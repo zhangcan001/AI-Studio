@@ -1,6 +1,14 @@
 # AI Studio
 
-AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains only the Tauri 2 + React shell, Rust layering, SQLite migration, and application data directory initialization.
+AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
+
+Current M0 progress:
+
+- Desktop foundation and Rust application layering
+- SQLite migration and local application data directories
+- ComfyUI connection, `/system_stats`, and `/object_info` capability detection
+- Recipe YAML parsing and semantic validation
+- ComfyUI API Workflow validation and immutable local compilation
 
 ## Development
 
@@ -19,4 +27,4 @@ cargo check
 cargo test
 ```
 
-ComfyUI integration, generation, workflow compilation, recipe parsing, and task orchestration are intentionally out of scope for M0.
+Workflow submission, generation, queue management, WebSocket task execution, and task orchestration remain out of scope for this M0 compiler phase.

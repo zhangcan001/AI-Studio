@@ -1,8 +1,8 @@
 mod app_state;
 mod application;
 mod commands;
-mod compiler;
-mod domain;
+pub mod compiler;
+pub mod domain;
 mod error;
 mod infrastructure;
 
