@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct SystemStatsDto {
@@ -32,4 +33,23 @@ pub struct DeviceInfoDto {
     pub vram_total: Option<u64>,
     #[serde(default)]
     pub vram_free: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromptRequestDto {
+    pub prompt: Value,
+    pub client_id: String,
+    pub prompt_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromptResponseDto {
+    #[serde(default)]
+    pub prompt_id: Option<String>,
+    #[serde(default)]
+    pub number: Option<Value>,
+    #[serde(default)]
+    pub node_errors: Option<Value>,
+    #[serde(default)]
+    pub error: Option<Value>,
 }

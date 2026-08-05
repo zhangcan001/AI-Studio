@@ -1,5 +1,5 @@
 use super::RepositoryError;
-use crate::domain::{NewTaskEvent, StoredTaskEvent, Task, TaskId};
+use crate::domain::{NewTaskEvent, StoredTaskEvent, Task, TaskId, TaskStatus};
 use async_trait::async_trait;
 
 #[async_trait]
@@ -11,6 +11,13 @@ pub trait TaskRepository: Send + Sync {
     ) -> Result<StoredTaskEvent, RepositoryError>;
 
     async fn persist_transition(
+        &self,
+        task: &Task,
+        event: &NewTaskEvent,
+        expected_previous_status: TaskStatus,
+    ) -> Result<StoredTaskEvent, RepositoryError>;
+
+    async fn persist_runtime_update(
         &self,
         task: &Task,
         event: &NewTaskEvent,

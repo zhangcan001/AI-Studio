@@ -1,6 +1,8 @@
+mod generation_definition;
 mod generation_snapshot;
 mod task;
 
+pub use generation_definition::SqliteGenerationDefinitionRepository;
 pub use generation_snapshot::SqliteGenerationSnapshotRepository;
 pub use task::SqliteTaskRepository;
 

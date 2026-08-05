@@ -231,6 +231,202 @@ impl Task {
         }
     }
 
+    pub fn prepare_submission(
+        &mut self,
+        prompt_id: impl Into<String>,
+        client_id: impl Into<String>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if self.status != TaskStatus::Preparing {
+            return Err(TaskDomainError::invalid_transition(
+                self.status,
+                TaskStatus::Preparing,
+            ));
+        }
+        if self.prompt_id.is_some() {
+            return Err(TaskDomainError::invalid_task(
+                "submission prompt_id has already been prepared",
+            ));
+        }
+        if at < self.created_at {
+            return Err(TaskDomainError::invalid_timestamp(
+                "submission preparation time must not precede created_at",
+            ));
+        }
+
+        let prompt_id = prompt_id.into();
+        let client_id = client_id.into();
+        if prompt_id.trim().is_empty() || client_id.trim().is_empty() {
+            return Err(TaskDomainError::invalid_task(
+                "submission prompt_id and client_id must not be empty",
+            ));
+        }
+
+        let mut next = self.clone();
+        next.prompt_id = Some(prompt_id.clone());
+        next.validate()?;
+        *self = next;
+
+        Ok(NewTaskEvent {
+            id: new_event_id(),
+            task_id: self.id.clone(),
+            event_type: TaskEventType::TaskSubmissionPrepared,
+            payload: Some(serde_json::json!({
+                "promptId": prompt_id,
+                "clientId": client_id,
+            })),
+            created_at: at,
+        })
+    }
+
+    pub fn set_queue_number(&mut self, queue_number: Option<i64>) -> Result<(), TaskDomainError> {
+        if !matches!(self.status, TaskStatus::Preparing | TaskStatus::Queued) {
+            return Err(TaskDomainError::invalid_task(format!(
+                "queue_number cannot be changed while task is {}",
+                self.status.as_str()
+            )));
+        }
+        if queue_number.is_some_and(|number| number < 0) {
+            return Err(TaskDomainError::invalid_task(
+                "queue_number must not be negative",
+            ));
+        }
+
+        let mut next = self.clone();
+        next.queue_number = queue_number;
+        next.validate()?;
+        *self = next;
+        Ok(())
+    }
+
+    pub fn update_node_progress(
+        &mut self,
+        node_id: impl Into<String>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if self.status != TaskStatus::Running {
+            return Err(TaskDomainError::invalid_task(
+                "node progress requires a RUNNING task",
+            ));
+        }
+        if at < self.created_at {
+            return Err(TaskDomainError::invalid_timestamp(
+                "node progress time must not precede created_at",
+            ));
+        }
+
+        let node_id = node_id.into();
+        let progress = TaskProgress::node(node_id.clone())?;
+        let mut next = self.clone();
+        next.progress = progress;
+        next.current_node_id = Some(node_id.clone());
+        next.validate()?;
+        *self = next;
+
+        Ok(NewTaskEvent {
+            id: new_event_id(),
+            task_id: self.id.clone(),
+            event_type: TaskEventType::TaskNodeStarted,
+            payload: Some(serde_json::json!({"nodeId": node_id})),
+            created_at: at,
+        })
+    }
+
+    pub fn update_step_progress(
+        &mut self,
+        current: u64,
+        total: u64,
+        node_id: Option<String>,
+        at: DateTime<Utc>,
+    ) -> Result<Option<NewTaskEvent>, TaskDomainError> {
+        if self.status != TaskStatus::Running {
+            return Err(TaskDomainError::invalid_task(
+                "step progress requires a RUNNING task",
+            ));
+        }
+        if at < self.created_at {
+            return Err(TaskDomainError::invalid_timestamp(
+                "step progress time must not precede created_at",
+            ));
+        }
+
+        let progress = TaskProgress::step(current, total, node_id.clone())?;
+        if self.progress == progress && self.current_node_id == node_id {
+            return Ok(None);
+        }
+
+        let mut next = self.clone();
+        next.progress = progress;
+        next.current_node_id = node_id.clone();
+        next.validate()?;
+        *self = next;
+
+        Ok(Some(NewTaskEvent {
+            id: new_event_id(),
+            task_id: self.id.clone(),
+            event_type: TaskEventType::TaskProgressUpdated,
+            payload: Some(serde_json::json!({
+                "current": current,
+                "total": total,
+                "nodeId": node_id,
+            })),
+            created_at: at,
+        }))
+    }
+
+    pub fn record_stream_disconnected(
+        &mut self,
+        message: impl Into<String>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if !matches!(
+            self.status,
+            TaskStatus::Queued | TaskStatus::Running | TaskStatus::Collecting
+        ) {
+            return Err(TaskDomainError::invalid_task(
+                "stream disconnection requires an active submitted task",
+            ));
+        }
+        if at < self.created_at {
+            return Err(TaskDomainError::invalid_timestamp(
+                "stream disconnection time must not precede created_at",
+            ));
+        }
+
+        let message = message.into();
+        if message.trim().is_empty() {
+            return Err(TaskDomainError::invalid_task(
+                "stream disconnection message must not be empty",
+            ));
+        }
+
+        Ok(NewTaskEvent {
+            id: new_event_id(),
+            task_id: self.id.clone(),
+            event_type: TaskEventType::TaskStreamDisconnected,
+            payload: Some(serde_json::json!({"message": message})),
+            created_at: at,
+        })
+    }
+
+    pub fn fail(
+        &mut self,
+        error: TaskError,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if error.code.trim().is_empty() || error.message.trim().is_empty() {
+            return Err(TaskDomainError::invalid_task(
+                "failed task requires a non-empty error code and message",
+            ));
+        }
+
+        let mut next = self.clone();
+        next.error = Some(error);
+        let event = TaskStateMachine::transition(&mut next, TaskStatus::Failed, at)?;
+        *self = next;
+        Ok(event)
+    }
+
     pub fn validate(&self) -> Result<(), TaskDomainError> {
         for (field, value) in [
             ("project_id", self.project_id.as_str()),
@@ -246,6 +442,21 @@ impl Task {
         }
 
         self.progress.validate()?;
+
+        if self
+            .prompt_id
+            .as_deref()
+            .is_some_and(|prompt_id| prompt_id.trim().is_empty())
+        {
+            return Err(TaskDomainError::invalid_task(
+                "prompt_id must not be empty when present",
+            ));
+        }
+        if self.queue_number.is_some_and(|number| number < 0) {
+            return Err(TaskDomainError::invalid_task(
+                "queue_number must not be negative",
+            ));
+        }
 
         if self.queued_at.is_some_and(|at| at < self.created_at)
             || self.started_at.is_some_and(|at| at < self.created_at)
@@ -317,6 +528,10 @@ pub enum TaskEventType {
     TaskCollecting,
     TaskSucceeded,
     TaskFailed,
+    TaskSubmissionPrepared,
+    TaskNodeStarted,
+    TaskProgressUpdated,
+    TaskStreamDisconnected,
 }
 
 impl TaskEventType {
@@ -330,6 +545,10 @@ impl TaskEventType {
             Self::TaskCollecting => "TASK_COLLECTING",
             Self::TaskSucceeded => "TASK_SUCCEEDED",
             Self::TaskFailed => "TASK_FAILED",
+            Self::TaskSubmissionPrepared => "TASK_SUBMISSION_PREPARED",
+            Self::TaskNodeStarted => "TASK_NODE_STARTED",
+            Self::TaskProgressUpdated => "TASK_PROGRESS_UPDATED",
+            Self::TaskStreamDisconnected => "TASK_STREAM_DISCONNECTED",
         }
     }
 
@@ -343,6 +562,10 @@ impl TaskEventType {
             "TASK_COLLECTING" => Ok(Self::TaskCollecting),
             "TASK_SUCCEEDED" => Ok(Self::TaskSucceeded),
             "TASK_FAILED" => Ok(Self::TaskFailed),
+            "TASK_SUBMISSION_PREPARED" => Ok(Self::TaskSubmissionPrepared),
+            "TASK_NODE_STARTED" => Ok(Self::TaskNodeStarted),
+            "TASK_PROGRESS_UPDATED" => Ok(Self::TaskProgressUpdated),
+            "TASK_STREAM_DISCONNECTED" => Ok(Self::TaskStreamDisconnected),
             _ => Err(TaskDomainError::invalid_event_type(value)),
         }
     }

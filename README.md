@@ -12,6 +12,13 @@ Current M0 progress:
 - Task domain and state machine
 - Task event persistence with transactional state transitions
 - Immutable generation snapshots
+- Generation orchestration through `GenerationService`
+- ComfyUI `/prompt` submission with client-generated `prompt_id`
+- ComfyUI WebSocket execution tracking and normalized Task events
+
+Output collection, `/history` reconciliation, asset import, and the final
+`SUCCEEDED` state are intentionally not implemented yet; a successful
+execution remains in `COLLECTING` until the next M0 phase.
 
 ## Development
 
@@ -30,4 +37,8 @@ cargo check
 cargo test
 ```
 
-Workflow submission, generation, queue management, WebSocket task execution, and task orchestration remain out of scope for this M0 persistence phase.
+The default Rust test suite uses Mock ComfyUI HTTP/WebSocket services. It does
+not submit compiler fixtures to a real ComfyUI instance. A live generation
+smoke test is only appropriate when a validated workflow and recipe are
+explicitly supplied through `AI_STUDIO_LIVE_WORKFLOW` and
+`AI_STUDIO_LIVE_RECIPE`.

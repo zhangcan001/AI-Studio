@@ -6,11 +6,19 @@ pub mod domain;
 mod error;
 mod infrastructure;
 
-pub use application::ports::{GenerationSnapshotRepository, RepositoryError, TaskRepository};
-pub use infrastructure::database::{SqliteGenerationSnapshotRepository, SqliteTaskRepository};
+pub use application::ports::{
+    GenerationDefinitionRepository, GenerationSnapshotRepository, RepositoryError, TaskRepository,
+};
+pub use infrastructure::database::{
+    SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository, SqliteTaskRepository,
+};
 
 use app_state::AppState;
-use application::{comfy_service::ComfyService, ports::ComfyConnectionConfig};
+use application::{
+    comfy_service::ComfyService,
+    generation_service::GenerationService,
+    ports::{ComfyAdapter, ComfyConnectionConfig},
+};
 use error::AppError;
 use infrastructure::{comfy::ComfyHttpAdapter, database, filesystem::AppDataDirs};
 use std::sync::Arc;
@@ -52,14 +60,29 @@ fn run_application() -> Result<(), AppError> {
 
             let database_pool =
                 tauri::async_runtime::block_on(database::initialize(&data_dirs.database))?;
-            app.manage(database_pool);
+            app.manage(database_pool.clone());
 
             let comfy_config = ComfyConnectionConfig::default();
             let comfy_adapter = ComfyHttpAdapter::new(comfy_config.clone()).map_err(|error| {
                 AppError::initialization(format!("failed to create ComfyUI HTTP client: {error}"))
             })?;
-            let comfy_service = Arc::new(ComfyService::new(Arc::new(comfy_adapter), &comfy_config));
-            app.manage(AppState::new(data_dirs, comfy_service));
+            let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(comfy_adapter);
+            let comfy_service = Arc::new(ComfyService::new(comfy_adapter.clone(), &comfy_config));
+            let task_repository: Arc<dyn TaskRepository> =
+                Arc::new(SqliteTaskRepository::new(database_pool.clone()));
+            let snapshot_repository: Arc<dyn GenerationSnapshotRepository> = Arc::new(
+                SqliteGenerationSnapshotRepository::new(database_pool.clone()),
+            );
+            let definition_repository = Arc::new(
+                infrastructure::database::SqliteGenerationDefinitionRepository::new(database_pool),
+            );
+            let generation_service = Arc::new(GenerationService::new(
+                task_repository,
+                snapshot_repository,
+                definition_repository,
+                comfy_adapter,
+            ));
+            app.manage(AppState::new(data_dirs, comfy_service, generation_service));
 
             Ok(())
         })

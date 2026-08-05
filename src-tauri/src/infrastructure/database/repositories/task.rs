@@ -77,11 +77,24 @@ impl TaskRepository for SqliteTaskRepository {
         &self,
         task: &Task,
         event: &NewTaskEvent,
+        expected_previous_status: TaskStatus,
     ) -> Result<StoredTaskEvent, RepositoryError> {
         if task.status == TaskStatus::Created {
             return Err(RepositoryError::integrity(
                 "persist_transition cannot persist status CREATED",
             ));
+        }
+        if task.status.is_terminal() {
+            return Err(RepositoryError::integrity(
+                "persist_transition cannot update a terminal task",
+            ));
+        }
+        if expected_previous_status == task.status || expected_previous_status.is_terminal() {
+            return Err(RepositoryError::integrity(format!(
+                "invalid expected previous status {} for current status {}",
+                expected_previous_status.as_str(),
+                task.status.as_str()
+            )));
         }
         let expected_event = task.status.event_type().ok_or_else(|| {
             RepositoryError::integrity("task status does not have a transition event")
@@ -97,7 +110,7 @@ impl TaskRepository for SqliteTaskRepository {
                 progress_mode = ?, progress_current = ?, progress_total = ?, current_node_id = ?,
                 error_code = ?, error_message = ?, raw_error_json = ?,
                 created_at = ?, queued_at = ?, started_at = ?, finished_at = ?
-             WHERE id = ?",
+             WHERE id = ? AND status = ?",
         )
         .bind(&task.project_id)
         .bind(&task.workflow_id)
@@ -118,12 +131,68 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(values.started_at)
         .bind(values.finished_at)
         .bind(task.id.as_str())
+        .bind(expected_previous_status.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
 
         if result.rows_affected() == 0 {
-            return Err(RepositoryError::not_found("task", task.id.as_str()));
+            return Err(RepositoryError::integrity(
+                "stale task transition or task does not exist",
+            ));
+        }
+
+        let stored_event = insert_event(&mut transaction, event).await?;
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(stored_event)
+    }
+
+    async fn persist_runtime_update(
+        &self,
+        task: &Task,
+        event: &NewTaskEvent,
+    ) -> Result<StoredTaskEvent, RepositoryError> {
+        validate_runtime_event(task, event)?;
+        let values = TaskDbValues::from_task(task)?;
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        let result = sqlx::query(
+            "UPDATE tasks SET
+                project_id = ?, workflow_id = ?, workflow_version_id = ?, recipe_id = ?,
+                status = ?, prompt_id = ?, queue_number = ?,
+                progress_mode = ?, progress_current = ?, progress_total = ?, current_node_id = ?,
+                error_code = ?, error_message = ?, raw_error_json = ?,
+                created_at = ?, queued_at = ?, started_at = ?, finished_at = ?
+             WHERE id = ? AND status = ?",
+        )
+        .bind(&task.project_id)
+        .bind(&task.workflow_id)
+        .bind(&task.workflow_version_id)
+        .bind(&task.recipe_id)
+        .bind(values.status)
+        .bind(values.prompt_id)
+        .bind(values.queue_number)
+        .bind(values.progress_mode)
+        .bind(values.progress_current)
+        .bind(values.progress_total)
+        .bind(values.current_node_id)
+        .bind(values.error_code)
+        .bind(values.error_message)
+        .bind(values.raw_error_json)
+        .bind(values.created_at)
+        .bind(values.queued_at)
+        .bind(values.started_at)
+        .bind(values.finished_at)
+        .bind(task.id.as_str())
+        .bind(task.status.as_str())
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        if result.rows_affected() == 0 {
+            return Err(RepositoryError::integrity(
+                "stale task runtime update or task does not exist",
+            ));
         }
 
         let stored_event = insert_event(&mut transaction, event).await?;
@@ -203,6 +272,44 @@ fn validate_event(
             expected.as_str(),
             event.event_type.as_str()
         )));
+    }
+    if event.created_at < task.created_at {
+        return Err(RepositoryError::integrity(
+            "task event created_at must not precede task created_at",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), RepositoryError> {
+    let allowed = match event.event_type {
+        TaskEventType::TaskSubmissionPrepared => task.status == TaskStatus::Preparing,
+        TaskEventType::TaskNodeStarted | TaskEventType::TaskProgressUpdated => {
+            task.status == TaskStatus::Running
+        }
+        TaskEventType::TaskStreamDisconnected => matches!(
+            task.status,
+            TaskStatus::Queued | TaskStatus::Running | TaskStatus::Collecting
+        ),
+        _ => false,
+    };
+    if !allowed {
+        return Err(RepositoryError::integrity(format!(
+            "runtime event {} is not allowed while task is {}",
+            event.event_type.as_str(),
+            task.status.as_str()
+        )));
+    }
+
+    if event.id.trim().is_empty() {
+        return Err(RepositoryError::integrity(
+            "task event id must not be empty",
+        ));
+    }
+    if event.task_id != task.id {
+        return Err(RepositoryError::integrity(
+            "task event task_id does not match task",
+        ));
     }
     if event.created_at < task.created_at {
         return Err(RepositoryError::integrity(
@@ -511,7 +618,7 @@ mod tests {
         let event = TaskStateMachine::transition(&mut task, TaskStatus::Validating, at)
             .expect("transition should succeed");
         let stored_event = repository
-            .persist_transition(&task, &event)
+            .persist_transition(&task, &event, TaskStatus::Created)
             .await
             .expect("transition should commit");
         let found = repository
@@ -555,7 +662,7 @@ mod tests {
         duplicate_event.id = created_event_id;
 
         assert!(repository
-            .persist_transition(&task, &duplicate_event)
+            .persist_transition(&task, &duplicate_event, TaskStatus::Created)
             .await
             .is_err());
         let found = repository
@@ -608,5 +715,72 @@ mod tests {
             .expect("corrupt status should be writable for test");
 
         assert!(repository.find_by_id(&task.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn runtime_updates_round_trip_and_stale_status_is_rejected() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("create should succeed");
+
+        let validating_at = task.created_at + Duration::seconds(1);
+        let validating_event =
+            TaskStateMachine::transition(&mut task, TaskStatus::Validating, validating_at)
+                .expect("validating transition should succeed");
+        repository
+            .persist_transition(&task, &validating_event, TaskStatus::Created)
+            .await
+            .expect("validating transition should persist");
+
+        let preparing_at = task.created_at + Duration::seconds(2);
+        let preparing_event =
+            TaskStateMachine::transition(&mut task, TaskStatus::Preparing, preparing_at)
+                .expect("preparing transition should succeed");
+        repository
+            .persist_transition(&task, &preparing_event, TaskStatus::Validating)
+            .await
+            .expect("preparing transition should persist");
+
+        let prepared_event = task
+            .prepare_submission(
+                "550e8400-e29b-41d4-a716-446655440000",
+                "client-1",
+                task.created_at + Duration::seconds(3),
+            )
+            .expect("submission should prepare");
+        repository
+            .persist_runtime_update(&task, &prepared_event)
+            .await
+            .expect("submission preparation should persist");
+        let stale_task = task.clone();
+
+        task.set_queue_number(Some(4))
+            .expect("queue number should be set");
+        let queued_at = task.created_at + Duration::seconds(4);
+        let queued_event = TaskStateMachine::transition(&mut task, TaskStatus::Queued, queued_at)
+            .expect("queued transition should succeed");
+        repository
+            .persist_transition(&task, &queued_event, TaskStatus::Preparing)
+            .await
+            .expect("queued transition should persist");
+
+        assert!(repository
+            .persist_runtime_update(&stale_task, &prepared_event)
+            .await
+            .is_err());
+        let found = repository
+            .find_by_id(&task.id)
+            .await
+            .expect("task lookup should succeed")
+            .expect("task should exist");
+        assert_eq!(found.status, TaskStatus::Queued);
+        assert_eq!(
+            found.prompt_id.as_deref(),
+            Some("550e8400-e29b-41d4-a716-446655440000")
+        );
+        assert_eq!(repository.list_events(&task.id).await.unwrap().len(), 5);
     }
 }

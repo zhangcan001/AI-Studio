@@ -181,6 +181,9 @@ fn status_for_adapter_error(error: &ComfyAdapterError) -> ComfyConnectionStatus 
         ComfyAdapterError::Incompatible(_) | ComfyAdapterError::Protocol(_) => {
             ComfyConnectionStatus::Incompatible
         }
+        ComfyAdapterError::WorkflowValidation { .. } | ComfyAdapterError::StreamDisconnected(_) => {
+            ComfyConnectionStatus::Incompatible
+        }
     }
 }
 
@@ -190,6 +193,9 @@ fn app_error_for_adapter_error(error: ComfyAdapterError) -> AppError {
         ComfyAdapterError::Timeout(_) => AppError::comfy_timeout("ComfyUI 请求超时"),
         ComfyAdapterError::Incompatible(_) | ComfyAdapterError::Protocol(_) => {
             AppError::comfy_protocol_error("ComfyUI 返回了不兼容的 API 响应")
+        }
+        ComfyAdapterError::WorkflowValidation { .. } | ComfyAdapterError::StreamDisconnected(_) => {
+            AppError::comfy_protocol_error("ComfyUI 返回了不兼容的执行响应")
         }
     }
 }
@@ -227,6 +233,27 @@ mod tests {
 
         async fn get_object_info(&self) -> Result<serde_json::Value, ComfyAdapterError> {
             self.object_info.as_ref().cloned().map_err(Clone::clone)
+        }
+
+        async fn submit_workflow(
+            &self,
+            _client_id: &str,
+            _prompt_id: &str,
+            _workflow: serde_json::Value,
+        ) -> Result<crate::application::ports::PromptSubmission, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "generation is not used by ComfyService tests".to_owned(),
+            ))
+        }
+
+        async fn subscribe_events(
+            &self,
+            _client_id: &str,
+        ) -> Result<Box<dyn crate::application::ports::ComfyEventSubscription>, ComfyAdapterError>
+        {
+            Err(ComfyAdapterError::Incompatible(
+                "generation is not used by ComfyService tests".to_owned(),
+            ))
         }
     }
 

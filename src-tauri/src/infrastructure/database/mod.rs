@@ -2,4 +2,6 @@ pub mod pool;
 pub mod repositories;
 
 pub use pool::initialize;
-pub use repositories::{SqliteGenerationSnapshotRepository, SqliteTaskRepository};
+pub use repositories::{
+    SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository, SqliteTaskRepository,
+};
