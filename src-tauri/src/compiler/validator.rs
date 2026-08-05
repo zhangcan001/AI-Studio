@@ -1,0 +1,270 @@
+use crate::domain::{InputDefinition, Recipe, RecipeError, WorkflowDocument, WorkflowError};
+use std::collections::BTreeSet;
+
+pub struct RecipeValidator;
+
+impl RecipeValidator {
+    pub fn validate(recipe: &Recipe) -> Result<(), RecipeError> {
+        if recipe.schema_version != 1 {
+            return Err(RecipeError::UnsupportedSchema {
+                found: recipe.schema_version,
+            });
+        }
+
+        if recipe.id.trim().is_empty() {
+            return Err(RecipeError::invalid("id must not be empty"));
+        }
+
+        if recipe.name.trim().is_empty() {
+            return Err(RecipeError::invalid("name must not be empty"));
+        }
+
+        if !recipe.workflow.is_safe_relative_path() {
+            return Err(RecipeError::invalid(format!(
+                "workflow.file must be a safe relative path without ..: \"{}\"",
+                recipe.workflow.file
+            )));
+        }
+
+        for (key, definition) in &recipe.inputs {
+            if key.trim().is_empty() {
+                return Err(RecipeError::invalid("input key must not be empty"));
+            }
+
+            if definition.label().trim().is_empty() {
+                return Err(RecipeError::invalid(format!(
+                    "input \"{key}\" label must not be empty"
+                )));
+            }
+
+            if let InputDefinition::Integer {
+                default, min, max, ..
+            } = definition
+            {
+                if let (Some(min), Some(max)) = (min, max) {
+                    if min > max {
+                        return Err(RecipeError::invalid(format!(
+                            "input \"{key}\" min {min} must be less than or equal to max {max}"
+                        )));
+                    }
+                }
+
+                if let Some(default) = default {
+                    if min.is_some_and(|min| *default < min)
+                        || max.is_some_and(|max| *default > max)
+                    {
+                        return Err(RecipeError::invalid(format!(
+                            "input \"{key}\" default {default} is outside its declared range"
+                        )));
+                    }
+                }
+            }
+        }
+
+        for binding in &recipe.bindings {
+            if !recipe.inputs.contains_key(&binding.source) {
+                return Err(RecipeError::invalid(format!(
+                    "binding source \"{}\" is not declared in inputs",
+                    binding.source
+                )));
+            }
+            if binding.target.node.trim().is_empty() {
+                return Err(RecipeError::invalid(format!(
+                    "binding \"{}\" target node must not be empty",
+                    binding.source
+                )));
+            }
+            if binding.target.input.trim().is_empty() {
+                return Err(RecipeError::invalid(format!(
+                    "binding \"{}\" target input must not be empty",
+                    binding.source
+                )));
+            }
+        }
+
+        let mut output_ids = BTreeSet::new();
+        for output in &recipe.outputs {
+            if output.id.trim().is_empty() {
+                return Err(RecipeError::invalid("output id must not be empty"));
+            }
+            if !output_ids.insert(&output.id) {
+                return Err(RecipeError::invalid(format!(
+                    "output id \"{}\" is duplicated",
+                    output.id
+                )));
+            }
+            if output.node.trim().is_empty() {
+                return Err(RecipeError::invalid(format!(
+                    "output \"{}\" node must not be empty",
+                    output.id
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub struct WorkflowValidator;
+
+impl WorkflowValidator {
+    pub fn validate(workflow: &WorkflowDocument) -> Result<(), WorkflowError> {
+        let root = workflow
+            .value()
+            .as_object()
+            .ok_or_else(|| WorkflowError::invalid("workflow root must be a JSON object"))?;
+
+        for (node_id, node_value) in root {
+            if !is_valid_node_id(node_id) {
+                return Err(WorkflowError::invalid(format!(
+                    "node id \"{node_id}\" must be a numeric string"
+                )));
+            }
+
+            let node = node_value.as_object().ok_or_else(|| {
+                WorkflowError::invalid(format!("node \"{node_id}\" must be a JSON object"))
+            })?;
+
+            let inputs = node.get("inputs").ok_or_else(|| {
+                WorkflowError::invalid(format!("node \"{node_id}\" is missing inputs"))
+            })?;
+            if !inputs.is_object() {
+                return Err(WorkflowError::invalid(format!(
+                    "node \"{node_id}\" inputs must be a JSON object"
+                )));
+            }
+
+            let class_type = node.get("class_type").ok_or_else(|| {
+                WorkflowError::invalid(format!("node \"{node_id}\" is missing class_type"))
+            })?;
+            if !class_type.is_string() {
+                return Err(WorkflowError::invalid(format!(
+                    "node \"{node_id}\" class_type must be a string"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn is_valid_node_id(node_id: &str) -> bool {
+    !node_id.is_empty()
+        && node_id.bytes().all(|byte| byte.is_ascii_digit())
+        && node_id.parse::<u64>().is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecipeValidator, WorkflowValidator};
+    use crate::compiler::RecipeParser;
+    use crate::domain::{RecipeError, WorkflowDocument, WorkflowError};
+    use serde_json::json;
+
+    const RECIPE_WITH_RANGE: &str = r#"
+schema_version: 1
+id: range_test
+name: Range Test
+workflow:
+  file: workflow.json
+inputs:
+  steps:
+    type: integer
+    label: Steps
+    required: true
+    default: 20
+    min: 1
+    max: 100
+bindings: []
+outputs: []
+"#;
+
+    #[test]
+    fn rejects_unsupported_schema() {
+        let mut recipe = RecipeParser::parse(RECIPE_WITH_RANGE).expect("recipe should parse");
+        recipe.schema_version = 2;
+
+        let error = RecipeValidator::validate(&recipe).expect_err("schema must be rejected");
+
+        assert!(matches!(error, RecipeError::UnsupportedSchema { found: 2 }));
+        assert!(error.to_string().contains("only version 1"));
+    }
+
+    #[test]
+    fn rejects_integer_default_outside_range() {
+        let mut recipe = RecipeParser::parse(RECIPE_WITH_RANGE).expect("recipe should parse");
+        if let Some(crate::domain::InputDefinition::Integer { default, .. }) =
+            recipe.inputs.get_mut("steps")
+        {
+            *default = Some(101);
+        }
+
+        let error = RecipeValidator::validate(&recipe).expect_err("default must be rejected");
+
+        assert!(matches!(error, RecipeError::Invalid { .. }));
+        assert!(error.to_string().contains("default 101"));
+    }
+
+    #[test]
+    fn rejects_min_greater_than_max() {
+        let mut recipe = RecipeParser::parse(RECIPE_WITH_RANGE).expect("recipe should parse");
+        if let Some(crate::domain::InputDefinition::Integer { min, max, .. }) =
+            recipe.inputs.get_mut("steps")
+        {
+            *min = Some(100);
+            *max = Some(10);
+        }
+
+        let error = RecipeValidator::validate(&recipe).expect_err("range must be rejected");
+
+        assert!(matches!(error, RecipeError::Invalid { .. }));
+    }
+
+    #[test]
+    fn rejects_unsafe_workflow_path() {
+        let mut recipe = RecipeParser::parse(RECIPE_WITH_RANGE).expect("recipe should parse");
+        recipe.workflow.file = "../workflow.json".to_owned();
+
+        let error = RecipeValidator::validate(&recipe).expect_err("path must be rejected");
+
+        assert!(matches!(error, RecipeError::Invalid { .. }));
+        assert!(error.to_string().contains("safe relative path"));
+    }
+
+    #[test]
+    fn validates_workflow_shape() {
+        let workflow = WorkflowDocument::parse(json!({
+            "3": {
+                "inputs": {"seed": 1},
+                "class_type": "KSampler"
+            }
+        }))
+        .expect("root should parse");
+
+        WorkflowValidator::validate(&workflow).expect("workflow should validate");
+    }
+
+    #[test]
+    fn rejects_non_object_workflow_root() {
+        let error = WorkflowDocument::parse(json!([])).expect_err("root must be object");
+
+        assert!(matches!(error, WorkflowError::Invalid { .. }));
+    }
+
+    #[test]
+    fn rejects_invalid_workflow_nodes() {
+        let cases = [
+            json!({"hello": {"inputs": {}, "class_type": "Node"}}),
+            json!({"3": "not a node"}),
+            json!({"3": {"class_type": "Node"}}),
+            json!({"3": {"inputs": [], "class_type": "Node"}}),
+            json!({"3": {"inputs": {}}}),
+            json!({"3": {"inputs": {}, "class_type": 3}}),
+        ];
+
+        for value in cases {
+            let workflow = WorkflowDocument::parse(value).expect("root should parse");
+            assert!(WorkflowValidator::validate(&workflow).is_err());
+        }
+    }
+}

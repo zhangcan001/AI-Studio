@@ -1,0 +1,50 @@
+schema_version: 1
+
+id: simple_t2i
+
+name: Simple Text to Image
+
+workflow:
+  file: workflow_api.json
+
+inputs:
+  prompt:
+    type: textarea
+    label: 提示词
+    required: true
+    default: ""
+
+  steps:
+    type: integer
+    label: Steps
+    required: true
+    default: 20
+    min: 1
+    max: 100
+
+  seed:
+    type: seed
+    label: Seed
+    default: random
+
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+
+  - source: steps
+    target:
+      node: "3"
+      input: steps
+
+  - source: seed
+    target:
+      node: "3"
+      input: seed
+
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true
