@@ -6,6 +6,9 @@ pub mod domain;
 mod error;
 mod infrastructure;
 
+pub use application::ports::{GenerationSnapshotRepository, RepositoryError, TaskRepository};
+pub use infrastructure::database::{SqliteGenerationSnapshotRepository, SqliteTaskRepository};
+
 use app_state::AppState;
 use application::{comfy_service::ComfyService, ports::ComfyConnectionConfig};
 use error::AppError;

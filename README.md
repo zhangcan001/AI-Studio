@@ -9,6 +9,9 @@ Current M0 progress:
 - ComfyUI connection, `/system_stats`, and `/object_info` capability detection
 - Recipe YAML parsing and semantic validation
 - ComfyUI API Workflow validation and immutable local compilation
+- Task domain and state machine
+- Task event persistence with transactional state transitions
+- Immutable generation snapshots
 
 ## Development
 
@@ -27,4 +30,4 @@ cargo check
 cargo test
 ```
 
-Workflow submission, generation, queue management, WebSocket task execution, and task orchestration remain out of scope for this M0 compiler phase.
+Workflow submission, generation, queue management, WebSocket task execution, and task orchestration remain out of scope for this M0 persistence phase.
