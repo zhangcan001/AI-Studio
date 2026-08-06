@@ -2,39 +2,52 @@
 
 Date: 2026-08-06
 
-AI Studio commit: 5cfd58b80cdce5d01c0df608d841879e7473f7ce
+AI Studio commit: 4b42679311ba3e7d328e4c02c2e47eb44f6949cc
 
-MILESTONE 0 = READY FOR LIVE VALIDATION
-
-Reason:
-No validated executable runtime Workflow Package is installed.
+MILESTONE 0 = FAIL
 
 ## Runtime Workflow
 
-- Workflow package ID: N/A
-- Workflow version: N/A
+- Found: YES
+- Workflow package ID: wfl_krea2_t2i_local
+- Workflow version: 1.0.0
+- API Workflow: VALID
+- Workflow SHA256: 249908808316a0f6d6190f9864602fcd04744989456814651ccaedcd871fd41d
 
-## ComfyUI
+## Capability
 
-- Version: NOT RUN
-- GPU: NOT RUN
-- VRAM: NOT RUN
-- Node Count: NOT RUN
+- ComfyUI: 0.30.1
+- GPU: cuda:0 NVIDIA GeForce RTX 5060 Ti : cudaMallocAsync
+- VRAM: 17102864384 total / 15875309568 free bytes
+- Node Count: 4486
+- Missing Nodes: NONE
+- Missing Models: NONE
 
-## UI Gate
+## Live M0
 
-- Catalog: NOT RUN
-- Dynamic Form: NOT RUN
-- Non-blocking Task: NOT RUN
+- Catalog: PASS
+- Dynamic Form: PASS
+- Non-blocking: PASS
 - Queued: NOT RUN
 - Running: NOT RUN
 - Progress: NOT RUN
 - Collecting: NOT RUN
-- Succeeded: NOT RUN
-- Asset: NOT RUN
+- Succeeded: FAIL
+- Asset: FAIL (Asset Created: NO)
 - Image UI: NOT RUN
 - Restart Persistence: NOT RUN
 
-## M1 Live I2I
+## Failure
 
-NOT RUN
+- Failure Stage: PREPARING / ComfyUI prompt validation
+- Task ID: tsk_0f28822a-a89a-45a5-a040-bce2c19c65f7
+- Prompt ID: 8e2db8a6-ad24-41e0-a4b0-b4b892dbc485
+- Error Code: WORKFLOW_VALIDATION_FAILED
+- Error Message: Prompt outputs failed validation
+- Snapshot Count: 1
+- Task Event Count: 5
+- Asset Count: 0
+
+## M1
+
+NOT ENTERED
