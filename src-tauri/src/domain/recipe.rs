@@ -70,6 +70,26 @@ pub enum InputDefinition {
         min_items: usize,
         max_items: usize,
     },
+    Video {
+        label: String,
+        required: bool,
+    },
+    Audio {
+        label: String,
+        required: bool,
+    },
+    Videos {
+        label: String,
+        required: bool,
+        min_items: usize,
+        max_items: usize,
+    },
+    Audios {
+        label: String,
+        required: bool,
+        min_items: usize,
+        max_items: usize,
+    },
 }
 
 impl InputDefinition {
@@ -80,6 +100,10 @@ impl InputDefinition {
             Self::Seed { .. } => "seed",
             Self::Image { .. } => "image",
             Self::Images { .. } => "images",
+            Self::Video { .. } => "video",
+            Self::Audio { .. } => "audio",
+            Self::Videos { .. } => "videos",
+            Self::Audios { .. } => "audios",
         }
     }
 
@@ -88,7 +112,12 @@ impl InputDefinition {
             Self::TextArea { label, .. }
             | Self::Integer { label, .. }
             | Self::Seed { label, .. } => label,
-            Self::Image { label, .. } | Self::Images { label, .. } => label,
+            Self::Image { label, .. }
+            | Self::Images { label, .. }
+            | Self::Video { label, .. }
+            | Self::Audio { label, .. }
+            | Self::Videos { label, .. }
+            | Self::Audios { label, .. } => label,
         }
     }
 }
@@ -150,6 +179,10 @@ pub enum InputValue {
     Seed(SeedValue),
     Image(String),
     Images(Vec<String>),
+    Video(String),
+    Audio(String),
+    Videos(Vec<String>),
+    Audios(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -159,6 +192,10 @@ pub enum ResolvedInputValue {
     Seed(u64),
     Image(String),
     Images(Vec<String>),
+    Video(String),
+    Audio(String),
+    Videos(Vec<String>),
+    Audios(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

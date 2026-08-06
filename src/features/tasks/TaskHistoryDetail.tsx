@@ -81,7 +81,7 @@ export function TaskHistoryDetail({ projectId, detail, loadingDraft: detailLoadi
           <p className="disabled-note">{detail.reusableDraft.reason ?? "Inputs unavailable for reuse."}</p>
         )}
         {detail.reusableDraft.missingAssetIds.length > 0 && (
-          <p className="disabled-note">Missing image asset. Choose a replacement after loading inputs.</p>
+          <p className="disabled-note">Missing media asset. Choose a replacement after loading inputs.</p>
         )}
         {draftError && <p className="error-message">Inputs unavailable for reuse.</p>}
         {draft && <InputSnapshot values={draft.values} />}
@@ -143,6 +143,14 @@ function formatValue(value: DraftValue): string {
       return value.assetId;
     case "image_assets":
       return value.assetIds.length ? value.assetIds.join(" → ") : "No images";
+    case "video_asset":
+      return value.assetId;
+    case "audio_asset":
+      return value.assetId;
+    case "video_assets":
+      return value.assetIds.length ? value.assetIds.join(" → ") : "No videos";
+    case "audio_assets":
+      return value.assetIds.length ? value.assetIds.join(" → ") : "No audio";
   }
 }
 

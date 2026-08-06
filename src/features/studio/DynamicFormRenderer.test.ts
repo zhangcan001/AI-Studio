@@ -102,3 +102,37 @@ describe("validateRecipeValues multi-image inputs", () => {
     })).toEqual({});
   });
 });
+
+describe("validateRecipeValues media inputs", () => {
+  it("requires a compatible single video or audio asset", () => {
+    const mediaRecipe: RecipeViewModel = {
+      ...recipe,
+      fields: [
+        { key: "video", type: "video", label: "Source video", required: true },
+        { key: "audio", type: "audio", label: "Source audio", required: true },
+      ],
+    };
+
+    expect(validateRecipeValues(mediaRecipe, {})).toEqual({
+      video: "Choose a video.",
+      audio: "Choose an audio file.",
+    });
+    expect(validateRecipeValues(mediaRecipe, {
+      video: { type: "video_asset", assetId: "ast_video" },
+      audio: { type: "audio_asset", assetId: "ast_audio" },
+    })).toEqual({});
+  });
+
+  it("validates ordered plural media slots", () => {
+    const mediaRecipe: RecipeViewModel = {
+      ...recipe,
+      fields: [{ key: "clips", type: "videos", label: "Clips", required: true, minItems: 2, maxItems: 3 }],
+    };
+    expect(validateRecipeValues(mediaRecipe, {
+      clips: { type: "video_assets", assetIds: ["ast_one"] },
+    }).clips).toContain("Choose between 2 and 3 videos.");
+    expect(validateRecipeValues(mediaRecipe, {
+      clips: { type: "video_assets", assetIds: ["ast_one", "ast_two"] },
+    })).toEqual({});
+  });
+});

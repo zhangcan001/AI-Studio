@@ -160,10 +160,35 @@ pub struct ComfyImageUpload {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComfyUploadedImage {
+pub struct ComfyUploadedInput {
     pub name: String,
     pub subfolder: String,
     pub folder_type: String,
+}
+
+pub type ComfyUploadedImage = ComfyUploadedInput;
+
+#[async_trait]
+pub trait ComfyInputStream: Send {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String>;
+}
+
+pub struct ComfyInputUpload {
+    pub filename: String,
+    pub content_type: String,
+    pub content_length: Option<u64>,
+    pub stream: Box<dyn ComfyInputStream>,
+}
+
+struct InMemoryComfyInputStream {
+    bytes: Option<Vec<u8>>,
+}
+
+#[async_trait]
+impl ComfyInputStream for InMemoryComfyInputStream {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.bytes.take())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -216,12 +241,18 @@ pub enum ComfyAdapterError {
     Timeout(String),
     Incompatible(String),
     Protocol(String),
-    WorkflowValidation { message: String, node_errors: Value },
+    WorkflowValidation {
+        message: String,
+        node_errors: Value,
+    },
     StreamDisconnected(String),
     HistoryNotFound(String),
     OutputDownload(String),
     OutputTooLarge(String),
+    #[allow(dead_code)]
     ImageUpload(String),
+    InputUpload(String),
+    InputUploadTooLarge(String),
 }
 
 impl ComfyAdapterError {
@@ -237,6 +268,8 @@ impl ComfyAdapterError {
             Self::OutputDownload(_) => "OUTPUT_DOWNLOAD_FAILED",
             Self::OutputTooLarge(_) => "OUTPUT_TOO_LARGE",
             Self::ImageUpload(_) => "IMAGE_UPLOAD_FAILED",
+            Self::InputUpload(_) => "INPUT_UPLOAD_FAILED",
+            Self::InputUploadTooLarge(_) => "INPUT_UPLOAD_TOO_LARGE",
         }
     }
 }
@@ -277,6 +310,12 @@ impl fmt::Display for ComfyAdapterError {
             Self::ImageUpload(message) => {
                 write!(formatter, "ComfyUI image upload failed: {message}")
             }
+            Self::InputUpload(message) => {
+                write!(formatter, "ComfyUI input upload failed: {message}")
+            }
+            Self::InputUploadTooLarge(message) => {
+                write!(formatter, "ComfyUI input upload is too large: {message}")
+            }
         }
     }
 }
@@ -291,14 +330,30 @@ pub trait ComfyAdapter: Send + Sync {
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError>;
 
+    async fn upload_input_file(
+        &self,
+        upload: ComfyInputUpload,
+    ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+        let _ = upload;
+        Err(ComfyAdapterError::Incompatible(
+            "generic input upload is not supported by this adapter".to_owned(),
+        ))
+    }
+
     async fn upload_image(
         &self,
         upload: ComfyImageUpload,
     ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
-        let _ = upload;
-        Err(ComfyAdapterError::ImageUpload(
-            "image upload is not supported by this adapter".to_owned(),
-        ))
+        let content_length = upload.bytes.len() as u64;
+        self.upload_input_file(ComfyInputUpload {
+            filename: upload.upload_name,
+            content_type: upload.content_type,
+            content_length: Some(content_length),
+            stream: Box::new(InMemoryComfyInputStream {
+                bytes: Some(upload.bytes),
+            }),
+        })
+        .await
     }
 
     async fn cancel_prompt(

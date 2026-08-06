@@ -1,7 +1,7 @@
 export interface AssetView {
   id: string;
-  assetType?: "image" | "video" | string;
-  category: "source_image" | "generated_image" | "generated_video" | string;
+  assetType?: "image" | "video" | "audio" | string;
+  category: "source_image" | "source_video" | "source_audio" | "generated_image" | "generated_video" | string;
   name: string;
   originalName: string;
   mimeType: string;
@@ -13,7 +13,13 @@ export interface AssetView {
   thumbnailAvailable?: boolean;
 }
 
-export type AssetCategoryFilter = "ALL" | "SOURCE_IMAGE" | "GENERATED_IMAGE" | "GENERATED_VIDEO";
+export type AssetCategoryFilter =
+  | "ALL"
+  | "SOURCE_IMAGE"
+  | "SOURCE_VIDEO"
+  | "SOURCE_AUDIO"
+  | "GENERATED_IMAGE"
+  | "GENERATED_VIDEO";
 
 export interface AssetLibraryPage {
   items: AssetView[];

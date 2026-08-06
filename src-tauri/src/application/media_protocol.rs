@@ -1,5 +1,5 @@
 use crate::application::ports::{AssetRepository, AssetStore, ProjectRepository};
-use crate::domain::AssetType;
+use crate::domain::{validate_project_id, AssetType};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub const MAX_MEDIA_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
@@ -23,6 +23,7 @@ impl MediaProtocolService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn handle(
         &self,
         method: &str,
@@ -30,6 +31,21 @@ impl MediaProtocolService {
         asset_id: &str,
         range: Option<&str>,
     ) -> MediaResponse {
+        self.handle_path(None, method, project_id, asset_id, range)
+            .await
+    }
+
+    pub async fn handle_path(
+        &self,
+        path: Option<&str>,
+        method: &str,
+        project_id: &str,
+        asset_id: &str,
+        range: Option<&str>,
+    ) -> MediaResponse {
+        if validate_project_id(project_id).is_err() {
+            return MediaResponse::not_found();
+        }
         let asset_id = match crate::domain::AssetId::parse(asset_id.to_owned()) {
             Ok(asset_id) => asset_id,
             Err(_) => return MediaResponse::not_found(),
@@ -40,7 +56,16 @@ impl MediaProtocolService {
         }) else {
             return MediaResponse::not_found();
         };
-        if asset.project_id != project_id || asset.asset_type != AssetType::Video {
+        let expected_type = match path {
+            Some("/video") => Some(AssetType::Video),
+            Some("/audio") => Some(AssetType::Audio),
+            Some(_) => return MediaResponse::not_found(),
+            None => None,
+        };
+        if asset.project_id != project_id
+            || !matches!(asset.asset_type, AssetType::Video | AssetType::Audio)
+            || expected_type.is_some_and(|expected| expected != asset.asset_type)
+        {
             return MediaResponse::not_found();
         }
         let Some(project_root) = (match self.project_repository.get_storage_root(project_id).await {
@@ -380,7 +405,7 @@ mod tests {
         let task_id = TaskId::parse("tsk_media").unwrap();
         let asset = Asset::new_generated_video(
             AssetId::parse("ast_media").unwrap(),
-            "project-1",
+            "prj_default",
             "Video",
             "video.mp4",
             path.to_string_lossy(),
@@ -403,7 +428,7 @@ mod tests {
             }),
         );
         let response = service
-            .handle("GET", "project-1", "ast_media", Some("bytes=4-9"))
+            .handle("GET", "prj_default", "ast_media", Some("bytes=4-9"))
             .await;
         assert_eq!(response.status, 206);
         assert_eq!(response.body, bytes[4..10]);
@@ -411,13 +436,143 @@ mod tests {
             response.headers.get("Content-Range").unwrap(),
             "bytes 4-9/64"
         );
-        let head = service.handle("HEAD", "project-1", "ast_media", None).await;
+        let head = service
+            .handle("HEAD", "prj_default", "ast_media", None)
+            .await;
         assert_eq!(head.status, 200);
         assert!(head.body.is_empty());
         assert_eq!(head.headers.get("Content-Length").unwrap(), "64");
         assert_eq!(
             service
-                .handle("GET", "project-2", "ast_media", None)
+                .handle(
+                    "GET",
+                    "prj_550e8400-e29b-41d4-a716-446655440000",
+                    "ast_media",
+                    None
+                )
+                .await
+                .status,
+            404
+        );
+        assert_eq!(
+            service
+                .handle("GET", "project-unsafe", "ast_media", None)
+                .await
+                .status,
+            404
+        );
+    }
+
+    #[tokio::test]
+    async fn serves_source_video_and_source_audio_only_on_their_matching_routes() {
+        let root = tempdir().unwrap();
+        let video_path = root.path().join("source.mp4");
+        let video_bytes = vec![1, 2, 3, 4, 5];
+        std::fs::write(&video_path, &video_bytes).unwrap();
+        let video = Asset::new_source_video(
+            AssetId::parse("ast_source_video").unwrap(),
+            "prj_default",
+            "source.mp4",
+            "source.mp4",
+            video_path.to_string_lossy(),
+            "a".repeat(64),
+            "video/mp4",
+            None,
+            None,
+            None,
+            video_bytes.len() as u64,
+            serde_json::json!({}),
+            Utc::now(),
+        )
+        .unwrap();
+        let video_service = super::MediaProtocolService::new(
+            Arc::new(OneAssetRepository { asset: video }),
+            Arc::new(FileRangeStore),
+            Arc::new(OneProjectRepository {
+                root: root.path().to_path_buf(),
+            }),
+        );
+        assert_eq!(
+            video_service
+                .handle("GET", "prj_default", "ast_source_video", None)
+                .await
+                .status,
+            200
+        );
+        assert_eq!(
+            video_service
+                .handle("GET", "prj_default", "ast_source_video", Some("bytes=0-1"))
+                .await
+                .status,
+            206
+        );
+
+        let audio_path = root.path().join("source.wav");
+        let audio_bytes = vec![7, 8, 9, 10];
+        std::fs::write(&audio_path, &audio_bytes).unwrap();
+        let audio = Asset::new_source_audio(
+            AssetId::parse("ast_source_audio").unwrap(),
+            "prj_default",
+            "source.wav",
+            "source.wav",
+            audio_path.to_string_lossy(),
+            "b".repeat(64),
+            "audio/wav",
+            Some(250),
+            audio_bytes.len() as u64,
+            serde_json::json!({}),
+            Utc::now(),
+        )
+        .unwrap();
+        let audio_service = super::MediaProtocolService::new(
+            Arc::new(OneAssetRepository { asset: audio }),
+            Arc::new(FileRangeStore),
+            Arc::new(OneProjectRepository {
+                root: root.path().to_path_buf(),
+            }),
+        );
+        assert_eq!(
+            audio_service
+                .handle_path(
+                    Some("/audio"),
+                    "HEAD",
+                    "prj_default",
+                    "ast_source_audio",
+                    None,
+                )
+                .await
+                .status,
+            200
+        );
+        assert_eq!(
+            audio_service
+                .handle_path(
+                    Some("/audio"),
+                    "GET",
+                    "prj_default",
+                    "ast_source_audio",
+                    Some("bytes=1-2"),
+                )
+                .await
+                .body,
+            audio_bytes[1..3]
+        );
+        assert_eq!(
+            audio_service
+                .handle_path(
+                    Some("/video"),
+                    "GET",
+                    "prj_default",
+                    "ast_source_audio",
+                    None,
+                )
+                .await
+                .status,
+            404
+        );
+        assert_eq!(
+            audio_service
+                .handle_path(Some("/audio"), "GET", "prj_default", "ast_missing", None,)
                 .await
                 .status,
             404

@@ -8,4 +8,9 @@ describe("asset media URL", () => {
     expect(url).not.toContain("storage");
     expect(url).not.toContain("assets/");
   });
+
+  it("uses a separate audio protocol route", () => {
+    expect(buildAssetMediaUrl("prj_default", "ast_audio", "audio"))
+      .toBe("aistudio-media://localhost/audio?projectId=prj_default&assetId=ast_audio");
+  });
 });

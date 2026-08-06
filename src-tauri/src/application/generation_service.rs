@@ -1,7 +1,8 @@
 use crate::application::asset_import_service::{AssetImportError, AssetImportService};
 use crate::application::generation_input_preparer::{
-    image_snapshot_value, images_snapshot_value, GenerationInputPrepareError,
-    GenerationInputPreparer, GenerationInputValue, PreparedGenerationInputs,
+    image_snapshot_value, images_snapshot_value, media_list_snapshot_value, media_snapshot_value,
+    GenerationInputPrepareError, GenerationInputPreparer, GenerationInputValue,
+    PreparedGenerationInputs,
 };
 use crate::application::output_collector::{OutputCollector, OutputCollectorError};
 use crate::application::ports::{
@@ -1012,6 +1013,12 @@ fn task_error_from_adapter(error: &ComfyAdapterError) -> TaskError {
         ComfyAdapterError::ImageUpload(message) => {
             ("COMFY_IMAGE_UPLOAD_FAILED", message.clone(), None)
         }
+        ComfyAdapterError::InputUpload(message) => {
+            ("COMFY_INPUT_UPLOAD_FAILED", message.clone(), None)
+        }
+        ComfyAdapterError::InputUploadTooLarge(message) => {
+            ("COMFY_INPUT_UPLOAD_TOO_LARGE", message.clone(), None)
+        }
     };
     TaskError {
         code: code.to_owned(),
@@ -1063,6 +1070,22 @@ fn input_value_to_json(value: &GenerationInputValue) -> Value {
             "type": "image_assets",
             "assetIds": asset_ids.iter().map(|asset_id| asset_id.as_str()).collect::<Vec<_>>(),
         }),
+        GenerationInputValue::VideoAsset(asset_id) => serde_json::json!({
+            "type": "video_asset",
+            "assetId": asset_id.as_str(),
+        }),
+        GenerationInputValue::AudioAsset(asset_id) => serde_json::json!({
+            "type": "audio_asset",
+            "assetId": asset_id.as_str(),
+        }),
+        GenerationInputValue::VideoAssets(asset_ids) => serde_json::json!({
+            "type": "video_assets",
+            "assetIds": asset_ids.iter().map(|asset_id| asset_id.as_str()).collect::<Vec<_>>(),
+        }),
+        GenerationInputValue::AudioAssets(asset_ids) => serde_json::json!({
+            "type": "audio_assets",
+            "assetIds": asset_ids.iter().map(|asset_id| asset_id.as_str()).collect::<Vec<_>>(),
+        }),
     }
 }
 
@@ -1087,6 +1110,17 @@ fn resolved_inputs_to_json(
                     .images
                     .get(key)
                     .map(|images| images_snapshot_value(images))
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+                ResolvedInputValue::Video(_) | ResolvedInputValue::Audio(_) => prepared
+                    .media
+                    .get(key)
+                    .and_then(|media| media.first())
+                    .map(media_snapshot_value)
+                    .unwrap_or_else(|| Value::String("media".to_owned())),
+                ResolvedInputValue::Videos(_) | ResolvedInputValue::Audios(_) => prepared
+                    .media
+                    .get(key)
+                    .map(|media| media_list_snapshot_value(media))
                     .unwrap_or_else(|| Value::Array(Vec::new())),
             };
             (key.clone(), value)
@@ -1253,6 +1287,7 @@ mod tests {
                     },
                 ],
             )]),
+            media: BTreeMap::new(),
         };
         let resolved = resolved_inputs_to_json(
             &BTreeMap::from([(
@@ -1263,5 +1298,132 @@ mod tests {
         );
         assert_eq!(resolved["references"][0]["assetId"], "ast_first");
         assert_eq!(resolved["references"][1]["assetId"], "ast_second");
+    }
+
+    #[test]
+    fn media_snapshot_preserves_ids_hashes_server_names_and_never_storage_paths() {
+        let values = BTreeMap::from([
+            (
+                "video".to_owned(),
+                GenerationInputValue::VideoAsset(
+                    crate::domain::AssetId::parse("ast_video").unwrap(),
+                ),
+            ),
+            (
+                "audio".to_owned(),
+                GenerationInputValue::AudioAsset(
+                    crate::domain::AssetId::parse("ast_audio").unwrap(),
+                ),
+            ),
+            (
+                "videos".to_owned(),
+                GenerationInputValue::VideoAssets(vec![
+                    crate::domain::AssetId::parse("ast_video_a").unwrap(),
+                    crate::domain::AssetId::parse("ast_video_b").unwrap(),
+                ]),
+            ),
+            (
+                "audios".to_owned(),
+                GenerationInputValue::AudioAssets(vec![
+                    crate::domain::AssetId::parse("ast_audio_a").unwrap(),
+                    crate::domain::AssetId::parse("ast_audio_b").unwrap(),
+                ]),
+            ),
+        ]);
+        let user = input_values_to_json(&values);
+        assert_eq!(
+            user["video"],
+            json!({"type": "video_asset", "assetId": "ast_video"})
+        );
+        assert_eq!(
+            user["audio"],
+            json!({"type": "audio_asset", "assetId": "ast_audio"})
+        );
+        assert_eq!(
+            user["videos"]["assetIds"],
+            json!(["ast_video_a", "ast_video_b"])
+        );
+        assert_eq!(
+            user["audios"]["assetIds"],
+            json!(["ast_audio_a", "ast_audio_b"])
+        );
+
+        let media = |asset_id: &str, hash: &str, name: &str| {
+            crate::application::generation_input_preparer::PreparedMediaInput {
+                asset_id: crate::domain::AssetId::parse(asset_id).unwrap(),
+                sha256: hash.to_owned(),
+                comfy: ComfyUploadedImage {
+                    name: name.to_owned(),
+                    subfolder: "input/subfolder".to_owned(),
+                    folder_type: "input".to_owned(),
+                },
+            }
+        };
+        let prepared = PreparedGenerationInputs {
+            compiler_values: BTreeMap::new(),
+            images: BTreeMap::new(),
+            media: BTreeMap::from([
+                (
+                    "video".to_owned(),
+                    vec![media("ast_video", "hash-video", "video.mp4")],
+                ),
+                (
+                    "audio".to_owned(),
+                    vec![media("ast_audio", "hash-audio", "audio.wav")],
+                ),
+                (
+                    "videos".to_owned(),
+                    vec![
+                        media("ast_video_a", "hash-video-a", "video-a.mp4"),
+                        media("ast_video_b", "hash-video-b", "video-b.mp4"),
+                    ],
+                ),
+                (
+                    "audios".to_owned(),
+                    vec![
+                        media("ast_audio_a", "hash-audio-a", "audio-a.wav"),
+                        media("ast_audio_b", "hash-audio-b", "audio-b.wav"),
+                    ],
+                ),
+            ]),
+        };
+        let resolved = resolved_inputs_to_json(
+            &BTreeMap::from([
+                (
+                    "video".to_owned(),
+                    ResolvedInputValue::Video("video.mp4".to_owned()),
+                ),
+                (
+                    "audio".to_owned(),
+                    ResolvedInputValue::Audio("audio.wav".to_owned()),
+                ),
+                (
+                    "videos".to_owned(),
+                    ResolvedInputValue::Videos(vec![
+                        "video-a.mp4".to_owned(),
+                        "video-b.mp4".to_owned(),
+                    ]),
+                ),
+                (
+                    "audios".to_owned(),
+                    ResolvedInputValue::Audios(vec![
+                        "audio-a.wav".to_owned(),
+                        "audio-b.wav".to_owned(),
+                    ]),
+                ),
+            ]),
+            &prepared,
+        );
+        assert_eq!(resolved["video"]["assetId"], "ast_video");
+        assert_eq!(resolved["video"]["sha256"], "hash-video");
+        assert_eq!(resolved["video"]["comfy"]["name"], "video.mp4");
+        assert_eq!(resolved["videos"][1]["assetId"], "ast_video_b");
+        assert_eq!(
+            resolved["audios"][0]["comfy"]["subfolder"],
+            "input/subfolder"
+        );
+        let text = resolved.to_string();
+        assert!(!text.contains("storage_path"));
+        assert!(!text.contains("C:/"));
     }
 }

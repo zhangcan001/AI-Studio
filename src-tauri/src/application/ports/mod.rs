@@ -19,14 +19,18 @@ pub mod workflow_library_source;
 
 pub use asset_browse_repository::{AssetBrowseRepository, AssetCategoryFilter};
 pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
-pub use asset_store::{AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile};
+pub use asset_store::{
+    AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile,
+};
 pub use clock::{Clock, MonotonicEventClock};
+#[allow(unused_imports)]
+pub use comfy_adapter::ComfyUploadedImage;
 pub use comfy_adapter::{
     CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
     ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
-    ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyOutputStream,
-    ComfyQueueState, ComfySavedResult, ComfyUploadedImage, DeviceInfo, PromptSubmission,
-    SystemStats,
+    ComfyImageUpload, ComfyInputStream, ComfyInputUpload, ComfyNodeOutput, ComfyOutputData,
+    ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult, ComfyUploadedInput,
+    DeviceInfo, PromptSubmission, SystemStats,
 };
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,

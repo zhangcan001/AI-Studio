@@ -6,6 +6,7 @@ use crate::application::ports::{
 use crate::compiler::RecipeParser;
 use crate::domain::{
     AssetId, AssetType, InputDefinition, Preset, PresetDomainError, PresetId, Recipe, SeedValue,
+    GENERATED_VIDEO_CATEGORY, SOURCE_AUDIO_CATEGORY, SOURCE_VIDEO_CATEGORY,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -226,6 +227,44 @@ impl PresetService {
                         self.validate_image_asset(project_id, key, asset_id).await?;
                     }
                 }
+                (InputDefinition::Video { .. }, GenerationInputValue::VideoAsset(asset_id)) => {
+                    self.validate_media_asset(project_id, key, asset_id, MediaKind::Video)
+                        .await?;
+                }
+                (InputDefinition::Audio { .. }, GenerationInputValue::AudioAsset(asset_id)) => {
+                    self.validate_media_asset(project_id, key, asset_id, MediaKind::Audio)
+                        .await?;
+                }
+                (
+                    InputDefinition::Videos {
+                        min_items,
+                        max_items,
+                        required,
+                        ..
+                    },
+                    GenerationInputValue::VideoAssets(asset_ids),
+                ) => {
+                    validate_media_count(key, asset_ids.len(), *required, *min_items, *max_items)?;
+                    for asset_id in asset_ids {
+                        self.validate_media_asset(project_id, key, asset_id, MediaKind::Video)
+                            .await?;
+                    }
+                }
+                (
+                    InputDefinition::Audios {
+                        min_items,
+                        max_items,
+                        required,
+                        ..
+                    },
+                    GenerationInputValue::AudioAssets(asset_ids),
+                ) => {
+                    validate_media_count(key, asset_ids.len(), *required, *min_items, *max_items)?;
+                    for asset_id in asset_ids {
+                        self.validate_media_asset(project_id, key, asset_id, MediaKind::Audio)
+                            .await?;
+                    }
+                }
                 _ => {
                     return Err(PresetServiceError::ValuesInvalid(format!(
                         "input \"{key}\" has a value type that does not match the recipe"
@@ -261,6 +300,66 @@ impl PresetService {
         }
         Ok(())
     }
+
+    async fn validate_media_asset(
+        &self,
+        project_id: &str,
+        key: &str,
+        asset_id: &AssetId,
+        kind: MediaKind,
+    ) -> Result<(), PresetServiceError> {
+        let asset = self.asset_repository.find_by_id(asset_id).await?;
+        let Some(asset) = asset else {
+            return Err(PresetServiceError::ValuesInvalid(format!(
+                "input \"{key}\" references missing asset {}",
+                asset_id.as_str()
+            )));
+        };
+        if asset.project_id != project_id {
+            return Err(PresetServiceError::ValuesInvalid(format!(
+                "input \"{key}\" references an asset from another project"
+            )));
+        }
+        let valid = match kind {
+            MediaKind::Video => {
+                asset.asset_type == AssetType::Video
+                    && matches!(
+                        asset.category.as_str(),
+                        SOURCE_VIDEO_CATEGORY | GENERATED_VIDEO_CATEGORY
+                    )
+            }
+            MediaKind::Audio => {
+                asset.asset_type == AssetType::Audio && asset.category == SOURCE_AUDIO_CATEGORY
+            }
+        };
+        if !valid {
+            return Err(PresetServiceError::ValuesInvalid(format!(
+                "input \"{key}\" references an incompatible media asset"
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MediaKind {
+    Video,
+    Audio,
+}
+
+fn validate_media_count(
+    key: &str,
+    count: usize,
+    required: bool,
+    min_items: usize,
+    max_items: usize,
+) -> Result<(), PresetServiceError> {
+    if count > max_items || (count > 0 && count < min_items) || (required && count < min_items) {
+        return Err(PresetServiceError::ValuesInvalid(format!(
+            "input \"{key}\" contains {count} items; expected {min_items}-{max_items}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_project_id(project_id: &str) -> Result<(), PresetServiceError> {
@@ -310,6 +409,22 @@ fn input_value_to_json(value: &GenerationInputValue) -> Value {
         }),
         GenerationInputValue::ImageAssets(asset_ids) => serde_json::json!({
             "type": "image_assets",
+            "assetIds": asset_ids.iter().map(AssetId::as_str).collect::<Vec<_>>(),
+        }),
+        GenerationInputValue::VideoAsset(asset_id) => serde_json::json!({
+            "type": "video_asset",
+            "assetId": asset_id.as_str(),
+        }),
+        GenerationInputValue::AudioAsset(asset_id) => serde_json::json!({
+            "type": "audio_asset",
+            "assetId": asset_id.as_str(),
+        }),
+        GenerationInputValue::VideoAssets(asset_ids) => serde_json::json!({
+            "type": "video_assets",
+            "assetIds": asset_ids.iter().map(AssetId::as_str).collect::<Vec<_>>(),
+        }),
+        GenerationInputValue::AudioAssets(asset_ids) => serde_json::json!({
+            "type": "audio_assets",
             "assetIds": asset_ids.iter().map(AssetId::as_str).collect::<Vec<_>>(),
         }),
     }
@@ -413,6 +528,7 @@ mod tests {
         SqliteGenerationDefinitionRepository, SqlitePresetRepository,
     };
     use chrono::{DateTime, Utc};
+    use serde_json::json;
     use std::{collections::BTreeMap, sync::Arc};
     use tempfile::{tempdir, TempDir};
 
@@ -492,5 +608,55 @@ mod tests {
             service.delete("project-1", &created.id).await,
             Err(PresetServiceError::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn serializes_media_preset_values_as_asset_ids_only() {
+        let values = BTreeMap::from([
+            (
+                "video".to_owned(),
+                GenerationInputValue::VideoAsset(
+                    crate::domain::AssetId::parse("ast_video").unwrap(),
+                ),
+            ),
+            (
+                "audio".to_owned(),
+                GenerationInputValue::AudioAsset(
+                    crate::domain::AssetId::parse("ast_audio").unwrap(),
+                ),
+            ),
+            (
+                "videos".to_owned(),
+                GenerationInputValue::VideoAssets(vec![
+                    crate::domain::AssetId::parse("ast_video_a").unwrap(),
+                    crate::domain::AssetId::parse("ast_video_b").unwrap(),
+                ]),
+            ),
+            (
+                "audios".to_owned(),
+                GenerationInputValue::AudioAssets(vec![
+                    crate::domain::AssetId::parse("ast_audio_a").unwrap(),
+                    crate::domain::AssetId::parse("ast_audio_b").unwrap(),
+                ]),
+            ),
+        ]);
+        let serialized = super::input_values_to_json(&values);
+        assert_eq!(
+            serialized["video"],
+            json!({"type": "video_asset", "assetId": "ast_video"})
+        );
+        assert_eq!(
+            serialized["audio"],
+            json!({"type": "audio_asset", "assetId": "ast_audio"})
+        );
+        assert_eq!(
+            serialized["videos"]["assetIds"],
+            json!(["ast_video_a", "ast_video_b"])
+        );
+        assert_eq!(
+            serialized["audios"]["assetIds"],
+            json!(["ast_audio_a", "ast_audio_b"])
+        );
+        assert!(!serialized.to_string().contains("storage_path"));
     }
 }

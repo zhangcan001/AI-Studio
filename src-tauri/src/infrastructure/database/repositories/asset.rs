@@ -428,6 +428,49 @@ mod tests {
             .expect("source asset should load");
         assert_eq!(loaded, source);
         assert!(loaded.source_task_id.is_none());
+
+        let source_video = Asset::new_source_video(
+            AssetId::parse("ast_source_video").unwrap(),
+            "project-1",
+            "reference.mp4",
+            "reference.mp4",
+            "C:/project/assets/source/video/ast_source_video.mp4",
+            "c".repeat(64),
+            "video/mp4",
+            Some(1280),
+            Some(720),
+            Some(1500),
+            1024,
+            json!({"source": "native_import"}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
+        )
+        .unwrap();
+        let source_audio = Asset::new_source_audio(
+            AssetId::parse("ast_source_audio").unwrap(),
+            "project-1",
+            "reference.wav",
+            "reference.wav",
+            "C:/project/assets/source/audio/ast_source_audio.wav",
+            "d".repeat(64),
+            "audio/wav",
+            Some(1500),
+            1024,
+            json!({"source": "native_import"}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 4).unwrap(),
+        )
+        .unwrap();
+        repository
+            .insert_many(&[source_video.clone(), source_audio.clone()])
+            .await
+            .unwrap();
+        assert_eq!(
+            repository.find_by_id(&source_video.id).await.unwrap(),
+            Some(source_video)
+        );
+        assert_eq!(
+            repository.find_by_id(&source_audio.id).await.unwrap(),
+            Some(source_audio)
+        );
     }
 
     #[tokio::test]

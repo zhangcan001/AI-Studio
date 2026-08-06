@@ -3,8 +3,10 @@ use crate::{
     application::{
         asset_library_service::{AssetLibraryError, AssetLibraryPageView},
         asset_query_service::{AssetQueryError, AssetView},
-        source_asset_import_service::SourceAssetImportError,
-        source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
+        source_asset_import_service::{
+            SourceAssetImportError, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES,
+            MAX_SOURCE_VIDEO_BYTES,
+        },
     },
     application::{pagination::PageCursor, ports::AssetCategoryFilter},
     error::AppError,
@@ -56,6 +58,8 @@ pub async fn asset_list_recent(
 pub enum AssetCategoryFilterDto {
     All,
     SourceImage,
+    SourceVideo,
+    SourceAudio,
     GeneratedImage,
     GeneratedVideo,
 }
@@ -65,6 +69,8 @@ impl From<AssetCategoryFilterDto> for AssetCategoryFilter {
         match value {
             AssetCategoryFilterDto::All => Self::All,
             AssetCategoryFilterDto::SourceImage => Self::SourceImage,
+            AssetCategoryFilterDto::SourceVideo => Self::SourceVideo,
+            AssetCategoryFilterDto::SourceAudio => Self::SourceAudio,
             AssetCategoryFilterDto::GeneratedImage => Self::GeneratedImage,
             AssetCategoryFilterDto::GeneratedVideo => Self::GeneratedVideo,
         }
@@ -147,6 +153,58 @@ pub async fn asset_pick_and_import_image(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn asset_pick_and_import_video(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Option<AssetView>, AppError> {
+    super::validate_project_id(&project_id)?;
+    let Some(file) = app_handle
+        .dialog()
+        .file()
+        .add_filter("Videos", &["mp4", "webm", "mov", "mkv"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|error| {
+        AppError::filesystem(format!("selected video path is unavailable: {error}"))
+    })?;
+    let asset = state
+        .source_asset_import_service
+        .import_video_file(&project_id, &path)
+        .await
+        .map_err(map_source_import_error)?;
+    Ok(Some(AssetView::from(asset)))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_pick_and_import_audio(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Option<AssetView>, AppError> {
+    super::validate_project_id(&project_id)?;
+    let Some(file) = app_handle
+        .dialog()
+        .file()
+        .add_filter("Audio files", &["wav", "flac", "mp3", "ogg", "opus", "m4a"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|error| {
+        AppError::filesystem(format!("selected audio path is unavailable: {error}"))
+    })?;
+    let asset = state
+        .source_asset_import_service
+        .import_audio_file(&project_id, &path)
+        .await
+        .map_err(map_source_import_error)?;
+    Ok(Some(AssetView::from(asset)))
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn asset_read_image(
     state: State<'_, AppState>,
     project_id: String,
@@ -222,6 +280,22 @@ fn map_source_import_error(error: SourceAssetImportError) -> AppError {
         } => AppError::invalid_input(format!(
             "{code}: image is {actual_bytes} bytes; maximum is {max_bytes}"
         )),
+        SourceAssetImportError::SourceVideoTooLarge {
+            max_bytes,
+            actual_bytes,
+        } => AppError::invalid_input(format!(
+            "{code}: video is {actual_bytes} bytes; maximum is {max_bytes} (limit {MAX_SOURCE_VIDEO_BYTES})"
+        )),
+        SourceAssetImportError::SourceAudioTooLarge {
+            max_bytes,
+            actual_bytes,
+        } => AppError::invalid_input(format!(
+            "{code}: audio is {actual_bytes} bytes; maximum is {max_bytes} (limit {MAX_SOURCE_AUDIO_BYTES})"
+        )),
+        SourceAssetImportError::InvalidSourceVideo { message }
+        | SourceAssetImportError::InvalidSourceAudio { message } => {
+            AppError::invalid_input(format!("{code}: {message}"))
+        }
         SourceAssetImportError::ProjectStorageMissing { project_id } => AppError::database(
             format!("ASSET_PERSISTENCE_ERROR: project {project_id} has no storage root"),
         ),

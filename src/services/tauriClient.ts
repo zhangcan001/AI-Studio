@@ -108,6 +108,14 @@ export function pickAndImportImage(projectId: string): Promise<AssetView | null>
   return invoke<AssetView | null>("asset_pick_and_import_image", { projectId });
 }
 
+export function pickAndImportVideo(projectId: string): Promise<AssetView | null> {
+  return invoke<AssetView | null>("asset_pick_and_import_video", { projectId });
+}
+
+export function pickAndImportAudio(projectId: string): Promise<AssetView | null> {
+  return invoke<AssetView | null>("asset_pick_and_import_audio", { projectId });
+}
+
 export function readAssetImage(projectId: string, assetId: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("asset_read_image", { projectId, assetId });
 }
@@ -116,8 +124,12 @@ export function readAssetThumbnail(projectId: string, assetId: string): Promise<
   return invoke<ArrayBuffer>("asset_read_thumbnail", { projectId, assetId });
 }
 
-export function getAssetMediaUrl(projectId: string, assetId: string): string {
-  return buildAssetMediaUrl(projectId, assetId);
+export function getAssetMediaUrl(
+  projectId: string,
+  assetId: string,
+  mediaKind: "video" | "audio" = "video",
+): string {
+  return buildAssetMediaUrl(projectId, assetId, mediaKind);
 }
 
 export function getAsset(projectId: string, assetId: string): Promise<AssetView> {

@@ -34,8 +34,9 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
 
   useEffect(() => {
     if (!visible) return () => undefined;
-    const isVideo = asset.assetType === "video" || asset.category === "generated_video";
-    if (isVideo && !asset.thumbnailAvailable) {
+    const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
+    const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
+    if (isVideo && !asset.thumbnailAvailable || isAudio) {
       setPreviewUrl(undefined);
       return () => undefined;
     }
@@ -59,8 +60,20 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
     };
   }, [asset.assetType, asset.category, asset.id, asset.mimeType, asset.thumbnailAvailable, projectId, visible]);
 
-  const isVideo = asset.assetType === "video" || asset.category === "generated_video";
-  const mediaUrl = isVideo ? getAssetMediaUrl(projectId, asset.id) : undefined;
+  const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
+  const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
+  const mediaUrl = isVideo ? getAssetMediaUrl(projectId, asset.id, "video") : isAudio ? getAssetMediaUrl(projectId, asset.id, "audio") : undefined;
+  const typeLabel = asset.category === "source_image"
+    ? "Source image"
+    : asset.category === "source_video"
+      ? "Source video"
+      : asset.category === "source_audio"
+        ? "Source audio"
+        : isVideo
+          ? "Generated video"
+          : isAudio
+            ? "Audio"
+            : "Generated image";
 
   return (
     <button ref={cardRef} type="button" className="asset-library-card" onClick={() => onSelect(asset)}>
@@ -70,14 +83,14 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
         ) : isVideo && mediaUrl ? (
           <video src={mediaUrl} aria-label={asset.name} preload="metadata" muted playsInline />
         ) : (
-          <span className="asset-image-placeholder">{isVideo ? "Video preview" : "Preview unavailable"}</span>
+          <span className="asset-image-placeholder">{isAudio ? "Audio asset" : isVideo ? "Video preview" : "Preview unavailable"}</span>
         )}
       </span>
       <span className="asset-library-card-copy">
         <strong>{asset.name}</strong>
-        <span>{asset.category === "source_image" ? "Source image" : isVideo ? "Generated video" : "Generated image"}</span>
+        <span>{typeLabel}</span>
         <small>
-          {isVideo ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatBytes(asset.fileSize)}
+          {isVideo || isAudio ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatBytes(asset.fileSize)}
         </small>
         <small>{formatDate(asset.createdAt)}</small>
       </span>

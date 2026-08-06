@@ -76,19 +76,23 @@ impl RecipeValidator {
                     min_items,
                     max_items,
                     ..
-                } => {
-                    if *max_items == 0 || *max_items > 32 {
-                        return Err(RecipeError::invalid(format!(
-                            "input \"{key}\" max_items must be between 1 and 32"
-                        )));
-                    }
-                    if min_items > max_items || (*required && *min_items == 0) {
-                        return Err(RecipeError::invalid(format!(
-                            "input \"{key}\" min_items must be less than or equal to max_items and required lists must have at least one item"
-                        )));
-                    }
                 }
-                InputDefinition::TextArea { .. } | InputDefinition::Image { .. } => {}
+                | InputDefinition::Videos {
+                    required,
+                    min_items,
+                    max_items,
+                    ..
+                }
+                | InputDefinition::Audios {
+                    required,
+                    min_items,
+                    max_items,
+                    ..
+                } => validate_plural_input(key, *required, *min_items, *max_items)?,
+                InputDefinition::TextArea { .. }
+                | InputDefinition::Image { .. }
+                | InputDefinition::Video { .. }
+                | InputDefinition::Audio { .. } => {}
             }
         }
 
@@ -100,21 +104,39 @@ impl RecipeValidator {
                 )));
             }
             if let Some(item_index) = binding.item_index {
-                let Some(InputDefinition::Images {
-                    min_items,
-                    max_items,
-                    ..
-                }) = recipe.inputs.get(&binding.source)
-                else {
+                let Some(definition) = recipe.inputs.get(&binding.source) else {
                     return Err(RecipeError::invalid(format!(
-                        "binding \"{}\" item requires an images input",
+                        "binding \"{}\" item requires a plural media input",
                         binding.source
                     )));
                 };
-                if item_index >= *max_items || item_index >= *min_items {
+                let (min_items, max_items, kind) = match definition {
+                    InputDefinition::Images {
+                        min_items,
+                        max_items,
+                        ..
+                    } => (*min_items, *max_items, "images"),
+                    InputDefinition::Videos {
+                        min_items,
+                        max_items,
+                        ..
+                    } => (*min_items, *max_items, "videos"),
+                    InputDefinition::Audios {
+                        min_items,
+                        max_items,
+                        ..
+                    } => (*min_items, *max_items, "audios"),
+                    _ => {
+                        return Err(RecipeError::invalid(format!(
+                            "binding \"{}\" item requires a plural media input",
+                            binding.source
+                        )))
+                    }
+                };
+                if item_index >= max_items || item_index >= min_items {
                     return Err(RecipeError::invalid(format!(
-                        "binding \"{}\" item {} must be within the declared minimum and maximum image slots",
-                        binding.source, item_index
+                        "binding \"{}\" item {} must be within the declared minimum and maximum {kind} slots",
+                        binding.source, item_index,
                     )));
                 }
             }
@@ -153,6 +175,25 @@ impl RecipeValidator {
 
         Ok(())
     }
+}
+
+fn validate_plural_input(
+    key: &str,
+    required: bool,
+    min_items: usize,
+    max_items: usize,
+) -> Result<(), RecipeError> {
+    if max_items == 0 || max_items > 32 {
+        return Err(RecipeError::invalid(format!(
+            "input \"{key}\" max_items must be between 1 and 32"
+        )));
+    }
+    if min_items > max_items || (required && min_items == 0) {
+        return Err(RecipeError::invalid(format!(
+            "input \"{key}\" min_items must be less than or equal to max_items and required lists must have at least one item"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_unsigned_range(

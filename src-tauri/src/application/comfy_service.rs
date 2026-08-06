@@ -179,7 +179,9 @@ fn status_for_adapter_error(error: &ComfyAdapterError) -> ComfyConnectionStatus 
         | ComfyAdapterError::HistoryNotFound(_)
         | ComfyAdapterError::OutputDownload(_)
         | ComfyAdapterError::OutputTooLarge(_)
-        | ComfyAdapterError::ImageUpload(_) => ComfyConnectionStatus::Incompatible,
+        | ComfyAdapterError::ImageUpload(_)
+        | ComfyAdapterError::InputUpload(_)
+        | ComfyAdapterError::InputUploadTooLarge(_) => ComfyConnectionStatus::Incompatible,
         ComfyAdapterError::WorkflowValidation { .. } | ComfyAdapterError::StreamDisconnected(_) => {
             ComfyConnectionStatus::Incompatible
         }
@@ -195,7 +197,9 @@ fn app_error_for_adapter_error(error: ComfyAdapterError) -> AppError {
         | ComfyAdapterError::HistoryNotFound(_)
         | ComfyAdapterError::OutputDownload(_)
         | ComfyAdapterError::OutputTooLarge(_)
-        | ComfyAdapterError::ImageUpload(_) => {
+        | ComfyAdapterError::ImageUpload(_)
+        | ComfyAdapterError::InputUpload(_)
+        | ComfyAdapterError::InputUploadTooLarge(_) => {
             AppError::comfy_protocol_error("ComfyUI 返回了不兼容的 API 响应")
         }
         ComfyAdapterError::WorkflowValidation { .. } | ComfyAdapterError::StreamDisconnected(_) => {

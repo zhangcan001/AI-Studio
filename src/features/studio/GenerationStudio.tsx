@@ -46,23 +46,29 @@ export function GenerationStudio({
   const [cancelling, setCancelling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [missingImageFields, setMissingImageFields] = useState<Set<string>>(new Set());
+  const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
   const [presets, setPresets] = useState<PresetView[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
   const [presetLoading, setPresetLoading] = useState(false);
   const [presetError, setPresetError] = useState<string>();
-  const handleImageAvailabilityChange = useCallback((key: string, available: boolean) => {
-    setMissingImageFields((current) => {
+  const handleAssetAvailabilityChange = useCallback((key: string, available: boolean) => {
+    setMissingAssetFields((current) => {
       const next = new Set(current);
-      if (available) next.delete(key);
-      else next.add(key);
+      if (available) {
+        if (!current.has(key)) return current;
+        next.delete(key);
+      } else {
+        if (current.has(key)) return current;
+        next.add(key);
+      }
       return next;
     });
   }, []);
 
   useEffect(() => {
-    setMissingImageFields(new Set());
+    useStudioStore.getState().resetDraft();
+    setMissingAssetFields(new Set());
     setNotice(null);
     setPresets([]);
     setSelectedPresetId("");
@@ -83,12 +89,12 @@ export function GenerationStudio({
       next?.recipeId !== selectedWorkflow?.recipeId
     ) {
       setSelectedWorkflow(next);
-      setMissingImageFields(new Set());
+      setMissingAssetFields(new Set());
     }
   }, [catalog, selectedWorkflow, setSelectedWorkflow]);
 
   const hasUnsupportedField = useMemo(
-    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images"].includes(field.type)) ?? false,
+    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
     [selectedWorkflow],
   );
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
@@ -97,7 +103,7 @@ export function GenerationStudio({
       taskEventsReady &&
       selectedWorkflow &&
       !hasUnsupportedField &&
-      missingImageFields.size === 0 &&
+      missingAssetFields.size === 0 &&
       Object.keys(errors).length === 0,
   );
 
@@ -128,7 +134,7 @@ export function GenerationStudio({
     useStudioStore.getState().loadDraft(selectedWorkflow, preset.values);
     setSelectedPresetId(preset.id);
     setPresetName(preset.name);
-    setMissingImageFields(new Set());
+    setMissingAssetFields(new Set());
     setPresetError(undefined);
   }
 
@@ -215,7 +221,7 @@ export function GenerationStudio({
       !comfyConnected ||
       !taskEventsReady ||
       hasUnsupportedField ||
-      missingImageFields.size > 0
+      missingAssetFields.size > 0
     )
       return;
 
@@ -280,7 +286,7 @@ export function GenerationStudio({
                     recipe.workflowVersionId === workflowVersionId && recipe.recipeId === recipeId,
                 );
                 setSelectedWorkflow(next);
-                setMissingImageFields(new Set());
+                setMissingAssetFields(new Set());
               }}
             >
               {catalog.map((recipe) => (
@@ -340,7 +346,7 @@ export function GenerationStudio({
               onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
               onGenerate={() => void generate()}
               projectId={projectId}
-              onImageAssetAvailabilityChange={handleImageAvailabilityChange}
+              onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
             />
             {!comfyConnected && <p className="disabled-note">Connect ComfyUI before generating.</p>}
             {!taskEventsReady && (
@@ -349,8 +355,8 @@ export function GenerationStudio({
               </p>
             )}
             {hasUnsupportedField && <p className="disabled-note">This Workflow has an unsupported field type.</p>}
-            {missingImageFields.size > 0 && (
-              <p className="disabled-note">Missing image asset. Choose a replacement before generating.</p>
+            {missingAssetFields.size > 0 && (
+              <p className="disabled-note">Missing media asset. Choose a replacement before generating.</p>
             )}
             <button type="button" className="generate-button" onClick={() => void generate()} disabled={!canGenerate || creating}>
               {creating ? "Creating Task..." : "Generate"}

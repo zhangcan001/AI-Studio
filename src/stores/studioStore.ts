@@ -60,7 +60,14 @@ function defaultValues(workflow: RecipeViewModel): GenerationValues {
           return [field.key, undefined];
         case "images":
           return [field.key, { type: "image_assets", assetIds: [] }];
+        case "video":
+        case "audio":
+          return [field.key, undefined];
+        case "videos":
+          return [field.key, { type: "video_assets", assetIds: [] }];
+        case "audios":
+          return [field.key, { type: "audio_assets", assetIds: [] }];
       }
-    }).filter((entry): entry is [string, DraftValue] => entry[1] !== undefined),
+    }).filter((entry): entry is [string, DraftValue] => Boolean(entry && entry[1] !== undefined)),
   );
 }

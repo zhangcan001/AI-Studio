@@ -85,22 +85,19 @@ impl WorkflowCompiler {
                     resolved_inputs.insert(input_key.clone(), ResolvedInputValue::Seed(seed));
                 }
                 InputDefinition::Image { required, .. } => {
-                    let value = request
-                        .values
-                        .get(input_key)
-                        .map(|value| match value {
-                            InputValue::Image(value) => Ok(value.clone()),
-                            other => Err(type_mismatch(input_key, "image", other)),
-                        })
-                        .transpose()?;
-                    let value = value.filter(|value| !value.trim().is_empty());
-                    if *required && value.is_none() {
-                        return Err(CompileError::InputRequired {
-                            input: input_key.to_owned(),
-                        });
-                    }
-                    if let Some(value) = value {
-                        resolved_inputs.insert(input_key.clone(), ResolvedInputValue::Image(value));
+                    if let Some(value) = resolve_single_media_input(
+                        input_key,
+                        *required,
+                        request,
+                        "image",
+                        |value| match value {
+                            InputValue::Image(value) => {
+                                Some((value.clone(), ResolvedInputValue::Image(value)))
+                            }
+                            _ => None,
+                        },
+                    )? {
+                        resolved_inputs.insert(input_key.clone(), value);
                     }
                 }
                 InputDefinition::Images {
@@ -109,31 +106,93 @@ impl WorkflowCompiler {
                     max_items,
                     ..
                 } => {
-                    let value = request
-                        .values
-                        .get(input_key)
-                        .map(|value| match value {
-                            InputValue::Images(value) => Ok(value.clone()),
-                            other => Err(type_mismatch(input_key, "images", other)),
-                        })
-                        .transpose()?;
-                    let value = value.filter(|value| !value.is_empty());
-                    if *required && value.as_ref().is_none_or(|value| value.len() < *min_items) {
-                        return Err(CompileError::InputRequired {
-                            input: input_key.to_owned(),
-                        });
+                    if let Some(value) = resolve_plural_media_input(
+                        input_key,
+                        *required,
+                        *min_items,
+                        *max_items,
+                        request,
+                        "images",
+                        |value| match value {
+                            InputValue::Images(value) => Some(ResolvedInputValue::Images(value)),
+                            _ => None,
+                        },
+                    )? {
+                        resolved_inputs.insert(input_key.clone(), value);
                     }
-                    if let Some(value) = value {
-                        if value.len() < *min_items || value.len() > *max_items {
-                            return Err(CompileError::InputCountOutOfRange {
-                                input: input_key.to_owned(),
-                                count: value.len(),
-                                min: *min_items,
-                                max: *max_items,
-                            });
-                        }
-                        resolved_inputs
-                            .insert(input_key.clone(), ResolvedInputValue::Images(value));
+                }
+                InputDefinition::Video { required, .. } => {
+                    if let Some(value) = resolve_single_media_input(
+                        input_key,
+                        *required,
+                        request,
+                        "video",
+                        |value| match value {
+                            InputValue::Video(value) => {
+                                Some((value.clone(), ResolvedInputValue::Video(value)))
+                            }
+                            _ => None,
+                        },
+                    )? {
+                        resolved_inputs.insert(input_key.clone(), value);
+                    }
+                }
+                InputDefinition::Audio { required, .. } => {
+                    if let Some(value) = resolve_single_media_input(
+                        input_key,
+                        *required,
+                        request,
+                        "audio",
+                        |value| match value {
+                            InputValue::Audio(value) => {
+                                Some((value.clone(), ResolvedInputValue::Audio(value)))
+                            }
+                            _ => None,
+                        },
+                    )? {
+                        resolved_inputs.insert(input_key.clone(), value);
+                    }
+                }
+                InputDefinition::Videos {
+                    required,
+                    min_items,
+                    max_items,
+                    ..
+                } => {
+                    if let Some(value) = resolve_plural_media_input(
+                        input_key,
+                        *required,
+                        *min_items,
+                        *max_items,
+                        request,
+                        "videos",
+                        |value| match value {
+                            InputValue::Videos(value) => Some(ResolvedInputValue::Videos(value)),
+                            _ => None,
+                        },
+                    )? {
+                        resolved_inputs.insert(input_key.clone(), value);
+                    }
+                }
+                InputDefinition::Audios {
+                    required,
+                    min_items,
+                    max_items,
+                    ..
+                } => {
+                    if let Some(value) = resolve_plural_media_input(
+                        input_key,
+                        *required,
+                        *min_items,
+                        *max_items,
+                        request,
+                        "audios",
+                        |value| match value {
+                            InputValue::Audios(value) => Some(ResolvedInputValue::Audios(value)),
+                            _ => None,
+                        },
+                    )? {
+                        resolved_inputs.insert(input_key.clone(), value);
                     }
                 }
             }
@@ -226,6 +285,89 @@ fn resolve_integer_input(
     Ok(Some(value))
 }
 
+fn resolve_single_media_input<F>(
+    input_key: &str,
+    required: bool,
+    request: &CompileRequest,
+    expected: &str,
+    resolve: F,
+) -> Result<Option<ResolvedInputValue>, CompileError>
+where
+    F: FnOnce(InputValue) -> Option<(String, ResolvedInputValue)>,
+{
+    let value = request.values.get(input_key).cloned();
+    let Some(value) = value else {
+        if required {
+            return Err(CompileError::InputRequired {
+                input: input_key.to_owned(),
+            });
+        }
+        return Ok(None);
+    };
+    let actual = value.clone();
+    let Some((value, resolved)) = resolve(value) else {
+        return Err(type_mismatch(input_key, expected, &actual));
+    };
+    let value = (!value.trim().is_empty()).then_some(resolved);
+    if value.is_none() && required {
+        return Err(CompileError::InputRequired {
+            input: input_key.to_owned(),
+        });
+    }
+    Ok(value)
+}
+
+fn resolve_plural_media_input<F>(
+    input_key: &str,
+    required: bool,
+    min: usize,
+    max: usize,
+    request: &CompileRequest,
+    expected: &str,
+    resolve: F,
+) -> Result<Option<ResolvedInputValue>, CompileError>
+where
+    F: FnOnce(InputValue) -> Option<ResolvedInputValue>,
+{
+    let Some(value) = request.values.get(input_key).cloned() else {
+        if required {
+            return Err(CompileError::InputRequired {
+                input: input_key.to_owned(),
+            });
+        }
+        return Ok(None);
+    };
+    let actual = value.clone();
+    let Some(resolved) = resolve(value) else {
+        return Err(type_mismatch(input_key, expected, &actual));
+    };
+    let count = match &resolved {
+        ResolvedInputValue::Images(values)
+        | ResolvedInputValue::Videos(values)
+        | ResolvedInputValue::Audios(values) => values.len(),
+        _ => 0,
+    };
+    if required && count < min {
+        return Err(CompileError::InputRequired {
+            input: input_key.to_owned(),
+        });
+    }
+    if (count > 0 && count < min) || count > max {
+        if required && count < min {
+            return Err(CompileError::InputRequired {
+                input: input_key.to_owned(),
+            });
+        }
+        return Err(CompileError::InputCountOutOfRange {
+            input: input_key.to_owned(),
+            count,
+            min,
+            max,
+        });
+    }
+    Ok((count > 0).then_some(resolved))
+}
+
 fn validate_seed_input(
     input_key: &str,
     value: u64,
@@ -254,6 +396,10 @@ fn type_mismatch(input_key: &str, expected: &str, value: &InputValue) -> Compile
             InputValue::Seed(_) => "seed",
             InputValue::Image(_) => "image",
             InputValue::Images(_) => "images",
+            InputValue::Video(_) => "video",
+            InputValue::Audio(_) => "audio",
+            InputValue::Videos(_) => "videos",
+            InputValue::Audios(_) => "audios",
         }
         .to_owned(),
     }
@@ -281,20 +427,22 @@ fn apply_bindings(
         };
 
         let target_value = match (binding.item_index, value) {
-            (Some(index), ResolvedInputValue::Images(values)) => values
+            (Some(index), ResolvedInputValue::Images(values))
+            | (Some(index), ResolvedInputValue::Videos(values))
+            | (Some(index), ResolvedInputValue::Audios(values)) => values
                 .get(index)
                 .cloned()
                 .map(Value::String)
                 .ok_or_else(|| CompileError::Internal {
                     message: format!(
-                        "validated image binding item {} became unavailable for {}",
+                        "validated media binding item {} became unavailable for {}",
                         index, binding.source
                     ),
                 })?,
             (Some(_), _) => {
                 return Err(CompileError::Internal {
                     message: format!(
-                        "binding {} declared an image item but resolved a non-list value",
+                        "binding {} declared a media item but resolved a non-list value",
                         binding.source
                     ),
                 })
@@ -314,6 +462,12 @@ fn resolved_value_to_json(value: &ResolvedInputValue) -> Value {
         ResolvedInputValue::Seed(value) => Value::Number(Number::from(*value)),
         ResolvedInputValue::Image(value) => Value::String(value.clone()),
         ResolvedInputValue::Images(values) => {
+            Value::Array(values.iter().cloned().map(Value::String).collect())
+        }
+        ResolvedInputValue::Video(value) | ResolvedInputValue::Audio(value) => {
+            Value::String(value.clone())
+        }
+        ResolvedInputValue::Videos(values) | ResolvedInputValue::Audios(values) => {
             Value::Array(values.iter().cloned().map(Value::String).collect())
         }
     }
@@ -451,6 +605,90 @@ outputs: []
                 "first.png".to_owned(),
                 "second.png".to_owned()
             ]))
+        );
+    }
+
+    #[test]
+    fn media_list_and_item_bindings_preserve_order() {
+        let recipe = RecipeParser::parse(
+            r#"
+schema_version: 1
+id: media_order
+name: Media Order
+workflow:
+  file: workflow.json
+inputs:
+  videos:
+    type: videos
+    label: Videos
+    required: true
+    min_items: 2
+    max_items: 3
+  audios:
+    type: audios
+    label: Audios
+    required: false
+    min_items: 0
+    max_items: 3
+bindings:
+  - source: videos
+    target:
+      node: "9"
+      input: videos
+  - source: videos
+    item: 1
+    target:
+      node: "10"
+      input: video
+  - source: audios
+    target:
+      node: "11"
+      input: audios
+outputs: []
+"#,
+        )
+        .expect("media recipe should parse");
+        let workflow = WorkflowDocument::parse(serde_json::json!({
+            "9": {"inputs": {"videos": "original"}, "class_type": "VideoList"},
+            "10": {"inputs": {"video": "original"}, "class_type": "VideoItem"},
+            "11": {"inputs": {"audios": "original"}, "class_type": "AudioList"}
+        }))
+        .expect("workflow should parse");
+        let result = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([
+                    (
+                        "videos".to_owned(),
+                        InputValue::Videos(vec![
+                            "video-a.mp4".to_owned(),
+                            "video-b.mp4".to_owned(),
+                        ]),
+                    ),
+                    (
+                        "audios".to_owned(),
+                        InputValue::Audios(vec!["audio-a.wav".to_owned()]),
+                    ),
+                ])),
+            )
+            .expect("media compile should succeed");
+        assert_eq!(
+            result.workflow["9"]["inputs"]["videos"],
+            serde_json::json!(["video-a.mp4", "video-b.mp4"])
+        );
+        assert_eq!(result.workflow["10"]["inputs"]["video"], "video-b.mp4");
+        assert_eq!(
+            result.workflow["11"]["inputs"]["audios"],
+            serde_json::json!(["audio-a.wav"])
+        );
+        assert_eq!(
+            result.resolved_inputs["videos"],
+            ResolvedInputValue::Videos(vec!["video-a.mp4".to_owned(), "video-b.mp4".to_owned()])
+        );
+        assert_eq!(
+            result.resolved_inputs["audios"],
+            ResolvedInputValue::Audios(vec!["audio-a.wav".to_owned()])
         );
     }
 

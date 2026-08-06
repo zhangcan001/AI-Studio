@@ -84,6 +84,38 @@ pub enum FieldViewModel {
         #[serde(rename = "maxItems")]
         max_items: usize,
     },
+    #[serde(rename = "video")]
+    Video {
+        key: String,
+        label: String,
+        required: bool,
+    },
+    #[serde(rename = "audio")]
+    Audio {
+        key: String,
+        label: String,
+        required: bool,
+    },
+    #[serde(rename = "videos")]
+    Videos {
+        key: String,
+        label: String,
+        required: bool,
+        #[serde(rename = "minItems")]
+        min_items: usize,
+        #[serde(rename = "maxItems")]
+        max_items: usize,
+    },
+    #[serde(rename = "audios")]
+    Audios {
+        key: String,
+        label: String,
+        required: bool,
+        #[serde(rename = "minItems")]
+        min_items: usize,
+        #[serde(rename = "maxItems")]
+        max_items: usize,
+    },
 }
 
 impl RecipeViewModel {
@@ -150,6 +182,40 @@ impl RecipeViewModel {
                     min_items,
                     max_items,
                 } => FieldViewModel::Images {
+                    key,
+                    label,
+                    required,
+                    min_items,
+                    max_items,
+                },
+                InputDefinition::Video { label, required } => FieldViewModel::Video {
+                    key,
+                    label,
+                    required,
+                },
+                InputDefinition::Audio { label, required } => FieldViewModel::Audio {
+                    key,
+                    label,
+                    required,
+                },
+                InputDefinition::Videos {
+                    label,
+                    required,
+                    min_items,
+                    max_items,
+                } => FieldViewModel::Videos {
+                    key,
+                    label,
+                    required,
+                    min_items,
+                    max_items,
+                },
+                InputDefinition::Audios {
+                    label,
+                    required,
+                    min_items,
+                    max_items,
+                } => FieldViewModel::Audios {
                     key,
                     label,
                     required,

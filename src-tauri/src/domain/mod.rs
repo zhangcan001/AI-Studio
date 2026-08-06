@@ -11,7 +11,10 @@ pub mod recipe;
 pub mod task;
 pub mod workflow;
 
-pub use asset::{Asset, AssetDomainError, AssetId, AssetType};
+pub use asset::{
+    Asset, AssetDomainError, AssetId, AssetType, GENERATED_IMAGE_CATEGORY,
+    GENERATED_VIDEO_CATEGORY, SOURCE_AUDIO_CATEGORY, SOURCE_IMAGE_CATEGORY, SOURCE_VIDEO_CATEGORY,
+};
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
 pub use preset::{Preset, PresetDomainError, PresetId};
 pub use project_id::{validate_project_id, ProjectIdValidationError};

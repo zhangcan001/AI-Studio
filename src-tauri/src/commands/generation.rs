@@ -42,6 +42,26 @@ pub(crate) enum InputValueDto {
         #[serde(rename = "assetIds")]
         asset_ids: Vec<String>,
     },
+    #[serde(rename = "video_asset")]
+    VideoAsset {
+        #[serde(rename = "assetId")]
+        asset_id: String,
+    },
+    #[serde(rename = "audio_asset")]
+    AudioAsset {
+        #[serde(rename = "assetId")]
+        asset_id: String,
+    },
+    #[serde(rename = "video_assets")]
+    VideoAssets {
+        #[serde(rename = "assetIds")]
+        asset_ids: Vec<String>,
+    },
+    #[serde(rename = "audio_assets")]
+    AudioAssets {
+        #[serde(rename = "assetIds")]
+        asset_ids: Vec<String>,
+    },
 }
 
 impl InputValueDto {
@@ -75,8 +95,32 @@ impl InputValueDto {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(GenerationInputValue::ImageAssets(asset_ids))
             }
+            Self::VideoAsset { asset_id } => Ok(GenerationInputValue::VideoAsset(parse_asset_id(
+                &asset_id, key, "video",
+            )?)),
+            Self::AudioAsset { asset_id } => Ok(GenerationInputValue::AudioAsset(parse_asset_id(
+                &asset_id, key, "audio",
+            )?)),
+            Self::VideoAssets { asset_ids } => Ok(GenerationInputValue::VideoAssets(
+                asset_ids
+                    .into_iter()
+                    .map(|asset_id| parse_asset_id(&asset_id, key, "video"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Self::AudioAssets { asset_ids } => Ok(GenerationInputValue::AudioAssets(
+                asset_ids
+                    .into_iter()
+                    .map(|asset_id| parse_asset_id(&asset_id, key, "audio"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
         }
     }
+}
+
+fn parse_asset_id(value: &str, key: &str, kind: &str) -> Result<crate::domain::AssetId, AppError> {
+    crate::domain::AssetId::parse(value.to_owned()).map_err(|error| {
+        AppError::invalid_input(format!("{kind} asset id for {key} is invalid: {error}"))
+    })
 }
 
 impl GenerationCreateRequest {

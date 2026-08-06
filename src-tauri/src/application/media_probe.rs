@@ -9,10 +9,19 @@ pub struct VideoMetadata {
     pub duration_ms: Option<u64>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AudioMetadata {
+    pub duration_ms: Option<u64>,
+}
+
 #[async_trait]
 pub trait MediaProbe: Send + Sync {
     async fn probe_video(&self, path: &Path) -> VideoMetadata;
     async fn generate_video_poster(&self, path: &Path) -> Option<Vec<u8>>;
+
+    async fn probe_audio(&self, _path: &Path) -> AudioMetadata {
+        AudioMetadata::default()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +97,36 @@ impl MediaProbe for CommandMediaProbe {
             None
         }
     }
+
+    async fn probe_audio(&self, path: &Path) -> AudioMetadata {
+        let output = match Command::new(&self.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+            ])
+            .arg(path)
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                tracing::debug!(error = %error, "ffprobe unavailable; audio metadata remains optional");
+                return AudioMetadata::default();
+            }
+        };
+        if !output.status.success() {
+            tracing::debug!(path = %path.display(), "ffprobe could not inspect audio");
+            return AudioMetadata::default();
+        }
+        AudioMetadata {
+            duration_ms: parse_duration_ms(&output.stdout),
+        }
+    }
 }
 
 fn parse_probe_json(bytes: &[u8]) -> VideoMetadata {
@@ -107,6 +146,16 @@ fn parse_probe_json(bytes: &[u8]) -> VideoMetadata {
         .and_then(|stream| stream.get("height"))
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok());
+    let duration_ms = parse_duration_ms(bytes);
+    VideoMetadata {
+        width,
+        height,
+        duration_ms,
+    }
+}
+
+fn parse_duration_ms(bytes: &[u8]) -> Option<u64> {
+    let value = serde_json::from_slice::<Value>(bytes).ok()?;
     let duration_seconds = value
         .get("format")
         .and_then(|format| format.get("duration"))
@@ -115,15 +164,12 @@ fn parse_probe_json(bytes: &[u8]) -> VideoMetadata {
                 .as_str()
                 .and_then(|value| value.parse::<f64>().ok())
                 .or_else(|| value.as_f64())
-        });
-    let duration_ms = duration_seconds
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .map(|value| (value * 1000.0).round() as u64);
-    VideoMetadata {
-        width,
-        height,
-        duration_ms,
-    }
+        })?;
+    duration_seconds
+        .is_finite()
+        .then_some(duration_seconds)
+        .filter(|value| *value >= 0.0)
+        .map(|value| (value * 1000.0).round() as u64)
 }
 
 #[cfg(test)]

@@ -5,7 +5,10 @@ use crate::application::ports::{
     TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository, TaskOutputAssetMapping,
 };
 use crate::compiler::RecipeParser;
-use crate::domain::{AssetType, InputDefinition, Recipe, TaskId};
+use crate::domain::{
+    AssetType, InputDefinition, Recipe, TaskId, GENERATED_VIDEO_CATEGORY, SOURCE_AUDIO_CATEGORY,
+    SOURCE_VIDEO_CATEGORY,
+};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
@@ -218,19 +221,38 @@ impl TaskHistoryService {
             .map_err(|_| TaskHistoryError::DraftUnavailable(INPUTS_UNAVAILABLE.to_owned()))?;
         let mut missing_asset_ids = Vec::new();
         for value in values.values() {
-            let asset_ids: Vec<&String> = match value {
-                DraftValueView::ImageAsset { asset_id } => vec![asset_id],
-                DraftValueView::ImageAssets { asset_ids } => asset_ids.iter().collect(),
+            let asset_refs: Vec<(&String, DraftAssetKind)> = match value {
+                DraftValueView::ImageAsset { asset_id } => {
+                    vec![(asset_id, DraftAssetKind::Image)]
+                }
+                DraftValueView::ImageAssets { asset_ids } => asset_ids
+                    .iter()
+                    .map(|asset_id| (asset_id, DraftAssetKind::Image))
+                    .collect(),
+                DraftValueView::VideoAsset { asset_id } => {
+                    vec![(asset_id, DraftAssetKind::Video)]
+                }
+                DraftValueView::VideoAssets { asset_ids } => asset_ids
+                    .iter()
+                    .map(|asset_id| (asset_id, DraftAssetKind::Video))
+                    .collect(),
+                DraftValueView::AudioAsset { asset_id } => {
+                    vec![(asset_id, DraftAssetKind::Audio)]
+                }
+                DraftValueView::AudioAssets { asset_ids } => asset_ids
+                    .iter()
+                    .map(|asset_id| (asset_id, DraftAssetKind::Audio))
+                    .collect(),
                 _ => Vec::new(),
             };
-            for asset_id in asset_ids {
+            for (asset_id, expected_kind) in asset_refs {
                 let asset =
                     self.asset_repository
                         .find_by_id(&crate::domain::AssetId::parse(asset_id.clone()).map_err(
                             |_| TaskHistoryError::DraftUnavailable(INPUTS_UNAVAILABLE.to_owned()),
                         )?)
                         .await?;
-                if !matches!(asset, Some(asset) if asset.project_id == record.task.project_id && asset.asset_type == AssetType::Image)
+                if !asset_matches_draft_kind(asset.as_ref(), &record.task.project_id, expected_kind)
                 {
                     if !missing_asset_ids.contains(asset_id) {
                         missing_asset_ids.push(asset_id.clone());
@@ -381,6 +403,55 @@ pub enum DraftValueView {
         #[serde(rename = "assetIds")]
         asset_ids: Vec<String>,
     },
+    VideoAsset {
+        #[serde(rename = "assetId")]
+        asset_id: String,
+    },
+    AudioAsset {
+        #[serde(rename = "assetId")]
+        asset_id: String,
+    },
+    VideoAssets {
+        #[serde(rename = "assetIds")]
+        asset_ids: Vec<String>,
+    },
+    AudioAssets {
+        #[serde(rename = "assetIds")]
+        asset_ids: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum DraftAssetKind {
+    Image,
+    Video,
+    Audio,
+}
+
+fn asset_matches_draft_kind(
+    asset: Option<&crate::domain::Asset>,
+    project_id: &str,
+    kind: DraftAssetKind,
+) -> bool {
+    let Some(asset) = asset else {
+        return false;
+    };
+    if asset.project_id != project_id {
+        return false;
+    }
+    match kind {
+        DraftAssetKind::Image => asset.asset_type == AssetType::Image,
+        DraftAssetKind::Video => {
+            asset.asset_type == AssetType::Video
+                && matches!(
+                    asset.category.as_str(),
+                    SOURCE_VIDEO_CATEGORY | GENERATED_VIDEO_CATEGORY
+                )
+        }
+        DraftAssetKind::Audio => {
+            asset.asset_type == AssetType::Audio && asset.category == SOURCE_AUDIO_CATEGORY
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -409,6 +480,10 @@ fn parse_snapshot_values(
                     | InputDefinition::Integer { required: true, .. }
                     | InputDefinition::Image { required: true, .. }
                     | InputDefinition::Images { required: true, .. }
+                    | InputDefinition::Video { required: true, .. }
+                    | InputDefinition::Audio { required: true, .. }
+                    | InputDefinition::Videos { required: true, .. }
+                    | InputDefinition::Audios { required: true, .. }
             ) {
                 return Err("snapshot is missing a required input");
             }
@@ -492,10 +567,105 @@ fn parse_snapshot_values(
                 }
                 DraftValueView::ImageAssets { asset_ids }
             }
+            InputDefinition::Video { .. } => {
+                parse_single_media_snapshot(value, "video_asset", |asset_id| {
+                    DraftValueView::VideoAsset { asset_id }
+                })?
+            }
+            InputDefinition::Audio { .. } => {
+                parse_single_media_snapshot(value, "audio_asset", |asset_id| {
+                    DraftValueView::AudioAsset { asset_id }
+                })?
+            }
+            InputDefinition::Videos {
+                min_items,
+                max_items,
+                required,
+                ..
+            } => parse_plural_media_snapshot(
+                value,
+                "video_assets",
+                *min_items,
+                *max_items,
+                *required,
+                |asset_ids| DraftValueView::VideoAssets { asset_ids },
+            )?,
+            InputDefinition::Audios {
+                min_items,
+                max_items,
+                required,
+                ..
+            } => parse_plural_media_snapshot(
+                value,
+                "audio_assets",
+                *min_items,
+                *max_items,
+                *required,
+                |asset_ids| DraftValueView::AudioAssets { asset_ids },
+            )?,
         };
         values.insert(key.clone(), parsed);
     }
     Ok(values)
+}
+
+fn parse_single_media_snapshot<F>(
+    value: &Value,
+    expected_type: &str,
+    build: F,
+) -> Result<DraftValueView, &'static str>
+where
+    F: FnOnce(String) -> DraftValueView,
+{
+    let media = value.as_object().ok_or("media input must be an object")?;
+    if media.get("type").and_then(Value::as_str) != Some(expected_type) {
+        return Err("media input has an invalid shape");
+    }
+    let asset_id = media
+        .get("assetId")
+        .and_then(Value::as_str)
+        .ok_or("media input must contain assetId")?;
+    crate::domain::AssetId::parse(asset_id.to_owned())
+        .map_err(|_| "media input contains an invalid asset id")?;
+    Ok(build(asset_id.to_owned()))
+}
+
+fn parse_plural_media_snapshot<F>(
+    value: &Value,
+    expected_type: &str,
+    min_items: usize,
+    max_items: usize,
+    required: bool,
+    build: F,
+) -> Result<DraftValueView, &'static str>
+where
+    F: FnOnce(Vec<String>) -> DraftValueView,
+{
+    let media = value
+        .as_object()
+        .ok_or("media list input must be an object")?;
+    if media.get("type").and_then(Value::as_str) != Some(expected_type) {
+        return Err("media list input has an invalid shape");
+    }
+    let asset_ids = media
+        .get("assetIds")
+        .and_then(Value::as_array)
+        .ok_or("media list input must contain assetIds")?
+        .iter()
+        .map(|value| {
+            let asset_id = value.as_str().ok_or("media asset id must be a string")?;
+            crate::domain::AssetId::parse(asset_id.to_owned())
+                .map_err(|_| "media list input contains an invalid asset id")?;
+            Ok(asset_id.to_owned())
+        })
+        .collect::<Result<Vec<_>, &'static str>>()?;
+    if asset_ids.len() > max_items
+        || (required && asset_ids.len() < min_items)
+        || (!asset_ids.is_empty() && asset_ids.len() < min_items)
+    {
+        return Err("media list input count is outside the current recipe range");
+    }
+    Ok(build(asset_ids))
 }
 
 #[derive(Debug)]
@@ -547,6 +717,13 @@ mod tests {
     fn multi_recipe() -> crate::domain::Recipe {
         RecipeParser::parse(
             "schema_version: 1\nid: multi\nname: Multi\nworkflow:\n  file: workflow_api.json\ninputs:\n  references:\n    type: images\n    label: References\n    required: false\n    min_items: 1\n    max_items: 3\nbindings: []\noutputs: []\n",
+        )
+        .unwrap()
+    }
+
+    fn media_recipe() -> crate::domain::Recipe {
+        RecipeParser::parse(
+            "schema_version: 1\nid: media\nname: Media\nworkflow:\n  file: workflow_api.json\ninputs:\n  video:\n    type: video\n    label: Video\n    required: true\n  audio:\n    type: audio\n    label: Audio\n    required: false\n  videos:\n    type: videos\n    label: Videos\n    required: false\n    min_items: 0\n    max_items: 3\n  audios:\n    type: audios\n    label: Audios\n    required: false\n    min_items: 0\n    max_items: 3\nbindings: []\noutputs: []\n",
         )
         .unwrap()
     }
@@ -613,6 +790,44 @@ mod tests {
             values["references"],
             DraftValueView::ImageAssets {
                 asset_ids: vec!["ast_first".to_owned(), "ast_second".to_owned()]
+            }
+        );
+    }
+
+    #[test]
+    fn parses_media_snapshot_values_in_original_order() {
+        let values = parse_snapshot_values(
+            &media_recipe(),
+            &json!({
+                "video": {"type": "video_asset", "assetId": "ast_video"},
+                "audio": {"type": "audio_asset", "assetId": "ast_audio"},
+                "videos": {"type": "video_assets", "assetIds": ["ast_video_a", "ast_video_b"]},
+                "audios": {"type": "audio_assets", "assetIds": ["ast_audio_a", "ast_audio_b"]}
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            values["video"],
+            DraftValueView::VideoAsset {
+                asset_id: "ast_video".to_owned()
+            }
+        );
+        assert_eq!(
+            values["audio"],
+            DraftValueView::AudioAsset {
+                asset_id: "ast_audio".to_owned()
+            }
+        );
+        assert_eq!(
+            values["videos"],
+            DraftValueView::VideoAssets {
+                asset_ids: vec!["ast_video_a".to_owned(), "ast_video_b".to_owned()]
+            }
+        );
+        assert_eq!(
+            values["audios"],
+            DraftValueView::AudioAssets {
+                asset_ids: vec!["ast_audio_a".to_owned(), "ast_audio_b".to_owned()]
             }
         );
     }

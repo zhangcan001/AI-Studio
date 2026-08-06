@@ -56,6 +56,16 @@ M1 progress:
 - Bounded Tauri 2 local video protocol with HEAD/single-Range seeking and
   project/asset isolation, plus inline video playback in Task Outputs and the
   Asset Library
+- Source video and source audio assets with category-safe constructors,
+  bounded streaming import, incremental SHA-256, atomic publish, optional
+  media metadata, and best-effort poster generation
+- Generic media-aware ComfyUI input upload through `POST /upload/image`, with
+  server-returned input identity and no whole-file video/audio buffering
+- Recipe `video`, `audio`, `videos`, and `audios` values with ordered binding,
+  sequential upload preparation, media snapshots, preset/history compatibility,
+  and project-scoped missing-asset validation
+- Source video/audio playback through the bounded local media protocol and
+  Asset Library source-media filters
 
 M1 fourth phase (Project Workspace + Project Isolation) code is complete. Historical task
 inputs are exposed through a safe DTO boundary; raw workflow payloads, recipe
@@ -80,6 +90,11 @@ M1 Video Foundation validation is recorded in
 streaming persistence, atomic task output mappings, bounded local playback,
 video output cards, and the no-package NOT RUN gate for Generic Video and
 MiniMax H3 live execution.
+
+M1 Media Input Pack validation is recorded in
+`docs/M1_MEDIA_INPUT_PACK_VALIDATION.md`. It covers source video/audio input,
+generic media upload, media-aware Recipe compilation and preparation,
+project-scoped playback, and the MiniMax H3 NOT RUN gate.
 
 The ComfyUI live gate passed independently: `http://127.0.0.1:8188` reported
 version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device, and 4,486 nodes. The

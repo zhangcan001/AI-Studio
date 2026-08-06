@@ -7,6 +7,8 @@ use async_trait::async_trait;
 pub enum AssetCategoryFilter {
     All,
     SourceImage,
+    SourceVideo,
+    SourceAudio,
     GeneratedImage,
     GeneratedVideo,
 }
@@ -16,6 +18,8 @@ impl AssetCategoryFilter {
         match self {
             Self::All => None,
             Self::SourceImage => Some("source_image"),
+            Self::SourceVideo => Some("source_video"),
+            Self::SourceAudio => Some("source_audio"),
             Self::GeneratedImage => Some("generated_image"),
             Self::GeneratedVideo => Some("generated_video"),
         }

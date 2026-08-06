@@ -1,8 +1,8 @@
 use crate::application::ports::{
     CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
     ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
-    ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyOutputStream,
-    ComfyQueueState, ComfySavedResult, ComfyUploadedImage, DeviceInfo, PromptSubmission,
+    ComfyInputUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyOutputStream,
+    ComfyQueueState, ComfySavedResult, ComfyUploadedInput, DeviceInfo, PromptSubmission,
     SystemStats,
 };
 use crate::infrastructure::comfy::dto::{
@@ -13,11 +13,15 @@ use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::{
     header::CONTENT_TYPE,
     multipart::{Form, Part},
-    Client, StatusCode,
+    Body, Client, StatusCode,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::{pin::Pin, time::Duration};
+use std::{
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -99,17 +103,41 @@ impl ComfyHttpAdapter {
         })
     }
 
-    async fn upload_image_internal(
+    async fn upload_input_file_internal(
         &self,
-        upload: ComfyImageUpload,
-    ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
+        upload: ComfyInputUpload,
+    ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
         let url = self.config.route_url("upload/image");
-        let part = Part::bytes(upload.bytes)
-            .file_name(upload.upload_name)
-            .mime_str(&upload.content_type)
-            .map_err(|error| {
-                ComfyAdapterError::ImageUpload(format!("invalid image MIME type: {error}"))
-            })?;
+        let stream_error = Arc::new(Mutex::new(None::<String>));
+        let stream_error_for_body = Arc::clone(&stream_error);
+        let body_stream = futures_util::stream::unfold(upload.stream, move |mut stream| {
+            let stream_error = Arc::clone(&stream_error_for_body);
+            async move {
+                match stream.next_chunk().await {
+                    Ok(Some(chunk)) => Some((Ok::<Vec<u8>, std::io::Error>(chunk), stream)),
+                    Ok(None) => None,
+                    Err(error) => {
+                        if let Ok(mut stored) = stream_error.lock() {
+                            *stored = Some(error.clone());
+                        }
+                        Some((
+                            Err(std::io::Error::new(std::io::ErrorKind::Other, error)),
+                            stream,
+                        ))
+                    }
+                }
+            }
+        });
+        let body = Body::wrap_stream(body_stream);
+        let part = match upload.content_length {
+            Some(length) => Part::stream_with_length(body, length),
+            None => Part::stream(body),
+        }
+        .file_name(upload.filename)
+        .mime_str(&upload.content_type)
+        .map_err(|error| {
+            ComfyAdapterError::InputUpload(format!("invalid input MIME type: {error}"))
+        })?;
         let form = Form::new()
             .part("image", part)
             .text("type", "input")
@@ -121,9 +149,23 @@ impl ComfyHttpAdapter {
             .multipart(form)
             .send()
             .await
-            .map_err(|error| request_error("POST", &url, error))?;
+            .map_err(|error| {
+                let stream_message = stream_error.lock().ok().and_then(|value| value.clone());
+                stream_message.map_or_else(
+                    || request_error("POST", &url, error),
+                    |message| ComfyAdapterError::InputUpload(format!("stream failed: {message}")),
+                )
+            })?;
+        if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            return Err(ComfyAdapterError::InputUploadTooLarge(
+                "ComfyUI rejected the multipart body with HTTP 413".to_owned(),
+            ));
+        }
         if !response.status().is_success() {
-            return Err(http_status_error("POST", &url, response.status()));
+            return Err(ComfyAdapterError::InputUpload(format!(
+                "POST {url} returned HTTP {}",
+                response.status()
+            )));
         }
         let dto = response
             .json::<UploadResponseDto>()
@@ -149,7 +191,7 @@ impl ComfyHttpAdapter {
                     "POST /upload/image response did not contain type".to_owned(),
                 )
             })?;
-        Ok(ComfyUploadedImage {
+        Ok(ComfyUploadedInput {
             name,
             subfolder: dto.subfolder.unwrap_or_default(),
             folder_type,
@@ -529,11 +571,11 @@ impl ComfyAdapter for ComfyHttpAdapter {
         Ok(object_info)
     }
 
-    async fn upload_image(
+    async fn upload_input_file(
         &self,
-        upload: ComfyImageUpload,
-    ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
-        self.upload_image_internal(upload).await
+        upload: ComfyInputUpload,
+    ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+        self.upload_input_file_internal(upload).await
     }
 
     async fn cancel_prompt(
@@ -976,10 +1018,12 @@ mod tests {
     use super::{normalize_history, ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES};
     use crate::application::ports::{
         CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
-        ComfyExecutionEvent, ComfyImageUpload, ComfyOutputFile,
+        ComfyExecutionEvent, ComfyImageUpload, ComfyInputStream, ComfyInputUpload, ComfyOutputFile,
     };
+    use async_trait::async_trait;
     use futures_util::SinkExt;
     use serde_json::{json, Value};
+    use std::collections::VecDeque;
     use std::net::TcpListener;
     use tokio::io::AsyncWriteExt;
     use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -990,6 +1034,17 @@ mod tests {
 
     fn config_for(server: &MockServer) -> ComfyConnectionConfig {
         ComfyConnectionConfig::new("http", "127.0.0.1", server.address().port())
+    }
+
+    struct TestInputStream {
+        chunks: VecDeque<Result<Option<Vec<u8>>, String>>,
+    }
+
+    #[async_trait]
+    impl ComfyInputStream for TestInputStream {
+        async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
+            self.chunks.pop_front().unwrap_or(Ok(None))
+        }
     }
 
     #[tokio::test]
@@ -1115,6 +1170,112 @@ mod tests {
             .expect("upload should parse");
         assert_eq!(uploaded.name, "aistudio_task_asset.png");
         assert_eq!(uploaded.folder_type, "input");
+    }
+
+    #[tokio::test]
+    async fn uploads_video_and_audio_through_the_same_generic_input_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .and(body_string_contains("type"))
+            .and(body_string_contains("input"))
+            .and(body_string_contains("overwrite"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "name": "server-authoritative.bin",
+                "subfolder": "",
+                "type": "input"
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let video = adapter
+            .upload_input_file(ComfyInputUpload {
+                filename: "aistudio_task_asset.mp4".to_owned(),
+                content_type: "video/mp4".to_owned(),
+                content_length: Some(4),
+                stream: Box::new(TestInputStream {
+                    chunks: VecDeque::from([Ok(Some(vec![1, 2])), Ok(Some(vec![3, 4])), Ok(None)]),
+                }),
+            })
+            .await
+            .expect("video upload should parse");
+        assert_eq!(video.name, "server-authoritative.bin");
+
+        let audio = adapter
+            .upload_input_file(ComfyInputUpload {
+                filename: "aistudio_task_asset.wav".to_owned(),
+                content_type: "audio/wav".to_owned(),
+                content_length: Some(2),
+                stream: Box::new(TestInputStream {
+                    chunks: VecDeque::from([Ok(Some(vec![5, 6])), Ok(None)]),
+                }),
+            })
+            .await
+            .expect("audio upload should parse");
+        assert_eq!(audio.folder_type, "input");
+        let requests = server
+            .received_requests()
+            .await
+            .expect("requests should be recorded");
+        assert_eq!(requests.len(), 2);
+        for request in requests {
+            let body = String::from_utf8_lossy(&request.body);
+            assert!(body.contains("subfolder"));
+            assert!(body.contains("false"));
+        }
+    }
+
+    #[tokio::test]
+    async fn maps_comfy_input_upload_413_to_specific_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .respond_with(ResponseTemplate::new(413))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let error = adapter
+            .upload_input_file(ComfyInputUpload {
+                filename: "large.mp4".to_owned(),
+                content_type: "video/mp4".to_owned(),
+                content_length: Some(1),
+                stream: Box::new(TestInputStream {
+                    chunks: VecDeque::from([Ok(Some(vec![1])), Ok(None)]),
+                }),
+            })
+            .await
+            .expect_err("413 should be rejected");
+        assert!(matches!(error, ComfyAdapterError::InputUploadTooLarge(_)));
+    }
+
+    #[tokio::test]
+    async fn input_stream_failure_is_not_hidden_as_a_successful_upload() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "name": "should-not-be-used",
+                "subfolder": "",
+                "type": "input"
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let error = adapter
+            .upload_input_file(ComfyInputUpload {
+                filename: "broken.mp4".to_owned(),
+                content_type: "video/mp4".to_owned(),
+                content_length: None,
+                stream: Box::new(TestInputStream {
+                    chunks: VecDeque::from([Err("disk read failed".to_owned())]),
+                }),
+            })
+            .await
+            .expect_err("stream failure should fail upload");
+        assert!(matches!(error, ComfyAdapterError::InputUpload(_)));
     }
 
     #[tokio::test]

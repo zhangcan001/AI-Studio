@@ -2,6 +2,8 @@ import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from 
 import { IntegerField } from "./fields/IntegerField";
 import { ImageField } from "./fields/ImageField";
 import { MultiImageField } from "./fields/MultiImageField";
+import { MediaField } from "./fields/MediaField";
+import { MultiMediaField } from "./fields/MultiMediaField";
 import { SeedField } from "./fields/SeedField";
 import { TextAreaField } from "./fields/TextAreaField";
 
@@ -111,6 +113,32 @@ function renderField(
           onAvailabilityChange={(available) => onImageAssetAvailabilityChange?.(field.key, available)}
         />
       );
+    case "video":
+    case "audio":
+      return (
+        <MediaField
+          key={field.key}
+          field={field}
+          value={value}
+          error={error}
+          projectId={projectId}
+          onChange={(next) => onChange(field.key, next)}
+          onAvailabilityChange={(available) => onImageAssetAvailabilityChange?.(field.key, available)}
+        />
+      );
+    case "videos":
+    case "audios":
+      return (
+        <MultiMediaField
+          key={field.key}
+          field={field}
+          value={value}
+          error={error}
+          projectId={projectId}
+          onChange={(next) => onChange(field.key, next)}
+          onAvailabilityChange={(available) => onImageAssetAvailabilityChange?.(field.key, available)}
+        />
+      );
     default:
       return (
         <div key={fieldRecord.key} className="unsupported-field">
@@ -166,6 +194,20 @@ export function validateRecipeValues(
         errors[field.key] = `Choose between ${field.minItems} and ${field.maxItems} images.`;
       } else if (field.required && imageIds.length < field.minItems) {
         errors[field.key] = `Choose at least ${field.minItems} images.`;
+      }
+    } else if (field.type === "video" || field.type === "audio") {
+      const expectedType = field.type === "video" ? "video_asset" : "audio_asset";
+      if (field.required && (!value || value.type !== expectedType || !value.assetId.trim())) {
+        errors[field.key] = field.type === "audio" ? "Choose an audio file." : "Choose a video.";
+      }
+    } else if (field.type === "videos" || field.type === "audios") {
+      const expectedType = field.type === "videos" ? "video_assets" : "audio_assets";
+      const assetIds = value?.type === expectedType ? value.assetIds : [];
+      const label = field.type === "videos" ? "videos" : "audio files";
+      if (assetIds.length > field.maxItems || (assetIds.length > 0 && assetIds.length < field.minItems)) {
+        errors[field.key] = `Choose between ${field.minItems} and ${field.maxItems} ${label}.`;
+      } else if (field.required && assetIds.length < field.minItems) {
+        errors[field.key] = `Choose at least ${field.minItems} ${label}.`;
       }
     }
   }

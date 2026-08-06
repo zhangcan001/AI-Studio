@@ -37,6 +37,20 @@ export type RecipeField =
       required: boolean;
       minItems: number;
       maxItems: number;
+    }
+  | {
+      key: string;
+      type: "video" | "audio";
+      label: string;
+      required: boolean;
+    }
+  | {
+      key: string;
+      type: "videos" | "audios";
+      label: string;
+      required: boolean;
+      minItems: number;
+      maxItems: number;
     };
 
 export interface RecipeViewModel {
@@ -55,6 +69,10 @@ export type DraftValue =
   | { type: "seed_random" }
   | { type: "seed_fixed"; value: string }
   | { type: "image_asset"; assetId: string }
-  | { type: "image_assets"; assetIds: string[] };
+  | { type: "image_assets"; assetIds: string[] }
+  | { type: "video_asset"; assetId: string }
+  | { type: "audio_asset"; assetId: string }
+  | { type: "video_assets"; assetIds: string[] }
+  | { type: "audio_assets"; assetIds: string[] };
 
 export type GenerationValues = Record<string, DraftValue>;

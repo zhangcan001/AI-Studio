@@ -82,6 +82,38 @@ enum InputDefinitionDto {
         #[serde(default = "default_max_items", rename = "max_items")]
         max_items: usize,
     },
+    #[serde(rename = "video")]
+    Video {
+        label: String,
+        #[serde(default)]
+        required: bool,
+    },
+    #[serde(rename = "audio")]
+    Audio {
+        label: String,
+        #[serde(default)]
+        required: bool,
+    },
+    #[serde(rename = "videos")]
+    Videos {
+        label: String,
+        #[serde(default)]
+        required: bool,
+        #[serde(default, rename = "min_items")]
+        min_items: usize,
+        #[serde(default = "default_max_items", rename = "max_items")]
+        max_items: usize,
+    },
+    #[serde(rename = "audios")]
+    Audios {
+        label: String,
+        #[serde(default)]
+        required: bool,
+        #[serde(default, rename = "min_items")]
+        min_items: usize,
+        #[serde(default = "default_max_items", rename = "max_items")]
+        max_items: usize,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,6 +257,30 @@ impl InputDefinitionDto {
                 min_items,
                 max_items,
             } => Ok(InputDefinition::Images {
+                label,
+                required,
+                min_items,
+                max_items,
+            }),
+            Self::Video { label, required } => Ok(InputDefinition::Video { label, required }),
+            Self::Audio { label, required } => Ok(InputDefinition::Audio { label, required }),
+            Self::Videos {
+                label,
+                required,
+                min_items,
+                max_items,
+            } => Ok(InputDefinition::Videos {
+                label,
+                required,
+                min_items,
+                max_items,
+            }),
+            Self::Audios {
+                label,
+                required,
+                min_items,
+                max_items,
+            } => Ok(InputDefinition::Audios {
                 label,
                 required,
                 min_items,
@@ -383,6 +439,74 @@ outputs: []
             })
         ));
         assert_eq!(recipe.bindings[0].item_index, Some(1));
+    }
+
+    #[test]
+    fn parses_video_audio_and_ordered_plural_media_inputs() {
+        let yaml = r#"
+schema_version: 1
+id: media_inputs
+name: Media Inputs
+workflow:
+  file: workflow.json
+inputs:
+  reference_video:
+    type: video
+    label: Reference Video
+    required: true
+  reference_audio:
+    type: audio
+    label: Reference Audio
+    required: false
+  reference_videos:
+    type: videos
+    label: Reference Videos
+    required: false
+    min_items: 0
+    max_items: 3
+  reference_audios:
+    type: audios
+    label: Reference Audios
+    required: false
+    min_items: 0
+    max_items: 3
+bindings:
+  - source: reference_videos
+    item: 0
+    target:
+      node: "10"
+      input: video
+outputs: []
+"#;
+        let recipe = RecipeParser::parse(yaml).expect("media recipe should parse");
+        assert!(matches!(
+            recipe.inputs.get("reference_video"),
+            Some(InputDefinition::Video { required: true, .. })
+        ));
+        assert!(matches!(
+            recipe.inputs.get("reference_audio"),
+            Some(InputDefinition::Audio {
+                required: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            recipe.inputs.get("reference_videos"),
+            Some(InputDefinition::Videos {
+                min_items: 0,
+                max_items: 3,
+                ..
+            })
+        ));
+        assert!(matches!(
+            recipe.inputs.get("reference_audios"),
+            Some(InputDefinition::Audios {
+                min_items: 0,
+                max_items: 3,
+                ..
+            })
+        ));
+        assert_eq!(recipe.bindings[0].item_index, Some(0));
     }
 
     #[test]

@@ -17,9 +17,13 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
     let active = true;
     let objectUrl: string | undefined;
     let posterObjectUrl: string | undefined;
-    const isVideo = asset.assetType === "video" || asset.category === "generated_video";
-    if (isVideo) {
-      setUrl(getAssetMediaUrl(projectId, asset.id));
+    setUrl(undefined);
+    setPosterUrl(undefined);
+    setError(undefined);
+    const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
+    const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
+    if (isVideo || isAudio) {
+      setUrl(getAssetMediaUrl(projectId, asset.id, isVideo ? "video" : "audio"));
       setError(undefined);
       if (asset.thumbnailAvailable) {
         void readAssetThumbnail(projectId, asset.id)
@@ -51,7 +55,8 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
     };
   }, [asset.assetType, asset.category, asset.id, asset.mimeType, asset.thumbnailAvailable, projectId]);
 
-  const isVideo = asset.assetType === "video" || asset.category === "generated_video";
+  const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
+  const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -82,10 +87,12 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
         <div className="asset-preview-image">
           {isVideo && url ? (
             <video src={url} poster={posterUrl} controls preload="metadata" playsInline aria-label={asset.name} />
+          ) : isAudio && url ? (
+            <audio src={url} controls preload="metadata" aria-label={asset.name} />
           ) : url ? <img src={url} alt={asset.name} /> : <p>{error ?? "Loading preview..."}</p>}
         </div>
         <p className="asset-preview-meta">
-          {asset.originalName} · {isVideo ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {asset.mimeType}
+          {asset.originalName} · {isVideo || isAudio ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {asset.mimeType}
         </p>
       </section>
     </div>

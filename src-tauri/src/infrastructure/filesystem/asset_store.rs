@@ -1,4 +1,6 @@
-use crate::application::ports::{AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile};
+use crate::application::ports::{
+    AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile,
+};
 use crate::domain::AssetId;
 use async_trait::async_trait;
 use std::{
@@ -6,6 +8,9 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
+use tokio::io::AsyncReadExt;
+
+const ASSET_READ_CHUNK_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileSystemAssetStore;
@@ -89,6 +94,27 @@ struct FileSystemVideoWriteSession {
     temporary: PathBuf,
     target: PathBuf,
     file: Option<fs::File>,
+}
+
+struct FileSystemAssetReadStream {
+    file: tokio::fs::File,
+}
+
+#[async_trait]
+impl AssetReadStream for FileSystemAssetReadStream {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, AssetStoreError> {
+        let mut chunk = vec![0; ASSET_READ_CHUNK_BYTES];
+        let read = self
+            .file
+            .read(&mut chunk)
+            .await
+            .map_err(|error| AssetStoreError::Read(format!("read asset stream: {error}")))?;
+        if read == 0 {
+            return Ok(None);
+        }
+        chunk.truncate(read);
+        Ok(Some(chunk))
+    }
 }
 
 #[async_trait]
@@ -190,28 +216,35 @@ impl AssetStore for FileSystemAssetStore {
         asset_id: &AssetId,
         extension: &str,
     ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
-        let target = Self::target_path(project_root, asset_id, extension, "generated", "video")?;
-        let parent = target.parent().ok_or_else(|| {
-            AssetStoreError::InvalidPath("video target has no parent directory".to_owned())
-        })?;
-        fs::create_dir_all(parent).map_err(|error| {
-            AssetStoreError::Write(format!("create {}: {error}", parent.display()))
-        })?;
-        if target.exists() {
-            return Err(AssetStoreError::Write(format!(
-                "asset target already exists: {}",
-                target.display()
-            )));
-        }
-        let temporary = parent.join(format!(".{}.tmp", asset_id.as_str()));
-        let file = fs::File::create(&temporary).map_err(|error| {
-            AssetStoreError::Write(format!("create {}: {error}", temporary.display()))
-        })?;
-        Ok(Box::new(FileSystemVideoWriteSession {
-            temporary,
-            target,
-            file: Some(file),
-        }))
+        Self::begin_stream_write(project_root, asset_id, extension, "generated", "video").await
+    }
+
+    async fn begin_source_video_write(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        Self::begin_stream_write(project_root, asset_id, extension, "source", "video").await
+    }
+
+    async fn begin_source_audio_write(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        Self::begin_stream_write(project_root, asset_id, extension, "source", "audio").await
+    }
+
+    async fn open_read_stream(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn AssetReadStream>, AssetStoreError> {
+        let file = tokio::fs::File::open(path)
+            .await
+            .map_err(|error| AssetStoreError::Read(format!("open {}: {error}", path.display())))?;
+        Ok(Box::new(FileSystemAssetReadStream { file }))
     }
 
     async fn write_video_poster(
@@ -257,6 +290,39 @@ impl AssetStore for FileSystemAssetStore {
         })?;
         bytes.truncate(read);
         Ok(bytes)
+    }
+}
+
+impl FileSystemAssetStore {
+    async fn begin_stream_write(
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+        category: &str,
+        media_type: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        let target = Self::target_path(project_root, asset_id, extension, category, media_type)?;
+        let parent = target.parent().ok_or_else(|| {
+            AssetStoreError::InvalidPath("media target has no parent directory".to_owned())
+        })?;
+        fs::create_dir_all(parent).map_err(|error| {
+            AssetStoreError::Write(format!("create {}: {error}", parent.display()))
+        })?;
+        if target.exists() {
+            return Err(AssetStoreError::Write(format!(
+                "asset target already exists: {}",
+                target.display()
+            )));
+        }
+        let temporary = parent.join(format!(".{}.tmp", asset_id.as_str()));
+        let file = fs::File::create(&temporary).map_err(|error| {
+            AssetStoreError::Write(format!("create {}: {error}", temporary.display()))
+        })?;
+        Ok(Box::new(FileSystemVideoWriteSession {
+            temporary,
+            target,
+            file: Some(file),
+        }))
     }
 }
 

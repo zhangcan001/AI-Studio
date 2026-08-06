@@ -14,6 +14,11 @@ pub trait AssetWriteSession: Send {
     async fn abort(self: Box<Self>) -> Result<(), AssetStoreError>;
 }
 
+#[async_trait]
+pub trait AssetReadStream: Send {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, AssetStoreError>;
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssetStoreError {
     InvalidPath(String),
@@ -78,6 +83,28 @@ pub trait AssetStore: Send + Sync {
         ))
     }
 
+    async fn begin_source_video_write(
+        &self,
+        _project_root: &Path,
+        _asset_id: &AssetId,
+        _extension: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        Err(AssetStoreError::Write(
+            "source video streaming storage is not available".to_owned(),
+        ))
+    }
+
+    async fn begin_source_audio_write(
+        &self,
+        _project_root: &Path,
+        _asset_id: &AssetId,
+        _extension: &str,
+    ) -> Result<Box<dyn AssetWriteSession>, AssetStoreError> {
+        Err(AssetStoreError::Write(
+            "source audio streaming storage is not available".to_owned(),
+        ))
+    }
+
     async fn write_video_poster(
         &self,
         _project_root: &Path,
@@ -92,6 +119,15 @@ pub trait AssetStore: Send + Sync {
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError>;
 
     async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError>;
+
+    async fn open_read_stream(
+        &self,
+        _path: &Path,
+    ) -> Result<Box<dyn AssetReadStream>, AssetStoreError> {
+        Err(AssetStoreError::Read(
+            "streaming asset reads are not available".to_owned(),
+        ))
+    }
 
     async fn read_range(
         &self,

@@ -79,7 +79,7 @@ fn run_application() -> Result<(), AppError> {
             move |_context, request, responder| {
                 let slot = Arc::clone(&media_protocol_slot);
                 std::thread::spawn(move || {
-                    let response = if request.uri().path() != "/video" {
+                    let response = if !matches!(request.uri().path(), "/video" | "/audio") {
                         application::media_protocol::MediaResponse {
                             status: 404,
                             headers: Default::default(),
@@ -105,7 +105,8 @@ fn run_application() -> Result<(), AppError> {
                         };
                         match (project_id, asset_id) {
                             (Some(project_id), Some(asset_id)) => {
-                                tauri::async_runtime::block_on(protocol.handle(
+                                tauri::async_runtime::block_on(protocol.handle_path(
+                                    Some(request.uri().path()),
                                     request.method().as_str(),
                                     &project_id,
                                     &asset_id,
@@ -358,6 +359,8 @@ fn run_application() -> Result<(), AppError> {
             commands::asset::asset_list_by_task,
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,
+            commands::asset::asset_pick_and_import_video,
+            commands::asset::asset_pick_and_import_audio,
             commands::asset::asset_read_image,
             commands::asset::asset_read_thumbnail,
             commands::asset::asset_library_page,
