@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComfyConnectionConfig {
@@ -84,6 +84,30 @@ pub struct PromptSubmission {
     pub node_errors: Value,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyHistory {
+    pub prompt_id: String,
+    pub outputs: BTreeMap<String, ComfyNodeOutput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyNodeOutput {
+    pub images: Vec<ComfyOutputFile>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyOutputFile {
+    pub filename: String,
+    pub subfolder: String,
+    pub folder_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyOutputData {
+    pub bytes: Vec<u8>,
+    pub content_type: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ComfyExecutionEvent {
     ExecutionStarted {
@@ -136,6 +160,9 @@ pub enum ComfyAdapterError {
     Protocol(String),
     WorkflowValidation { message: String, node_errors: Value },
     StreamDisconnected(String),
+    HistoryNotFound(String),
+    OutputDownload(String),
+    OutputTooLarge(String),
 }
 
 impl ComfyAdapterError {
@@ -147,6 +174,9 @@ impl ComfyAdapterError {
             Self::Protocol(_) => "PROTOCOL_ERROR",
             Self::WorkflowValidation { .. } => "WORKFLOW_VALIDATION",
             Self::StreamDisconnected(_) => "STREAM_DISCONNECTED",
+            Self::HistoryNotFound(_) => "HISTORY_NOT_FOUND",
+            Self::OutputDownload(_) => "OUTPUT_DOWNLOAD_FAILED",
+            Self::OutputTooLarge(_) => "OUTPUT_TOO_LARGE",
         }
     }
 }
@@ -172,6 +202,18 @@ impl fmt::Display for ComfyAdapterError {
             Self::StreamDisconnected(message) => {
                 write!(formatter, "ComfyUI WebSocket disconnected: {message}")
             }
+            Self::HistoryNotFound(prompt_id) => {
+                write!(
+                    formatter,
+                    "ComfyUI history was not found for prompt {prompt_id}"
+                )
+            }
+            Self::OutputDownload(message) => {
+                write!(formatter, "ComfyUI output download failed: {message}")
+            }
+            Self::OutputTooLarge(message) => {
+                write!(formatter, "ComfyUI output is too large: {message}")
+            }
         }
     }
 }
@@ -185,6 +227,13 @@ pub trait ComfyAdapter: Send + Sync {
     async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError>;
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError>;
+
+    async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError>;
+
+    async fn download_output(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<ComfyOutputData, ComfyAdapterError>;
 
     async fn submit_workflow(
         &self,

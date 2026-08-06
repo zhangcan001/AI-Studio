@@ -178,9 +178,11 @@ fn status_for_adapter_error(error: &ComfyAdapterError) -> ComfyConnectionStatus 
         ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_) => {
             ComfyConnectionStatus::Offline
         }
-        ComfyAdapterError::Incompatible(_) | ComfyAdapterError::Protocol(_) => {
-            ComfyConnectionStatus::Incompatible
-        }
+        ComfyAdapterError::Incompatible(_)
+        | ComfyAdapterError::Protocol(_)
+        | ComfyAdapterError::HistoryNotFound(_)
+        | ComfyAdapterError::OutputDownload(_)
+        | ComfyAdapterError::OutputTooLarge(_) => ComfyConnectionStatus::Incompatible,
         ComfyAdapterError::WorkflowValidation { .. } | ComfyAdapterError::StreamDisconnected(_) => {
             ComfyConnectionStatus::Incompatible
         }
@@ -191,7 +193,11 @@ fn app_error_for_adapter_error(error: ComfyAdapterError) -> AppError {
     match error {
         ComfyAdapterError::Offline(_) => AppError::comfy_offline("无法连接到本地 ComfyUI"),
         ComfyAdapterError::Timeout(_) => AppError::comfy_timeout("ComfyUI 请求超时"),
-        ComfyAdapterError::Incompatible(_) | ComfyAdapterError::Protocol(_) => {
+        ComfyAdapterError::Incompatible(_)
+        | ComfyAdapterError::Protocol(_)
+        | ComfyAdapterError::HistoryNotFound(_)
+        | ComfyAdapterError::OutputDownload(_)
+        | ComfyAdapterError::OutputTooLarge(_) => {
             AppError::comfy_protocol_error("ComfyUI 返回了不兼容的 API 响应")
         }
         ComfyAdapterError::WorkflowValidation { .. } | ComfyAdapterError::StreamDisconnected(_) => {
@@ -233,6 +239,24 @@ mod tests {
 
         async fn get_object_info(&self) -> Result<serde_json::Value, ComfyAdapterError> {
             self.object_info.as_ref().cloned().map_err(Clone::clone)
+        }
+
+        async fn get_history(
+            &self,
+            _prompt_id: &str,
+        ) -> Result<crate::application::ports::ComfyHistory, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "generation is not used by ComfyService tests".to_owned(),
+            ))
+        }
+
+        async fn download_output(
+            &self,
+            _file: &crate::application::ports::ComfyOutputFile,
+        ) -> Result<crate::application::ports::ComfyOutputData, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "generation is not used by ComfyService tests".to_owned(),
+            ))
         }
 
         async fn submit_workflow(

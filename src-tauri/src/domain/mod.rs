@@ -3,11 +3,13 @@
 //! This module intentionally has no dependency on Tauri, SQLx, HTTP clients,
 //! or other infrastructure concerns.
 
+pub mod asset;
 pub mod generation_snapshot;
 pub mod recipe;
 pub mod task;
 pub mod workflow;
 
+pub use asset::{Asset, AssetDomainError, AssetId, AssetType};
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,

@@ -7,10 +7,12 @@ mod error;
 mod infrastructure;
 
 pub use application::ports::{
-    GenerationDefinitionRepository, GenerationSnapshotRepository, RepositoryError, TaskRepository,
+    AssetRepository, AssetStore, Clock, GenerationDefinitionRepository,
+    GenerationSnapshotRepository, ProjectRepository, RepositoryError, TaskRepository,
 };
 pub use infrastructure::database::{
-    SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository, SqliteTaskRepository,
+    SqliteAssetRepository, SqliteGenerationDefinitionRepository,
+    SqliteGenerationSnapshotRepository, SqliteProjectRepository, SqliteTaskRepository,
 };
 
 use app_state::AppState;
@@ -20,7 +22,12 @@ use application::{
     ports::{ComfyAdapter, ComfyConnectionConfig},
 };
 use error::AppError;
-use infrastructure::{comfy::ComfyHttpAdapter, database, filesystem::AppDataDirs};
+use infrastructure::{
+    comfy::ComfyHttpAdapter,
+    database,
+    filesystem::{AppDataDirs, FileSystemAssetStore},
+    time::SystemClock,
+};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -74,13 +81,25 @@ fn run_application() -> Result<(), AppError> {
                 SqliteGenerationSnapshotRepository::new(database_pool.clone()),
             );
             let definition_repository = Arc::new(
-                infrastructure::database::SqliteGenerationDefinitionRepository::new(database_pool),
+                infrastructure::database::SqliteGenerationDefinitionRepository::new(
+                    database_pool.clone(),
+                ),
             );
+            let project_repository: Arc<dyn ProjectRepository> =
+                Arc::new(SqliteProjectRepository::new(database_pool.clone()));
+            let asset_repository: Arc<dyn AssetRepository> =
+                Arc::new(SqliteAssetRepository::new(database_pool));
+            let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
+            let clock: Arc<dyn Clock> = Arc::new(SystemClock);
             let generation_service = Arc::new(GenerationService::new(
                 task_repository,
                 snapshot_repository,
                 definition_repository,
                 comfy_adapter,
+                project_repository,
+                asset_store,
+                asset_repository,
+                clock,
             ));
             app.manage(AppState::new(data_dirs, comfy_service, generation_service));
 

@@ -427,6 +427,15 @@ impl Task {
         Ok(event)
     }
 
+    pub fn succeed(&mut self, at: DateTime<Utc>) -> Result<NewTaskEvent, TaskDomainError> {
+        let mut next = self.clone();
+        next.current_node_id = None;
+        next.progress = TaskProgress::Indeterminate;
+        let event = TaskStateMachine::transition(&mut next, TaskStatus::Succeeded, at)?;
+        *self = next;
+        Ok(event)
+    }
+
     pub fn validate(&self) -> Result<(), TaskDomainError> {
         for (field, value) in [
             ("project_id", self.project_id.as_str()),

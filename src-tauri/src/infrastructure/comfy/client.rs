@@ -1,11 +1,12 @@
 use crate::application::ports::{
     ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyEventSubscription,
-    ComfyExecutionEvent, ComfyHealth, DeviceInfo, PromptSubmission, SystemStats,
+    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyNodeOutput, ComfyOutputData,
+    ComfyOutputFile, DeviceInfo, PromptSubmission, SystemStats,
 };
 use crate::infrastructure::comfy::dto::{PromptRequestDto, PromptResponseDto, SystemStatsDto};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
-use reqwest::{Client, StatusCode};
+use reqwest::{header::CONTENT_TYPE, Client, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::time::Duration;
@@ -13,6 +14,8 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 const COMFY_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub struct ComfyHttpAdapter {
     client: Client,
@@ -158,6 +161,91 @@ impl ComfyHttpAdapter {
             node_errors: dto.node_errors.unwrap_or_else(|| serde_json::json!({})),
         })
     }
+
+    async fn get_history_internal(
+        &self,
+        prompt_id: &str,
+    ) -> Result<ComfyHistory, ComfyAdapterError> {
+        let route = format!("history/{prompt_id}");
+        let url = self.config.route_url(&route);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|error| request_error("GET", &url, error))?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(ComfyAdapterError::HistoryNotFound(prompt_id.to_owned()));
+        }
+        if !response.status().is_success() {
+            return Err(http_status_error("GET", &url, response.status()));
+        }
+        let body = response.json::<Value>().await.map_err(|error| {
+            ComfyAdapterError::Protocol(format!("GET {url} returned invalid history JSON: {error}"))
+        })?;
+        normalize_history(prompt_id, body)
+    }
+
+    async fn download_output_internal(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<ComfyOutputData, ComfyAdapterError> {
+        let url = self.config.route_url("view");
+        let response = self
+            .client
+            .get(&url)
+            .query(&[
+                ("filename", file.filename.as_str()),
+                ("subfolder", file.subfolder.as_str()),
+                ("type", file.folder_type.as_str()),
+            ])
+            .timeout(COMFY_OUTPUT_TIMEOUT)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    ComfyAdapterError::OutputDownload(format!("GET {url} timed out: {error}"))
+                } else {
+                    ComfyAdapterError::OutputDownload(format!("GET {url} failed: {error}"))
+                }
+            })?;
+
+        if !response.status().is_success() {
+            return Err(ComfyAdapterError::OutputDownload(format!(
+                "GET {url} returned HTTP {}",
+                response.status()
+            )));
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_IMAGE_OUTPUT_BYTES)
+        {
+            return Err(ComfyAdapterError::OutputTooLarge(format!(
+                "Content-Length exceeds {} bytes",
+                MAX_IMAGE_OUTPUT_BYTES
+            )));
+        }
+
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let bytes = response.bytes().await.map_err(|error| {
+            ComfyAdapterError::OutputDownload(format!("GET {url} body read failed: {error}"))
+        })?;
+        if bytes.len() as u64 > MAX_IMAGE_OUTPUT_BYTES {
+            return Err(ComfyAdapterError::OutputTooLarge(format!(
+                "response body exceeds {} bytes",
+                MAX_IMAGE_OUTPUT_BYTES
+            )));
+        }
+
+        Ok(ComfyOutputData {
+            bytes: bytes.to_vec(),
+            content_type,
+        })
+    }
 }
 
 #[async_trait]
@@ -184,6 +272,17 @@ impl ComfyAdapter for ComfyHttpAdapter {
         Ok(object_info)
     }
 
+    async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+        self.get_history_internal(prompt_id).await
+    }
+
+    async fn download_output(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<ComfyOutputData, ComfyAdapterError> {
+        self.download_output_internal(file).await
+    }
+
     async fn submit_workflow(
         &self,
         client_id: &str,
@@ -204,6 +303,76 @@ impl ComfyAdapter for ComfyHttpAdapter {
         })?;
         Ok(Box::new(ComfyWsEventSubscription { stream }))
     }
+}
+
+fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, ComfyAdapterError> {
+    let root = body.as_object().ok_or_else(|| {
+        ComfyAdapterError::Protocol("GET /history response must be a JSON object".to_owned())
+    })?;
+    let history = root
+        .get(prompt_id)
+        .ok_or_else(|| ComfyAdapterError::HistoryNotFound(prompt_id.to_owned()))?;
+    let history = history.as_object().ok_or_else(|| {
+        ComfyAdapterError::Protocol("history prompt entry must be a JSON object".to_owned())
+    })?;
+    let outputs = history
+        .get("outputs")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            ComfyAdapterError::Protocol("history outputs must be a JSON object".to_owned())
+        })?;
+
+    let mut normalized = std::collections::BTreeMap::new();
+    for (node_id, node_value) in outputs {
+        let node = node_value.as_object().ok_or_else(|| {
+            ComfyAdapterError::Protocol(format!("history output node {node_id} must be an object"))
+        })?;
+        let Some(images_value) = node.get("images") else {
+            normalized.insert(node_id.clone(), ComfyNodeOutput { images: Vec::new() });
+            continue;
+        };
+        let images = images_value.as_array().ok_or_else(|| {
+            ComfyAdapterError::Protocol(format!(
+                "history output node {node_id} images must be an array"
+            ))
+        })?;
+        let mut files = Vec::with_capacity(images.len());
+        for image in images {
+            let image = image.as_object().ok_or_else(|| {
+                ComfyAdapterError::Protocol(format!(
+                    "history output node {node_id} image must be an object"
+                ))
+            })?;
+            let filename = image
+                .get("filename")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    ComfyAdapterError::Protocol(format!(
+                        "history output node {node_id} image filename is missing"
+                    ))
+                })?;
+            files.push(ComfyOutputFile {
+                filename: filename.to_owned(),
+                subfolder: image
+                    .get("subfolder")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                folder_type: image
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("output")
+                    .to_owned(),
+            });
+        }
+        normalized.insert(node_id.clone(), ComfyNodeOutput { images: files });
+    }
+
+    Ok(ComfyHistory {
+        prompt_id: prompt_id.to_owned(),
+        outputs: normalized,
+    })
 }
 
 type ComfyWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -455,16 +624,18 @@ fn http_status_error(method: &str, url: &str, status: StatusCode) -> ComfyAdapte
 
 #[cfg(test)]
 mod tests {
-    use super::ComfyHttpAdapter;
+    use super::{ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES};
     use crate::application::ports::{
         ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyExecutionEvent,
+        ComfyOutputFile,
     };
     use futures_util::SinkExt;
     use serde_json::json;
     use std::net::TcpListener;
+    use tokio::io::AsyncWriteExt;
     use tokio_tungstenite::{accept_async, tungstenite::Message};
     use wiremock::{
-        matchers::{body_json, method, path},
+        matchers::{body_json, method, path, query_param},
         Mock, MockServer, ResponseTemplate,
     };
 
@@ -565,6 +736,141 @@ mod tests {
             .expect("object info should parse");
 
         assert_eq!(object_info.as_object().expect("object expected").len(), 3);
+    }
+
+    #[tokio::test]
+    async fn history_normalizes_multiple_images_and_ignores_unknown_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/history/prompt-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "prompt-1": {
+                    "outputs": {
+                        "9": {
+                            "images": [
+                                {"filename": "a.png", "subfolder": "", "type": "output", "unknown": true},
+                                {"filename": "b.png", "subfolder": "nested", "type": "temp"}
+                            ],
+                            "audio": [{"filename": "ignored.wav"}]
+                        },
+                        "3": {"text": ["ignored"]}
+                    },
+                    "status": {"completed": true}
+                },
+                "other-prompt": {"outputs": {}}
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let history = adapter
+            .get_history("prompt-1")
+            .await
+            .expect("history should parse");
+        assert_eq!(history.prompt_id, "prompt-1");
+        assert_eq!(history.outputs["9"].images.len(), 2);
+        assert_eq!(history.outputs["9"].images[1].subfolder, "nested");
+        assert!(history.outputs["3"].images.is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_missing_prompt_is_history_not_found() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/history/missing"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"other": {"outputs": {}}})),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert!(matches!(
+            adapter.get_history("missing").await,
+            Err(ComfyAdapterError::HistoryNotFound(prompt_id)) if prompt_id == "missing"
+        ));
+    }
+
+    #[tokio::test]
+    async fn malformed_history_is_protocol_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/history/prompt-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "prompt-1": {"outputs": {"9": {"images": "not-array"}}}
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert!(matches!(
+            adapter.get_history("prompt-1").await,
+            Err(ComfyAdapterError::Protocol(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn output_download_uses_view_query_and_returns_bytes_and_content_type() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/view"))
+            .and(query_param("filename", "ComfyUI_00001.png"))
+            .and(query_param("subfolder", "nested"))
+            .and(query_param("type", "output"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "image/png")
+                    .set_body_bytes(vec![1, 2, 3]),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let output = adapter
+            .download_output(&ComfyOutputFile {
+                filename: "ComfyUI_00001.png".to_owned(),
+                subfolder: "nested".to_owned(),
+                folder_type: "output".to_owned(),
+            })
+            .await
+            .expect("output should download");
+        assert_eq!(output.bytes, vec![1, 2, 3]);
+        assert_eq!(output.content_type.as_deref(), Some("image/png"));
+    }
+
+    #[tokio::test]
+    async fn output_download_rejects_content_length_over_image_limit() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener should bind");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("request should arrive");
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: image/png\r\n\r\n",
+                        MAX_IMAGE_OUTPUT_BYTES + 1
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("headers should write");
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        });
+
+        let adapter = ComfyHttpAdapter::new(ComfyConnectionConfig::new("http", "127.0.0.1", port))
+            .expect("client should build");
+        let error = adapter
+            .download_output(&ComfyOutputFile {
+                filename: "large.png".to_owned(),
+                subfolder: String::new(),
+                folder_type: "output".to_owned(),
+            })
+            .await
+            .expect_err("large output should be rejected");
+        assert!(matches!(error, ComfyAdapterError::OutputTooLarge(_)));
+        server.await.expect("server should finish");
     }
 
     #[tokio::test]

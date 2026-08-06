@@ -84,11 +84,6 @@ impl TaskRepository for SqliteTaskRepository {
                 "persist_transition cannot persist status CREATED",
             ));
         }
-        if task.status.is_terminal() {
-            return Err(RepositoryError::integrity(
-                "persist_transition cannot update a terminal task",
-            ));
-        }
         if expected_previous_status == task.status || expected_previous_status.is_terminal() {
             return Err(RepositoryError::integrity(format!(
                 "invalid expected previous status {} for current status {}",
@@ -549,7 +544,9 @@ impl EventRow {
 mod tests {
     use super::SqliteTaskRepository;
     use crate::application::ports::TaskRepository;
-    use crate::domain::{Task, TaskEventType, TaskProgress, TaskStateMachine, TaskStatus};
+    use crate::domain::{
+        Task, TaskError, TaskEventType, TaskProgress, TaskStateMachine, TaskStatus,
+    };
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use chrono::{Duration, TimeZone, Utc};
     use serde_json::json;
@@ -641,6 +638,123 @@ mod tests {
             [1, 2]
         );
         assert_eq!(repository.list_recent(1).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn persists_created_to_failed_transition_and_failed_event() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("create should succeed");
+
+        let failed_at = task.created_at + Duration::seconds(1);
+        let event = task
+            .fail(
+                TaskError {
+                    code: "TEST_FAILURE".to_owned(),
+                    message: "expected failure".to_owned(),
+                    raw: None,
+                },
+                failed_at,
+            )
+            .expect("failure transition should succeed");
+        repository
+            .persist_transition(&task, &event, TaskStatus::Created)
+            .await
+            .expect("terminal failure transition should persist");
+
+        let found = repository.find_by_id(&task.id).await.unwrap().unwrap();
+        let events = repository.list_events(&task.id).await.unwrap();
+        assert_eq!(found.status, TaskStatus::Failed);
+        assert_eq!(found.finished_at, Some(failed_at));
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.event_type)
+                .collect::<Vec<_>>(),
+            vec![TaskEventType::TaskCreated, TaskEventType::TaskFailed]
+        );
+    }
+
+    #[tokio::test]
+    async fn persists_complete_lifecycle_through_succeeded() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("create should succeed");
+
+        let previous = task.status;
+        let at = task.created_at + Duration::seconds(1);
+        let event = TaskStateMachine::transition(&mut task, TaskStatus::Validating, at)
+            .expect("transition should succeed");
+        repository
+            .persist_transition(&task, &event, previous)
+            .await
+            .unwrap();
+        let previous = task.status;
+        let at = task.created_at + Duration::seconds(2);
+        let event = TaskStateMachine::transition(&mut task, TaskStatus::Preparing, at)
+            .expect("transition should succeed");
+        repository
+            .persist_transition(&task, &event, previous)
+            .await
+            .unwrap();
+        task.set_queue_number(Some(1)).unwrap();
+        let previous = task.status;
+        let at = task.created_at + Duration::seconds(3);
+        let event = TaskStateMachine::transition(&mut task, TaskStatus::Queued, at)
+            .expect("transition should succeed");
+        repository
+            .persist_transition(&task, &event, previous)
+            .await
+            .unwrap();
+        let previous = task.status;
+        let at = task.created_at + Duration::seconds(4);
+        let event = TaskStateMachine::transition(&mut task, TaskStatus::Running, at)
+            .expect("transition should succeed");
+        repository
+            .persist_transition(&task, &event, previous)
+            .await
+            .unwrap();
+        let previous = task.status;
+        let at = task.created_at + Duration::seconds(5);
+        let event = TaskStateMachine::transition(&mut task, TaskStatus::Collecting, at)
+            .expect("transition should succeed");
+        repository
+            .persist_transition(&task, &event, previous)
+            .await
+            .unwrap();
+        let previous = task.status;
+        let at = task.created_at + Duration::seconds(6);
+        let event = task.succeed(at).expect("success transition should succeed");
+        repository
+            .persist_transition(&task, &event, previous)
+            .await
+            .expect("terminal success transition should persist");
+
+        let found = repository.find_by_id(&task.id).await.unwrap().unwrap();
+        let events = repository.list_events(&task.id).await.unwrap();
+        assert_eq!(found.status, TaskStatus::Succeeded);
+        assert_eq!(found.current_node_id, None);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.event_type)
+                .collect::<Vec<_>>(),
+            vec![
+                TaskEventType::TaskCreated,
+                TaskEventType::TaskValidating,
+                TaskEventType::TaskPreparing,
+                TaskEventType::TaskQueued,
+                TaskEventType::TaskRunning,
+                TaskEventType::TaskCollecting,
+                TaskEventType::TaskSucceeded,
+            ]
+        );
     }
 
     #[tokio::test]

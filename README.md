@@ -15,10 +15,13 @@ Current M0 progress:
 - Generation orchestration through `GenerationService`
 - ComfyUI `/prompt` submission with client-generated `prompt_id`
 - ComfyUI WebSocket execution tracking and normalized Task events
+- Output collection from `/history/{prompt_id}` and `/view`
+- Project-rooted generated image Asset Store with SHA-256 and image metadata
+- Transactional Asset Repository and compensating cleanup on database failure
+- `COLLECTING → SUCCEEDED` only after output validation and Asset persistence
 
-Output collection, `/history` reconciliation, asset import, and the final
-`SUCCEEDED` state are intentionally not implemented yet; a successful
-execution remains in `COLLECTING` until the next M0 phase.
+Generation output remains backend-only in this phase; the formal React Generate
+UI is intentionally deferred.
 
 ## Development
 
