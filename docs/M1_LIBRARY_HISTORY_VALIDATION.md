@@ -1,7 +1,7 @@
 # M1 Task History + Asset Library Validation
 
 Date: 2026-08-06
-Commit: `7a24a0c`
+Commit: `623be3d`
 
 ## Scope
 
