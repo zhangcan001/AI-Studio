@@ -543,6 +543,7 @@ fn success_history() -> ComfyHistory {
                     subfolder: String::new(),
                     folder_type: "output".to_owned(),
                 }],
+                saved_results: Vec::new(),
             },
         )]),
     }

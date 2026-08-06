@@ -7,7 +7,7 @@ use crate::application::ports::{
 use crate::compiler::RecipeParser;
 use crate::domain::{Task, TaskDomainError, TaskError, TaskEventType, TaskStatus};
 use serde::Serialize;
-use std::{error::Error, fmt, sync::Arc};
+use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 use tokio::sync::Mutex;
 
 pub struct TaskRecoveryService {
@@ -325,27 +325,41 @@ impl TaskRecoveryService {
             return Ok(());
         }
 
-        let assets = self.asset_repository.list_by_source_task(&task.id).await?;
-        if assets.is_empty() {
-            let snapshot = self
-                .snapshot_repository
-                .find_by_task_id(&task.id)
-                .await?
-                .ok_or_else(|| {
-                    TaskRecoveryError::Unresolved("generation snapshot is missing".to_owned())
+        let mappings = self.asset_repository.list_output_mappings(&task.id).await?;
+        let assets = if mappings.is_empty() {
+            self.asset_repository.list_by_source_task(&task.id).await?
+        } else {
+            Vec::new()
+        };
+        if mappings.is_empty() && !assets.is_empty() {
+            // Legacy tasks have no output mapping. Their existing source-task assets
+            // remain the idempotency fallback and must not be re-collected.
+        } else {
+            let existing_outputs: HashSet<(String, usize)> = mappings
+                .iter()
+                .map(|mapping| (mapping.output_id.clone(), mapping.ordinal as usize))
+                .collect();
+            let snapshot = self.snapshot_repository.find_by_task_id(&task.id).await?;
+            if let Some(snapshot) = snapshot {
+                let recipe = RecipeParser::parse(&snapshot.recipe_yaml).map_err(|error| {
+                    TaskRecoveryError::Unresolved(format!("snapshot recipe is invalid: {error}"))
                 })?;
-            let recipe = RecipeParser::parse(&snapshot.recipe_yaml).map_err(|error| {
-                TaskRecoveryError::Unresolved(format!("snapshot recipe is invalid: {error}"))
-            })?;
-            let images = self
-                .output_collector
-                .collect_from_history(&recipe, history)
-                .await
-                .map_err(|error| TaskRecoveryError::OutputCollection(error.to_string()))?;
-            self.asset_import_service
-                .import(&task.project_id, &task.id, &images)
-                .await
-                .map_err(|error| TaskRecoveryError::AssetImport(error.to_string()))?;
+                let outputs = self
+                    .output_collector
+                    .collect_outputs_from_history_excluding(&recipe, history, &existing_outputs)
+                    .await
+                    .map_err(|error| TaskRecoveryError::OutputCollection(error.to_string()))?;
+                if !outputs.is_empty() {
+                    self.asset_import_service
+                        .import_outputs(&task.project_id, &task.id, outputs)
+                        .await
+                        .map_err(|error| TaskRecoveryError::AssetImport(error.to_string()))?;
+                }
+            } else if mappings.is_empty() {
+                return Err(TaskRecoveryError::Unresolved(
+                    "generation snapshot is missing".to_owned(),
+                ));
+            }
         }
 
         let _ = prompt_id;
@@ -569,9 +583,9 @@ mod tests {
     use crate::application::ports::{
         AssetRepository, CancelPromptResult, Clock, ComfyAdapter, ComfyAdapterError,
         ComfyEventSubscription, ComfyHealth, ComfyHistory, ComfyHistoryStatus, ComfyImageUpload,
-        ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyQueueState, ComfyUploadedImage,
-        GenerationSnapshotRepository, PromptSubmission, SystemStats, TaskRepository,
-        TaskUpdateSink,
+        ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyOutputStream, ComfyQueueState,
+        ComfySavedResult, ComfyUploadedImage, GenerationSnapshotRepository, PromptSubmission,
+        SystemStats, TaskRepository, TaskUpdateSink,
     };
     use crate::domain::{
         Asset, AssetId, GenerationSnapshot, Task, TaskEventType, TaskStateMachine, TaskStatus,
@@ -599,6 +613,21 @@ mod tests {
         "/../tests/fixtures/simple_t2i/recipe.yaml"
     ));
 
+    const VIDEO_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: simple_video
+name: Simple Video
+workflow:
+  file: workflow_api.json
+inputs: {}
+bindings: []
+outputs:
+  - id: generated_video
+    type: video
+    node: "11"
+    required: true
+"#;
+
     #[derive(Clone, Default)]
     struct AdapterCounters {
         health: usize,
@@ -608,6 +637,7 @@ mod tests {
         download: usize,
         history: usize,
         queue: usize,
+        open_stream: usize,
     }
 
     #[derive(Clone)]
@@ -699,6 +729,14 @@ mod tests {
             })
         }
 
+        async fn open_output_stream(
+            &self,
+            _file: &ComfyOutputFile,
+        ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+            self.counters.lock().unwrap().open_stream += 1;
+            Ok(Box::new(RecoveryVideoStream { sent: false }))
+        }
+
         async fn submit_workflow(
             &self,
             _client_id: &str,
@@ -720,6 +758,31 @@ mod tests {
             Err(ComfyAdapterError::Incompatible(
                 "recovery must not subscribe".to_owned(),
             ))
+        }
+    }
+
+    struct RecoveryVideoStream {
+        sent: bool,
+    }
+
+    #[async_trait]
+    impl ComfyOutputStream for RecoveryVideoStream {
+        fn content_type(&self) -> Option<&str> {
+            Some("video/mp4")
+        }
+
+        fn content_length(&self) -> Option<u64> {
+            Some(12)
+        }
+
+        async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ComfyAdapterError> {
+            if self.sent {
+                return Ok(None);
+            }
+            self.sent = true;
+            let mut bytes = vec![0; 12];
+            bytes[4..8].copy_from_slice(b"ftyp");
+            Ok(Some(bytes))
         }
     }
 
@@ -924,10 +987,18 @@ mod tests {
     }
 
     async fn snapshot_for(repository: &SqliteGenerationSnapshotRepository, task: &Task) {
+        snapshot_for_recipe(repository, task, RECIPE_YAML).await;
+    }
+
+    async fn snapshot_for_recipe(
+        repository: &SqliteGenerationSnapshotRepository,
+        task: &Task,
+        recipe_yaml: &str,
+    ) {
         let snapshot = GenerationSnapshot::new(
             task.id.clone(),
             json!({}),
-            RECIPE_YAML,
+            recipe_yaml,
             json!({}),
             json!({ "seed": 123 }),
             task.created_at + Duration::seconds(3),
@@ -951,6 +1022,36 @@ mod tests {
                         filename: "ComfyUI_00001.png".to_owned(),
                         subfolder: String::new(),
                         folder_type: "output".to_owned(),
+                    }],
+                    saved_results: Vec::new(),
+                },
+            )]),
+        }
+    }
+
+    fn video_success_history() -> ComfyHistory {
+        ComfyHistory {
+            prompt_id: "prompt-test".to_owned(),
+            status: ComfyHistoryStatus {
+                status_str: Some("success".to_owned()),
+                completed: Some(true),
+                messages: None,
+            },
+            outputs: BTreeMap::from([(
+                "11".to_owned(),
+                ComfyNodeOutput {
+                    images: vec![ComfyOutputFile {
+                        filename: "ComfyUI_00001.mp4".to_owned(),
+                        subfolder: String::new(),
+                        folder_type: "output".to_owned(),
+                    }],
+                    saved_results: vec![ComfySavedResult {
+                        file: ComfyOutputFile {
+                            filename: "ComfyUI_00001.mp4".to_owned(),
+                            subfolder: String::new(),
+                            folder_type: "output".to_owned(),
+                        },
+                        animated: Some(true),
                     }],
                 },
             )]),
@@ -1319,6 +1420,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn history_success_imports_video_and_output_mapping_after_restart() {
+        let harness = setup(adapter(
+            true,
+            Some(video_success_history()),
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let task = submitted_task(&harness.task_repository, TaskStatus::Running).await;
+        snapshot_for_recipe(&harness.snapshot_repository, &task, VIDEO_RECIPE_YAML).await;
+
+        let report = harness.service.reconcile_active().await.unwrap();
+        let found = harness
+            .task_repository
+            .find_by_id(&task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let assets = harness
+            .asset_repository
+            .list_by_source_task(&task.id)
+            .await
+            .unwrap();
+        let mappings = harness
+            .asset_repository
+            .list_output_mappings(&task.id)
+            .await
+            .unwrap();
+        assert_eq!(report.succeeded, 1);
+        assert_eq!(found.status, TaskStatus::Succeeded);
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].asset_type, crate::domain::AssetType::Video);
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].output_id, "generated_video");
+        assert_eq!(mappings[0].ordinal, 0);
+        assert!(std::path::Path::new(&assets[0].storage_path).is_file());
+        let counters = harness.adapter.counters.lock().unwrap().clone();
+        assert_eq!(counters.open_stream, 1);
+        assert_eq!(counters.download, 0);
+        assert_eq!(counters.submit, 0);
+    }
+
+    #[tokio::test]
     async fn history_success_with_existing_asset_does_not_duplicate_import() {
         let harness = setup(adapter(
             true,
@@ -1343,6 +1489,61 @@ mod tests {
             harness
                 .asset_repository
                 .list_by_source_task(&task.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(harness.adapter.counters.lock().unwrap().download, 0);
+    }
+
+    #[tokio::test]
+    async fn history_success_with_existing_mapping_does_not_download_again() {
+        let harness = setup(adapter(
+            true,
+            Some(success_history()),
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let task = submitted_task(&harness.task_repository, TaskStatus::Collecting).await;
+        let asset = Asset::new_generated_image(
+            AssetId::new(),
+            "project-1",
+            "Generated Image 1",
+            "ComfyUI_00001.png",
+            "existing-mapped.png",
+            "hash-mapped",
+            "image/png",
+            2,
+            2,
+            4,
+            task.id.clone(),
+            json!({}),
+            task.created_at + Duration::seconds(7),
+        )
+        .unwrap();
+        let mapping = crate::application::ports::TaskOutputAssetMapping {
+            task_id: task.id.clone(),
+            output_id: "generated_image".to_owned(),
+            ordinal: 0,
+            asset_id: asset.id.clone(),
+            created_at: asset.created_at,
+        };
+        harness
+            .asset_repository
+            .insert_generated_outputs(&[asset], &[mapping])
+            .await
+            .unwrap();
+        snapshot_for(&harness.snapshot_repository, &task).await;
+
+        harness.service.reconcile_active().await.unwrap();
+        assert_eq!(
+            harness
+                .asset_repository
+                .list_output_mappings(&task.id)
                 .await
                 .unwrap()
                 .len(),

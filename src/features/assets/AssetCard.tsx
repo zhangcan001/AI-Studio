@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
+import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 
 interface Props {
@@ -34,6 +34,11 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
 
   useEffect(() => {
     if (!visible) return () => undefined;
+    const isVideo = asset.assetType === "video" || asset.category === "generated_video";
+    if (isVideo && !asset.thumbnailAvailable) {
+      setPreviewUrl(undefined);
+      return () => undefined;
+    }
     let active = true;
     let url: string | undefined;
     const readPreview = asset.thumbnailAvailable
@@ -52,22 +57,27 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
       active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [asset.id, asset.mimeType, asset.thumbnailAvailable, projectId, visible]);
+  }, [asset.assetType, asset.category, asset.id, asset.mimeType, asset.thumbnailAvailable, projectId, visible]);
+
+  const isVideo = asset.assetType === "video" || asset.category === "generated_video";
+  const mediaUrl = isVideo ? getAssetMediaUrl(projectId, asset.id) : undefined;
 
   return (
     <button ref={cardRef} type="button" className="asset-library-card" onClick={() => onSelect(asset)}>
       <span className="asset-library-image">
         {previewUrl ? (
           <img src={previewUrl} alt={asset.name} loading="lazy" />
+        ) : isVideo && mediaUrl ? (
+          <video src={mediaUrl} aria-label={asset.name} preload="metadata" muted playsInline />
         ) : (
-          <span className="asset-image-placeholder">Preview unavailable</span>
+          <span className="asset-image-placeholder">{isVideo ? "Video preview" : "Preview unavailable"}</span>
         )}
       </span>
       <span className="asset-library-card-copy">
         <strong>{asset.name}</strong>
-        <span>{asset.category === "source_image" ? "Source image" : "Generated image"}</span>
+        <span>{asset.category === "source_image" ? "Source image" : isVideo ? "Generated video" : "Generated image"}</span>
         <small>
-          {asset.width} × {asset.height} · {formatBytes(asset.fileSize)}
+          {isVideo ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatBytes(asset.fileSize)}
         </small>
         <small>{formatDate(asset.createdAt)}</small>
       </span>
@@ -83,4 +93,10 @@ function formatBytes(bytes: number): string {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
+}
+
+function formatDuration(value?: number | null): string {
+  if (!value || value < 0) return "Duration unavailable";
+  const totalSeconds = Math.round(value / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }

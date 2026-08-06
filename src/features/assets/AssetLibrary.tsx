@@ -8,6 +8,7 @@ const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "ALL", label: "All" },
   { value: "SOURCE_IMAGE", label: "Source images" },
   { value: "GENERATED_IMAGE", label: "Generated images" },
+  { value: "GENERATED_VIDEO", label: "Generated videos" },
 ];
 
 export function AssetLibrary({ projectId }: { projectId: string }) {
@@ -77,7 +78,7 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
         <div>
           <span className="section-label">Assets</span>
           <h2>Asset Library</h2>
-          <p className="section-description">Browse source and generated images for this project.</p>
+          <p className="section-description">Browse source images, generated images, and generated videos for this project.</p>
         </div>
         <button type="button" className="quiet-button" onClick={() => void load(true)} disabled={loading}>
           {loading ? "Refreshing..." : "Refresh"}

@@ -1,0 +1,13 @@
+{
+  "prompt-video-fixture": {
+    "status": { "completed": true },
+    "outputs": {
+      "11": {
+        "images": [
+          { "filename": "ComfyUI_00001.png", "subfolder": "", "type": "output", "unknown": "ignored" }
+        ],
+        "audio": [{ "filename": "ignored.wav" }]
+      }
+    }
+  }
+}

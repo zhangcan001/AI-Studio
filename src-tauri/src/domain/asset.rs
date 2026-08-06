@@ -5,6 +5,7 @@ use std::{error::Error, fmt};
 use uuid::Uuid;
 
 pub const GENERATED_IMAGE_CATEGORY: &str = "generated_image";
+pub const GENERATED_VIDEO_CATEGORY: &str = "generated_video";
 pub const SOURCE_IMAGE_CATEGORY: &str = "source_image";
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -44,18 +45,21 @@ impl fmt::Display for AssetId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AssetType {
     Image,
+    Video,
 }
 
 impl AssetType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Image => "image",
+            Self::Video => "video",
         }
     }
 
     pub fn try_from_db(value: &str) -> Result<Self, AssetDomainError> {
         match value {
             "image" => Ok(Self::Image),
+            "video" => Ok(Self::Video),
             other => Err(AssetDomainError::InvalidType(other.to_owned())),
         }
     }
@@ -75,6 +79,7 @@ pub struct Asset {
     pub mime_type: String,
     pub width: u32,
     pub height: u32,
+    pub duration_ms: Option<u64>,
     pub file_size: u64,
     pub source_task_id: Option<TaskId>,
     pub metadata_json: Value,
@@ -111,6 +116,7 @@ impl Asset {
             mime_type: mime_type.into(),
             width,
             height,
+            duration_ms: None,
             file_size,
             source_task_id: Some(source_task_id),
             metadata_json,
@@ -180,8 +186,49 @@ impl Asset {
             mime_type: mime_type.into(),
             width,
             height,
+            duration_ms: None,
             file_size,
             source_task_id: None,
+            metadata_json,
+            created_at,
+            updated_at: created_at,
+        };
+        asset.validate()?;
+        Ok(asset)
+    }
+
+    pub fn new_generated_video(
+        id: AssetId,
+        project_id: impl Into<String>,
+        name: impl Into<String>,
+        original_name: impl Into<String>,
+        storage_path: impl Into<String>,
+        sha256: impl Into<String>,
+        mime_type: impl Into<String>,
+        width: Option<u32>,
+        height: Option<u32>,
+        duration_ms: Option<u64>,
+        file_size: u64,
+        source_task_id: TaskId,
+        metadata_json: Value,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, AssetDomainError> {
+        let asset = Self {
+            id,
+            project_id: project_id.into(),
+            asset_type: AssetType::Video,
+            category: GENERATED_VIDEO_CATEGORY.to_owned(),
+            name: name.into(),
+            original_name: original_name.into(),
+            storage_path: storage_path.into(),
+            thumbnail_path: None,
+            sha256: sha256.into(),
+            mime_type: mime_type.into(),
+            width: width.unwrap_or_default(),
+            height: height.unwrap_or_default(),
+            duration_ms,
+            file_size,
+            source_task_id: Some(source_task_id),
             metadata_json,
             created_at,
             updated_at: created_at,
@@ -206,15 +253,19 @@ impl Asset {
         }
         if !matches!(
             self.category.as_str(),
-            GENERATED_IMAGE_CATEGORY | SOURCE_IMAGE_CATEGORY
+            GENERATED_IMAGE_CATEGORY | GENERATED_VIDEO_CATEGORY | SOURCE_IMAGE_CATEGORY
         ) {
             return Err(AssetDomainError::InvalidField(
-                "category must be generated_image or source_image".to_owned(),
+                "category must be generated_image, generated_video or source_image".to_owned(),
             ));
         }
-        if self.category == GENERATED_IMAGE_CATEGORY && self.source_task_id.is_none() {
+        if matches!(
+            self.category.as_str(),
+            GENERATED_IMAGE_CATEGORY | GENERATED_VIDEO_CATEGORY
+        ) && self.source_task_id.is_none()
+        {
             return Err(AssetDomainError::InvalidField(
-                "generated_image must have a source task".to_owned(),
+                "generated assets must have a source task".to_owned(),
             ));
         }
         if self.category == SOURCE_IMAGE_CATEGORY && self.source_task_id.is_some() {
@@ -222,9 +273,30 @@ impl Asset {
                 "source_image must not have a source task".to_owned(),
             ));
         }
-        if self.width == 0 || self.height == 0 || self.file_size == 0 {
+        if self.category == GENERATED_VIDEO_CATEGORY && self.asset_type != AssetType::Video {
+            return Err(AssetDomainError::InvalidField(
+                "generated_video must have video asset_type".to_owned(),
+            ));
+        }
+        if matches!(
+            self.category.as_str(),
+            GENERATED_IMAGE_CATEGORY | SOURCE_IMAGE_CATEGORY
+        ) && self.asset_type != AssetType::Image
+        {
+            return Err(AssetDomainError::InvalidField(
+                "image categories must have image asset_type".to_owned(),
+            ));
+        }
+        if self.asset_type == AssetType::Image
+            && (self.width == 0 || self.height == 0 || self.file_size == 0)
+        {
             return Err(AssetDomainError::InvalidField(
                 "image dimensions and file_size must be positive".to_owned(),
+            ));
+        }
+        if self.asset_type == AssetType::Video && self.file_size == 0 {
+            return Err(AssetDomainError::InvalidField(
+                "video file_size must be positive".to_owned(),
             ));
         }
         if self.updated_at < self.created_at {

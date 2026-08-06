@@ -1,4 +1,8 @@
-use crate::application::ports::{AssetRepository, AssetStore, AssetStoreError, RepositoryError};
+use crate::application::ports::{
+    AssetRepository, AssetStore, AssetStoreError, GenerationDefinitionRepository, RepositoryError,
+    TaskOutputAssetMapping, TaskRepository,
+};
+use crate::compiler::RecipeParser;
 use crate::domain::{AssetId, AssetType, TaskId};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -7,6 +11,8 @@ use std::{error::Error, fmt, sync::Arc};
 pub struct AssetQueryService {
     asset_repository: Arc<dyn AssetRepository>,
     asset_store: Arc<dyn AssetStore>,
+    task_repository: Option<Arc<dyn TaskRepository>>,
+    definition_repository: Option<Arc<dyn GenerationDefinitionRepository>>,
 }
 
 impl AssetQueryService {
@@ -17,7 +23,19 @@ impl AssetQueryService {
         Self {
             asset_repository,
             asset_store,
+            task_repository: None,
+            definition_repository: None,
         }
+    }
+
+    pub fn with_output_order_repositories(
+        mut self,
+        task_repository: Arc<dyn TaskRepository>,
+        definition_repository: Arc<dyn GenerationDefinitionRepository>,
+    ) -> Self {
+        self.task_repository = Some(task_repository);
+        self.definition_repository = Some(definition_repository);
+        self
     }
 
     pub async fn list_by_task(
@@ -28,14 +46,45 @@ impl AssetQueryService {
         validate_project_id(project_id)?;
         let task_id = TaskId::parse(task_id.to_owned())
             .map_err(|error| AssetQueryError::InvalidTaskId(error.to_string()))?;
-        Ok(self
-            .asset_repository
-            .list_by_source_task(&task_id)
-            .await?
+        let mut mapped = self.asset_repository.list_mapped_assets(&task_id).await?;
+        if mapped.is_empty() {
+            return Ok(self
+                .asset_repository
+                .list_by_source_task(&task_id)
+                .await?
+                .into_iter()
+                .filter(|asset| asset.project_id == project_id)
+                .map(AssetView::from)
+                .collect());
+        }
+
+        let output_order = self.output_order(&task_id).await?;
+        mapped.sort_by(|(left, _), (right, _)| compare_mappings(left, right, &output_order));
+        Ok(mapped
             .into_iter()
-            .filter(|asset| asset.project_id == project_id)
-            .map(AssetView::from)
+            .filter(|(_, asset)| asset.project_id == project_id)
+            .map(|(_, asset)| AssetView::from(asset))
             .collect())
+    }
+
+    async fn output_order(&self, task_id: &TaskId) -> Result<Vec<String>, AssetQueryError> {
+        let (Some(task_repository), Some(definition_repository)) =
+            (&self.task_repository, &self.definition_repository)
+        else {
+            return Ok(Vec::new());
+        };
+        let Some(task) = task_repository.find_by_id(task_id).await? else {
+            return Ok(Vec::new());
+        };
+        let Some(definition) = definition_repository
+            .find(&task.workflow_version_id, &task.recipe_id)
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(RecipeParser::parse(&definition.recipe_yaml)
+            .map(|recipe| recipe.outputs.into_iter().map(|output| output.id).collect())
+            .unwrap_or_default())
     }
 
     pub async fn list_recent(
@@ -123,7 +172,7 @@ impl AssetQueryService {
         if asset.project_id != project_id {
             return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
         }
-        if asset.asset_type != AssetType::Image {
+        if !matches!(asset.asset_type, AssetType::Image | AssetType::Video) {
             return Err(AssetQueryError::NotImage(asset_id.as_str().to_owned()));
         }
         let path = asset
@@ -136,6 +185,25 @@ impl AssetQueryService {
             .map_err(AssetQueryError::Read)?;
         Ok(AssetBinary { bytes })
     }
+}
+
+fn compare_mappings(
+    left: &TaskOutputAssetMapping,
+    right: &TaskOutputAssetMapping,
+    output_order: &[String],
+) -> std::cmp::Ordering {
+    let left_rank = output_order
+        .iter()
+        .position(|output_id| output_id == &left.output_id)
+        .unwrap_or(usize::MAX);
+    let right_rank = output_order
+        .iter()
+        .position(|output_id| output_id == &right.output_id)
+        .unwrap_or(usize::MAX);
+    left_rank
+        .cmp(&right_rank)
+        .then_with(|| left.ordinal.cmp(&right.ordinal))
+        .then_with(|| left.output_id.cmp(&right.output_id))
 }
 
 fn validate_project_id(project_id: &str) -> Result<(), AssetQueryError> {
@@ -151,12 +219,14 @@ fn validate_project_id(project_id: &str) -> Result<(), AssetQueryError> {
 #[serde(rename_all = "camelCase")]
 pub struct AssetSummaryView {
     pub id: String,
+    pub asset_type: String,
     pub category: String,
     pub name: String,
     pub original_name: String,
     pub mime_type: String,
-    pub width: u32,
-    pub height: u32,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub duration_ms: Option<u64>,
     pub file_size: u64,
     pub created_at: DateTime<Utc>,
     pub thumbnail_available: bool,
@@ -164,14 +234,25 @@ pub struct AssetSummaryView {
 
 impl From<crate::domain::Asset> for AssetSummaryView {
     fn from(asset: crate::domain::Asset) -> Self {
+        let original_name = if matches!(
+            asset.category.as_str(),
+            crate::domain::asset::GENERATED_IMAGE_CATEGORY
+                | crate::domain::asset::GENERATED_VIDEO_CATEGORY
+        ) {
+            asset.name.clone()
+        } else {
+            asset.original_name.clone()
+        };
         Self {
             id: asset.id.as_str().to_owned(),
+            asset_type: asset.asset_type.as_str().to_owned(),
             category: asset.category,
             name: asset.name,
-            original_name: asset.original_name,
+            original_name,
             mime_type: asset.mime_type,
-            width: asset.width,
-            height: asset.height,
+            width: (asset.width > 0).then_some(asset.width),
+            height: (asset.height > 0).then_some(asset.height),
+            duration_ms: asset.duration_ms,
             file_size: asset.file_size,
             created_at: asset.created_at,
             thumbnail_available: asset.thumbnail_path.is_some(),
@@ -296,7 +377,7 @@ mod tests {
             AssetId::parse("ast_read_test").unwrap(),
             "project-1",
             "image",
-            "image.png",
+            "ComfyUI_00001.png",
             path.to_string_lossy(),
             "a".repeat(64),
             "image/png",
@@ -336,6 +417,7 @@ mod tests {
             "metadataJson",
             "comfyFilename",
             "nodeId",
+            "ComfyUI_",
         ] {
             assert!(
                 !json.contains(forbidden),

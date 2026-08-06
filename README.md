@@ -47,6 +47,15 @@ M1 progress:
 - Active Project selector, persisted local context, and Projects workspace
 - Project-scoped generation, task history, task events, asset listing, and binary reads
 - Cross-project task cancellation and asset access rejected before side effects
+- Generic `video` Recipe outputs using ComfyUI SaveVideo/PreviewVideo-compatible
+  SavedResult normalization from the existing `images` history key
+- Streamed generated video import with incremental SHA-256, atomic local file
+  publish, optional ffprobe metadata/poster, and `generated_video` assets
+- Atomic `task_output_assets` output mappings with restart-safe recovery and no
+  duplicate output import
+- Bounded Tauri 2 local video protocol with HEAD/single-Range seeking and
+  project/asset isolation, plus inline video playback in Task Outputs and the
+  Asset Library
 
 M1 fourth phase (Project Workspace + Project Isolation) code is complete. Historical task
 inputs are exposed through a safe DTO boundary; raw workflow payloads, recipe
@@ -65,6 +74,12 @@ persistence and Studio controls, ordered multi-image recipe/application values,
 best-effort source/generated thumbnails, Asset Library thumbnail fallback, and
 historical draft compatibility. The exact evidence is recorded in
 `docs/M1_PRODUCTION_INPUT_PACK_VALIDATION.md`.
+
+M1 Video Foundation validation is recorded in
+`docs/M1_VIDEO_FOUNDATION_VALIDATION.md`. It covers the generic video protocol,
+streaming persistence, atomic task output mappings, bounded local playback,
+video output cards, and the no-package NOT RUN gate for Generic Video and
+MiniMax H3 live execution.
 
 The ComfyUI live gate passed independently: `http://127.0.0.1:8188` reported
 version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device, and 4,486 nodes. The

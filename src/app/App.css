@@ -197,6 +197,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .output-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin-top: 18px; }
 .asset-card { margin: 0; overflow: hidden; border: 1px solid #35435b; border-radius: 10px; background: #111720; }
 .asset-card img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: #090c11; }
+.asset-card video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #090c11; }
 .asset-card figcaption { display: grid; gap: 3px; padding: 9px; font-size: 0.75rem; }
 .asset-card figcaption span { overflow: hidden; color: #8997ad; text-overflow: ellipsis; white-space: nowrap; }
 .error-message { color: #ffadad; }
@@ -241,6 +242,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-library-card:hover:not(:disabled) { border-color: #75a1e9; background: #182337; }
 .asset-library-image { display: grid; place-items: center; aspect-ratio: 1 / 1; background: #090c11; }
 .asset-library-image img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.asset-library-image video { display: block; width: 100%; height: 100%; object-fit: contain; }
 .asset-image-placeholder { padding: 14px; color: #68758a; font-size: 0.76rem; text-align: center; }
 .asset-library-card-copy { display: grid; gap: 4px; padding: 11px; }
 .asset-library-card-copy strong, .asset-library-card-copy span, .asset-library-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -251,6 +253,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-preview-panel { width: min(820px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 22px; border: 1px solid #4d658f; border-radius: 16px; background: #171d28; box-shadow: 0 28px 80px rgb(0 0 0 / 40%); }
 .asset-preview-image { display: grid; place-items: center; min-height: 260px; margin-top: 18px; border-radius: 10px; background: #090c11; }
 .asset-preview-image img { display: block; max-width: 100%; max-height: 62vh; object-fit: contain; }
+.asset-preview-image video { display: block; width: 100%; max-height: 62vh; background: #090c11; }
 .asset-preview-image p { color: #8997ad; }
 .asset-preview-meta { margin: 12px 0 0; color: #8997ad; font-size: 0.8rem; }
 .task-history-list { display: grid; gap: 8px; }

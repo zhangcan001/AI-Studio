@@ -1,10 +1,12 @@
 use crate::application::image_inspection::{generate_thumbnail, inspect_bytes, InspectedImage};
-use crate::application::output_collector::CollectedImage;
+use crate::application::media_probe::{CommandMediaProbe, MediaProbe};
+use crate::application::output_collector::{CollectedImage, CollectedOutput, CollectedVideo};
 use crate::application::ports::{
-    AssetRepository, AssetStore, Clock, ProjectRepository, RepositoryError,
+    AssetRepository, AssetStore, Clock, ProjectRepository, RepositoryError, TaskOutputAssetMapping,
 };
 use crate::domain::{Asset, AssetId, TaskId};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{error::Error, fmt, path::PathBuf, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +51,7 @@ pub struct AssetImportService {
     asset_store: Arc<dyn AssetStore>,
     asset_repository: Arc<dyn AssetRepository>,
     clock: Arc<dyn Clock>,
+    media_probe: Arc<dyn MediaProbe>,
 }
 
 impl AssetImportService {
@@ -63,9 +66,17 @@ impl AssetImportService {
             asset_store,
             asset_repository,
             clock,
+            media_probe: Arc::new(CommandMediaProbe::default()),
         }
     }
 
+    #[allow(dead_code)]
+    pub fn with_media_probe(mut self, media_probe: Arc<dyn MediaProbe>) -> Self {
+        self.media_probe = media_probe;
+        self
+    }
+
+    #[allow(dead_code)]
     pub async fn import(
         &self,
         project_id: &str,
@@ -173,6 +184,285 @@ impl AssetImportService {
         Ok(assets)
     }
 
+    pub async fn import_outputs(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        outputs: Vec<CollectedOutput>,
+    ) -> Result<Vec<Asset>, AssetImportError> {
+        if outputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let project_root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await
+            .map_err(repository_error)?
+            .ok_or_else(|| AssetImportError::ProjectStorageMissing {
+                project_id: project_id.to_owned(),
+            })?;
+
+        let mut stored_paths = Vec::<PathBuf>::new();
+        let mut assets = Vec::with_capacity(outputs.len());
+        let mut mappings = Vec::with_capacity(outputs.len());
+        for output in outputs {
+            let result = match output {
+                CollectedOutput::Image(image) => {
+                    self.persist_collected_image(project_id, task_id, &project_root, image)
+                        .await
+                }
+                CollectedOutput::Video(video) => {
+                    self.persist_collected_video(project_id, task_id, &project_root, video)
+                        .await
+                }
+            };
+            let (asset, mapping, paths) = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    self.compensate(&stored_paths).await;
+                    return Err(error);
+                }
+            };
+            stored_paths.extend(paths);
+            assets.push(asset);
+            mappings.push(mapping);
+        }
+
+        if let Err(error) = self
+            .asset_repository
+            .insert_generated_outputs(&assets, &mappings)
+            .await
+        {
+            self.compensate(&stored_paths).await;
+            return Err(AssetImportError::AssetPersistence {
+                message: error.to_string(),
+            });
+        }
+        Ok(assets)
+    }
+
+    async fn persist_collected_image(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        project_root: &std::path::Path,
+        image: CollectedImage,
+    ) -> Result<(Asset, TaskOutputAssetMapping, Vec<PathBuf>), AssetImportError> {
+        let inspected = inspect_image(&image)?;
+        let asset_id = AssetId::new();
+        let stored = self
+            .asset_store
+            .write_image(project_root, &asset_id, inspected.extension, &image.bytes)
+            .await
+            .map_err(|error| AssetImportError::AssetPersistence {
+                message: error.to_string(),
+            })?;
+        let mut paths = vec![stored.path.clone()];
+        let thumbnail_path = match generate_thumbnail(&image.bytes) {
+            Ok(thumbnail) => match self
+                .asset_store
+                .write_thumbnail(project_root, &asset_id, &thumbnail)
+                .await
+            {
+                Ok(stored_thumbnail) => {
+                    paths.push(stored_thumbnail.path.clone());
+                    Some(stored_thumbnail.path.display().to_string())
+                }
+                Err(error) => {
+                    tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail write skipped; full asset remains available");
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail generation skipped; full asset remains available");
+                None
+            }
+        };
+        let created_at = self.clock.now();
+        let metadata = json!({
+            "outputId": image.output_id,
+            "nodeId": image.node_id,
+            "position": image.position,
+            "comfyFilename": image.original_filename,
+            "comfySubfolder": image.subfolder,
+            "comfyType": image.folder_type,
+            "mediaKind": "image",
+        });
+        let mut asset = Asset::new_generated_image(
+            asset_id.clone(),
+            project_id,
+            format!("Generated Image {}", image.position + 1),
+            image.original_filename,
+            stored.path.display().to_string(),
+            inspected.sha256,
+            inspected.mime_type,
+            inspected.width,
+            inspected.height,
+            image.bytes.len() as u64,
+            task_id.clone(),
+            metadata,
+            created_at,
+        )
+        .map_err(|error| AssetImportError::OutputImportFailed {
+            message: error.to_string(),
+        })?;
+        asset.thumbnail_path = thumbnail_path;
+        Ok((
+            asset,
+            TaskOutputAssetMapping {
+                task_id: task_id.clone(),
+                output_id: image.output_id,
+                ordinal: image.position as u32,
+                asset_id,
+                created_at,
+            },
+            paths,
+        ))
+    }
+
+    async fn persist_collected_video(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        project_root: &std::path::Path,
+        mut video: CollectedVideo,
+    ) -> Result<(Asset, TaskOutputAssetMapping, Vec<PathBuf>), AssetImportError> {
+        let (extension, mime_type) =
+            validate_video_output(&video.original_filename, video.content_type.as_deref())?;
+        if video
+            .content_length
+            .is_some_and(|length| length > MAX_VIDEO_OUTPUT_BYTES)
+        {
+            return Err(AssetImportError::OutputImportFailed {
+                message: format!(
+                    "video output exceeds the {} byte safety limit",
+                    MAX_VIDEO_OUTPUT_BYTES
+                ),
+            });
+        }
+
+        let asset_id = AssetId::new();
+        let mut writer = self
+            .asset_store
+            .begin_video_write(project_root, &asset_id, extension)
+            .await
+            .map_err(|error| AssetImportError::AssetPersistence {
+                message: error.to_string(),
+            })?;
+        let mut hasher = Sha256::new();
+        let mut file_size = 0u64;
+        let mut signature = Vec::with_capacity(64);
+        while let Some(chunk) = video.stream.next_chunk().await.map_err(|error| {
+            AssetImportError::OutputImportFailed {
+                message: error.to_string(),
+            }
+        })? {
+            if chunk.is_empty() {
+                continue;
+            }
+            if signature.len() < 64 {
+                signature.extend_from_slice(&chunk[..chunk.len().min(64 - signature.len())]);
+            }
+            file_size = file_size.saturating_add(chunk.len() as u64);
+            if file_size > MAX_VIDEO_OUTPUT_BYTES {
+                let _ = writer.abort().await;
+                return Err(AssetImportError::OutputImportFailed {
+                    message: format!(
+                        "video output exceeds the {} byte safety limit",
+                        MAX_VIDEO_OUTPUT_BYTES
+                    ),
+                });
+            }
+            hasher.update(&chunk);
+            if let Err(error) = writer.write_chunk(&chunk).await {
+                let _ = writer.abort().await;
+                return Err(AssetImportError::AssetPersistence {
+                    message: error.to_string(),
+                });
+            }
+        }
+        if file_size == 0 || !valid_video_signature(extension, &signature) {
+            let _ = writer.abort().await;
+            return Err(AssetImportError::OutputImportFailed {
+                message: "video output is empty or is not a recognized MP4/WEBM stream".to_owned(),
+            });
+        }
+        let stored = writer
+            .commit()
+            .await
+            .map_err(|error| AssetImportError::AssetPersistence {
+                message: error.to_string(),
+            })?;
+        let mut paths = vec![stored.path.clone()];
+        let probed = self.media_probe.probe_video(&stored.path).await;
+        let thumbnail_path = if let Some(poster) =
+            self.media_probe.generate_video_poster(&stored.path).await
+        {
+            match self
+                .asset_store
+                .write_video_poster(project_root, &asset_id, &poster)
+                .await
+            {
+                Ok(stored_poster) => {
+                    paths.push(stored_poster.path.clone());
+                    Some(stored_poster.path.display().to_string())
+                }
+                Err(error) => {
+                    tracing::warn!(asset_id = %asset_id, error = %error, "video poster write skipped");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let created_at = self.clock.now();
+        let metadata = json!({
+            "outputId": video.output_id.clone(),
+            "nodeId": video.node_id.clone(),
+            "position": video.position,
+            "comfyFilename": video.original_filename.clone(),
+            "comfySubfolder": video.subfolder.clone(),
+            "comfyType": video.folder_type.clone(),
+            "mediaKind": "video",
+        });
+        let mut asset = match Asset::new_generated_video(
+            asset_id.clone(),
+            project_id,
+            format!("Generated Video {}", video.position + 1),
+            video.original_filename.clone(),
+            stored.path.display().to_string(),
+            format!("{:x}", hasher.finalize()),
+            mime_type,
+            probed.width,
+            probed.height,
+            probed.duration_ms,
+            file_size,
+            task_id.clone(),
+            metadata,
+            created_at,
+        ) {
+            Ok(asset) => asset,
+            Err(error) => {
+                self.compensate(&paths).await;
+                return Err(AssetImportError::OutputImportFailed {
+                    message: error.to_string(),
+                });
+            }
+        };
+        asset.thumbnail_path = thumbnail_path;
+        Ok((
+            asset,
+            TaskOutputAssetMapping {
+                task_id: task_id.clone(),
+                output_id: video.output_id.clone(),
+                ordinal: video.position as u32,
+                asset_id,
+                created_at,
+            },
+            paths,
+        ))
+    }
+
     async fn compensate(&self, paths: &[PathBuf]) {
         for path in paths {
             if let Err(error) = self.asset_store.delete(path).await {
@@ -183,6 +473,60 @@ impl AssetImportService {
                 );
             }
         }
+    }
+}
+
+pub const MAX_VIDEO_OUTPUT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+fn validate_video_output(
+    filename: &str,
+    content_type: Option<&str>,
+) -> Result<(&'static str, &'static str), AssetImportError> {
+    let extension = std::path::Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    let mime = content_type.map(|value| {
+        value
+            .split(';')
+            .next()
+            .unwrap_or(value)
+            .trim()
+            .to_ascii_lowercase()
+    });
+    if mime
+        .as_deref()
+        .is_some_and(|value| value == "text/html" || value == "application/json")
+    {
+        return Err(AssetImportError::OutputImportFailed {
+            message: "video response is HTML/JSON rather than media".to_owned(),
+        });
+    }
+    match (extension.as_deref(), mime.as_deref()) {
+        (Some("mp4"), None | Some("video/mp4") | Some("application/octet-stream")) => {
+            Ok(("mp4", "video/mp4"))
+        }
+        (Some("webm"), None | Some("video/webm") | Some("application/octet-stream")) => {
+            Ok(("webm", "video/webm"))
+        }
+        (Some("mp4"), Some(other)) | (Some("webm"), Some(other)) => {
+            Err(AssetImportError::OutputImportFailed {
+                message: format!("video extension/content-type mismatch: {filename} / {other}"),
+            })
+        }
+        _ => Err(AssetImportError::OutputImportFailed {
+            message: format!("unsupported video output format: {filename}"),
+        }),
+    }
+}
+
+fn valid_video_signature(extension: &str, bytes: &[u8]) -> bool {
+    match extension {
+        "webm" => bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]),
+        "mp4" => bytes
+            .get(4..)
+            .is_some_and(|header| header.windows(4).any(|window| window == b"ftyp")),
+        _ => false,
     }
 }
 
@@ -205,9 +549,10 @@ fn repository_error(error: RepositoryError) -> AssetImportError {
 #[cfg(test)]
 mod tests {
     use super::{AssetImportError, AssetImportService};
-    use crate::application::output_collector::CollectedImage;
+    use crate::application::output_collector::{CollectedImage, CollectedOutput, CollectedVideo};
     use crate::application::ports::{
-        AssetRepository, Clock, ProjectRecord, ProjectRepository, RepositoryError,
+        AssetRepository, Clock, ComfyAdapterError, ComfyOutputStream, ProjectRecord,
+        ProjectRepository, RepositoryError,
     };
     use crate::domain::{Asset, AssetId, TaskId};
     use crate::infrastructure::filesystem::FileSystemAssetStore;
@@ -388,6 +733,62 @@ mod tests {
 
     use std::io::Cursor;
 
+    struct SyntheticVideoStream {
+        remaining: usize,
+        chunk_size: usize,
+        emitted: usize,
+        fail_after: Option<usize>,
+    }
+
+    #[async_trait]
+    impl ComfyOutputStream for SyntheticVideoStream {
+        fn content_type(&self) -> Option<&str> {
+            Some("video/mp4")
+        }
+
+        fn content_length(&self) -> Option<u64> {
+            Some(self.remaining as u64 + self.emitted as u64)
+        }
+
+        async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ComfyAdapterError> {
+            if self.fail_after.is_some_and(|limit| self.emitted >= limit) {
+                return Err(ComfyAdapterError::OutputDownload(
+                    "synthetic stream interrupted".to_owned(),
+                ));
+            }
+            if self.remaining == 0 {
+                return Ok(None);
+            }
+            let length = self.remaining.min(self.chunk_size);
+            let mut bytes = vec![0u8; length];
+            if self.emitted == 0 && length >= 12 {
+                bytes[4..8].copy_from_slice(b"ftyp");
+            }
+            self.remaining -= length;
+            self.emitted += length;
+            Ok(Some(bytes))
+        }
+    }
+
+    fn video(output_id: &str, size: usize, fail_after: Option<usize>) -> CollectedOutput {
+        CollectedOutput::Video(CollectedVideo {
+            output_id: output_id.to_owned(),
+            node_id: "11".to_owned(),
+            original_filename: "ComfyUI_00001.mp4".to_owned(),
+            content_type: Some("video/mp4".to_owned()),
+            content_length: Some(size as u64),
+            position: 0,
+            subfolder: String::new(),
+            folder_type: "output".to_owned(),
+            stream: Box::new(SyntheticVideoStream {
+                remaining: size,
+                chunk_size: 1024 * 1024,
+                emitted: 0,
+                fail_after,
+            }),
+        })
+    }
+
     #[tokio::test]
     async fn validates_actual_image_format_and_records_hash_dimensions_and_extension() {
         let root = tempdir().unwrap();
@@ -461,5 +862,108 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn streams_video_in_bounded_chunks_and_persists_generated_video_asset() {
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository::default();
+        let size = 128 * 1024 * 1024;
+        let assets = service(root.path(), repository.clone())
+            .import_outputs(
+                "project-1",
+                &task_id(),
+                vec![video("generated_video", size, None)],
+            )
+            .await
+            .expect("video import should succeed");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].asset_type, crate::domain::AssetType::Video);
+        assert_eq!(assets[0].category, "generated_video");
+        assert_eq!(assets[0].file_size, size as u64);
+        assert!(assets[0].duration_ms.is_none());
+        assert!(
+            assets[0]
+                .storage_path
+                .contains("assets/generated/video/ast_")
+                || assets[0]
+                    .storage_path
+                    .contains("assets\\generated\\video\\ast_")
+        );
+        assert!(Path::new(&assets[0].storage_path).is_file());
+        assert!(!Path::new(&assets[0].storage_path)
+            .parent()
+            .unwrap()
+            .join(format!(".{}.tmp", assets[0].id))
+            .exists());
+        assert_eq!(repository.assets.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn interrupted_video_stream_removes_temp_file_and_persists_no_asset() {
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository::default();
+        let error = service(root.path(), repository.clone())
+            .import_outputs(
+                "project-1",
+                &task_id(),
+                vec![video(
+                    "generated_video",
+                    8 * 1024 * 1024,
+                    Some(3 * 1024 * 1024),
+                )],
+            )
+            .await
+            .expect_err("interrupted stream should fail");
+        assert!(matches!(error, AssetImportError::OutputImportFailed { .. }));
+        assert!(repository.assets.lock().unwrap().is_empty());
+        let video_directory = root.path().join("assets/generated/video");
+        if video_directory.exists() {
+            assert_eq!(std::fs::read_dir(video_directory).unwrap().count(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_video_html_or_extension_content_type_mismatch_before_write() {
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository::default();
+        let mut output = match video("generated_video", 1024, None) {
+            CollectedOutput::Video(output) => output,
+            CollectedOutput::Image(_) => unreachable!(),
+        };
+        output.content_type = Some("text/html".to_owned());
+        let error = service(root.path(), repository.clone())
+            .import_outputs(
+                "project-1",
+                &task_id(),
+                vec![CollectedOutput::Video(output)],
+            )
+            .await
+            .expect_err("HTML response should be rejected");
+        assert!(matches!(error, AssetImportError::OutputImportFailed { .. }));
+        assert!(repository.assets.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn video_database_failure_cleans_published_video_without_mapping() {
+        let root = tempdir().unwrap();
+        let repository = FakeAssetRepository {
+            assets: Arc::new(Mutex::new(Vec::new())),
+            fail: true,
+        };
+        let error = service(root.path(), repository.clone())
+            .import_outputs(
+                "project-1",
+                &task_id(),
+                vec![video("generated_video", 1024 * 1024, None)],
+            )
+            .await
+            .expect_err("database failure should be returned");
+        assert!(matches!(error, AssetImportError::AssetPersistence { .. }));
+        assert!(repository.assets.lock().unwrap().is_empty());
+        let video_directory = root.path().join("assets/generated/video");
+        if video_directory.exists() {
+            assert_eq!(std::fs::read_dir(video_directory).unwrap().count(), 0);
+        }
     }
 }

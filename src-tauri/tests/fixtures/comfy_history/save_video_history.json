@@ -1,0 +1,18 @@
+{
+  "prompt-video-fixture": {
+    "status": { "completed": true },
+    "outputs": {
+      "11": {
+        "images": [
+          {
+            "filename": "ComfyUI_00001.mp4",
+            "subfolder": "",
+            "type": "output"
+          }
+        ],
+        "animated": [true],
+        "asset": {"metadata": "ignored"}
+      }
+    }
+  }
+}

@@ -120,7 +120,10 @@ mod tests {
                         .collect();
                     std::collections::BTreeMap::from([(
                         "9".to_owned(),
-                        ComfyNodeOutput { images: files },
+                        ComfyNodeOutput {
+                            images: files,
+                            saved_results: Vec::new(),
+                        },
                     )])
                 }
             };

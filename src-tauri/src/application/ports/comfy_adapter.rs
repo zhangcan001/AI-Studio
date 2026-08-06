@@ -123,6 +123,13 @@ pub struct ComfyHistory {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComfyNodeOutput {
     pub images: Vec<ComfyOutputFile>,
+    pub saved_results: Vec<ComfySavedResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfySavedResult {
+    pub file: ComfyOutputFile,
+    pub animated: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,6 +143,13 @@ pub struct ComfyOutputFile {
 pub struct ComfyOutputData {
     pub bytes: Vec<u8>,
     pub content_type: Option<String>,
+}
+
+#[async_trait]
+pub trait ComfyOutputStream: Send {
+    fn content_type(&self) -> Option<&str>;
+    fn content_length(&self) -> Option<u64>;
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ComfyAdapterError>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -309,6 +323,15 @@ pub trait ComfyAdapter: Send + Sync {
         &self,
         file: &ComfyOutputFile,
     ) -> Result<ComfyOutputData, ComfyAdapterError>;
+
+    async fn open_output_stream(
+        &self,
+        _file: &ComfyOutputFile,
+    ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+        Err(ComfyAdapterError::Incompatible(
+            "streaming output download is not supported by this adapter".to_owned(),
+        ))
+    }
 
     async fn submit_workflow(
         &self,

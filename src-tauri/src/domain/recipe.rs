@@ -118,9 +118,10 @@ pub struct BindingTarget {
     pub input: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputType {
     Image,
+    Video,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

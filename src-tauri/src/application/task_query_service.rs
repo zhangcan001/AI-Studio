@@ -1,22 +1,27 @@
 use crate::application::ports::{
-    AssetRepository, RepositoryError, TaskRepository, TaskUpdatePayload,
+    AssetRepository, GenerationDefinitionRepository, RepositoryError, TaskOutputAssetMapping,
+    TaskRepository, TaskUpdatePayload,
 };
-use crate::domain::{Task, TaskId};
+use crate::compiler::RecipeParser;
+use crate::domain::{Asset, Task, TaskId};
 use std::{error::Error, fmt, sync::Arc};
 
 pub struct TaskQueryService {
     task_repository: Arc<dyn TaskRepository>,
     asset_repository: Arc<dyn AssetRepository>,
+    definition_repository: Arc<dyn GenerationDefinitionRepository>,
 }
 
 impl TaskQueryService {
     pub fn new(
         task_repository: Arc<dyn TaskRepository>,
         asset_repository: Arc<dyn AssetRepository>,
+        definition_repository: Arc<dyn GenerationDefinitionRepository>,
     ) -> Self {
         Self {
             task_repository,
             asset_repository,
+            definition_repository,
         }
     }
 
@@ -55,7 +60,7 @@ impl TaskQueryService {
     }
 
     pub async fn view(&self, task: Task) -> Result<TaskView, TaskQueryError> {
-        let assets = self.asset_repository.list_by_source_task(&task.id).await?;
+        let assets = self.list_output_assets(&task).await?;
         let mut view = TaskUpdatePayload::from_task(&task);
         view.output_asset_ids = assets
             .into_iter()
@@ -64,6 +69,49 @@ impl TaskQueryService {
             .collect();
         Ok(view)
     }
+
+    async fn list_output_assets(&self, task: &Task) -> Result<Vec<Asset>, TaskQueryError> {
+        let mut mapped = self.asset_repository.list_mapped_assets(&task.id).await?;
+        if mapped.is_empty() {
+            return Ok(self.asset_repository.list_by_source_task(&task.id).await?);
+        }
+
+        let output_order = self.output_order(task).await?;
+        mapped.sort_by(|(left, _), (right, _)| compare_mappings(left, right, &output_order));
+        Ok(mapped.into_iter().map(|(_, asset)| asset).collect())
+    }
+
+    async fn output_order(&self, task: &Task) -> Result<Vec<String>, TaskQueryError> {
+        let Some(definition) = self
+            .definition_repository
+            .find(&task.workflow_version_id, &task.recipe_id)
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(RecipeParser::parse(&definition.recipe_yaml)
+            .map(|recipe| recipe.outputs.into_iter().map(|output| output.id).collect())
+            .unwrap_or_default())
+    }
+}
+
+fn compare_mappings(
+    left: &TaskOutputAssetMapping,
+    right: &TaskOutputAssetMapping,
+    output_order: &[String],
+) -> std::cmp::Ordering {
+    let left_rank = output_order
+        .iter()
+        .position(|output_id| output_id == &left.output_id)
+        .unwrap_or(usize::MAX);
+    let right_rank = output_order
+        .iter()
+        .position(|output_id| output_id == &right.output_id)
+        .unwrap_or(usize::MAX);
+    left_rank
+        .cmp(&right_rank)
+        .then_with(|| left.ordinal.cmp(&right.ordinal))
+        .then_with(|| left.output_id.cmp(&right.output_id))
 }
 
 pub type TaskView = TaskUpdatePayload;
@@ -99,5 +147,39 @@ impl Error for TaskQueryError {}
 impl From<RepositoryError> for TaskQueryError {
     fn from(error: RepositoryError) -> Self {
         Self::Repository(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compare_mappings;
+    use crate::application::ports::TaskOutputAssetMapping;
+    use crate::domain::{AssetId, TaskId};
+    use chrono::Utc;
+
+    fn mapping(output_id: &str, ordinal: u32, asset_id: &str) -> TaskOutputAssetMapping {
+        TaskOutputAssetMapping {
+            task_id: TaskId::parse("tsk_order").unwrap(),
+            output_id: output_id.to_owned(),
+            ordinal,
+            asset_id: AssetId::parse(asset_id).unwrap(),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn output_mappings_follow_recipe_order_then_ordinal() {
+        let image = mapping("preview", 0, "ast_image");
+        let video = mapping("final_video", 0, "ast_video");
+        let second_video = mapping("final_video", 1, "ast_video_2");
+        let order = vec!["preview".to_owned(), "final_video".to_owned()];
+        assert_eq!(
+            compare_mappings(&image, &video, &order),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            compare_mappings(&video, &second_video, &order),
+            std::cmp::Ordering::Less
+        );
     }
 }

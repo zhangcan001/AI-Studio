@@ -1,14 +1,15 @@
 use crate::application::ports::{
     CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
     ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
-    ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyQueueState,
-    ComfyUploadedImage, DeviceInfo, PromptSubmission, SystemStats,
+    ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyOutputStream,
+    ComfyQueueState, ComfySavedResult, ComfyUploadedImage, DeviceInfo, PromptSubmission,
+    SystemStats,
 };
 use crate::infrastructure::comfy::dto::{
     CancelResponseDto, PromptRequestDto, PromptResponseDto, SystemStatsDto, UploadResponseDto,
 };
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::{
     header::CONTENT_TYPE,
     multipart::{Form, Part},
@@ -16,7 +17,7 @@ use reqwest::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::time::Duration;
+use std::{pin::Pin, time::Duration};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -425,6 +426,83 @@ impl ComfyHttpAdapter {
             content_type,
         })
     }
+
+    async fn open_output_stream_internal(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+        let url = self.config.route_url("view");
+        let response = self
+            .client
+            .get(&url)
+            .query(&[
+                ("filename", file.filename.as_str()),
+                ("subfolder", file.subfolder.as_str()),
+                ("type", file.folder_type.as_str()),
+            ])
+            .timeout(COMFY_OUTPUT_TIMEOUT)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    ComfyAdapterError::OutputDownload(format!("GET {url} timed out: {error}"))
+                } else {
+                    ComfyAdapterError::OutputDownload(format!("GET {url} failed: {error}"))
+                }
+            })?;
+        if !response.status().is_success() {
+            return Err(ComfyAdapterError::OutputDownload(format!(
+                "GET {url} returned HTTP {}",
+                response.status()
+            )));
+        }
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let content_length = response.content_length();
+        Ok(Box::new(ComfyHttpOutputStream {
+            content_type,
+            content_length,
+            stream: Box::pin(
+                response
+                    .bytes_stream()
+                    .map(|item| item.map(|bytes| bytes.to_vec())),
+            ),
+        }))
+    }
+}
+
+type HttpOutputByteStream =
+    Pin<Box<dyn Stream<Item = Result<Vec<u8>, reqwest::Error>> + Send + 'static>>;
+
+struct ComfyHttpOutputStream {
+    content_type: Option<String>,
+    content_length: Option<u64>,
+    stream: HttpOutputByteStream,
+}
+
+#[async_trait]
+impl ComfyOutputStream for ComfyHttpOutputStream {
+    fn content_type(&self) -> Option<&str> {
+        self.content_type.as_deref()
+    }
+
+    fn content_length(&self) -> Option<u64> {
+        self.content_length
+    }
+
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ComfyAdapterError> {
+        self.stream
+            .next()
+            .await
+            .transpose()
+            .map_err(|error| {
+                ComfyAdapterError::OutputDownload(format!("stream read failed: {error}"))
+            })
+            .map(|chunk| chunk)
+    }
 }
 
 #[async_trait]
@@ -478,6 +556,13 @@ impl ComfyAdapter for ComfyHttpAdapter {
         file: &ComfyOutputFile,
     ) -> Result<ComfyOutputData, ComfyAdapterError> {
         self.download_output_internal(file).await
+    }
+
+    async fn open_output_stream(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+        self.open_output_stream_internal(file).await
     }
 
     async fn submit_workflow(
@@ -537,7 +622,13 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
             ComfyAdapterError::Protocol(format!("history output node {node_id} must be an object"))
         })?;
         let Some(images_value) = node.get("images") else {
-            normalized.insert(node_id.clone(), ComfyNodeOutput { images: Vec::new() });
+            normalized.insert(
+                node_id.clone(),
+                ComfyNodeOutput {
+                    images: Vec::new(),
+                    saved_results: Vec::new(),
+                },
+            );
             continue;
         };
         let images = images_value.as_array().ok_or_else(|| {
@@ -545,8 +636,10 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
                 "history output node {node_id} images must be an array"
             ))
         })?;
+        let animated_flags = node.get("animated").and_then(Value::as_array);
         let mut files = Vec::with_capacity(images.len());
-        for image in images {
+        let mut saved_results = Vec::with_capacity(images.len());
+        for (index, image) in images.iter().enumerate() {
             let image = image.as_object().ok_or_else(|| {
                 ComfyAdapterError::Protocol(format!(
                     "history output node {node_id} image must be an object"
@@ -561,7 +654,7 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
                         "history output node {node_id} image filename is missing"
                     ))
                 })?;
-            files.push(ComfyOutputFile {
+            let file = ComfyOutputFile {
                 filename: filename.to_owned(),
                 subfolder: image
                     .get("subfolder")
@@ -573,9 +666,23 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
                     .and_then(Value::as_str)
                     .unwrap_or("output")
                     .to_owned(),
+            };
+            saved_results.push(ComfySavedResult {
+                file: file.clone(),
+                animated: animated_flags
+                    .and_then(|flags| flags.get(index))
+                    .and_then(Value::as_bool)
+                    .or_else(|| image.get("animated").and_then(Value::as_bool)),
             });
+            files.push(file);
         }
-        normalized.insert(node_id.clone(), ComfyNodeOutput { images: files });
+        normalized.insert(
+            node_id.clone(),
+            ComfyNodeOutput {
+                images: files,
+                saved_results,
+            },
+        );
     }
 
     Ok(ComfyHistory {
@@ -866,13 +973,13 @@ fn http_status_error(method: &str, url: &str, status: StatusCode) -> ComfyAdapte
 
 #[cfg(test)]
 mod tests {
-    use super::{ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES};
+    use super::{normalize_history, ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES};
     use crate::application::ports::{
         CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
         ComfyExecutionEvent, ComfyImageUpload, ComfyOutputFile,
     };
     use futures_util::SinkExt;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::net::TcpListener;
     use tokio::io::AsyncWriteExt;
     use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -1180,7 +1287,7 @@ mod tests {
                     "outputs": {
                         "9": {
                             "images": [
-                                {"filename": "a.png", "subfolder": "", "type": "output", "unknown": true},
+                                {"filename": "a.png", "subfolder": "", "type": "output", "animated": true, "unknown": true},
                                 {"filename": "b.png", "subfolder": "nested", "type": "temp"}
                             ],
                             "audio": [{"filename": "ignored.wav"}]
@@ -1202,7 +1309,25 @@ mod tests {
         assert_eq!(history.prompt_id, "prompt-1");
         assert_eq!(history.outputs["9"].images.len(), 2);
         assert_eq!(history.outputs["9"].images[1].subfolder, "nested");
+        assert_eq!(history.outputs["9"].saved_results.len(), 2);
+        assert_eq!(history.outputs["9"].saved_results[0].animated, Some(true));
         assert!(history.outputs["3"].images.is_empty());
+    }
+
+    #[test]
+    fn save_video_fixture_uses_images_as_generic_saved_results() {
+        let body: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/comfy_history/save_video_history.json"
+        )))
+        .expect("video fixture should be valid JSON");
+        let history = normalize_history("prompt-video-fixture", body)
+            .expect("video fixture should normalize");
+        let output = &history.outputs["11"];
+        assert_eq!(output.images.len(), 1);
+        assert_eq!(output.saved_results.len(), 1);
+        assert_eq!(output.saved_results[0].file.filename, "ComfyUI_00001.mp4");
+        assert_eq!(output.saved_results[0].animated, Some(true));
     }
 
     #[tokio::test]
@@ -1268,6 +1393,38 @@ mod tests {
             .expect("output should download");
         assert_eq!(output.bytes, vec![1, 2, 3]);
         assert_eq!(output.content_type.as_deref(), Some("image/png"));
+    }
+
+    #[tokio::test]
+    async fn output_stream_uses_view_query_without_buffering_the_full_response_in_adapter() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/view"))
+            .and(query_param("filename", "ComfyUI_00001.mp4"))
+            .and(query_param("subfolder", "nested"))
+            .and(query_param("type", "output"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "video/mp4")
+                    .set_body_bytes(vec![0, 0, 0, 0, b'f', b't', b'y', b'p', 1, 2, 3]),
+            )
+            .mount(&server)
+            .await;
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let mut stream = adapter
+            .open_output_stream(&ComfyOutputFile {
+                filename: "ComfyUI_00001.mp4".to_owned(),
+                subfolder: "nested".to_owned(),
+                folder_type: "output".to_owned(),
+            })
+            .await
+            .expect("stream should open");
+        assert_eq!(stream.content_type(), Some("video/mp4"));
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next_chunk().await.unwrap() {
+            bytes.extend(chunk);
+        }
+        assert_eq!(bytes[4..8], *b"ftyp");
     }
 
     #[tokio::test]

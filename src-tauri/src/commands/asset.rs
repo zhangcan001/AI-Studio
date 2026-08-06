@@ -57,6 +57,7 @@ pub enum AssetCategoryFilterDto {
     All,
     SourceImage,
     GeneratedImage,
+    GeneratedVideo,
 }
 
 impl From<AssetCategoryFilterDto> for AssetCategoryFilter {
@@ -65,6 +66,7 @@ impl From<AssetCategoryFilterDto> for AssetCategoryFilter {
             AssetCategoryFilterDto::All => Self::All,
             AssetCategoryFilterDto::SourceImage => Self::SourceImage,
             AssetCategoryFilterDto::GeneratedImage => Self::GeneratedImage,
+            AssetCategoryFilterDto::GeneratedVideo => Self::GeneratedVideo,
         }
     }
 }

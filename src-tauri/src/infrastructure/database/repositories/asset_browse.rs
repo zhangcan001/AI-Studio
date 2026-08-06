@@ -18,7 +18,7 @@ impl SqliteAssetBrowseRepository {
 
 const ASSET_BROWSE_SELECT: &str = "SELECT
     id, project_id, type AS asset_type, category, name, original_name,
-    storage_path, thumbnail_path, sha256, mime_type, width, height, file_size,
+    storage_path, thumbnail_path, sha256, mime_type, width, height, duration_ms, file_size,
     source_task_id, metadata_json, created_at, updated_at
     FROM assets";
 
@@ -88,6 +88,7 @@ struct AssetBrowseRow {
     mime_type: Option<String>,
     width: Option<i64>,
     height: Option<i64>,
+    duration_ms: Option<i64>,
     file_size: Option<i64>,
     source_task_id: Option<String>,
     metadata_json: Option<String>,
@@ -105,10 +106,22 @@ impl AssetBrowseRow {
     fn try_into_domain(self) -> Result<Asset, RepositoryError> {
         let width = self
             .width
-            .ok_or_else(|| RepositoryError::serialization("asset width", "missing image width"))?;
-        let height = self.height.ok_or_else(|| {
-            RepositoryError::serialization("asset height", "missing image height")
-        })?;
+            .map(|value| {
+                u32::try_from(value).map_err(|_| {
+                    RepositoryError::serialization("asset width", format!("invalid value {value}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let height = self
+            .height
+            .map(|value| {
+                u32::try_from(value).map_err(|_| {
+                    RepositoryError::serialization("asset height", format!("invalid value {value}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
         let file_size = self.file_size.ok_or_else(|| {
             RepositoryError::serialization("asset file_size", "missing file size")
         })?;
@@ -141,12 +154,12 @@ impl AssetBrowseRow {
             mime_type: self.mime_type.ok_or_else(|| {
                 RepositoryError::serialization("asset mime_type", "missing MIME type")
             })?,
-            width: u32::try_from(width).map_err(|_| {
-                RepositoryError::serialization("asset width", format!("invalid value {width}"))
-            })?,
-            height: u32::try_from(height).map_err(|_| {
-                RepositoryError::serialization("asset height", format!("invalid value {height}"))
-            })?,
+            width,
+            height,
+            duration_ms: self
+                .duration_ms
+                .map(|value| i64_to_u64("asset duration_ms", value))
+                .transpose()?,
             file_size: i64_to_u64("asset file_size", file_size)?,
             source_task_id,
             metadata_json,

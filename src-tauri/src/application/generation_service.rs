@@ -17,7 +17,12 @@ use crate::domain::{
     TaskError, TaskStateMachine, TaskStatus,
 };
 use serde_json::{Map, Number, Value};
-use std::{collections::BTreeMap, error::Error, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    error::Error,
+    fmt,
+    sync::Arc,
+};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -103,6 +108,7 @@ pub struct GenerationService {
     comfy_adapter: Arc<dyn ComfyAdapter>,
     output_collector: Arc<OutputCollector>,
     asset_import_service: Arc<AssetImportService>,
+    asset_repository: Arc<dyn AssetRepository>,
     generation_input_preparer: Arc<GenerationInputPreparer>,
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
@@ -140,8 +146,9 @@ impl GenerationService {
                 asset_repository.clone(),
                 clock.clone(),
             )),
+            asset_repository: asset_repository.clone(),
             generation_input_preparer: Arc::new(GenerationInputPreparer::new(
-                asset_repository,
+                asset_repository.clone(),
                 asset_store,
                 comfy_adapter.clone(),
             )),
@@ -779,16 +786,29 @@ impl GenerationService {
                 .await?;
         }
 
-        let images = match history {
+        let existing_mappings = self
+            .asset_repository
+            .list_output_mappings(&task.id)
+            .await
+            .map_err(GenerationServiceError::Repository)?;
+        let existing_outputs: HashSet<(String, usize)> = existing_mappings
+            .iter()
+            .map(|mapping| (mapping.output_id.clone(), mapping.ordinal as usize))
+            .collect();
+        let outputs = match history {
             Some(history) => {
                 self.output_collector
-                    .collect_from_history(recipe, history)
+                    .collect_outputs_from_history_excluding(recipe, history, &existing_outputs)
                     .await
             }
-            None => self.output_collector.collect(recipe, prompt_id).await,
+            None => {
+                self.output_collector
+                    .collect_outputs_excluding(recipe, prompt_id, &existing_outputs)
+                    .await
+            }
         };
-        let images = match images {
-            Ok(images) => images,
+        let outputs = match outputs {
+            Ok(outputs) => outputs,
             Err(error) => {
                 let original = GenerationServiceError::OutputCollection(error);
                 return Err(self
@@ -796,15 +816,17 @@ impl GenerationService {
                     .await);
             }
         };
-        if let Err(error) = self
-            .asset_import_service
-            .import(project_id, &task.id, &images)
-            .await
-        {
-            let original = GenerationServiceError::AssetImport(error);
-            return Err(self
-                .fail_and_preserve(task, task_error_from_output(&original), original)
-                .await);
+        if !outputs.is_empty() {
+            if let Err(error) = self
+                .asset_import_service
+                .import_outputs(project_id, &task.id, outputs)
+                .await
+            {
+                let original = GenerationServiceError::AssetImport(error);
+                return Err(self
+                    .fail_and_preserve(task, task_error_from_output(&original), original)
+                    .await);
+            }
         }
 
         let previous_status = task.status;
@@ -1174,6 +1196,7 @@ mod tests {
                         subfolder: String::new(),
                         folder_type: "output".to_owned(),
                     }],
+                    saved_results: Vec::new(),
                 },
             )]),
         }

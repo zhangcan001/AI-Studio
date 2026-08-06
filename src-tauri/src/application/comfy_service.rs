@@ -4,7 +4,6 @@ use crate::application::ports::{
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::Value;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -40,14 +39,12 @@ pub struct CapabilitySummary {
 pub struct CapabilityCache {
     pub node_count: usize,
     pub node_classes: HashSet<String>,
-    pub raw_object_info: Value,
     pub captured_at: DateTime<Utc>,
 }
 
 impl CapabilityCache {
     fn summary(&self) -> CapabilitySummary {
         debug_assert_eq!(self.node_count, self.node_classes.len());
-        debug_assert!(self.raw_object_info.is_object());
 
         CapabilitySummary {
             node_count: self.node_classes.len(),
@@ -128,7 +125,6 @@ impl ComfyService {
         let cache = CapabilityCache {
             node_count: node_classes.len(),
             node_classes,
-            raw_object_info: object_info,
             captured_at: Utc::now(),
         };
         let summary = cache.summary();

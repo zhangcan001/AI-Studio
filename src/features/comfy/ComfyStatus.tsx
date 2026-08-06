@@ -20,7 +20,7 @@ export function ComfyStatus({
   onReconnect,
   onRefreshCapabilities,
 }: Props) {
-  const device = status?.devices[0];
+  const devices = status?.devices ?? [];
   const label = status?.status === "CONNECTED"
     ? "Connected"
     : status?.status === "INCOMPATIBLE"
@@ -40,8 +40,8 @@ export function ComfyStatus({
       <div className="comfy-status-grid">
         <div><span>Endpoint</span><strong>{status?.endpoint ?? "--"}</strong></div>
         <div><span>Version</span><strong>{status?.comfyuiVersion ?? "--"}</strong></div>
-        <div><span>GPU</span><strong>{device?.name ?? "--"}</strong></div>
-        <div><span>VRAM</span><strong>{device ? `${formatBytes(device.vramFree)} / ${formatBytes(device.vramTotal)}` : "--"}</strong></div>
+        <div><span>GPU</span><strong>{devices.length ? devices.map((device) => device.name ?? "Unnamed GPU").join(" · ") : "--"}</strong></div>
+        <div><span>VRAM</span><strong>{devices.length ? devices.map((device) => `${formatBytes(device.vramFree)} free / ${formatBytes(device.vramTotal)}`).join(" · ") : "--"}</strong></div>
         <div><span>Node Count</span><strong>{status?.capability?.nodeCount ?? "--"}</strong></div>
       </div>
       <div className="comfy-status-actions">

@@ -12,6 +12,7 @@ import type {
 import type { TaskView } from "../types/task";
 import type { ProjectView } from "../types/project";
 import type { PresetView } from "../types/preset";
+import { buildAssetMediaUrl } from "./mediaUrl";
 
 export function ping(): Promise<string> {
   return invoke<string>("ping");
@@ -113,6 +114,10 @@ export function readAssetImage(projectId: string, assetId: string): Promise<Arra
 
 export function readAssetThumbnail(projectId: string, assetId: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("asset_read_thumbnail", { projectId, assetId });
+}
+
+export function getAssetMediaUrl(projectId: string, assetId: string): string {
+  return buildAssetMediaUrl(projectId, assetId);
 }
 
 export function getAsset(projectId: string, assetId: string): Promise<AssetView> {

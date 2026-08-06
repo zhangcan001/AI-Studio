@@ -125,6 +125,8 @@ struct OutputDefinitionDto {
 enum OutputTypeDto {
     #[serde(rename = "image")]
     Image,
+    #[serde(rename = "video")]
+    Video,
 }
 
 impl RecipeFileDto {
@@ -159,6 +161,7 @@ impl RecipeFileDto {
                 id: output.id,
                 output_type: match output.output_type {
                     OutputTypeDto::Image => OutputType::Image,
+                    OutputTypeDto::Video => OutputType::Video,
                 },
                 node: output.node,
                 required: output.required,
@@ -246,7 +249,7 @@ impl SeedDefaultDto {
 #[cfg(test)]
 mod tests {
     use super::RecipeParser;
-    use crate::domain::{InputDefinition, RecipeError, SeedDefault};
+    use crate::domain::{InputDefinition, OutputType, RecipeError, SeedDefault};
 
     const VALID_RECIPE: &str = r#"
 schema_version: 1
@@ -380,6 +383,13 @@ outputs: []
             })
         ));
         assert_eq!(recipe.bindings[0].item_index, Some(1));
+    }
+
+    #[test]
+    fn parses_video_output_type_without_workflow_specific_conditionals() {
+        let yaml = VALID_RECIPE.replace("type: image", "type: video");
+        let recipe = RecipeParser::parse(&yaml).expect("video recipe should parse");
+        assert_eq!(recipe.outputs[0].output_type, OutputType::Video);
     }
 
     #[test]

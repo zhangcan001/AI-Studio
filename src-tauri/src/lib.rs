@@ -24,6 +24,7 @@ use application::{
     comfy_service::ComfyService,
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
+    media_protocol::MediaProtocolService,
     ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
     preset_service::PresetService,
     project_bootstrap::DefaultProjectBootstrap,
@@ -47,7 +48,7 @@ use infrastructure::{
     tauri::TauriTaskUpdateSink,
     time::SystemClock,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -68,9 +69,69 @@ fn initialize_logging() {
 }
 
 fn run_application() -> Result<(), AppError> {
+    let media_protocol_slot: Arc<Mutex<Option<Arc<MediaProtocolService>>>> =
+        Arc::new(Mutex::new(None));
+    let setup_media_protocol_slot = Arc::clone(&media_protocol_slot);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .register_asynchronous_uri_scheme_protocol(
+            "aistudio-media",
+            move |_context, request, responder| {
+                let slot = Arc::clone(&media_protocol_slot);
+                std::thread::spawn(move || {
+                    let response = if request.uri().path() != "/video" {
+                        application::media_protocol::MediaResponse {
+                            status: 404,
+                            headers: Default::default(),
+                            body: Vec::new(),
+                        }
+                    } else {
+                        let project_id = query_param(request.uri().query(), "projectId");
+                        let asset_id = query_param(request.uri().query(), "assetId");
+                        let range = request
+                            .headers()
+                            .get("range")
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned);
+                        let Some(protocol) = slot.lock().ok().and_then(|value| value.clone())
+                        else {
+                            responder.respond(
+                                tauri::http::Response::builder()
+                                    .status(503)
+                                    .body(Vec::new())
+                                    .expect("protocol response builder should accept empty body"),
+                            );
+                            return;
+                        };
+                        match (project_id, asset_id) {
+                            (Some(project_id), Some(asset_id)) => {
+                                tauri::async_runtime::block_on(protocol.handle(
+                                    request.method().as_str(),
+                                    &project_id,
+                                    &asset_id,
+                                    range.as_deref(),
+                                ))
+                            }
+                            _ => application::media_protocol::MediaResponse {
+                                status: 404,
+                                headers: Default::default(),
+                                body: Vec::new(),
+                            },
+                        }
+                    };
+                    let mut builder = tauri::http::Response::builder().status(response.status);
+                    for (name, value) in response.headers {
+                        builder = builder.header(name, value);
+                    }
+                    responder.respond(
+                        builder
+                            .body(response.body)
+                            .expect("protocol response builder should accept media body"),
+                    );
+                });
+            },
+        )
+        .setup(move |app| {
             let data_root = app
                 .path()
                 .local_data_dir()
@@ -182,11 +243,15 @@ fn run_application() -> Result<(), AppError> {
             let task_query_service = Arc::new(TaskQueryService::new(
                 Arc::new(SqliteTaskRepository::new(database_pool.clone())),
                 asset_repository.clone(),
+                definition_repository.clone(),
             ));
-            let asset_query_service = Arc::new(AssetQueryService::new(
-                asset_repository.clone(),
-                asset_store.clone(),
-            ));
+            let asset_query_service = Arc::new(
+                AssetQueryService::new(asset_repository.clone(), asset_store.clone())
+                    .with_output_order_repositories(
+                        Arc::new(SqliteTaskRepository::new(database_pool.clone())),
+                        definition_repository.clone(),
+                    ),
+            );
             let asset_library_service = Arc::new(AssetLibraryService::new(asset_browse_repository));
             let task_history_service = Arc::new(TaskHistoryService::new(
                 task_history_repository,
@@ -217,16 +282,23 @@ fn run_application() -> Result<(), AppError> {
                 task_update_sink,
             ));
             let project_service = Arc::new(ProjectService::new(
-                project_repository,
+                project_repository.clone(),
                 project_directory_store,
                 clock.clone(),
             ));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository,
                 definition_repository,
-                asset_repository,
+                asset_repository.clone(),
                 clock,
             ));
+            if let Ok(mut slot) = setup_media_protocol_slot.lock() {
+                *slot = Some(Arc::new(MediaProtocolService::new(
+                    asset_repository.clone(),
+                    asset_store.clone(),
+                    project_repository.clone(),
+                )));
+            }
             let startup_recovery = task_recovery_service.clone();
             app.manage(AppState::new(
                 data_dirs,
@@ -293,4 +365,38 @@ fn run_application() -> Result<(), AppError> {
         ])
         .run(tauri::generate_context!())
         .map_err(|error| AppError::initialization(format!("Tauri runtime failed: {error}")))
+}
+
+fn query_param(query: Option<&str>, key: &str) -> Option<String> {
+    query?
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .find(|(candidate, _)| *candidate == key)
+        .and_then(|(_, value)| percent_decode(value))
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(value.len());
+    let mut chars = value.as_bytes().iter().copied();
+    while let Some(byte) = chars.next() {
+        match byte {
+            b'+' => bytes.push(b' '),
+            b'%' => {
+                let high = chars.next().and_then(hex_value)?;
+                let low = chars.next().and_then(hex_value)?;
+                bytes.push((high << 4) | low);
+            }
+            other => bytes.push(other),
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }

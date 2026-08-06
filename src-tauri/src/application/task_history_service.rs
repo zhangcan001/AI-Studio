@@ -2,7 +2,7 @@ use crate::application::asset_query_service::{AssetSummaryView, AssetView};
 use crate::application::pagination::PageCursor;
 use crate::application::ports::{
     AssetRepository, GenerationDefinitionRepository, GenerationSnapshotRepository, RepositoryError,
-    TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository,
+    TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository, TaskOutputAssetMapping,
 };
 use crate::compiler::RecipeParser;
 use crate::domain::{AssetType, InputDefinition, Recipe, TaskId};
@@ -73,13 +73,7 @@ impl TaskHistoryService {
             .find_detail(project_id, &task_id)
             .await?
             .ok_or_else(|| TaskHistoryError::NotFound(task_id.as_str().to_owned()))?;
-        let output_assets = self
-            .asset_repository
-            .list_by_source_task(&task_id)
-            .await?
-            .into_iter()
-            .map(AssetView::from)
-            .collect();
+        let output_assets = self.list_output_assets(&record).await?;
         let reusable_draft = match self.build_draft(&record).await {
             Ok(draft) => ReusableDraftAvailabilityView {
                 available: true,
@@ -115,6 +109,46 @@ impl TaskHistoryService {
             output_assets,
             reusable_draft,
         })
+    }
+
+    async fn list_output_assets(
+        &self,
+        record: &TaskHistoryRecord,
+    ) -> Result<Vec<AssetSummaryView>, TaskHistoryError> {
+        let mut mapped = self
+            .asset_repository
+            .list_mapped_assets(&record.task.id)
+            .await?;
+        if mapped.is_empty() {
+            return Ok(self
+                .asset_repository
+                .list_by_source_task(&record.task.id)
+                .await?
+                .into_iter()
+                .filter(|asset| asset.project_id == record.task.project_id)
+                .map(AssetView::from)
+                .collect());
+        }
+
+        let output_order = self
+            .definition_repository
+            .find(&record.task.workflow_version_id, &record.task.recipe_id)
+            .await?
+            .and_then(|definition| RecipeParser::parse(&definition.recipe_yaml).ok())
+            .map(|recipe| {
+                recipe
+                    .outputs
+                    .into_iter()
+                    .map(|output| output.id)
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+        mapped.sort_by(|(left, _), (right, _)| compare_mappings(left, right, &output_order));
+        Ok(mapped
+            .into_iter()
+            .filter(|(_, asset)| asset.project_id == record.task.project_id)
+            .map(|(_, asset)| AssetView::from(asset))
+            .collect())
     }
 
     pub async fn get_reusable_draft(
@@ -210,6 +244,25 @@ impl TaskHistoryService {
             missing_asset_ids,
         })
     }
+}
+
+fn compare_mappings(
+    left: &TaskOutputAssetMapping,
+    right: &TaskOutputAssetMapping,
+    output_order: &[String],
+) -> std::cmp::Ordering {
+    let left_rank = output_order
+        .iter()
+        .position(|output_id| output_id == &left.output_id)
+        .unwrap_or(usize::MAX);
+    let right_rank = output_order
+        .iter()
+        .position(|output_id| output_id == &right.output_id)
+        .unwrap_or(usize::MAX);
+    left_rank
+        .cmp(&right_rank)
+        .then_with(|| left.ordinal.cmp(&right.ordinal))
+        .then_with(|| left.output_id.cmp(&right.output_id))
 }
 
 fn parse_task_id(value: &str) -> Result<TaskId, TaskHistoryError> {

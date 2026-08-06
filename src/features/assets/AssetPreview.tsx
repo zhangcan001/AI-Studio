@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { readAssetImage } from "../../services/tauriClient";
+import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 
 interface Props {
@@ -10,11 +10,31 @@ interface Props {
 
 export function AssetPreview({ projectId, asset, onClose }: Props) {
   const [url, setUrl] = useState<string>();
+  const [posterUrl, setPosterUrl] = useState<string>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     let active = true;
     let objectUrl: string | undefined;
+    let posterObjectUrl: string | undefined;
+    const isVideo = asset.assetType === "video" || asset.category === "generated_video";
+    if (isVideo) {
+      setUrl(getAssetMediaUrl(projectId, asset.id));
+      setError(undefined);
+      if (asset.thumbnailAvailable) {
+        void readAssetThumbnail(projectId, asset.id)
+          .then((bytes) => {
+            if (!active) return;
+            posterObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+            setPosterUrl(posterObjectUrl);
+          })
+          .catch(() => undefined);
+      }
+      return () => {
+        active = false;
+        if (posterObjectUrl) URL.revokeObjectURL(posterObjectUrl);
+      };
+    }
     void readAssetImage(projectId, asset.id)
       .then((bytes) => {
         if (!active) return;
@@ -27,8 +47,11 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (posterObjectUrl) URL.revokeObjectURL(posterObjectUrl);
     };
-  }, [asset.id, asset.mimeType, projectId]);
+  }, [asset.assetType, asset.category, asset.id, asset.mimeType, asset.thumbnailAvailable, projectId]);
+
+  const isVideo = asset.assetType === "video" || asset.category === "generated_video";
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -57,12 +80,20 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
           </button>
         </div>
         <div className="asset-preview-image">
-          {url ? <img src={url} alt={asset.name} /> : <p>{error ?? "Loading preview..."}</p>}
+          {isVideo && url ? (
+            <video src={url} poster={posterUrl} controls preload="metadata" playsInline aria-label={asset.name} />
+          ) : url ? <img src={url} alt={asset.name} /> : <p>{error ?? "Loading preview..."}</p>}
         </div>
         <p className="asset-preview-meta">
-          {asset.originalName} · {asset.width} × {asset.height} · {asset.mimeType}
+          {asset.originalName} · {isVideo ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {asset.mimeType}
         </p>
       </section>
     </div>
   );
+}
+
+function formatDuration(value?: number | null): string {
+  if (!value || value < 0) return "Duration unavailable";
+  const totalSeconds = Math.round(value / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
