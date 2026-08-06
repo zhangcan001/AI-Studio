@@ -12,6 +12,7 @@ import { ImageOutput } from "./ImageOutput";
 import { TaskProgressCard } from "./TaskProgressCard";
 
 interface Props {
+  projectId: string;
   catalog: RecipeViewModel[];
   comfyConnected: boolean;
   taskEventsReady: boolean;
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export function GenerationStudio({
+  projectId,
   catalog,
   comfyConnected,
   taskEventsReady,
@@ -48,6 +50,11 @@ export function GenerationStudio({
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    setMissingImageFields(new Set());
+    setNotice(null);
+  }, [projectId]);
 
   useEffect(() => {
     const next = selectedWorkflow && catalog.some(
@@ -110,7 +117,7 @@ export function GenerationStudio({
     setNotice(null);
     try {
       const task = await createGeneration({
-        projectId: "prj_default",
+        projectId,
         workflowVersionId: selectedWorkflow.workflowVersionId,
         recipeId: selectedWorkflow.recipeId,
         values,
@@ -128,7 +135,7 @@ export function GenerationStudio({
     setCancelling(true);
     setNotice(null);
     try {
-      const task = await cancelTask(currentTask.id);
+      const task = await cancelTask(projectId, currentTask.id);
       useTaskStore.getState().upsertTask(task);
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -189,7 +196,7 @@ export function GenerationStudio({
               validationErrors={validationErrors}
               onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
               onGenerate={() => void generate()}
-              projectId="prj_default"
+              projectId={projectId}
               onImageAssetAvailabilityChange={handleImageAvailabilityChange}
             />
             {!comfyConnected && <p className="disabled-note">Connect ComfyUI before generating.</p>}
@@ -214,7 +221,7 @@ export function GenerationStudio({
         cancelling={cancelling}
         onCancel={() => void cancelCurrentTask()}
       />
-      <ImageOutput task={currentTask} />
+      <ImageOutput projectId={projectId} task={currentTask} />
     </>
   );
 }

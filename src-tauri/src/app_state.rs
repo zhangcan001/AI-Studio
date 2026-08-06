@@ -3,6 +3,7 @@ use crate::application::asset_query_service::AssetQueryService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
+use crate::application::project_service::ProjectService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
 use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::application::task_history_service::TaskHistoryService;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub source_asset_import_service: Arc<SourceAssetImportService>,
     pub task_cancellation_service: Arc<TaskCancellationService>,
     pub task_recovery_service: Arc<TaskRecoveryService>,
+    pub project_service: Arc<ProjectService>,
 }
 
 impl AppState {
@@ -41,6 +43,7 @@ impl AppState {
         source_asset_import_service: Arc<SourceAssetImportService>,
         task_cancellation_service: Arc<TaskCancellationService>,
         task_recovery_service: Arc<TaskRecoveryService>,
+        project_service: Arc<ProjectService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -55,6 +58,7 @@ impl AppState {
             source_asset_import_service,
             task_cancellation_service,
             task_recovery_service,
+            project_service,
         }
     }
 }

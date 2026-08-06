@@ -193,6 +193,10 @@ mod tests {
 
     #[async_trait]
     impl ProjectRepository for FakeProjectRepository {
+        async fn list(&self) -> Result<Vec<ProjectRecord>, RepositoryError> {
+            Ok(Vec::new())
+        }
+
         async fn find_by_id(
             &self,
             project_id: &str,
@@ -204,6 +208,27 @@ mod tests {
                 root_path: self.root.clone(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+            }))
+        }
+
+        async fn insert(&self, _project: &ProjectRecord) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        async fn update_metadata(
+            &self,
+            project_id: &str,
+            name: &str,
+            description: Option<&str>,
+            updated_at: DateTime<Utc>,
+        ) -> Result<Option<ProjectRecord>, RepositoryError> {
+            Ok(Some(ProjectRecord {
+                id: project_id.to_owned(),
+                name: name.to_owned(),
+                description: description.map(str::to_owned),
+                root_path: self.root.clone(),
+                created_at: updated_at,
+                updated_at,
             }))
         }
 

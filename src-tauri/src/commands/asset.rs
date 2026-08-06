@@ -15,11 +15,23 @@ use tauri_plugin_dialog::DialogExt;
 #[tauri::command(rename_all = "camelCase")]
 pub async fn asset_list_by_task(
     state: State<'_, AppState>,
+    project_id: String,
     task_id: String,
 ) -> Result<Vec<crate::application::asset_query_service::AssetView>, AppError> {
+    let task_exists = state
+        .task_query_service
+        .get(&project_id, &task_id)
+        .await
+        .map_err(map_task_query_error)?
+        .is_some();
+    if !task_exists {
+        return Err(AppError::task_not_found(format!(
+            "task {task_id} was not found"
+        )));
+    }
     state
         .asset_query_service
-        .list_by_task(&task_id)
+        .list_by_task(&project_id, &task_id)
         .await
         .map_err(map_asset_error)
 }
@@ -130,14 +142,27 @@ pub async fn asset_pick_and_import_image(
 #[tauri::command(rename_all = "camelCase")]
 pub async fn asset_read_image(
     state: State<'_, AppState>,
+    project_id: String,
     asset_id: String,
 ) -> Result<Response, AppError> {
     let asset = state
         .asset_query_service
-        .read_image(&asset_id)
+        .read_image(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)?;
     Ok(Response::new(asset.bytes))
+}
+
+fn map_task_query_error(error: crate::application::task_query_service::TaskQueryError) -> AppError {
+    match error {
+        crate::application::task_query_service::TaskQueryError::InvalidProjectId(message)
+        | crate::application::task_query_service::TaskQueryError::InvalidTaskId(message) => {
+            AppError::invalid_input(message)
+        }
+        crate::application::task_query_service::TaskQueryError::Repository(error) => {
+            super::map_repository_error(&error)
+        }
+    }
 }
 
 fn map_asset_error(error: AssetQueryError) -> AppError {

@@ -8,7 +8,7 @@ interface LoadedAsset {
   url: string;
 }
 
-export function ImageOutput({ task }: { task?: TaskView }) {
+export function ImageOutput({ projectId, task }: { projectId: string; task?: TaskView }) {
   const [images, setImages] = useState<LoadedAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,11 +22,11 @@ export function ImageOutput({ task }: { task?: TaskView }) {
       return () => undefined;
     }
 
-    void listAssetsByTask(task.id)
+    void listAssetsByTask(projectId, task.id)
       .then(async (assets) => {
         const loaded = await Promise.all(
           assets.map(async (asset) => {
-            const bytes = await readAssetImage(asset.id);
+            const bytes = await readAssetImage(projectId, asset.id);
             const url = URL.createObjectURL(new Blob([bytes], { type: asset.mimeType }));
             urls.push(url);
             return { asset, url };
@@ -48,7 +48,7 @@ export function ImageOutput({ task }: { task?: TaskView }) {
       cancelled = true;
       urls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [task]);
+  }, [projectId, task]);
 
   if (!task || task.status !== "SUCCEEDED") {
     return (

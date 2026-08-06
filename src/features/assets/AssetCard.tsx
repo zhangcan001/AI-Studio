@@ -3,11 +3,12 @@ import { readAssetImage } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 
 interface Props {
+  projectId: string;
   asset: AssetView;
   onSelect: (asset: AssetView) => void;
 }
 
-export function AssetCard({ asset, onSelect }: Props) {
+export function AssetCard({ projectId, asset, onSelect }: Props) {
   const cardRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>();
@@ -35,7 +36,7 @@ export function AssetCard({ asset, onSelect }: Props) {
     if (!visible) return () => undefined;
     let active = true;
     let url: string | undefined;
-    void readAssetImage(asset.id)
+    void readAssetImage(projectId, asset.id)
       .then((bytes) => {
         if (!active) return;
         url = URL.createObjectURL(new Blob([bytes], { type: asset.mimeType }));
@@ -48,7 +49,7 @@ export function AssetCard({ asset, onSelect }: Props) {
       active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [asset.id, asset.mimeType, visible]);
+  }, [asset.id, asset.mimeType, projectId, visible]);
 
   return (
     <button ref={cardRef} type="button" className="asset-library-card" onClick={() => onSelect(asset)}>

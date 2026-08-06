@@ -18,6 +18,19 @@ impl SqliteProjectRepository {
 
 #[async_trait]
 impl ProjectRepository for SqliteProjectRepository {
+    async fn list(&self) -> Result<Vec<ProjectRecord>, RepositoryError> {
+        let rows = sqlx::query_as::<_, ProjectRow>(
+            "SELECT id, name, description, root_path, created_at, updated_at
+             FROM projects
+             ORDER BY updated_at DESC, created_at DESC, id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter().map(ProjectRow::try_into_domain).collect()
+    }
+
     async fn find_by_id(&self, project_id: &str) -> Result<Option<ProjectRecord>, RepositoryError> {
         let row = sqlx::query_as::<_, ProjectRow>(
             "SELECT id, name, description, root_path, created_at, updated_at
@@ -29,6 +42,49 @@ impl ProjectRepository for SqliteProjectRepository {
         .map_err(map_sqlx_error)?;
 
         row.map(ProjectRow::try_into_domain).transpose()
+    }
+
+    async fn insert(&self, project: &ProjectRecord) -> Result<(), RepositoryError> {
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&project.id)
+        .bind(&project.name)
+        .bind(&project.description)
+        .bind(project.root_path.to_string_lossy().to_string())
+        .bind(format_datetime(project.created_at))
+        .bind(format_datetime(project.updated_at))
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn update_metadata(
+        &self,
+        project_id: &str,
+        name: &str,
+        description: Option<&str>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Option<ProjectRecord>, RepositoryError> {
+        let result = sqlx::query(
+            "UPDATE projects
+             SET name = ?, description = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(name)
+        .bind(description)
+        .bind(format_datetime(updated_at))
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.find_by_id(project_id).await
     }
 
     async fn get_storage_root(&self, project_id: &str) -> Result<Option<PathBuf>, RepositoryError> {
@@ -97,7 +153,7 @@ impl ProjectRow {
 #[cfg(test)]
 mod tests {
     use super::SqliteProjectRepository;
-    use crate::application::ports::ProjectRepository;
+    use crate::application::ports::{ProjectRecord, ProjectRepository};
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use sqlx::SqlitePool;
     use std::path::PathBuf;
@@ -161,5 +217,38 @@ mod tests {
                 .expect("project count"),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn inserts_lists_and_updates_project_metadata_without_changing_root() {
+        let (_directory, _pool, repository) = setup().await;
+        let root = PathBuf::from("C:/created-project");
+        let created_at = chrono::Utc::now();
+        let project = ProjectRecord {
+            id: "prj_created".to_owned(),
+            name: "Created".to_owned(),
+            description: Some("Initial".to_owned()),
+            root_path: root.clone(),
+            created_at,
+            updated_at: created_at,
+        };
+
+        repository.insert(&project).await.unwrap();
+        let listed = repository.list().await.unwrap();
+        assert!(listed.iter().any(|item| item.id == "prj_created"));
+
+        let updated = repository
+            .update_metadata(
+                "prj_created",
+                "Renamed",
+                Some("Updated"),
+                created_at + chrono::Duration::seconds(1),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.description.as_deref(), Some("Updated"));
+        assert_eq!(updated.root_path, root);
     }
 }

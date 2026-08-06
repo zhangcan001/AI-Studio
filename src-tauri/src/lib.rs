@@ -26,6 +26,7 @@ use application::{
     generation_service::GenerationService,
     ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
     project_bootstrap::DefaultProjectBootstrap,
+    project_service::ProjectService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
     task_execution_registry::TaskExecutionRegistry,
@@ -38,7 +39,10 @@ use error::AppError;
 use infrastructure::{
     comfy::ComfyHttpAdapter,
     database,
-    filesystem::{AppDataDirs, FileSystemAssetStore, FileSystemWorkflowLibrarySource},
+    filesystem::{
+        AppDataDirs, FileSystemAssetStore, FileSystemProjectDirectoryStore,
+        FileSystemWorkflowLibrarySource,
+    },
     tauri::TauriTaskUpdateSink,
     time::SystemClock,
 };
@@ -108,6 +112,10 @@ fn run_application() -> Result<(), AppError> {
                     database_pool.clone(),
                 ));
             let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
+            let project_directory_store: Arc<dyn application::ports::ProjectDirectoryStore> =
+                Arc::new(FileSystemProjectDirectoryStore::new(
+                    data_dirs.projects.clone(),
+                ));
 
             let project_bootstrap =
                 DefaultProjectBootstrap::new(project_repository.clone(), clock.clone());
@@ -199,10 +207,15 @@ fn run_application() -> Result<(), AppError> {
                 snapshot_repository,
                 asset_repository,
                 comfy_adapter,
-                project_repository,
+                project_repository.clone(),
                 asset_store,
-                clock,
+                clock.clone(),
                 task_update_sink,
+            ));
+            let project_service = Arc::new(ProjectService::new(
+                project_repository,
+                project_directory_store,
+                clock,
             ));
             let startup_recovery = task_recovery_service.clone();
             app.manage(AppState::new(
@@ -218,6 +231,7 @@ fn run_application() -> Result<(), AppError> {
                 source_asset_import_service,
                 task_cancellation_service,
                 task_recovery_service,
+                project_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -244,6 +258,9 @@ fn run_application() -> Result<(), AppError> {
             commands::workflow_library::workflow_library_refresh,
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
+            commands::project::project_list,
+            commands::project::project_create,
+            commands::project::project_update,
             commands::task::task_get,
             commands::task::task_list_recent,
             commands::task::task_cancel,

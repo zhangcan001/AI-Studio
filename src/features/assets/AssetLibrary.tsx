@@ -1,30 +1,33 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { assetLibraryPage } from "../../services/tauriClient";
 import type { AssetCategoryFilter, AssetView, PageCursor } from "../../types/asset";
 import { AssetGrid } from "./AssetGrid";
 import { AssetPreview } from "./AssetPreview";
 
-const PROJECT_ID = "prj_default";
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "ALL", label: "All" },
   { value: "SOURCE_IMAGE", label: "Source images" },
   { value: "GENERATED_IMAGE", label: "Generated images" },
 ];
 
-export function AssetLibrary() {
+export function AssetLibrary({ projectId }: { projectId: string }) {
   const [category, setCategory] = useState<AssetCategoryFilter>("ALL");
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
   const [selectedAsset, setSelectedAsset] = useState<AssetView>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const requestVersion = useRef(0);
 
   const load = useCallback(
     async (reset: boolean) => {
+      const version = ++requestVersion.current;
+      const requestedCursor = reset ? undefined : cursor;
       setLoading(true);
       setError(undefined);
       try {
-        const page = await assetLibraryPage(PROJECT_ID, category, reset ? undefined : cursor, 30);
+        const page = await assetLibraryPage(projectId, category, requestedCursor, 30);
+        if (requestVersion.current !== version) return;
         setAssets((current) =>
           reset
             ? page.items
@@ -32,28 +35,44 @@ export function AssetLibrary() {
         );
         setCursor(page.nextCursor);
       } catch (loadError: unknown) {
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        if (requestVersion.current === version) {
+          setError(loadError instanceof Error ? loadError.message : String(loadError));
+        }
       } finally {
-        setLoading(false);
+        if (requestVersion.current === version) setLoading(false);
       }
     },
-    [category, cursor],
+    [category, cursor, projectId],
   );
 
   useEffect(() => {
+    const version = ++requestVersion.current;
     setAssets([]);
     setCursor(undefined);
-    void assetLibraryPage(PROJECT_ID, category, undefined, 30)
+    setSelectedAsset(undefined);
+    setError(undefined);
+    setLoading(true);
+    void assetLibraryPage(projectId, category, undefined, 30)
       .then((page) => {
+        if (requestVersion.current !== version) return;
         setAssets(page.items);
         setCursor(page.nextCursor);
       })
-      .catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : String(loadError)))
-      .finally(() => setLoading(false));
-  }, [category]);
+      .catch((loadError: unknown) => {
+        if (requestVersion.current === version) {
+          setError(loadError instanceof Error ? loadError.message : String(loadError));
+        }
+      })
+      .finally(() => {
+        if (requestVersion.current === version) setLoading(false);
+      });
+    return () => {
+      requestVersion.current += 1;
+    };
+  }, [category, projectId]);
 
   return (
-    <section className="workspace-panel">
+    <section className="workspace-panel" aria-busy={loading}>
       <div className="section-heading workspace-heading">
         <div>
           <span className="section-label">Assets</span>
@@ -77,13 +96,15 @@ export function AssetLibrary() {
         ))}
       </div>
       {error && <p className="error-message">Unable to load assets: {error}</p>}
-      <AssetGrid assets={assets} onSelect={setSelectedAsset} />
+      <AssetGrid projectId={projectId} assets={assets} onSelect={setSelectedAsset} />
       {cursor && (
         <button type="button" className="load-more-button" onClick={() => void load(false)} disabled={loading}>
           {loading ? "Loading..." : "Load more"}
         </button>
       )}
-      {selectedAsset && <AssetPreview asset={selectedAsset} onClose={() => setSelectedAsset(undefined)} />}
+      {selectedAsset && (
+        <AssetPreview projectId={projectId} asset={selectedAsset} onClose={() => setSelectedAsset(undefined)} />
+      )}
     </section>
   );
 }

@@ -23,6 +23,7 @@ export interface TaskError {
 
 export interface TaskView {
   id: string;
+  projectId: string;
   status: TaskStatus;
   promptId?: string;
   queueNumber?: number;

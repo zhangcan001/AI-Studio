@@ -15,7 +15,19 @@ pub struct ProjectRecord {
 
 #[async_trait]
 pub trait ProjectRepository: Send + Sync {
+    async fn list(&self) -> Result<Vec<ProjectRecord>, RepositoryError>;
+
     async fn find_by_id(&self, project_id: &str) -> Result<Option<ProjectRecord>, RepositoryError>;
+
+    async fn insert(&self, project: &ProjectRecord) -> Result<(), RepositoryError>;
+
+    async fn update_metadata(
+        &self,
+        project_id: &str,
+        name: &str,
+        description: Option<&str>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<Option<ProjectRecord>, RepositoryError>;
 
     async fn get_storage_root(&self, project_id: &str) -> Result<Option<PathBuf>, RepositoryError>;
 

@@ -20,7 +20,12 @@ impl AssetQueryService {
         }
     }
 
-    pub async fn list_by_task(&self, task_id: &str) -> Result<Vec<AssetView>, AssetQueryError> {
+    pub async fn list_by_task(
+        &self,
+        project_id: &str,
+        task_id: &str,
+    ) -> Result<Vec<AssetView>, AssetQueryError> {
+        validate_project_id(project_id)?;
         let task_id = TaskId::parse(task_id.to_owned())
             .map_err(|error| AssetQueryError::InvalidTaskId(error.to_string()))?;
         Ok(self
@@ -28,6 +33,7 @@ impl AssetQueryService {
             .list_by_source_task(&task_id)
             .await?
             .into_iter()
+            .filter(|asset| asset.project_id == project_id)
             .map(AssetView::from)
             .collect())
     }
@@ -74,7 +80,12 @@ impl AssetQueryService {
         Ok(AssetSummaryView::from(asset))
     }
 
-    pub async fn read_image(&self, asset_id: &str) -> Result<AssetBinary, AssetQueryError> {
+    pub async fn read_image(
+        &self,
+        project_id: &str,
+        asset_id: &str,
+    ) -> Result<AssetBinary, AssetQueryError> {
+        validate_project_id(project_id)?;
         let asset_id = AssetId::parse(asset_id.to_owned())
             .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
         let asset = self
@@ -82,6 +93,9 @@ impl AssetQueryService {
             .find_by_id(&asset_id)
             .await?
             .ok_or_else(|| AssetQueryError::NotFound(asset_id.as_str().to_owned()))?;
+        if asset.project_id != project_id {
+            return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
+        }
         if asset.asset_type != AssetType::Image {
             return Err(AssetQueryError::NotImage(asset_id.as_str().to_owned()));
         }
@@ -92,6 +106,15 @@ impl AssetQueryService {
             .map_err(AssetQueryError::Read)?;
         Ok(AssetBinary { bytes })
     }
+}
+
+fn validate_project_id(project_id: &str) -> Result<(), AssetQueryError> {
+    if project_id.trim().is_empty() {
+        return Err(AssetQueryError::InvalidProjectId(
+            "project id must not be empty".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -166,16 +189,50 @@ impl From<RepositoryError> for AssetQueryError {
 #[cfg(test)]
 mod tests {
     use super::{AssetQueryError, AssetQueryService};
-    use crate::application::ports::{AssetRepository, TaskRepository};
+    use crate::application::ports::{
+        AssetRepository, AssetStore, AssetStoreError, StoredAssetFile, TaskRepository,
+    };
     use crate::domain::{Asset, AssetId, Task};
     use crate::infrastructure::database::{
         initialize, repositories::test_support, SqliteAssetRepository, SqliteTaskRepository,
     };
     use crate::infrastructure::filesystem::FileSystemAssetStore;
+    use async_trait::async_trait;
     use chrono::{TimeZone, Utc};
     use serde_json::json;
-    use std::sync::Arc;
+    use std::path::Path;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use tempfile::tempdir;
+
+    #[derive(Clone)]
+    struct CountingAssetStore {
+        reads: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl AssetStore for CountingAssetStore {
+        async fn write_image(
+            &self,
+            _project_root: &Path,
+            _asset_id: &AssetId,
+            _extension: &str,
+            _bytes: &[u8],
+        ) -> Result<StoredAssetFile, AssetStoreError> {
+            unreachable!()
+        }
+
+        async fn delete(&self, _path: &Path) -> Result<(), AssetStoreError> {
+            unreachable!()
+        }
+
+        async fn read(&self, _path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+    }
 
     #[tokio::test]
     async fn reads_image_by_asset_id_and_rejects_unknown_asset() {
@@ -220,11 +277,15 @@ mod tests {
             AssetQueryService::new(Arc::new(repository), Arc::new(FileSystemAssetStore::new()));
 
         assert_eq!(
-            service.read_image("ast_read_test").await.unwrap().bytes,
+            service
+                .read_image("project-1", "ast_read_test")
+                .await
+                .unwrap()
+                .bytes,
             bytes
         );
         assert!(matches!(
-            service.read_image("ast_missing").await,
+            service.read_image("project-1", "ast_missing").await,
             Err(AssetQueryError::NotFound(_))
         ));
 
@@ -248,5 +309,61 @@ mod tests {
             service.get("project-2", "ast_read_test").await,
             Err(AssetQueryError::NotFound(_))
         ));
+        assert!(matches!(
+            service.read_image("project-2", "ast_read_test").await,
+            Err(AssetQueryError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn cross_project_binary_read_fails_before_filesystem_access() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let task_repository = SqliteTaskRepository::new(pool.clone());
+        let task = Task::new(
+            "project-1",
+            "workflow-1",
+            "workflow-version-1",
+            "recipe-1",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        );
+        task_repository
+            .create(&task, &task.created_event())
+            .await
+            .unwrap();
+        let path = directory.path().join("image.png");
+        std::fs::write(&path, b"image").unwrap();
+        let asset = Asset::new_image(
+            AssetId::parse("ast_cross_project").unwrap(),
+            "project-1",
+            "image",
+            "image.png",
+            path.to_string_lossy(),
+            "a".repeat(64),
+            "image/png",
+            1,
+            1,
+            5,
+            task.id,
+            json!({}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap(),
+        )
+        .unwrap();
+        let repository = SqliteAssetRepository::new(pool);
+        repository.insert_many(&[asset]).await.unwrap();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let service = AssetQueryService::new(
+            Arc::new(repository),
+            Arc::new(CountingAssetStore {
+                reads: reads.clone(),
+            }),
+        );
+
+        assert!(matches!(
+            service.read_image("project-2", "ast_cross_project").await,
+            Err(AssetQueryError::NotFound(_))
+        ));
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
 }

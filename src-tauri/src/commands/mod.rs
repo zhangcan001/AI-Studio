@@ -2,6 +2,7 @@ pub mod asset;
 pub mod catalog;
 pub mod comfy;
 pub mod generation;
+pub mod project;
 pub mod task;
 pub mod workflow_library;
 

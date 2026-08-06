@@ -25,12 +25,24 @@ impl TaskCancellationService {
         }
     }
 
-    pub async fn request_cancel(&self, task_id: &str) -> Result<Task, TaskCancellationError> {
+    pub async fn request_cancel(
+        &self,
+        project_id: &str,
+        task_id: &str,
+    ) -> Result<Task, TaskCancellationError> {
+        if project_id.trim().is_empty() {
+            return Err(TaskCancellationError::InvalidProjectId(
+                "project id must not be empty".to_owned(),
+            ));
+        }
         let task_id = TaskId::parse(task_id.to_owned())
             .map_err(|error| TaskCancellationError::InvalidTaskId(error.to_string()))?;
         let Some(task) = self.task_repository.find_by_id(&task_id).await? else {
             return Err(TaskCancellationError::NotFound(task_id.to_string()));
         };
+        if task.project_id != project_id {
+            return Err(TaskCancellationError::NotFound(task_id.to_string()));
+        }
 
         match task.status {
             TaskStatus::CancelRequested | TaskStatus::Cancelled => {
@@ -86,6 +98,7 @@ impl TaskCancellationService {
 
 #[derive(Debug)]
 pub enum TaskCancellationError {
+    InvalidProjectId(String),
     InvalidTaskId(String),
     NotFound(String),
     NotCancellable { task_id: String, status: TaskStatus },
@@ -96,6 +109,7 @@ pub enum TaskCancellationError {
 impl fmt::Display for TaskCancellationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidProjectId(message) => write!(formatter, "INVALID_PROJECT_ID: {message}"),
             Self::InvalidTaskId(message) => write!(formatter, "INVALID_TASK_ID: {message}"),
             Self::NotFound(task_id) => {
                 write!(formatter, "TASK_NOT_FOUND: task {task_id} was not found")
@@ -189,7 +203,10 @@ mod tests {
             sink.clone(),
         );
 
-        let cancelled = service.request_cancel(task.id.as_str()).await.unwrap();
+        let cancelled = service
+            .request_cancel(&task.project_id, task.id.as_str())
+            .await
+            .unwrap();
         assert_eq!(cancelled.status, TaskStatus::CancelRequested);
         assert!(signal.changed().await.is_ok());
         assert!(*signal.borrow());
@@ -244,7 +261,9 @@ mod tests {
         );
 
         assert!(matches!(
-            service.request_cancel(task.id.as_str()).await,
+            service
+                .request_cancel(&task.project_id, task.id.as_str())
+                .await,
             Err(TaskCancellationError::NotCancellable {
                 status: TaskStatus::Failed,
                 ..
@@ -258,6 +277,36 @@ mod tests {
                 .unwrap()
                 .status,
             TaskStatus::Failed
+        );
+    }
+
+    #[tokio::test]
+    async fn cross_project_cancel_is_not_found_without_signaling_or_persisting() {
+        let (_directory, repository, task) = setup().await;
+        let registry = TaskExecutionRegistry::default();
+        let (signal, _guard) = registry.register(task.id.clone());
+        let sink = Arc::new(RecordingSink::default());
+        let service = TaskCancellationService::new(
+            repository.clone(),
+            registry,
+            Arc::new(FixedClock),
+            sink.clone(),
+        );
+
+        assert!(matches!(
+            service.request_cancel("project-2", task.id.as_str()).await,
+            Err(TaskCancellationError::NotFound(_))
+        ));
+        assert!(!*signal.borrow());
+        assert!(sink.0.lock().unwrap().is_empty());
+        assert_eq!(
+            repository
+                .find_by_id(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Created
         );
     }
 }

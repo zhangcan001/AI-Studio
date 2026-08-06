@@ -8,6 +8,7 @@ interface TaskState {
   setRecentTasks: (tasks: TaskView[]) => void;
   upsertTask: (task: TaskView) => void;
   adoptCreatedTask: (task: TaskView) => void;
+  clear: () => void;
 }
 
 export interface TaskStoreSnapshot {
@@ -63,4 +64,5 @@ export const useTaskStore = create<TaskState>((set) => ({
         task,
       ),
     ),
+  clear: () => set({ currentTask: undefined, recentTasks: [] }),
 }));

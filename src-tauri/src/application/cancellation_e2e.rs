@@ -607,7 +607,7 @@ async fn cancel_before_post_never_submits_prompt() {
     assert_eq!(
         harness
             .cancellation
-            .request_cancel(task.id.as_str())
+            .request_cancel(&task.project_id, task.id.as_str())
             .await
             .unwrap()
             .status,
@@ -643,7 +643,7 @@ async fn cancel_after_upload_stops_before_snapshot_and_post() {
     harness.adapter.control.upload.wait_until_reached().await;
     harness
         .cancellation
-        .request_cancel(task.id.as_str())
+        .request_cancel(&task.project_id, task.id.as_str())
         .await
         .unwrap();
     harness.adapter.control.upload.release();
@@ -685,7 +685,7 @@ async fn cancel_queued_task_becomes_cancelled_without_interrupting_unknown_work(
         .await;
     harness
         .cancellation
-        .request_cancel(task.id.as_str())
+        .request_cancel(&task.project_id, task.id.as_str())
         .await
         .unwrap();
     let finished = wait_for_status(&harness.task_repository, &task.id, TaskStatus::Cancelled).await;
@@ -733,7 +733,7 @@ async fn cancel_running_waits_for_execution_interrupted_then_cancels() {
         .await;
     harness
         .cancellation
-        .request_cancel(task.id.as_str())
+        .request_cancel(&task.project_id, task.id.as_str())
         .await
         .unwrap();
     wait_for_action(&harness.adapter, "cancel_prompt").await;
@@ -780,7 +780,7 @@ async fn cancellation_racing_success_preserves_result_and_records_not_effective(
         .await;
     harness
         .cancellation
-        .request_cancel(task.id.as_str())
+        .request_cancel(&task.project_id, task.id.as_str())
         .await
         .unwrap();
     let finished = wait_for_status(&harness.task_repository, &task.id, TaskStatus::Succeeded).await;

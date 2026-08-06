@@ -10,6 +10,7 @@ import type {
   TaskHistoryPage,
 } from "../types/history";
 import type { TaskView } from "../types/task";
+import type { ProjectView } from "../types/project";
 
 export function ping(): Promise<string> {
   return invoke<string>("ping");
@@ -53,12 +54,28 @@ export function createGeneration(request: {
   return invoke<TaskView>("generation_create", { request });
 }
 
-export function getTask(taskId: string): Promise<TaskView> {
-  return invoke<TaskView>("task_get", { taskId });
+export function listProjects(): Promise<ProjectView[]> {
+  return invoke<ProjectView[]>("project_list");
 }
 
-export function listRecentTasks(limit = 10): Promise<TaskView[]> {
-  return invoke<TaskView[]>("task_list_recent", { limit });
+export function createProject(name: string, description?: string): Promise<ProjectView> {
+  return invoke<ProjectView>("project_create", { name, description });
+}
+
+export function updateProject(
+  projectId: string,
+  name: string,
+  description?: string,
+): Promise<ProjectView> {
+  return invoke<ProjectView>("project_update", { projectId, name, description });
+}
+
+export function getTask(projectId: string, taskId: string): Promise<TaskView> {
+  return invoke<TaskView>("task_get", { projectId, taskId });
+}
+
+export function listRecentTasks(projectId: string, limit = 10): Promise<TaskView[]> {
+  return invoke<TaskView[]>("task_list_recent", { projectId, limit });
 }
 
 export interface RecoveryReport {
@@ -69,16 +86,16 @@ export interface RecoveryReport {
   unresolved: number;
 }
 
-export function cancelTask(taskId: string): Promise<TaskView> {
-  return invoke<TaskView>("task_cancel", { taskId });
+export function cancelTask(projectId: string, taskId: string): Promise<TaskView> {
+  return invoke<TaskView>("task_cancel", { projectId, taskId });
 }
 
 export function reconcileActiveTasks(): Promise<RecoveryReport> {
   return invoke<RecoveryReport>("task_reconcile_active");
 }
 
-export function listAssetsByTask(taskId: string): Promise<AssetView[]> {
-  return invoke<AssetView[]>("asset_list_by_task", { taskId });
+export function listAssetsByTask(projectId: string, taskId: string): Promise<AssetView[]> {
+  return invoke<AssetView[]>("asset_list_by_task", { projectId, taskId });
 }
 
 export function listRecentAssets(projectId: string, limit = 100): Promise<AssetView[]> {
@@ -89,8 +106,8 @@ export function pickAndImportImage(projectId: string): Promise<AssetView | null>
   return invoke<AssetView | null>("asset_pick_and_import_image", { projectId });
 }
 
-export function readAssetImage(assetId: string): Promise<ArrayBuffer> {
-  return invoke<ArrayBuffer>("asset_read_image", { assetId });
+export function readAssetImage(projectId: string, assetId: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("asset_read_image", { projectId, assetId });
 }
 
 export function getAsset(projectId: string, assetId: string): Promise<AssetView> {

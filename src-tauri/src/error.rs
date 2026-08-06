@@ -16,6 +16,7 @@ pub enum AppErrorCode {
     WorkflowVersionConflict,
     RecipeVersionConflict,
     GenerationDefinitionNotFound,
+    ProjectNotFound,
     InvalidInput,
     TaskNotFound,
     TaskNotCancellable,
@@ -77,6 +78,10 @@ impl AppError {
         Self::new(AppErrorCode::GenerationDefinitionNotFound, message)
     }
 
+    pub fn project_not_found(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ProjectNotFound, message)
+    }
+
     pub fn invalid_input(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::InvalidInput, message)
     }
@@ -114,6 +119,7 @@ impl AppError {
             AppErrorCode::WorkflowVersionConflict => "WORKFLOW_VERSION_CONFLICT",
             AppErrorCode::RecipeVersionConflict => "RECIPE_VERSION_CONFLICT",
             AppErrorCode::GenerationDefinitionNotFound => "GENERATION_DEFINITION_NOT_FOUND",
+            AppErrorCode::ProjectNotFound => "PROJECT_NOT_FOUND",
             AppErrorCode::InvalidInput => "INVALID_INPUT",
             AppErrorCode::TaskNotFound => "TASK_NOT_FOUND",
             AppErrorCode::TaskNotCancellable => "TASK_NOT_CANCELLABLE",

@@ -4,9 +4,8 @@ import type { DraftValue } from "../../types/generation";
 import type { ReusableGenerationDraft, TaskDetail } from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
 
-const PROJECT_ID = "prj_default";
-
 interface Props {
+  projectId: string;
   detail: TaskDetail;
   loadingDraft: boolean;
   onBack: () => void;
@@ -14,7 +13,7 @@ interface Props {
   onOpenAsset: (assetId: string) => void;
 }
 
-export function TaskHistoryDetail({ detail, loadingDraft: detailLoading, onBack, onLoadInputs, onOpenAsset }: Props) {
+export function TaskHistoryDetail({ projectId, detail, loadingDraft: detailLoading, onBack, onLoadInputs, onOpenAsset }: Props) {
   const [draft, setDraft] = useState<ReusableGenerationDraft>();
   const [draftLoading, setDraftLoading] = useState(detailLoading);
   const [draftError, setDraftError] = useState<string>();
@@ -24,7 +23,7 @@ export function TaskHistoryDetail({ detail, loadingDraft: detailLoading, onBack,
     let active = true;
     setDraftLoading(true);
     setDraftError(undefined);
-    void getReusableDraft(PROJECT_ID, detail.id)
+    void getReusableDraft(projectId, detail.id)
       .then((value) => {
         if (active) setDraft(value);
       })
@@ -37,11 +36,11 @@ export function TaskHistoryDetail({ detail, loadingDraft: detailLoading, onBack,
     return () => {
       active = false;
     };
-  }, [detail.id, detail.reusableDraft.available]);
+  }, [detail.id, detail.reusableDraft.available, projectId]);
 
   return (
     <div className="task-detail-view">
-      <button type="button" className="quiet-button back-button" onClick={onBack}>← Back to history</button>
+      <button type="button" className="quiet-button back-button" onClick={onBack}>Back to history</button>
       <div className="section-heading workspace-heading">
         <div>
           <span className="section-label">Task detail</span>
@@ -97,7 +96,7 @@ export function TaskHistoryDetail({ detail, loadingDraft: detailLoading, onBack,
         {detail.outputAssets.length ? (
           <div className="output-grid">
             {detail.outputAssets.map((asset) => (
-              <AssetCard key={asset.id} asset={asset} onSelect={() => onOpenAsset(asset.id)} />
+              <AssetCard key={asset.id} projectId={projectId} asset={asset} onSelect={() => onOpenAsset(asset.id)} />
             ))}
           </div>
         ) : (

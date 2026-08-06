@@ -213,7 +213,11 @@ impl TaskRepository for SqliteTaskRepository {
         row.map(TaskRow::try_into_domain).transpose()
     }
 
-    async fn list_recent(&self, limit: u32) -> Result<Vec<Task>, RepositoryError> {
+    async fn list_recent(
+        &self,
+        project_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Task>, RepositoryError> {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
@@ -221,8 +225,11 @@ impl TaskRepository for SqliteTaskRepository {
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
                 created_at, queued_at, started_at, finished_at
-             FROM tasks ORDER BY created_at DESC LIMIT ?",
+             FROM tasks
+             WHERE project_id = ?
+             ORDER BY created_at DESC, id DESC LIMIT ?",
         )
+        .bind(project_id)
         .bind(i64::from(limit))
         .fetch_all(&self.pool)
         .await
@@ -809,7 +816,47 @@ mod tests {
                 .collect::<Vec<_>>(),
             [1, 2]
         );
-        assert_eq!(repository.list_recent(1).await.unwrap().len(), 1);
+        assert_eq!(
+            repository.list_recent("project-1", 1).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn list_recent_is_scoped_to_project() {
+        let (_directory, pool, repository) = setup().await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Other', 'C:/other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let first = new_task();
+        let second = Task::new(
+            "project-2",
+            "workflow-1",
+            "workflow-version-1",
+            "recipe-1",
+            first.created_at + Duration::seconds(1),
+        );
+        repository
+            .create(&first, &first.created_event())
+            .await
+            .unwrap();
+        repository
+            .create(&second, &second.created_event())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository.list_recent("project-1", 10).await.unwrap().len(),
+            1
+        );
+        assert_eq!(
+            repository.list_recent("project-2", 10).await.unwrap().len(),
+            1
+        );
     }
 
     #[tokio::test]

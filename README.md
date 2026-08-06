@@ -43,12 +43,30 @@ M1 progress:
 - Project-scoped task history with status filters, keyset pagination, detail views, and safe snapshot reuse
 - Project-scoped Asset Library with category filters, keyset pagination, binary previews, and Blob URL cleanup
 - Local-first historical input loading that never auto-generates a new task
+- Project Repository CRUD foundation with stable ID-based project roots and metadata validation
+- Active Project selector, persisted local context, and Projects workspace
+- Project-scoped generation, task history, task events, asset listing, and binary reads
+- Cross-project task cancellation and asset access rejected before side effects
 
-M1 third phase (Task History + Asset Library) is complete. Historical task
+M1 fourth phase (Project Workspace + Project Isolation) code is complete. Historical task
 inputs are exposed through a safe DTO boundary; raw workflow payloads, recipe
 YAML, prompt IDs, storage paths, SHA-256 values, and asset metadata are not
 returned to the frontend. Browse queries use the existing SQLite schema plus
 `002_browse_indexes.sql`; no existing migration was changed.
+
+M1 project workspace automated validation and direct ComfyUI HTTP validation
+are complete. The remaining desktop checklist covers creating `Project Live
+Test` through the Projects workspace, running the existing
+`wfl_kera2_t2i_local_v2` package there, checking project-rooted Task/Asset
+isolation, and switching contexts. The desktop control session was stopped by
+the physical Escape safety signal before those UI actions could be completed;
+the exact result is recorded in `docs/M1_PROJECT_WORKSPACE_VALIDATION.md`.
+
+The ComfyUI live gate passed independently: `http://127.0.0.1:8188` reported
+version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device, and 4,486 nodes. The
+offline/restart gate also passed: stopping the exact ComfyUI Python process
+made port 8188 unavailable while AI Studio stayed alive, and restarting with
+the original arguments restored the API.
 
 M1 live I2I is not run because no validated runtime I2I Workflow Package was supplied.
 The existing M0 text-to-image runtime remains the only live generation package.

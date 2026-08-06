@@ -3,18 +3,19 @@ import { readAssetImage } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 
 interface Props {
+  projectId: string;
   asset: AssetView;
   onClose: () => void;
 }
 
-export function AssetPreview({ asset, onClose }: Props) {
+export function AssetPreview({ projectId, asset, onClose }: Props) {
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     let active = true;
     let objectUrl: string | undefined;
-    void readAssetImage(asset.id)
+    void readAssetImage(projectId, asset.id)
       .then((bytes) => {
         if (!active) return;
         objectUrl = URL.createObjectURL(new Blob([bytes], { type: asset.mimeType }));
@@ -27,7 +28,7 @@ export function AssetPreview({ asset, onClose }: Props) {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [asset.id, asset.mimeType]);
+  }, [asset.id, asset.mimeType, projectId]);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {

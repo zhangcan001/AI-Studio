@@ -8,6 +8,7 @@ pub const TASK_UPDATED_EVENT: &str = "task://updated";
 #[serde(rename_all = "camelCase")]
 pub struct TaskUpdatePayload {
     pub id: String,
+    pub project_id: String,
     pub status: String,
     pub prompt_id: Option<String>,
     pub queue_number: Option<i64>,
@@ -47,6 +48,7 @@ impl TaskUpdatePayload {
 
         Self {
             id: task.id.as_str().to_owned(),
+            project_id: task.project_id.clone(),
             status: task.status.as_str().to_owned(),
             prompt_id: task.prompt_id.clone(),
             queue_number: task.queue_number,
@@ -83,4 +85,27 @@ pub struct NoopTaskUpdateSink;
 
 impl TaskUpdateSink for NoopTaskUpdateSink {
     fn publish(&self, _task: &Task) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskUpdatePayload;
+    use crate::domain::Task;
+    use chrono::Utc;
+
+    #[test]
+    fn task_update_payload_exposes_project_context_without_runtime_details() {
+        let task = Task::new(
+            "prj_test",
+            "workflow",
+            "workflow-version",
+            "recipe",
+            Utc::now(),
+        );
+        let payload = serde_json::to_value(TaskUpdatePayload::from_task(&task)).unwrap();
+        assert_eq!(payload["projectId"], "prj_test");
+        assert!(payload.get("workflowJson").is_none());
+        assert!(payload.get("storagePath").is_none());
+        assert!(payload.get("rawError").is_none());
+    }
 }

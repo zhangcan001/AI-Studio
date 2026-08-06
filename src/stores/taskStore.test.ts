@@ -5,6 +5,7 @@ import type { TaskView } from "../types/task";
 function task(status: TaskView["status"], id = "tsk-test"): TaskView {
   return {
     id,
+    projectId: "prj_test",
     status,
     progress: { mode: "indeterminate" },
     createdAt: "2026-08-06T00:00:00Z",

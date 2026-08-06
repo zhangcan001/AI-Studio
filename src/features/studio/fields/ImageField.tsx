@@ -78,7 +78,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
     return () => {
       active = false;
     };
-  }, [onAvailabilityChange, recentSelectedAsset, selectedAssetId]);
+  }, [onAvailabilityChange, projectId, recentSelectedAsset, selectedAssetId]);
 
   useEffect(() => {
     let active = true;
@@ -87,7 +87,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
       setPreviewUrl(undefined);
       return () => undefined;
     }
-    void readAssetImage(selectedAsset.id)
+    void readAssetImage(projectId, selectedAsset.id)
       .then((bytes) => {
         if (!active) return;
         nextUrl = URL.createObjectURL(new Blob([bytes], { type: selectedAsset.mimeType }));
@@ -103,7 +103,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
       active = false;
       if (nextUrl) URL.revokeObjectURL(nextUrl);
     };
-  }, [onAvailabilityChange, selectedAsset]);
+  }, [onAvailabilityChange, projectId, selectedAsset]);
 
   async function chooseLocalImage() {
     setLoading(true);

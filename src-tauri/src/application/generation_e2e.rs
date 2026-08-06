@@ -392,7 +392,7 @@ mod tests {
             assert_eq!(returned_task.status, TaskStatus::Created);
             for _ in 0..100 {
                 let current = task_repository
-                    .list_recent(1)
+                    .list_recent("project-1", 1)
                     .await
                     .expect("task should be readable")
                     .into_iter()
@@ -408,7 +408,7 @@ mod tests {
             service.execute(request).await.map(|_| ())
         };
         let task = task_repository
-            .list_recent(1)
+            .list_recent("project-1", 1)
             .await
             .expect("task should be readable")
             .into_iter()
@@ -547,7 +547,11 @@ mod tests {
             ]),
         };
         let outcome = service.execute(request).await.map(|_| ());
-        let task = task_repository.list_recent(1).await.unwrap().remove(0);
+        let task = task_repository
+            .list_recent("project-1", 1)
+            .await
+            .unwrap()
+            .remove(0);
         let assets = asset_repository
             .list_by_source_task(&task.id)
             .await

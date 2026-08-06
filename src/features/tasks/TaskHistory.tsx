@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getTaskDetail, taskHistoryPage } from "../../services/tauriClient";
 import { subscribeTaskUpdates } from "../../services/taskEvents";
 import type { PageCursor } from "../../types/asset";
@@ -8,13 +8,12 @@ import { AssetPreview } from "../assets/AssetPreview";
 import { TaskHistoryDetail } from "./TaskHistoryDetail";
 import { TaskHistoryList } from "./TaskHistoryList";
 
-const PROJECT_ID = "prj_default";
-
 interface Props {
+  projectId: string;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
 }
 
-export function TaskHistory({ onLoadInputs }: Props) {
+export function TaskHistory({ projectId, onLoadInputs }: Props) {
   const [filter, setFilter] = useState<TaskHistoryFilter>("ALL");
   const [items, setItems] = useState<TaskHistoryItem[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
@@ -24,13 +23,18 @@ export function TaskHistory({ onLoadInputs }: Props) {
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [detail, setDetail] = useState<TaskDetail>();
   const [previewAssetId, setPreviewAssetId] = useState<string>();
+  const requestVersion = useRef(0);
+  const detailVersion = useRef(0);
 
   const loadPage = useCallback(
     async (reset: boolean) => {
+      const version = ++requestVersion.current;
+      const requestedCursor = reset ? undefined : cursor;
       setLoading(true);
       setError(undefined);
       try {
-        const page = await taskHistoryPage(PROJECT_ID, filter, reset ? undefined : cursor, 30);
+        const page = await taskHistoryPage(projectId, filter, requestedCursor, 30);
+        if (requestVersion.current !== version) return;
         setItems((current) =>
           reset
             ? page.items
@@ -39,25 +43,32 @@ export function TaskHistory({ onLoadInputs }: Props) {
         setCursor(page.nextCursor);
         setActivityNotice(false);
       } catch (loadError: unknown) {
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        if (requestVersion.current === version) {
+          setError(loadError instanceof Error ? loadError.message : String(loadError));
+        }
       } finally {
-        setLoading(false);
+        if (requestVersion.current === version) setLoading(false);
       }
     },
-    [cursor, filter],
+    [cursor, filter, projectId],
   );
 
   useEffect(() => {
+    detailVersion.current += 1;
     setItems([]);
     setCursor(undefined);
+    setSelectedTaskId(undefined);
+    setDetail(undefined);
+    setPreviewAssetId(undefined);
+    setActivityNotice(false);
     void loadPage(true);
-  }, [filter]);
+  }, [filter, projectId]); // loadPage intentionally captures the reset context for this effect.
 
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
     void subscribeTaskUpdates((task) => {
-      if (!active) return;
+      if (!active || task.projectId !== projectId) return;
       setItems((current) => {
         const index = current.findIndex((item) => item.id === task.id);
         if (index < 0) {
@@ -86,30 +97,37 @@ export function TaskHistory({ onLoadInputs }: Props) {
       active = false;
       unlisten?.();
     };
-  }, []);
+  }, [projectId]);
 
   async function selectTask(taskId: string) {
+    const version = ++detailVersion.current;
     setSelectedTaskId(taskId);
     setDetail(undefined);
+    setPreviewAssetId(undefined);
     setError(undefined);
     try {
-      setDetail(await getTaskDetail(PROJECT_ID, taskId));
+      const nextDetail = await getTaskDetail(projectId, taskId);
+      if (detailVersion.current === version) setDetail(nextDetail);
     } catch (loadError: unknown) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
+      if (detailVersion.current === version) {
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
+      }
     }
   }
 
   const previewAsset = detail?.outputAssets.find((asset) => asset.id === previewAssetId);
 
   return (
-    <section className="workspace-panel">
+    <section className="workspace-panel" aria-busy={loading}>
       {selectedTaskId && detail ? (
         <TaskHistoryDetail
+          projectId={projectId}
           detail={detail}
           loadingDraft={false}
           onBack={() => {
             setSelectedTaskId(undefined);
             setDetail(undefined);
+            setPreviewAssetId(undefined);
           }}
           onLoadInputs={onLoadInputs}
           onOpenAsset={setPreviewAssetId}
@@ -134,7 +152,9 @@ export function TaskHistory({ onLoadInputs }: Props) {
         </>
       )}
       {error && <p className="error-message">Unable to load task history: {error}</p>}
-      {previewAsset && <AssetPreview asset={previewAsset} onClose={() => setPreviewAssetId(undefined)} />}
+      {previewAsset && (
+        <AssetPreview projectId={projectId} asset={previewAsset} onClose={() => setPreviewAssetId(undefined)} />
+      )}
     </section>
   );
 }

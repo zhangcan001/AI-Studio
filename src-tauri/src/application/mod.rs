@@ -14,6 +14,7 @@ pub mod output_collector;
 pub mod pagination;
 pub mod ports;
 pub mod project_bootstrap;
+pub mod project_service;
 pub mod source_asset_import_service;
 pub mod task_cancellation_service;
 pub mod task_execution_registry;
