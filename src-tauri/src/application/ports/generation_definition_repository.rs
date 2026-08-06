@@ -11,6 +11,17 @@ pub struct GenerationDefinition {
     pub recipe_yaml: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AvailableGenerationDefinition {
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub name: String,
+    pub category: String,
+    pub mode: String,
+    pub recipe_yaml: String,
+}
+
 #[async_trait]
 pub trait GenerationDefinitionRepository: Send + Sync {
     async fn find(
@@ -18,4 +29,6 @@ pub trait GenerationDefinitionRepository: Send + Sync {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<Option<GenerationDefinition>, RepositoryError>;
+
+    async fn list_available(&self) -> Result<Vec<AvailableGenerationDefinition>, RepositoryError>;
 }

@@ -3,7 +3,7 @@ use crate::application::output_collector::{OutputCollector, OutputCollectorError
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError, ComfyExecutionEvent,
     GenerationDefinitionRepository, GenerationSnapshotRepository, MonotonicEventClock,
-    ProjectRepository, RepositoryError, TaskRepository,
+    NoopTaskUpdateSink, ProjectRepository, RepositoryError, TaskRepository, TaskUpdateSink,
 };
 use crate::compiler::{CompileError, RecipeParser, WorkflowCompiler};
 use crate::domain::{
@@ -89,6 +89,7 @@ pub struct GenerationService {
     output_collector: Arc<OutputCollector>,
     asset_import_service: Arc<AssetImportService>,
     clock: Arc<dyn Clock>,
+    task_update_sink: Arc<dyn TaskUpdateSink>,
     compiler: WorkflowCompiler,
 }
 
@@ -117,14 +118,54 @@ impl GenerationService {
             )),
             comfy_adapter,
             clock,
+            task_update_sink: Arc::new(NoopTaskUpdateSink),
             compiler: WorkflowCompiler,
         }
     }
 
+    pub fn with_task_update_sink(mut self, task_update_sink: Arc<dyn TaskUpdateSink>) -> Self {
+        self.task_update_sink = task_update_sink;
+        self
+    }
+
+    #[allow(dead_code)]
     pub async fn execute(
         &self,
         request: CreateGenerationRequest,
     ) -> Result<Task, GenerationServiceError> {
+        let (request, definition, task) = self.prepare_task(request).await?;
+        self.execute_prepared(request, definition, task).await
+    }
+
+    pub async fn start_generation(
+        self: &Arc<Self>,
+        request: CreateGenerationRequest,
+    ) -> Result<Task, GenerationServiceError> {
+        let (request, definition, task) = self.prepare_task(request).await?;
+        let service = Arc::clone(self);
+        let background_task = task.clone();
+        tokio::spawn(async move {
+            if let Err(error) = service
+                .execute_prepared(request, definition, background_task)
+                .await
+            {
+                tracing::error!(error = %error, "background generation failed");
+            }
+        });
+        Ok(task)
+    }
+
+    async fn prepare_task(
+        &self,
+        request: CreateGenerationRequest,
+    ) -> Result<
+        (
+            CreateGenerationRequest,
+            crate::application::ports::GenerationDefinition,
+            Task,
+        ),
+        GenerationServiceError,
+    > {
         let definition = self
             .definition_repository
             .find(&request.workflow_version_id, &request.recipe_id)
@@ -133,10 +174,9 @@ impl GenerationService {
                 workflow_version_id: request.workflow_version_id.clone(),
                 recipe_id: request.recipe_id.clone(),
             })?;
-        let project_id = request.project_id.clone();
         let created_at = self.clock.now();
-        let mut task = Task::new(
-            request.project_id,
+        let task = Task::new(
+            request.project_id.clone(),
             definition.workflow_id.clone(),
             definition.workflow_version_id.clone(),
             definition.recipe_id.clone(),
@@ -144,7 +184,17 @@ impl GenerationService {
         );
         let created_event = task.created_event();
         self.task_repository.create(&task, &created_event).await?;
+        self.task_update_sink.publish(&task);
+        Ok((request, definition, task))
+    }
 
+    async fn execute_prepared(
+        &self,
+        request: CreateGenerationRequest,
+        definition: crate::application::ports::GenerationDefinition,
+        mut task: Task,
+    ) -> Result<Task, GenerationServiceError> {
+        let project_id = request.project_id.clone();
         self.transition_and_persist(&mut task, TaskStatus::Validating)
             .await?;
 
@@ -238,6 +288,7 @@ impl GenerationService {
         self.task_repository
             .persist_runtime_update(&task, &submission_event)
             .await?;
+        self.task_update_sink.publish(&task);
 
         let mut subscription = match self.comfy_adapter.subscribe_events(&client_id).await {
             Ok(subscription) => subscription,
@@ -335,6 +386,7 @@ impl GenerationService {
                         self.task_repository
                             .persist_runtime_update(&task, &event)
                             .await?;
+                        self.task_update_sink.publish(&task);
                     }
                 }
                 ComfyExecutionEvent::Progress {
@@ -350,6 +402,7 @@ impl GenerationService {
                             self.task_repository
                                 .persist_runtime_update(&task, &event)
                                 .await?;
+                            self.task_update_sink.publish(&task);
                         }
                     }
                 }
@@ -402,6 +455,7 @@ impl GenerationService {
                         );
                         return Err(error.into());
                     }
+                    self.task_update_sink.publish(&task);
                     return Ok(task);
                 }
                 ComfyExecutionEvent::ExecutionError {
@@ -465,6 +519,7 @@ impl GenerationService {
         self.task_repository
             .persist_transition(task, &event, previous_status)
             .await?;
+        self.task_update_sink.publish(task);
         Ok(())
     }
 
@@ -484,7 +539,10 @@ impl GenerationService {
             .persist_transition(task, &event, previous_status)
             .await
         {
-            Ok(_) => original,
+            Ok(_) => {
+                self.task_update_sink.publish(task);
+                original
+            }
             Err(error) => {
                 tracing::error!(
                     task_id = %task.id,
@@ -508,7 +566,9 @@ impl GenerationService {
         self.task_repository
             .persist_runtime_update(task, &event)
             .await
-            .map(|_| ())
+            .map(|_| {
+                self.task_update_sink.publish(task);
+            })
             .map_err(GenerationServiceError::Repository)
     }
 }

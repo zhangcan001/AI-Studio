@@ -219,7 +219,9 @@ fn repository_error(error: RepositoryError) -> AssetImportError {
 mod tests {
     use super::{AssetImportError, AssetImportService};
     use crate::application::output_collector::CollectedImage;
-    use crate::application::ports::{AssetRepository, Clock, ProjectRepository, RepositoryError};
+    use crate::application::ports::{
+        AssetRepository, Clock, ProjectRecord, ProjectRepository, RepositoryError,
+    };
     use crate::domain::{Asset, AssetId, TaskId};
     use crate::infrastructure::filesystem::FileSystemAssetStore;
     use async_trait::async_trait;
@@ -236,11 +238,42 @@ mod tests {
 
     #[async_trait]
     impl ProjectRepository for FakeProjectRepository {
+        async fn find_by_id(
+            &self,
+            project_id: &str,
+        ) -> Result<Option<ProjectRecord>, RepositoryError> {
+            Ok(Some(ProjectRecord {
+                id: project_id.to_owned(),
+                name: "Test Project".to_owned(),
+                description: None,
+                root_path: self.root.clone(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }))
+        }
+
         async fn get_storage_root(
             &self,
             _project_id: &str,
         ) -> Result<Option<PathBuf>, RepositoryError> {
             Ok(Some(self.root.clone()))
+        }
+
+        async fn ensure_default_project(
+            &self,
+            project_id: &str,
+            name: &str,
+            root_path: &PathBuf,
+            created_at: DateTime<Utc>,
+        ) -> Result<ProjectRecord, RepositoryError> {
+            Ok(ProjectRecord {
+                id: project_id.to_owned(),
+                name: name.to_owned(),
+                description: None,
+                root_path: root_path.clone(),
+                created_at,
+                updated_at: created_at,
+            })
         }
     }
 

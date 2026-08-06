@@ -1,6 +1,7 @@
-use super::map_sqlx_error;
-use crate::application::ports::{ProjectRepository, RepositoryError};
+use super::{format_datetime, map_sqlx_error, parse_datetime};
+use crate::application::ports::{ProjectRecord, ProjectRepository, RepositoryError};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 
@@ -17,26 +18,79 @@ impl SqliteProjectRepository {
 
 #[async_trait]
 impl ProjectRepository for SqliteProjectRepository {
-    async fn get_storage_root(&self, project_id: &str) -> Result<Option<PathBuf>, RepositoryError> {
-        let root_path =
-            sqlx::query_scalar::<_, Option<String>>("SELECT root_path FROM projects WHERE id = ?")
-                .bind(project_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?
-                .flatten();
+    async fn find_by_id(&self, project_id: &str) -> Result<Option<ProjectRecord>, RepositoryError> {
+        let row = sqlx::query_as::<_, ProjectRow>(
+            "SELECT id, name, description, root_path, created_at, updated_at
+             FROM projects WHERE id = ?",
+        )
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
-        root_path
-            .map(|value| {
-                if value.trim().is_empty() {
-                    Err(RepositoryError::integrity(
-                        "project root_path must not be empty",
-                    ))
-                } else {
-                    Ok(PathBuf::from(value))
-                }
-            })
-            .transpose()
+        row.map(ProjectRow::try_into_domain).transpose()
+    }
+
+    async fn get_storage_root(&self, project_id: &str) -> Result<Option<PathBuf>, RepositoryError> {
+        Ok(self
+            .find_by_id(project_id)
+            .await?
+            .map(|project| project.root_path))
+    }
+
+    async fn ensure_default_project(
+        &self,
+        project_id: &str,
+        name: &str,
+        root_path: &PathBuf,
+        created_at: DateTime<Utc>,
+    ) -> Result<ProjectRecord, RepositoryError> {
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES (?, ?, NULL, ?, ?, ?)
+             ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(project_id)
+        .bind(name)
+        .bind(root_path.to_string_lossy().to_string())
+        .bind(format_datetime(created_at))
+        .bind(format_datetime(created_at))
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        self.find_by_id(project_id)
+            .await?
+            .ok_or_else(|| RepositoryError::not_found("project", project_id))
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ProjectRow {
+    id: String,
+    name: String,
+    description: Option<String>,
+    root_path: String,
+    created_at: String,
+    updated_at: String,
+}
+
+impl ProjectRow {
+    fn try_into_domain(self) -> Result<ProjectRecord, RepositoryError> {
+        if self.root_path.trim().is_empty() {
+            return Err(RepositoryError::integrity(
+                "project root_path must not be empty",
+            ));
+        }
+
+        Ok(ProjectRecord {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            root_path: PathBuf::from(self.root_path),
+            created_at: parse_datetime("project created_at", &self.created_at)?,
+            updated_at: parse_datetime("project updated_at", &self.updated_at)?,
+        })
     }
 }
 
@@ -46,6 +100,7 @@ mod tests {
     use crate::application::ports::ProjectRepository;
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use sqlx::SqlitePool;
+    use std::path::PathBuf;
     use tempfile::{tempdir, TempDir};
 
     async fn setup() -> (TempDir, SqlitePool, SqliteProjectRepository) {
@@ -73,6 +128,38 @@ mod tests {
                 .await
                 .expect("missing lookup"),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn ensures_default_project_once_without_overwriting_existing_root() {
+        let (_directory, pool, repository) = setup().await;
+        let first_root = PathBuf::from("C:/first-project");
+        let second_root = PathBuf::from("C:/second-project");
+        let at = chrono::Utc::now();
+
+        let first = repository
+            .ensure_default_project("prj_default", "Default Project", &first_root, at)
+            .await
+            .expect("default project should be created");
+        let second = repository
+            .ensure_default_project(
+                "prj_default",
+                "Default Project",
+                &second_root,
+                at + chrono::Duration::seconds(1),
+            )
+            .await
+            .expect("default project should be reused");
+
+        assert_eq!(first.root_path, first_root);
+        assert_eq!(second.root_path, first_root);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = 'prj_default'")
+                .fetch_one(&pool)
+                .await
+                .expect("project count"),
+            1
         );
     }
 }

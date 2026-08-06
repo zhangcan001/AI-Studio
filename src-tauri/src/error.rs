@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value;
 use std::{error::Error, fmt};
 
 #[derive(Debug, Clone, Serialize)]
@@ -11,12 +12,22 @@ pub enum AppErrorCode {
     ComfyOffline,
     ComfyTimeout,
     ComfyProtocolError,
+    WorkflowPackageInvalid,
+    WorkflowVersionConflict,
+    RecipeVersionConflict,
+    GenerationDefinitionNotFound,
+    InvalidInput,
+    TaskNotFound,
+    AssetNotFound,
+    AssetReadFailed,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AppError {
     pub code: AppErrorCode,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 impl AppError {
@@ -48,6 +59,38 @@ impl AppError {
         Self::new(AppErrorCode::ComfyProtocolError, message)
     }
 
+    pub fn workflow_package_invalid(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::WorkflowPackageInvalid, message)
+    }
+
+    pub fn workflow_version_conflict(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::WorkflowVersionConflict, message)
+    }
+
+    pub fn recipe_version_conflict(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::RecipeVersionConflict, message)
+    }
+
+    pub fn generation_definition_not_found(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::GenerationDefinitionNotFound, message)
+    }
+
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::InvalidInput, message)
+    }
+
+    pub fn task_not_found(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::TaskNotFound, message)
+    }
+
+    pub fn asset_not_found(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::AssetNotFound, message)
+    }
+
+    pub fn asset_read_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::AssetReadFailed, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -57,6 +100,14 @@ impl AppError {
             AppErrorCode::ComfyOffline => "COMFY_OFFLINE",
             AppErrorCode::ComfyTimeout => "COMFY_TIMEOUT",
             AppErrorCode::ComfyProtocolError => "COMFY_PROTOCOL_ERROR",
+            AppErrorCode::WorkflowPackageInvalid => "WORKFLOW_PACKAGE_INVALID",
+            AppErrorCode::WorkflowVersionConflict => "WORKFLOW_VERSION_CONFLICT",
+            AppErrorCode::RecipeVersionConflict => "RECIPE_VERSION_CONFLICT",
+            AppErrorCode::GenerationDefinitionNotFound => "GENERATION_DEFINITION_NOT_FOUND",
+            AppErrorCode::InvalidInput => "INVALID_INPUT",
+            AppErrorCode::TaskNotFound => "TASK_NOT_FOUND",
+            AppErrorCode::AssetNotFound => "ASSET_NOT_FOUND",
+            AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
         }
     }
 
@@ -64,6 +115,7 @@ impl AppError {
         Self {
             code,
             message: message.into(),
+            details: None,
         }
     }
 }

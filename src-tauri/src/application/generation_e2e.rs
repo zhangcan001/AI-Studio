@@ -6,7 +6,7 @@ mod tests {
     use crate::application::ports::{
         AssetRepository, Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription,
         ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyNodeOutput, ComfyOutputData,
-        ComfyOutputFile, PromptSubmission, SystemStats, TaskRepository,
+        ComfyOutputFile, PromptSubmission, SystemStats, TaskRepository, TaskUpdateSink,
     };
     use crate::domain::{InputValue, SeedValue, Task, TaskEventType, TaskStatus};
     use crate::infrastructure::database::{
@@ -248,10 +248,29 @@ mod tests {
         task: Task,
         assets: Vec<crate::domain::Asset>,
         events: Vec<crate::domain::StoredTaskEvent>,
+        published_statuses: Vec<String>,
         outcome: Result<(), GenerationServiceError>,
     }
 
+    #[derive(Clone, Default)]
+    struct RecordingSink {
+        statuses: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl TaskUpdateSink for RecordingSink {
+        fn publish(&self, task: &Task) {
+            self.statuses
+                .lock()
+                .unwrap()
+                .push(task.status.as_str().to_owned());
+        }
+    }
+
     async fn run(mode: FakeMode) -> Run {
+        run_mode(mode, false).await
+    }
+
+    async fn run_mode(mode: FakeMode, non_blocking: bool) -> Run {
         let directory = tempdir().expect("temporary directory");
         let root = directory.path().join("project");
         std::fs::create_dir_all(&root).expect("project root");
@@ -309,15 +328,19 @@ mod tests {
         let asset_repository = Arc::new(SqliteAssetRepository::new(pool.clone()));
         let asset_store = Arc::new(FileSystemAssetStore::new());
         let clock = Arc::new(FakeClock::new(clock_values()));
-        let service = GenerationService::new(
-            task_repository.clone(),
-            snapshot_repository,
-            definition_repository,
-            adapter,
-            project_repository,
-            asset_store,
-            asset_repository.clone(),
-            clock,
+        let sink = Arc::new(RecordingSink::default());
+        let service = Arc::new(
+            GenerationService::new(
+                task_repository.clone(),
+                snapshot_repository,
+                definition_repository,
+                adapter,
+                project_repository,
+                asset_store,
+                asset_repository.clone(),
+                clock,
+            )
+            .with_task_update_sink(sink.clone()),
         );
         let request = CreateGenerationRequest {
             project_id: "project-1".to_owned(),
@@ -329,7 +352,29 @@ mod tests {
                 ("seed".to_owned(), InputValue::Seed(SeedValue::Fixed(123))),
             ]),
         };
-        let result = service.execute(request).await;
+        let result = if non_blocking {
+            let returned_task = service
+                .start_generation(request)
+                .await
+                .expect("start_generation should return a task");
+            assert_eq!(returned_task.status, TaskStatus::Created);
+            for _ in 0..100 {
+                let current = task_repository
+                    .list_recent(1)
+                    .await
+                    .expect("task should be readable")
+                    .into_iter()
+                    .next();
+                if current.is_some_and(|task| task.status.is_terminal()) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                tokio::task::yield_now().await;
+            }
+            Ok(())
+        } else {
+            service.execute(request).await.map(|_| ())
+        };
         let task = task_repository
             .list_recent(1)
             .await
@@ -345,12 +390,14 @@ mod tests {
             .list_events(&task.id)
             .await
             .expect("events should be readable");
+        let published_statuses = sink.statuses.lock().unwrap().clone();
         Run {
             _directory: directory,
             pool,
             task,
             assets,
             events: stored_events,
+            published_statuses,
             outcome: result.map(|_| ()),
         }
     }
@@ -466,6 +513,42 @@ mod tests {
             "OUTPUT_DOWNLOAD_FAILED"
         );
         assert!(run.assets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn start_generation_returns_created_before_background_execution_finishes() {
+        let run = run_mode(FakeMode::Success { image_count: 1 }, true).await;
+        run.outcome
+            .as_ref()
+            .expect("background generation should finish successfully");
+        assert_eq!(run.task.status, TaskStatus::Succeeded);
+        assert_eq!(run.assets.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn task_updates_include_persisted_lifecycle_states() {
+        let run = run(FakeMode::Success { image_count: 1 }).await;
+        run.outcome.as_ref().expect("generation should succeed");
+        assert_eq!(
+            run.published_statuses.first().map(String::as_str),
+            Some("CREATED")
+        );
+        assert!(run
+            .published_statuses
+            .iter()
+            .any(|status| status == "VALIDATING"));
+        assert!(run
+            .published_statuses
+            .iter()
+            .any(|status| status == "RUNNING"));
+        assert!(run
+            .published_statuses
+            .iter()
+            .any(|status| status == "COLLECTING"));
+        assert_eq!(
+            run.published_statuses.last().map(String::as_str),
+            Some("SUCCEEDED")
+        );
     }
 
     #[allow(dead_code)]

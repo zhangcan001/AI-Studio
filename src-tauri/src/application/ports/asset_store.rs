@@ -12,6 +12,7 @@ pub enum AssetStoreError {
     InvalidPath(String),
     Write(String),
     Delete(String),
+    Read(String),
 }
 
 impl std::fmt::Display for AssetStoreError {
@@ -20,6 +21,7 @@ impl std::fmt::Display for AssetStoreError {
             Self::InvalidPath(message) => write!(formatter, "invalid asset path: {message}"),
             Self::Write(message) => write!(formatter, "asset write failed: {message}"),
             Self::Delete(message) => write!(formatter, "asset delete failed: {message}"),
+            Self::Read(message) => write!(formatter, "asset read failed: {message}"),
         }
     }
 }
@@ -37,4 +39,6 @@ pub trait AssetStore: Send + Sync {
     ) -> Result<StoredAssetFile, AssetStoreError>;
 
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError>;
+
+    async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError>;
 }

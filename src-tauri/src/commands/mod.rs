@@ -1,8 +1,28 @@
+pub mod asset;
+pub mod catalog;
 pub mod comfy;
+pub mod generation;
+pub mod task;
+pub mod workflow_library;
 
 use crate::{app_state::AppState, error::AppError};
 use serde::Serialize;
 use tauri::State;
+
+pub(crate) fn map_repository_error(error: &crate::application::ports::RepositoryError) -> AppError {
+    match error {
+        crate::application::ports::RepositoryError::WorkflowVersionConflict { .. } => {
+            AppError::workflow_version_conflict(error.to_string())
+        }
+        crate::application::ports::RepositoryError::RecipeVersionConflict { .. } => {
+            AppError::recipe_version_conflict(error.to_string())
+        }
+        crate::application::ports::RepositoryError::NotFound { .. } => {
+            AppError::internal(error.to_string())
+        }
+        _ => AppError::database(error.to_string()),
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct AppStatus {

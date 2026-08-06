@@ -1,52 +1,59 @@
 import { useEffect, useState } from "react";
 import {
   getComfyStatus,
+  listGenerationCatalog,
+  listRecentTasks,
   refreshComfyCapabilities,
 } from "../services/tauriClient";
+import { subscribeTaskUpdates } from "../services/taskEvents";
+import { useTaskStore } from "../stores/taskStore";
+import type { RecipeViewModel } from "../types/generation";
 import type { ComfyDeviceInfo, ComfyStatus } from "../types/comfy";
+import { GenerationStudio } from "../features/studio/GenerationStudio";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import "./App.css";
 
 function formatBytes(bytes: number | undefined): string {
-  if (bytes === undefined) {
-    return "--";
-  }
-
+  if (bytes === undefined) return "--";
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function formatVram(device: ComfyDeviceInfo | undefined): string {
-  if (!device || (device.vramFree === undefined && device.vramTotal === undefined)) {
-    return "--";
-  }
-
+  if (!device || (device.vramFree === undefined && device.vramTotal === undefined)) return "--";
   return `${formatBytes(device.vramFree)} / ${formatBytes(device.vramTotal)}`;
 }
 
 function connectionLabel(status: ComfyStatus["status"]): string {
   switch (status) {
-    case "CONNECTED":
-      return "Connected";
-    case "INCOMPATIBLE":
-      return "Incompatible";
-    default:
-      return "Offline";
+    case "CONNECTED": return "Connected";
+    case "INCOMPATIBLE": return "Incompatible";
+    default: return "Offline";
   }
 }
 
 function App() {
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
+  const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [connectionLoading, setConnectionLoading] = useState(false);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
+  const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
 
   useEffect(() => {
     let cancelled = false;
+    let unlisten: (() => void) | undefined;
 
-    void bootstrap()
-      .then((state) => {
+    void subscribeTaskUpdates((task) => useTaskStore.getState().upsertTask(task)).then((cleanup) => {
+      if (cancelled) cleanup();
+      else unlisten = cleanup;
+    });
+
+    void Promise.all([bootstrap(), listGenerationCatalog(), listRecentTasks(10)])
+      .then(([state, recipes, tasks]) => {
         if (!cancelled) {
           setBootstrapState(state);
+          setCatalog(recipes);
+          setRecentTasks(tasks);
         }
       })
       .catch((bootstrapError: unknown) => {
@@ -57,13 +64,13 @@ function App() {
 
     return () => {
       cancelled = true;
+      unlisten?.();
     };
-  }, []);
+  }, [setRecentTasks]);
 
   async function reconnectComfy() {
     setConnectionLoading(true);
     setError(null);
-
     try {
       const comfy = await getComfyStatus();
       setBootstrapState((current) => (current ? { ...current, comfy } : current));
@@ -77,13 +84,10 @@ function App() {
   async function refreshCapabilities() {
     setCapabilityLoading(true);
     setError(null);
-
     try {
       const capability = await refreshComfyCapabilities();
       setBootstrapState((current) =>
-        current
-          ? { ...current, comfy: { ...current.comfy, capability } }
-          : current,
+        current ? { ...current, comfy: { ...current.comfy, capability } } : current,
       );
     } catch (refreshError: unknown) {
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
@@ -92,98 +96,53 @@ function App() {
     }
   }
 
+  async function reloadCatalog() {
+    setCatalog(await listGenerationCatalog());
+  }
+
   const comfy = bootstrapState?.comfy;
   const firstDevice = comfy?.devices[0];
   const isConnected = comfy?.status === "CONNECTED";
 
   return (
     <main className="app-shell">
-      <section className="status-card" aria-live="polite">
-        <p className="eyebrow">M0 Development Build</p>
-        <h1>AI Studio</h1>
-
-        <dl className="status-list">
-          <div>
-            <dt>Rust Backend</dt>
-            <dd>{bootstrapState?.ping ?? "Connecting..."}</dd>
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">M0 Generation Studio</p>
+          <h1>AI Studio</h1>
+        </div>
+        {comfy && (
+          <div className="header-status">
+            <span className={`status-dot status-${comfy.status.toLowerCase()}`} />
+            <span>ComfyUI {connectionLabel(comfy.status)}</span>
+            <small>{firstDevice?.name ?? "GPU unavailable"}</small>
           </div>
-          <div>
-            <dt>Database</dt>
-            <dd>{bootstrapState?.status.database === "ready" ? "Ready" : "Connecting..."}</dd>
-          </div>
-          <div>
-            <dt>Data Directory</dt>
-            <dd className="path-value">{bootstrapState?.status.data_root ?? "Resolving..."}</dd>
-          </div>
-        </dl>
+        )}
+      </header>
 
-        <section className="comfy-panel" aria-busy={connectionLoading}>
-          <div className="section-heading">
-            <div>
-              <p className="section-label">Connection</p>
-              <h2>ComfyUI</h2>
-            </div>
-            {comfy && (
-              <span className={`status-pill status-${comfy.status.toLowerCase()}`}>
-                {connectionLabel(comfy.status)}
-              </span>
-            )}
-          </div>
-
-          {!comfy ? (
-            <p className="loading-message">Connecting...</p>
-          ) : (
-            <>
-              <dl className="comfy-details">
-                <div>
-                  <dt>Endpoint</dt>
-                  <dd className="path-value">{comfy.endpoint}</dd>
-                </div>
-                <div>
-                  <dt>Version</dt>
-                  <dd>{comfy.comfyuiVersion ?? "--"}</dd>
-                </div>
-                <div>
-                  <dt>GPU</dt>
-                  <dd>{firstDevice?.name ?? "--"}</dd>
-                </div>
-                <div>
-                  <dt>VRAM</dt>
-                  <dd>{formatVram(firstDevice)}</dd>
-                </div>
-                <div>
-                  <dt>Nodes</dt>
-                  <dd>{comfy.capability?.nodeCount ?? "--"}</dd>
-                </div>
-              </dl>
-
-              {!isConnected && (
-                <p className="offline-message">
-                  {comfy.status === "INCOMPATIBLE"
-                    ? "The endpoint did not return a compatible ComfyUI API response."
-                    : "Unable to connect to local ComfyUI."}
-                </p>
-              )}
-
-              <div className="actions">
-                <button type="button" onClick={() => void reconnectComfy()} disabled={connectionLoading}>
-                  {connectionLoading ? "Connecting..." : isConnected ? "Test Connection" : "Reconnect"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void refreshCapabilities()}
-                  disabled={!isConnected || capabilityLoading}
-                >
-                  {capabilityLoading ? "Refreshing..." : "Refresh Node Capabilities"}
-                </button>
-              </div>
-            </>
-          )}
-        </section>
-
-        {bootstrapState && <p className="version">Version {bootstrapState.status.version}</p>}
-        {error && <p className="error-message">Notice: {error}</p>}
+      <section className="runtime-strip" aria-live="polite">
+        <div><span>Backend</span><strong>{bootstrapState?.ping ?? "Connecting..."}</strong></div>
+        <div><span>Database</span><strong>{bootstrapState?.status.database === "ready" ? "Ready" : "Connecting..."}</strong></div>
+        <div><span>VRAM</span><strong>{formatVram(firstDevice)}</strong></div>
+        <div><span>Nodes</span><strong>{comfy?.capability?.nodeCount ?? "--"}</strong></div>
+        <button type="button" onClick={() => void reconnectComfy()} disabled={connectionLoading}>
+          {connectionLoading ? "Checking..." : "Test Connection"}
+        </button>
+        <button type="button" onClick={() => void refreshCapabilities()} disabled={!isConnected || capabilityLoading}>
+          {capabilityLoading ? "Refreshing..." : "Refresh Nodes"}
+        </button>
       </section>
+
+      <section className="studio-layout">
+        <GenerationStudio
+          catalog={catalog}
+          comfyConnected={isConnected}
+          onCatalogChanged={reloadCatalog}
+        />
+      </section>
+
+      {error && <p className="error-message global-error">Notice: {error}</p>}
+      {bootstrapState && <p className="version">Version {bootstrapState.status.version}</p>}
     </main>
   );
 }

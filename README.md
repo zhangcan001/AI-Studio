@@ -19,9 +19,16 @@ Current M0 progress:
 - Project-rooted generated image Asset Store with SHA-256 and image metadata
 - Transactional Asset Repository and compensating cleanup on database failure
 - `COLLECTING → SUCCEEDED` only after output validation and Asset persistence
+- Idempotent `prj_default` project bootstrap and project asset directory
+- Runtime Workflow Library package validation, version conflict protection, and sync
+- Catalog ViewModel bridge exposing only `textarea`, `integer`, and `seed` fields
+- Non-blocking `generation_create`, persisted `task://updated` events, and task queries
+- Asset ID-only query bridge with binary image IPC and Blob URL cleanup in React
+- Dynamic Generation Studio, task progress card, and image output grid
 
-Generation output remains backend-only in this phase; the formal React Generate
-UI is intentionally deferred.
+Runtime Workflow Packages are loaded only from
+`%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
+installed as runtime packages, and no model files are bundled or modified.
 
 ## Development
 

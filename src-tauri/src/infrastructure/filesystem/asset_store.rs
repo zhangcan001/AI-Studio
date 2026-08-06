@@ -93,6 +93,11 @@ impl AssetStore for FileSystemAssetStore {
             ))),
         }
     }
+
+    async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+        fs::read(path)
+            .map_err(|error| AssetStoreError::Read(format!("read {}: {error}", path.display())))
+    }
 }
 
 #[cfg(test)]

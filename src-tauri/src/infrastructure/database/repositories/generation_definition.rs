@@ -1,6 +1,7 @@
 use super::{map_sqlx_error, parse_json};
 use crate::application::ports::{
-    GenerationDefinition, GenerationDefinitionRepository, RepositoryError,
+    AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
+    RepositoryError,
 };
 use async_trait::async_trait;
 use sqlx::SqlitePool;
@@ -46,6 +47,40 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
 
         row.map(DefinitionRow::try_into_domain).transpose()
     }
+
+    async fn list_available(&self) -> Result<Vec<AvailableGenerationDefinition>, RepositoryError> {
+        let rows = sqlx::query_as::<_, AvailableDefinitionRow>(
+            "SELECT
+                w.id AS workflow_id,
+                wv.id AS workflow_version_id,
+                r.id AS recipe_id,
+                w.name,
+                w.category,
+                w.mode,
+                r.recipe_yaml
+             FROM workflows w
+             INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
+             INNER JOIN recipes r ON r.workflow_version_id = wv.id
+             WHERE w.current_version_id = wv.id
+             ORDER BY w.name ASC, wv.version ASC, r.version ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| AvailableGenerationDefinition {
+                workflow_id: row.workflow_id,
+                workflow_version_id: row.workflow_version_id,
+                recipe_id: row.recipe_id,
+                name: row.name,
+                category: row.category,
+                mode: row.mode,
+                recipe_yaml: row.recipe_yaml,
+            })
+            .collect())
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -54,6 +89,17 @@ struct DefinitionRow {
     workflow_version_id: String,
     recipe_id: String,
     api_workflow_json: String,
+    recipe_yaml: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct AvailableDefinitionRow {
+    workflow_id: String,
+    workflow_version_id: String,
+    recipe_id: String,
+    name: String,
+    category: String,
+    mode: String,
     recipe_yaml: String,
 }
 

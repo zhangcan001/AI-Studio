@@ -3,12 +3,14 @@ mod generation_definition;
 mod generation_snapshot;
 mod project;
 mod task;
+mod workflow_library;
 
 pub use asset::SqliteAssetRepository;
 pub use generation_definition::SqliteGenerationDefinitionRepository;
 pub use generation_snapshot::SqliteGenerationSnapshotRepository;
 pub use project::SqliteProjectRepository;
 pub use task::SqliteTaskRepository;
+pub use workflow_library::SqliteWorkflowLibraryRepository;
 
 use crate::application::ports::RepositoryError;
 use chrono::{DateTime, Utc};
