@@ -55,6 +55,22 @@ export function listRecentTasks(limit = 10): Promise<TaskView[]> {
   return invoke<TaskView[]>("task_list_recent", { limit });
 }
 
+export interface RecoveryReport {
+  examined: number;
+  succeeded: number;
+  failed: number;
+  deferred: number;
+  unresolved: number;
+}
+
+export function cancelTask(taskId: string): Promise<TaskView> {
+  return invoke<TaskView>("task_cancel", { taskId });
+}
+
+export function reconcileActiveTasks(): Promise<RecoveryReport> {
+  return invoke<RecoveryReport>("task_reconcile_active");
+}
+
 export function listAssetsByTask(taskId: string): Promise<AssetView[]> {
   return invoke<AssetView[]>("asset_list_by_task", { taskId });
 }

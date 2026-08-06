@@ -1,11 +1,11 @@
 use crate::application::ports::{
-    ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyEventSubscription,
-    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyImageUpload, ComfyNodeOutput,
-    ComfyOutputData, ComfyOutputFile, ComfyUploadedImage, DeviceInfo, PromptSubmission,
-    SystemStats,
+    CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
+    ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
+    ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyQueueState,
+    ComfyUploadedImage, DeviceInfo, PromptSubmission, SystemStats,
 };
 use crate::infrastructure::comfy::dto::{
-    PromptRequestDto, PromptResponseDto, SystemStatsDto, UploadResponseDto,
+    CancelResponseDto, PromptRequestDto, PromptResponseDto, SystemStatsDto, UploadResponseDto,
 };
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -226,6 +226,121 @@ impl ComfyHttpAdapter {
         })
     }
 
+    async fn cancel_prompt_internal(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelPromptResult, ComfyAdapterError> {
+        if !is_safe_prompt_id(prompt_id) {
+            return Err(ComfyAdapterError::Protocol(
+                "prompt_id contains unsafe path characters".to_owned(),
+            ));
+        }
+
+        let route = format!("api/jobs/{prompt_id}/cancel");
+        let url = self.config.route_url(&route);
+        let response = self
+            .client
+            .post(&url)
+            .send()
+            .await
+            .map_err(|error| request_error("POST", &url, error))?;
+        let status = response.status();
+
+        if status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED {
+            return self.cancel_prompt_legacy(prompt_id).await;
+        }
+        if !status.is_success() {
+            return Err(http_status_error("POST", &url, status));
+        }
+
+        let dto = response
+            .json::<CancelResponseDto>()
+            .await
+            .map_err(|error| {
+                ComfyAdapterError::Protocol(format!(
+                    "POST {url} returned invalid cancel JSON: {error}"
+                ))
+            })?;
+        match dto.cancelled {
+            Some(true) => Ok(CancelPromptResult::CancellationRequested),
+            Some(false) => Ok(CancelPromptResult::NotFoundOrAlreadyFinished),
+            None => Err(ComfyAdapterError::Protocol(
+                "POST /api/jobs/{prompt_id}/cancel response did not contain cancelled".to_owned(),
+            )),
+        }
+    }
+
+    async fn cancel_prompt_legacy(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelPromptResult, ComfyAdapterError> {
+        let queue = self.get_queue_state_internal().await?;
+        if queue
+            .pending_prompt_ids
+            .iter()
+            .any(|candidate| candidate == prompt_id)
+        {
+            let url = self.config.route_url("queue");
+            let response = self
+                .client
+                .post(&url)
+                .json(&serde_json::json!({ "delete": [prompt_id] }))
+                .send()
+                .await
+                .map_err(|error| request_error("POST", &url, error))?;
+            if !response.status().is_success() {
+                return Err(http_status_error("POST", &url, response.status()));
+            }
+            return Ok(CancelPromptResult::CancellationRequested);
+        }
+
+        if queue
+            .running_prompt_ids
+            .iter()
+            .any(|candidate| candidate == prompt_id)
+        {
+            let url = self.config.route_url("interrupt");
+            let response = self
+                .client
+                .post(&url)
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .map_err(|error| request_error("POST", &url, error))?;
+            if !response.status().is_success() {
+                return Err(http_status_error("POST", &url, response.status()));
+            }
+            return Ok(CancelPromptResult::CancellationRequested);
+        }
+
+        Ok(CancelPromptResult::NotFoundOrAlreadyFinished)
+    }
+
+    async fn get_queue_state_internal(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
+        let body: Value = self.get_json("queue").await?;
+        let root = body.as_object().ok_or_else(|| {
+            ComfyAdapterError::Protocol("GET /queue response must be a JSON object".to_owned())
+        })?;
+        Ok(ComfyQueueState {
+            running_prompt_ids: normalize_queue_ids(
+                root.get("queue_running").ok_or_else(|| {
+                    ComfyAdapterError::Protocol(
+                        "GET /queue response is missing queue_running".to_owned(),
+                    )
+                })?,
+                "queue_running",
+            )?,
+            pending_prompt_ids: normalize_queue_ids(
+                root.get("queue_pending").ok_or_else(|| {
+                    ComfyAdapterError::Protocol(
+                        "GET /queue response is missing queue_pending".to_owned(),
+                    )
+                })?,
+                "queue_pending",
+            )?,
+        })
+    }
+
     async fn get_history_internal(
         &self,
         prompt_id: &str,
@@ -343,6 +458,17 @@ impl ComfyAdapter for ComfyHttpAdapter {
         self.upload_image_internal(upload).await
     }
 
+    async fn cancel_prompt(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelPromptResult, ComfyAdapterError> {
+        self.cancel_prompt_internal(prompt_id).await
+    }
+
+    async fn get_queue_state(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
+        self.get_queue_state_internal().await
+    }
+
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
         self.get_history_internal(prompt_id).await
     }
@@ -386,6 +512,18 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
     let history = history.as_object().ok_or_else(|| {
         ComfyAdapterError::Protocol("history prompt entry must be a JSON object".to_owned())
     })?;
+    let status = history
+        .get("status")
+        .and_then(Value::as_object)
+        .map(|status| ComfyHistoryStatus {
+            status_str: status
+                .get("status_str")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            completed: status.get("completed").and_then(Value::as_bool),
+            messages: status.get("messages").cloned(),
+        })
+        .unwrap_or_default();
     let outputs = history
         .get("outputs")
         .and_then(Value::as_object)
@@ -442,8 +580,41 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
 
     Ok(ComfyHistory {
         prompt_id: prompt_id.to_owned(),
+        status,
         outputs: normalized,
     })
+}
+
+fn normalize_queue_ids(value: &Value, field: &str) -> Result<Vec<String>, ComfyAdapterError> {
+    let items = value.as_array().ok_or_else(|| {
+        ComfyAdapterError::Protocol(format!("GET /queue field {field} must be an array"))
+    })?;
+    let mut prompt_ids = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let tuple = item.as_array().ok_or_else(|| {
+            ComfyAdapterError::Protocol(format!(
+                "GET /queue field {field} item {index} must be an array"
+            ))
+        })?;
+        let prompt_id = tuple
+            .get(1)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                ComfyAdapterError::Protocol(format!(
+                    "GET /queue field {field} item {index} has no prompt_id at tuple index 1"
+                ))
+            })?;
+        prompt_ids.push(prompt_id.to_owned());
+    }
+    Ok(prompt_ids)
+}
+
+fn is_safe_prompt_id(prompt_id: &str) -> bool {
+    !prompt_id.trim().is_empty()
+        && prompt_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 type ComfyWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -697,8 +868,8 @@ fn http_status_error(method: &str, url: &str, status: StatusCode) -> ComfyAdapte
 mod tests {
     use super::{ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES};
     use crate::application::ports::{
-        ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyExecutionEvent,
-        ComfyImageUpload, ComfyOutputFile,
+        CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
+        ComfyExecutionEvent, ComfyImageUpload, ComfyOutputFile,
     };
     use futures_util::SinkExt;
     use serde_json::json;
@@ -837,6 +1008,145 @@ mod tests {
             .expect("upload should parse");
         assert_eq!(uploaded.name, "aistudio_task_asset.png");
         assert_eq!(uploaded.folder_type, "input");
+    }
+
+    #[tokio::test]
+    async fn modern_cancel_true_is_prompt_specific() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/jobs/prompt-1/cancel"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "cancelled": true })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert_eq!(
+            adapter.cancel_prompt("prompt-1").await.unwrap(),
+            CancelPromptResult::CancellationRequested
+        );
+    }
+
+    #[tokio::test]
+    async fn modern_cancel_false_means_not_found_or_finished() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/jobs/prompt-1/cancel"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "cancelled": false })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert_eq!(
+            adapter.cancel_prompt("prompt-1").await.unwrap(),
+            CancelPromptResult::NotFoundOrAlreadyFinished
+        );
+    }
+
+    #[tokio::test]
+    async fn modern_cancel_404_falls_back_to_pending_delete() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/jobs/prompt-1/cancel"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/queue"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "queue_running": [],
+                "queue_pending": [[3, "prompt-1", {}, {}]]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/queue"))
+            .and(body_json(json!({ "delete": ["prompt-1"] })))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert_eq!(
+            adapter.cancel_prompt("prompt-1").await.unwrap(),
+            CancelPromptResult::CancellationRequested
+        );
+    }
+
+    #[tokio::test]
+    async fn modern_cancel_404_interrupts_only_the_target_running_prompt() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/jobs/prompt-1/cancel"))
+            .respond_with(ResponseTemplate::new(405))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/queue"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "queue_running": [[4, "prompt-1", {}, {}]],
+                "queue_pending": []
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/interrupt"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert_eq!(
+            adapter.cancel_prompt("prompt-1").await.unwrap(),
+            CancelPromptResult::CancellationRequested
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_fallback_never_blindly_interrupts_another_prompt() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/jobs/prompt-a/cancel"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/queue"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "queue_running": [[4, "prompt-b", {}, {}]],
+                "queue_pending": []
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert_eq!(
+            adapter.cancel_prompt("prompt-a").await.unwrap(),
+            CancelPromptResult::NotFoundOrAlreadyFinished
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_queue_is_a_protocol_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/jobs/prompt-1/cancel"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/queue"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "queue_running": {},
+                "queue_pending": []
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        assert!(matches!(
+            adapter.cancel_prompt("prompt-1").await,
+            Err(ComfyAdapterError::Protocol(_))
+        ));
     }
 
     #[tokio::test]

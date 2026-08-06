@@ -1,4 +1,4 @@
-use crate::application::ports::{ComfyAdapter, ComfyAdapterError};
+use crate::application::ports::{ComfyAdapter, ComfyAdapterError, ComfyHistory};
 use crate::domain::{OutputType, Recipe};
 use std::{error::Error, fmt, sync::Arc};
 
@@ -86,7 +86,14 @@ impl OutputCollector {
                 ),
             });
         }
+        self.collect_from_history(recipe, &history).await
+    }
 
+    pub async fn collect_from_history(
+        &self,
+        recipe: &Recipe,
+        history: &ComfyHistory,
+    ) -> Result<Vec<CollectedImage>, OutputCollectorError> {
         let mut collected = Vec::new();
         for output in &recipe.outputs {
             if output.output_type != OutputType::Image {
@@ -236,6 +243,7 @@ mod tests {
     fn history(images: Vec<ComfyOutputFile>) -> ComfyHistory {
         ComfyHistory {
             prompt_id: "prompt-1".to_owned(),
+            status: Default::default(),
             outputs: BTreeMap::from([
                 ("9".to_owned(), ComfyNodeOutput { images }),
                 (
@@ -291,6 +299,7 @@ mod tests {
         let adapter = Arc::new(FakeAdapter {
             history: Ok(ComfyHistory {
                 prompt_id: "prompt-1".to_owned(),
+                status: Default::default(),
                 outputs: BTreeMap::new(),
             }),
             bytes: Vec::new(),
@@ -311,6 +320,7 @@ mod tests {
         let adapter = Arc::new(FakeAdapter {
             history: Ok(ComfyHistory {
                 prompt_id: "prompt-1".to_owned(),
+                status: Default::default(),
                 outputs: BTreeMap::new(),
             }),
             bytes: Vec::new(),

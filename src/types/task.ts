@@ -4,9 +4,11 @@ export type TaskStatus =
   | "PREPARING"
   | "QUEUED"
   | "RUNNING"
+  | "CANCEL_REQUESTED"
   | "COLLECTING"
   | "SUCCEEDED"
-  | "FAILED";
+  | "FAILED"
+  | "CANCELLED";
 
 export interface TaskProgress {
   mode: "indeterminate" | "node" | "step";

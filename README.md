@@ -35,6 +35,10 @@ M1 first phase:
 - ComfyUI `/upload/image` multipart adapter with server-returned input identity
 - Asset picker, recent image selection, and `ImageField` preview UI
 - Mock I2I E2E covering validation, upload, snapshot identity, and prompt submission
+- Task cancellation domain with `CANCEL_REQUESTED` and `CANCELLED` terminal handling
+- Prompt-specific ComfyUI cancellation with modern API and safe legacy queue fallback
+- Startup task recovery and manual history/queue reconciliation without automatic resubmit
+- Cancel and recovery UI driven by persisted `task://updated` events, without frontend polling
 
 M1 live I2I is not run because no validated runtime I2I Workflow Package was supplied.
 The existing M0 text-to-image runtime remains the only live generation package.

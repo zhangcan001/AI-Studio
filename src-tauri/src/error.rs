@@ -18,6 +18,7 @@ pub enum AppErrorCode {
     GenerationDefinitionNotFound,
     InvalidInput,
     TaskNotFound,
+    TaskNotCancellable,
     AssetNotFound,
     AssetReadFailed,
 }
@@ -83,6 +84,10 @@ impl AppError {
         Self::new(AppErrorCode::TaskNotFound, message)
     }
 
+    pub fn task_not_cancellable(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::TaskNotCancellable, message)
+    }
+
     pub fn asset_not_found(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::AssetNotFound, message)
     }
@@ -106,6 +111,7 @@ impl AppError {
             AppErrorCode::GenerationDefinitionNotFound => "GENERATION_DEFINITION_NOT_FOUND",
             AppErrorCode::InvalidInput => "INVALID_INPUT",
             AppErrorCode::TaskNotFound => "TASK_NOT_FOUND",
+            AppErrorCode::TaskNotCancellable => "TASK_NOT_CANCELLABLE",
             AppErrorCode::AssetNotFound => "ASSET_NOT_FOUND",
             AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
         }

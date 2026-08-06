@@ -3,6 +3,7 @@ import {
   getComfyStatus,
   listGenerationCatalog,
   listRecentTasks,
+  reconcileActiveTasks,
   refreshComfyCapabilities,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
@@ -21,7 +22,10 @@ function App() {
   const [taskEventError, setTaskEventError] = useState<string | undefined>();
   const [connectionLoading, setConnectionLoading] = useState(false);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
+  const recentTasks = useTaskStore((state) => state.recentTasks);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,8 +98,29 @@ function App() {
     setCatalog(await listGenerationCatalog());
   }
 
+  async function reconcileTasks() {
+    setReconciling(true);
+    setRecoveryNotice(null);
+    try {
+      const report = await reconcileActiveTasks();
+      setRecentTasks(await listRecentTasks(10));
+      setRecoveryNotice(
+        `Reconciled ${report.examined} task${report.examined === 1 ? "" : "s"}: ` +
+          `${report.succeeded} updated, ${report.deferred} deferred, ${report.unresolved} unresolved.`,
+      );
+    } catch (recoveryError: unknown) {
+      setRecoveryNotice(recoveryError instanceof Error ? recoveryError.message : String(recoveryError));
+    } finally {
+      setReconciling(false);
+    }
+  }
+
   const comfy = bootstrapState?.comfy;
   const isConnected = comfy?.status === "CONNECTED";
+  const hasActiveTasks = recentTasks.some((task) =>
+    ["CREATED", "VALIDATING", "PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED", "COLLECTING"]
+      .includes(task.status),
+  );
 
   return (
     <main className="app-shell">
@@ -120,6 +145,18 @@ function App() {
         onReconnect={() => void reconnectComfy()}
         onRefreshCapabilities={() => void refreshCapabilities()}
       />
+
+      {(hasActiveTasks || recoveryNotice) && (
+        <section className="task-recovery-bar" aria-live="polite">
+          <div>
+            <span className="section-label">Task recovery</span>
+            <p>{recoveryNotice ?? "Active tasks were found after startup."}</p>
+          </div>
+          <button type="button" onClick={() => void reconcileTasks()} disabled={reconciling}>
+            {reconciling ? "Reconciling..." : "Reconcile tasks"}
+          </button>
+        </section>
+      )}
 
       <section className="studio-layout">
         <GenerationStudio

@@ -231,6 +231,28 @@ impl TaskRepository for SqliteTaskRepository {
         rows.into_iter().map(TaskRow::try_into_domain).collect()
     }
 
+    async fn list_active(&self) -> Result<Vec<Task>, RepositoryError> {
+        let rows = sqlx::query_as::<_, TaskRow>(
+            "SELECT
+                id, project_id, workflow_id, workflow_version_id, recipe_id,
+                status, prompt_id, queue_number,
+                progress_mode, progress_current, progress_total, current_node_id,
+                error_code, error_message, raw_error_json,
+                created_at, queued_at, started_at, finished_at
+             FROM tasks
+             WHERE status IN (
+                'CREATED', 'VALIDATING', 'PREPARING', 'QUEUED',
+                'RUNNING', 'COLLECTING', 'CANCEL_REQUESTED'
+             )
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter().map(TaskRow::try_into_domain).collect()
+    }
+
     async fn list_events(&self, task_id: &TaskId) -> Result<Vec<StoredTaskEvent>, RepositoryError> {
         let rows = sqlx::query_as::<_, EventRow>(
             "SELECT id, task_id, sequence, event_type, payload_json, created_at
@@ -286,6 +308,11 @@ fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), Repos
             task.status,
             TaskStatus::Queued | TaskStatus::Running | TaskStatus::Collecting
         ),
+        TaskEventType::TaskCancelNotEffective => task.status == TaskStatus::CancelRequested,
+        TaskEventType::TaskRecoveryStarted
+        | TaskEventType::TaskRecoverySucceeded
+        | TaskEventType::TaskRecoveryDeferred
+        | TaskEventType::TaskRecoveryUnresolved => true,
         _ => false,
     };
     if !allowed {
@@ -600,6 +627,151 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].sequence, 1);
         assert_eq!(events[0].payload, event.payload);
+    }
+
+    #[tokio::test]
+    async fn list_active_returns_only_non_terminal_recovery_states() {
+        let (_directory, _pool, repository) = setup().await;
+        let statuses = [
+            TaskStatus::Created,
+            TaskStatus::Validating,
+            TaskStatus::Preparing,
+            TaskStatus::Queued,
+            TaskStatus::Running,
+            TaskStatus::Collecting,
+            TaskStatus::CancelRequested,
+        ];
+
+        for (index, status) in statuses.into_iter().enumerate() {
+            let mut task = new_task();
+            task.id = crate::domain::TaskId::parse(format!("tsk_active_{index}")).unwrap();
+            repository
+                .create(&task, &task.created_event())
+                .await
+                .expect("active task should create");
+            let base = task.created_at + Duration::seconds((index * 10) as i64);
+            if status != TaskStatus::Created {
+                let event = TaskStateMachine::transition(
+                    &mut task,
+                    TaskStatus::Validating,
+                    base + Duration::seconds(1),
+                )
+                .unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Created)
+                    .await
+                    .unwrap();
+            }
+            if matches!(
+                status,
+                TaskStatus::Preparing
+                    | TaskStatus::Queued
+                    | TaskStatus::Running
+                    | TaskStatus::Collecting
+                    | TaskStatus::CancelRequested
+            ) {
+                let event = TaskStateMachine::transition(
+                    &mut task,
+                    TaskStatus::Preparing,
+                    base + Duration::seconds(2),
+                )
+                .unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Validating)
+                    .await
+                    .unwrap();
+            }
+            if matches!(
+                status,
+                TaskStatus::Queued
+                    | TaskStatus::Running
+                    | TaskStatus::Collecting
+                    | TaskStatus::CancelRequested
+            ) {
+                let prepared = task
+                    .prepare_submission(
+                        format!("prompt-{index}"),
+                        format!("client-{index}"),
+                        base + Duration::seconds(3),
+                    )
+                    .unwrap();
+                repository
+                    .persist_runtime_update(&task, &prepared)
+                    .await
+                    .unwrap();
+                task.set_queue_number(Some(index as i64)).unwrap();
+                let event = TaskStateMachine::transition(
+                    &mut task,
+                    TaskStatus::Queued,
+                    base + Duration::seconds(4),
+                )
+                .unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Preparing)
+                    .await
+                    .unwrap();
+            }
+            if matches!(status, TaskStatus::Running | TaskStatus::Collecting) {
+                let event = TaskStateMachine::transition(
+                    &mut task,
+                    TaskStatus::Running,
+                    base + Duration::seconds(5),
+                )
+                .unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Queued)
+                    .await
+                    .unwrap();
+            }
+            if status == TaskStatus::Collecting {
+                let event = TaskStateMachine::transition(
+                    &mut task,
+                    TaskStatus::Collecting,
+                    base + Duration::seconds(6),
+                )
+                .unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Running)
+                    .await
+                    .unwrap();
+            }
+            if status == TaskStatus::CancelRequested {
+                let event = task.request_cancel(base + Duration::seconds(5)).unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Queued)
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(task.status, status);
+        }
+
+        let mut succeeded = new_task();
+        succeeded.id = crate::domain::TaskId::parse("tsk_succeeded").unwrap();
+        repository
+            .create(&succeeded, &succeeded.created_event())
+            .await
+            .unwrap();
+        let event = succeeded
+            .fail(
+                TaskError {
+                    code: "TEST".to_owned(),
+                    message: "terminal".to_owned(),
+                    raw: None,
+                },
+                succeeded.created_at + Duration::seconds(1),
+            )
+            .unwrap();
+        repository
+            .persist_transition(&succeeded, &event, TaskStatus::Created)
+            .await
+            .unwrap();
+
+        let mut active = repository.list_active().await.unwrap();
+        active.sort_by_key(|task| task.id.as_str().to_owned());
+        assert_eq!(
+            active.iter().map(|task| task.status).collect::<Vec<_>>(),
+            statuses
+        );
     }
 
     #[tokio::test]

@@ -44,9 +44,11 @@ pub enum TaskStatus {
     Preparing,
     Queued,
     Running,
+    CancelRequested,
     Collecting,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 impl TaskStatus {
@@ -57,9 +59,11 @@ impl TaskStatus {
             Self::Preparing => "PREPARING",
             Self::Queued => "QUEUED",
             Self::Running => "RUNNING",
+            Self::CancelRequested => "CANCEL_REQUESTED",
             Self::Collecting => "COLLECTING",
             Self::Succeeded => "SUCCEEDED",
             Self::Failed => "FAILED",
+            Self::Cancelled => "CANCELLED",
         }
     }
 
@@ -70,15 +74,17 @@ impl TaskStatus {
             "PREPARING" => Ok(Self::Preparing),
             "QUEUED" => Ok(Self::Queued),
             "RUNNING" => Ok(Self::Running),
+            "CANCEL_REQUESTED" => Ok(Self::CancelRequested),
             "COLLECTING" => Ok(Self::Collecting),
             "SUCCEEDED" => Ok(Self::Succeeded),
             "FAILED" => Ok(Self::Failed),
+            "CANCELLED" => Ok(Self::Cancelled),
             _ => Err(TaskDomainError::invalid_status(value)),
         }
     }
 
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed)
+        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
     }
 
     pub(crate) fn event_type(self) -> Option<TaskEventType> {
@@ -88,9 +94,11 @@ impl TaskStatus {
             Self::Preparing => Some(TaskEventType::TaskPreparing),
             Self::Queued => Some(TaskEventType::TaskQueued),
             Self::Running => Some(TaskEventType::TaskRunning),
+            Self::CancelRequested => Some(TaskEventType::TaskCancelRequested),
             Self::Collecting => Some(TaskEventType::TaskCollecting),
             Self::Succeeded => Some(TaskEventType::TaskSucceeded),
             Self::Failed => Some(TaskEventType::TaskFailed),
+            Self::Cancelled => Some(TaskEventType::TaskCancelled),
         }
     }
 }
@@ -427,6 +435,89 @@ impl Task {
         Ok(event)
     }
 
+    pub fn request_cancel(&mut self, at: DateTime<Utc>) -> Result<NewTaskEvent, TaskDomainError> {
+        let mut next = self.clone();
+        let event = TaskStateMachine::transition(&mut next, TaskStatus::CancelRequested, at)?;
+        *self = next;
+        Ok(event)
+    }
+
+    pub fn cancel(&mut self, at: DateTime<Utc>) -> Result<NewTaskEvent, TaskDomainError> {
+        if self.status != TaskStatus::CancelRequested {
+            return Err(TaskDomainError::invalid_transition(
+                self.status,
+                TaskStatus::Cancelled,
+            ));
+        }
+
+        let mut next = self.clone();
+        next.current_node_id = None;
+        next.progress = TaskProgress::Indeterminate;
+        next.error = None;
+        let event = TaskStateMachine::transition(&mut next, TaskStatus::Cancelled, at)?;
+        *self = next;
+        Ok(event)
+    }
+
+    pub fn record_cancel_not_effective(
+        &self,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if self.status != TaskStatus::CancelRequested {
+            return Err(TaskDomainError::invalid_task(
+                "cancel-not-effective requires a CANCEL_REQUESTED task",
+            ));
+        }
+        self.new_runtime_event(
+            TaskEventType::TaskCancelNotEffective,
+            Some(serde_json::json!({
+                "promptId": self.prompt_id,
+                "message": "Cancellation was requested but execution completed before cancellation took effect",
+            })),
+            at,
+        )
+    }
+
+    pub fn record_recovery_event(
+        &self,
+        event_type: TaskEventType,
+        payload: Option<Value>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if !matches!(
+            event_type,
+            TaskEventType::TaskRecoveryStarted
+                | TaskEventType::TaskRecoverySucceeded
+                | TaskEventType::TaskRecoveryDeferred
+                | TaskEventType::TaskRecoveryUnresolved
+        ) {
+            return Err(TaskDomainError::invalid_task(
+                "event is not a recovery event",
+            ));
+        }
+        self.new_runtime_event(event_type, payload, at)
+    }
+
+    fn new_runtime_event(
+        &self,
+        event_type: TaskEventType,
+        payload: Option<Value>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if at < self.created_at {
+            return Err(TaskDomainError::invalid_timestamp(
+                "task event time must not precede created_at",
+            ));
+        }
+        Ok(NewTaskEvent {
+            id: new_event_id(),
+            task_id: self.id.clone(),
+            event_type,
+            payload,
+            created_at: at,
+        })
+    }
+
     pub fn succeed(&mut self, at: DateTime<Utc>) -> Result<NewTaskEvent, TaskDomainError> {
         let mut next = self.clone();
         next.current_node_id = None;
@@ -520,7 +611,18 @@ impl Task {
                     "FAILED task must have finished_at",
                 ));
             }
+            TaskStatus::Cancelled if self.finished_at.is_none() => {
+                return Err(TaskDomainError::invalid_task(
+                    "CANCELLED task must have finished_at",
+                ));
+            }
             _ => {}
+        }
+
+        if self.status == TaskStatus::Cancelled && self.error.is_some() {
+            return Err(TaskDomainError::invalid_task(
+                "CANCELLED task must not have an error",
+            ));
         }
 
         Ok(())
@@ -534,13 +636,20 @@ pub enum TaskEventType {
     TaskPreparing,
     TaskQueued,
     TaskRunning,
+    TaskCancelRequested,
     TaskCollecting,
     TaskSucceeded,
     TaskFailed,
+    TaskCancelled,
     TaskSubmissionPrepared,
     TaskNodeStarted,
     TaskProgressUpdated,
     TaskStreamDisconnected,
+    TaskCancelNotEffective,
+    TaskRecoveryStarted,
+    TaskRecoverySucceeded,
+    TaskRecoveryDeferred,
+    TaskRecoveryUnresolved,
 }
 
 impl TaskEventType {
@@ -551,13 +660,20 @@ impl TaskEventType {
             Self::TaskPreparing => "TASK_PREPARING",
             Self::TaskQueued => "TASK_QUEUED",
             Self::TaskRunning => "TASK_RUNNING",
+            Self::TaskCancelRequested => "TASK_CANCEL_REQUESTED",
             Self::TaskCollecting => "TASK_COLLECTING",
             Self::TaskSucceeded => "TASK_SUCCEEDED",
             Self::TaskFailed => "TASK_FAILED",
+            Self::TaskCancelled => "TASK_CANCELLED",
             Self::TaskSubmissionPrepared => "TASK_SUBMISSION_PREPARED",
             Self::TaskNodeStarted => "TASK_NODE_STARTED",
             Self::TaskProgressUpdated => "TASK_PROGRESS_UPDATED",
             Self::TaskStreamDisconnected => "TASK_STREAM_DISCONNECTED",
+            Self::TaskCancelNotEffective => "TASK_CANCEL_NOT_EFFECTIVE",
+            Self::TaskRecoveryStarted => "TASK_RECOVERY_STARTED",
+            Self::TaskRecoverySucceeded => "TASK_RECOVERY_SUCCEEDED",
+            Self::TaskRecoveryDeferred => "TASK_RECOVERY_DEFERRED",
+            Self::TaskRecoveryUnresolved => "TASK_RECOVERY_UNRESOLVED",
         }
     }
 
@@ -568,13 +684,20 @@ impl TaskEventType {
             "TASK_PREPARING" => Ok(Self::TaskPreparing),
             "TASK_QUEUED" => Ok(Self::TaskQueued),
             "TASK_RUNNING" => Ok(Self::TaskRunning),
+            "TASK_CANCEL_REQUESTED" => Ok(Self::TaskCancelRequested),
             "TASK_COLLECTING" => Ok(Self::TaskCollecting),
             "TASK_SUCCEEDED" => Ok(Self::TaskSucceeded),
             "TASK_FAILED" => Ok(Self::TaskFailed),
+            "TASK_CANCELLED" => Ok(Self::TaskCancelled),
             "TASK_SUBMISSION_PREPARED" => Ok(Self::TaskSubmissionPrepared),
             "TASK_NODE_STARTED" => Ok(Self::TaskNodeStarted),
             "TASK_PROGRESS_UPDATED" => Ok(Self::TaskProgressUpdated),
             "TASK_STREAM_DISCONNECTED" => Ok(Self::TaskStreamDisconnected),
+            "TASK_CANCEL_NOT_EFFECTIVE" => Ok(Self::TaskCancelNotEffective),
+            "TASK_RECOVERY_STARTED" => Ok(Self::TaskRecoveryStarted),
+            "TASK_RECOVERY_SUCCEEDED" => Ok(Self::TaskRecoverySucceeded),
+            "TASK_RECOVERY_DEFERRED" => Ok(Self::TaskRecoveryDeferred),
+            "TASK_RECOVERY_UNRESOLVED" => Ok(Self::TaskRecoveryUnresolved),
             _ => Err(TaskDomainError::invalid_event_type(value)),
         }
     }
@@ -635,7 +758,15 @@ impl TaskStateMachine {
                 }
                 next.started_at = Some(at);
             }
-            TaskStatus::Succeeded | TaskStatus::Failed => {
+            TaskStatus::Collecting => {
+                if next.queued_at.is_none() {
+                    next.queued_at = Some(at);
+                }
+                if next.started_at.is_none() {
+                    next.started_at = Some(at);
+                }
+            }
+            TaskStatus::Succeeded | TaskStatus::Failed | TaskStatus::Cancelled => {
                 let lower_bound = task.started_at.unwrap_or(task.created_at);
                 if at < lower_bound {
                     return Err(TaskDomainError::invalid_timestamp(
@@ -674,6 +805,7 @@ fn is_allowed_transition(from: TaskStatus, to: TaskStatus) -> bool {
                 | TaskStatus::Queued
                 | TaskStatus::Running
                 | TaskStatus::Collecting
+                | TaskStatus::CancelRequested
         )
     {
         return true;
@@ -686,7 +818,16 @@ fn is_allowed_transition(from: TaskStatus, to: TaskStatus) -> bool {
             | (TaskStatus::Preparing, TaskStatus::Queued)
             | (TaskStatus::Queued, TaskStatus::Running)
             | (TaskStatus::Running, TaskStatus::Collecting)
+            | (TaskStatus::Preparing, TaskStatus::Collecting)
+            | (TaskStatus::Queued, TaskStatus::Collecting)
+            | (TaskStatus::CancelRequested, TaskStatus::Collecting)
             | (TaskStatus::Collecting, TaskStatus::Succeeded)
+            | (TaskStatus::Created, TaskStatus::CancelRequested)
+            | (TaskStatus::Validating, TaskStatus::CancelRequested)
+            | (TaskStatus::Preparing, TaskStatus::CancelRequested)
+            | (TaskStatus::Queued, TaskStatus::CancelRequested)
+            | (TaskStatus::Running, TaskStatus::CancelRequested)
+            | (TaskStatus::CancelRequested, TaskStatus::Cancelled)
     )
 }
 
@@ -777,7 +918,9 @@ impl Error for TaskDomainError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Task, TaskDomainError, TaskEventType, TaskProgress, TaskStateMachine, TaskStatus};
+    use super::{
+        Task, TaskDomainError, TaskError, TaskEventType, TaskProgress, TaskStateMachine, TaskStatus,
+    };
     use chrono::{Duration, TimeZone, Utc};
 
     fn created_task() -> Task {
@@ -964,7 +1107,10 @@ mod tests {
                     )
                     .unwrap();
                 }
-                TaskStatus::Succeeded | TaskStatus::Failed => unreachable!(),
+                TaskStatus::Succeeded
+                | TaskStatus::Failed
+                | TaskStatus::CancelRequested
+                | TaskStatus::Cancelled => unreachable!(),
             }
 
             TaskStateMachine::transition(
@@ -1036,5 +1182,122 @@ mod tests {
         );
         assert!(TaskStatus::try_from_db("FOOBAR").is_err());
         assert!(TaskEventType::try_from_db("EVENT_UNKNOWN").is_err());
+    }
+
+    fn task_at_status(status: TaskStatus) -> Task {
+        let mut task = created_task();
+        if status == TaskStatus::Created {
+            return task;
+        }
+        let base = task.created_at;
+        for (next, seconds) in [
+            (TaskStatus::Validating, 1),
+            (TaskStatus::Preparing, 2),
+            (TaskStatus::Queued, 3),
+            (TaskStatus::Running, 4),
+            (TaskStatus::Collecting, 5),
+        ] {
+            TaskStateMachine::transition(&mut task, next, base + Duration::seconds(seconds))
+                .expect("fixture transition should succeed");
+            if next == status {
+                break;
+            }
+        }
+        task
+    }
+
+    #[test]
+    fn active_tasks_can_request_then_complete_cancellation() {
+        for status in [
+            TaskStatus::Created,
+            TaskStatus::Validating,
+            TaskStatus::Preparing,
+            TaskStatus::Queued,
+            TaskStatus::Running,
+        ] {
+            let mut task = task_at_status(status);
+            let requested_at = task.created_at + Duration::seconds(10);
+            let requested = task
+                .request_cancel(requested_at)
+                .expect("active task should accept cancellation");
+            assert_eq!(task.status, TaskStatus::CancelRequested);
+            assert_eq!(requested.event_type, TaskEventType::TaskCancelRequested);
+
+            let cancelled = task
+                .cancel(requested_at + Duration::seconds(1))
+                .expect("cancel request should complete");
+            assert_eq!(task.status, TaskStatus::Cancelled);
+            assert_eq!(cancelled.event_type, TaskEventType::TaskCancelled);
+            assert!(task.finished_at.is_some());
+            assert_eq!(task.progress, TaskProgress::Indeterminate);
+            assert!(task.current_node_id.is_none());
+            assert!(task.error.is_none());
+        }
+    }
+
+    #[test]
+    fn collecting_cannot_be_cancelled_and_terminal_tasks_do_not_change() {
+        let mut collecting = task_at_status(TaskStatus::Collecting);
+        assert!(collecting
+            .request_cancel(collecting.created_at + Duration::seconds(10))
+            .is_err());
+
+        let mut succeeded = task_at_status(TaskStatus::Collecting);
+        succeeded
+            .succeed(succeeded.created_at + Duration::seconds(10))
+            .expect("success should succeed");
+        let succeeded_before = succeeded.clone();
+        assert!(succeeded
+            .request_cancel(succeeded.created_at + Duration::seconds(11))
+            .is_err());
+        assert_eq!(succeeded, succeeded_before);
+
+        let mut failed = task_at_status(TaskStatus::Created);
+        failed
+            .fail(
+                TaskError {
+                    code: "TEST".to_owned(),
+                    message: "failed".to_owned(),
+                    raw: None,
+                },
+                failed.created_at + Duration::seconds(10),
+            )
+            .expect("failure should succeed");
+        let failed_before = failed.clone();
+        assert!(failed
+            .request_cancel(failed.created_at + Duration::seconds(11))
+            .is_err());
+        assert_eq!(failed, failed_before);
+
+        let mut cancelled = task_at_status(TaskStatus::Created);
+        cancelled
+            .request_cancel(cancelled.created_at + Duration::seconds(10))
+            .unwrap();
+        cancelled
+            .cancel(cancelled.created_at + Duration::seconds(11))
+            .unwrap();
+        let cancelled_before = cancelled.clone();
+        assert!(cancelled
+            .request_cancel(cancelled.created_at + Duration::seconds(12))
+            .is_err());
+        assert_eq!(cancelled, cancelled_before);
+    }
+
+    #[test]
+    fn cancellation_race_can_continue_to_collecting() {
+        let mut task = task_at_status(TaskStatus::Running);
+        task.request_cancel(task.created_at + Duration::seconds(10))
+            .expect("running task should accept cancellation");
+        let not_effective = task
+            .record_cancel_not_effective(task.created_at + Duration::seconds(11))
+            .expect("cancel race event should be recorded");
+        assert_eq!(
+            not_effective.event_type,
+            TaskEventType::TaskCancelNotEffective
+        );
+        let collecting_at = task.created_at + Duration::seconds(12);
+        TaskStateMachine::transition(&mut task, TaskStatus::Collecting, collecting_at)
+            .expect("completed execution should continue collecting");
+        assert_eq!(task.status, TaskStatus::Collecting);
     }
 }

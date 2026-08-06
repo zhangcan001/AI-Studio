@@ -26,7 +26,10 @@ use application::{
     ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
     project_bootstrap::DefaultProjectBootstrap,
     source_asset_import_service::SourceAssetImportService,
+    task_cancellation_service::TaskCancellationService,
+    task_execution_registry::TaskExecutionRegistry,
     task_query_service::TaskQueryService,
+    task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
 };
 use error::AppError;
@@ -137,18 +140,20 @@ fn run_application() -> Result<(), AppError> {
             let comfy_service = Arc::new(ComfyService::new(comfy_adapter.clone(), &comfy_config));
             let task_update_sink: Arc<dyn application::ports::TaskUpdateSink> =
                 Arc::new(TauriTaskUpdateSink::new(app.handle().clone()));
+            let execution_registry = TaskExecutionRegistry::default();
             let generation_service = Arc::new(
                 GenerationService::new(
-                    task_repository,
-                    snapshot_repository,
+                    task_repository.clone(),
+                    snapshot_repository.clone(),
                     definition_repository.clone(),
-                    comfy_adapter,
+                    comfy_adapter.clone(),
                     project_repository.clone(),
                     asset_store.clone(),
                     asset_repository.clone(),
                     clock.clone(),
                 )
-                .with_task_update_sink(task_update_sink),
+                .with_task_update_sink(task_update_sink.clone())
+                .with_execution_registry(execution_registry.clone()),
             );
             let generation_catalog_service =
                 Arc::new(GenerationCatalogService::new(definition_repository));
@@ -161,11 +166,28 @@ fn run_application() -> Result<(), AppError> {
                 asset_store.clone(),
             ));
             let source_asset_import_service = Arc::new(SourceAssetImportService::new(
+                project_repository.clone(),
+                asset_store.clone(),
+                asset_repository.clone(),
+                clock.clone(),
+            ));
+            let task_cancellation_service = Arc::new(TaskCancellationService::new(
+                task_repository.clone(),
+                execution_registry,
+                clock.clone(),
+                task_update_sink.clone(),
+            ));
+            let task_recovery_service = Arc::new(TaskRecoveryService::new(
+                task_repository,
+                snapshot_repository,
+                asset_repository,
+                comfy_adapter,
                 project_repository,
                 asset_store,
-                asset_repository,
                 clock,
+                task_update_sink,
             ));
+            let startup_recovery = task_recovery_service.clone();
             app.manage(AppState::new(
                 data_dirs,
                 comfy_service,
@@ -175,7 +197,23 @@ fn run_application() -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 source_asset_import_service,
+                task_cancellation_service,
+                task_recovery_service,
             ));
+
+            tauri::async_runtime::spawn(async move {
+                match startup_recovery.reconcile_active().await {
+                    Ok(report) => tracing::info!(
+                        examined = report.examined,
+                        succeeded = report.succeeded,
+                        failed = report.failed,
+                        deferred = report.deferred,
+                        unresolved = report.unresolved,
+                        "startup task recovery completed"
+                    ),
+                    Err(error) => tracing::warn!(error = %error, "startup task recovery failed"),
+                }
+            });
 
             Ok(())
         })
@@ -189,6 +227,8 @@ fn run_application() -> Result<(), AppError> {
             commands::generation::generation_create,
             commands::task::task_get,
             commands::task::task_list_recent,
+            commands::task::task_cancel,
+            commands::task::task_reconcile_active,
             commands::asset::asset_list_by_task,
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,

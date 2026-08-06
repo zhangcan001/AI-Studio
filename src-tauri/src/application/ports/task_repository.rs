@@ -27,5 +27,7 @@ pub trait TaskRepository: Send + Sync {
 
     async fn list_recent(&self, limit: u32) -> Result<Vec<Task>, RepositoryError>;
 
+    async fn list_active(&self) -> Result<Vec<Task>, RepositoryError>;
+
     async fn list_events(&self, task_id: &TaskId) -> Result<Vec<StoredTaskEvent>, RepositoryError>;
 }

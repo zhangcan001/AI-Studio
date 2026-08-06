@@ -17,10 +17,10 @@ pub use asset_repository::AssetRepository;
 pub use asset_store::{AssetStore, AssetStoreError, StoredAssetFile};
 pub use clock::{Clock, MonotonicEventClock};
 pub use comfy_adapter::{
-    ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyEventSubscription,
-    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyImageUpload, ComfyNodeOutput,
-    ComfyOutputData, ComfyOutputFile, ComfyUploadedImage, DeviceInfo, PromptSubmission,
-    SystemStats,
+    CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
+    ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
+    ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyQueueState,
+    ComfyUploadedImage, DeviceInfo, PromptSubmission, SystemStats,
 };
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,

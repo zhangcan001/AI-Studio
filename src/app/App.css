@@ -90,6 +90,20 @@ p { line-height: 1.5; }
 .comfy-offline { color: #ffd2b8; background: #5b3327; }
 .comfy-incompatible { color: #ffdfb8; background: #5d4724; }
 
+.task-recovery-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 13px 16px;
+  border: 1px solid #4d658f;
+  border-radius: 12px;
+  background: #182337;
+}
+.task-recovery-bar p { margin: 0; color: #b9c8df; }
+.task-recovery-bar button { flex: none; }
+
 button {
   padding: 9px 13px;
   border: 1px solid #4d658f;
@@ -145,9 +159,13 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 
 .status-pill { flex: none; padding: 5px 10px; border-radius: 999px; font-size: 0.74rem; font-weight: 700; }
 .task-created, .task-validating, .task-preparing { color: #d6c7ff; background: #3a2b60; }
-.task-queued, .task-running, .task-collecting { color: #b9dcff; background: #254c69; }
+.task-queued, .task-running, .task-cancel-requested, .task-collecting { color: #b9dcff; background: #254c69; }
 .task-succeeded { color: #b9f5cd; background: #1d5535; }
 .task-failed { color: #ffd2b8; background: #5b3327; }
+.task-cancelled { color: #c8d3e5; background: #39465c; }
+.task-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.cancel-button { padding: 5px 10px; color: #ffd2b8; border-color: #8a5548; background: #3a2423; }
+.cancel-button:hover:not(:disabled) { border-color: #d89079; background: #5b3327; }
 .task-meta { display: flex; gap: 16px; margin-top: 18px; color: #8997ad; font-size: 0.8rem; }
 .empty-task, .empty-output { color: #8997ad; }
 .empty-task p, .empty-output p { margin-bottom: 0; }
@@ -182,4 +200,6 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .comfy-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .comfy-status-grid div { border-right: 0; }
   .comfy-status-actions, .image-field-actions { grid-template-columns: 1fr; flex-direction: column; }
+  .task-recovery-bar { align-items: stretch; flex-direction: column; }
+  .task-recovery-bar button { width: 100%; }
 }

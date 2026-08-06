@@ -6,9 +6,11 @@ use crate::application::generation_input_preparer::{
 use crate::application::output_collector::{OutputCollector, OutputCollectorError};
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError, ComfyExecutionEvent,
-    GenerationDefinitionRepository, GenerationSnapshotRepository, MonotonicEventClock,
-    NoopTaskUpdateSink, ProjectRepository, RepositoryError, TaskRepository, TaskUpdateSink,
+    ComfyHistory, ComfyHistoryStatus, GenerationDefinitionRepository, GenerationSnapshotRepository,
+    MonotonicEventClock, NoopTaskUpdateSink, ProjectRepository, RepositoryError, TaskRepository,
+    TaskUpdateSink,
 };
+use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::compiler::{CompileError, RecipeParser, WorkflowCompiler};
 use crate::domain::{
     CompileRequest, GenerationSnapshot, ResolvedInputValue, SeedValue, Task, TaskDomainError,
@@ -16,6 +18,7 @@ use crate::domain::{
 };
 use serde_json::{Map, Number, Value};
 use std::{collections::BTreeMap, error::Error, fmt, sync::Arc};
+use tokio::sync::watch;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,6 +90,12 @@ impl From<TaskDomainError> for GenerationServiceError {
     }
 }
 
+impl From<ComfyAdapterError> for GenerationServiceError {
+    fn from(error: ComfyAdapterError) -> Self {
+        Self::Comfy(error)
+    }
+}
+
 pub struct GenerationService {
     task_repository: Arc<dyn TaskRepository>,
     snapshot_repository: Arc<dyn GenerationSnapshotRepository>,
@@ -97,7 +106,15 @@ pub struct GenerationService {
     generation_input_preparer: Arc<GenerationInputPreparer>,
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
+    execution_registry: TaskExecutionRegistry,
     compiler: WorkflowCompiler,
+}
+
+enum CancelResolution {
+    KeepWaiting,
+    Cancelled,
+    Success(ComfyHistory),
+    Failed(TaskError),
 }
 
 impl GenerationService {
@@ -131,6 +148,7 @@ impl GenerationService {
             comfy_adapter,
             clock,
             task_update_sink: Arc::new(NoopTaskUpdateSink),
+            execution_registry: TaskExecutionRegistry::default(),
             compiler: WorkflowCompiler,
         }
     }
@@ -140,13 +158,20 @@ impl GenerationService {
         self
     }
 
+    pub fn with_execution_registry(mut self, execution_registry: TaskExecutionRegistry) -> Self {
+        self.execution_registry = execution_registry;
+        self
+    }
+
     #[allow(dead_code)]
     pub async fn execute(
         &self,
         request: CreateGenerationRequest,
     ) -> Result<Task, GenerationServiceError> {
         let (request, definition, task) = self.prepare_task(request).await?;
-        self.execute_prepared(request, definition, task).await
+        let (cancel_signal, _guard) = self.execution_registry.register(task.id.clone());
+        self.execute_prepared(request, definition, task, cancel_signal)
+            .await
     }
 
     pub async fn start_generation(
@@ -154,11 +179,13 @@ impl GenerationService {
         request: CreateGenerationRequest,
     ) -> Result<Task, GenerationServiceError> {
         let (request, definition, task) = self.prepare_task(request).await?;
+        let (cancel_signal, guard) = self.execution_registry.register(task.id.clone());
         let service = Arc::clone(self);
         let background_task = task.clone();
         tokio::spawn(async move {
+            let _guard = guard;
             if let Err(error) = service
-                .execute_prepared(request, definition, background_task)
+                .execute_prepared(request, definition, background_task, cancel_signal)
                 .await
             {
                 tracing::error!(error = %error, "background generation failed");
@@ -205,10 +232,14 @@ impl GenerationService {
         request: CreateGenerationRequest,
         definition: crate::application::ports::GenerationDefinition,
         mut task: Task,
+        mut cancel_signal: watch::Receiver<bool>,
     ) -> Result<Task, GenerationServiceError> {
         let project_id = request.project_id.clone();
         self.transition_and_persist(&mut task, TaskStatus::Validating)
             .await?;
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
 
         let recipe = match RecipeParser::parse(&definition.recipe_yaml) {
             Ok(recipe) => recipe,
@@ -264,9 +295,15 @@ impl GenerationService {
                 )
                 .await);
         }
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
 
         self.transition_and_persist(&mut task, TaskStatus::Preparing)
             .await?;
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
 
         let prepared = match self
             .generation_input_preparer
@@ -284,6 +321,9 @@ impl GenerationService {
                     .await);
             }
         };
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
         let compile_request = CompileRequest::new(prepared.compiler_values.clone());
         let compile_result = match self.compiler.compile(&workflow, &recipe, &compile_request) {
             Ok(result) => result,
@@ -297,6 +337,9 @@ impl GenerationService {
                     .await);
             }
         };
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
 
         let snapshot = match GenerationSnapshot::new(
             task.id.clone(),
@@ -336,6 +379,9 @@ impl GenerationService {
                 )
                 .await);
         }
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
 
         let client_id = Uuid::new_v4().to_string();
         let prompt_id = Uuid::new_v4().to_string();
@@ -346,6 +392,10 @@ impl GenerationService {
             .await?;
         self.task_update_sink.publish(&task);
 
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
+
         let mut subscription = match self.comfy_adapter.subscribe_events(&client_id).await {
             Ok(subscription) => subscription,
             Err(error) => {
@@ -355,6 +405,10 @@ impl GenerationService {
                     .await);
             }
         };
+
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
 
         let submission = match self
             .comfy_adapter
@@ -381,12 +435,75 @@ impl GenerationService {
                 .await);
         }
 
-        task.set_queue_number(submission.number)?;
-        self.transition_and_persist(&mut task, TaskStatus::Queued)
-            .await?;
+        let persisted_after_submit = self.task_repository.find_by_id(&task.id).await?;
+        match persisted_after_submit {
+            Some(current) if current.status == TaskStatus::CancelRequested => {
+                task = current;
+            }
+            Some(_) => {
+                task.set_queue_number(submission.number)?;
+                self.transition_and_persist(&mut task, TaskStatus::Queued)
+                    .await?;
+            }
+            None => {
+                return Err(GenerationServiceError::Repository(
+                    RepositoryError::NotFound {
+                        entity: "task".to_owned(),
+                        id: task.id.to_string(),
+                    },
+                ));
+            }
+        }
 
+        let mut cancel_action_sent = false;
         loop {
-            let event = match subscription.next_event().await {
+            if !cancel_action_sent && *cancel_signal.borrow() {
+                match self.handle_submitted_cancel(&mut task, &prompt_id).await? {
+                    CancelResolution::KeepWaiting => {
+                        cancel_action_sent = true;
+                    }
+                    CancelResolution::Cancelled => {
+                        self.cancel_checkpoint(&mut task, &cancel_signal).await?;
+                        return Ok(task);
+                    }
+                    CancelResolution::Success(history) => {
+                        return self
+                            .complete_success(
+                                &mut task,
+                                &recipe,
+                                &project_id,
+                                &prompt_id,
+                                Some(&history),
+                            )
+                            .await;
+                    }
+                    CancelResolution::Failed(error) => {
+                        let message = error.message.clone();
+                        return Err(self
+                            .fail_and_preserve(
+                                &mut task,
+                                error,
+                                GenerationServiceError::ExecutionFailed {
+                                    code: "EXECUTION_ERROR".to_owned(),
+                                    message,
+                                },
+                            )
+                            .await);
+                    }
+                }
+            }
+
+            let event_result = tokio::select! {
+                changed = cancel_signal.changed(), if !cancel_action_sent => {
+                    if changed.is_err() {
+                        cancel_action_sent = true;
+                    }
+                    continue;
+                }
+                event = subscription.next_event() => event,
+            };
+
+            let event = match event_result {
                 Ok(Some(event)) => event,
                 Ok(None) => {
                     let message = "ComfyUI WebSocket closed after prompt submission".to_owned();
@@ -463,56 +580,24 @@ impl GenerationService {
                     }
                 }
                 ComfyExecutionEvent::ExecutionSucceeded { .. } => {
+                    if *cancel_signal.borrow() {
+                        if let Some(current) = self.task_repository.find_by_id(&task.id).await? {
+                            if current.status == TaskStatus::CancelRequested {
+                                task = current;
+                            }
+                        }
+                    }
+                    if task.status == TaskStatus::CancelRequested {
+                        return self
+                            .complete_success(&mut task, &recipe, &project_id, &prompt_id, None)
+                            .await;
+                    }
                     if task.status != TaskStatus::Running {
                         continue;
                     }
-                    self.transition_and_persist(&mut task, TaskStatus::Collecting)
-                        .await?;
-
-                    let images = match self.output_collector.collect(&recipe, &prompt_id).await {
-                        Ok(images) => images,
-                        Err(error) => {
-                            let original = GenerationServiceError::OutputCollection(error);
-                            return Err(self
-                                .fail_and_preserve(
-                                    &mut task,
-                                    task_error_from_output(&original),
-                                    original,
-                                )
-                                .await);
-                        }
-                    };
-                    if let Err(error) = self
-                        .asset_import_service
-                        .import(&project_id, &task.id, &images)
-                        .await
-                    {
-                        let original = GenerationServiceError::AssetImport(error);
-                        return Err(self
-                            .fail_and_preserve(
-                                &mut task,
-                                task_error_from_output(&original),
-                                original,
-                            )
-                            .await);
-                    }
-
-                    let previous_status = task.status;
-                    let event = task.succeed(self.clock.now())?;
-                    if let Err(error) = self
-                        .task_repository
-                        .persist_transition(&task, &event, previous_status)
-                        .await
-                    {
-                        tracing::error!(
-                            task_id = %task.id,
-                            error = %error,
-                            "assets imported but SUCCEEDED task persistence failed"
-                        );
-                        return Err(error.into());
-                    }
-                    self.task_update_sink.publish(&task);
-                    return Ok(task);
+                    return self
+                        .complete_success(&mut task, &recipe, &project_id, &prompt_id, None)
+                        .await;
                 }
                 ComfyExecutionEvent::ExecutionError {
                     node_id,
@@ -520,6 +605,7 @@ impl GenerationService {
                     raw,
                     ..
                 } => {
+                    self.refresh_task_from_database(&mut task).await?;
                     let message = if let Some(node_id) = node_id {
                         format!("node {node_id}: {message}")
                     } else {
@@ -542,6 +628,11 @@ impl GenerationService {
                         .await);
                 }
                 ComfyExecutionEvent::ExecutionInterrupted { node_id, raw, .. } => {
+                    self.refresh_task_from_database(&mut task).await?;
+                    if task.status == TaskStatus::CancelRequested {
+                        self.cancel_checkpoint(&mut task, &cancel_signal).await?;
+                        return Ok(task);
+                    }
                     let message = node_id
                         .map(|node_id| format!("execution interrupted at node {node_id}"))
                         .unwrap_or_else(|| "ComfyUI interrupted execution".to_owned());
@@ -563,6 +654,175 @@ impl GenerationService {
                 }
             }
         }
+    }
+
+    async fn cancel_checkpoint(
+        &self,
+        task: &mut Task,
+        cancel_signal: &watch::Receiver<bool>,
+    ) -> Result<bool, GenerationServiceError> {
+        if !*cancel_signal.borrow() {
+            return Ok(false);
+        }
+
+        let Some(current) = self.task_repository.find_by_id(&task.id).await? else {
+            return Err(GenerationServiceError::Repository(
+                RepositoryError::NotFound {
+                    entity: "task".to_owned(),
+                    id: task.id.to_string(),
+                },
+            ));
+        };
+        match current.status {
+            TaskStatus::CancelRequested => {
+                let mut cancelled = current;
+                let event = cancelled.cancel(self.clock.now())?;
+                self.task_repository
+                    .persist_transition(&cancelled, &event, TaskStatus::CancelRequested)
+                    .await?;
+                self.task_update_sink.publish(&cancelled);
+                *task = cancelled;
+                Ok(true)
+            }
+            status if status.is_terminal() => {
+                *task = current;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn refresh_task_from_database(
+        &self,
+        task: &mut Task,
+    ) -> Result<(), GenerationServiceError> {
+        *task = self
+            .task_repository
+            .find_by_id(&task.id)
+            .await?
+            .ok_or_else(|| {
+                GenerationServiceError::Repository(RepositoryError::NotFound {
+                    entity: "task".to_owned(),
+                    id: task.id.to_string(),
+                })
+            })?;
+        Ok(())
+    }
+
+    async fn handle_submitted_cancel(
+        &self,
+        task: &mut Task,
+        prompt_id: &str,
+    ) -> Result<CancelResolution, GenerationServiceError> {
+        self.refresh_task_from_database(task).await?;
+        if task.status != TaskStatus::CancelRequested {
+            return Ok(CancelResolution::KeepWaiting);
+        }
+
+        let _cancel_result = self.comfy_adapter.cancel_prompt(prompt_id).await?;
+        self.reconcile_cancel_request(prompt_id).await
+    }
+
+    async fn reconcile_cancel_request(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelResolution, GenerationServiceError> {
+        let history = match self.comfy_adapter.get_history(prompt_id).await {
+            Ok(history) => Some(history),
+            Err(ComfyAdapterError::HistoryNotFound(_)) => None,
+            Err(error) => return Err(GenerationServiceError::Comfy(error)),
+        };
+
+        if let Some(history) = history {
+            return Ok(match classify_history_status(&history.status) {
+                HistoryResolution::Success => CancelResolution::Success(history),
+                HistoryResolution::Interrupted => CancelResolution::Cancelled,
+                HistoryResolution::Failed => CancelResolution::Failed(history_error(&history)),
+                HistoryResolution::Unknown => self.cancel_resolution_from_queue(prompt_id).await?,
+            });
+        }
+
+        self.cancel_resolution_from_queue(prompt_id).await
+    }
+
+    async fn cancel_resolution_from_queue(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelResolution, GenerationServiceError> {
+        let queue = self.comfy_adapter.get_queue_state().await?;
+        if queue.running_prompt_ids.iter().any(|id| id == prompt_id)
+            || queue.pending_prompt_ids.iter().any(|id| id == prompt_id)
+        {
+            Ok(CancelResolution::KeepWaiting)
+        } else {
+            Ok(CancelResolution::Cancelled)
+        }
+    }
+
+    async fn complete_success(
+        &self,
+        task: &mut Task,
+        recipe: &crate::domain::Recipe,
+        project_id: &str,
+        prompt_id: &str,
+        history: Option<&ComfyHistory>,
+    ) -> Result<Task, GenerationServiceError> {
+        if task.status == TaskStatus::CancelRequested {
+            let event = task.record_cancel_not_effective(self.clock.now())?;
+            self.task_repository
+                .persist_runtime_update(task, &event)
+                .await?;
+            self.task_update_sink.publish(task);
+        }
+        if task.status != TaskStatus::Collecting {
+            self.transition_and_persist(task, TaskStatus::Collecting)
+                .await?;
+        }
+
+        let images = match history {
+            Some(history) => {
+                self.output_collector
+                    .collect_from_history(recipe, history)
+                    .await
+            }
+            None => self.output_collector.collect(recipe, prompt_id).await,
+        };
+        let images = match images {
+            Ok(images) => images,
+            Err(error) => {
+                let original = GenerationServiceError::OutputCollection(error);
+                return Err(self
+                    .fail_and_preserve(task, task_error_from_output(&original), original)
+                    .await);
+            }
+        };
+        if let Err(error) = self
+            .asset_import_service
+            .import(project_id, &task.id, &images)
+            .await
+        {
+            let original = GenerationServiceError::AssetImport(error);
+            return Err(self
+                .fail_and_preserve(task, task_error_from_output(&original), original)
+                .await);
+        }
+
+        let previous_status = task.status;
+        let event = task.succeed(self.clock.now())?;
+        if let Err(error) = self
+            .task_repository
+            .persist_transition(task, &event, previous_status)
+            .await
+        {
+            tracing::error!(
+                task_id = %task.id,
+                error = %error,
+                "assets imported but SUCCEEDED task persistence failed"
+            );
+            return Err(error.into());
+        }
+        self.task_update_sink.publish(task);
+        Ok(task.clone())
     }
 
     async fn transition_and_persist(
@@ -626,6 +886,73 @@ impl GenerationService {
                 self.task_update_sink.publish(task);
             })
             .map_err(GenerationServiceError::Repository)
+    }
+}
+
+pub(crate) enum HistoryResolution {
+    Success,
+    Interrupted,
+    Failed,
+    Unknown,
+}
+
+pub(crate) fn classify_history_status(status: &ComfyHistoryStatus) -> HistoryResolution {
+    let status_str = status
+        .status_str
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let messages = status
+        .messages
+        .as_ref()
+        .map(|messages| messages.to_string().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if status_str.contains("interrupt") || messages.contains("execution_interrupted") {
+        return HistoryResolution::Interrupted;
+    }
+    if status_str.contains("error")
+        || status_str.contains("fail")
+        || messages.contains("execution_error")
+    {
+        return HistoryResolution::Failed;
+    }
+    if status.completed == Some(false) {
+        return HistoryResolution::Unknown;
+    }
+    if status.completed == Some(true)
+        || status_str.contains("success")
+        || status_str.contains("completed")
+    {
+        return HistoryResolution::Success;
+    }
+    HistoryResolution::Unknown
+}
+
+fn history_error(history: &ComfyHistory) -> TaskError {
+    let interrupted = matches!(
+        classify_history_status(&history.status),
+        HistoryResolution::Interrupted
+    );
+    TaskError {
+        code: if interrupted {
+            "EXECUTION_INTERRUPTED".to_owned()
+        } else {
+            "EXECUTION_ERROR".to_owned()
+        },
+        message: history
+            .status
+            .messages
+            .as_ref()
+            .map(|messages| format!("ComfyUI history reported: {messages}"))
+            .unwrap_or_else(|| {
+                if interrupted {
+                    "ComfyUI history reported an interrupted execution".to_owned()
+                } else {
+                    "ComfyUI history reported an execution error".to_owned()
+                }
+            }),
+        raw: history.status.messages.clone(),
     }
 }
 
@@ -828,6 +1155,7 @@ mod tests {
     fn _history_fixture() -> ComfyHistory {
         ComfyHistory {
             prompt_id: "prompt-1".to_owned(),
+            status: Default::default(),
             outputs: BTreeMap::from([(
                 "9".to_owned(),
                 ComfyNodeOutput {

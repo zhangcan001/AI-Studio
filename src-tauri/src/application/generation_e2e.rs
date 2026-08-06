@@ -124,6 +124,7 @@ mod tests {
             };
             Ok(ComfyHistory {
                 prompt_id: prompt_id.to_owned(),
+                status: Default::default(),
                 outputs,
             })
         }

@@ -55,6 +55,12 @@ pub struct PromptResponseDto {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CancelResponseDto {
+    #[serde(default)]
+    pub cancelled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UploadResponseDto {
     #[serde(default)]
     pub name: Option<String>,

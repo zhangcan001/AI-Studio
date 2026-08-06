@@ -85,8 +85,38 @@ pub struct PromptSubmission {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CancelPromptResult {
+    CancellationRequested,
+    NotFoundOrAlreadyFinished,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyQueueState {
+    pub running_prompt_ids: Vec<String>,
+    pub pending_prompt_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComfyHistoryStatus {
+    pub status_str: Option<String>,
+    pub completed: Option<bool>,
+    pub messages: Option<Value>,
+}
+
+impl Default for ComfyHistoryStatus {
+    fn default() -> Self {
+        Self {
+            status_str: None,
+            completed: None,
+            messages: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ComfyHistory {
     pub prompt_id: String,
+    pub status: ComfyHistoryStatus,
     pub outputs: BTreeMap<String, ComfyNodeOutput>,
 }
 
@@ -254,6 +284,22 @@ pub trait ComfyAdapter: Send + Sync {
         let _ = upload;
         Err(ComfyAdapterError::ImageUpload(
             "image upload is not supported by this adapter".to_owned(),
+        ))
+    }
+
+    async fn cancel_prompt(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelPromptResult, ComfyAdapterError> {
+        let _ = prompt_id;
+        Err(ComfyAdapterError::Incompatible(
+            "prompt cancellation is not supported by this adapter".to_owned(),
+        ))
+    }
+
+    async fn get_queue_state(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
+        Err(ComfyAdapterError::Incompatible(
+            "queue inspection is not supported by this adapter".to_owned(),
         ))
     }
 

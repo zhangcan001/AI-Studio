@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  cancelTask,
   createGeneration,
   refreshWorkflowLibrary,
 } from "../../services/tauriClient";
@@ -35,6 +36,7 @@ export function GenerationStudio({
   const currentTask = useTaskStore((state) => state.currentTask);
   const adoptCreatedTask = useTaskStore((state) => state.adoptCreatedTask);
   const [creating, setCreating] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -104,6 +106,20 @@ export function GenerationStudio({
     }
   }
 
+  async function cancelCurrentTask() {
+    if (!currentTask) return;
+    setCancelling(true);
+    setNotice(null);
+    try {
+      const task = await cancelTask(currentTask.id);
+      useTaskStore.getState().upsertTask(task);
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (!catalog.length) {
     return (
       <section className="studio-empty">
@@ -167,7 +183,11 @@ export function GenerationStudio({
         )}
         {notice && <p className="error-message">{notice}</p>}
       </section>
-      <TaskProgressCard task={currentTask} />
+      <TaskProgressCard
+        task={currentTask}
+        cancelling={cancelling}
+        onCancel={() => void cancelCurrentTask()}
+      />
       <ImageOutput task={currentTask} />
     </>
   );

@@ -1,5 +1,7 @@
 pub mod asset_import_service;
 pub mod asset_query_service;
+#[cfg(test)]
+mod cancellation_e2e;
 pub mod comfy_service;
 pub mod generation_catalog_service;
 #[cfg(test)]
@@ -11,5 +13,8 @@ pub mod output_collector;
 pub mod ports;
 pub mod project_bootstrap;
 pub mod source_asset_import_service;
+pub mod task_cancellation_service;
+pub mod task_execution_registry;
 pub mod task_query_service;
+pub mod task_recovery_service;
 pub mod workflow_library_service;

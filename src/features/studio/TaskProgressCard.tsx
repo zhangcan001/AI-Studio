@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type { TaskView } from "../../types/task";
 
 const STATUS_LABELS: Record<TaskView["status"], string> = {
@@ -7,24 +6,20 @@ const STATUS_LABELS: Record<TaskView["status"], string> = {
   PREPARING: "Preparing generation",
   QUEUED: "Queued",
   RUNNING: "Generating",
+  CANCEL_REQUESTED: "Cancelling",
   COLLECTING: "Collecting output",
   SUCCEEDED: "Complete",
   FAILED: "Failed",
+  CANCELLED: "Cancelled",
 };
 
 interface Props {
   task?: TaskView;
+  cancelling?: boolean;
+  onCancel?: () => void | Promise<void>;
 }
 
-export function TaskProgressCard({ task }: Props) {
-  const [, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!task || task.status === "SUCCEEDED" || task.status === "FAILED") return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [task]);
-
+export function TaskProgressCard({ task, cancelling = false, onCancel }: Props) {
   if (!task) {
     return (
       <section className="task-card empty-task">
@@ -45,7 +40,19 @@ export function TaskProgressCard({ task }: Props) {
           <span className="section-label">Task status</span>
           <h2>{STATUS_LABELS[task.status]}</h2>
         </div>
-        <span className={`status-pill task-${task.status.toLowerCase()}`}>{task.status}</span>
+        <div className="task-heading-actions">
+          <span className={`status-pill task-${task.status.toLowerCase()}`}>{task.status}</span>
+          {onCancel && canCancel(task.status) && (
+            <button
+              type="button"
+              className="cancel-button"
+              onClick={() => void onCancel()}
+              disabled={cancelling || task.status === "CANCEL_REQUESTED"}
+            >
+              {cancelling ? "Cancelling..." : "Cancel"}
+            </button>
+          )}
+        </div>
       </div>
       {task.status === "FAILED" && task.error && (
         <div className="task-error">
@@ -62,7 +69,7 @@ export function TaskProgressCard({ task }: Props) {
           <div className="progress-track"><div style={{ width: `${progress}%` }} /></div>
           <small>{progress}%</small>
         </div>
-      ) : task.status === "RUNNING" ? (
+      ) : task.status === "RUNNING" || task.status === "CANCEL_REQUESTED" ? (
         <p className="indeterminate-message">Processing...</p>
       ) : null}
       <div className="task-meta">
@@ -71,6 +78,10 @@ export function TaskProgressCard({ task }: Props) {
       </div>
     </section>
   );
+}
+
+function canCancel(status: TaskView["status"]): boolean {
+  return ["CREATED", "VALIDATING", "PREPARING", "QUEUED", "RUNNING"].includes(status);
 }
 
 function formatElapsed(task: TaskView, now: number): string {
