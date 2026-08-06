@@ -6,6 +6,7 @@ interface StudioState {
   values: GenerationValues;
   validationErrors: Record<string, string>;
   setSelectedWorkflow: (workflow?: RecipeViewModel) => void;
+  loadDraft: (workflow: RecipeViewModel, values: GenerationValues) => void;
   setValue: (key: string, value: DraftValue) => void;
   removeValue: (key: string) => void;
   setValidationErrors: (errors: Record<string, string>) => void;
@@ -21,6 +22,8 @@ export const useStudioStore = create<StudioState>((set) => ({
       values: workflow ? defaultValues(workflow) : {},
       validationErrors: {},
     }),
+  loadDraft: (workflow, values) =>
+    set({ selectedWorkflow: workflow, values, validationErrors: {} }),
   setValue: (key, value) =>
     set((state) => ({ values: { ...state.values, [key]: value } })),
   removeValue: (key) =>

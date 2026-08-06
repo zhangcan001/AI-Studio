@@ -8,5 +8,16 @@ export interface AssetView {
   height: number;
   fileSize: number;
   createdAt: string;
-  metadata: Record<string, unknown>;
+}
+
+export type AssetCategoryFilter = "ALL" | "SOURCE_IMAGE" | "GENERATED_IMAGE";
+
+export interface AssetLibraryPage {
+  items: AssetView[];
+  nextCursor?: PageCursor;
+}
+
+export interface PageCursor {
+  createdAt: string;
+  id: string;
 }

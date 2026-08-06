@@ -1,8 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppStatus } from "../types/app";
 import type { CapabilitySummary, ComfyStatus } from "../types/comfy";
-import type { AssetView } from "../types/asset";
+import type { AssetCategoryFilter, AssetLibraryPage, AssetView, PageCursor } from "../types/asset";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
+import type {
+  ReusableGenerationDraft,
+  TaskDetail,
+  TaskHistoryFilter,
+  TaskHistoryPage,
+} from "../types/history";
 import type { TaskView } from "../types/task";
 
 export function ping(): Promise<string> {
@@ -85,4 +91,34 @@ export function pickAndImportImage(projectId: string): Promise<AssetView | null>
 
 export function readAssetImage(assetId: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("asset_read_image", { assetId });
+}
+
+export function getAsset(projectId: string, assetId: string): Promise<AssetView> {
+  return invoke<AssetView>("asset_get", { projectId, assetId });
+}
+
+export function taskHistoryPage(
+  projectId: string,
+  filter: TaskHistoryFilter,
+  cursor?: PageCursor,
+  limit = 30,
+): Promise<TaskHistoryPage> {
+  return invoke<TaskHistoryPage>("task_history_page", { projectId, filter, cursor, limit });
+}
+
+export function getTaskDetail(projectId: string, taskId: string): Promise<TaskDetail> {
+  return invoke<TaskDetail>("task_get_detail", { projectId, taskId });
+}
+
+export function getReusableDraft(projectId: string, taskId: string): Promise<ReusableGenerationDraft> {
+  return invoke<ReusableGenerationDraft>("task_get_reusable_draft", { projectId, taskId });
+}
+
+export function assetLibraryPage(
+  projectId: string,
+  category: AssetCategoryFilter,
+  cursor?: PageCursor,
+  limit = 30,
+): Promise<AssetLibraryPage> {
+  return invoke<AssetLibraryPage>("asset_library_page", { projectId, category, cursor, limit });
 }

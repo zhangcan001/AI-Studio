@@ -18,7 +18,7 @@ pub(crate) fn map_repository_error(error: &crate::application::ports::Repository
             AppError::recipe_version_conflict(error.to_string())
         }
         crate::application::ports::RepositoryError::NotFound { .. } => {
-            AppError::internal(error.to_string())
+            AppError::database(error.to_string())
         }
         _ => AppError::database(error.to_string()),
     }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  getAsset,
   listRecentAssets,
   pickAndImportImage,
   readAssetImage,
@@ -17,14 +18,16 @@ interface Props {
   error?: string;
   projectId: string;
   onChange: (value?: DraftValue) => void;
+  onAvailabilityChange?: (available: boolean) => void;
 }
 
-export function ImageField({ field, value, error, projectId, onChange }: Props) {
+export function ImageField({ field, value, error, projectId, onChange, onAvailabilityChange }: Props) {
   const selectedAssetId = value?.type === "image_asset" ? value.assetId : "";
   const [recentAssets, setRecentAssets] = useState<AssetView[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [resolvedAsset, setResolvedAsset] = useState<AssetView>();
 
   useEffect(() => {
     let active = true;
@@ -40,10 +43,42 @@ export function ImageField({ field, value, error, projectId, onChange }: Props) 
     };
   }, [projectId]);
 
-  const selectedAsset = useMemo(
+  const recentSelectedAsset = useMemo(
     () => recentAssets.find((asset) => asset.id === selectedAssetId),
     [recentAssets, selectedAssetId],
   );
+
+  const selectedAsset = recentSelectedAsset ?? resolvedAsset;
+
+  useEffect(() => {
+    let active = true;
+    setMessage(undefined);
+    if (!selectedAssetId) {
+      setResolvedAsset(undefined);
+      onAvailabilityChange?.(true);
+      return () => undefined;
+    }
+    if (recentSelectedAsset) {
+      setResolvedAsset(undefined);
+      onAvailabilityChange?.(true);
+      return () => undefined;
+    }
+    void getAsset(projectId, selectedAssetId)
+      .then((asset) => {
+        if (!active) return;
+        setResolvedAsset(asset);
+        onAvailabilityChange?.(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setResolvedAsset(undefined);
+        setMessage("Missing image asset");
+        onAvailabilityChange?.(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [onAvailabilityChange, recentSelectedAsset, selectedAssetId]);
 
   useEffect(() => {
     let active = true;
@@ -59,13 +94,16 @@ export function ImageField({ field, value, error, projectId, onChange }: Props) 
         setPreviewUrl(nextUrl);
       })
       .catch((previewError: unknown) => {
-        if (active) setMessage(previewError instanceof Error ? previewError.message : String(previewError));
+        if (active) {
+          setMessage(previewError instanceof Error ? previewError.message : String(previewError));
+          onAvailabilityChange?.(false);
+        }
       });
     return () => {
       active = false;
       if (nextUrl) URL.revokeObjectURL(nextUrl);
     };
-  }, [selectedAsset]);
+  }, [onAvailabilityChange, selectedAsset]);
 
   async function chooseLocalImage() {
     setLoading(true);
@@ -75,6 +113,7 @@ export function ImageField({ field, value, error, projectId, onChange }: Props) 
       if (!asset) return;
       setRecentAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
       onChange({ type: "image_asset", assetId: asset.id });
+      onAvailabilityChange?.(true);
     } catch (pickError: unknown) {
       setMessage(pickError instanceof Error ? pickError.message : String(pickError));
     } finally {

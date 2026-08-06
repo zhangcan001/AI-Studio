@@ -13,6 +13,7 @@ interface Props {
   onChange: (key: string, value?: DraftValue) => void;
   onGenerate: () => void;
   projectId: string;
+  onImageAssetAvailabilityChange?: (key: string, available: boolean) => void;
 }
 
 export function DynamicFormRenderer({
@@ -22,10 +23,21 @@ export function DynamicFormRenderer({
   onChange,
   onGenerate,
   projectId,
+  onImageAssetAvailabilityChange,
 }: Props) {
   return (
     <div className="dynamic-form">
-      {recipe.fields.map((field) => renderField(field, values, validationErrors, onChange, onGenerate, projectId))}
+      {recipe.fields.map((field) =>
+        renderField(
+          field,
+          values,
+          validationErrors,
+          onChange,
+          onGenerate,
+          projectId,
+          onImageAssetAvailabilityChange,
+        ),
+      )}
     </div>
   );
 }
@@ -37,6 +49,7 @@ function renderField(
   onChange: (key: string, value?: DraftValue) => void,
   onGenerate: () => void,
   projectId: string,
+  onImageAssetAvailabilityChange?: (key: string, available: boolean) => void,
 ) {
   const value = values[field.key];
   const error = validationErrors[field.key];
@@ -82,6 +95,7 @@ function renderField(
           error={error}
           projectId={projectId}
           onChange={(next) => onChange(field.key, next)}
+          onAvailabilityChange={(available) => onImageAssetAvailabilityChange?.(field.key, available)}
         />
       );
     default:

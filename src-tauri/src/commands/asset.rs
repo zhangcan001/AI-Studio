@@ -1,10 +1,12 @@
 use crate::{
     app_state::AppState,
     application::{
+        asset_library_service::{AssetLibraryError, AssetLibraryPageView},
         asset_query_service::{AssetQueryError, AssetView},
         source_asset_import_service::SourceAssetImportError,
         source_asset_import_service::MAX_SOURCE_IMAGE_BYTES,
     },
+    application::{pagination::PageCursor, ports::AssetCategoryFilter},
     error::AppError,
 };
 use tauri::{ipc::Response, AppHandle, State};
@@ -31,6 +33,52 @@ pub async fn asset_list_recent(
     state
         .asset_query_service
         .list_recent(&project_id, limit.unwrap_or(100))
+        .await
+        .map_err(map_asset_error)
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetCategoryFilterDto {
+    All,
+    SourceImage,
+    GeneratedImage,
+}
+
+impl From<AssetCategoryFilterDto> for AssetCategoryFilter {
+    fn from(value: AssetCategoryFilterDto) -> Self {
+        match value {
+            AssetCategoryFilterDto::All => Self::All,
+            AssetCategoryFilterDto::SourceImage => Self::SourceImage,
+            AssetCategoryFilterDto::GeneratedImage => Self::GeneratedImage,
+        }
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_library_page(
+    state: State<'_, AppState>,
+    project_id: String,
+    category: AssetCategoryFilterDto,
+    cursor: Option<PageCursor>,
+    limit: Option<u32>,
+) -> Result<AssetLibraryPageView, AppError> {
+    state
+        .asset_library_service
+        .list_page(&project_id, category.into(), cursor, limit.unwrap_or(30))
+        .await
+        .map_err(map_asset_library_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_id: String,
+) -> Result<AssetView, AppError> {
+    state
+        .asset_query_service
+        .get(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)
 }
@@ -101,6 +149,15 @@ fn map_asset_error(error: AssetQueryError) -> AppError {
         AssetQueryError::NotImage(message) => AppError::invalid_input(message),
         AssetQueryError::Repository(error) => super::map_repository_error(&error),
         AssetQueryError::Read(error) => AppError::asset_read_failed(error.to_string()),
+    }
+}
+
+fn map_asset_library_error(error: AssetLibraryError) -> AppError {
+    match error {
+        AssetLibraryError::InvalidProjectId => {
+            AppError::invalid_input("INVALID_PROJECT_ID: project id must not be empty")
+        }
+        AssetLibraryError::Repository(error) => super::map_repository_error(&error),
     }
 }
 

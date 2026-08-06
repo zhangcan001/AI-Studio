@@ -19,6 +19,7 @@ pub use infrastructure::database::{
 
 use app_state::AppState;
 use application::{
+    asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
     comfy_service::ComfyService,
     generation_catalog_service::GenerationCatalogService,
@@ -28,6 +29,7 @@ use application::{
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
     task_execution_registry::TaskExecutionRegistry,
+    task_history_service::TaskHistoryService,
     task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
@@ -97,6 +99,14 @@ fn run_application() -> Result<(), AppError> {
                 Arc::new(SqliteProjectRepository::new(database_pool.clone()));
             let asset_repository: Arc<dyn AssetRepository> =
                 Arc::new(SqliteAssetRepository::new(database_pool.clone()));
+            let task_history_repository: Arc<dyn application::ports::TaskHistoryRepository> =
+                Arc::new(infrastructure::database::SqliteTaskHistoryRepository::new(
+                    database_pool.clone(),
+                ));
+            let asset_browse_repository: Arc<dyn application::ports::AssetBrowseRepository> =
+                Arc::new(infrastructure::database::SqliteAssetBrowseRepository::new(
+                    database_pool.clone(),
+                ));
             let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
 
             let project_bootstrap =
@@ -156,7 +166,7 @@ fn run_application() -> Result<(), AppError> {
                 .with_execution_registry(execution_registry.clone()),
             );
             let generation_catalog_service =
-                Arc::new(GenerationCatalogService::new(definition_repository));
+                Arc::new(GenerationCatalogService::new(definition_repository.clone()));
             let task_query_service = Arc::new(TaskQueryService::new(
                 Arc::new(SqliteTaskRepository::new(database_pool.clone())),
                 asset_repository.clone(),
@@ -164,6 +174,13 @@ fn run_application() -> Result<(), AppError> {
             let asset_query_service = Arc::new(AssetQueryService::new(
                 asset_repository.clone(),
                 asset_store.clone(),
+            ));
+            let asset_library_service = Arc::new(AssetLibraryService::new(asset_browse_repository));
+            let task_history_service = Arc::new(TaskHistoryService::new(
+                task_history_repository,
+                snapshot_repository.clone(),
+                definition_repository.clone(),
+                asset_repository.clone(),
             ));
             let source_asset_import_service = Arc::new(SourceAssetImportService::new(
                 project_repository.clone(),
@@ -196,6 +213,8 @@ fn run_application() -> Result<(), AppError> {
                 generation_catalog_service,
                 task_query_service,
                 asset_query_service,
+                asset_library_service,
+                task_history_service,
                 source_asset_import_service,
                 task_cancellation_service,
                 task_recovery_service,
@@ -229,10 +248,15 @@ fn run_application() -> Result<(), AppError> {
             commands::task::task_list_recent,
             commands::task::task_cancel,
             commands::task::task_reconcile_active,
+            commands::task::task_history_page,
+            commands::task::task_get_detail,
+            commands::task::task_get_reusable_draft,
             commands::asset::asset_list_by_task,
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,
-            commands::asset::asset_read_image
+            commands::asset::asset_read_image,
+            commands::asset::asset_library_page,
+            commands::asset::asset_get
         ])
         .run(tauri::generate_context!())
         .map_err(|error| AppError::initialization(format!("Tauri runtime failed: {error}")))

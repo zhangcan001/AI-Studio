@@ -10,11 +10,17 @@ import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
 import type { RecipeViewModel } from "../types/generation";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
+import { AssetLibrary } from "../features/assets/AssetLibrary";
+import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
+import { useStudioStore } from "../stores/studioStore";
+import type { ReusableGenerationDraft } from "../types/history";
 import "./App.css";
 
 function App() {
+  type Workspace = "studio" | "assets" | "tasks";
+  const [workspace, setWorkspace] = useState<Workspace>("studio");
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +121,20 @@ function App() {
     }
   }
 
+  function loadHistoricalInputs(draft: ReusableGenerationDraft) {
+    const workflow = catalog.find(
+      (recipe) =>
+        recipe.workflowVersionId === draft.workflowVersionId && recipe.recipeId === draft.recipeId,
+    );
+    if (!workflow) {
+      setError("This workflow version is no longer available in the runtime catalog.");
+      return;
+    }
+    useStudioStore.getState().loadDraft(workflow, draft.values);
+    setError(null);
+    setWorkspace("studio");
+  }
+
   const comfy = bootstrapState?.comfy;
   const isConnected = comfy?.status === "CONNECTED";
   const hasActiveTasks = recentTasks.some((task) =>
@@ -126,7 +146,7 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">M0 Generation Studio</p>
+          <p className="eyebrow">LOCAL WORKBENCH</p>
           <h1>AI Studio</h1>
         </div>
         {comfy && (
@@ -138,13 +158,33 @@ function App() {
         )}
       </header>
 
-      <ComfyStatusCard
-        status={comfy}
-        connectionLoading={connectionLoading}
-        capabilityLoading={capabilityLoading}
-        onReconnect={() => void reconnectComfy()}
-        onRefreshCapabilities={() => void refreshCapabilities()}
-      />
+      <nav className="workspace-nav" aria-label="Workspace">
+        {([
+          ["studio", "Studio"],
+          ["assets", "Assets"],
+          ["tasks", "Tasks"],
+        ] as const).map(([value, label]) => (
+          <button
+            type="button"
+            key={value}
+            className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
+            onClick={() => setWorkspace(value)}
+            aria-current={workspace === value ? "page" : undefined}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {workspace === "studio" && (
+        <ComfyStatusCard
+          status={comfy}
+          connectionLoading={connectionLoading}
+          capabilityLoading={capabilityLoading}
+          onReconnect={() => void reconnectComfy()}
+          onRefreshCapabilities={() => void refreshCapabilities()}
+        />
+      )}
 
       {(hasActiveTasks || recoveryNotice) && (
         <section className="task-recovery-bar" aria-live="polite">
@@ -158,15 +198,19 @@ function App() {
         </section>
       )}
 
-      <section className="studio-layout">
-        <GenerationStudio
-          catalog={catalog}
-          comfyConnected={isConnected}
-          taskEventsReady={taskEventsReady}
-          taskEventError={taskEventError}
-          onCatalogChanged={reloadCatalog}
-        />
-      </section>
+      {workspace === "studio" && (
+        <section className="studio-layout">
+          <GenerationStudio
+            catalog={catalog}
+            comfyConnected={isConnected}
+            taskEventsReady={taskEventsReady}
+            taskEventError={taskEventError}
+            onCatalogChanged={reloadCatalog}
+          />
+        </section>
+      )}
+      {workspace === "assets" && <AssetLibrary />}
+      {workspace === "tasks" && <TaskHistory onLoadInputs={loadHistoricalInputs} />}
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
       {error && <p className="error-message global-error">Notice: {error}</p>}

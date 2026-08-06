@@ -6,7 +6,7 @@ Current milestone progress:
 
 M0 = PASS.
 
-M1 first phase:
+M1 progress:
 
 - Desktop foundation and Rust application layering
 - SQLite migration and local application data directories
@@ -39,6 +39,16 @@ M1 first phase:
 - Prompt-specific ComfyUI cancellation with modern API and safe legacy queue fallback
 - Startup task recovery and manual history/queue reconciliation without automatic resubmit
 - Cancel and recovery UI driven by persisted `task://updated` events, without frontend polling
+- Workspace navigation between Studio, Assets, and Tasks
+- Project-scoped task history with status filters, keyset pagination, detail views, and safe snapshot reuse
+- Project-scoped Asset Library with category filters, keyset pagination, binary previews, and Blob URL cleanup
+- Local-first historical input loading that never auto-generates a new task
+
+M1 third phase (Task History + Asset Library) is complete. Historical task
+inputs are exposed through a safe DTO boundary; raw workflow payloads, recipe
+YAML, prompt IDs, storage paths, SHA-256 values, and asset metadata are not
+returned to the frontend. Browse queries use the existing SQLite schema plus
+`002_browse_indexes.sql`; no existing migration was changed.
 
 M1 live I2I is not run because no validated runtime I2I Workflow Package was supplied.
 The existing M0 text-to-image runtime remains the only live generation package.

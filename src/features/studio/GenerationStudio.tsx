@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   cancelTask,
   createGeneration,
@@ -39,15 +39,30 @@ export function GenerationStudio({
   const [cancelling, setCancelling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [missingImageFields, setMissingImageFields] = useState<Set<string>>(new Set());
+  const handleImageAvailabilityChange = useCallback((key: string, available: boolean) => {
+    setMissingImageFields((current) => {
+      const next = new Set(current);
+      if (available) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const next = selectedWorkflow && catalog.some(
-      (recipe) => recipe.workflowVersionId === selectedWorkflow.workflowVersionId,
+      (recipe) =>
+        recipe.workflowVersionId === selectedWorkflow.workflowVersionId &&
+        recipe.recipeId === selectedWorkflow.recipeId,
     )
       ? selectedWorkflow
       : catalog[0];
-    if (next?.workflowVersionId !== selectedWorkflow?.workflowVersionId) {
+    if (
+      next?.workflowVersionId !== selectedWorkflow?.workflowVersionId ||
+      next?.recipeId !== selectedWorkflow?.recipeId
+    ) {
       setSelectedWorkflow(next);
+      setMissingImageFields(new Set());
     }
   }, [catalog, selectedWorkflow, setSelectedWorkflow]);
 
@@ -61,6 +76,7 @@ export function GenerationStudio({
       taskEventsReady &&
       selectedWorkflow &&
       !hasUnsupportedField &&
+      missingImageFields.size === 0 &&
       Object.keys(errors).length === 0,
   );
 
@@ -85,7 +101,8 @@ export function GenerationStudio({
       Object.keys(nextErrors).length ||
       !comfyConnected ||
       !taskEventsReady ||
-      hasUnsupportedField
+      hasUnsupportedField ||
+      missingImageFields.size > 0
     )
       return;
 
@@ -142,14 +159,19 @@ export function GenerationStudio({
           <label>
             <span>Workflow</span>
             <select
-              value={selectedWorkflow?.workflowVersionId ?? ""}
+              value={selectedWorkflow ? `${selectedWorkflow.workflowVersionId}:${selectedWorkflow.recipeId}` : ""}
               onChange={(event) => {
-                const next = catalog.find((recipe) => recipe.workflowVersionId === event.target.value);
+                const [workflowVersionId, recipeId] = event.target.value.split(":");
+                const next = catalog.find(
+                  (recipe) =>
+                    recipe.workflowVersionId === workflowVersionId && recipe.recipeId === recipeId,
+                );
                 setSelectedWorkflow(next);
+                setMissingImageFields(new Set());
               }}
             >
               {catalog.map((recipe) => (
-                <option key={recipe.workflowVersionId} value={recipe.workflowVersionId}>
+                <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={`${recipe.workflowVersionId}:${recipe.recipeId}`}>
                   {recipe.name}
                 </option>
               ))}
@@ -168,6 +190,7 @@ export function GenerationStudio({
               onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
               onGenerate={() => void generate()}
               projectId="prj_default"
+              onImageAssetAvailabilityChange={handleImageAvailabilityChange}
             />
             {!comfyConnected && <p className="disabled-note">Connect ComfyUI before generating.</p>}
             {!taskEventsReady && (
@@ -176,6 +199,9 @@ export function GenerationStudio({
               </p>
             )}
             {hasUnsupportedField && <p className="disabled-note">This Workflow has an unsupported field type.</p>}
+            {missingImageFields.size > 0 && (
+              <p className="disabled-note">Missing image asset. Choose a replacement before generating.</p>
+            )}
             <button type="button" className="generate-button" onClick={() => void generate()} disabled={!canGenerate || creating}>
               {creating ? "Creating Task..." : "Generate"}
             </button>

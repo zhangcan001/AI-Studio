@@ -21,6 +21,7 @@ pub enum AppErrorCode {
     TaskNotCancellable,
     AssetNotFound,
     AssetReadFailed,
+    ReusableDraftUnavailable,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +97,10 @@ impl AppError {
         Self::new(AppErrorCode::AssetReadFailed, message)
     }
 
+    pub fn reusable_draft_unavailable(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ReusableDraftUnavailable, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -114,6 +119,7 @@ impl AppError {
             AppErrorCode::TaskNotCancellable => "TASK_NOT_CANCELLABLE",
             AppErrorCode::AssetNotFound => "ASSET_NOT_FOUND",
             AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
+            AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
         }
     }
 

@@ -2,7 +2,6 @@ use crate::application::ports::{AssetRepository, AssetStore, AssetStoreError, Re
 use crate::domain::{AssetId, AssetType, TaskId};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::Value;
 use std::{error::Error, fmt, sync::Arc};
 
 pub struct AssetQueryService {
@@ -52,6 +51,29 @@ impl AssetQueryService {
             .collect())
     }
 
+    pub async fn get(
+        &self,
+        project_id: &str,
+        asset_id: &str,
+    ) -> Result<AssetSummaryView, AssetQueryError> {
+        if project_id.trim().is_empty() {
+            return Err(AssetQueryError::InvalidProjectId(
+                "project id must not be empty".to_owned(),
+            ));
+        }
+        let asset_id = AssetId::parse(asset_id.to_owned())
+            .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
+        let asset = self
+            .asset_repository
+            .find_by_id(&asset_id)
+            .await?
+            .ok_or_else(|| AssetQueryError::NotFound(asset_id.as_str().to_owned()))?;
+        if asset.project_id != project_id {
+            return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
+        }
+        Ok(AssetSummaryView::from(asset))
+    }
+
     pub async fn read_image(&self, asset_id: &str) -> Result<AssetBinary, AssetQueryError> {
         let asset_id = AssetId::parse(asset_id.to_owned())
             .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
@@ -74,7 +96,7 @@ impl AssetQueryService {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AssetView {
+pub struct AssetSummaryView {
     pub id: String,
     pub category: String,
     pub name: String,
@@ -84,10 +106,9 @@ pub struct AssetView {
     pub height: u32,
     pub file_size: u64,
     pub created_at: DateTime<Utc>,
-    pub metadata: Value,
 }
 
-impl From<crate::domain::Asset> for AssetView {
+impl From<crate::domain::Asset> for AssetSummaryView {
     fn from(asset: crate::domain::Asset) -> Self {
         Self {
             id: asset.id.as_str().to_owned(),
@@ -99,10 +120,11 @@ impl From<crate::domain::Asset> for AssetView {
             height: asset.height,
             file_size: asset.file_size,
             created_at: asset.created_at,
-            metadata: asset.metadata_json,
         }
     }
 }
+
+pub type AssetView = AssetSummaryView;
 
 pub struct AssetBinary {
     pub bytes: Vec<u8>,
@@ -203,6 +225,27 @@ mod tests {
         );
         assert!(matches!(
             service.read_image("ast_missing").await,
+            Err(AssetQueryError::NotFound(_))
+        ));
+
+        let summary = service.get("project-1", "ast_read_test").await.unwrap();
+        let json = serde_json::to_string(&summary).unwrap();
+        for forbidden in [
+            "storagePath",
+            "thumbnailPath",
+            "sha256",
+            "metadata",
+            "metadataJson",
+            "comfyFilename",
+            "nodeId",
+        ] {
+            assert!(
+                !json.contains(forbidden),
+                "secure asset DTO leaked {forbidden}"
+            );
+        }
+        assert!(matches!(
+            service.get("project-2", "ast_read_test").await,
             Err(AssetQueryError::NotFound(_))
         ));
     }

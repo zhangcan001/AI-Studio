@@ -1,6 +1,11 @@
 use crate::{
     app_state::AppState,
+    application::pagination::PageCursor,
+    application::ports::TaskHistoryFilter,
     application::task_cancellation_service::TaskCancellationError,
+    application::task_history_service::{
+        ReusableGenerationDraftView, TaskDetailView, TaskHistoryError, TaskHistoryPageView,
+    },
     application::task_query_service::{TaskQueryError, TaskView},
     application::task_recovery_service::{RecoveryReport, TaskRecoveryError},
     error::AppError,
@@ -56,10 +61,89 @@ pub async fn task_reconcile_active(state: State<'_, AppState>) -> Result<Recover
         .map_err(map_recovery_error)
 }
 
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TaskHistoryFilterDto {
+    All,
+    Active,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl From<TaskHistoryFilterDto> for TaskHistoryFilter {
+    fn from(value: TaskHistoryFilterDto) -> Self {
+        match value {
+            TaskHistoryFilterDto::All => Self::All,
+            TaskHistoryFilterDto::Active => Self::Active,
+            TaskHistoryFilterDto::Succeeded => Self::Succeeded,
+            TaskHistoryFilterDto::Failed => Self::Failed,
+            TaskHistoryFilterDto::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn task_history_page(
+    state: State<'_, AppState>,
+    project_id: String,
+    filter: TaskHistoryFilterDto,
+    cursor: Option<PageCursor>,
+    limit: Option<u32>,
+) -> Result<TaskHistoryPageView, AppError> {
+    state
+        .task_history_service
+        .list_page(&project_id, filter.into(), cursor, limit.unwrap_or(30))
+        .await
+        .map_err(map_history_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn task_get_detail(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<TaskDetailView, AppError> {
+    state
+        .task_history_service
+        .get_detail(&project_id, &task_id)
+        .await
+        .map_err(map_history_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn task_get_reusable_draft(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<ReusableGenerationDraftView, AppError> {
+    state
+        .task_history_service
+        .get_reusable_draft(&project_id, &task_id)
+        .await
+        .map_err(map_history_error)
+}
+
 fn map_query_error(error: TaskQueryError) -> AppError {
     match error {
         TaskQueryError::InvalidTaskId(message) => AppError::invalid_input(message),
         TaskQueryError::Repository(error) => super::map_repository_error(&error),
+    }
+}
+
+fn map_history_error(error: TaskHistoryError) -> AppError {
+    match error {
+        TaskHistoryError::InvalidProjectId => {
+            AppError::invalid_input("INVALID_PROJECT_ID: project id must not be empty")
+        }
+        TaskHistoryError::InvalidTaskId(message) => AppError::invalid_input(message),
+        TaskHistoryError::NotFound(task_id) => {
+            AppError::task_not_found(format!("task {task_id} was not found"))
+        }
+        TaskHistoryError::DraftUnavailable(message) => {
+            AppError::reusable_draft_unavailable(message)
+        }
+        TaskHistoryError::Repository(error) => super::map_repository_error(&error),
     }
 }
 
