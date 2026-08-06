@@ -59,14 +59,33 @@ impl TaskRecoveryService {
             return Ok(RecoveryReport::default());
         }
 
-        let availability = self.comfy_adapter.health_check().await;
         let mut report = RecoveryReport {
             examined: tasks.len() as u32,
             ..RecoveryReport::default()
         };
 
+        let mut local_tasks = Vec::new();
+        let mut external_tasks = Vec::new();
         for task in tasks {
             self.record_recovery_started(&task).await?;
+            if task.prompt_id.is_some() {
+                external_tasks.push(task);
+            } else {
+                local_tasks.push(task);
+            }
+        }
+
+        for task in local_tasks {
+            let outcome = self.reconcile_local_task(task).await?;
+            add_outcome(&mut report, outcome);
+        }
+
+        if external_tasks.is_empty() {
+            return Ok(report);
+        }
+
+        let availability = self.comfy_adapter.health_check().await;
+        for task in external_tasks {
             let outcome = match &availability {
                 Err(error) if is_offline_error(error) => {
                     self.record_deferred(&task, "COMFY_OFFLINE").await?;
@@ -77,52 +96,57 @@ impl TaskRecoveryService {
                         .await?;
                     RecoveryOutcome::Unresolved
                 }
-                Ok(_) => self.reconcile_task(task).await?,
+                Ok(_) => self.reconcile_external_task(task).await?,
             };
-
-            match outcome {
-                RecoveryOutcome::Succeeded => report.succeeded += 1,
-                RecoveryOutcome::Deferred => report.deferred += 1,
-                RecoveryOutcome::Unresolved => report.unresolved += 1,
-                RecoveryOutcome::Failed => report.failed += 1,
-            }
+            add_outcome(&mut report, outcome);
         }
 
         Ok(report)
     }
 
-    async fn reconcile_task(&self, mut task: Task) -> Result<RecoveryOutcome, TaskRecoveryError> {
-        if task.prompt_id.is_none() {
-            return if task.status == TaskStatus::CancelRequested {
-                self.finish_cancelled(&mut task).await?;
-                self.record_succeeded(&task, "cancelled without an external prompt")
-                    .await?;
-                Ok(RecoveryOutcome::Succeeded)
-            } else if matches!(
-                task.status,
-                TaskStatus::Created | TaskStatus::Validating | TaskStatus::Preparing
-            ) {
-                self.fail_task(
-                    &mut task,
-                    TaskError {
-                        code: "APP_RESTARTED_BEFORE_SUBMISSION".to_owned(),
-                        message: "AI Studio restarted before the workflow was submitted to ComfyUI"
-                            .to_owned(),
-                        raw: None,
-                    },
-                )
+    async fn reconcile_local_task(
+        &self,
+        mut task: Task,
+    ) -> Result<RecoveryOutcome, TaskRecoveryError> {
+        if task.status == TaskStatus::CancelRequested {
+            self.finish_cancelled(&mut task).await?;
+            self.record_succeeded(&task, "cancelled without an external prompt")
                 .await?;
-                self.record_succeeded(&task, "task failed before external submission")
-                    .await?;
-                Ok(RecoveryOutcome::Succeeded)
-            } else {
-                self.record_unresolved(&task, "active task has no prompt_id")
-                    .await?;
-                Ok(RecoveryOutcome::Unresolved)
-            };
+            return Ok(RecoveryOutcome::Succeeded);
         }
 
-        let prompt_id = task.prompt_id.clone().unwrap_or_default();
+        if matches!(
+            task.status,
+            TaskStatus::Created | TaskStatus::Validating | TaskStatus::Preparing
+        ) {
+            self.fail_task(
+                &mut task,
+                TaskError {
+                    code: "APP_RESTARTED_BEFORE_SUBMISSION".to_owned(),
+                    message: "AI Studio restarted before the workflow was submitted to ComfyUI"
+                        .to_owned(),
+                    raw: None,
+                },
+            )
+            .await?;
+            self.record_succeeded(&task, "task failed before external submission")
+                .await?;
+            return Ok(RecoveryOutcome::Succeeded);
+        }
+
+        self.record_unresolved(&task, "ACTIVE_TASK_MISSING_PROMPT_ID")
+            .await?;
+        Ok(RecoveryOutcome::Unresolved)
+    }
+
+    async fn reconcile_external_task(
+        &self,
+        mut task: Task,
+    ) -> Result<RecoveryOutcome, TaskRecoveryError> {
+        let prompt_id = match task.prompt_id.clone() {
+            Some(prompt_id) => prompt_id,
+            None => return self.reconcile_local_task(task).await,
+        };
         let history = match self.comfy_adapter.get_history(&prompt_id).await {
             Ok(history) => Some(history),
             Err(ComfyAdapterError::HistoryNotFound(_)) => None,
@@ -451,6 +475,15 @@ enum RecoveryOutcome {
     Unresolved,
 }
 
+fn add_outcome(report: &mut RecoveryReport, outcome: RecoveryOutcome) {
+    match outcome {
+        RecoveryOutcome::Succeeded => report.succeeded += 1,
+        RecoveryOutcome::Deferred => report.deferred += 1,
+        RecoveryOutcome::Unresolved => report.unresolved += 1,
+        RecoveryOutcome::Failed => report.failed += 1,
+    }
+}
+
 #[derive(Debug)]
 pub enum TaskRecoveryError {
     Repository(RepositoryError),
@@ -568,6 +601,7 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct AdapterCounters {
+        health: usize,
         cancel: usize,
         submit: usize,
         upload: usize,
@@ -587,6 +621,7 @@ mod tests {
     #[async_trait]
     impl ComfyAdapter for RecoveryAdapter {
         async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            self.counters.lock().unwrap().health += 1;
             if !self.online {
                 return Err(ComfyAdapterError::Offline("test offline".to_owned()));
             }
@@ -780,6 +815,54 @@ mod tests {
         task
     }
 
+    async fn local_task(repository: &SqliteTaskRepository, target: TaskStatus) -> Task {
+        let mut task = create_task(repository).await;
+        match target {
+            TaskStatus::Created => {}
+            TaskStatus::Validating => {
+                persist_transition(repository, &mut task, TaskStatus::Validating, 1).await;
+            }
+            TaskStatus::Preparing => {
+                persist_transition(repository, &mut task, TaskStatus::Validating, 1).await;
+                persist_transition(repository, &mut task, TaskStatus::Preparing, 2).await;
+            }
+            TaskStatus::CancelRequested => {
+                let event = task
+                    .request_cancel(task.created_at + Duration::seconds(1))
+                    .unwrap();
+                repository
+                    .persist_transition(&task, &event, TaskStatus::Created)
+                    .await
+                    .unwrap();
+            }
+            _ => panic!("unsupported local task fixture status: {target:?}"),
+        }
+        task
+    }
+
+    async fn local_external_state_task(
+        repository: &SqliteTaskRepository,
+        target: TaskStatus,
+    ) -> Task {
+        let mut task = create_task(repository).await;
+        persist_transition(repository, &mut task, TaskStatus::Validating, 1).await;
+        persist_transition(repository, &mut task, TaskStatus::Preparing, 2).await;
+        match target {
+            TaskStatus::Queued => {
+                persist_transition(repository, &mut task, TaskStatus::Queued, 3).await;
+            }
+            TaskStatus::Running => {
+                persist_transition(repository, &mut task, TaskStatus::Queued, 3).await;
+                persist_transition(repository, &mut task, TaskStatus::Running, 4).await;
+            }
+            TaskStatus::Collecting => {
+                persist_transition(repository, &mut task, TaskStatus::Collecting, 3).await;
+            }
+            _ => panic!("unsupported missing-prompt fixture status: {target:?}"),
+        }
+        task
+    }
+
     async fn persist_transition(
         repository: &SqliteTaskRepository,
         task: &mut Task,
@@ -913,6 +996,232 @@ mod tests {
         )
         .unwrap();
         repository.insert_many(&[asset]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn offline_local_tasks_recover_without_comfy_calls() {
+        let harness = setup(adapter(
+            false,
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let created = local_task(&harness.task_repository, TaskStatus::Created).await;
+        let validating = local_task(&harness.task_repository, TaskStatus::Validating).await;
+        let preparing = local_task(&harness.task_repository, TaskStatus::Preparing).await;
+        let cancel_requested =
+            local_task(&harness.task_repository, TaskStatus::CancelRequested).await;
+
+        let report = harness.service.reconcile_active().await.unwrap();
+
+        assert_eq!(report.examined, 4);
+        assert_eq!(report.succeeded, 4);
+        assert_eq!(report.deferred, 0);
+        assert_eq!(report.unresolved, 0);
+        let created = harness
+            .task_repository
+            .find_by_id(&created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let validating = harness
+            .task_repository
+            .find_by_id(&validating.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let preparing = harness
+            .task_repository
+            .find_by_id(&preparing.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let cancel_requested = harness
+            .task_repository
+            .find_by_id(&cancel_requested.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(created.status, TaskStatus::Failed);
+        assert_eq!(
+            created.error.unwrap().code,
+            "APP_RESTARTED_BEFORE_SUBMISSION"
+        );
+        assert_eq!(validating.status, TaskStatus::Failed);
+        assert_eq!(
+            validating.error.unwrap().code,
+            "APP_RESTARTED_BEFORE_SUBMISSION"
+        );
+        assert_eq!(preparing.status, TaskStatus::Failed);
+        assert_eq!(
+            preparing.error.unwrap().code,
+            "APP_RESTARTED_BEFORE_SUBMISSION"
+        );
+        assert_eq!(cancel_requested.status, TaskStatus::Cancelled);
+
+        let counters = harness.adapter.counters.lock().unwrap().clone();
+        assert_eq!(counters.health, 0);
+        assert_eq!(counters.history, 0);
+        assert_eq!(counters.queue, 0);
+        assert_eq!(counters.cancel, 0);
+        assert_eq!(counters.submit, 0);
+        assert_eq!(counters.upload, 0);
+    }
+
+    #[tokio::test]
+    async fn mixed_offline_recovery_resolves_local_and_defers_external() {
+        let harness = setup(adapter(
+            false,
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let local_failed = local_task(&harness.task_repository, TaskStatus::Created).await;
+        let local_cancelled =
+            local_task(&harness.task_repository, TaskStatus::CancelRequested).await;
+        let external = submitted_task(&harness.task_repository, TaskStatus::Running).await;
+
+        let report = harness.service.reconcile_active().await.unwrap();
+
+        assert_eq!(report.examined, 3);
+        assert_eq!(report.succeeded, 2);
+        assert_eq!(report.deferred, 1);
+        assert_eq!(report.unresolved, 0);
+        assert_eq!(
+            harness
+                .task_repository
+                .find_by_id(&local_failed.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Failed
+        );
+        assert_eq!(
+            harness
+                .task_repository
+                .find_by_id(&local_cancelled.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Cancelled
+        );
+        assert_eq!(
+            harness
+                .task_repository
+                .find_by_id(&external.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Running
+        );
+
+        let external_events = harness
+            .task_repository
+            .list_events(&external.id)
+            .await
+            .unwrap();
+        assert!(external_events.iter().any(|event| {
+            event.event_type == TaskEventType::TaskRecoveryDeferred
+                && event.payload == Some(json!({ "reason": "COMFY_OFFLINE" }))
+        }));
+        for task_id in [&local_failed.id, &local_cancelled.id] {
+            let events = harness.task_repository.list_events(task_id).await.unwrap();
+            assert!(!events
+                .iter()
+                .any(|event| event.event_type == TaskEventType::TaskRecoveryDeferred));
+        }
+
+        let counters = harness.adapter.counters.lock().unwrap().clone();
+        assert_eq!(counters.health, 1);
+        assert_eq!(counters.history, 0);
+        assert_eq!(counters.queue, 0);
+        assert_eq!(counters.cancel, 0);
+        assert_eq!(counters.submit, 0);
+        assert_eq!(counters.upload, 0);
+    }
+
+    #[tokio::test]
+    async fn missing_prompt_in_external_state_is_unresolved_without_comfy_calls() {
+        let harness = setup(adapter(
+            false,
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let queued = local_external_state_task(&harness.task_repository, TaskStatus::Queued).await;
+        let running =
+            local_external_state_task(&harness.task_repository, TaskStatus::Running).await;
+        let collecting =
+            local_external_state_task(&harness.task_repository, TaskStatus::Collecting).await;
+
+        let report = harness.service.reconcile_active().await.unwrap();
+
+        assert_eq!(report.examined, 3);
+        assert_eq!(report.unresolved, 3);
+        assert_eq!(report.deferred, 0);
+        for task in [&queued, &running, &collecting] {
+            let found = harness
+                .task_repository
+                .find_by_id(&task.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(found.status, task.status);
+            let events = harness.task_repository.list_events(&task.id).await.unwrap();
+            assert!(events.iter().any(|event| {
+                event.event_type == TaskEventType::TaskRecoveryUnresolved
+                    && event.payload == Some(json!({ "reason": "ACTIVE_TASK_MISSING_PROMPT_ID" }))
+            }));
+            assert!(!events
+                .iter()
+                .any(|event| event.event_type == TaskEventType::TaskRecoveryDeferred));
+        }
+        let counters = harness.adapter.counters.lock().unwrap().clone();
+        assert_eq!(counters.health, 0);
+        assert_eq!(counters.history, 0);
+        assert_eq!(counters.queue, 0);
+        assert_eq!(counters.cancel, 0);
+        assert_eq!(counters.submit, 0);
+        assert_eq!(counters.upload, 0);
+    }
+
+    #[tokio::test]
+    async fn multiple_external_tasks_share_one_health_check() {
+        let harness = setup(adapter(
+            true,
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ))
+        .await;
+        let first = submitted_task(&harness.task_repository, TaskStatus::Running).await;
+        let second = submitted_task(&harness.task_repository, TaskStatus::Running).await;
+
+        let report = harness.service.reconcile_active().await.unwrap();
+
+        assert_eq!(report.examined, 2);
+        assert_eq!(report.unresolved, 2);
+        let counters = harness.adapter.counters.lock().unwrap().clone();
+        assert_eq!(counters.health, 1);
+        assert_eq!(counters.history, 2);
+        assert_eq!(counters.queue, 2);
+        assert_eq!(counters.submit, 0);
+        assert_eq!(counters.upload, 0);
+        assert_eq!(first.prompt_id, second.prompt_id);
     }
 
     #[tokio::test]
