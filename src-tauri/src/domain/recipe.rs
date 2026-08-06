@@ -57,6 +57,8 @@ pub enum InputDefinition {
     Seed {
         label: String,
         default: SeedDefault,
+        min: Option<u64>,
+        max: Option<u64>,
     },
 }
 

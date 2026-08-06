@@ -33,6 +33,12 @@ pub enum CompileError {
         min: Option<i64>,
         max: Option<i64>,
     },
+    SeedOutOfRange {
+        input: String,
+        value: u64,
+        min: Option<u64>,
+        max: Option<u64>,
+    },
     Internal {
         message: String,
     },
@@ -49,6 +55,7 @@ impl CompileError {
             Self::InputRequired { .. } => "INPUT_REQUIRED",
             Self::InputTypeMismatch { .. } => "INPUT_TYPE_MISMATCH",
             Self::InputOutOfRange { .. } => "INPUT_OUT_OF_RANGE",
+            Self::SeedOutOfRange { .. } => "SEED_OUT_OF_RANGE",
             Self::Internal { .. } => "COMPILE_INTERNAL",
         }
     }
@@ -112,6 +119,18 @@ impl fmt::Display for CompileError {
                 self.code(),
                 min.map_or_else(|| "-∞".to_owned(), |value| value.to_string()),
                 max.map_or_else(|| "∞".to_owned(), |value| value.to_string())
+            ),
+            Self::SeedOutOfRange {
+                input,
+                value,
+                min,
+                max,
+            } => write!(
+                formatter,
+                "{}: seed input \"{input}\" value {value} is outside range [{}, {}]",
+                self.code(),
+                min.map_or_else(|| "0".to_owned(), |value| value.to_string()),
+                max.map_or_else(|| u64::MAX.to_string(), |value| value.to_string())
             ),
             Self::Internal { message } => write!(formatter, "{}: {message}", self.code()),
         }

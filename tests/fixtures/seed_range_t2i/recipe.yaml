@@ -1,0 +1,24 @@
+schema_version: 1
+
+id: seed_range_t2i
+
+name: Seed Range Text to Image
+
+workflow:
+  file: workflow_api.json
+
+inputs:
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 10
+    max: 20
+
+bindings:
+  - source: seed
+    target:
+      node: "3"
+      input: seed
+
+outputs: []

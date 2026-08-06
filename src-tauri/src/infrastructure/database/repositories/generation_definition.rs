@@ -62,7 +62,12 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
              INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
              INNER JOIN recipes r ON r.workflow_version_id = wv.id
              WHERE w.current_version_id = wv.id
-             ORDER BY w.name ASC, wv.version ASC, r.version ASC",
+               AND r.version = (
+                   SELECT MAX(latest.version)
+                   FROM recipes latest
+                   WHERE latest.workflow_version_id = wv.id
+               )
+             ORDER BY w.name ASC, wv.version ASC",
         )
         .fetch_all(&self.pool)
         .await
@@ -177,5 +182,33 @@ mod tests {
             .expect("definition lookup should succeed");
 
         assert!(definition.is_none());
+    }
+
+    #[tokio::test]
+    async fn lists_only_the_latest_recipe_for_each_current_workflow_version() {
+        let (_directory, pool, repository) = setup().await;
+        sqlx::query(
+            "INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("recipe-2")
+        .bind("workflow-version-1")
+        .bind("1.0.1")
+        .bind(1)
+        .bind("schema_version: 1\nid: latest-recipe")
+        .bind("sha-latest")
+        .bind("2026-01-02T00:00:00Z")
+        .execute(&pool)
+        .await
+        .expect("latest recipe fixture should insert");
+
+        let definitions = repository
+            .list_available()
+            .await
+            .expect("available definitions should load");
+
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].recipe_id, "recipe-2");
+        assert!(definitions[0].recipe_yaml.contains("latest-recipe"));
     }
 }

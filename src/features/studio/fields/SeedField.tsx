@@ -1,7 +1,12 @@
 import type { DraftValue } from "../../../types/generation";
 
 interface Props {
-  field: { key: string; label: string };
+  field: {
+    key: string;
+    label: string;
+    minValue?: string | null;
+    maxValue?: string | null;
+  };
   value?: DraftValue;
   error?: string;
   onChange: (value: DraftValue) => void;
@@ -10,6 +15,8 @@ interface Props {
 export function SeedField({ field, value, error, onChange }: Props) {
   const mode = value?.type === "seed_fixed" ? "fixed" : "random";
   const fixedValue = value?.type === "seed_fixed" ? value.value : "";
+  const minValue = field.minValue ?? "0";
+  const maxValue = field.maxValue ?? "18446744073709551615";
   return (
     <label className="field-control">
       <span>{field.label}</span>
@@ -36,7 +43,9 @@ export function SeedField({ field, value, error, onChange }: Props) {
           aria-invalid={Boolean(error)}
         />
       )}
-      <small className="field-hint">Fixed seeds use a decimal string.</small>
+      <small className="field-hint">
+        Fixed seeds use a decimal string. Range: {minValue} – {maxValue}
+      </small>
       {error && <small className="field-error">{error}</small>}
     </label>
   );

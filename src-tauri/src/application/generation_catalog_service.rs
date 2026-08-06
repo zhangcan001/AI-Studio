@@ -63,6 +63,10 @@ pub enum FieldViewModel {
         default_mode: String,
         #[serde(rename = "defaultValue")]
         default_value: Option<String>,
+        #[serde(rename = "minValue")]
+        min_value: Option<String>,
+        #[serde(rename = "maxValue")]
+        max_value: Option<String>,
     },
 }
 
@@ -100,7 +104,12 @@ impl RecipeViewModel {
                     min,
                     max,
                 },
-                InputDefinition::Seed { label, default } => {
+                InputDefinition::Seed {
+                    label,
+                    default,
+                    min,
+                    max,
+                } => {
                     let (default_mode, default_value) = match default {
                         SeedDefault::Random => ("random".to_owned(), None),
                         SeedDefault::Fixed(value) => ("fixed".to_owned(), Some(value.to_string())),
@@ -110,6 +119,8 @@ impl RecipeViewModel {
                         label,
                         default_mode,
                         default_value,
+                        min_value: min.map(|value| value.to_string()),
+                        max_value: max.map(|value| value.to_string()),
                     }
                 }
             })
@@ -207,10 +218,35 @@ mod tests {
                 label: "Seed".to_owned(),
                 default_mode: "fixed".to_owned(),
                 default_value: Some("18446744073709551615".to_owned()),
+                min_value: None,
+                max_value: None,
             }]
         );
         let json = to_string(&view).unwrap();
         assert!(json.contains("\"defaultValue\":\"18446744073709551615\""));
+        assert!(!json.contains("1.8446744073709552e19"));
+    }
+
+    #[tokio::test]
+    async fn serializes_seed_range_as_decimal_strings() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+            .bind(
+                "schema_version: 1\nid: recipe\nname: Recipe\nworkflow:\n  file: workflow_api.json\ninputs:\n  seed:\n    type: seed\n    label: Seed\n    default: random\n    min: 0\n    max: 18446744073709551615\nbindings: []\noutputs: []\n",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let repository = std::sync::Arc::new(SqliteGenerationDefinitionRepository::new(pool));
+        let catalog = GenerationCatalogService::new(repository);
+        let view = catalog.list().await.unwrap().remove(0);
+        let json = to_string(&view).unwrap();
+
+        assert!(json.contains("\"minValue\":\"0\""));
+        assert!(json.contains("\"maxValue\":\"18446744073709551615\""));
         assert!(!json.contains("1.8446744073709552e19"));
     }
 }

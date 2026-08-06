@@ -62,7 +62,9 @@ impl WorkflowCompiler {
                             .insert(input_key.clone(), ResolvedInputValue::Integer(value));
                     }
                 }
-                InputDefinition::Seed { default, .. } => {
+                InputDefinition::Seed {
+                    default, min, max, ..
+                } => {
                     let seed_value = request
                         .values
                         .get(input_key)
@@ -75,7 +77,10 @@ impl WorkflowCompiler {
                             SeedDefault::Random => SeedValue::Random,
                             SeedDefault::Fixed(seed) => SeedValue::Fixed(*seed),
                         });
-                    let seed = seed_resolver.resolve(&seed_value);
+                    if let SeedValue::Fixed(seed) = &seed_value {
+                        validate_seed_input(input_key, *seed, *min, *max)?;
+                    }
+                    let seed = seed_resolver.resolve(input_key, &seed_value, *min, *max);
                     resolved_seed.get_or_insert(seed);
                     resolved_inputs.insert(input_key.clone(), ResolvedInputValue::Seed(seed));
                 }
@@ -169,6 +174,24 @@ fn resolve_integer_input(
     Ok(Some(value))
 }
 
+fn validate_seed_input(
+    input_key: &str,
+    value: u64,
+    min: Option<u64>,
+    max: Option<u64>,
+) -> Result<(), CompileError> {
+    if min.is_some_and(|min| value < min) || max.is_some_and(|max| value > max) {
+        return Err(CompileError::SeedOutOfRange {
+            input: input_key.to_owned(),
+            value,
+            min,
+            max,
+        });
+    }
+
+    Ok(())
+}
+
 fn type_mismatch(input_key: &str, expected: &str, value: &InputValue) -> CompileError {
     CompileError::InputTypeMismatch {
         input: input_key.to_owned(),
@@ -240,6 +263,14 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../tests/fixtures/simple_t2i/expected_compiled_fixed_seed.json"
     ));
+    const RANGE_RECIPE_YAML: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/seed_range_t2i/recipe.yaml"
+    ));
+    const RANGE_WORKFLOW_JSON: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/seed_range_t2i/workflow_api.json"
+    ));
 
     fn recipe_and_workflow() -> (crate::domain::Recipe, WorkflowDocument) {
         let recipe = RecipeParser::parse(RECIPE_YAML).expect("recipe should parse");
@@ -260,6 +291,21 @@ mod tests {
                 InputValue::Seed(SeedValue::Fixed(123_456_789)),
             ),
         ]))
+    }
+
+    fn range_recipe_and_workflow() -> (crate::domain::Recipe, WorkflowDocument) {
+        let recipe = RecipeParser::parse(RANGE_RECIPE_YAML).expect("range recipe should parse");
+        let workflow_value: Value =
+            serde_json::from_str(RANGE_WORKFLOW_JSON).expect("range workflow JSON");
+        let workflow = WorkflowDocument::parse(workflow_value).expect("workflow should parse");
+        (recipe, workflow)
+    }
+
+    fn seed_request(seed: SeedValue) -> CompileRequest {
+        CompileRequest::new(BTreeMap::from([(
+            "seed".to_owned(),
+            InputValue::Seed(seed),
+        )]))
     }
 
     #[test]
@@ -305,6 +351,64 @@ mod tests {
         assert_eq!(
             result.workflow["3"]["inputs"]["seed"],
             Value::from(resolved_seed)
+        );
+    }
+
+    #[test]
+    fn seed_range_accepts_fixed_boundaries_and_random_values() {
+        for seed in [10, 20] {
+            let (recipe, workflow) = range_recipe_and_workflow();
+            let result = WorkflowCompiler
+                .compile(&workflow, &recipe, &seed_request(SeedValue::Fixed(seed)))
+                .expect("range boundary should compile");
+            assert_eq!(result.resolved_seed, Some(seed));
+        }
+
+        let (recipe, workflow) = range_recipe_and_workflow();
+        let result = WorkflowCompiler
+            .compile(&workflow, &recipe, &seed_request(SeedValue::Random))
+            .expect("random range should compile");
+        let seed = result.resolved_seed.expect("random seed should resolve");
+        assert!((10..=20).contains(&seed));
+    }
+
+    #[test]
+    fn fixed_seed_outside_recipe_range_returns_unsigned_error() {
+        for seed in [9, 21] {
+            let (recipe, workflow) = range_recipe_and_workflow();
+            let error = WorkflowCompiler
+                .compile(&workflow, &recipe, &seed_request(SeedValue::Fixed(seed)))
+                .expect_err("out-of-range seed must fail");
+
+            assert!(matches!(
+                error,
+                CompileError::SeedOutOfRange {
+                    value,
+                    min: Some(10),
+                    max: Some(20),
+                    ..
+                } if value == seed
+            ));
+            assert_eq!(error.code(), "SEED_OUT_OF_RANGE");
+        }
+    }
+
+    #[test]
+    fn unbounded_recipe_preserves_u64_seed_values() {
+        let (recipe, workflow) = recipe_and_workflow();
+        let mut request = fixed_request();
+        request.values.insert(
+            "seed".to_owned(),
+            InputValue::Seed(SeedValue::Fixed(u64::MAX)),
+        );
+        let result = WorkflowCompiler
+            .compile(&workflow, &recipe, &request)
+            .expect("unbounded seed should accept u64::MAX");
+
+        assert_eq!(result.resolved_seed, Some(u64::MAX));
+        assert_eq!(
+            result.workflow["3"]["inputs"]["seed"],
+            Value::from(u64::MAX)
         );
     }
 

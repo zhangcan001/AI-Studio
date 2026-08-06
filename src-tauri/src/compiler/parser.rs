@@ -61,6 +61,10 @@ enum InputDefinitionDto {
     Seed {
         label: String,
         default: SeedDefaultDto,
+        #[serde(default)]
+        min: Option<u64>,
+        #[serde(default)]
+        max: Option<u64>,
     },
 }
 
@@ -177,9 +181,16 @@ impl InputDefinitionDto {
                 min,
                 max,
             }),
-            Self::Seed { label, default } => Ok(InputDefinition::Seed {
+            Self::Seed {
+                label,
+                default,
+                min,
+                max,
+            } => Ok(InputDefinition::Seed {
                 label,
                 default: default.try_into_domain()?,
+                min,
+                max,
             }),
         }
     }
@@ -264,6 +275,26 @@ outputs:
         ));
         assert_eq!(recipe.bindings.len(), 3);
         assert_eq!(recipe.outputs.len(), 1);
+    }
+
+    #[test]
+    fn parses_optional_seed_range_without_upgrading_schema() {
+        let yaml = VALID_RECIPE.replace(
+            "    default: random\n",
+            "    default: random\n    min: 10\n    max: 20\n",
+        );
+        let recipe = RecipeParser::parse(&yaml).expect("recipe should parse");
+
+        assert!(matches!(
+            recipe.inputs.get("seed"),
+            Some(InputDefinition::Seed {
+                default: SeedDefault::Random,
+                min: Some(10),
+                max: Some(20),
+                ..
+            })
+        ));
+        assert_eq!(recipe.schema_version, 1);
     }
 
     #[test]

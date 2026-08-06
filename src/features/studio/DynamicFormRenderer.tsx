@@ -3,6 +3,8 @@ import { IntegerField } from "./fields/IntegerField";
 import { SeedField } from "./fields/SeedField";
 import { TextAreaField } from "./fields/TextAreaField";
 
+const U64_MAX = "18446744073709551615";
+
 interface Props {
   recipe: RecipeViewModel;
   values: GenerationValues;
@@ -98,6 +100,17 @@ export function validateRecipeValues(
     } else if (field.type === "seed" && value?.type === "seed_fixed") {
       if (!/^\d+$/.test(value.value) || value.value.length > 20) {
         errors[field.key] = "Use a decimal u64 seed string.";
+      } else {
+        try {
+          const seed = BigInt(value.value);
+          const min = BigInt(field.minValue ?? "0");
+          const max = BigInt(field.maxValue ?? U64_MAX);
+          if (seed < min || seed > max) {
+            errors[field.key] = `Seed must be between ${min} and ${max}.`;
+          }
+        } catch {
+          errors[field.key] = "Use a decimal u64 seed string.";
+        }
       }
     }
   }

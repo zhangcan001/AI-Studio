@@ -37,27 +37,41 @@ impl RecipeValidator {
                 )));
             }
 
-            if let InputDefinition::Integer {
-                default, min, max, ..
-            } = definition
-            {
-                if let (Some(min), Some(max)) = (min, max) {
-                    if min > max {
-                        return Err(RecipeError::invalid(format!(
-                            "input \"{key}\" min {min} must be less than or equal to max {max}"
-                        )));
+            match definition {
+                InputDefinition::Integer {
+                    default, min, max, ..
+                } => {
+                    if let (Some(min), Some(max)) = (min, max) {
+                        if min > max {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" min {min} must be less than or equal to max {max}"
+                            )));
+                        }
                     }
-                }
 
-                if let Some(default) = default {
-                    if min.is_some_and(|min| *default < min)
-                        || max.is_some_and(|max| *default > max)
-                    {
-                        return Err(RecipeError::invalid(format!(
-                            "input \"{key}\" default {default} is outside its declared range"
-                        )));
+                    if let Some(default) = default {
+                        if min.is_some_and(|min| *default < min)
+                            || max.is_some_and(|max| *default > max)
+                        {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" default {default} is outside its declared range"
+                            )));
+                        }
                     }
                 }
+                InputDefinition::Seed {
+                    default, min, max, ..
+                } => {
+                    validate_unsigned_range(key, *min, *max)?;
+                    if let crate::domain::SeedDefault::Fixed(default) = default {
+                        if is_outside_unsigned_range(*default, *min, *max) {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" default {default} is outside its declared range"
+                            )));
+                        }
+                    }
+                }
+                InputDefinition::TextArea { .. } => {}
             }
         }
 
@@ -103,6 +117,25 @@ impl RecipeValidator {
 
         Ok(())
     }
+}
+
+fn validate_unsigned_range(
+    key: &str,
+    min: Option<u64>,
+    max: Option<u64>,
+) -> Result<(), RecipeError> {
+    if let (Some(min), Some(max)) = (min, max) {
+        if min > max {
+            return Err(RecipeError::invalid(format!(
+                "input \"{key}\" min {min} must be less than or equal to max {max}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_outside_unsigned_range(value: u64, min: Option<u64>, max: Option<u64>) -> bool {
+    min.is_some_and(|min| value < min) || max.is_some_and(|max| value > max)
 }
 
 pub struct WorkflowValidator;
@@ -158,7 +191,7 @@ fn is_valid_node_id(node_id: &str) -> bool {
 mod tests {
     use super::{RecipeValidator, WorkflowValidator};
     use crate::compiler::RecipeParser;
-    use crate::domain::{RecipeError, WorkflowDocument, WorkflowError};
+    use crate::domain::{InputDefinition, RecipeError, WorkflowDocument, WorkflowError};
     use serde_json::json;
 
     const RECIPE_WITH_RANGE: &str = r#"
@@ -175,6 +208,23 @@ inputs:
     default: 20
     min: 1
     max: 100
+bindings: []
+outputs: []
+"#;
+
+    const RECIPE_WITH_SEED_RANGE: &str = r#"
+schema_version: 1
+id: seed_range
+name: Seed Range
+workflow:
+  file: workflow.json
+inputs:
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 10
+    max: 20
 bindings: []
 outputs: []
 "#;
@@ -218,6 +268,40 @@ outputs: []
         let error = RecipeValidator::validate(&recipe).expect_err("range must be rejected");
 
         assert!(matches!(error, RecipeError::Invalid { .. }));
+    }
+
+    #[test]
+    fn accepts_valid_seed_range() {
+        let recipe = RecipeParser::parse(RECIPE_WITH_SEED_RANGE).expect("recipe should parse");
+
+        RecipeValidator::validate(&recipe).expect("seed range should be valid");
+    }
+
+    #[test]
+    fn rejects_seed_min_greater_than_max() {
+        let mut recipe = RecipeParser::parse(RECIPE_WITH_SEED_RANGE).expect("recipe should parse");
+        if let Some(InputDefinition::Seed { min, max, .. }) = recipe.inputs.get_mut("seed") {
+            *min = Some(20);
+            *max = Some(10);
+        }
+
+        let error = RecipeValidator::validate(&recipe).expect_err("seed range must be rejected");
+
+        assert!(matches!(error, RecipeError::Invalid { .. }));
+    }
+
+    #[test]
+    fn rejects_fixed_seed_default_outside_range() {
+        let yaml = RECIPE_WITH_SEED_RANGE
+            .replace("default: random", "default: 999")
+            .replace("max: 20", "max: 100");
+        let recipe = RecipeParser::parse(&yaml).expect("recipe should parse");
+
+        let error = RecipeValidator::validate(&recipe)
+            .expect_err("fixed seed default must be inside its declared range");
+
+        assert!(matches!(error, RecipeError::Invalid { .. }));
+        assert!(error.to_string().contains("default 999"));
     }
 
     #[test]

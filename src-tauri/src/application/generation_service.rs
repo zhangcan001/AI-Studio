@@ -664,6 +664,7 @@ mod tests {
         ComfyHistory, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile,
     };
     use chrono::{TimeZone, Utc};
+    use serde_json::json;
     use std::collections::BTreeMap;
 
     #[test]
@@ -678,6 +679,34 @@ mod tests {
             message: "invalid png".to_owned(),
         });
         assert_eq!(task_error_from_output(&error).code, "OUTPUT_IMPORT_FAILED");
+    }
+
+    #[test]
+    fn workflow_validation_node_errors_are_preserved_on_failed_task() {
+        let node_errors = json!({
+            "123": {
+                "errors": [{
+                    "type": "value_bigger_than_max",
+                    "message": "Value 21 bigger than max 20"
+                }]
+            }
+        });
+        let adapter_error = ComfyAdapterError::WorkflowValidation {
+            message: "Prompt outputs failed validation".to_owned(),
+            node_errors: node_errors.clone(),
+        };
+        let task_error = task_error_from_adapter(&adapter_error);
+        let now = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut task = Task::new("project-1", "workflow-1", "version-1", "recipe-1", now);
+
+        task.fail(task_error, now + chrono::Duration::seconds(1))
+            .expect("task should fail");
+
+        assert_eq!(task.status, TaskStatus::Failed);
+        assert_eq!(
+            task.error.expect("failed task should have error").raw,
+            Some(node_errors)
+        );
     }
 
     #[derive(Clone)]

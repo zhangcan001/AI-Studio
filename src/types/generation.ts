@@ -21,6 +21,8 @@ export type RecipeField =
       label: string;
       defaultMode: "random" | "fixed";
       defaultValue?: string | null;
+      minValue?: string | null;
+      maxValue?: string | null;
     };
 
 export interface RecipeViewModel {
