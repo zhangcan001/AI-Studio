@@ -1,96 +1,107 @@
-# M1 Project Workspace Validation
+# M1 Project Workspace Final Gate
 
 Date: 2026-08-06
-Commit: `b0ace8a`
 
-## Scope
+This record covers FIX-PROJECT-001 and LIVE-PROJECT-001 through
+LIVE-PROJECT-006. The validation stopped at this gate; Preset, Multi Image,
+Mask, Video, MiniMax H3, and delete flows were not entered.
 
-M1-21 through M1-28:
+## Source Hardening
 
-- Project Repository CRUD foundation and metadata validation
-- Project Service with ID-based local project roots and database-insert compensation
-- Active Project persistence and fallback to `prj_default`
-- Header project selector and Projects workspace
-- Project-scoped generation, task history, task events, asset browsing, binary reads, and cancellation
-- Cross-project side-effect protection
+- PASS: Project IDs now use one domain validator. `prj_default` is accepted;
+  created projects must use `prj_<canonical UUID>`. Empty, arbitrary,
+  path-like, separator-containing, and malformed IDs are rejected.
+- PASS: Project update, generation creation, task queries/history/cancel, and
+  asset queries/binary reads validate the project boundary before application
+  work or filesystem/ComfyUI side effects.
+- PASS: No database migration was changed. The frontend retains only the
+  intentional `prj_default` bootstrap constant; no root/storage path is
+  exposed through the normal React bridge.
 
-## Automated checks
+## Automated
 
-- `cargo fmt --all -- --check`
-- `cargo check`
-- `cargo test -- --test-threads=1`
-- `pnpm test`
-- `pnpm build`
+- PASS: `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- PASS: `cargo check --manifest-path src-tauri/Cargo.toml`
+- PASS: `cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1`
+  — 168 Rust tests passed.
+- PASS: `pnpm test` — 12 frontend tests passed across 5 files.
+- PASS: `pnpm build`
+- PASS: `git diff --check`
+- PASS: Frontend scan found no forbidden root/storage path fields or
+  unapproved project-ID literals.
 
-Result: PASS. Rust has 166 passing tests and the frontend has 12 passing tests
-across 5 test files. TypeScript/Vite production build and `git diff --check`
-also pass.
+## Project UI
 
-## Live ComfyUI Gate
+- PASS: Created `Project Live Test`, received a UUID-backed project ID, and
+  confirmed its project root was created by the application.
+- PASS: Renamed it to `Project Live Test Renamed`; the description and stable
+  project ID were preserved.
+- PASS: Header selector, Projects workspace Open/Edit actions, and active
+  project state were visible and consistent.
+- PASS: After closing and reopening the development instance, the selector
+  still showed `Project Live Test Renamed`.
+- PASS: The UI exposes no Project Delete, custom root-path, Move Project, or
+  Browse Folder action.
 
-- Endpoint: `http://127.0.0.1:8188`
-- Health: PASS (`/system_stats` and `/object_info`)
-- ComfyUI version: `0.30.1`
-- Devices: 1
-- GPU: `cuda:0 NVIDIA GeForce RTX 5060 Ti : cudaMallocAsync`
-- VRAM total: `17,102,864,384` bytes
-- VRAM free: `15,875,309,568` bytes
-- Node count: `4,486`
+## New Project T2I
 
-The exact ComfyUI Python listener was stopped for the offline check. Port 8188
-became unavailable while the AI Studio process remained alive. ComfyUI was
-then restarted from `D:\ComfyUI-WorkFisher-V2\ComfyUI` with its original
-arguments and the API recovered with the same status values. Result: PASS.
+- PASS: The existing M0 text-to-image package was started from the new
+  project through the UI.
+- PASS: The live task was observed in `RUNNING`, then reached `COLLECTING`
+  and `SUCCEEDED`; output collection produced an image Asset.
+- PASS: Three generated tasks in the test project completed successfully,
+  with three distinct prompt identities and one generated Asset per task.
 
-## Desktop Gate Status
+## Isolation
 
-The desktop control session was stopped by the physical Escape safety signal
-before the Projects workspace could be driven. Therefore this run does not
-claim a new-project UI creation, project-scoped live T2I generation, or a
-visual project-switch check. The database/filesystem snapshot after the run
-contains only `prj_default` with 11 historical tasks and 7 generated assets;
-no test project was created by the aborted session.
+- PASS: Read-only database verification ended with Default Project at 11
+  tasks / 7 assets, Project Live Test Renamed at 3 tasks / 3 assets, and the
+  offline test project at 0 tasks / 0 assets.
+- PASS: Switching to Default Project showed only its existing history and
+  assets; switching back showed the new project records and previews.
+- PASS: Generated assets were linked to the creating project and source task;
+  no cross-project record or binary read was observed.
 
-## Manual validation checklist
+## Running Switch
 
-### Remaining desktop validation: Project Create / Rename
+- PASS: A running task was observed while opening Projects and switching away
+  from its project. The source project's task continued in ComfyUI and ended
+  `SUCCEEDED`; the destination project did not display it, and no cancel or
+  duplicate prompt was created.
+- PASS: A separate clean running-task audit had zero `CANCEL` and zero
+  `RECOVERY` events, one prompt identity, and one final Asset.
+- Note: One earlier observation included a `TASK_RECOVERY_STARTED` /
+  `TASK_RECOVERY_SUCCEEDED` pair because the evaluator manually pressed the
+  visible `Reconcile tasks` button after the route switch. That was not caused
+  by project switching, did not cancel or resubmit the task, and the clean
+  audit above was performed without pressing that control.
 
-- Open Projects and create `Project Live Test` with a description.
-- Confirm the project appears in the list and the header selector.
-- Rename the project and confirm the header updates without restarting.
-- Confirm there is no Delete Project or custom root-path control.
+## Offline
 
-### Project Switch / State Isolation
+- PASS: ComfyUI was stopped while no task was active. AI Studio remained
+  alive; after Test Connection, the UI showed Offline and Generate was
+  disabled.
+- PASS: While offline, `Offline Project Test` was created and renamed to
+  `Offline Project Test Renamed` without a command failure or database error.
+- PASS: The existing project remained readable offline: Tasks, Task Detail,
+  Load Inputs, Asset Library, and Asset Preview all loaded successfully.
+- PASS: ComfyUI restart restored `/system_stats` with HTTP 200. AI Studio then
+  showed Connected, version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device,
+  VRAM `14.8 GB / 15.9 GB`, and node count `4,486`; node refresh succeeded.
 
-- Switch between Default Project and Project Live Test.
-- Confirm Studio input values reset to the selected workflow defaults.
-- Confirm Tasks and Assets reload for the selected project.
-- Confirm a task from the previous project is not shown in the active project.
-- Confirm switching away from a running task does not cancel it.
+## Security
 
-### New Project T2I Live
+- PASS: Project DTOs expose only project metadata; project roots, storage
+  paths, workflow payloads, recipe YAML, prompt IDs, and asset internals stay
+  outside the React bridge.
+- PASS: The validation document contains no user profile path, ComfyUI
+  installation path, or project-root absolute path.
+- PASS: Test projects were intentionally retained for continued local review;
+  no delete flow was exercised.
 
-- In Project Live Test, use the existing `wfl_kera2_t2i_local_v2` package.
-- Run one text-to-image generation and observe `QUEUED → RUNNING → COLLECTING → SUCCEEDED`.
-- Confirm the Task and Asset are visible only in Project Live Test.
-- Confirm the new asset is under the new project root and not under `prj_default`.
-- Switch to Default Project and confirm its existing history/assets remain isolated.
+## Final status
 
-### Offline Project Use
+M1 Project Workspace Final Gate: **PASS**.
 
-- Stop ComfyUI and refresh the app.
-- Confirm ComfyUI is Offline and Generate is disabled.
-- Confirm project create, switch, browse, and rename still work.
-- Restart ComfyUI after the check.
-
-## Security boundary
-
-Project DTOs expose only `id`, `name`, `description`, `createdAt`, and
-`updatedAt`; root paths never cross the Tauri/React boundary. Task events add
-only `projectId`. Cross-project task lookup/cancel and asset binary reads fail
-as not found before ComfyUI or filesystem side effects.
-
-## Not included
-
-Preset, multi-image, mask, video, MiniMax H3, Project Delete, Asset Delete,
-Task Delete, and Workflow Delete remain outside this phase.
+FIX-PROJECT-001 and LIVE-PROJECT-001 through LIVE-PROJECT-006 are complete.
+Stop here as requested; the next phase was not entered.

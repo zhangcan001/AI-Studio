@@ -41,6 +41,8 @@ pub enum InputValueDto {
 
 impl GenerationCreateRequest {
     fn into_application(self) -> Result<CreateGenerationRequest, AppError> {
+        crate::domain::validate_project_id(&self.project_id)
+            .map_err(|error| AppError::invalid_input(error.to_string()))?;
         let values = self
             .values
             .into_iter()

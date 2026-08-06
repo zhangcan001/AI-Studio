@@ -54,19 +54,16 @@ YAML, prompt IDs, storage paths, SHA-256 values, and asset metadata are not
 returned to the frontend. Browse queries use the existing SQLite schema plus
 `002_browse_indexes.sql`; no existing migration was changed.
 
-M1 project workspace automated validation and direct ComfyUI HTTP validation
-are complete. The remaining desktop checklist covers creating `Project Live
-Test` through the Projects workspace, running the existing
-`wfl_kera2_t2i_local_v2` package there, checking project-rooted Task/Asset
-isolation, and switching contexts. The desktop control session was stopped by
-the physical Escape safety signal before those UI actions could be completed;
-the exact result is recorded in `docs/M1_PROJECT_WORKSPACE_VALIDATION.md`.
+M1 Project Workspace Final Gate validation is complete. It covers strict
+Project ID hardening, UI project create/rename, active-project persistence,
+new-project text-to-image generation, project-scoped Task/Asset isolation,
+running-task switching, and the offline/restart gate. The exact evidence is
+recorded in `docs/M1_PROJECT_WORKSPACE_VALIDATION.md`.
 
 The ComfyUI live gate passed independently: `http://127.0.0.1:8188` reported
 version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device, and 4,486 nodes. The
-offline/restart gate also passed: stopping the exact ComfyUI Python process
-made port 8188 unavailable while AI Studio stayed alive, and restarting with
-the original arguments restored the API.
+offline/restart gate also passed: port 8188 became unavailable while AI
+Studio stayed alive, and restarting ComfyUI restored the API.
 
 M1 live I2I is not run because no validated runtime I2I Workflow Package was supplied.
 The existing M0 text-to-image runtime remains the only live generation package.

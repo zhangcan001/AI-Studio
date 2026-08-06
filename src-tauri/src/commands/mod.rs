@@ -10,6 +10,11 @@ use crate::{app_state::AppState, error::AppError};
 use serde::Serialize;
 use tauri::State;
 
+pub(crate) fn validate_project_id(value: &str) -> Result<(), AppError> {
+    crate::domain::validate_project_id(value)
+        .map_err(|error| AppError::invalid_input(error.to_string()))
+}
+
 pub(crate) fn map_repository_error(error: &crate::application::ports::RepositoryError) -> AppError {
     match error {
         crate::application::ports::RepositoryError::WorkflowVersionConflict { .. } => {

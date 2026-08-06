@@ -1,4 +1,5 @@
 use crate::application::ports::{ProjectDirectoryStore, ProjectDirectoryStoreError};
+use crate::domain::validate_project_id;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -12,22 +13,9 @@ impl FileSystemProjectDirectoryStore {
         Self { projects_root }
     }
 
-    fn validate_project_id(project_id: &str) -> Result<(), ProjectDirectoryStoreError> {
-        if project_id.trim().is_empty()
-            || project_id.contains('/')
-            || project_id.contains('\\')
-            || project_id.contains(':')
-            || project_id.contains("..")
-        {
-            return Err(ProjectDirectoryStoreError::InvalidProjectId(
-                project_id.to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
     fn project_path(&self, project_id: &str) -> Result<PathBuf, ProjectDirectoryStoreError> {
-        Self::validate_project_id(project_id)?;
+        validate_project_id(project_id)
+            .map_err(|error| ProjectDirectoryStoreError::InvalidProjectId(error.to_string()))?;
         let root = self.projects_root.join(project_id);
         if !root.starts_with(&self.projects_root) {
             return Err(ProjectDirectoryStoreError::InvalidProjectId(
@@ -84,10 +72,15 @@ mod tests {
             .unwrap();
         let store = FileSystemProjectDirectoryStore::new(projects_root.clone());
 
-        let created = store.create_project_root("prj_new").await.unwrap();
-        assert_eq!(created, projects_root.join("prj_new"));
-        store.remove_new_project_root("prj_new").await.unwrap();
-        assert!(!projects_root.join("prj_new").exists());
+        let project_id = "prj_550e8400-e29b-41d4-a716-446655440000";
+        let created = store.create_project_root(project_id).await.unwrap();
+        assert_eq!(created, projects_root.join(project_id));
+        store.remove_new_project_root(project_id).await.unwrap();
+        assert!(!projects_root.join(project_id).exists());
+        let default_created = store.create_project_root("prj_default").await.unwrap();
+        assert_eq!(default_created, projects_root.join("prj_default"));
+        store.remove_new_project_root("prj_default").await.unwrap();
+        assert!(!projects_root.join("prj_default").exists());
         assert!(projects_root.join("prj_existing").exists());
     }
 
@@ -95,7 +88,20 @@ mod tests {
     async fn rejects_path_like_project_ids() {
         let directory = tempdir().unwrap();
         let store = FileSystemProjectDirectoryStore::new(directory.path().to_owned());
-        for project_id in ["", "prj/a", "prj\\a", "prj:a", "prj..a"] {
+        for project_id in [
+            "",
+            " ",
+            "default",
+            "prj_",
+            "prj_test",
+            "project-1",
+            "../prj_x",
+            "prj/a",
+            "prj\\a",
+            "prj:a",
+            "prj_123",
+            "prj_not-a-uuid",
+        ] {
             assert!(store.create_project_root(project_id).await.is_err());
         }
     }

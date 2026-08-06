@@ -18,6 +18,7 @@ pub async fn task_get(
     project_id: String,
     task_id: String,
 ) -> Result<TaskView, AppError> {
+    super::validate_project_id(&project_id)?;
     let task = state
         .task_query_service
         .get(&project_id, &task_id)
@@ -33,6 +34,7 @@ pub async fn task_list_recent(
     project_id: String,
     limit: Option<u32>,
 ) -> Result<Vec<TaskView>, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .task_query_service
         .list_recent(&project_id, limit.unwrap_or(10).min(50))
@@ -46,6 +48,7 @@ pub async fn task_cancel(
     project_id: String,
     task_id: String,
 ) -> Result<TaskView, AppError> {
+    super::validate_project_id(&project_id)?;
     let task = state
         .task_cancellation_service
         .request_cancel(&project_id, &task_id)
@@ -97,6 +100,7 @@ pub async fn task_history_page(
     cursor: Option<PageCursor>,
     limit: Option<u32>,
 ) -> Result<TaskHistoryPageView, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .task_history_service
         .list_page(&project_id, filter.into(), cursor, limit.unwrap_or(30))
@@ -110,6 +114,7 @@ pub async fn task_get_detail(
     project_id: String,
     task_id: String,
 ) -> Result<TaskDetailView, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .task_history_service
         .get_detail(&project_id, &task_id)
@@ -123,6 +128,7 @@ pub async fn task_get_reusable_draft(
     project_id: String,
     task_id: String,
 ) -> Result<ReusableGenerationDraftView, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .task_history_service
         .get_reusable_draft(&project_id, &task_id)

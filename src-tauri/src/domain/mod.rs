@@ -5,12 +5,14 @@
 
 pub mod asset;
 pub mod generation_snapshot;
+pub mod project_id;
 pub mod recipe;
 pub mod task;
 pub mod workflow;
 
 pub use asset::{Asset, AssetDomainError, AssetId, AssetType};
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
+pub use project_id::{validate_project_id, ProjectIdValidationError};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,
     OutputType, Recipe, RecipeError, ResolvedInputValue, SeedDefault, SeedValue, WorkflowRef,

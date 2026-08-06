@@ -18,6 +18,7 @@ pub async fn asset_list_by_task(
     project_id: String,
     task_id: String,
 ) -> Result<Vec<crate::application::asset_query_service::AssetView>, AppError> {
+    super::validate_project_id(&project_id)?;
     let task_exists = state
         .task_query_service
         .get(&project_id, &task_id)
@@ -42,6 +43,7 @@ pub async fn asset_list_recent(
     project_id: String,
     limit: Option<u32>,
 ) -> Result<Vec<AssetView>, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .asset_query_service
         .list_recent(&project_id, limit.unwrap_or(100))
@@ -75,6 +77,7 @@ pub async fn asset_library_page(
     cursor: Option<PageCursor>,
     limit: Option<u32>,
 ) -> Result<AssetLibraryPageView, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .asset_library_service
         .list_page(&project_id, category.into(), cursor, limit.unwrap_or(30))
@@ -88,6 +91,7 @@ pub async fn asset_get(
     project_id: String,
     asset_id: String,
 ) -> Result<AssetView, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .asset_query_service
         .get(&project_id, &asset_id)
@@ -101,6 +105,7 @@ pub async fn asset_pick_and_import_image(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Option<AssetView>, AppError> {
+    super::validate_project_id(&project_id)?;
     let Some(file) = app_handle
         .dialog()
         .file()
@@ -145,6 +150,7 @@ pub async fn asset_read_image(
     project_id: String,
     asset_id: String,
 ) -> Result<Response, AppError> {
+    super::validate_project_id(&project_id)?;
     let asset = state
         .asset_query_service
         .read_image(&project_id, &asset_id)

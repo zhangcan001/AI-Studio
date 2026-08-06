@@ -34,6 +34,7 @@ pub async fn project_update(
     name: String,
     description: Option<String>,
 ) -> Result<ProjectView, AppError> {
+    super::validate_project_id(&project_id)?;
     state
         .project_service
         .update(&project_id, &name, description.as_deref())

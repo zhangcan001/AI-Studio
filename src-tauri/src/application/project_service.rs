@@ -2,6 +2,7 @@ use crate::application::ports::{
     Clock, ProjectDirectoryStore, ProjectDirectoryStoreError, ProjectRecord, ProjectRepository,
     RepositoryError,
 };
+use crate::domain::validate_project_id as validate_formal_project_id;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::{error::Error, fmt, sync::Arc};
@@ -132,18 +133,9 @@ fn normalize_metadata(
     Ok((name.to_owned(), description.map(str::to_owned)))
 }
 
-pub fn validate_project_id(project_id: &str) -> Result<(), ProjectServiceError> {
-    if project_id.trim().is_empty()
-        || project_id.contains('/')
-        || project_id.contains('\\')
-        || project_id.contains(':')
-        || project_id.contains("..")
-    {
-        return Err(ProjectServiceError::InvalidProjectId(format!(
-            "INVALID_PROJECT_ID: project id {project_id:?} is not valid"
-        )));
-    }
-    Ok(())
+fn validate_project_id(project_id: &str) -> Result<(), ProjectServiceError> {
+    validate_formal_project_id(project_id)
+        .map_err(|error| ProjectServiceError::InvalidProjectId(error.to_string()))
 }
 
 impl From<ProjectRecord> for ProjectView {
