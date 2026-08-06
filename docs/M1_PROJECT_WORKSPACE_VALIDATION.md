@@ -1,7 +1,7 @@
 # M1 Project Workspace Validation
 
 Date: 2026-08-06
-Commit: pending implementation commit
+Commit: `b0ace8a`
 
 ## Scope
 
