@@ -49,6 +49,17 @@ pub trait AssetStore: Send + Sync {
             .await
     }
 
+    async fn write_thumbnail(
+        &self,
+        _project_root: &Path,
+        _asset_id: &AssetId,
+        _bytes: &[u8],
+    ) -> Result<StoredAssetFile, AssetStoreError> {
+        Err(AssetStoreError::Write(
+            "thumbnail storage is not available".to_owned(),
+        ))
+    }
+
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError>;
 
     async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError>;

@@ -1,6 +1,7 @@
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
 import { IntegerField } from "./fields/IntegerField";
 import { ImageField } from "./fields/ImageField";
+import { MultiImageField } from "./fields/MultiImageField";
 import { SeedField } from "./fields/SeedField";
 import { TextAreaField } from "./fields/TextAreaField";
 
@@ -98,6 +99,18 @@ function renderField(
           onAvailabilityChange={(available) => onImageAssetAvailabilityChange?.(field.key, available)}
         />
       );
+    case "images":
+      return (
+        <MultiImageField
+          key={field.key}
+          field={field}
+          value={value}
+          error={error}
+          projectId={projectId}
+          onChange={(next) => onChange(field.key, next)}
+          onAvailabilityChange={(available) => onImageAssetAvailabilityChange?.(field.key, available)}
+        />
+      );
     default:
       return (
         <div key={fieldRecord.key} className="unsupported-field">
@@ -147,6 +160,13 @@ export function validateRecipeValues(
       (!value || value.type !== "image_asset" || !value.assetId.trim())
     ) {
       errors[field.key] = "Choose an image.";
+    } else if (field.type === "images") {
+      const imageIds = value?.type === "image_assets" ? value.assetIds : [];
+      if (imageIds.length > field.maxItems || (imageIds.length > 0 && imageIds.length < field.minItems)) {
+        errors[field.key] = `Choose between ${field.minItems} and ${field.maxItems} images.`;
+      } else if (field.required && imageIds.length < field.minItems) {
+        errors[field.key] = `Choose at least ${field.minItems} images.`;
+      }
     }
   }
   return errors;

@@ -79,3 +79,26 @@ describe("validateRecipeValues image inputs", () => {
     ).toEqual({});
   });
 });
+
+describe("validateRecipeValues multi-image inputs", () => {
+  const multiRecipe: RecipeViewModel = {
+    ...recipe,
+    fields: [{
+      key: "references",
+      type: "images",
+      label: "References",
+      required: true,
+      minItems: 2,
+      maxItems: 3,
+    }],
+  };
+
+  it("requires the recipe minimum and keeps ordered ids as a valid value", () => {
+    expect(validateRecipeValues(multiRecipe, {
+      references: { type: "image_assets", assetIds: ["ast_first"] },
+    }).references).toContain("Choose between 2 and 3 images.");
+    expect(validateRecipeValues(multiRecipe, {
+      references: { type: "image_assets", assetIds: ["ast_first", "ast_second"] },
+    })).toEqual({});
+  });
+});

@@ -103,6 +103,39 @@ impl WorkflowCompiler {
                         resolved_inputs.insert(input_key.clone(), ResolvedInputValue::Image(value));
                     }
                 }
+                InputDefinition::Images {
+                    required,
+                    min_items,
+                    max_items,
+                    ..
+                } => {
+                    let value = request
+                        .values
+                        .get(input_key)
+                        .map(|value| match value {
+                            InputValue::Images(value) => Ok(value.clone()),
+                            other => Err(type_mismatch(input_key, "images", other)),
+                        })
+                        .transpose()?;
+                    let value = value.filter(|value| !value.is_empty());
+                    if *required && value.as_ref().is_none_or(|value| value.len() < *min_items) {
+                        return Err(CompileError::InputRequired {
+                            input: input_key.to_owned(),
+                        });
+                    }
+                    if let Some(value) = value {
+                        if value.len() < *min_items || value.len() > *max_items {
+                            return Err(CompileError::InputCountOutOfRange {
+                                input: input_key.to_owned(),
+                                count: value.len(),
+                                min: *min_items,
+                                max: *max_items,
+                            });
+                        }
+                        resolved_inputs
+                            .insert(input_key.clone(), ResolvedInputValue::Images(value));
+                    }
+                }
             }
         }
 
@@ -220,6 +253,7 @@ fn type_mismatch(input_key: &str, expected: &str, value: &InputValue) -> Compile
             InputValue::Integer(_) => "integer",
             InputValue::Seed(_) => "seed",
             InputValue::Image(_) => "image",
+            InputValue::Images(_) => "images",
         }
         .to_owned(),
     }
@@ -246,7 +280,28 @@ fn apply_bindings(
             });
         };
 
-        inputs.insert(binding.target.input.clone(), resolved_value_to_json(value));
+        let target_value = match (binding.item_index, value) {
+            (Some(index), ResolvedInputValue::Images(values)) => values
+                .get(index)
+                .cloned()
+                .map(Value::String)
+                .ok_or_else(|| CompileError::Internal {
+                    message: format!(
+                        "validated image binding item {} became unavailable for {}",
+                        index, binding.source
+                    ),
+                })?,
+            (Some(_), _) => {
+                return Err(CompileError::Internal {
+                    message: format!(
+                        "binding {} declared an image item but resolved a non-list value",
+                        binding.source
+                    ),
+                })
+            }
+            (None, value) => resolved_value_to_json(value),
+        };
+        inputs.insert(binding.target.input.clone(), target_value);
     }
 
     Ok(())
@@ -258,6 +313,9 @@ fn resolved_value_to_json(value: &ResolvedInputValue) -> Value {
         ResolvedInputValue::Integer(value) => Value::Number(Number::from(*value)),
         ResolvedInputValue::Seed(value) => Value::Number(Number::from(*value)),
         ResolvedInputValue::Image(value) => Value::String(value.clone()),
+        ResolvedInputValue::Images(values) => {
+            Value::Array(values.iter().cloned().map(Value::String).collect())
+        }
     }
 }
 
@@ -301,6 +359,32 @@ mod tests {
         "/../tests/fixtures/simple_i2i/workflow_api.json"
     ));
 
+    const MULTI_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: multi_image
+name: Multi Image
+workflow:
+  file: workflow.json
+inputs:
+  references:
+    type: images
+    label: References
+    required: true
+    min_items: 2
+    max_items: 4
+bindings:
+  - source: references
+    target:
+      node: "9"
+      input: images
+  - source: references
+    item: 1
+    target:
+      node: "10"
+      input: image
+outputs: []
+"#;
+
     fn recipe_and_workflow() -> (crate::domain::Recipe, WorkflowDocument) {
         let recipe = RecipeParser::parse(RECIPE_YAML).expect("recipe should parse");
         let workflow_value: Value = serde_json::from_str(WORKFLOW_JSON).expect("JSON fixture");
@@ -335,6 +419,39 @@ mod tests {
             "seed".to_owned(),
             InputValue::Seed(seed),
         )]))
+    }
+
+    #[test]
+    fn multi_image_list_and_item_bindings_preserve_order() {
+        let recipe = RecipeParser::parse(MULTI_RECIPE_YAML).expect("multi recipe should parse");
+        let workflow = WorkflowDocument::parse(serde_json::json!({
+            "9": {"inputs": {"images": "original-list"}, "class_type": "SaveImage"},
+            "10": {"inputs": {"image": "original-image"}, "class_type": "LoadImage"}
+        }))
+        .expect("workflow should parse");
+        let result = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([(
+                    "references".to_owned(),
+                    InputValue::Images(vec!["first.png".to_owned(), "second.png".to_owned()]),
+                )])),
+            )
+            .expect("multi image compile should succeed");
+
+        assert_eq!(
+            result.workflow["9"]["inputs"]["images"],
+            serde_json::json!(["first.png", "second.png"])
+        );
+        assert_eq!(result.workflow["10"]["inputs"]["image"], "second.png");
+        assert_eq!(
+            result.resolved_inputs.get("references"),
+            Some(&ResolvedInputValue::Images(vec![
+                "first.png".to_owned(),
+                "second.png".to_owned()
+            ]))
+        );
     }
 
     #[test]

@@ -105,6 +105,15 @@ impl AssetStore for FileSystemAssetStore {
         Self::write_to_path(project_root, asset_id, extension, "source", bytes).await
     }
 
+    async fn write_thumbnail(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        bytes: &[u8],
+    ) -> Result<StoredAssetFile, AssetStoreError> {
+        Self::write_to_path(project_root, asset_id, "png", "thumbnails", bytes).await
+    }
+
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError> {
         match fs::remove_file(path) {
             Ok(()) => Ok(()),

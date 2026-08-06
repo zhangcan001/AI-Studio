@@ -141,6 +141,8 @@ function formatValue(value: DraftValue): string {
       return value.value;
     case "image_asset":
       return value.assetId;
+    case "image_assets":
+      return value.assetIds.length ? value.assetIds.join(" → ") : "No images";
   }
 }
 

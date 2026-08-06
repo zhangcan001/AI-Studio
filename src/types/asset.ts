@@ -8,6 +8,7 @@ export interface AssetView {
   height: number;
   fileSize: number;
   createdAt: string;
+  thumbnailAvailable?: boolean;
 }
 
 export type AssetCategoryFilter = "ALL" | "SOURCE_IMAGE" | "GENERATED_IMAGE";

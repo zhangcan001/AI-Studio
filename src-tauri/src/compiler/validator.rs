@@ -71,6 +71,23 @@ impl RecipeValidator {
                         }
                     }
                 }
+                InputDefinition::Images {
+                    required,
+                    min_items,
+                    max_items,
+                    ..
+                } => {
+                    if *max_items == 0 || *max_items > 32 {
+                        return Err(RecipeError::invalid(format!(
+                            "input \"{key}\" max_items must be between 1 and 32"
+                        )));
+                    }
+                    if min_items > max_items || (*required && *min_items == 0) {
+                        return Err(RecipeError::invalid(format!(
+                            "input \"{key}\" min_items must be less than or equal to max_items and required lists must have at least one item"
+                        )));
+                    }
+                }
                 InputDefinition::TextArea { .. } | InputDefinition::Image { .. } => {}
             }
         }
@@ -81,6 +98,25 @@ impl RecipeValidator {
                     "binding source \"{}\" is not declared in inputs",
                     binding.source
                 )));
+            }
+            if let Some(item_index) = binding.item_index {
+                let Some(InputDefinition::Images {
+                    min_items,
+                    max_items,
+                    ..
+                }) = recipe.inputs.get(&binding.source)
+                else {
+                    return Err(RecipeError::invalid(format!(
+                        "binding \"{}\" item requires an images input",
+                        binding.source
+                    )));
+                };
+                if item_index >= *max_items || item_index >= *min_items {
+                    return Err(RecipeError::invalid(format!(
+                        "binding \"{}\" item {} must be within the declared minimum and maximum image slots",
+                        binding.source, item_index
+                    )));
+                }
             }
             if binding.target.node.trim().is_empty() {
                 return Err(RecipeError::invalid(format!(

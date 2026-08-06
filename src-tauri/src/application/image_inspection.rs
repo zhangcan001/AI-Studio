@@ -65,3 +65,14 @@ pub(crate) fn inspect_bytes(bytes: &[u8]) -> Result<InspectedImage, ImageInspect
         sha256: format!("{:x}", Sha256::digest(bytes)),
     })
 }
+
+pub(crate) fn generate_thumbnail(bytes: &[u8]) -> Result<Vec<u8>, ImageInspectionError> {
+    let image = image::load_from_memory(bytes)
+        .map_err(|error| ImageInspectionError::new(format!("thumbnail decode failed: {error}")))?;
+    let thumbnail = image.thumbnail(384, 384);
+    let mut output = Cursor::new(Vec::new());
+    thumbnail
+        .write_to(&mut output, ImageFormat::Png)
+        .map_err(|error| ImageInspectionError::new(format!("thumbnail encode failed: {error}")))?;
+    Ok(output.into_inner())
+}

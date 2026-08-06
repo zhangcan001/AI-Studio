@@ -74,6 +74,16 @@ pub enum FieldViewModel {
         label: String,
         required: bool,
     },
+    #[serde(rename = "images")]
+    Images {
+        key: String,
+        label: String,
+        required: bool,
+        #[serde(rename = "minItems")]
+        min_items: usize,
+        #[serde(rename = "maxItems")]
+        max_items: usize,
+    },
 }
 
 impl RecipeViewModel {
@@ -133,6 +143,18 @@ impl RecipeViewModel {
                     key,
                     label,
                     required,
+                },
+                InputDefinition::Images {
+                    label,
+                    required,
+                    min_items,
+                    max_items,
+                } => FieldViewModel::Images {
+                    key,
+                    label,
+                    required,
+                    min_items,
+                    max_items,
                 },
             })
             .collect();

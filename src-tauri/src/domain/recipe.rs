@@ -64,6 +64,12 @@ pub enum InputDefinition {
         label: String,
         required: bool,
     },
+    Images {
+        label: String,
+        required: bool,
+        min_items: usize,
+        max_items: usize,
+    },
 }
 
 impl InputDefinition {
@@ -73,6 +79,7 @@ impl InputDefinition {
             Self::Integer { .. } => "integer",
             Self::Seed { .. } => "seed",
             Self::Image { .. } => "image",
+            Self::Images { .. } => "images",
         }
     }
 
@@ -81,7 +88,7 @@ impl InputDefinition {
             Self::TextArea { label, .. }
             | Self::Integer { label, .. }
             | Self::Seed { label, .. } => label,
-            Self::Image { label, .. } => label,
+            Self::Image { label, .. } | Self::Images { label, .. } => label,
         }
     }
 }
@@ -101,6 +108,7 @@ pub enum SeedValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Binding {
     pub source: String,
+    pub item_index: Option<usize>,
     pub target: BindingTarget,
 }
 
@@ -140,6 +148,7 @@ pub enum InputValue {
     Integer(i64),
     Seed(SeedValue),
     Image(String),
+    Images(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +157,7 @@ pub enum ResolvedInputValue {
     Integer(i64),
     Seed(u64),
     Image(String),
+    Images(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

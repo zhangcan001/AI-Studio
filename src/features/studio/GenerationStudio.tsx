@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   cancelTask,
+  createPreset,
   createGeneration,
+  deletePreset,
+  listPresets,
   refreshWorkflowLibrary,
+  updatePreset,
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeViewModel } from "../../types/generation";
+import type { PresetView } from "../../types/preset";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
 import { ImageOutput } from "./ImageOutput";
 import { TaskProgressCard } from "./TaskProgressCard";
@@ -42,6 +47,11 @@ export function GenerationStudio({
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [missingImageFields, setMissingImageFields] = useState<Set<string>>(new Set());
+  const [presets, setPresets] = useState<PresetView[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetName, setPresetName] = useState("");
+  const [presetLoading, setPresetLoading] = useState(false);
+  const [presetError, setPresetError] = useState<string>();
   const handleImageAvailabilityChange = useCallback((key: string, available: boolean) => {
     setMissingImageFields((current) => {
       const next = new Set(current);
@@ -54,6 +64,10 @@ export function GenerationStudio({
   useEffect(() => {
     setMissingImageFields(new Set());
     setNotice(null);
+    setPresets([]);
+    setSelectedPresetId("");
+    setPresetName("");
+    setPresetError(undefined);
   }, [projectId]);
 
   useEffect(() => {
@@ -74,7 +88,7 @@ export function GenerationStudio({
   }, [catalog, selectedWorkflow, setSelectedWorkflow]);
 
   const hasUnsupportedField = useMemo(
-    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image"].includes(field.type)) ?? false,
+    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images"].includes(field.type)) ?? false,
     [selectedWorkflow],
   );
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
@@ -86,6 +100,98 @@ export function GenerationStudio({
       missingImageFields.size === 0 &&
       Object.keys(errors).length === 0,
   );
+
+  useEffect(() => {
+    if (!selectedWorkflow) return;
+    let active = true;
+    setPresetLoading(true);
+    setPresetError(undefined);
+    setSelectedPresetId("");
+    setPresetName("");
+    void listPresets(projectId, selectedWorkflow.workflowVersionId, selectedWorkflow.recipeId)
+      .then((nextPresets) => {
+        if (active) setPresets(nextPresets);
+      })
+      .catch((loadError: unknown) => {
+        if (active) setPresetError(loadError instanceof Error ? loadError.message : String(loadError));
+      })
+      .finally(() => {
+        if (active) setPresetLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, selectedWorkflow]);
+
+  function applyPreset(preset: PresetView) {
+    if (!selectedWorkflow) return;
+    useStudioStore.getState().loadDraft(selectedWorkflow, preset.values);
+    setSelectedPresetId(preset.id);
+    setPresetName(preset.name);
+    setMissingImageFields(new Set());
+    setPresetError(undefined);
+  }
+
+  async function savePreset() {
+    if (!selectedWorkflow) return;
+    if (!presetName.trim()) {
+      setPresetError("PRESET_NAME_REQUIRED: enter a name before saving.");
+      return;
+    }
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      const preset = await createPreset({
+        projectId,
+        workflowVersionId: selectedWorkflow.workflowVersionId,
+        recipeId: selectedWorkflow.recipeId,
+        name: presetName,
+        values,
+      });
+      setPresets((current) => [preset, ...current.filter((item) => item.id !== preset.id)]);
+      applyPreset(preset);
+    } catch (saveError: unknown) {
+      setPresetError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
+
+  async function savePresetChanges() {
+    if (!selectedPresetId) return savePreset();
+    if (!presetName.trim()) {
+      setPresetError("PRESET_NAME_REQUIRED: enter a name before saving.");
+      return;
+    }
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      const preset = await updatePreset({ projectId, presetId: selectedPresetId, name: presetName, values });
+      setPresets((current) => current.map((item) => (item.id === preset.id ? preset : item)));
+      applyPreset(preset);
+    } catch (updateError: unknown) {
+      setPresetError(updateError instanceof Error ? updateError.message : String(updateError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
+
+  async function removePreset() {
+    if (!selectedPresetId) return;
+    if (!window.confirm("Delete this preset?")) return;
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      await deletePreset(projectId, selectedPresetId);
+      setPresets((current) => current.filter((preset) => preset.id !== selectedPresetId));
+      setSelectedPresetId("");
+      setPresetName("");
+    } catch (deleteError: unknown) {
+      setPresetError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
 
   async function refreshWorkflows() {
     setRefreshing(true);
@@ -190,6 +296,43 @@ export function GenerationStudio({
         </div>
         {selectedWorkflow && (
           <>
+            <div className="preset-toolbar" aria-label="Preset Studio">
+              <label>
+                <span>Preset</span>
+                <select
+                  aria-label="Saved presets"
+                  value={selectedPresetId}
+                  onChange={(event) => {
+                    const preset = presets.find((item) => item.id === event.target.value);
+                    if (preset) applyPreset(preset);
+                    else {
+                      setSelectedPresetId("");
+                      setPresetName("");
+                    }
+                  }}
+                  disabled={presetLoading}
+                >
+                  <option value="">Select a saved preset</option>
+                  {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Preset name</span>
+                <input
+                  aria-label="Preset name"
+                  value={presetName}
+                  maxLength={80}
+                  onChange={(event) => setPresetName(event.target.value)}
+                  placeholder="e.g. Portrait soft light"
+                />
+              </label>
+              <div className="preset-actions">
+                <button type="button" onClick={() => void savePreset()} disabled={presetLoading}>{selectedPresetId ? "Save as new" : "Save"}</button>
+                <button type="button" onClick={() => void savePresetChanges()} disabled={presetLoading || !selectedPresetId}>Update</button>
+                <button type="button" className="quiet-button" onClick={() => void removePreset()} disabled={presetLoading || !selectedPresetId}>Delete</button>
+              </div>
+            </div>
+            {presetError && <p className="error-message">Preset: {presetError}</p>}
             <DynamicFormRenderer
               recipe={selectedWorkflow}
               values={values}

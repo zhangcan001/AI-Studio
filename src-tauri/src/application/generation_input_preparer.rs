@@ -14,6 +14,7 @@ pub enum GenerationInputValue {
     Integer(i64),
     Seed(SeedValue),
     ImageAsset(AssetId),
+    ImageAssets(Vec<AssetId>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,7 +27,7 @@ pub struct PreparedImageInput {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedGenerationInputs {
     pub compiler_values: BTreeMap<String, InputValue>,
-    pub images: BTreeMap<String, PreparedImageInput>,
+    pub images: BTreeMap<String, Vec<PreparedImageInput>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +134,12 @@ impl GenerationInputPreparer {
                     GenerationInputValue::ImageAsset(_) => {
                         InputValue::Image(IMAGE_PREVIEW_REFERENCE.to_owned())
                     }
+                    GenerationInputValue::ImageAssets(asset_ids) => InputValue::Images(
+                        asset_ids
+                            .iter()
+                            .map(|_| IMAGE_PREVIEW_REFERENCE.to_owned())
+                            .collect(),
+                    ),
                 };
                 (key.clone(), value)
             })
@@ -145,8 +152,16 @@ impl GenerationInputPreparer {
         values: &BTreeMap<String, GenerationInputValue>,
     ) -> Result<(), GenerationInputPrepareError> {
         for value in values.values() {
-            if let GenerationInputValue::ImageAsset(asset_id) = value {
-                self.load_image_asset(project_id, asset_id).await?;
+            match value {
+                GenerationInputValue::ImageAsset(asset_id) => {
+                    self.load_image_asset(project_id, asset_id).await?;
+                }
+                GenerationInputValue::ImageAssets(asset_ids) => {
+                    for asset_id in asset_ids {
+                        self.load_image_asset(project_id, asset_id).await?;
+                    }
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -160,7 +175,6 @@ impl GenerationInputPreparer {
     ) -> Result<PreparedGenerationInputs, GenerationInputPrepareError> {
         let mut compiler_values = BTreeMap::new();
         let mut images = BTreeMap::new();
-        let mut uploaded_by_asset = BTreeMap::<String, PreparedImageInput>::new();
 
         for (key, value) in values {
             match value {
@@ -175,17 +189,22 @@ impl GenerationInputPreparer {
                 }
                 GenerationInputValue::ImageAsset(asset_id) => {
                     let asset = self.load_image_asset(project_id, asset_id).await?;
-                    let prepared = if let Some(prepared) = uploaded_by_asset.get(asset_id.as_str())
-                    {
-                        prepared.clone()
-                    } else {
-                        let prepared = self.upload_asset(task_id, &asset).await?;
-                        uploaded_by_asset.insert(asset_id.as_str().to_owned(), prepared.clone());
-                        prepared
-                    };
+                    let prepared = self.upload_asset(task_id, &asset, None).await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Image(prepared.comfy.name.clone()));
-                    images.insert(key.clone(), prepared);
+                    images.insert(key.clone(), vec![prepared]);
+                }
+                GenerationInputValue::ImageAssets(asset_ids) => {
+                    let mut prepared_images = Vec::with_capacity(asset_ids.len());
+                    let mut comfy_names = Vec::with_capacity(asset_ids.len());
+                    for (index, asset_id) in asset_ids.iter().enumerate() {
+                        let asset = self.load_image_asset(project_id, asset_id).await?;
+                        let prepared = self.upload_asset(task_id, &asset, Some(index + 1)).await?;
+                        comfy_names.push(prepared.comfy.name.clone());
+                        prepared_images.push(prepared);
+                    }
+                    compiler_values.insert(key.clone(), InputValue::Images(comfy_names));
+                    images.insert(key.clone(), prepared_images);
                 }
             }
         }
@@ -226,6 +245,7 @@ impl GenerationInputPreparer {
         &self,
         task_id: &TaskId,
         asset: &Asset,
+        position: Option<usize>,
     ) -> Result<PreparedImageInput, GenerationInputPrepareError> {
         if !matches!(
             asset.mime_type.as_str(),
@@ -246,7 +266,7 @@ impl GenerationInputPreparer {
             })?;
         let upload = ComfyImageUpload {
             bytes,
-            upload_name: upload_name(task_id, asset),
+            upload_name: upload_name_at(task_id, asset, position),
             content_type: asset.mime_type.clone(),
         };
         let comfy = self
@@ -262,7 +282,12 @@ impl GenerationInputPreparer {
     }
 }
 
+#[cfg(test)]
 pub fn upload_name(task_id: &TaskId, asset: &Asset) -> String {
+    upload_name_at(task_id, asset, None)
+}
+
+pub fn upload_name_at(task_id: &TaskId, asset: &Asset, position: Option<usize>) -> String {
     let extension = match asset.mime_type.as_str() {
         "image/png" => "png",
         "image/jpeg" => "jpg",
@@ -287,7 +312,49 @@ pub fn upload_name(task_id: &TaskId, asset: &Asset) -> String {
         .as_str()
         .strip_prefix("ast_")
         .unwrap_or(asset.id.as_str());
-    format!("aistudio_{task}_{asset_id}.{extension}")
+    match position {
+        Some(position) => format!("aistudio_{task}_{asset_id}_{position:02}.{extension}"),
+        None => format!("aistudio_{task}_{asset_id}.{extension}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{upload_name, upload_name_at};
+    use crate::domain::{Asset, AssetId, TaskId};
+    use serde_json::json;
+
+    fn asset() -> Asset {
+        Asset::new_source_image(
+            AssetId::parse("ast_reference").unwrap(),
+            "project-1",
+            "reference.png",
+            "reference.png",
+            "C:/project/reference.png",
+            "a".repeat(64),
+            "image/png",
+            2,
+            2,
+            10,
+            json!({}),
+            chrono::Utc::now(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn ordered_upload_names_are_position_stable() {
+        let task = TaskId::parse("tsk_test-task").unwrap();
+        let asset = asset();
+        assert_eq!(
+            upload_name(&task, &asset),
+            "aistudio_test-task_reference.png"
+        );
+        assert_eq!(
+            upload_name_at(&task, &asset, Some(2)),
+            "aistudio_test-task_reference_02.png"
+        );
+    }
 }
 
 pub fn image_snapshot_value(prepared: &PreparedImageInput) -> serde_json::Value {
@@ -300,6 +367,10 @@ pub fn image_snapshot_value(prepared: &PreparedImageInput) -> serde_json::Value 
             "type": prepared.comfy.folder_type,
         }
     })
+}
+
+pub fn images_snapshot_value(prepared: &[PreparedImageInput]) -> serde_json::Value {
+    serde_json::Value::Array(prepared.iter().map(image_snapshot_value).collect())
 }
 
 fn repository_error(error: RepositoryError) -> GenerationInputPrepareError {

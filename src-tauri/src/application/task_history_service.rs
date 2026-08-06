@@ -184,7 +184,12 @@ impl TaskHistoryService {
             .map_err(|_| TaskHistoryError::DraftUnavailable(INPUTS_UNAVAILABLE.to_owned()))?;
         let mut missing_asset_ids = Vec::new();
         for value in values.values() {
-            if let DraftValueView::ImageAsset { asset_id } = value {
+            let asset_ids: Vec<&String> = match value {
+                DraftValueView::ImageAsset { asset_id } => vec![asset_id],
+                DraftValueView::ImageAssets { asset_ids } => asset_ids.iter().collect(),
+                _ => Vec::new(),
+            };
+            for asset_id in asset_ids {
                 let asset =
                     self.asset_repository
                         .find_by_id(&crate::domain::AssetId::parse(asset_id.clone()).map_err(
@@ -193,7 +198,9 @@ impl TaskHistoryService {
                         .await?;
                 if !matches!(asset, Some(asset) if asset.project_id == record.task.project_id && asset.asset_type == AssetType::Image)
                 {
-                    missing_asset_ids.push(asset_id.clone());
+                    if !missing_asset_ids.contains(asset_id) {
+                        missing_asset_ids.push(asset_id.clone());
+                    }
                 }
             }
         }
@@ -317,6 +324,10 @@ pub enum DraftValueView {
         #[serde(rename = "assetId")]
         asset_id: String,
     },
+    ImageAssets {
+        #[serde(rename = "assetIds")]
+        asset_ids: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -344,6 +355,7 @@ fn parse_snapshot_values(
                 InputDefinition::TextArea { required: true, .. }
                     | InputDefinition::Integer { required: true, .. }
                     | InputDefinition::Image { required: true, .. }
+                    | InputDefinition::Images { required: true, .. }
             ) {
                 return Err("snapshot is missing a required input");
             }
@@ -395,6 +407,37 @@ fn parse_snapshot_values(
                 DraftValueView::ImageAsset {
                     asset_id: asset_id.to_owned(),
                 }
+            }
+            InputDefinition::Images {
+                min_items,
+                max_items,
+                required,
+                ..
+            } => {
+                let images = value.as_object().ok_or("images input must be an object")?;
+                if images.get("type").and_then(Value::as_str) != Some("image_assets") {
+                    return Err("images input has an invalid shape");
+                }
+                let asset_ids = images
+                    .get("assetIds")
+                    .and_then(Value::as_array)
+                    .ok_or("images input must contain assetIds")?
+                    .iter()
+                    .map(|asset_id| {
+                        let asset_id =
+                            asset_id.as_str().ok_or("image asset id must be a string")?;
+                        crate::domain::AssetId::parse(asset_id.to_owned())
+                            .map_err(|_| "images input contains an invalid asset id")?;
+                        Ok(asset_id.to_owned())
+                    })
+                    .collect::<Result<Vec<_>, &'static str>>()?;
+                if asset_ids.len() > *max_items
+                    || (*required && asset_ids.len() < *min_items)
+                    || (!asset_ids.is_empty() && asset_ids.len() < *min_items)
+                {
+                    return Err("images input count is outside the current recipe range");
+                }
+                DraftValueView::ImageAssets { asset_ids }
             }
         };
         values.insert(key.clone(), parsed);
@@ -448,6 +491,13 @@ mod tests {
         .unwrap()
     }
 
+    fn multi_recipe() -> crate::domain::Recipe {
+        RecipeParser::parse(
+            "schema_version: 1\nid: multi\nname: Multi\nworkflow:\n  file: workflow_api.json\ninputs:\n  references:\n    type: images\n    label: References\n    required: false\n    min_items: 1\n    max_items: 3\nbindings: []\noutputs: []\n",
+        )
+        .unwrap()
+    }
+
     #[test]
     fn parses_random_fixed_u64_max_and_image_values_without_exact_retry_payload() {
         let values = parse_snapshot_values(
@@ -492,6 +542,26 @@ mod tests {
             &json!({"prompt": "hello", "steps": "20", "seed": "random"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn parses_multi_image_snapshot_in_original_order() {
+        let values = parse_snapshot_values(
+            &multi_recipe(),
+            &json!({
+                "references": {
+                    "type": "image_assets",
+                    "assetIds": ["ast_first", "ast_second"]
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            values["references"],
+            DraftValueView::ImageAssets {
+                asset_ids: vec!["ast_first".to_owned(), "ast_second".to_owned()]
+            }
+        );
     }
 
     #[test]

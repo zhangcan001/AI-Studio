@@ -72,6 +72,16 @@ enum InputDefinitionDto {
         #[serde(default)]
         required: bool,
     },
+    #[serde(rename = "images")]
+    Images {
+        label: String,
+        #[serde(default)]
+        required: bool,
+        #[serde(default, rename = "min_items")]
+        min_items: usize,
+        #[serde(default = "default_max_items", rename = "max_items")]
+        max_items: usize,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,7 +95,13 @@ enum SeedDefaultDto {
 #[serde(deny_unknown_fields)]
 struct BindingDto {
     source: String,
+    #[serde(default, rename = "item")]
+    item_index: Option<usize>,
     target: BindingTargetDto,
+}
+
+fn default_max_items() -> usize {
+    8
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +144,7 @@ impl RecipeFileDto {
             .into_iter()
             .map(|binding| Binding {
                 source: binding.source,
+                item_index: binding.item_index,
                 target: BindingTarget {
                     node: binding.target.node,
                     input: binding.target.input,
@@ -199,6 +216,17 @@ impl InputDefinitionDto {
                 max,
             }),
             Self::Image { label, required } => Ok(InputDefinition::Image { label, required }),
+            Self::Images {
+                label,
+                required,
+                min_items,
+                max_items,
+            } => Ok(InputDefinition::Images {
+                label,
+                required,
+                min_items,
+                max_items,
+            }),
         }
     }
 }
@@ -316,6 +344,42 @@ outputs:
             Some(InputDefinition::Image { required: true, .. })
         ));
         assert_eq!(recipe.schema_version, 1);
+    }
+
+    #[test]
+    fn parses_ordered_images_input_and_item_binding() {
+        let yaml = r#"
+schema_version: 1
+id: multi_image
+name: Multi Image
+workflow:
+  file: workflow.json
+inputs:
+  references:
+    type: images
+    label: References
+    required: true
+    min_items: 2
+    max_items: 4
+bindings:
+  - source: references
+    item: 1
+    target:
+      node: "10"
+      input: image
+outputs: []
+"#;
+        let recipe = RecipeParser::parse(yaml).expect("multi-image recipe should parse");
+        assert!(matches!(
+            recipe.inputs.get("references"),
+            Some(InputDefinition::Images {
+                required: true,
+                min_items: 2,
+                max_items: 4,
+                ..
+            })
+        ));
+        assert_eq!(recipe.bindings[0].item_index, Some(1));
     }
 
     #[test]

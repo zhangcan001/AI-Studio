@@ -13,8 +13,8 @@ pub use application::ports::{
 };
 pub use infrastructure::database::{
     SqliteAssetRepository, SqliteGenerationDefinitionRepository,
-    SqliteGenerationSnapshotRepository, SqliteProjectRepository, SqliteTaskRepository,
-    SqliteWorkflowLibraryRepository,
+    SqliteGenerationSnapshotRepository, SqlitePresetRepository, SqliteProjectRepository,
+    SqliteTaskRepository, SqliteWorkflowLibraryRepository,
 };
 
 use app_state::AppState;
@@ -25,6 +25,7 @@ use application::{
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
     ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
+    preset_service::PresetService,
     project_bootstrap::DefaultProjectBootstrap,
     project_service::ProjectService,
     source_asset_import_service::SourceAssetImportService,
@@ -112,6 +113,9 @@ fn run_application() -> Result<(), AppError> {
                     database_pool.clone(),
                 ));
             let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
+            let preset_repository: Arc<dyn application::ports::PresetRepository> = Arc::new(
+                infrastructure::database::SqlitePresetRepository::new(database_pool.clone()),
+            );
             let project_directory_store: Arc<dyn application::ports::ProjectDirectoryStore> =
                 Arc::new(FileSystemProjectDirectoryStore::new(
                     data_dirs.projects.clone(),
@@ -205,16 +209,22 @@ fn run_application() -> Result<(), AppError> {
             let task_recovery_service = Arc::new(TaskRecoveryService::new(
                 task_repository,
                 snapshot_repository,
-                asset_repository,
+                asset_repository.clone(),
                 comfy_adapter,
                 project_repository.clone(),
-                asset_store,
+                asset_store.clone(),
                 clock.clone(),
                 task_update_sink,
             ));
             let project_service = Arc::new(ProjectService::new(
                 project_repository,
                 project_directory_store,
+                clock.clone(),
+            ));
+            let preset_service = Arc::new(PresetService::new(
+                preset_repository,
+                definition_repository,
+                asset_repository,
                 clock,
             ));
             let startup_recovery = task_recovery_service.clone();
@@ -232,6 +242,7 @@ fn run_application() -> Result<(), AppError> {
                 task_cancellation_service,
                 task_recovery_service,
                 project_service,
+                preset_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -268,10 +279,15 @@ fn run_application() -> Result<(), AppError> {
             commands::task::task_history_page,
             commands::task::task_get_detail,
             commands::task::task_get_reusable_draft,
+            commands::preset::preset_list,
+            commands::preset::preset_create,
+            commands::preset::preset_update,
+            commands::preset::preset_delete,
             commands::asset::asset_list_by_task,
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,
             commands::asset::asset_read_image,
+            commands::asset::asset_read_thumbnail,
             commands::asset::asset_library_page,
             commands::asset::asset_get
         ])

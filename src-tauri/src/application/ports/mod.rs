@@ -7,6 +7,7 @@ pub mod clock;
 pub mod comfy_adapter;
 pub mod generation_definition_repository;
 pub mod generation_snapshot_repository;
+pub mod preset_repository;
 pub mod project_directory_store;
 pub mod project_repository;
 pub mod repository_error;
@@ -30,6 +31,7 @@ pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
 };
 pub use generation_snapshot_repository::GenerationSnapshotRepository;
+pub use preset_repository::PresetRepository;
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use repository_error::RepositoryError;

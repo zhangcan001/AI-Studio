@@ -3,6 +3,7 @@ import {
   getAsset,
   listRecentAssets,
   pickAndImportImage,
+  readAssetThumbnail,
   readAssetImage,
 } from "../../../services/tauriClient";
 import type { AssetView } from "../../../types/asset";
@@ -87,10 +88,11 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
       setPreviewUrl(undefined);
       return () => undefined;
     }
-    void readAssetImage(projectId, selectedAsset.id)
+    void readAssetThumbnail(projectId, selectedAsset.id)
+      .catch(() => readAssetImage(projectId, selectedAsset.id))
       .then((bytes) => {
         if (!active) return;
-        nextUrl = URL.createObjectURL(new Blob([bytes], { type: selectedAsset.mimeType }));
+        nextUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
         setPreviewUrl(nextUrl);
       })
       .catch((previewError: unknown) => {

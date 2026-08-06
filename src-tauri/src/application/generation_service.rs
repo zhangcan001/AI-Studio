@@ -1,7 +1,7 @@
 use crate::application::asset_import_service::{AssetImportError, AssetImportService};
 use crate::application::generation_input_preparer::{
-    image_snapshot_value, GenerationInputPrepareError, GenerationInputPreparer,
-    GenerationInputValue, PreparedGenerationInputs,
+    image_snapshot_value, images_snapshot_value, GenerationInputPrepareError,
+    GenerationInputPreparer, GenerationInputValue, PreparedGenerationInputs,
 };
 use crate::application::output_collector::{OutputCollector, OutputCollectorError};
 use crate::application::ports::{
@@ -1037,6 +1037,10 @@ fn input_value_to_json(value: &GenerationInputValue) -> Value {
             "type": "image_asset",
             "assetId": asset_id.as_str(),
         }),
+        GenerationInputValue::ImageAssets(asset_ids) => serde_json::json!({
+            "type": "image_assets",
+            "assetIds": asset_ids.iter().map(|asset_id| asset_id.as_str()).collect::<Vec<_>>(),
+        }),
     }
 }
 
@@ -1054,8 +1058,14 @@ fn resolved_inputs_to_json(
                 ResolvedInputValue::Image(_) => prepared
                     .images
                     .get(key)
+                    .and_then(|images| images.first())
                     .map(image_snapshot_value)
                     .unwrap_or_else(|| Value::String("image".to_owned())),
+                ResolvedInputValue::Images(_) => prepared
+                    .images
+                    .get(key)
+                    .map(|images| images_snapshot_value(images))
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
             };
             (key.clone(), value)
         })
@@ -1067,7 +1077,7 @@ fn resolved_inputs_to_json(
 mod tests {
     use super::*;
     use crate::application::ports::{
-        ComfyHistory, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile,
+        ComfyHistory, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyUploadedImage,
     };
     use chrono::{TimeZone, Utc};
     use serde_json::json;
@@ -1175,5 +1185,60 @@ mod tests {
             bytes: Vec::new(),
             content_type: None,
         }
+    }
+
+    #[test]
+    fn multi_image_snapshot_payload_preserves_user_and_resolved_order() {
+        let values = BTreeMap::from([(
+            "references".to_owned(),
+            GenerationInputValue::ImageAssets(vec![
+                crate::domain::AssetId::parse("ast_first").unwrap(),
+                crate::domain::AssetId::parse("ast_second").unwrap(),
+            ]),
+        )]);
+        let user_inputs = input_values_to_json(&values);
+        assert_eq!(
+            user_inputs["references"],
+            json!({
+                "type": "image_assets",
+                "assetIds": ["ast_first", "ast_second"]
+            })
+        );
+
+        let prepared = PreparedGenerationInputs {
+            compiler_values: BTreeMap::new(),
+            images: BTreeMap::from([(
+                "references".to_owned(),
+                vec![
+                    crate::application::generation_input_preparer::PreparedImageInput {
+                        asset_id: crate::domain::AssetId::parse("ast_first").unwrap(),
+                        sha256: "first-hash".to_owned(),
+                        comfy: ComfyUploadedImage {
+                            name: "first.png".to_owned(),
+                            subfolder: String::new(),
+                            folder_type: "input".to_owned(),
+                        },
+                    },
+                    crate::application::generation_input_preparer::PreparedImageInput {
+                        asset_id: crate::domain::AssetId::parse("ast_second").unwrap(),
+                        sha256: "second-hash".to_owned(),
+                        comfy: ComfyUploadedImage {
+                            name: "second.png".to_owned(),
+                            subfolder: String::new(),
+                            folder_type: "input".to_owned(),
+                        },
+                    },
+                ],
+            )]),
+        };
+        let resolved = resolved_inputs_to_json(
+            &BTreeMap::from([(
+                "references".to_owned(),
+                ResolvedInputValue::Images(vec!["first.png".to_owned(), "second.png".to_owned()]),
+            )]),
+            &prepared,
+        );
+        assert_eq!(resolved["references"][0]["assetId"], "ast_first");
+        assert_eq!(resolved["references"][1]["assetId"], "ast_second");
     }
 }

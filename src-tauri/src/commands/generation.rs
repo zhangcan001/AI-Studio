@@ -23,7 +23,7 @@ pub struct GenerationCreateRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-pub enum InputValueDto {
+pub(crate) enum InputValueDto {
     #[serde(rename = "string")]
     String { value: String },
     #[serde(rename = "integer")]
@@ -37,6 +37,46 @@ pub enum InputValueDto {
         #[serde(rename = "assetId")]
         asset_id: String,
     },
+    #[serde(rename = "image_assets")]
+    ImageAssets {
+        #[serde(rename = "assetIds")]
+        asset_ids: Vec<String>,
+    },
+}
+
+impl InputValueDto {
+    pub(crate) fn into_application(self, key: &str) -> Result<GenerationInputValue, AppError> {
+        match self {
+            Self::String { value } => Ok(GenerationInputValue::Text(value)),
+            Self::Integer { value } => Ok(GenerationInputValue::Integer(value)),
+            Self::SeedRandom => Ok(GenerationInputValue::Seed(SeedValue::Random)),
+            Self::SeedFixed { value } => {
+                let seed = value.parse::<u64>().map_err(|_| {
+                    AppError::invalid_input(format!(
+                        "seed value for {key} must be a decimal u64 string"
+                    ))
+                })?;
+                Ok(GenerationInputValue::Seed(SeedValue::Fixed(seed)))
+            }
+            Self::ImageAsset { asset_id } => {
+                let asset_id = crate::domain::AssetId::parse(asset_id).map_err(|error| {
+                    AppError::invalid_input(format!("image asset id is invalid: {error}"))
+                })?;
+                Ok(GenerationInputValue::ImageAsset(asset_id))
+            }
+            Self::ImageAssets { asset_ids } => {
+                let asset_ids = asset_ids
+                    .into_iter()
+                    .map(|asset_id| {
+                        crate::domain::AssetId::parse(asset_id).map_err(|error| {
+                            AppError::invalid_input(format!("image asset id is invalid: {error}"))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(GenerationInputValue::ImageAssets(asset_ids))
+            }
+        }
+    }
 }
 
 impl GenerationCreateRequest {
@@ -46,31 +86,7 @@ impl GenerationCreateRequest {
         let values = self
             .values
             .into_iter()
-            .map(|(key, value)| {
-                let value = match value {
-                    InputValueDto::String { value } => GenerationInputValue::Text(value),
-                    InputValueDto::Integer { value } => GenerationInputValue::Integer(value),
-                    InputValueDto::SeedRandom => GenerationInputValue::Seed(SeedValue::Random),
-                    InputValueDto::SeedFixed { value } => {
-                        let seed = value.parse::<u64>().map_err(|_| {
-                            AppError::invalid_input(format!(
-                                "seed value for {key} must be a decimal u64 string"
-                            ))
-                        })?;
-                        GenerationInputValue::Seed(SeedValue::Fixed(seed))
-                    }
-                    InputValueDto::ImageAsset { asset_id } => {
-                        let asset_id =
-                            crate::domain::AssetId::parse(asset_id).map_err(|error| {
-                                AppError::invalid_input(format!(
-                                    "image asset id is invalid: {error}"
-                                ))
-                            })?;
-                        GenerationInputValue::ImageAsset(asset_id)
-                    }
-                };
-                Ok((key, value))
-            })
+            .map(|(key, value)| Ok((key.clone(), value.into_application(&key)?)))
             .collect::<Result<BTreeMap<_, _>, AppError>>()?;
 
         Ok(CreateGenerationRequest {

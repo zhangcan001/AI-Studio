@@ -1,4 +1,4 @@
-use crate::application::image_inspection::{inspect_bytes, InspectedImage};
+use crate::application::image_inspection::{generate_thumbnail, inspect_bytes, InspectedImage};
 use crate::application::output_collector::CollectedImage;
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ProjectRepository, RepositoryError,
@@ -107,6 +107,26 @@ impl AssetImportService {
                 }
             };
             stored_paths.push(stored.path.clone());
+            let thumbnail_path = match generate_thumbnail(&image.bytes) {
+                Ok(thumbnail) => match self
+                    .asset_store
+                    .write_thumbnail(&project_root, &asset_id, &thumbnail)
+                    .await
+                {
+                    Ok(stored_thumbnail) => {
+                        stored_paths.push(stored_thumbnail.path.clone());
+                        Some(stored_thumbnail.path.display().to_string())
+                    }
+                    Err(error) => {
+                        tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail write skipped; full asset remains available");
+                        None
+                    }
+                },
+                Err(error) => {
+                    tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail generation skipped; full asset remains available");
+                    None
+                }
+            };
             let created_at = self.clock.now();
             let metadata = json!({
                 "outputId": image.output_id,
@@ -116,7 +136,7 @@ impl AssetImportService {
                 "comfySubfolder": image.subfolder,
                 "comfyType": image.folder_type,
             });
-            let asset = match Asset::new_generated_image(
+            let mut asset = match Asset::new_generated_image(
                 asset_id,
                 project_id,
                 format!("Generated Image {}", image.position + 1),
@@ -139,6 +159,7 @@ impl AssetImportService {
                     });
                 }
             };
+            asset.thumbnail_path = thumbnail_path;
             assets.push(asset);
         }
 
@@ -384,6 +405,16 @@ mod tests {
             std::fs::metadata(&assets[0].storage_path).unwrap().len()
         );
         assert!(assets[0].storage_path.ends_with(".png"));
+        let thumbnail_path = assets[0]
+            .thumbnail_path
+            .as_ref()
+            .expect("thumbnail should be recorded");
+        assert!(
+            thumbnail_path.contains("assets/thumbnails/image")
+                || thumbnail_path.contains("assets\\thumbnails\\image")
+        );
+        let (thumbnail_width, thumbnail_height) = image::image_dimensions(thumbnail_path).unwrap();
+        assert!(thumbnail_width <= 384 && thumbnail_height <= 384);
         assert_eq!(repository.assets.lock().unwrap().len(), 1);
         assert!(Path::new(&assets[0].storage_path).is_file());
     }

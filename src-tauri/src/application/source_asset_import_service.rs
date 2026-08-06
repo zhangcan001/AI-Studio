@@ -1,4 +1,4 @@
-use crate::application::image_inspection::inspect_bytes;
+use crate::application::image_inspection::{generate_thumbnail, inspect_bytes};
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ProjectRepository, RepositoryError,
 };
@@ -111,8 +111,29 @@ impl SourceAssetImportService {
             .map_err(|error| SourceAssetImportError::AssetPersistence {
                 message: error.to_string(),
             })?;
+        let mut stored_paths = vec![stored.path.clone()];
+        let thumbnail_path = match generate_thumbnail(bytes) {
+            Ok(thumbnail) => match self
+                .asset_store
+                .write_thumbnail(&project_root, &asset_id, &thumbnail)
+                .await
+            {
+                Ok(stored_thumbnail) => {
+                    stored_paths.push(stored_thumbnail.path.clone());
+                    Some(stored_thumbnail.path.display().to_string())
+                }
+                Err(error) => {
+                    tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail write skipped; full asset remains available");
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail generation skipped; full asset remains available");
+                None
+            }
+        };
         let created_at = self.clock.now();
-        let asset = match Asset::new_source_image(
+        let mut asset = match Asset::new_source_image(
             asset_id,
             project_id,
             original_name.clone(),
@@ -128,25 +149,34 @@ impl SourceAssetImportService {
         ) {
             Ok(asset) => asset,
             Err(error) => {
-                let _ = self.asset_store.delete(&stored.path).await;
+                self.compensate(&stored_paths).await;
                 return Err(SourceAssetImportError::InvalidSourceImage {
                     message: error.to_string(),
                 });
             }
         };
+        asset.thumbnail_path = thumbnail_path;
 
         if let Err(error) = self
             .asset_repository
             .insert_many(std::slice::from_ref(&asset))
             .await
         {
-            let _ = self.asset_store.delete(&stored.path).await;
+            self.compensate(&stored_paths).await;
             return Err(SourceAssetImportError::AssetPersistence {
                 message: error.to_string(),
             });
         }
 
         Ok(asset)
+    }
+
+    async fn compensate(&self, paths: &[std::path::PathBuf]) {
+        for path in paths {
+            if let Err(error) = self.asset_store.delete(path).await {
+                tracing::error!(path = %path.display(), error = %error, "source asset compensation delete failed");
+            }
+        }
     }
 }
 

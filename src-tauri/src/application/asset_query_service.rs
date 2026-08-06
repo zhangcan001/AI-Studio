@@ -106,6 +106,36 @@ impl AssetQueryService {
             .map_err(AssetQueryError::Read)?;
         Ok(AssetBinary { bytes })
     }
+
+    pub async fn read_thumbnail(
+        &self,
+        project_id: &str,
+        asset_id: &str,
+    ) -> Result<AssetBinary, AssetQueryError> {
+        validate_project_id(project_id)?;
+        let asset_id = AssetId::parse(asset_id.to_owned())
+            .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
+        let asset = self
+            .asset_repository
+            .find_by_id(&asset_id)
+            .await?
+            .ok_or_else(|| AssetQueryError::NotFound(asset_id.as_str().to_owned()))?;
+        if asset.project_id != project_id {
+            return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
+        }
+        if asset.asset_type != AssetType::Image {
+            return Err(AssetQueryError::NotImage(asset_id.as_str().to_owned()));
+        }
+        let path = asset
+            .thumbnail_path
+            .ok_or_else(|| AssetQueryError::ThumbnailNotAvailable(asset_id.as_str().to_owned()))?;
+        let bytes = self
+            .asset_store
+            .read(std::path::Path::new(&path))
+            .await
+            .map_err(AssetQueryError::Read)?;
+        Ok(AssetBinary { bytes })
+    }
 }
 
 fn validate_project_id(project_id: &str) -> Result<(), AssetQueryError> {
@@ -129,6 +159,7 @@ pub struct AssetSummaryView {
     pub height: u32,
     pub file_size: u64,
     pub created_at: DateTime<Utc>,
+    pub thumbnail_available: bool,
 }
 
 impl From<crate::domain::Asset> for AssetSummaryView {
@@ -143,6 +174,7 @@ impl From<crate::domain::Asset> for AssetSummaryView {
             height: asset.height,
             file_size: asset.file_size,
             created_at: asset.created_at,
+            thumbnail_available: asset.thumbnail_path.is_some(),
         }
     }
 }
@@ -160,6 +192,7 @@ pub enum AssetQueryError {
     InvalidAssetId(String),
     NotFound(String),
     NotImage(String),
+    ThumbnailNotAvailable(String),
     Repository(RepositoryError),
     Read(AssetStoreError),
 }
@@ -172,6 +205,10 @@ impl fmt::Display for AssetQueryError {
             Self::InvalidAssetId(message) => write!(formatter, "INVALID_ASSET_ID: {message}"),
             Self::NotFound(id) => write!(formatter, "ASSET_NOT_FOUND: asset {id} was not found"),
             Self::NotImage(id) => write!(formatter, "ASSET_NOT_IMAGE: asset {id} is not an image"),
+            Self::ThumbnailNotAvailable(id) => write!(
+                formatter,
+                "THUMBNAIL_NOT_AVAILABLE: asset {id} has no thumbnail"
+            ),
             Self::Repository(error) => write!(formatter, "{error}"),
             Self::Read(error) => write!(formatter, "ASSET_READ_FAILED: {error}"),
         }

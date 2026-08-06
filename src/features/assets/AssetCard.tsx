@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { readAssetImage } from "../../services/tauriClient";
+import { readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 
 interface Props {
@@ -36,10 +36,13 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
     if (!visible) return () => undefined;
     let active = true;
     let url: string | undefined;
-    void readAssetImage(projectId, asset.id)
+    const readPreview = asset.thumbnailAvailable
+      ? readAssetThumbnail(projectId, asset.id).catch(() => readAssetImage(projectId, asset.id))
+      : readAssetImage(projectId, asset.id);
+    void readPreview
       .then((bytes) => {
         if (!active) return;
-        url = URL.createObjectURL(new Blob([bytes], { type: asset.mimeType }));
+        url = URL.createObjectURL(new Blob([bytes], { type: asset.thumbnailAvailable ? "image/png" : asset.mimeType }));
         setPreviewUrl(url);
       })
       .catch(() => {
@@ -49,7 +52,7 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
       active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [asset.id, asset.mimeType, projectId, visible]);
+  }, [asset.id, asset.mimeType, asset.thumbnailAvailable, projectId, visible]);
 
   return (
     <button ref={cardRef} type="button" className="asset-library-card" onClick={() => onSelect(asset)}>

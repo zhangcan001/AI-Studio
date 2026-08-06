@@ -60,6 +60,12 @@ new-project text-to-image generation, project-scoped Task/Asset isolation,
 running-task switching, and the offline/restart gate. The exact evidence is
 recorded in `docs/M1_PROJECT_WORKSPACE_VALIDATION.md`.
 
+M1 Production Input Pack validation is complete. It adds project-scoped Preset
+persistence and Studio controls, ordered multi-image recipe/application values,
+best-effort source/generated thumbnails, Asset Library thumbnail fallback, and
+historical draft compatibility. The exact evidence is recorded in
+`docs/M1_PRODUCTION_INPUT_PACK_VALIDATION.md`.
+
 The ComfyUI live gate passed independently: `http://127.0.0.1:8188` reported
 version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device, and 4,486 nodes. The
 offline/restart gate also passed: port 8188 became unavailable while AI

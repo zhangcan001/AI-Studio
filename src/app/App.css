@@ -149,6 +149,10 @@ select, input { min-height: 40px; padding: 8px 10px; }
 textarea { resize: vertical; padding: 10px; }
 select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-offset: 1px; }
 .dynamic-form { display: grid; gap: 17px; padding: 22px 0; }
+.preset-toolbar { display: grid; grid-template-columns: minmax(150px, 0.9fr) minmax(150px, 1fr) auto; gap: 10px; align-items: end; padding: 18px 0 0; }
+.preset-toolbar label { display: grid; gap: 7px; min-width: 0; color: #d5deec; font-weight: 600; }
+.preset-toolbar label span { font-size: 0.8rem; }
+.preset-actions { display: flex; gap: 7px; align-items: end; flex-wrap: wrap; }
 .field-control { display: grid; gap: 6px; }
 .image-field-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
 .image-selection-summary { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid #35435b; border-radius: 10px; background: #111720; }
@@ -158,6 +162,13 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .image-selection-summary small { color: #8997ad; font-size: 0.78rem; }
 .field-hint { color: #8997ad; font-size: 0.78rem; }
 .field-error { color: #ffadad; font-size: 0.8rem; }
+.multi-image-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.multi-image-list { display: grid; gap: 7px; }
+.multi-image-item { display: grid; grid-template-columns: 28px 48px minmax(0, 1fr) auto auto auto; align-items: center; gap: 7px; padding: 7px; border: 1px solid #35435b; border-radius: 9px; background: #111720; }
+.multi-image-item img { width: 48px; height: 48px; object-fit: cover; border-radius: 5px; background: #090c11; }
+.multi-image-order { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #b9c8df; background: #263754; font-size: 0.76rem; }
+.multi-image-name { min-width: 0; overflow: hidden; color: #d5deec; text-overflow: ellipsis; white-space: nowrap; }
+.multi-image-item button { padding: 6px 8px; font-size: 0.75rem; }
 .unsupported-field { padding: 12px; border: 1px dashed #b36b58; border-radius: 8px; color: #ffc3ae; background: #3a2423; }
 .disabled-note { margin: 0 0 14px; color: #ffcf9e; font-size: 0.85rem; }
 .generate-button { width: 100%; padding: 12px; font-weight: 700; }
@@ -298,7 +309,11 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .studio-panel, .task-card, .output-card, .studio-empty { padding: 17px; }
   .comfy-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .comfy-status-grid div { border-right: 0; }
-  .comfy-status-actions, .image-field-actions { grid-template-columns: 1fr; flex-direction: column; }
+  .comfy-status-actions, .image-field-actions, .multi-image-actions { grid-template-columns: 1fr; flex-direction: column; }
+  .preset-toolbar { grid-template-columns: 1fr; }
+  .preset-actions { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .multi-image-item { grid-template-columns: 28px 48px minmax(0, 1fr); }
+  .multi-image-item button { width: 100%; }
   .task-recovery-bar { align-items: stretch; flex-direction: column; }
   .task-recovery-bar button { width: 100%; }
   .header-context-group { width: 100%; align-items: stretch; }

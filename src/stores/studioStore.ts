@@ -58,6 +58,8 @@ function defaultValues(workflow: RecipeViewModel): GenerationValues {
             : [field.key, { type: "seed_random" }];
         case "image":
           return [field.key, undefined];
+        case "images":
+          return [field.key, { type: "image_assets", assetIds: [] }];
       }
     }).filter((entry): entry is [string, DraftValue] => entry[1] !== undefined),
   );

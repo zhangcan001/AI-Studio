@@ -11,6 +11,7 @@ import type {
 } from "../types/history";
 import type { TaskView } from "../types/task";
 import type { ProjectView } from "../types/project";
+import type { PresetView } from "../types/preset";
 
 export function ping(): Promise<string> {
   return invoke<string>("ping");
@@ -110,6 +111,10 @@ export function readAssetImage(projectId: string, assetId: string): Promise<Arra
   return invoke<ArrayBuffer>("asset_read_image", { projectId, assetId });
 }
 
+export function readAssetThumbnail(projectId: string, assetId: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("asset_read_thumbnail", { projectId, assetId });
+}
+
 export function getAsset(projectId: string, assetId: string): Promise<AssetView> {
   return invoke<AssetView>("asset_get", { projectId, assetId });
 }
@@ -138,4 +143,35 @@ export function assetLibraryPage(
   limit = 30,
 ): Promise<AssetLibraryPage> {
   return invoke<AssetLibraryPage>("asset_library_page", { projectId, category, cursor, limit });
+}
+
+export function listPresets(
+  projectId: string,
+  workflowVersionId: string,
+  recipeId: string,
+): Promise<PresetView[]> {
+  return invoke<PresetView[]>("preset_list", { projectId, workflowVersionId, recipeId });
+}
+
+export function createPreset(request: {
+  projectId: string;
+  workflowVersionId: string;
+  recipeId: string;
+  name: string;
+  values: GenerationValues;
+}): Promise<PresetView> {
+  return invoke<PresetView>("preset_create", { request });
+}
+
+export function updatePreset(request: {
+  projectId: string;
+  presetId: string;
+  name: string;
+  values: GenerationValues;
+}): Promise<PresetView> {
+  return invoke<PresetView>("preset_update", { request });
+}
+
+export function deletePreset(projectId: string, presetId: string): Promise<void> {
+  return invoke<void>("preset_delete", { projectId, presetId });
 }

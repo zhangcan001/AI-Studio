@@ -24,6 +24,12 @@ pub enum RepositoryError {
         workflow_version_id: String,
         version: String,
     },
+    PresetNameConflict {
+        project_id: String,
+        workflow_version_id: String,
+        recipe_id: String,
+        name: String,
+    },
 }
 
 impl RepositoryError {
@@ -72,6 +78,20 @@ impl RepositoryError {
             version: version.into(),
         }
     }
+
+    pub fn preset_name_conflict(
+        project_id: impl Into<String>,
+        workflow_version_id: impl Into<String>,
+        recipe_id: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self::PresetNameConflict {
+            project_id: project_id.into(),
+            workflow_version_id: workflow_version_id.into(),
+            recipe_id: recipe_id.into(),
+            name: name.into(),
+        }
+    }
 }
 
 impl fmt::Display for RepositoryError {
@@ -96,6 +116,9 @@ impl fmt::Display for RepositoryError {
                 formatter,
                 "RECIPE_VERSION_CONFLICT: workflow version {workflow_version_id} recipe version {version} has different content"
             ),
+            Self::PresetNameConflict { name, .. } => {
+                write!(formatter, "PRESET_NAME_CONFLICT: preset name \"{name}\" already exists for this recipe")
+            }
         }
     }
 }

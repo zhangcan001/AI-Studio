@@ -159,6 +159,21 @@ pub async fn asset_read_image(
     Ok(Response::new(asset.bytes))
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_read_thumbnail(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_id: String,
+) -> Result<Response, AppError> {
+    super::validate_project_id(&project_id)?;
+    let asset = state
+        .asset_query_service
+        .read_thumbnail(&project_id, &asset_id)
+        .await
+        .map_err(map_asset_error)?;
+    Ok(Response::new(asset.bytes))
+}
+
 fn map_task_query_error(error: crate::application::task_query_service::TaskQueryError) -> AppError {
     match error {
         crate::application::task_query_service::TaskQueryError::InvalidProjectId(message)
@@ -178,6 +193,7 @@ fn map_asset_error(error: AssetQueryError) -> AppError {
         | AssetQueryError::InvalidAssetId(message) => AppError::invalid_input(message),
         AssetQueryError::NotFound(message) => AppError::asset_not_found(message),
         AssetQueryError::NotImage(message) => AppError::invalid_input(message),
+        AssetQueryError::ThumbnailNotAvailable(message) => AppError::asset_read_failed(message),
         AssetQueryError::Repository(error) => super::map_repository_error(&error),
         AssetQueryError::Read(error) => AppError::asset_read_failed(error.to_string()),
     }
