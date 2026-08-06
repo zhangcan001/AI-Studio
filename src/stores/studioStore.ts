@@ -45,7 +45,7 @@ function defaultValues(workflow: RecipeViewModel): GenerationValues {
             : [field.key, { type: "integer", value: field.default }];
         case "seed":
           return field.defaultMode === "fixed"
-            ? [field.key, { type: "seed_fixed", value: "" }]
+            ? [field.key, { type: "seed_fixed", value: field.defaultValue ?? "" }]
             : [field.key, { type: "seed_random" }];
       }
     }).filter((entry): entry is [string, DraftValue] => entry[1] !== undefined),

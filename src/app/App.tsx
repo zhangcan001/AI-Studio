@@ -35,6 +35,8 @@ function App() {
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [taskEventsReady, setTaskEventsReady] = useState(false);
+  const [taskEventError, setTaskEventError] = useState<string | undefined>();
   const [connectionLoading, setConnectionLoading] = useState(false);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
@@ -43,10 +45,20 @@ function App() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    void subscribeTaskUpdates((task) => useTaskStore.getState().upsertTask(task)).then((cleanup) => {
-      if (cancelled) cleanup();
-      else unlisten = cleanup;
-    });
+    void subscribeTaskUpdates((task) => useTaskStore.getState().upsertTask(task))
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else {
+          unlisten = cleanup;
+          setTaskEventsReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTaskEventsReady(false);
+          setTaskEventError("Task event channel unavailable");
+        }
+      });
 
     void Promise.all([bootstrap(), listGenerationCatalog(), listRecentTasks(10)])
       .then(([state, recipes, tasks]) => {
@@ -137,10 +149,13 @@ function App() {
         <GenerationStudio
           catalog={catalog}
           comfyConnected={isConnected}
+          taskEventsReady={taskEventsReady}
+          taskEventError={taskEventError}
           onCatalogChanged={reloadCatalog}
         />
       </section>
 
+      {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
       {error && <p className="error-message global-error">Notice: {error}</p>}
       {bootstrapState && <p className="version">Version {bootstrapState.status.version}</p>}
     </main>

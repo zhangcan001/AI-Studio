@@ -13,10 +13,18 @@ import { TaskProgressCard } from "./TaskProgressCard";
 interface Props {
   catalog: RecipeViewModel[];
   comfyConnected: boolean;
+  taskEventsReady: boolean;
+  taskEventError?: string;
   onCatalogChanged: () => Promise<void>;
 }
 
-export function GenerationStudio({ catalog, comfyConnected, onCatalogChanged }: Props) {
+export function GenerationStudio({
+  catalog,
+  comfyConnected,
+  taskEventsReady,
+  taskEventError,
+  onCatalogChanged,
+}: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const values = useStudioStore((state) => state.values);
   const validationErrors = useStudioStore((state) => state.validationErrors);
@@ -25,7 +33,7 @@ export function GenerationStudio({ catalog, comfyConnected, onCatalogChanged }: 
   const removeValue = useStudioStore((state) => state.removeValue);
   const setValidationErrors = useStudioStore((state) => state.setValidationErrors);
   const currentTask = useTaskStore((state) => state.currentTask);
-  const setCurrentTask = useTaskStore((state) => state.setCurrentTask);
+  const adoptCreatedTask = useTaskStore((state) => state.adoptCreatedTask);
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -47,7 +55,11 @@ export function GenerationStudio({ catalog, comfyConnected, onCatalogChanged }: 
   );
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
   const canGenerate = Boolean(
-    comfyConnected && selectedWorkflow && !hasUnsupportedField && Object.keys(errors).length === 0,
+    comfyConnected &&
+      taskEventsReady &&
+      selectedWorkflow &&
+      !hasUnsupportedField &&
+      Object.keys(errors).length === 0,
   );
 
   async function refreshWorkflows() {
@@ -67,7 +79,13 @@ export function GenerationStudio({ catalog, comfyConnected, onCatalogChanged }: 
     if (!selectedWorkflow) return;
     const nextErrors = validateRecipeValues(selectedWorkflow, values);
     setValidationErrors(nextErrors);
-    if (Object.keys(nextErrors).length || !comfyConnected || hasUnsupportedField) return;
+    if (
+      Object.keys(nextErrors).length ||
+      !comfyConnected ||
+      !taskEventsReady ||
+      hasUnsupportedField
+    )
+      return;
 
     setCreating(true);
     setNotice(null);
@@ -78,7 +96,7 @@ export function GenerationStudio({ catalog, comfyConnected, onCatalogChanged }: 
         recipeId: selectedWorkflow.recipeId,
         values,
       });
-      setCurrentTask(task);
+      adoptCreatedTask(task);
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -135,6 +153,11 @@ export function GenerationStudio({ catalog, comfyConnected, onCatalogChanged }: 
               onGenerate={() => void generate()}
             />
             {!comfyConnected && <p className="disabled-note">Connect ComfyUI before generating.</p>}
+            {!taskEventsReady && (
+              <p className="disabled-note">
+                {taskEventError ?? "Preparing task event channel..."}
+              </p>
+            )}
             {hasUnsupportedField && <p className="disabled-note">This Workflow has an unsupported field type.</p>}
             <button type="button" className="generate-button" onClick={() => void generate()} disabled={!canGenerate || creating}>
               {creating ? "Creating Task..." : "Generate"}

@@ -20,6 +20,7 @@ export type RecipeField =
       type: "seed";
       label: string;
       defaultMode: "random" | "fixed";
+      defaultValue?: string | null;
     };
 
 export interface RecipeViewModel {
