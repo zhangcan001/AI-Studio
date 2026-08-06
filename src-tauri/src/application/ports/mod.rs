@@ -18,8 +18,9 @@ pub use asset_store::{AssetStore, AssetStoreError, StoredAssetFile};
 pub use clock::{Clock, MonotonicEventClock};
 pub use comfy_adapter::{
     ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyEventSubscription,
-    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyNodeOutput, ComfyOutputData,
-    ComfyOutputFile, DeviceInfo, PromptSubmission, SystemStats,
+    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyImageUpload, ComfyNodeOutput,
+    ComfyOutputData, ComfyOutputFile, ComfyUploadedImage, DeviceInfo, PromptSubmission,
+    SystemStats,
 };
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,

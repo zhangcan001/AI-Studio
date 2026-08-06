@@ -59,6 +59,14 @@ export function listAssetsByTask(taskId: string): Promise<AssetView[]> {
   return invoke<AssetView[]>("asset_list_by_task", { taskId });
 }
 
+export function listRecentAssets(projectId: string, limit = 100): Promise<AssetView[]> {
+  return invoke<AssetView[]>("asset_list_recent", { projectId, limit });
+}
+
+export function pickAndImportImage(projectId: string): Promise<AssetView | null> {
+  return invoke<AssetView | null>("asset_pick_and_import_image", { projectId });
+}
+
 export function readAssetImage(assetId: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("asset_read_image", { assetId });
 }

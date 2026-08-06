@@ -1,12 +1,19 @@
 use crate::application::ports::{
     ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyEventSubscription,
-    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyNodeOutput, ComfyOutputData,
-    ComfyOutputFile, DeviceInfo, PromptSubmission, SystemStats,
+    ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyImageUpload, ComfyNodeOutput,
+    ComfyOutputData, ComfyOutputFile, ComfyUploadedImage, DeviceInfo, PromptSubmission,
+    SystemStats,
 };
-use crate::infrastructure::comfy::dto::{PromptRequestDto, PromptResponseDto, SystemStatsDto};
+use crate::infrastructure::comfy::dto::{
+    PromptRequestDto, PromptResponseDto, SystemStatsDto, UploadResponseDto,
+};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
-use reqwest::{header::CONTENT_TYPE, Client, StatusCode};
+use reqwest::{
+    header::CONTENT_TYPE,
+    multipart::{Form, Part},
+    Client, StatusCode,
+};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::time::Duration;
@@ -88,6 +95,63 @@ impl ComfyHttpAdapter {
             ram_total: system.ram_total,
             ram_free: system.ram_free,
             devices,
+        })
+    }
+
+    async fn upload_image_internal(
+        &self,
+        upload: ComfyImageUpload,
+    ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
+        let url = self.config.route_url("upload/image");
+        let part = Part::bytes(upload.bytes)
+            .file_name(upload.upload_name)
+            .mime_str(&upload.content_type)
+            .map_err(|error| {
+                ComfyAdapterError::ImageUpload(format!("invalid image MIME type: {error}"))
+            })?;
+        let form = Form::new()
+            .part("image", part)
+            .text("type", "input")
+            .text("subfolder", String::new())
+            .text("overwrite", "false");
+        let response = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|error| request_error("POST", &url, error))?;
+        if !response.status().is_success() {
+            return Err(http_status_error("POST", &url, response.status()));
+        }
+        let dto = response
+            .json::<UploadResponseDto>()
+            .await
+            .map_err(|error| {
+                ComfyAdapterError::Protocol(format!(
+                    "POST {url} returned invalid upload JSON: {error}"
+                ))
+            })?;
+        let name = dto
+            .name
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                ComfyAdapterError::Protocol(
+                    "POST /upload/image response did not contain name".to_owned(),
+                )
+            })?;
+        let folder_type = dto
+            .folder_type
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                ComfyAdapterError::Protocol(
+                    "POST /upload/image response did not contain type".to_owned(),
+                )
+            })?;
+        Ok(ComfyUploadedImage {
+            name,
+            subfolder: dto.subfolder.unwrap_or_default(),
+            folder_type,
         })
     }
 
@@ -270,6 +334,13 @@ impl ComfyAdapter for ComfyHttpAdapter {
         }
 
         Ok(object_info)
+    }
+
+    async fn upload_image(
+        &self,
+        upload: ComfyImageUpload,
+    ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
+        self.upload_image_internal(upload).await
     }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
@@ -627,7 +698,7 @@ mod tests {
     use super::{ComfyHttpAdapter, MAX_IMAGE_OUTPUT_BYTES};
     use crate::application::ports::{
         ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, ComfyExecutionEvent,
-        ComfyOutputFile,
+        ComfyImageUpload, ComfyOutputFile,
     };
     use futures_util::SinkExt;
     use serde_json::json;
@@ -635,7 +706,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use tokio_tungstenite::{accept_async, tungstenite::Message};
     use wiremock::{
-        matchers::{body_json, method, path, query_param},
+        matchers::{body_json, body_string_contains, method, path, query_param},
         Mock, MockServer, ResponseTemplate,
     };
 
@@ -736,6 +807,57 @@ mod tests {
             .expect("object info should parse");
 
         assert_eq!(object_info.as_object().expect("object expected").len(), 3);
+    }
+
+    #[tokio::test]
+    async fn uploads_image_as_input_and_accepts_server_identity() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .and(body_string_contains("aistudio_task_asset.png"))
+            .and(body_string_contains("input"))
+            .and(body_string_contains("overwrite"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "name": "aistudio_task_asset.png",
+                "subfolder": "",
+                "type": "input",
+                "unknown": true
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let uploaded = adapter
+            .upload_image(ComfyImageUpload {
+                bytes: vec![1, 2, 3],
+                upload_name: "aistudio_task_asset.png".to_owned(),
+                content_type: "image/png".to_owned(),
+            })
+            .await
+            .expect("upload should parse");
+        assert_eq!(uploaded.name, "aistudio_task_asset.png");
+        assert_eq!(uploaded.folder_type, "input");
+    }
+
+    #[tokio::test]
+    async fn malformed_upload_response_is_protocol_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let error = adapter
+            .upload_image(ComfyImageUpload {
+                bytes: vec![1, 2, 3],
+                upload_name: "image.png".to_owned(),
+                content_type: "image/png".to_owned(),
+            })
+            .await
+            .expect_err("malformed upload response should fail");
+        assert!(matches!(error, ComfyAdapterError::Protocol(_)));
     }
 
     #[tokio::test]

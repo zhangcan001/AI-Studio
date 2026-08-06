@@ -84,6 +84,25 @@ impl WorkflowCompiler {
                     resolved_seed.get_or_insert(seed);
                     resolved_inputs.insert(input_key.clone(), ResolvedInputValue::Seed(seed));
                 }
+                InputDefinition::Image { required, .. } => {
+                    let value = request
+                        .values
+                        .get(input_key)
+                        .map(|value| match value {
+                            InputValue::Image(value) => Ok(value.clone()),
+                            other => Err(type_mismatch(input_key, "image", other)),
+                        })
+                        .transpose()?;
+                    let value = value.filter(|value| !value.trim().is_empty());
+                    if *required && value.is_none() {
+                        return Err(CompileError::InputRequired {
+                            input: input_key.to_owned(),
+                        });
+                    }
+                    if let Some(value) = value {
+                        resolved_inputs.insert(input_key.clone(), ResolvedInputValue::Image(value));
+                    }
+                }
             }
         }
 
@@ -200,6 +219,7 @@ fn type_mismatch(input_key: &str, expected: &str, value: &InputValue) -> Compile
             InputValue::String(_) => "string",
             InputValue::Integer(_) => "integer",
             InputValue::Seed(_) => "seed",
+            InputValue::Image(_) => "image",
         }
         .to_owned(),
     }
@@ -237,6 +257,7 @@ fn resolved_value_to_json(value: &ResolvedInputValue) -> Value {
         ResolvedInputValue::String(value) => Value::String(value.clone()),
         ResolvedInputValue::Integer(value) => Value::Number(Number::from(*value)),
         ResolvedInputValue::Seed(value) => Value::Number(Number::from(*value)),
+        ResolvedInputValue::Image(value) => Value::String(value.clone()),
     }
 }
 
@@ -270,6 +291,14 @@ mod tests {
     const RANGE_WORKFLOW_JSON: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../tests/fixtures/seed_range_t2i/workflow_api.json"
+    ));
+    const I2I_RECIPE_YAML: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/simple_i2i/recipe.yaml"
+    ));
+    const I2I_WORKFLOW_JSON: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/simple_i2i/workflow_api.json"
     ));
 
     fn recipe_and_workflow() -> (crate::domain::Recipe, WorkflowDocument) {
@@ -306,6 +335,38 @@ mod tests {
             "seed".to_owned(),
             InputValue::Seed(seed),
         )]))
+    }
+
+    #[test]
+    fn prepared_image_string_binds_without_mutating_raw_workflow() {
+        let recipe = RecipeParser::parse(I2I_RECIPE_YAML).expect("i2i recipe should parse");
+        let workflow_value: Value = serde_json::from_str(I2I_WORKFLOW_JSON).unwrap();
+        let workflow = WorkflowDocument::parse(workflow_value.clone()).unwrap();
+        let result = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([
+                    ("prompt".to_owned(), InputValue::String("hello".to_owned())),
+                    (
+                        "reference_image".to_owned(),
+                        InputValue::Image("server_returned.png".to_owned()),
+                    ),
+                    ("steps".to_owned(), InputValue::Integer(20)),
+                    ("seed".to_owned(), InputValue::Seed(SeedValue::Fixed(123))),
+                ])),
+            )
+            .expect("prepared image should compile");
+
+        assert_eq!(
+            result.workflow["10"]["inputs"]["image"],
+            "server_returned.png"
+        );
+        assert_eq!(workflow.value(), &workflow_value);
+        assert_eq!(
+            result.resolved_inputs.get("reference_image"),
+            Some(&ResolvedInputValue::Image("server_returned.png".to_owned()))
+        );
     }
 
     #[test]

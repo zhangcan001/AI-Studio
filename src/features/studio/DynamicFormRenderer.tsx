@@ -1,5 +1,6 @@
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
 import { IntegerField } from "./fields/IntegerField";
+import { ImageField } from "./fields/ImageField";
 import { SeedField } from "./fields/SeedField";
 import { TextAreaField } from "./fields/TextAreaField";
 
@@ -11,6 +12,7 @@ interface Props {
   validationErrors: Record<string, string>;
   onChange: (key: string, value?: DraftValue) => void;
   onGenerate: () => void;
+  projectId: string;
 }
 
 export function DynamicFormRenderer({
@@ -19,10 +21,11 @@ export function DynamicFormRenderer({
   validationErrors,
   onChange,
   onGenerate,
+  projectId,
 }: Props) {
   return (
     <div className="dynamic-form">
-      {recipe.fields.map((field) => renderField(field, values, validationErrors, onChange, onGenerate))}
+      {recipe.fields.map((field) => renderField(field, values, validationErrors, onChange, onGenerate, projectId))}
     </div>
   );
 }
@@ -33,6 +36,7 @@ function renderField(
   validationErrors: Record<string, string>,
   onChange: (key: string, value?: DraftValue) => void,
   onGenerate: () => void,
+  projectId: string,
 ) {
   const value = values[field.key];
   const error = validationErrors[field.key];
@@ -66,6 +70,17 @@ function renderField(
           field={field}
           value={value}
           error={error}
+          onChange={(next) => onChange(field.key, next)}
+        />
+      );
+    case "image":
+      return (
+        <ImageField
+          key={field.key}
+          field={field}
+          value={value}
+          error={error}
+          projectId={projectId}
           onChange={(next) => onChange(field.key, next)}
         />
       );
@@ -112,6 +127,12 @@ export function validateRecipeValues(
           errors[field.key] = "Use a decimal u64 seed string.";
         }
       }
+    } else if (
+      field.type === "image" &&
+      field.required &&
+      (!value || value.type !== "image_asset" || !value.assetId.trim())
+    ) {
+      errors[field.key] = "Choose an image.";
     }
   }
   return errors;

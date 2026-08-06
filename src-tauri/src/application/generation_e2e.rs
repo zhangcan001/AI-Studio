@@ -1,14 +1,17 @@
 #[cfg(test)]
 mod tests {
+    use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::{
         CreateGenerationRequest, GenerationService, GenerationServiceError,
     };
     use crate::application::ports::{
-        AssetRepository, Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription,
-        ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyNodeOutput, ComfyOutputData,
-        ComfyOutputFile, PromptSubmission, SystemStats, TaskRepository, TaskUpdateSink,
+        AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError,
+        ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyImageUpload,
+        ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyUploadedImage,
+        GenerationSnapshotRepository, PromptSubmission, SystemStats, TaskRepository,
+        TaskUpdateSink,
     };
-    use crate::domain::{InputValue, SeedValue, Task, TaskEventType, TaskStatus};
+    use crate::domain::{Asset, AssetId, SeedValue, Task, TaskEventType, TaskStatus};
     use crate::infrastructure::database::{
         initialize,
         repositories::{
@@ -24,7 +27,7 @@ mod tests {
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
     use sqlx::SqlitePool;
-    use std::collections::VecDeque;
+    use std::collections::{BTreeMap, VecDeque};
     use std::io::Cursor;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -53,6 +56,7 @@ mod tests {
         events: Arc<Mutex<VecDeque<Result<Option<ComfyExecutionEvent>, ComfyAdapterError>>>>,
         prompt_id: Arc<Mutex<Option<String>>>,
         image_bytes: Vec<u8>,
+        actions: Arc<Mutex<Vec<String>>>,
     }
 
     struct FakeSubscription {
@@ -81,6 +85,18 @@ mod tests {
 
         async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
             Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn upload_image(
+            &self,
+            _upload: ComfyImageUpload,
+        ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
+            self.actions.lock().unwrap().push("upload_image".to_owned());
+            Ok(ComfyUploadedImage {
+                name: "server_returned.png".to_owned(),
+                subfolder: String::new(),
+                folder_type: "input".to_owned(),
+            })
         }
 
         async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
@@ -138,6 +154,10 @@ mod tests {
             prompt_id: &str,
             _workflow: Value,
         ) -> Result<PromptSubmission, ComfyAdapterError> {
+            self.actions
+                .lock()
+                .unwrap()
+                .push("submit_workflow".to_owned());
             *self.prompt_id.lock().unwrap() = Some(prompt_id.to_owned());
             Ok(PromptSubmission {
                 prompt_id: prompt_id.to_owned(),
@@ -150,6 +170,10 @@ mod tests {
             &self,
             _client_id: &str,
         ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+            self.actions
+                .lock()
+                .unwrap()
+                .push("subscribe_events".to_owned());
             Ok(Box::new(FakeSubscription {
                 events: self.events.lock().unwrap().clone(),
                 prompt_id: self.prompt_id.clone(),
@@ -319,6 +343,7 @@ mod tests {
             events: Arc::new(Mutex::new(events.into())),
             prompt_id: Arc::new(Mutex::new(None)),
             image_bytes: png_bytes(),
+            actions: Arc::new(Mutex::new(Vec::new())),
         });
         let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
         let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
@@ -347,9 +372,15 @@ mod tests {
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
             values: std::collections::BTreeMap::from([
-                ("prompt".to_owned(), InputValue::String("hello".to_owned())),
-                ("steps".to_owned(), InputValue::Integer(20)),
-                ("seed".to_owned(), InputValue::Seed(SeedValue::Fixed(123))),
+                (
+                    "prompt".to_owned(),
+                    GenerationInputValue::Text("hello".to_owned()),
+                ),
+                ("steps".to_owned(), GenerationInputValue::Integer(20)),
+                (
+                    "seed".to_owned(),
+                    GenerationInputValue::Seed(SeedValue::Fixed(123)),
+                ),
             ]),
         };
         let result = if non_blocking {
@@ -391,7 +422,7 @@ mod tests {
             .await
             .expect("events should be readable");
         let published_statuses = sink.statuses.lock().unwrap().clone();
-        Run {
+        let run = Run {
             _directory: directory,
             pool,
             task,
@@ -399,7 +430,141 @@ mod tests {
             events: stored_events,
             published_statuses,
             outcome: result.map(|_| ()),
-        }
+        };
+        run
+    }
+
+    async fn run_i2i_success() -> (Run, Arc<Mutex<Vec<String>>>) {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path().join("project");
+        std::fs::create_dir_all(&root).expect("project root");
+        let pool = initialize(&directory.path().join("app.db"))
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET root_path = ? WHERE id = 'project-1'")
+            .bind(root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("project root should update");
+        sqlx::query(
+            "UPDATE workflow_versions SET api_workflow_json = ? WHERE id = 'workflow-version-1'",
+        )
+        .bind(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/fixtures/simple_i2i/workflow_api.json"
+        )))
+        .execute(&pool)
+        .await
+        .expect("i2i workflow should update");
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+            .bind(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tests/fixtures/simple_i2i/recipe.yaml"
+            )))
+            .execute(&pool)
+            .await
+            .expect("i2i recipe should update");
+
+        let asset_repository = Arc::new(SqliteAssetRepository::new(pool.clone()));
+        let asset_store = Arc::new(FileSystemAssetStore::new());
+        let source_id = AssetId::parse("ast_i2i_source").unwrap();
+        let source_bytes = png_bytes();
+        let stored = asset_store
+            .write_source_image(&root, &source_id, "png", &source_bytes)
+            .await
+            .expect("source image should store");
+        let source = Asset::new_source_image(
+            source_id,
+            "project-1",
+            "reference.png",
+            "reference.png",
+            stored.path.to_string_lossy().to_string(),
+            format!("{:x}", Sha256::digest(&source_bytes)),
+            "image/png",
+            2,
+            3,
+            source_bytes.len() as u64,
+            json!({"source": "test"}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 10, 0, 0).unwrap(),
+        )
+        .unwrap();
+        asset_repository.insert_many(&[source]).await.unwrap();
+
+        let actions = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(FakeComfyAdapter {
+            mode: FakeMode::Success { image_count: 1 },
+            events: Arc::new(Mutex::new(
+                vec![
+                    Ok(Some(ComfyExecutionEvent::ExecutionStarted {
+                        prompt_id: "CURRENT".to_owned(),
+                    })),
+                    Ok(Some(ComfyExecutionEvent::ExecutionSucceeded {
+                        prompt_id: "CURRENT".to_owned(),
+                    })),
+                ]
+                .into(),
+            )),
+            prompt_id: Arc::new(Mutex::new(None)),
+            image_bytes: png_bytes(),
+            actions: actions.clone(),
+        });
+        let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
+        let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
+        let definition_repository =
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
+        let project_repository = Arc::new(SqliteProjectRepository::new(pool.clone()));
+        let clock = Arc::new(FakeClock::new(clock_values()));
+        let service = GenerationService::new(
+            task_repository.clone(),
+            snapshot_repository,
+            definition_repository,
+            adapter,
+            project_repository,
+            asset_store,
+            asset_repository.clone(),
+            clock,
+        );
+        let request = CreateGenerationRequest {
+            project_id: "project-1".to_owned(),
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values: BTreeMap::from([
+                (
+                    "prompt".to_owned(),
+                    GenerationInputValue::Text("use the image".to_owned()),
+                ),
+                (
+                    "reference_image".to_owned(),
+                    GenerationInputValue::ImageAsset(AssetId::parse("ast_i2i_source").unwrap()),
+                ),
+                ("steps".to_owned(), GenerationInputValue::Integer(20)),
+                (
+                    "seed".to_owned(),
+                    GenerationInputValue::Seed(SeedValue::Fixed(123)),
+                ),
+            ]),
+        };
+        let outcome = service.execute(request).await.map(|_| ());
+        let task = task_repository.list_recent(1).await.unwrap().remove(0);
+        let assets = asset_repository
+            .list_by_source_task(&task.id)
+            .await
+            .unwrap();
+        let events = task_repository.list_events(&task.id).await.unwrap();
+        let snapshot_repository = SqliteGenerationSnapshotRepository::new(pool.clone());
+        let snapshot = snapshot_repository.find_by_task_id(&task.id).await.unwrap();
+        assert!(snapshot.is_some(), "i2i must persist a snapshot");
+        let run = Run {
+            _directory: directory,
+            pool,
+            task,
+            assets,
+            events,
+            published_statuses: Vec::new(),
+            outcome,
+        };
+        (run, actions)
     }
 
     #[tokio::test]
@@ -457,6 +622,44 @@ mod tests {
             .await
             .expect("snapshot count");
         assert_eq!(snapshot_count, 1);
+    }
+
+    #[tokio::test]
+    async fn backend_i2i_mock_e2e_uploads_before_snapshot_and_post() {
+        let (run, actions) = run_i2i_success().await;
+        run.outcome.as_ref().expect("i2i generation should succeed");
+        assert_eq!(run.task.status, TaskStatus::Succeeded);
+        assert_eq!(run.assets.len(), 1);
+        let actions = actions.lock().unwrap().clone();
+        assert_eq!(
+            actions,
+            vec!["upload_image", "subscribe_events", "submit_workflow"]
+        );
+
+        let snapshot: (String, String) = sqlx::query_as(
+            "SELECT user_inputs_json, resolved_inputs_json FROM generation_snapshots WHERE task_id = ?",
+        )
+        .bind(run.task.id.as_str())
+        .fetch_one(&run.pool)
+        .await
+        .unwrap();
+        let user_inputs: Value = serde_json::from_str(&snapshot.0).unwrap();
+        let resolved_inputs: Value = serde_json::from_str(&snapshot.1).unwrap();
+        assert_eq!(user_inputs["reference_image"]["type"], "image_asset");
+        assert_eq!(user_inputs["reference_image"]["assetId"], "ast_i2i_source");
+        assert_eq!(
+            resolved_inputs["reference_image"]["assetId"],
+            "ast_i2i_source"
+        );
+        assert_eq!(
+            resolved_inputs["reference_image"]["comfy"]["name"],
+            "server_returned.png"
+        );
+        assert_eq!(resolved_inputs["reference_image"]["comfy"]["type"], "input");
+        assert!(!snapshot.0.contains("storage_path"));
+        assert!(!snapshot.0.contains("reference.png"));
+        assert!(!snapshot.1.contains("assets\\source"));
+        assert!(!snapshot.1.contains("C:\\"));
     }
 
     #[tokio::test]

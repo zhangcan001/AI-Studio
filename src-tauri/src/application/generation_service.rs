@@ -1,4 +1,8 @@
 use crate::application::asset_import_service::{AssetImportError, AssetImportService};
+use crate::application::generation_input_preparer::{
+    image_snapshot_value, GenerationInputPrepareError, GenerationInputPreparer,
+    GenerationInputValue, PreparedGenerationInputs,
+};
 use crate::application::output_collector::{OutputCollector, OutputCollectorError};
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError, ComfyExecutionEvent,
@@ -7,8 +11,8 @@ use crate::application::ports::{
 };
 use crate::compiler::{CompileError, RecipeParser, WorkflowCompiler};
 use crate::domain::{
-    CompileRequest, GenerationSnapshot, InputValue, ResolvedInputValue, SeedValue, Task,
-    TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
+    CompileRequest, GenerationSnapshot, ResolvedInputValue, SeedValue, Task, TaskDomainError,
+    TaskError, TaskStateMachine, TaskStatus,
 };
 use serde_json::{Map, Number, Value};
 use std::{collections::BTreeMap, error::Error, fmt, sync::Arc};
@@ -19,7 +23,7 @@ pub struct CreateGenerationRequest {
     pub project_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
-    pub values: BTreeMap<String, InputValue>,
+    pub values: BTreeMap<String, GenerationInputValue>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -30,6 +34,7 @@ pub enum GenerationServiceError {
     },
     Repository(RepositoryError),
     Compile(CompileError),
+    InputPrepare(GenerationInputPrepareError),
     Snapshot(String),
     Domain(TaskDomainError),
     Comfy(ComfyAdapterError),
@@ -54,6 +59,7 @@ impl fmt::Display for GenerationServiceError {
             ),
             Self::Repository(error) => write!(formatter, "{error}"),
             Self::Compile(error) => write!(formatter, "{error}"),
+            Self::InputPrepare(error) => write!(formatter, "{error}"),
             Self::Snapshot(message) => write!(formatter, "SNAPSHOT_ERROR: {message}"),
             Self::Domain(error) => write!(formatter, "TASK_DOMAIN_ERROR: {error}"),
             Self::Comfy(error) => write!(formatter, "{error}"),
@@ -88,6 +94,7 @@ pub struct GenerationService {
     comfy_adapter: Arc<dyn ComfyAdapter>,
     output_collector: Arc<OutputCollector>,
     asset_import_service: Arc<AssetImportService>,
+    generation_input_preparer: Arc<GenerationInputPreparer>,
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
     compiler: WorkflowCompiler,
@@ -111,10 +118,15 @@ impl GenerationService {
             definition_repository,
             output_collector: Arc::new(OutputCollector::new(comfy_adapter.clone())),
             asset_import_service: Arc::new(AssetImportService::new(
-                project_repository,
-                asset_store,
-                asset_repository,
+                project_repository.clone(),
+                asset_store.clone(),
+                asset_repository.clone(),
                 clock.clone(),
+            )),
+            generation_input_preparer: Arc::new(GenerationInputPreparer::new(
+                asset_repository,
+                asset_store,
+                comfy_adapter.clone(),
             )),
             comfy_adapter,
             clock,
@@ -225,7 +237,54 @@ impl GenerationService {
                         .await);
                 }
             };
-        let compile_request = CompileRequest::new(request.values.clone());
+        let preflight_request =
+            CompileRequest::new(GenerationInputPreparer::preflight_values(&request.values));
+        if let Err(error) = self
+            .compiler
+            .compile(&workflow, &recipe, &preflight_request)
+        {
+            return Err(self
+                .fail_and_preserve(
+                    &mut task,
+                    task_error_from_compile(&error),
+                    GenerationServiceError::Compile(error),
+                )
+                .await);
+        }
+        if let Err(error) = self
+            .generation_input_preparer
+            .validate_asset_references(&project_id, &request.values)
+            .await
+        {
+            return Err(self
+                .fail_and_preserve(
+                    &mut task,
+                    task_error_from_input_prepare(&error),
+                    GenerationServiceError::InputPrepare(error),
+                )
+                .await);
+        }
+
+        self.transition_and_persist(&mut task, TaskStatus::Preparing)
+            .await?;
+
+        let prepared = match self
+            .generation_input_preparer
+            .prepare(&project_id, &task.id, &request.values)
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return Err(self
+                    .fail_and_preserve(
+                        &mut task,
+                        task_error_from_input_prepare(&error),
+                        GenerationServiceError::InputPrepare(error),
+                    )
+                    .await);
+            }
+        };
+        let compile_request = CompileRequest::new(prepared.compiler_values.clone());
         let compile_result = match self.compiler.compile(&workflow, &recipe, &compile_request) {
             Ok(result) => result,
             Err(error) => {
@@ -239,15 +298,12 @@ impl GenerationService {
             }
         };
 
-        self.transition_and_persist(&mut task, TaskStatus::Preparing)
-            .await?;
-
         let snapshot = match GenerationSnapshot::new(
             task.id.clone(),
             compile_result.workflow.clone(),
             definition.recipe_yaml.clone(),
             input_values_to_json(&request.values),
-            resolved_inputs_to_json(&compile_result.resolved_inputs),
+            resolved_inputs_to_json(&compile_result.resolved_inputs, &prepared),
             self.clock.now(),
         ) {
             Ok(snapshot) => snapshot,
@@ -604,6 +660,9 @@ fn task_error_from_adapter(error: &ComfyAdapterError) -> TaskError {
             ("OUTPUT_DOWNLOAD_FAILED", message.clone(), None)
         }
         ComfyAdapterError::OutputTooLarge(message) => ("OUTPUT_TOO_LARGE", message.clone(), None),
+        ComfyAdapterError::ImageUpload(message) => {
+            ("COMFY_IMAGE_UPLOAD_FAILED", message.clone(), None)
+        }
     };
     TaskError {
         code: code.to_owned(),
@@ -625,7 +684,15 @@ fn task_error_from_output(error: &GenerationServiceError) -> TaskError {
     }
 }
 
-fn input_values_to_json(values: &BTreeMap<String, InputValue>) -> Value {
+fn task_error_from_input_prepare(error: &GenerationInputPrepareError) -> TaskError {
+    TaskError {
+        code: error.code().to_owned(),
+        message: error.to_string(),
+        raw: None,
+    }
+}
+
+fn input_values_to_json(values: &BTreeMap<String, GenerationInputValue>) -> Value {
     let object = values
         .iter()
         .map(|(key, value)| (key.clone(), input_value_to_json(value)))
@@ -633,16 +700,23 @@ fn input_values_to_json(values: &BTreeMap<String, InputValue>) -> Value {
     Value::Object(object)
 }
 
-fn input_value_to_json(value: &InputValue) -> Value {
+fn input_value_to_json(value: &GenerationInputValue) -> Value {
     match value {
-        InputValue::String(value) => Value::String(value.clone()),
-        InputValue::Integer(value) => Value::Number(Number::from(*value)),
-        InputValue::Seed(SeedValue::Random) => Value::String("random".to_owned()),
-        InputValue::Seed(SeedValue::Fixed(value)) => Value::Number(Number::from(*value)),
+        GenerationInputValue::Text(value) => Value::String(value.clone()),
+        GenerationInputValue::Integer(value) => Value::Number(Number::from(*value)),
+        GenerationInputValue::Seed(SeedValue::Random) => Value::String("random".to_owned()),
+        GenerationInputValue::Seed(SeedValue::Fixed(value)) => Value::Number(Number::from(*value)),
+        GenerationInputValue::ImageAsset(asset_id) => serde_json::json!({
+            "type": "image_asset",
+            "assetId": asset_id.as_str(),
+        }),
     }
 }
 
-fn resolved_inputs_to_json(values: &BTreeMap<String, ResolvedInputValue>) -> Value {
+fn resolved_inputs_to_json(
+    values: &BTreeMap<String, ResolvedInputValue>,
+    prepared: &PreparedGenerationInputs,
+) -> Value {
     let object = values
         .iter()
         .map(|(key, value)| {
@@ -650,6 +724,11 @@ fn resolved_inputs_to_json(values: &BTreeMap<String, ResolvedInputValue>) -> Val
                 ResolvedInputValue::String(value) => Value::String(value.clone()),
                 ResolvedInputValue::Integer(value) => Value::Number(Number::from(*value)),
                 ResolvedInputValue::Seed(value) => Value::Number(Number::from(*value)),
+                ResolvedInputValue::Image(_) => prepared
+                    .images
+                    .get(key)
+                    .map(image_snapshot_value)
+                    .unwrap_or_else(|| Value::String("image".to_owned())),
             };
             (key.clone(), value)
         })

@@ -1,10 +1,11 @@
 use crate::{
     app_state::AppState,
     application::{
+        generation_input_preparer::GenerationInputValue,
         generation_service::{CreateGenerationRequest, GenerationServiceError},
         task_query_service::TaskView,
     },
-    domain::{InputValue, SeedValue},
+    domain::SeedValue,
     error::AppError,
 };
 use serde::Deserialize;
@@ -31,6 +32,11 @@ pub enum InputValueDto {
     SeedRandom,
     #[serde(rename = "seed_fixed")]
     SeedFixed { value: String },
+    #[serde(rename = "image_asset")]
+    ImageAsset {
+        #[serde(rename = "assetId")]
+        asset_id: String,
+    },
 }
 
 impl GenerationCreateRequest {
@@ -40,16 +46,25 @@ impl GenerationCreateRequest {
             .into_iter()
             .map(|(key, value)| {
                 let value = match value {
-                    InputValueDto::String { value } => InputValue::String(value),
-                    InputValueDto::Integer { value } => InputValue::Integer(value),
-                    InputValueDto::SeedRandom => InputValue::Seed(SeedValue::Random),
+                    InputValueDto::String { value } => GenerationInputValue::Text(value),
+                    InputValueDto::Integer { value } => GenerationInputValue::Integer(value),
+                    InputValueDto::SeedRandom => GenerationInputValue::Seed(SeedValue::Random),
                     InputValueDto::SeedFixed { value } => {
                         let seed = value.parse::<u64>().map_err(|_| {
                             AppError::invalid_input(format!(
                                 "seed value for {key} must be a decimal u64 string"
                             ))
                         })?;
-                        InputValue::Seed(SeedValue::Fixed(seed))
+                        GenerationInputValue::Seed(SeedValue::Fixed(seed))
+                    }
+                    InputValueDto::ImageAsset { asset_id } => {
+                        let asset_id =
+                            crate::domain::AssetId::parse(asset_id).map_err(|error| {
+                                AppError::invalid_input(format!(
+                                    "image asset id is invalid: {error}"
+                                ))
+                            })?;
+                        GenerationInputValue::ImageAsset(asset_id)
                     }
                 };
                 Ok((key, value))
@@ -92,6 +107,7 @@ fn map_generation_error(error: GenerationServiceError) -> AppError {
             super::map_repository_error(repository_error)
         }
         GenerationServiceError::Compile(_) => AppError::invalid_input(error.to_string()),
+        GenerationServiceError::InputPrepare(_) => AppError::invalid_input(error.to_string()),
         GenerationServiceError::Domain(_)
         | GenerationServiceError::Snapshot(_)
         | GenerationServiceError::Comfy(_)

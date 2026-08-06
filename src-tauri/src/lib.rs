@@ -25,6 +25,7 @@ use application::{
     generation_service::GenerationService,
     ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
     project_bootstrap::DefaultProjectBootstrap,
+    source_asset_import_service::SourceAssetImportService,
     task_query_service::TaskQueryService,
     workflow_library_service::WorkflowLibraryService,
 };
@@ -58,6 +59,7 @@ fn initialize_logging() {
 
 fn run_application() -> Result<(), AppError> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_root = app
                 .path()
@@ -141,10 +143,10 @@ fn run_application() -> Result<(), AppError> {
                     snapshot_repository,
                     definition_repository.clone(),
                     comfy_adapter,
-                    project_repository,
+                    project_repository.clone(),
                     asset_store.clone(),
                     asset_repository.clone(),
-                    clock,
+                    clock.clone(),
                 )
                 .with_task_update_sink(task_update_sink),
             );
@@ -154,8 +156,16 @@ fn run_application() -> Result<(), AppError> {
                 Arc::new(SqliteTaskRepository::new(database_pool.clone())),
                 asset_repository.clone(),
             ));
-            let asset_query_service =
-                Arc::new(AssetQueryService::new(asset_repository, asset_store));
+            let asset_query_service = Arc::new(AssetQueryService::new(
+                asset_repository.clone(),
+                asset_store.clone(),
+            ));
+            let source_asset_import_service = Arc::new(SourceAssetImportService::new(
+                project_repository,
+                asset_store,
+                asset_repository,
+                clock,
+            ));
             app.manage(AppState::new(
                 data_dirs,
                 comfy_service,
@@ -164,6 +174,7 @@ fn run_application() -> Result<(), AppError> {
                 generation_catalog_service,
                 task_query_service,
                 asset_query_service,
+                source_asset_import_service,
             ));
 
             Ok(())
@@ -179,6 +190,8 @@ fn run_application() -> Result<(), AppError> {
             commands::task::task_get,
             commands::task::task_list_recent,
             commands::asset::asset_list_by_task,
+            commands::asset::asset_list_recent,
+            commands::asset::asset_pick_and_import_image,
             commands::asset::asset_read_image
         ])
         .run(tauri::generate_context!())

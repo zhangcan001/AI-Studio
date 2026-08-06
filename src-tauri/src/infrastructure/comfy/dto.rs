@@ -53,3 +53,13 @@ pub struct PromptResponseDto {
     #[serde(default)]
     pub error: Option<Value>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UploadResponseDto {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub subfolder: Option<String>,
+    #[serde(rename = "type", default)]
+    pub folder_type: Option<String>,
+}

@@ -2,6 +2,7 @@ use crate::application::asset_query_service::AssetQueryService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
+use crate::application::source_asset_import_service::SourceAssetImportService;
 use crate::application::task_query_service::TaskQueryService;
 use crate::application::workflow_library_service::WorkflowLibraryService;
 use crate::infrastructure::filesystem::AppDataDirs;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub generation_catalog_service: Arc<GenerationCatalogService>,
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
+    pub source_asset_import_service: Arc<SourceAssetImportService>,
 }
 
 impl AppState {
@@ -26,6 +28,7 @@ impl AppState {
         generation_catalog_service: Arc<GenerationCatalogService>,
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
+        source_asset_import_service: Arc<SourceAssetImportService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -35,6 +38,7 @@ impl AppState {
             generation_catalog_service,
             task_query_service,
             asset_query_service,
+            source_asset_import_service,
         }
     }
 }

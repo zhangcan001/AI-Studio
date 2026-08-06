@@ -66,6 +66,12 @@ enum InputDefinitionDto {
         #[serde(default)]
         max: Option<u64>,
     },
+    #[serde(rename = "image")]
+    Image {
+        label: String,
+        #[serde(default)]
+        required: bool,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +198,7 @@ impl InputDefinitionDto {
                 min,
                 max,
             }),
+            Self::Image { label, required } => Ok(InputDefinition::Image { label, required }),
         }
     }
 }
@@ -293,6 +300,20 @@ outputs:
                 max: Some(20),
                 ..
             })
+        ));
+        assert_eq!(recipe.schema_version, 1);
+    }
+
+    #[test]
+    fn parses_image_input_in_schema_v1() {
+        let yaml = VALID_RECIPE.replace(
+            "  steps:\n",
+            "  reference_image:\n    type: image\n    label: Reference Image\n    required: true\n  steps:\n",
+        );
+        let recipe = RecipeParser::parse(&yaml).expect("image recipe should parse");
+        assert!(matches!(
+            recipe.inputs.get("reference_image"),
+            Some(InputDefinition::Image { required: true, .. })
         ));
         assert_eq!(recipe.schema_version, 1);
     }

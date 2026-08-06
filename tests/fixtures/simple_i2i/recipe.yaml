@@ -1,0 +1,60 @@
+schema_version: 1
+
+id: simple_i2i
+
+name: Simple Image to Image
+
+workflow:
+  file: workflow_api.json
+
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+
+  reference_image:
+    type: image
+    label: Reference Image
+    required: true
+
+  steps:
+    type: integer
+    label: Steps
+    required: true
+    default: 20
+    min: 1
+    max: 100
+
+  seed:
+    type: seed
+    label: Seed
+    default: random
+
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+
+  - source: reference_image
+    target:
+      node: "10"
+      input: image
+
+  - source: steps
+    target:
+      node: "3"
+      input: steps
+
+  - source: seed
+    target:
+      node: "3"
+      input: seed
+
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true

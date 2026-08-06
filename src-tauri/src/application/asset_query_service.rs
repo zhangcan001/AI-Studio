@@ -33,6 +33,25 @@ impl AssetQueryService {
             .collect())
     }
 
+    pub async fn list_recent(
+        &self,
+        project_id: &str,
+        limit: u32,
+    ) -> Result<Vec<AssetView>, AssetQueryError> {
+        if project_id.trim().is_empty() {
+            return Err(AssetQueryError::InvalidProjectId(
+                "project id must not be empty".to_owned(),
+            ));
+        }
+        Ok(self
+            .asset_repository
+            .list_recent(project_id, limit.min(100))
+            .await?
+            .into_iter()
+            .map(AssetView::from)
+            .collect())
+    }
+
     pub async fn read_image(&self, asset_id: &str) -> Result<AssetBinary, AssetQueryError> {
         let asset_id = AssetId::parse(asset_id.to_owned())
             .map_err(|error| AssetQueryError::InvalidAssetId(error.to_string()))?;
@@ -57,6 +76,7 @@ impl AssetQueryService {
 #[serde(rename_all = "camelCase")]
 pub struct AssetView {
     pub id: String,
+    pub category: String,
     pub name: String,
     pub original_name: String,
     pub mime_type: String,
@@ -71,6 +91,7 @@ impl From<crate::domain::Asset> for AssetView {
     fn from(asset: crate::domain::Asset) -> Self {
         Self {
             id: asset.id.as_str().to_owned(),
+            category: asset.category,
             name: asset.name,
             original_name: asset.original_name,
             mime_type: asset.mime_type,
@@ -90,6 +111,7 @@ pub struct AssetBinary {
 #[derive(Debug)]
 pub enum AssetQueryError {
     InvalidTaskId(String),
+    InvalidProjectId(String),
     InvalidAssetId(String),
     NotFound(String),
     NotImage(String),
@@ -101,6 +123,7 @@ impl fmt::Display for AssetQueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidTaskId(message) => write!(formatter, "INVALID_TASK_ID: {message}"),
+            Self::InvalidProjectId(message) => write!(formatter, "INVALID_PROJECT_ID: {message}"),
             Self::InvalidAssetId(message) => write!(formatter, "INVALID_ASSET_ID: {message}"),
             Self::NotFound(id) => write!(formatter, "ASSET_NOT_FOUND: asset {id} was not found"),
             Self::NotImage(id) => write!(formatter, "ASSET_NOT_IMAGE: asset {id} is not an image"),

@@ -71,7 +71,7 @@ impl RecipeValidator {
                         }
                     }
                 }
-                InputDefinition::TextArea { .. } => {}
+                InputDefinition::TextArea { .. } | InputDefinition::Image { .. } => {}
             }
         }
 

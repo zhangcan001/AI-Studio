@@ -63,3 +63,19 @@ describe("validateRecipeValues seed ranges", () => {
     ).toEqual({});
   });
 });
+
+describe("validateRecipeValues image inputs", () => {
+  const imageRecipe: RecipeViewModel = {
+    ...recipe,
+    fields: [{ key: "reference", type: "image", label: "Reference", required: true }],
+  };
+
+  it("requires an image asset for a required image field", () => {
+    expect(validateRecipeValues(imageRecipe, {})).toEqual({ reference: "Choose an image." });
+    expect(
+      validateRecipeValues(imageRecipe, {
+        reference: { type: "image_asset", assetId: "ast_reference" },
+      }),
+    ).toEqual({});
+  });
+});

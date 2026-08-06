@@ -69,6 +69,27 @@ p { line-height: 1.5; }
 .runtime-strip span { color: #8997ad; font-size: 0.75rem; }
 .runtime-strip strong { margin-top: 3px; font-size: 0.9rem; }
 
+.comfy-status-card {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid #2c3547;
+  border-radius: 16px;
+  background: #171d28;
+}
+.comfy-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.comfy-status-heading h2 { margin: 0; }
+.comfy-status-grid { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 12px; }
+.comfy-status-grid div { min-width: 0; padding-right: 12px; border-right: 1px solid #2c3547; }
+.comfy-status-grid span, .comfy-status-grid strong { display: block; }
+.comfy-status-grid span { color: #8997ad; font-size: 0.75rem; }
+.comfy-status-grid strong { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.86rem; }
+.comfy-status-actions { display: flex; gap: 10px; }
+.comfy-connected { color: #b9f5cd; background: #1d5535; }
+.comfy-offline { color: #ffd2b8; background: #5b3327; }
+.comfy-incompatible { color: #ffdfb8; background: #5d4724; }
+
 button {
   padding: 9px 13px;
   border: 1px solid #4d658f;
@@ -110,6 +131,12 @@ textarea { resize: vertical; padding: 10px; }
 select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-offset: 1px; }
 .dynamic-form { display: grid; gap: 17px; padding: 22px 0; }
 .field-control { display: grid; gap: 6px; }
+.image-field-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
+.image-selection-summary { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid #35435b; border-radius: 10px; background: #111720; }
+.image-selection-summary img { width: 72px; height: 72px; object-fit: contain; border-radius: 6px; background: #090c11; }
+.image-selection-summary div { display: grid; gap: 4px; min-width: 0; }
+.image-selection-summary strong, .image-selection-summary small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-selection-summary small { color: #8997ad; font-size: 0.78rem; }
 .field-hint { color: #8997ad; font-size: 0.78rem; }
 .field-error { color: #ffadad; font-size: 0.8rem; }
 .unsupported-field { padding: 12px; border: 1px dashed #b36b58; border-radius: 8px; color: #ffc3ae; background: #3a2423; }
@@ -152,4 +179,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .runtime-strip > div { border-right: 0; }
   .runtime-strip button { flex: 1; }
   .studio-panel, .task-card, .output-card, .studio-empty { padding: 17px; }
+  .comfy-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .comfy-status-grid div { border-right: 0; }
+  .comfy-status-actions, .image-field-actions { grid-template-columns: 1fr; flex-direction: column; }
 }

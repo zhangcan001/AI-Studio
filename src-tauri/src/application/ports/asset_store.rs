@@ -38,6 +38,17 @@ pub trait AssetStore: Send + Sync {
         bytes: &[u8],
     ) -> Result<StoredAssetFile, AssetStoreError>;
 
+    async fn write_source_image(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+        bytes: &[u8],
+    ) -> Result<StoredAssetFile, AssetStoreError> {
+        self.write_image(project_root, asset_id, extension, bytes)
+            .await
+    }
+
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError>;
 
     async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError>;

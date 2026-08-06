@@ -8,28 +8,10 @@ import {
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
 import type { RecipeViewModel } from "../types/generation";
-import type { ComfyDeviceInfo, ComfyStatus } from "../types/comfy";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
+import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import "./App.css";
-
-function formatBytes(bytes: number | undefined): string {
-  if (bytes === undefined) return "--";
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-}
-
-function formatVram(device: ComfyDeviceInfo | undefined): string {
-  if (!device || (device.vramFree === undefined && device.vramTotal === undefined)) return "--";
-  return `${formatBytes(device.vramFree)} / ${formatBytes(device.vramTotal)}`;
-}
-
-function connectionLabel(status: ComfyStatus["status"]): string {
-  switch (status) {
-    case "CONNECTED": return "Connected";
-    case "INCOMPATIBLE": return "Incompatible";
-    default: return "Offline";
-  }
-}
 
 function App() {
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
@@ -113,7 +95,6 @@ function App() {
   }
 
   const comfy = bootstrapState?.comfy;
-  const firstDevice = comfy?.devices[0];
   const isConnected = comfy?.status === "CONNECTED";
 
   return (
@@ -126,24 +107,19 @@ function App() {
         {comfy && (
           <div className="header-status">
             <span className={`status-dot status-${comfy.status.toLowerCase()}`} />
-            <span>ComfyUI {connectionLabel(comfy.status)}</span>
-            <small>{firstDevice?.name ?? "GPU unavailable"}</small>
+            <span>ComfyUI {comfy.status === "CONNECTED" ? "Connected" : comfy.status === "INCOMPATIBLE" ? "Incompatible" : "Offline"}</span>
+            <small>{comfy.devices[0]?.name ?? "GPU unavailable"}</small>
           </div>
         )}
       </header>
 
-      <section className="runtime-strip" aria-live="polite">
-        <div><span>Backend</span><strong>{bootstrapState?.ping ?? "Connecting..."}</strong></div>
-        <div><span>Database</span><strong>{bootstrapState?.status.database === "ready" ? "Ready" : "Connecting..."}</strong></div>
-        <div><span>VRAM</span><strong>{formatVram(firstDevice)}</strong></div>
-        <div><span>Nodes</span><strong>{comfy?.capability?.nodeCount ?? "--"}</strong></div>
-        <button type="button" onClick={() => void reconnectComfy()} disabled={connectionLoading}>
-          {connectionLoading ? "Checking..." : "Test Connection"}
-        </button>
-        <button type="button" onClick={() => void refreshCapabilities()} disabled={!isConnected || capabilityLoading}>
-          {capabilityLoading ? "Refreshing..." : "Refresh Nodes"}
-        </button>
-      </section>
+      <ComfyStatusCard
+        status={comfy}
+        connectionLoading={connectionLoading}
+        capabilityLoading={capabilityLoading}
+        onReconnect={() => void reconnectComfy()}
+        onRefreshCapabilities={() => void refreshCapabilities()}
+      />
 
       <section className="studio-layout">
         <GenerationStudio

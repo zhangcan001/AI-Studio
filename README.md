@@ -2,7 +2,11 @@
 
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
-Current M0 progress:
+Current milestone progress:
+
+M0 = PASS.
+
+M1 first phase:
 
 - Desktop foundation and Rust application layering
 - SQLite migration and local application data directories
@@ -21,10 +25,19 @@ Current M0 progress:
 - `COLLECTING → SUCCEEDED` only after output validation and Asset persistence
 - Idempotent `prj_default` project bootstrap and project asset directory
 - Runtime Workflow Library package validation, version conflict protection, and sync
-- Catalog ViewModel bridge exposing only `textarea`, `integer`, and `seed` fields
+- Catalog ViewModel bridge exposing `textarea`, `integer`, `seed`, and `image` fields
 - Non-blocking `generation_create`, persisted `task://updated` events, and task queries
 - Asset ID-only query bridge with binary image IPC and Blob URL cleanup in React
 - Dynamic Generation Studio, task progress card, and image output grid
+- Source and generated image Asset categories with nullable `source_task_id`
+- Native PNG/JPEG/WebP Source Asset import with SHA-256 and atomic storage
+- Recipe `image` input, pure Image compiler values, and Application Input Preparer
+- ComfyUI `/upload/image` multipart adapter with server-returned input identity
+- Asset picker, recent image selection, and `ImageField` preview UI
+- Mock I2I E2E covering validation, upload, snapshot identity, and prompt submission
+
+M1 live I2I is not run because no validated runtime I2I Workflow Package was supplied.
+The existing M0 text-to-image runtime remains the only live generation package.
 
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not

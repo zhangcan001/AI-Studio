@@ -50,7 +50,7 @@ export function GenerationStudio({
   }, [catalog, selectedWorkflow, setSelectedWorkflow]);
 
   const hasUnsupportedField = useMemo(
-    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed"].includes(field.type)) ?? false,
+    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image"].includes(field.type)) ?? false,
     [selectedWorkflow],
   );
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
@@ -151,6 +151,7 @@ export function GenerationStudio({
               validationErrors={validationErrors}
               onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
               onGenerate={() => void generate()}
+              projectId="prj_default"
             />
             {!comfyConnected && <p className="disabled-note">Connect ComfyUI before generating.</p>}
             {!taskEventsReady && (

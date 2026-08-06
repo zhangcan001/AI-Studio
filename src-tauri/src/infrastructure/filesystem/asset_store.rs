@@ -19,9 +19,11 @@ impl FileSystemAssetStore {
         project_root: &Path,
         asset_id: &AssetId,
         extension: &str,
+        category: &str,
     ) -> Result<PathBuf, AssetStoreError> {
         if project_root.as_os_str().is_empty()
             || extension.is_empty()
+            || category.is_empty()
             || !extension
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric())
@@ -33,22 +35,19 @@ impl FileSystemAssetStore {
 
         Ok(project_root
             .join("assets")
-            .join("generated")
+            .join(category)
             .join("image")
             .join(format!("{}.{}", asset_id.as_str(), extension)))
     }
-}
 
-#[async_trait]
-impl AssetStore for FileSystemAssetStore {
-    async fn write_image(
-        &self,
+    async fn write_to_path(
         project_root: &Path,
         asset_id: &AssetId,
         extension: &str,
+        category: &str,
         bytes: &[u8],
     ) -> Result<StoredAssetFile, AssetStoreError> {
-        let target = Self::target_path(project_root, asset_id, extension)?;
+        let target = Self::target_path(project_root, asset_id, extension, category)?;
         let parent = target.parent().ok_or_else(|| {
             AssetStoreError::InvalidPath("asset target has no parent directory".to_owned())
         })?;
@@ -81,6 +80,29 @@ impl AssetStore for FileSystemAssetStore {
         }
 
         Ok(StoredAssetFile { path: target })
+    }
+}
+
+#[async_trait]
+impl AssetStore for FileSystemAssetStore {
+    async fn write_image(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+        bytes: &[u8],
+    ) -> Result<StoredAssetFile, AssetStoreError> {
+        Self::write_to_path(project_root, asset_id, extension, "generated", bytes).await
+    }
+
+    async fn write_source_image(
+        &self,
+        project_root: &Path,
+        asset_id: &AssetId,
+        extension: &str,
+        bytes: &[u8],
+    ) -> Result<StoredAssetFile, AssetStoreError> {
+        Self::write_to_path(project_root, asset_id, extension, "source", bytes).await
     }
 
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError> {
@@ -127,5 +149,14 @@ mod tests {
             .await
             .expect("asset should delete");
         assert!(!stored.path.exists());
+
+        let source = store
+            .write_source_image(root.path(), &asset_id, "png", b"source-bytes")
+            .await
+            .expect("source asset should write");
+        assert_eq!(
+            source.path,
+            root.path().join("assets/source/image/ast_test-1.png")
+        );
     }
 }

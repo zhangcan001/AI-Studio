@@ -108,6 +108,20 @@ pub struct ComfyOutputData {
     pub content_type: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyImageUpload {
+    pub bytes: Vec<u8>,
+    pub upload_name: String,
+    pub content_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyUploadedImage {
+    pub name: String,
+    pub subfolder: String,
+    pub folder_type: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ComfyExecutionEvent {
     ExecutionStarted {
@@ -163,6 +177,7 @@ pub enum ComfyAdapterError {
     HistoryNotFound(String),
     OutputDownload(String),
     OutputTooLarge(String),
+    ImageUpload(String),
 }
 
 impl ComfyAdapterError {
@@ -177,6 +192,7 @@ impl ComfyAdapterError {
             Self::HistoryNotFound(_) => "HISTORY_NOT_FOUND",
             Self::OutputDownload(_) => "OUTPUT_DOWNLOAD_FAILED",
             Self::OutputTooLarge(_) => "OUTPUT_TOO_LARGE",
+            Self::ImageUpload(_) => "IMAGE_UPLOAD_FAILED",
         }
     }
 }
@@ -214,6 +230,9 @@ impl fmt::Display for ComfyAdapterError {
             Self::OutputTooLarge(message) => {
                 write!(formatter, "ComfyUI output is too large: {message}")
             }
+            Self::ImageUpload(message) => {
+                write!(formatter, "ComfyUI image upload failed: {message}")
+            }
         }
     }
 }
@@ -227,6 +246,16 @@ pub trait ComfyAdapter: Send + Sync {
     async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError>;
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError>;
+
+    async fn upload_image(
+        &self,
+        upload: ComfyImageUpload,
+    ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
+        let _ = upload;
+        Err(ComfyAdapterError::ImageUpload(
+            "image upload is not supported by this adapter".to_owned(),
+        ))
+    }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError>;
 

@@ -47,6 +47,8 @@ function defaultValues(workflow: RecipeViewModel): GenerationValues {
           return field.defaultMode === "fixed"
             ? [field.key, { type: "seed_fixed", value: field.defaultValue ?? "" }]
             : [field.key, { type: "seed_random" }];
+        case "image":
+          return [field.key, undefined];
       }
     }).filter((entry): entry is [string, DraftValue] => entry[1] !== undefined),
   );

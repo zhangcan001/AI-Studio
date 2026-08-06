@@ -68,6 +68,12 @@ pub enum FieldViewModel {
         #[serde(rename = "maxValue")]
         max_value: Option<String>,
     },
+    #[serde(rename = "image")]
+    Image {
+        key: String,
+        label: String,
+        required: bool,
+    },
 }
 
 impl RecipeViewModel {
@@ -123,6 +129,11 @@ impl RecipeViewModel {
                         max_value: max.map(|value| value.to_string()),
                     }
                 }
+                InputDefinition::Image { label, required } => FieldViewModel::Image {
+                    key,
+                    label,
+                    required,
+                },
             })
             .collect();
 

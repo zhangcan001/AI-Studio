@@ -23,6 +23,12 @@ export type RecipeField =
       defaultValue?: string | null;
       minValue?: string | null;
       maxValue?: string | null;
+    }
+  | {
+      key: string;
+      type: "image";
+      label: string;
+      required: boolean;
     };
 
 export interface RecipeViewModel {
@@ -39,6 +45,7 @@ export type DraftValue =
   | { type: "string"; value: string }
   | { type: "integer"; value: number }
   | { type: "seed_random" }
-  | { type: "seed_fixed"; value: string };
+  | { type: "seed_fixed"; value: string }
+  | { type: "image_asset"; assetId: string };
 
 export type GenerationValues = Record<string, DraftValue>;

@@ -109,7 +109,7 @@ async fn insert_asset(
             RepositoryError::integrity("asset file_size exceeds SQLite integer range")
         })?,
     )
-    .bind(asset.source_task_id.as_str())
+    .bind(asset.source_task_id.as_ref().map(TaskId::as_str))
     .bind(metadata_json)
     .bind(format_datetime(asset.created_at))
     .bind(format_datetime(asset.updated_at))
@@ -151,9 +151,13 @@ impl AssetRow {
         let file_size = self.file_size.ok_or_else(|| {
             RepositoryError::serialization("asset file_size", "missing file size")
         })?;
-        let source_task_id = self.source_task_id.ok_or_else(|| {
-            RepositoryError::serialization("asset source_task_id", "missing source task")
-        })?;
+        let source_task_id = self
+            .source_task_id
+            .map(|value| {
+                TaskId::parse(value)
+                    .map_err(|error| map_domain_error("asset source_task_id", error))
+            })
+            .transpose()?;
         let metadata_json = parse_json("asset metadata_json", self.metadata_json.as_deref())?
             .ok_or_else(|| {
                 RepositoryError::serialization("asset metadata_json", "missing value")
@@ -183,8 +187,7 @@ impl AssetRow {
                 RepositoryError::serialization("asset height", format!("invalid value {height}"))
             })?,
             file_size: i64_to_u64("asset file_size", file_size)?,
-            source_task_id: TaskId::parse(source_task_id)
-                .map_err(|error| map_domain_error("asset source_task_id", error))?,
+            source_task_id,
             metadata_json,
             created_at: parse_datetime("asset created_at", &self.created_at)?,
             updated_at: parse_datetime("asset updated_at", &self.updated_at)?,
@@ -254,6 +257,24 @@ mod tests {
         .unwrap()
     }
 
+    fn source_asset(id: &str) -> Asset {
+        Asset::new_source_image(
+            AssetId::parse(id).unwrap(),
+            "project-1",
+            "reference.png",
+            "reference.png",
+            "C:/project/assets/source/image/reference.png",
+            "b".repeat(64),
+            "image/png",
+            2,
+            3,
+            67,
+            json!({"source": "native_import"}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 2).unwrap(),
+        )
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn insert_many_round_trips_and_lists_by_task() {
         let (_directory, _pool, task, repository) = setup().await;
@@ -289,5 +310,22 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn source_asset_round_trips_with_null_source_task() {
+        let (_directory, _pool, _task, repository) = setup().await;
+        let source = source_asset("ast_source_one");
+        repository
+            .insert_many(std::slice::from_ref(&source))
+            .await
+            .unwrap();
+        let loaded = repository
+            .find_by_id(&source.id)
+            .await
+            .unwrap()
+            .expect("source asset should load");
+        assert_eq!(loaded, source);
+        assert!(loaded.source_task_id.is_none());
     }
 }

@@ -1,12 +1,11 @@
+use crate::application::image_inspection::{inspect_bytes, InspectedImage};
 use crate::application::output_collector::CollectedImage;
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ProjectRepository, RepositoryError,
 };
 use crate::domain::{Asset, AssetId, TaskId};
-use image::{ImageFormat, ImageReader};
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use std::{error::Error, fmt, io::Cursor, path::PathBuf, sync::Arc};
+use std::{error::Error, fmt, path::PathBuf, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AssetImportError {
@@ -117,7 +116,7 @@ impl AssetImportService {
                 "comfySubfolder": image.subfolder,
                 "comfyType": image.folder_type,
             });
-            let asset = match Asset::new_image(
+            let asset = match Asset::new_generated_image(
                 asset_id,
                 project_id,
                 format!("Generated Image {}", image.position + 1),
@@ -166,41 +165,8 @@ impl AssetImportService {
     }
 }
 
-struct InspectedImage {
-    extension: &'static str,
-    mime_type: &'static str,
-    width: u32,
-    height: u32,
-    sha256: String,
-}
-
 fn inspect_image(image: &CollectedImage) -> Result<InspectedImage, AssetImportError> {
-    if image.bytes.is_empty() {
-        return Err(invalid_image("image output is empty"));
-    }
-    let reader = ImageReader::new(Cursor::new(&image.bytes))
-        .with_guessed_format()
-        .map_err(|error| invalid_image(error.to_string()))?;
-    let format = reader
-        .format()
-        .ok_or_else(|| invalid_image("image format could not be detected"))?;
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|error| invalid_image(error.to_string()))?;
-    let (extension, mime_type) = match format {
-        ImageFormat::Png => ("png", "image/png"),
-        ImageFormat::Jpeg => ("jpg", "image/jpeg"),
-        ImageFormat::WebP => ("webp", "image/webp"),
-        other => return Err(invalid_image(format!("unsupported image format {other:?}"))),
-    };
-    let sha256 = format!("{:x}", Sha256::digest(&image.bytes));
-    Ok(InspectedImage {
-        extension,
-        mime_type,
-        width,
-        height,
-        sha256,
-    })
+    inspect_bytes(&image.bytes).map_err(|error| invalid_image(error.to_string()))
 }
 
 fn invalid_image(message: impl Into<String>) -> AssetImportError {
@@ -312,7 +278,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|asset| asset.source_task_id == *task_id)
+                .filter(|asset| asset.source_task_id.as_ref() == Some(task_id))
                 .cloned()
                 .collect())
         }

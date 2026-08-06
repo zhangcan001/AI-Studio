@@ -60,6 +60,10 @@ pub enum InputDefinition {
         min: Option<u64>,
         max: Option<u64>,
     },
+    Image {
+        label: String,
+        required: bool,
+    },
 }
 
 impl InputDefinition {
@@ -68,6 +72,7 @@ impl InputDefinition {
             Self::TextArea { .. } => "textarea",
             Self::Integer { .. } => "integer",
             Self::Seed { .. } => "seed",
+            Self::Image { .. } => "image",
         }
     }
 
@@ -76,6 +81,7 @@ impl InputDefinition {
             Self::TextArea { label, .. }
             | Self::Integer { label, .. }
             | Self::Seed { label, .. } => label,
+            Self::Image { label, .. } => label,
         }
     }
 }
@@ -133,6 +139,7 @@ pub enum InputValue {
     String(String),
     Integer(i64),
     Seed(SeedValue),
+    Image(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,6 +147,7 @@ pub enum ResolvedInputValue {
     String(String),
     Integer(i64),
     Seed(u64),
+    Image(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
