@@ -77,12 +77,12 @@ export function GenerationStudio({
   }, [projectId]);
 
   useEffect(() => {
-    const next = selectedWorkflow && catalog.some(
-      (recipe) =>
-        recipe.workflowVersionId === selectedWorkflow.workflowVersionId &&
-        recipe.recipeId === selectedWorkflow.recipeId,
-    )
-      ? selectedWorkflow
+    const next = selectedWorkflow
+      ? catalog.find(
+          (recipe) =>
+            recipe.workflowVersionId === selectedWorkflow.workflowVersionId &&
+            recipe.recipeId === selectedWorkflow.recipeId,
+        )
       : catalog[0];
     if (
       next?.workflowVersionId !== selectedWorkflow?.workflowVersionId ||

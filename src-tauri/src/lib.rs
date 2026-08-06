@@ -9,7 +9,8 @@ mod infrastructure;
 pub use application::ports::{
     AssetRepository, AssetStore, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProjectRepository, RepositoryError, TaskRepository,
-    WorkflowLibraryRepository, WorkflowRunRepository,
+    WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
+    WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{
     SqliteAssetRepository, SqliteGenerationDefinitionRepository,
@@ -36,6 +37,7 @@ use application::{
     task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
+    workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::WorkflowOnboardingService,
 };
 use error::AppError;
@@ -44,7 +46,7 @@ use infrastructure::{
     database,
     filesystem::{
         AppDataDirs, FileSystemAssetStore, FileSystemProjectDirectoryStore,
-        FileSystemWorkflowLibrarySource,
+        FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore,
     },
     tauri::TauriTaskUpdateSink,
     time::SystemClock,
@@ -226,14 +228,37 @@ fn run_application() -> Result<(), AppError> {
             let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
                 infrastructure::database::SqliteWorkflowRunRepository::new(database_pool.clone()),
             );
+            let runtime_repository: Arc<dyn WorkflowRuntimeRepository> = Arc::new(
+                infrastructure::database::SqliteWorkflowRuntimeRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let runtime_state_repository: Arc<dyn WorkflowRuntimeStateRepository> = Arc::new(
+                infrastructure::database::SqliteWorkflowRuntimeStateRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let package_store: Arc<dyn application::ports::WorkflowPackageStore> =
+                Arc::new(FileSystemWorkflowPackageStore::new(
+                    data_dirs.workflow_library.clone(),
+                    data_dirs.workflow_staging.clone(),
+                ));
             let workflow_onboarding_service = Arc::new(WorkflowOnboardingService::new(
                 workflow_library_source.clone(),
                 comfy_adapter.clone(),
                 workflow_library_service.clone(),
                 workflow_run_repository,
+                package_store.clone(),
                 clock.clone(),
-                data_dirs.workflow_staging.clone(),
-                data_dirs.workflow_library.clone(),
+            ));
+            let workflow_lifecycle_service = Arc::new(WorkflowLifecycleService::new(
+                workflow_library_source.clone(),
+                workflow_library_service.clone(),
+                workflow_onboarding_service.clone(),
+                runtime_repository,
+                runtime_state_repository,
+                package_store,
+                clock.clone(),
             ));
             let task_update_sink: Arc<dyn application::ports::TaskUpdateSink> =
                 Arc::new(TauriTaskUpdateSink::new(app.handle().clone()));
@@ -320,6 +345,7 @@ fn run_application() -> Result<(), AppError> {
                 generation_service,
                 workflow_library_service,
                 workflow_onboarding_service,
+                workflow_lifecycle_service,
                 generation_catalog_service,
                 task_query_service,
                 asset_query_service,
@@ -365,6 +391,15 @@ fn run_application() -> Result<(), AppError> {
             commands::workflow_onboarding::workflow_onboarding_publish,
             commands::workflow_onboarding::workflow_onboarding_discard,
             commands::workflow_onboarding::workflow_workspace_list,
+            commands::workflow_lifecycle::workflow_runtime_workspace_list,
+            commands::workflow_lifecycle::workflow_runtime_diagnostics,
+            commands::workflow_lifecycle::workflow_set_enabled,
+            commands::workflow_lifecycle::workflow_recheck_capability,
+            commands::workflow_lifecycle::workflow_duplicate_recipe,
+            commands::workflow_lifecycle::workflow_compare_versions,
+            commands::workflow_lifecycle::workflow_export_package,
+            commands::workflow_lifecycle::workflow_import_package_backup,
+            commands::workflow_lifecycle::workflow_clean_staging,
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
             commands::project::project_list,

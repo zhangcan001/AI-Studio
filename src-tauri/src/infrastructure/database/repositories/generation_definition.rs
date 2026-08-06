@@ -61,7 +61,9 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
              FROM workflows w
              INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
              INNER JOIN recipes r ON r.workflow_version_id = wv.id
+             LEFT JOIN workflow_runtime_states wrs ON wrs.workflow_version_id = wv.id
              WHERE w.current_version_id = wv.id
+               AND COALESCE(wrs.enabled, 1) = 1
                AND r.version = (
                    SELECT MAX(latest.version)
                    FROM recipes latest
@@ -210,5 +212,23 @@ mod tests {
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].recipe_id, "recipe-2");
         assert!(definitions[0].recipe_yaml.contains("latest-recipe"));
+    }
+
+    #[tokio::test]
+    async fn excludes_explicitly_disabled_versions_without_hiding_missing_state() {
+        let (_directory, pool, repository) = setup().await;
+        assert_eq!(repository.list_available().await.unwrap().len(), 1);
+
+        sqlx::query(
+            "INSERT INTO workflow_runtime_states (workflow_version_id, enabled, updated_at)
+             VALUES (?, 0, ?)",
+        )
+        .bind("workflow-version-1")
+        .bind("2026-01-02T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(repository.list_available().await.unwrap().is_empty());
     }
 }

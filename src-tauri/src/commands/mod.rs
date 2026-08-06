@@ -6,6 +6,7 @@ pub mod preset;
 pub mod project;
 pub mod task;
 pub mod workflow_library;
+pub mod workflow_lifecycle;
 pub mod workflow_onboarding;
 
 use crate::{app_state::AppState, error::AppError};

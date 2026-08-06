@@ -6,5 +6,6 @@ pub use repositories::{
     SqliteAssetBrowseRepository, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqlitePresetRepository, SqliteProjectRepository,
     SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRunRepository,
+    SqliteWorkflowRunRepository, SqliteWorkflowRuntimeRepository,
+    SqliteWorkflowRuntimeStateRepository,
 };

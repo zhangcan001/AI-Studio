@@ -21,6 +21,9 @@ import type {
   WorkflowOnboardingPublishView,
   WorkflowOnboardingRemoveInputMappingRequest,
   WorkflowOnboardingValidationView,
+  WorkflowProductionWorkspaceResponse,
+  WorkflowRestoreView,
+  WorkflowVersionDiffView,
   WorkflowWorkspaceView,
 } from "../types/workflowOnboarding";
 import { buildAssetMediaUrl } from "./mediaUrl";
@@ -110,6 +113,46 @@ export function discardOnboarding(draftId: string): Promise<void> {
 
 export function listWorkflowWorkspace(): Promise<WorkflowWorkspaceView[]> {
   return invoke<WorkflowWorkspaceView[]>("workflow_workspace_list");
+}
+
+export function listWorkflowProductionWorkspace(): Promise<WorkflowProductionWorkspaceResponse> {
+  return invoke<WorkflowProductionWorkspaceResponse>("workflow_runtime_workspace_list");
+}
+
+export function setWorkflowEnabled(workflowVersionId: string, enabled: boolean): Promise<void> {
+  return invoke<void>("workflow_set_enabled", { workflowVersionId, enabled });
+}
+
+export function recheckWorkflowCapability(workflowVersionId: string): Promise<CapabilityCheckView> {
+  return invoke<CapabilityCheckView>("workflow_recheck_capability", { workflowVersionId });
+}
+
+export function duplicateWorkflowRecipe(
+  workflowVersionId: string,
+  recipeId?: string,
+  recipeVersion?: string,
+): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_duplicate_recipe", {
+    workflowVersionId,
+    recipeId,
+    recipeVersion,
+  });
+}
+
+export function compareWorkflowVersions(versionAId: string, versionBId: string): Promise<WorkflowVersionDiffView> {
+  return invoke<WorkflowVersionDiffView>("workflow_compare_versions", { versionAId, versionBId });
+}
+
+export function exportWorkflowPackage(workflowVersionId: string): Promise<{ fileName: string } | null> {
+  return invoke<{ fileName: string } | null>("workflow_export_package", { workflowVersionId });
+}
+
+export function importWorkflowPackageBackup(): Promise<WorkflowRestoreView | null> {
+  return invoke<WorkflowRestoreView | null>("workflow_import_package_backup");
+}
+
+export function cleanWorkflowStaging(stagingId: string): Promise<void> {
+  return invoke<void>("workflow_clean_staging", { stagingId });
 }
 
 export function listGenerationCatalog(): Promise<RecipeViewModel[]> {

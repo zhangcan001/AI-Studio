@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   checkOnboardingCapability,
+  cleanWorkflowStaging,
+  compareWorkflowVersions,
   discardOnboarding,
+  duplicateWorkflowRecipe,
+  exportWorkflowPackage,
   getOnboardingDraft,
-  listWorkflowWorkspace,
+  importWorkflowPackageBackup,
+  listWorkflowProductionWorkspace,
   pickApiWorkflow,
   publishOnboarding,
+  recheckWorkflowCapability,
   removeOnboardingInputMapping,
+  setWorkflowEnabled,
   setOnboardingInputMapping,
   setOnboardingMetadata,
   setOnboardingOutputMapping,
@@ -20,7 +27,8 @@ import type {
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingOutputMappingRequest,
-  WorkflowWorkspaceView,
+  WorkflowProductionWorkspaceView,
+  WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
 
 interface Props {
@@ -81,7 +89,12 @@ interface MetadataDraft {
 }
 
 export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
-  const [items, setItems] = useState<WorkflowWorkspaceView[]>([]);
+  const [items, setItems] = useState<WorkflowProductionWorkspaceView[]>([]);
+  const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "enabled" | "disabled" | "issues">("all");
+  const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
+  const [diff, setDiff] = useState<WorkflowVersionDiffView>();
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string>();
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, MappingDraft>>({});
@@ -111,7 +124,9 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     setWorkspaceLoading(true);
     setWorkspaceError(undefined);
     try {
-      setItems(await listWorkflowWorkspace());
+      const workspace = await listWorkflowProductionWorkspace();
+      setItems(workspace.items);
+      setStaging(workspace.staging);
     } catch (loadError: unknown) {
       setWorkspaceError(errorMessage(loadError));
     } finally {
@@ -160,6 +175,80 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       setLoading(false);
     }
   }
+
+  async function importBackup() {
+    setWorkspaceError(undefined);
+    try {
+      const restored = await importWorkflowPackageBackup();
+      if (restored) {
+        setNotice(`${restored.status}: ${restored.workflowVersion}`);
+        await loadWorkspace();
+        await onCatalogChanged();
+      }
+    } catch (importError: unknown) {
+      setWorkspaceError(errorMessage(importError));
+    }
+  }
+
+  async function toggleVersion(item: WorkflowProductionWorkspaceView) {
+    if (!item.workflowVersionId) return;
+    try {
+      await setWorkflowEnabled(item.workflowVersionId, !item.enabled);
+      await loadWorkspace();
+      await onCatalogChanged();
+      setNotice(`${item.name ?? item.packageName} ${item.enabled ? "disabled" : "enabled"}.`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(errorMessage(actionError));
+    }
+  }
+
+  async function recheckVersion(item: WorkflowProductionWorkspaceView) {
+    if (!item.workflowVersionId) return;
+    try {
+      const capability = await recheckWorkflowCapability(item.workflowVersionId);
+      await loadWorkspace();
+      setNotice(`${item.name ?? item.packageName}: ${formatCapability(capability.state)}`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(errorMessage(actionError));
+    }
+  }
+
+  async function duplicateRecipe(item: WorkflowProductionWorkspaceView) {
+    if (!item.workflowVersionId) return;
+    try {
+      const duplicated = await duplicateWorkflowRecipe(item.workflowVersionId, item.recipes[item.recipes.length - 1]?.recipeId);
+      setDraft(duplicated);
+      setStep("inputs");
+      setNotice("Recipe duplicated. Review mappings and publish the new Recipe version.");
+    } catch (actionError: unknown) {
+      setWorkspaceError(errorMessage(actionError));
+    }
+  }
+
+  async function compareSelected() {
+    if (selectedVersions.length !== 2) return;
+    try {
+      setDiff(await compareWorkflowVersions(selectedVersions[0], selectedVersions[1]));
+    } catch (actionError: unknown) {
+      setWorkspaceError(errorMessage(actionError));
+    }
+  }
+
+  function toggleSelected(item: WorkflowProductionWorkspaceView) {
+    if (!item.workflowVersionId) return;
+    setSelectedVersions((current) => current.includes(item.workflowVersionId!)
+      ? current.filter((id) => id !== item.workflowVersionId)
+      : current.length < 2 ? [...current, item.workflowVersionId!] : [current[1], item.workflowVersionId!]);
+  }
+
+  const visibleItems = items.filter((item) => {
+    const matchesSearch = !search.trim() || (item.name ?? item.packageName).toLowerCase().includes(search.trim().toLowerCase());
+    const matchesFilter = filter === "all"
+      || (filter === "enabled" && item.enabled)
+      || (filter === "disabled" && !item.enabled)
+      || (filter === "issues" && (item.packageStatus !== "VALID" || item.diagnostics.length > 0 || item.capability !== "READY"));
+    return matchesSearch && matchesFilter;
+  });
 
   async function checkCapability() {
     if (!draft) return;
@@ -282,43 +371,63 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
         <div className="workflow-workspace-actions">
           <button type="button" onClick={() => void loadWorkspace()} disabled={workspaceLoading}>Refresh</button>
           <button type="button" onClick={() => void importWorkflow()} disabled={loading}>Import API Workflow</button>
-        </div>
+          <button type="button" onClick={() => void importBackup()} disabled={loading}>Import Package Backup</button>
+      </div>
       </div>
 
       {workspaceError && <p className="error-message" role="alert">{workspaceError}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
 
+      <div className="workflow-production-toolbar">
+        <input aria-label="Search workflows" placeholder="Search by name" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <select aria-label="Workflow filter" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
+          <option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="issues">Issues</option>
+        </select>
+        <button type="button" onClick={() => void compareSelected()} disabled={selectedVersions.length !== 2}>Compare selected versions</button>
+      </div>
       <div className="workflow-catalog" aria-label="Workflow packages">
         <div className="workflow-catalog-header">
-          <span>Workflow Name</span><span>Version</span><span>Mode</span><span>Package Status</span><span>Capability</span><span>Successful Runs</span><span>Actions</span>
+          <span>Compare</span><span>Workflow Name</span><span>Version</span><span>Mode</span><span>Runtime</span><span>Capability</span><span>Runs</span><span>Actions</span>
         </div>
-        {items.map((item) => (
-          <article className="workflow-catalog-row" key={`${item.workflowId}:${item.workflowVersion}`}>
-            <strong>{item.name}</strong>
-            <span>{item.workflowVersion}</span>
-            <span>{item.mode}</span>
+        {visibleItems.map((item) => (
+          <article className="workflow-catalog-row" key={`${item.packageName}:${item.workflowVersionId ?? "invalid"}`}>
+            <input type="checkbox" aria-label={`Compare ${item.name ?? item.packageName}`} checked={item.workflowVersionId ? selectedVersions.includes(item.workflowVersionId) : false} onChange={() => toggleSelected(item)} disabled={!item.workflowVersionId} />
+            <strong>{item.name ?? item.packageName}</strong>
+            <span>{item.workflowVersion ?? "—"}</span>
+            <span>{item.mode ?? "—"}</span>
             <span>{item.packageStatus}</span>
             <span className={`workflow-capability workflow-capability-${item.capability.toLowerCase()}`}>{formatCapability(item.capability)}</span>
-            <span>{item.hasSuccessfulRun ? "Yes" : "No"}</span>
-            <button type="button" className="quiet-button" onClick={() => void importWorkflow(item.workflowId)} disabled={loading}>
-              Create new version
-            </button>
+            <span>{item.hasSuccessfulRun ? "Success" : `${item.totalTasks} total`}</span>
+            <div className="workflow-row-actions">
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "Disable" : "Enable"}</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>Recheck</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>Duplicate Recipe</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>Export</button>}
+              {item.workflowId && <button type="button" className="quiet-button" onClick={() => void importWorkflow(item.workflowId)}>Create new version</button>}
+            </div>
             <details className="workflow-catalog-detail">
               <summary>Details</summary>
               <div className="workflow-detail-grid">
-                <span>SHA-256 <strong>{item.workflowSha256}</strong></span>
+                <span>Enabled <strong>{item.enabled ? "Yes" : "No"}</strong></span>
+                <span>Workflow SHA-256 <strong>{item.workflowSha256 ?? "—"}</strong></span>
+                <span>Recipe SHA-256 <strong>{item.recipeSha256 ?? "—"}</strong></span>
                 <span>Nodes <strong>{item.nodeCount}</strong></span>
-                <span>Classes <strong>{item.uniqueClassCount}</strong></span>
-                <span>Input mappings <strong>{item.inputMappings.length}</strong></span>
-                <span>Outputs <strong>{item.outputs.length}</strong></span>
+                <span>Recipes <strong>{item.recipes.length}</strong></span>
+                <span>Active tasks <strong>{item.activeTasks}</strong></span>
+                <span>Total tasks <strong>{item.totalTasks}</strong></span>
               </div>
               {!!item.capabilityIssues.length && <IssueList issues={item.capabilityIssues} />}
+              {!!item.diagnostics.length && <ul className="workflow-issue-list">{item.diagnostics.map((diagnostic) => <li key={diagnostic.code}>{diagnostic.code}: {diagnostic.message}</li>)}</ul>}
+              {!!item.recipes.length && <div className="workflow-recipe-summary">{item.recipes.map((recipe) => <span key={recipe.recipeId}>Recipe {recipe.version} · {recipe.inputCount} inputs · {recipe.outputCount} outputs</span>)}</div>}
             </details>
           </article>
         ))}
-        {!items.length && !workspaceLoading && <p className="empty-state">No published workflow packages are available yet.</p>}
+        {!visibleItems.length && !workspaceLoading && <p className="empty-state">No workflows match the current filter.</p>}
       </div>
+
+      {!!staging.length && <div className="workflow-diagnostics-panel"><h3>Diagnostics</h3>{staging.map((entry) => <div key={entry.stagingId}><span>{entry.status}</span><code>{entry.stagingId}</code><button type="button" className="quiet-button" onClick={() => void cleanWorkflowStaging(entry.stagingId)} disabled={entry.inUse}>{entry.inUse ? "In use" : "Clean staging"}</button></div>)}</div>}
+      {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
 
       {draft && (
         <div className="workflow-onboarding-panel">
@@ -546,6 +655,31 @@ function PublishPane({ draft, published, loading, onPublish, onOpenStudio }: { d
       <button type="button" onClick={onPublish} disabled={loading || !draft.validation.readyToPublish}>{loading ? "Publishing..." : "Publish runtime package"}</button>
       {published && <div className="workflow-published-result"><strong>Published successfully</strong><span>Package is available in Studio after catalog refresh.</span><button type="button" onClick={onOpenStudio}>Open in Studio</button></div>}
     </div>
+  );
+}
+
+function VersionDiffPane({ diff, onClose }: { diff: WorkflowVersionDiffView; onClose: () => void }) {
+  return (
+    <details className="workflow-diff-panel" open>
+      <summary>Version diff · {diff.versionA} vs {diff.versionB}</summary>
+      <div className="workflow-detail-grid">
+        <span>Nodes <strong>{diff.nodeCountA} → {diff.nodeCountB}</strong></span>
+        <span>Added <strong>{diff.addedNodes.length}</strong></span>
+        <span>Removed <strong>{diff.removedNodes.length}</strong></span>
+        <span>Class changes <strong>{diff.changedClassTypes.length}</strong></span>
+        <span>Literal changes <strong>{diff.changedLiteralInputs.length}</strong></span>
+        <span>Link changes <strong>{diff.changedLinks.length}</strong></span>
+      </div>
+      {!!diff.addedNodes.length && <p>Added nodes: {diff.addedNodes.join(", ")}</p>}
+      {!!diff.removedNodes.length && <p>Removed nodes: {diff.removedNodes.join(", ")}</p>}
+      {!!diff.changedClassTypes.length && <ul className="workflow-issue-list">{diff.changedClassTypes.map((change) => <li key={change.nodeId}>Node {change.nodeId}: {change.from} → {change.to}</li>)}</ul>}
+      {!!diff.changedLiteralInputs.length && <ul className="workflow-issue-list">{diff.changedLiteralInputs.map((change) => <li key={`${change.nodeId}:${change.input}`}>Node {change.nodeId}.{change.input}: {change.from} → {change.to}</li>)}</ul>}
+      {!!diff.changedLinks.length && <ul className="workflow-issue-list">{diff.changedLinks.map((change) => <li key={`${change.nodeId}:${change.input}`}>Node connection changed: {change.nodeId}.{change.input}</li>)}</ul>}
+      {!!diff.recipeInputChanges.length && <p>Recipe inputs: {diff.recipeInputChanges.join("; ")}</p>}
+      {!!diff.bindingChanges.length && <p>Bindings: {diff.bindingChanges.join("; ")}</p>}
+      {!!diff.outputChanges.length && <p>Outputs: {diff.outputChanges.join("; ")}</p>}
+      <button type="button" className="quiet-button" onClick={onClose}>Close diff</button>
+    </details>
   );
 }
 

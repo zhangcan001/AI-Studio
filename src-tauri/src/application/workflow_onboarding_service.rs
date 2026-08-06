@@ -1,7 +1,7 @@
 use crate::application::{
     ports::{
-        Clock, ComfyAdapter, ComfyAdapterError, WorkflowLibrarySource, WorkflowPackageLoad,
-        WorkflowRunRepository,
+        Clock, ComfyAdapter, ComfyAdapterError, WorkflowLibrarySource, WorkflowPackageBytes,
+        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
     },
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
@@ -20,10 +20,9 @@ use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     error::Error,
     fmt,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Mutex},
 };
-use tokio::fs;
 use uuid::Uuid;
 
 pub const MAX_WORKFLOW_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
@@ -391,6 +390,7 @@ struct WorkflowOnboardingDraft {
     nodes: Vec<WorkflowNodeView>,
     manifest: WorkflowManifest,
     recipe_id: String,
+    allow_existing_workflow_sha: bool,
     capability: CapabilityCheckView,
     input_mappings: Vec<InputMapping>,
     output_mappings: Vec<OutputMapping>,
@@ -453,9 +453,8 @@ pub struct WorkflowOnboardingService {
     comfy_adapter: Arc<dyn ComfyAdapter>,
     workflow_library_service: Arc<WorkflowLibraryService>,
     workflow_run_repository: Arc<dyn WorkflowRunRepository>,
+    package_store: Arc<dyn WorkflowPackageStore>,
     clock: Arc<dyn Clock>,
-    staging_root: PathBuf,
-    library_root: PathBuf,
     registry: Mutex<WorkflowOnboardingRegistry>,
 }
 
@@ -465,18 +464,16 @@ impl WorkflowOnboardingService {
         comfy_adapter: Arc<dyn ComfyAdapter>,
         workflow_library_service: Arc<WorkflowLibraryService>,
         workflow_run_repository: Arc<dyn WorkflowRunRepository>,
+        package_store: Arc<dyn WorkflowPackageStore>,
         clock: Arc<dyn Clock>,
-        staging_root: PathBuf,
-        library_root: PathBuf,
     ) -> Self {
         Self {
             source,
             comfy_adapter,
             workflow_library_service,
             workflow_run_repository,
+            package_store,
             clock,
-            staging_root,
-            library_root,
             registry: Mutex::new(WorkflowOnboardingRegistry::default()),
         }
     }
@@ -540,6 +537,7 @@ impl WorkflowOnboardingService {
                 mode: "text_to_image".to_owned(),
             },
             recipe_id,
+            allow_existing_workflow_sha: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
@@ -562,6 +560,93 @@ impl WorkflowOnboardingService {
     ) -> Result<WorkflowOnboardingDraftView, WorkflowOnboardingError> {
         let draft = self.with_registry(|registry| registry.get(draft_id))??;
         Ok(view_for_draft(&draft))
+    }
+
+    pub fn is_draft_active(&self, draft_id: &str) -> bool {
+        self.registry
+            .lock()
+            .map(|registry| registry.drafts.contains_key(draft_id))
+            .unwrap_or(true)
+    }
+
+    pub async fn duplicate_recipe_draft(
+        &self,
+        workflow_id: &str,
+        workflow_version: &str,
+        source_recipe_version: Option<&str>,
+        recipe_version: Option<String>,
+    ) -> Result<WorkflowOnboardingDraftView, WorkflowOnboardingError> {
+        let packages = self.source.load_packages().await.map_err(|error| {
+            WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
+        })?;
+        let files = packages
+            .into_iter()
+            .find_map(|package| match package {
+                WorkflowPackageLoad::Loaded(files) => {
+                    let manifest = WorkflowManifest::parse(&files.manifest_yaml).ok()?;
+                    (manifest.id == workflow_id
+                        && manifest.workflow_version == workflow_version
+                        && source_recipe_version
+                            .map(|version| manifest.recipe_version == version)
+                            .unwrap_or(true))
+                    .then_some((files, manifest))
+                }
+                WorkflowPackageLoad::Invalid { .. } => None,
+            })
+            .ok_or_else(|| {
+                WorkflowOnboardingError::new(
+                    "RUNTIME_PACKAGE_MISSING",
+                    "the requested runtime package is not available",
+                )
+            })?;
+        let (files, manifest) = files;
+        let workflow_value: Value =
+            serde_json::from_str(&files.workflow_json).map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
+            })?;
+        let workflow = validate_api_workflow(workflow_value)?;
+        let recipe = RecipeParser::parse(&files.recipe_yaml)
+            .map_err(|error| WorkflowOnboardingError::new("RECIPE_INVALID", error.to_string()))?;
+        let mut next_manifest = manifest.clone();
+        next_manifest.recipe_version = recipe_version
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| increment_semver(&manifest.recipe_version));
+        validate_metadata_values(
+            &next_manifest.name,
+            &next_manifest.workflow_version,
+            &next_manifest.recipe_version,
+            &next_manifest.category,
+            &next_manifest.mode,
+        )?;
+        let raw_bytes = files.workflow_json.into_bytes();
+        let draft = WorkflowOnboardingDraft {
+            draft_id: format!("onb_{}", Uuid::new_v4()),
+            workflow_sha256: sha256(&raw_bytes),
+            original_filename: safe_filename(&format!("{}.json", next_manifest.name)),
+            nodes: inspect_workflow(&workflow)?,
+            workflow,
+            raw_bytes,
+            manifest: next_manifest,
+            recipe_id: format!("rcp_{}", Uuid::new_v4()),
+            allow_existing_workflow_sha: true,
+            capability: CapabilityCheckView {
+                state: CapabilityState::NotChecked,
+                checked_at: None,
+                issues: Vec::new(),
+            },
+            input_mappings: input_mappings_from_recipe(&recipe)?,
+            output_mappings: recipe
+                .outputs
+                .iter()
+                .map(output_mapping_from_recipe)
+                .collect(),
+        };
+        let draft_id = draft.draft_id.clone();
+        self.with_registry(|registry| {
+            registry.insert(draft);
+            Ok(())
+        })??;
+        self.get(&draft_id)
     }
 
     pub fn set_metadata(
@@ -840,6 +925,44 @@ impl WorkflowOnboardingService {
         Ok(capability)
     }
 
+    pub async fn check_runtime_workflow(
+        &self,
+        workflow_json: &str,
+    ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
+        let raw_bytes = workflow_json.as_bytes().to_vec();
+        let workflow =
+            validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
+            })?)?;
+        let draft = WorkflowOnboardingDraft {
+            draft_id: "onb_runtime_check".to_owned(),
+            workflow_sha256: sha256(&raw_bytes),
+            original_filename: "runtime.json".to_owned(),
+            nodes: inspect_workflow(&workflow)?,
+            workflow,
+            raw_bytes,
+            manifest: WorkflowManifest {
+                schema_version: 1,
+                id: "wfl_runtime_check".to_owned(),
+                name: "Runtime Check".to_owned(),
+                workflow_version: "1.0.0".to_owned(),
+                recipe_version: "1.0.0".to_owned(),
+                category: "diagnostic".to_owned(),
+                mode: "diagnostic".to_owned(),
+            },
+            recipe_id: "rcp_runtime_check".to_owned(),
+            allow_existing_workflow_sha: true,
+            capability: CapabilityCheckView {
+                state: CapabilityState::NotChecked,
+                checked_at: None,
+                issues: Vec::new(),
+            },
+            input_mappings: Vec::new(),
+            output_mappings: Vec::new(),
+        };
+        Ok(self.check_capability_for_workflow(&draft).await.0)
+    }
+
     pub fn validate(
         &self,
         draft_id: &str,
@@ -867,13 +990,15 @@ impl WorkflowOnboardingService {
         let existing_packages = self.source.load_packages().await.map_err(|error| {
             WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
         })?;
-        if existing_packages.iter().any(|package| {
-            if let WorkflowPackageLoad::Loaded(files) = package {
-                sha256(files.workflow_json.as_bytes()) == draft.workflow_sha256
-            } else {
-                false
-            }
-        }) {
+        if !draft.allow_existing_workflow_sha
+            && existing_packages.iter().any(|package| {
+                if let WorkflowPackageLoad::Loaded(files) = package {
+                    sha256(files.workflow_json.as_bytes()) == draft.workflow_sha256
+                } else {
+                    false
+                }
+            })
+        {
             return Err(WorkflowOnboardingError::new(
                 "IDENTICAL_WORKFLOW_ALREADY_EXISTS",
                 "Identical workflow already exists",
@@ -886,44 +1011,50 @@ impl WorkflowOnboardingService {
             .manifest
             .to_yaml()
             .map_err(|message| WorkflowOnboardingError::new("MANIFEST_INVALID", message))?;
-        let package_name = package_directory_name(&draft.manifest, &draft.workflow_sha256);
+        let package_name = if draft.allow_existing_workflow_sha {
+            package_directory_name_with_recipe(
+                &draft.manifest,
+                &draft.workflow_sha256,
+                &recipe_yaml,
+            )
+        } else {
+            package_directory_name(&draft.manifest, &draft.workflow_sha256)
+        };
         let staging_name = draft.draft_id.clone();
-        let staging_path = self.staging_root.join(&staging_name);
-        let destination_path = self.library_root.join(&package_name);
-        if fs::try_exists(&destination_path).await.map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_ALREADY_EXISTS", error.to_string())
-        })? {
-            return Err(WorkflowOnboardingError::new(
-                "WORKFLOW_PACKAGE_ALREADY_EXISTS",
-                format!("package {package_name} already exists"),
-            ));
+        let package = WorkflowPackageBytes::new(
+            manifest_yaml.into_bytes(),
+            recipe_yaml.into_bytes(),
+            draft.raw_bytes.clone(),
+        );
+        self.package_store
+            .stage(&staging_name, &package)
+            .await
+            .map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
+            })?;
+        let staged = match self.package_store.read_staging(&staging_name).await {
+            Ok(package) => package,
+            Err(error) => {
+                let _ = self.package_store.remove_staging(&staging_name).await;
+                return Err(WorkflowOnboardingError::new(
+                    "WORKFLOW_PACKAGE_PUBLISH_FAILED",
+                    error.to_string(),
+                ));
+            }
+        };
+        if let Err(error) = read_back_and_validate_package(&staged) {
+            let _ = self.package_store.remove_staging(&staging_name).await;
+            return Err(error);
         }
-
-        if fs::try_exists(&staging_path).await.unwrap_or(false) {
-            let _ = fs::remove_dir_all(&staging_path).await;
-        }
-        if let Err(error) = write_staging_package(
-            &staging_path,
-            &manifest_yaml,
-            &recipe_yaml,
-            &draft.raw_bytes,
-        )
-        .await
+        if let Err(error) = self
+            .package_store
+            .publish_atomic(&staging_name, &package_name)
+            .await
         {
-            let _ = fs::remove_dir_all(&staging_path).await;
-            return Err(error);
-        }
-
-        if let Err(error) = read_back_and_validate_package(&staging_path).await {
-            let _ = fs::remove_dir_all(&staging_path).await;
-            return Err(error);
-        }
-
-        if let Err(error) = fs::rename(&staging_path, &destination_path).await {
-            let _ = fs::remove_dir_all(&staging_path).await;
+            let _ = self.package_store.remove_staging(&staging_name).await;
             return Err(WorkflowOnboardingError::new(
                 "WORKFLOW_PACKAGE_PUBLISH_FAILED",
-                format!("atomic package rename failed: {error}"),
+                error.to_string(),
             ));
         }
 
@@ -937,7 +1068,7 @@ impl WorkflowOnboardingService {
                 report
             }
             Ok(report) => {
-                let _ = fs::remove_dir_all(&destination_path).await;
+                let _ = self.package_store.remove_published(&package_name).await;
                 return Err(WorkflowOnboardingError::new(
                     "WORKFLOW_PACKAGE_PUBLISH_FAILED",
                     report
@@ -949,7 +1080,7 @@ impl WorkflowOnboardingService {
                 ));
             }
             Err(error) => {
-                let _ = fs::remove_dir_all(&destination_path).await;
+                let _ = self.package_store.remove_published(&package_name).await;
                 return Err(WorkflowOnboardingError::new(
                     "WORKFLOW_PACKAGE_PUBLISH_FAILED",
                     error.to_string(),
@@ -1727,6 +1858,47 @@ fn output_view(output: &OutputDefinition) -> WorkflowOutputMappingView {
     }
 }
 
+fn input_mappings_from_recipe(
+    recipe: &Recipe,
+) -> Result<Vec<InputMapping>, WorkflowOnboardingError> {
+    recipe
+        .bindings
+        .iter()
+        .map(|binding| {
+            let definition = recipe.inputs.get(&binding.source).ok_or_else(|| {
+                WorkflowOnboardingError::new(
+                    "BINDING_INVALID",
+                    format!("recipe binding references unknown input {}", binding.source),
+                )
+            })?;
+            Ok(InputMapping {
+                semantic_key: binding.source.clone(),
+                field_type: SemanticFieldType::parse(definition.kind())?,
+                label: definition.label().to_owned(),
+                required: input_required(definition),
+                default_value: input_default(definition),
+                min_value: input_min(definition),
+                max_value: input_max(definition),
+                min_items: input_min_items(definition),
+                max_items: input_max_items(definition),
+                target_node: binding.target.node.clone(),
+                target_input: binding.target.input.clone(),
+                item_index: binding.item_index,
+            })
+        })
+        .collect()
+}
+
+fn output_mapping_from_recipe(output: &OutputDefinition) -> OutputMapping {
+    OutputMapping {
+        output_id: output.id.clone(),
+        label: output.id.clone(),
+        output_type: output.output_type,
+        node_id: output.node.clone(),
+        required: output.required,
+    }
+}
+
 fn input_required(definition: &InputDefinition) -> bool {
     match definition {
         InputDefinition::TextArea { required, .. }
@@ -2445,49 +2617,13 @@ fn parse_optional_u64(
         .transpose()
 }
 
-async fn write_staging_package(
-    staging_path: &Path,
-    manifest_yaml: &str,
-    recipe_yaml: &str,
-    workflow_bytes: &[u8],
+pub(crate) fn read_back_and_validate_package(
+    package: &WorkflowPackageBytes,
 ) -> Result<(), WorkflowOnboardingError> {
-    fs::create_dir_all(staging_path).await.map_err(|error| {
-        WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-    })?;
-    fs::write(staging_path.join("workflow_api.json"), workflow_bytes)
-        .await
-        .map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-        })?;
-    fs::write(staging_path.join("recipe.yaml"), recipe_yaml)
-        .await
-        .map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-        })?;
-    fs::write(staging_path.join("manifest.yaml"), manifest_yaml)
-        .await
-        .map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-        })?;
-    Ok(())
-}
-
-async fn read_back_and_validate_package(path: &Path) -> Result<(), WorkflowOnboardingError> {
-    let manifest = fs::read_to_string(path.join("manifest.yaml"))
-        .await
-        .map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-        })?;
-    let recipe = fs::read_to_string(path.join("recipe.yaml"))
-        .await
-        .map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-        })?;
-    let workflow = fs::read(path.join("workflow_api.json"))
-        .await
-        .map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_PACKAGE_PUBLISH_FAILED", error.to_string())
-        })?;
+    let manifest = String::from_utf8(package.manifest_yaml.clone())
+        .map_err(|error| WorkflowOnboardingError::new("MANIFEST_INVALID", error.to_string()))?;
+    let recipe = String::from_utf8(package.recipe_yaml.clone())
+        .map_err(|error| WorkflowOnboardingError::new("RECIPE_INVALID", error.to_string()))?;
     let manifest = WorkflowManifest::parse(&manifest)
         .map_err(|error| WorkflowOnboardingError::new("MANIFEST_INVALID", error))?;
     manifest
@@ -2497,9 +2633,10 @@ async fn read_back_and_validate_package(path: &Path) -> Result<(), WorkflowOnboa
         .map_err(|error| WorkflowOnboardingError::new("RECIPE_INVALID", error.to_string()))?;
     RecipeValidator::validate(&recipe)
         .map_err(|error| WorkflowOnboardingError::new("RECIPE_INVALID", error.to_string()))?;
-    let workflow = validate_api_workflow(serde_json::from_slice(&workflow).map_err(|error| {
-        WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
-    })?)?;
+    let workflow =
+        validate_api_workflow(serde_json::from_slice(&package.workflow_api_json).map_err(
+            |error| WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string()),
+        )?)?;
     BindingValidator::validate(&recipe, &workflow)
         .map_err(|error| WorkflowOnboardingError::new("BINDING_INVALID", error.to_string()))?;
     dry_run_compile(&recipe, &workflow)?;
@@ -2512,6 +2649,21 @@ fn package_directory_name(manifest: &WorkflowManifest, workflow_sha256: &str) ->
         slugify(&manifest.id.trim_start_matches("wfl_")),
         manifest.workflow_version.replace('.', "_"),
         &workflow_sha256[..8.min(workflow_sha256.len())]
+    )
+}
+
+fn package_directory_name_with_recipe(
+    manifest: &WorkflowManifest,
+    workflow_sha256: &str,
+    recipe_yaml: &str,
+) -> String {
+    format!(
+        "{}_{}_{}_{}_{}",
+        slugify(&manifest.id.trim_start_matches("wfl_")),
+        manifest.workflow_version.replace('.', "_"),
+        slugify(&manifest.recipe_version),
+        &workflow_sha256[..8.min(workflow_sha256.len())],
+        &sha256(recipe_yaml.as_bytes())[..8],
     )
 }
 
@@ -2568,7 +2720,7 @@ mod tests {
         domain::OutputType,
         infrastructure::{
             database::{initialize, SqliteWorkflowLibraryRepository},
-            filesystem::FileSystemWorkflowLibrarySource,
+            filesystem::{FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore},
         },
     };
     use async_trait::async_trait;
@@ -2776,18 +2928,30 @@ mod tests {
     #[tokio::test]
     async fn staging_readback_runs_manifest_recipe_workflow_and_dry_run_validation() {
         let directory = tempdir().unwrap();
-        let path = directory.path().join("onb_test");
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
         let draft = sample_draft();
         let recipe = build_recipe(&draft).unwrap();
         let manifest = draft.manifest.to_yaml().unwrap();
         let recipe_yaml = recipe_to_yaml(&recipe).unwrap();
-        write_staging_package(&path, &manifest, &recipe_yaml, &draft.raw_bytes)
+        let store = FileSystemWorkflowPackageStore::new(library_root, staging_root);
+        let package = WorkflowPackageBytes::new(
+            manifest.into_bytes(),
+            recipe_yaml.into_bytes(),
+            draft.raw_bytes.clone(),
+        );
+        store
+            .stage("onb_00000000-0000-4000-8000-000000000001", &package)
             .await
             .unwrap();
-        read_back_and_validate_package(&path).await.unwrap();
-        assert!(path.join("manifest.yaml").is_file());
-        assert!(path.join("recipe.yaml").is_file());
-        assert!(path.join("workflow_api.json").is_file());
+        let staged = store
+            .read_staging("onb_00000000-0000-4000-8000-000000000001")
+            .await
+            .unwrap();
+        read_back_and_validate_package(&staged).unwrap();
+        assert_eq!(staged, package);
     }
 
     #[tokio::test]
@@ -2811,9 +2975,11 @@ mod tests {
             adapter.clone(),
             library_service,
             Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root.clone(),
+                staging_root.clone(),
+            )),
             Arc::new(TestClock),
-            staging_root.clone(),
-            library_root.clone(),
         );
         let raw = br#"{"1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0]},"class_type":"SaveImage"}}"#.to_vec();
         let draft = service
@@ -2869,6 +3035,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(definitions.len(), 1);
+
+        let duplicate = service
+            .duplicate_recipe_draft("wfl_onboarded_t2i", "1.0.0", Some("1.0.0"), None)
+            .await
+            .unwrap();
+        assert_eq!(duplicate.manifest.recipe_version, "1.0.1");
+        assert_eq!(duplicate.workflow_sha256, draft.workflow_sha256);
+        assert!(!duplicate.input_mappings.is_empty());
+        service.check_capability(&duplicate.draft_id).await.unwrap();
+        assert!(
+            service
+                .validate(&duplicate.draft_id)
+                .unwrap()
+                .ready_to_publish
+        );
+        let duplicate_published = service.publish(&duplicate.draft_id).await.unwrap();
+        assert_ne!(duplicate_published.package_name, published.package_name);
     }
 
     #[tokio::test]
@@ -2889,9 +3072,11 @@ mod tests {
                 Arc::new(TestClock),
             )),
             Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root.clone(),
+                staging_root.clone(),
+            )),
             Arc::new(TestClock),
-            staging_root.clone(),
-            library_root.clone(),
         );
         let draft = service
             .import_bytes(
@@ -2940,6 +3125,7 @@ mod tests {
                     mode: "text_to_image".to_owned(),
                 },
                 recipe_id: "rcp_test".to_owned(),
+                allow_existing_workflow_sha: false,
                 capability: CapabilityCheckView {
                     state: CapabilityState::NotChecked,
                     checked_at: None,
@@ -2986,6 +3172,7 @@ mod tests {
                 mode: "text_to_image".to_owned(),
             },
             recipe_id: "rcp_sample".to_owned(),
+            allow_existing_workflow_sha: false,
             capability: CapabilityCheckView {
                 state: CapabilityState::Ready,
                 checked_at: None,

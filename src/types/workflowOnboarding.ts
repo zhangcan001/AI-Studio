@@ -168,6 +168,82 @@ export interface WorkflowWorkspaceView {
   hasSuccessfulRun: boolean;
 }
 
+export interface WorkflowRecipeSummaryView {
+  recipeId: string;
+  version: string;
+  inputCount: number;
+  outputCount: number;
+  presetCount?: number;
+}
+
+export interface WorkflowDiagnosticView {
+  code: string;
+  message: string;
+}
+
+export interface WorkflowStagingView {
+  stagingId: string;
+  status: string;
+  inUse: boolean;
+}
+
+export interface WorkflowProductionWorkspaceView {
+  packageName: string;
+  packageStatus: string;
+  errorCode?: string;
+  errorMessage?: string;
+  workflowId?: string;
+  workflowVersionId?: string;
+  name?: string;
+  category?: string;
+  mode?: string;
+  workflowVersion?: string;
+  workflowSha256?: string;
+  recipeSha256?: string;
+  enabled: boolean;
+  capability: string;
+  capabilityIssues: CapabilityIssueView[];
+  nodeCount: number;
+  recipes: WorkflowRecipeSummaryView[];
+  activeTasks: number;
+  totalTasks: number;
+  hasSuccessfulRun: boolean;
+  latestSuccessAt?: string;
+  latestFailureAt?: string;
+  diagnostics: WorkflowDiagnosticView[];
+}
+
+export interface WorkflowProductionWorkspaceResponse {
+  items: WorkflowProductionWorkspaceView[];
+  staging: WorkflowStagingView[];
+}
+
+export interface WorkflowRestoreView {
+  status: string;
+  packageName: string;
+  workflowId: string;
+  workflowVersion: string;
+  recipeId?: string;
+  enabled: boolean;
+  capability: string;
+}
+
+export interface WorkflowVersionDiffView {
+  workflowId: string;
+  versionA: string;
+  versionB: string;
+  nodeCountA: number;
+  nodeCountB: number;
+  addedNodes: string[];
+  removedNodes: string[];
+  changedClassTypes: Array<{ nodeId: string; from: string; to: string }>;
+  changedLiteralInputs: Array<{ nodeId: string; input: string; from: string; to: string }>;
+  changedLinks: Array<{ nodeId: string; input: string; from: string; to: string }>;
+  recipeInputChanges: string[];
+  bindingChanges: string[];
+  outputChanges: string[];
+}
+
 export interface WorkflowOnboardingMetadataRequest {
   workflowId?: string;
   name: string;
