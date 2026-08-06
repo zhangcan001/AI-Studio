@@ -1,7 +1,7 @@
 # M1 Cancel and Recovery Validation
 
 Date: 2026-08-06  
-AI Studio commit: implementation commit recorded in the final handoff  
+AI Studio commit: `f80e25d6291704d2a819ad59371dc5b47d38e17e`  
 ComfyUI version: 0.30.1
 
 ## Automated validation
