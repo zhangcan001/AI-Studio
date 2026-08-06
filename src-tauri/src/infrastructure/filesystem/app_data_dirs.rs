@@ -7,6 +7,7 @@ pub struct AppDataDirs {
     pub database: PathBuf,
     pub projects: PathBuf,
     pub workflow_library: PathBuf,
+    pub workflow_staging: PathBuf,
     pub cache: PathBuf,
     pub logs: PathBuf,
 }
@@ -17,6 +18,7 @@ impl AppDataDirs {
             database: root.join("app.db"),
             projects: root.join("projects"),
             workflow_library: root.join("workflow_library"),
+            workflow_staging: root.join("workflow_staging"),
             cache: root.join("cache"),
             logs: root.join("logs"),
             root,
@@ -26,6 +28,7 @@ impl AppDataDirs {
             ("root", directories.root.as_path()),
             ("projects", directories.projects.as_path()),
             ("workflow_library", directories.workflow_library.as_path()),
+            ("workflow_staging", directories.workflow_staging.as_path()),
             ("cache", directories.cache.as_path()),
             ("logs", directories.logs.as_path()),
         ] {
@@ -58,6 +61,7 @@ mod tests {
         assert_eq!(directories.database, root.join("app.db"));
         assert_eq!(directories.projects, root.join("projects"));
         assert_eq!(directories.workflow_library, root.join("workflow_library"));
+        assert_eq!(directories.workflow_staging, root.join("workflow_staging"));
         assert_eq!(directories.cache, root.join("cache"));
         assert_eq!(directories.logs, root.join("logs"));
     }
@@ -71,6 +75,7 @@ mod tests {
         assert!(directories.root.is_dir());
         assert!(directories.projects.is_dir());
         assert!(directories.workflow_library.is_dir());
+        assert!(directories.workflow_staging.is_dir());
         assert!(directories.cache.is_dir());
         assert!(directories.logs.is_dir());
         assert!(!directories.database.exists());

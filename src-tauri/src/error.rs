@@ -23,6 +23,7 @@ pub enum AppErrorCode {
     AssetNotFound,
     AssetReadFailed,
     ReusableDraftUnavailable,
+    WorkflowOnboardingError,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,6 +107,10 @@ impl AppError {
         Self::new(AppErrorCode::ReusableDraftUnavailable, message)
     }
 
+    pub fn workflow_onboarding(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::WorkflowOnboardingError, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -126,6 +131,7 @@ impl AppError {
             AppErrorCode::AssetNotFound => "ASSET_NOT_FOUND",
             AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
             AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
+            AppErrorCode::WorkflowOnboardingError => "WORKFLOW_ONBOARDING_ERROR",
         }
     }
 

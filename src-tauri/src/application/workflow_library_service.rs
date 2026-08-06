@@ -2,9 +2,10 @@ use crate::application::ports::{
     Clock, RepositoryError, WorkflowLibraryRepository, WorkflowLibrarySource, WorkflowPackageFiles,
     WorkflowPackageLoad, WorkflowPackageRecord, WorkflowPackageRegistration,
 };
+use crate::application::workflow_manifest::WorkflowManifest;
 use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
 use crate::domain::WorkflowDocument;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{error::Error, fmt, sync::Arc};
 
@@ -94,11 +95,11 @@ impl WorkflowLibraryService {
         &self,
         files: WorkflowPackageFiles,
     ) -> Result<WorkflowPackageRegistration, WorkflowPackageServiceError> {
-        let manifest: WorkflowManifest =
-            yaml_serde::from_str(&files.manifest_yaml).map_err(|error| {
-                WorkflowPackageServiceError::Invalid(format!("invalid manifest.yaml: {error}"))
-            })?;
-        manifest.validate()?;
+        let manifest = WorkflowManifest::parse(&files.manifest_yaml)
+            .map_err(WorkflowPackageServiceError::Invalid)?;
+        manifest
+            .validate()
+            .map_err(WorkflowPackageServiceError::Invalid)?;
 
         let recipe = RecipeParser::parse(&files.recipe_yaml)
             .map_err(|error| WorkflowPackageServiceError::Invalid(error.to_string()))?;
@@ -145,48 +146,6 @@ impl WorkflowLibraryService {
             .register_package(&package)
             .await
             .map_err(WorkflowPackageServiceError::Repository)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WorkflowManifest {
-    schema_version: u32,
-    id: String,
-    name: String,
-    workflow_version: String,
-    recipe_version: String,
-    category: String,
-    mode: String,
-}
-
-impl WorkflowManifest {
-    fn validate(&self) -> Result<(), WorkflowPackageServiceError> {
-        if self.schema_version != 1 {
-            return Err(WorkflowPackageServiceError::Invalid(format!(
-                "unsupported manifest schema_version {}",
-                self.schema_version
-            )));
-        }
-        if !self.id.starts_with("wfl_") || self.id.len() <= 4 {
-            return Err(WorkflowPackageServiceError::Invalid(
-                "manifest id must start with wfl_".to_owned(),
-            ));
-        }
-        for (field, value) in [
-            ("name", self.name.as_str()),
-            ("workflow_version", self.workflow_version.as_str()),
-            ("recipe_version", self.recipe_version.as_str()),
-            ("category", self.category.as_str()),
-            ("mode", self.mode.as_str()),
-        ] {
-            if value.trim().is_empty() {
-                return Err(WorkflowPackageServiceError::Invalid(format!(
-                    "manifest {field} must not be empty"
-                )));
-            }
-        }
-        Ok(())
     }
 }
 

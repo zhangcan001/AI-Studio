@@ -15,6 +15,7 @@ import { GenerationStudio } from "../features/studio/GenerationStudio";
 import { AssetLibrary } from "../features/assets/AssetLibrary";
 import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
+import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { useStudioStore } from "../stores/studioStore";
@@ -22,7 +23,7 @@ import type { ReusableGenerationDraft } from "../types/history";
 import type { ProjectView } from "../types/project";
 import "./App.css";
 
-type Workspace = "studio" | "assets" | "tasks" | "projects";
+type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows";
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
@@ -177,6 +178,24 @@ function App() {
     setCatalog(await listGenerationCatalog());
   }
 
+  async function openPublishedWorkflow(workflowId: string, recipeId: string) {
+    try {
+      const nextCatalog = await listGenerationCatalog();
+      setCatalog(nextCatalog);
+      const workflow = nextCatalog.find((recipe) => recipe.workflowId === workflowId && recipe.recipeId === recipeId)
+        ?? nextCatalog.find((recipe) => recipe.workflowId === workflowId);
+      if (!workflow) {
+        setError("The published workflow is not available in the runtime catalog yet.");
+        return;
+      }
+      useStudioStore.getState().setSelectedWorkflow(workflow);
+      setWorkspace("studio");
+      setError(null);
+    } catch (openError: unknown) {
+      setError(openError instanceof Error ? openError.message : String(openError));
+    }
+  }
+
   async function reconcileTasks() {
     if (!activeProjectId) return;
     setReconciling(true);
@@ -264,6 +283,7 @@ function App() {
           ["assets", "Assets"],
           ["tasks", "Tasks"],
           ["projects", "Projects"],
+          ["workflows", "Workflows"],
         ] as const).map(([value, label]) => (
           <button
             type="button"
@@ -326,6 +346,9 @@ function App() {
           onOpen={openProject}
           onProjectUpdated={handleProjectUpdated}
         />
+      )}
+      {workspace === "workflows" && (
+        <WorkflowWorkspace onCatalogChanged={reloadCatalog} onOpenStudio={openPublishedWorkflow} />
       )}
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}

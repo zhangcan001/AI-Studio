@@ -16,6 +16,7 @@ pub mod task_repository;
 pub mod task_update_sink;
 pub mod workflow_library_repository;
 pub mod workflow_library_source;
+pub mod workflow_run_repository;
 
 pub use asset_browse_repository::{AssetBrowseRepository, AssetCategoryFilter};
 pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
@@ -51,3 +52,4 @@ pub use workflow_library_repository::{
 pub use workflow_library_source::{
     WorkflowLibrarySource, WorkflowLibrarySourceError, WorkflowPackageFiles, WorkflowPackageLoad,
 };
+pub use workflow_run_repository::WorkflowRunRepository;

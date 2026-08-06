@@ -12,6 +12,17 @@ import type {
 import type { TaskView } from "../types/task";
 import type { ProjectView } from "../types/project";
 import type { PresetView } from "../types/preset";
+import type {
+  CapabilityCheckView,
+  WorkflowOnboardingDraftView,
+  WorkflowOnboardingInputMappingRequest,
+  WorkflowOnboardingMetadataRequest,
+  WorkflowOnboardingOutputMappingRequest,
+  WorkflowOnboardingPublishView,
+  WorkflowOnboardingRemoveInputMappingRequest,
+  WorkflowOnboardingValidationView,
+  WorkflowWorkspaceView,
+} from "../types/workflowOnboarding";
 import { buildAssetMediaUrl } from "./mediaUrl";
 
 export function ping(): Promise<string> {
@@ -41,6 +52,64 @@ export interface WorkflowSyncReport {
 
 export function refreshWorkflowLibrary(): Promise<WorkflowSyncReport> {
   return invoke<WorkflowSyncReport>("workflow_library_refresh");
+}
+
+export function pickApiWorkflow(existingWorkflowId?: string): Promise<WorkflowOnboardingDraftView | null> {
+  return invoke<WorkflowOnboardingDraftView | null>("workflow_onboarding_pick_api_workflow", {
+    existingWorkflowId,
+  });
+}
+
+export function getOnboardingDraft(draftId: string): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_get", { draftId });
+}
+
+export function checkOnboardingCapability(draftId: string): Promise<CapabilityCheckView> {
+  return invoke<CapabilityCheckView>("workflow_onboarding_check_capability", { draftId });
+}
+
+export function setOnboardingMetadata(
+  draftId: string,
+  request: WorkflowOnboardingMetadataRequest,
+): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_set_metadata", { draftId, request });
+}
+
+export function setOnboardingInputMapping(
+  draftId: string,
+  request: WorkflowOnboardingInputMappingRequest,
+): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_set_input_mapping", { draftId, request });
+}
+
+export function removeOnboardingInputMapping(
+  draftId: string,
+  request: WorkflowOnboardingRemoveInputMappingRequest,
+): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_remove_input_mapping", { draftId, request });
+}
+
+export function setOnboardingOutputMapping(
+  draftId: string,
+  request: WorkflowOnboardingOutputMappingRequest,
+): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_set_output_mapping", { draftId, request });
+}
+
+export function validateOnboarding(draftId: string): Promise<WorkflowOnboardingValidationView> {
+  return invoke<WorkflowOnboardingValidationView>("workflow_onboarding_validate", { draftId });
+}
+
+export function publishOnboarding(draftId: string): Promise<WorkflowOnboardingPublishView> {
+  return invoke<WorkflowOnboardingPublishView>("workflow_onboarding_publish", { draftId });
+}
+
+export function discardOnboarding(draftId: string): Promise<void> {
+  return invoke<void>("workflow_onboarding_discard", { draftId });
+}
+
+export function listWorkflowWorkspace(): Promise<WorkflowWorkspaceView[]> {
+  return invoke<WorkflowWorkspaceView[]>("workflow_workspace_list");
 }
 
 export function listGenerationCatalog(): Promise<RecipeViewModel[]> {

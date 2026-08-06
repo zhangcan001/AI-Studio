@@ -9,12 +9,12 @@ mod infrastructure;
 pub use application::ports::{
     AssetRepository, AssetStore, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProjectRepository, RepositoryError, TaskRepository,
-    WorkflowLibraryRepository,
+    WorkflowLibraryRepository, WorkflowRunRepository,
 };
 pub use infrastructure::database::{
     SqliteAssetRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqlitePresetRepository, SqliteProjectRepository,
-    SqliteTaskRepository, SqliteWorkflowLibraryRepository,
+    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -36,6 +36,7 @@ use application::{
     task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
+    workflow_onboarding_service::WorkflowOnboardingService,
 };
 use error::AppError;
 use infrastructure::{
@@ -199,7 +200,7 @@ fn run_application() -> Result<(), AppError> {
                 FileSystemWorkflowLibrarySource::new(data_dirs.workflow_library.clone()),
             );
             let workflow_library_service = Arc::new(WorkflowLibraryService::new(
-                workflow_library_source,
+                workflow_library_source.clone(),
                 workflow_library_repository,
                 clock.clone(),
             ));
@@ -222,6 +223,18 @@ fn run_application() -> Result<(), AppError> {
             })?;
             let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(comfy_adapter);
             let comfy_service = Arc::new(ComfyService::new(comfy_adapter.clone(), &comfy_config));
+            let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
+                infrastructure::database::SqliteWorkflowRunRepository::new(database_pool.clone()),
+            );
+            let workflow_onboarding_service = Arc::new(WorkflowOnboardingService::new(
+                workflow_library_source.clone(),
+                comfy_adapter.clone(),
+                workflow_library_service.clone(),
+                workflow_run_repository,
+                clock.clone(),
+                data_dirs.workflow_staging.clone(),
+                data_dirs.workflow_library.clone(),
+            ));
             let task_update_sink: Arc<dyn application::ports::TaskUpdateSink> =
                 Arc::new(TauriTaskUpdateSink::new(app.handle().clone()));
             let execution_registry = TaskExecutionRegistry::default();
@@ -306,6 +319,7 @@ fn run_application() -> Result<(), AppError> {
                 comfy_service,
                 generation_service,
                 workflow_library_service,
+                workflow_onboarding_service,
                 generation_catalog_service,
                 task_query_service,
                 asset_query_service,
@@ -340,6 +354,17 @@ fn run_application() -> Result<(), AppError> {
             commands::comfy::comfy_get_status,
             commands::comfy::comfy_refresh_capabilities,
             commands::workflow_library::workflow_library_refresh,
+            commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
+            commands::workflow_onboarding::workflow_onboarding_get,
+            commands::workflow_onboarding::workflow_onboarding_check_capability,
+            commands::workflow_onboarding::workflow_onboarding_set_metadata,
+            commands::workflow_onboarding::workflow_onboarding_set_input_mapping,
+            commands::workflow_onboarding::workflow_onboarding_remove_input_mapping,
+            commands::workflow_onboarding::workflow_onboarding_set_output_mapping,
+            commands::workflow_onboarding::workflow_onboarding_validate,
+            commands::workflow_onboarding::workflow_onboarding_publish,
+            commands::workflow_onboarding::workflow_onboarding_discard,
+            commands::workflow_onboarding::workflow_workspace_list,
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
             commands::project::project_list,

@@ -7,6 +7,7 @@ mod project;
 mod task;
 mod task_history;
 mod workflow_library;
+mod workflow_run;
 
 pub use asset::SqliteAssetRepository;
 pub use asset_browse::SqliteAssetBrowseRepository;
@@ -17,6 +18,7 @@ pub use project::SqliteProjectRepository;
 pub use task::SqliteTaskRepository;
 pub use task_history::SqliteTaskHistoryRepository;
 pub use workflow_library::SqliteWorkflowLibraryRepository;
+pub use workflow_run::SqliteWorkflowRunRepository;
 
 use crate::application::ports::RepositoryError;
 use chrono::{DateTime, Utc};
