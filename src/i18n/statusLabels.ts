@@ -140,6 +140,15 @@ export function workflowModeLabel(mode: string): string {
   return WORKFLOW_MODE_LABELS[mode] ?? "其他模式";
 }
 
+export function workflowDescription(mode: string): string {
+  if (mode === "text_to_image") return "快速生成高质量图片";
+  if (mode === "reference_to_video") return "使用参考图生成带声音的短视频";
+  if (mode === "image_to_video") return "将图片转换为动态视频";
+  if (mode === "text_to_video") return "根据文字描述生成视频";
+  if (mode === "image_to_image") return "基于参考图生成新的图片";
+  return "根据当前工作流生成内容";
+}
+
 export function workflowDisplayName(workflowId: string | undefined, name: string): string {
   return (workflowId && WORKFLOW_ALIASES[workflowId])
     ?? WORKFLOW_NAME_ALIASES[name.trim().toLowerCase()]

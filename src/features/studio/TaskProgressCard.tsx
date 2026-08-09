@@ -23,11 +23,11 @@ export function TaskProgressCard({ task, cancelling = false, onCancel }: Props) 
     : undefined;
 
   return (
-    <section className="task-card" aria-live="polite">
+    <section className="task-card compact-task-card" aria-live="polite">
       <div className="task-heading">
         <div>
           <span className="section-label">任务状态</span>
-          <h2>{taskStatusLabel(task.status)}</h2>
+          <h2>{taskHeading(task.status)}</h2>
         </div>
         <div className="task-heading-actions">
           <span className={`status-pill task-${task.status.toLowerCase()}`}>{taskStatusLabel(task.status)}</span>
@@ -62,11 +62,18 @@ export function TaskProgressCard({ task, cancelling = false, onCancel }: Props) 
         <p className="indeterminate-message">正在处理...</p>
       ) : null}
       <div className="task-meta">
-        <span>已耗时 {formatElapsed(task, Date.now())}</span>
-        {task.queueNumber !== undefined && <span>队列序号 #{task.queueNumber}</span>}
+        <span>{task.status === "SUCCEEDED" ? "用时" : "已耗时"} {formatElapsed(task, Date.now())}</span>
+        {task.queueNumber !== undefined && <span>{task.status === "QUEUED" ? "队列" : "队列序号"} #{task.queueNumber}</span>}
       </div>
     </section>
   );
+}
+
+function taskHeading(status: TaskView["status"]): string {
+  if (status === "QUEUED") return "等待生成";
+  if (status === "COLLECTING") return "正在整理生成结果...";
+  if (status === "SUCCEEDED") return "生成完成";
+  return taskStatusLabel(status);
 }
 
 function canCancel(status: TaskView["status"]): boolean {

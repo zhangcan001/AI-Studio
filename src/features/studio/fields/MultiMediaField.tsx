@@ -1,28 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  getAsset,
-  getAssetMediaUrl,
-  listRecentAssets,
-  pickAndImportAudio,
-  pickAndImportVideo,
-} from "../../../services/tauriClient";
+import { getAsset, getAssetMediaUrl } from "../../../services/tauriClient";
 import type { AssetView } from "../../../types/asset";
 import type { DraftValue } from "../../../types/generation";
 import { toUserMessage } from "../../../i18n/errorMessages";
-import { assetCategoryLabel } from "../../../i18n/statusLabels";
+import { assetCategoryLabel, formatDurationMs, formatFileSize } from "../../../i18n/statusLabels";
+import { AssetPickerDialog } from "../AssetPickerDialog";
 import { isCompatibleAsset } from "./MediaField";
 
 type MediaListKind = "videos" | "audios";
 
 interface Props {
-  field: {
-    key: string;
-    label: string;
-    required: boolean;
-    minItems: number;
-    maxItems: number;
-    type: MediaListKind;
-  };
+  field: { key: string; label: string; required: boolean; minItems: number; maxItems: number; type: MediaListKind };
   value?: DraftValue;
   error?: string;
   projectId: string;
@@ -32,146 +20,87 @@ interface Props {
 
 export function MultiMediaField({ field, value, error, projectId, onChange, onAvailabilityChange }: Props) {
   const selectedIds = selectedIdsFor(value, field.type);
-  const selectedIdsKey = selectedIds.join("\u001f");
   const mediaKind = field.type === "videos" ? "video" : "audio";
-  const [recentAssets, setRecentAssets] = useState<AssetView[]>([]);
-  const [resolvedAssets, setResolvedAssets] = useState<Record<string, AssetView>>({});
-  const [loading, setLoading] = useState(false);
+  const [assetsById, setAssetsById] = useState<Record<string, AssetView>>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [message, setMessage] = useState<string>();
-  const [pickerValue, setPickerValue] = useState("");
+
+  useEffect(() => {
+    setPickerOpen(false);
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
-    setMessage(undefined);
-    void listRecentAssets(projectId)
-      .then((assets) => {
-        if (active) setRecentAssets(assets.filter((asset) => isCompatibleAsset(asset, mediaKind)));
-      })
-      .catch((loadError: unknown) => {
-        if (active) setMessage(toUserMessage(loadError));
-      });
-    return () => {
-      active = false;
-    };
-  }, [mediaKind, projectId]);
-
-  const assetsById = useMemo(() => {
-    const next = { ...resolvedAssets };
-    for (const asset of recentAssets) next[asset.id] = asset;
-    return next;
-  }, [recentAssets, resolvedAssets]);
-
-  useEffect(() => {
-    let active = true;
-    const missing = selectedIds.filter((id) => !assetsById[id]);
-    if (!missing.length) {
+    if (!selectedIds.length) {
       onAvailabilityChange?.(true);
+      setAssetsById({});
       return () => undefined;
     }
-    void Promise.all(missing.map((id) => getAsset(projectId, id)))
+    void Promise.all(selectedIds.map((assetId) => getAsset(projectId, assetId)))
       .then((assets) => {
         if (!active) return;
-        const compatible = assets.filter((asset) => isCompatibleAsset(asset, mediaKind));
-        if (compatible.length !== assets.length) throw new Error("找不到一个或多个媒体素材，请重新选择。");
-        setResolvedAssets((current) => ({
-          ...current,
-          ...Object.fromEntries(compatible.map((asset) => [asset.id, asset])),
-        }));
+        if (assets.some((asset) => !isCompatibleAsset(asset, mediaKind))) throw new Error("所选素材类型不匹配，请重新选择。");
+        setAssetsById(Object.fromEntries(assets.map((asset) => [asset.id, asset])));
         onAvailabilityChange?.(true);
       })
       .catch((loadError: unknown) => {
-        if (active) {
-          setMessage(toUserMessage(loadError));
-          onAvailabilityChange?.(false);
-        }
+        if (!active) return;
+        setMessage(toUserMessage(loadError));
+        onAvailabilityChange?.(false);
       });
     return () => {
       active = false;
     };
-  }, [assetsById, mediaKind, onAvailabilityChange, projectId, selectedIdsKey]);
+  }, [mediaKind, onAvailabilityChange, projectId, selectedIds.join("\u001f")]);
 
-  function setIds(nextIds: string[]) {
-    onChange(toDraftValue(field.type, nextIds));
+  const orderedAssets = useMemo(() => selectedIds.map((assetId) => assetsById[assetId]), [assetsById, selectedIds.join("\u001f")]);
+
+  function setIds(assetIds: string[]) {
+    onChange(toDraftValue(field.type, assetIds));
     setMessage(undefined);
-  }
-
-  function addAsset(assetId: string) {
-    if (!assetId || selectedIds.length >= field.maxItems) return;
-    setIds([...selectedIds, assetId]);
-    setPickerValue("");
-  }
-
-  async function chooseLocal() {
-    if (selectedIds.length >= field.maxItems) return;
-    setLoading(true);
-    setMessage(undefined);
-    try {
-      const asset = mediaKind === "video"
-        ? await pickAndImportVideo(projectId)
-        : await pickAndImportAudio(projectId);
-      if (!asset) return;
-      setRecentAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
-      addAsset(asset.id);
-    } catch (pickError: unknown) {
-      setMessage(toUserMessage(pickError));
-    } finally {
-      setLoading(false);
-    }
   }
 
   return (
     <div className="field-control multi-media-field">
-      <span>
-        {field.label}
-        <em>{field.required ? `必填 · ${field.minItems}-${field.maxItems} 个` : `可选 · 最多 ${field.maxItems} 个`}</em>
-      </span>
-      <div className="multi-media-actions">
-        <select
-          aria-label={`${field.label} 素材选择器`}
-          value={pickerValue}
-          onChange={(event) => {
-            const assetId = event.target.value;
-            setPickerValue(assetId);
-            addAsset(assetId);
-          }}
-          disabled={selectedIds.length >= field.maxItems}
-        >
-          <option value="">选择{mediaKind === "video" ? "视频" : "音频"}</option>
-          {recentAssets.map((asset) => (
-            <option key={asset.id} value={asset.id} disabled={selectedIds.includes(asset.id)}>
-              {asset.name} · {assetCategoryLabel(asset.category)}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={() => void chooseLocal()} disabled={loading || selectedIds.length >= field.maxItems}>
-          {loading ? "正在导入..." : `导入${mediaKind === "video" ? "视频" : "音频"}`}
-        </button>
-      </div>
-        <div className="multi-media-list" aria-label={`${field.label} 已选${mediaKind === "video" ? "视频" : "音频"}`}>
-        {selectedIds.map((assetId, index) => {
-          const asset = assetsById[assetId];
-          const url = asset ? getAssetMediaUrl(projectId, asset.id, mediaKind) : undefined;
-          return (
-            <div key={`${assetId}-${index}`} className="multi-media-item">
-              <span className="multi-media-order" aria-label={`第 ${index + 1} 项`}>{index + 1}</span>
-              <div className="multi-media-preview">
-                {url && mediaKind === "video" ? (
-                  <video src={url} preload="metadata" muted playsInline aria-label={asset?.name ?? "缺少视频"} />
-                ) : url ? (
-                  <audio src={url} preload="metadata" controls aria-label={asset?.name ?? "缺少音频"} />
-                ) : <span>缺少素材</span>}
-              </div>
-              <span className="multi-media-name">{asset?.name ?? "缺少素材"}</span>
-              <button type="button" onClick={() => setIds(selectedIds.filter((_, itemIndex) => itemIndex !== index))} aria-label={`移除第 ${index + 1} 项`}>移除</button>
-              <button type="button" onClick={() => index > 0 && setIds(move(selectedIds, index, index - 1))} disabled={index === 0} aria-label={`上移第 ${index + 1} 项`}>上移</button>
-              <button type="button" onClick={() => index < selectedIds.length - 1 && setIds(move(selectedIds, index, index + 1))} disabled={index === selectedIds.length - 1} aria-label={`下移第 ${index + 1} 项`}>下移</button>
+      <span>{field.label}<em>{field.required ? `必填 · ${field.minItems}-${field.maxItems} 个` : `可选 · 最多 ${field.maxItems} 个`}</em></span>
+      <button type="button" className="asset-select-trigger" onClick={() => setPickerOpen(true)}>
+        {selectedIds.length ? `管理${mediaKind === "video" ? "视频" : "音频"}（${selectedIds.length}/${field.maxItems}）` : `选择${mediaKind === "video" ? "视频" : "音频"}`}
+      </button>
+      <div className="multi-media-list" aria-label={`${field.label} 已选${mediaKind === "video" ? "视频" : "音频"}`}>
+        {orderedAssets.map((asset, index) => asset ? (
+          <div key={`${asset.id}-${index}`} className="multi-media-item">
+            <span className="multi-media-order" aria-label={`第 ${index + 1} 项`}>{index + 1}</span>
+            <div className="multi-media-preview">
+              {mediaKind === "video" ? <video src={getAssetMediaUrl(projectId, asset.id, "video")} preload="metadata" muted playsInline aria-label={asset.name} /> : <span className="asset-picker-audio-mark" aria-hidden="true">音频</span>}
             </div>
-          );
-        })}
-        {!selectedIds.length && <small className="field-hint">请按 ComfyUI 接收顺序添加媒体素材。</small>}
+            <span className="multi-media-name"><strong>{asset.name}</strong><small>{formatDurationMs(asset.durationMs)} · {formatFileSize(asset.fileSize)} · {assetCategoryLabel(asset.category)}</small></span>
+            <div className="multi-media-item-actions">
+              <button type="button" onClick={() => setIds(selectedIds.filter((_, itemIndex) => itemIndex !== index))}>移除</button>
+              <button type="button" onClick={() => index > 0 && setIds(move(selectedIds, index, index - 1))} disabled={index === 0}>上移</button>
+              <button type="button" onClick={() => index < selectedIds.length - 1 && setIds(move(selectedIds, index, index + 1))} disabled={index === selectedIds.length - 1}>下移</button>
+            </div>
+          </div>
+        ) : (
+          <div className="multi-media-item" key={`${selectedIds[index]}-${index}`}><span>{index + 1}</span><span className="field-error">素材加载失败</span></div>
+        ))}
+        {!selectedIds.length && <small className="field-hint">按 ComfyUI 接收顺序添加媒体素材。</small>}
       </div>
       {message && <small className="field-error">{message}</small>}
       {error && <small className="field-error">{error}</small>}
+      {pickerOpen && (
+        <AssetPickerDialog
+          projectId={projectId}
+          kind={mediaKind}
+          multiple
+          maxItems={field.maxItems}
+          selectedIds={selectedIds}
+          onCancel={() => setPickerOpen(false)}
+          onConfirm={(assetIds) => {
+            setIds(assetIds);
+            setPickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

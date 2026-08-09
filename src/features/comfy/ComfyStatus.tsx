@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ComfyStatus as ComfyStatusView } from "../../types/comfy";
 import { comfyStatusLabel, formatFileSize } from "../../i18n/statusLabels";
 
@@ -17,11 +18,36 @@ export function ComfyStatus({
   onRefreshCapabilities,
 }: Props) {
   const devices = status?.devices ?? [];
+  const offline = status?.status !== "CONNECTED";
+  const [expanded, setExpanded] = useState(offline);
+
+  useEffect(() => {
+    setExpanded(offline);
+  }, [offline]);
+
+  const primaryDevice = devices[0];
   return (
-    <section className="comfy-status-card" aria-label="ComfyUI 状态">
-      <div className="comfy-status-heading">
+    <section className={`comfy-status-card runtime-status-card${offline ? " runtime-status-offline" : ""}`} aria-label="ComfyUI 状态">
+      <div className="runtime-status-summary">
+        <div className="runtime-status-identity">
+          <span className={`status-dot status-${status?.status?.toLowerCase() ?? "offline"}`} aria-hidden="true" />
+          <div>
+            <span className="section-label">运行环境</span>
+            <strong>ComfyUI {comfyStatusLabel(status?.status)}</strong>
+          </div>
+        </div>
+        <div className="runtime-status-metrics">
+          <span>{primaryDevice?.name ?? "GPU 未连接"}</span>
+          <span>{primaryDevice ? `${formatFileSize(primaryDevice.vramFree ?? 0)} / ${formatFileSize(primaryDevice.vramTotal ?? 0)} 显存` : "等待连接"}</span>
+        </div>
+        <button type="button" className="quiet-button runtime-details-button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+          {expanded ? "收起详情" : "运行环境详情"}
+        </button>
+      </div>
+      {expanded && <div className="runtime-status-details">
+        <div className="comfy-status-heading">
         <div>
-          <span className="section-label">运行环境</span>
+          <span className="section-label">连接详情</span>
           <h2>ComfyUI 状态</h2>
         </div>
         <span className={`status-pill comfy-${status?.status?.toLowerCase() ?? "offline"}`}>
@@ -43,6 +69,7 @@ export function ComfyStatus({
           {capabilityLoading ? "正在刷新..." : "刷新节点"}
         </button>
       </div>
+      </div>}
     </section>
   );
 }

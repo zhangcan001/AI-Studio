@@ -1,22 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  getAsset,
-  listRecentAssets,
-  pickAndImportImage,
-  readAssetThumbnail,
-  readAssetImage,
-} from "../../../services/tauriClient";
+import { useEffect, useState } from "react";
+import { getAsset, readAssetImage, readAssetThumbnail } from "../../../services/tauriClient";
 import type { AssetView } from "../../../types/asset";
 import type { DraftValue } from "../../../types/generation";
 import { toUserMessage } from "../../../i18n/errorMessages";
 import { assetCategoryLabel, formatFileSize } from "../../../i18n/statusLabels";
+import { AssetPickerDialog } from "../AssetPickerDialog";
 
 interface Props {
-  field: {
-    key: string;
-    label: string;
-    required: boolean;
-  };
+  field: { key: string; label: string; required: boolean };
   value?: DraftValue;
   error?: string;
   projectId: string;
@@ -26,145 +17,107 @@ interface Props {
 
 export function ImageField({ field, value, error, projectId, onChange, onAvailabilityChange }: Props) {
   const selectedAssetId = value?.type === "image_asset" ? value.assetId : "";
-  const [recentAssets, setRecentAssets] = useState<AssetView[]>([]);
+  const [selectedAsset, setSelectedAsset] = useState<AssetView>();
   const [previewUrl, setPreviewUrl] = useState<string>();
-  const [loading, setLoading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [message, setMessage] = useState<string>();
-  const [resolvedAsset, setResolvedAsset] = useState<AssetView>();
 
   useEffect(() => {
-    let active = true;
-    void listRecentAssets(projectId)
-      .then((assets) => {
-        if (active) setRecentAssets(assets);
-      })
-      .catch((loadError: unknown) => {
-        if (active) setMessage(toUserMessage(loadError));
-      });
-    return () => {
-      active = false;
-    };
+    setPickerOpen(false);
   }, [projectId]);
-
-  const recentSelectedAsset = useMemo(
-    () => recentAssets.find((asset) => asset.id === selectedAssetId),
-    [recentAssets, selectedAssetId],
-  );
-
-  const selectedAsset = recentSelectedAsset ?? resolvedAsset;
 
   useEffect(() => {
     let active = true;
     setMessage(undefined);
+    setSelectedAsset(undefined);
     if (!selectedAssetId) {
-      setResolvedAsset(undefined);
-      onAvailabilityChange?.(true);
-      return () => undefined;
-    }
-    if (recentSelectedAsset) {
-      setResolvedAsset(undefined);
       onAvailabilityChange?.(true);
       return () => undefined;
     }
     void getAsset(projectId, selectedAssetId)
       .then((asset) => {
         if (!active) return;
-        setResolvedAsset(asset);
+        setSelectedAsset(asset);
         onAvailabilityChange?.(true);
       })
-      .catch(() => {
+      .catch((loadError: unknown) => {
         if (!active) return;
-        setResolvedAsset(undefined);
-        setMessage("找不到图片素材，请重新选择。");
+        setMessage(toUserMessage(loadError));
         onAvailabilityChange?.(false);
       });
     return () => {
       active = false;
     };
-  }, [onAvailabilityChange, projectId, recentSelectedAsset, selectedAssetId]);
+  }, [onAvailabilityChange, projectId, selectedAssetId]);
 
   useEffect(() => {
     let active = true;
-    let nextUrl: string | undefined;
-    if (!selectedAsset) {
-      setPreviewUrl(undefined);
-      return () => undefined;
-    }
+    let objectUrl: string | undefined;
+    setPreviewUrl(undefined);
+    if (!selectedAsset) return () => undefined;
     void readAssetThumbnail(projectId, selectedAsset.id)
       .catch(() => readAssetImage(projectId, selectedAsset.id))
       .then((bytes) => {
         if (!active) return;
-        nextUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-        setPreviewUrl(nextUrl);
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+        setPreviewUrl(objectUrl);
       })
       .catch((previewError: unknown) => {
-        if (active) {
-          setMessage(toUserMessage(previewError));
-          onAvailabilityChange?.(false);
-        }
+        if (active) setMessage(toUserMessage(previewError));
       });
     return () => {
       active = false;
-      if (nextUrl) URL.revokeObjectURL(nextUrl);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [onAvailabilityChange, projectId, selectedAsset]);
+  }, [projectId, selectedAsset]);
 
-  async function chooseLocalImage() {
-    setLoading(true);
+  function clearSelection() {
+    onChange(undefined);
+    setSelectedAsset(undefined);
     setMessage(undefined);
-    try {
-      const asset = await pickAndImportImage(projectId);
-      if (!asset) return;
-      setRecentAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
-      onChange({ type: "image_asset", assetId: asset.id });
-      onAvailabilityChange?.(true);
-    } catch (pickError: unknown) {
-      setMessage(toUserMessage(pickError));
-    } finally {
-      setLoading(false);
-    }
+    onAvailabilityChange?.(true);
   }
 
   return (
     <div className="field-control image-field">
-      <span>
-        {field.label}
-        {field.required && <em>必填</em>}
-      </span>
-      <div className="image-field-actions">
-        <button type="button" onClick={() => void chooseLocalImage()} disabled={loading}>
-          {loading ? "正在导入..." : "选择本地图片"}
-        </button>
-        <select
-          aria-label={`${field.label} 最近使用的图片`}
-          value={selectedAssetId}
-          onChange={(event) => {
-            const assetId = event.target.value;
-            onChange(assetId ? { type: "image_asset", assetId } : undefined);
-          }}
-        >
-          <option value="">选择最近使用的图片</option>
-          {recentAssets.map((asset) => (
-            <option key={asset.id} value={asset.id}>
-              {asset.name} · {assetCategoryLabel(asset.category)}
-            </option>
-          ))}
-        </select>
-      </div>
-      {selectedAsset && (
-        <div className="image-selection-summary">
-          {previewUrl && <img src={previewUrl} alt={selectedAsset.name} />}
-          <div>
+      <span>{field.label}{field.required && <em>必填</em>}</span>
+      {selectedAsset ? (
+        <div className="asset-field-selection">
+          <div className="asset-field-preview image-field-preview">
+            {previewUrl ? <img src={previewUrl} alt={selectedAsset.name} /> : <span>正在加载缩略图...</span>}
+          </div>
+          <div className="asset-field-copy">
             <strong>{selectedAsset.name}</strong>
-            <small>
-              {selectedAsset.width} × {selectedAsset.height} · {formatFileSize(selectedAsset.fileSize)}
-            </small>
+            <small>{selectedAsset.width ?? "--"} × {selectedAsset.height ?? "--"} · {formatFileSize(selectedAsset.fileSize)}</small>
             <small>{assetCategoryLabel(selectedAsset.category)}</small>
           </div>
+          <div className="asset-field-actions">
+            <button type="button" onClick={() => setPickerOpen(true)}>更换图片</button>
+            <button type="button" className="quiet-button" onClick={clearSelection}>清除</button>
+          </div>
         </div>
+      ) : (
+        <button type="button" className="asset-select-trigger" onClick={() => setPickerOpen(true)}>
+          选择参考图片
+        </button>
       )}
       {message && <small className="field-error">{message}</small>}
       {error && <small className="field-error">{error}</small>}
+      {pickerOpen && (
+        <AssetPickerDialog
+          projectId={projectId}
+          kind="image"
+          selectedIds={selectedAssetId ? [selectedAssetId] : []}
+          onCancel={() => setPickerOpen(false)}
+          onConfirm={(assetIds) => {
+            const assetId = assetIds[0];
+            if (!assetId) return;
+            onChange({ type: "image_asset", assetId });
+            setPickerOpen(false);
+            setMessage(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }
