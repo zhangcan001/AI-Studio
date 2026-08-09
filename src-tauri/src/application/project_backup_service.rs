@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 1;
+const BACKUP_VERSION: u32 = 2;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -251,6 +251,10 @@ impl ProjectBackupService {
         for item in &document.items {
             item_ids.insert(item.id.clone(), format!("pbi_{}", Uuid::new_v4().simple()));
         }
+        let mut tag_ids = HashMap::new();
+        for tag in &document.asset_tags {
+            tag_ids.insert(tag.id.clone(), format!("tag_{}", Uuid::new_v4()));
+        }
 
         let copy_result = copy_assets(
             &mut archive,
@@ -283,6 +287,7 @@ impl ProjectBackupService {
                 &preset_ids,
                 &batch_ids,
                 &item_ids,
+                &tag_ids,
                 &restored_assets,
             )
             .await;
@@ -391,6 +396,15 @@ impl ProjectBackupService {
         let presets = query_presets(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
+        let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
+            "SELECT id, project_id, name, normalized_name, created_at, updated_at FROM asset_tags WHERE project_id = ? ORDER BY created_at, id",
+        ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
+        let mut asset_tag_links = sqlx::query_as::<_, BackupAssetTagLink>(
+            "SELECT asset_id, tag_id, project_id, created_at FROM asset_tag_links WHERE project_id = ? ORDER BY created_at, asset_id, tag_id",
+        ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
+        let mut asset_favorites = sqlx::query_as::<_, BackupAssetFavorite>(
+            "SELECT asset_id, project_id, created_at FROM asset_favorites WHERE project_id = ? ORDER BY created_at, asset_id",
+        ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
         let workflow_refs = collect_workflow_refs(&tasks);
         transaction
             .commit()
@@ -483,6 +497,12 @@ impl ProjectBackupService {
                 thumbnail_path,
             });
         }
+        let included_asset_ids = assets
+            .iter()
+            .map(|asset| asset.id.as_str())
+            .collect::<HashSet<_>>();
+        asset_tag_links.retain(|link| included_asset_ids.contains(link.asset_id.as_str()));
+        asset_favorites.retain(|favorite| included_asset_ids.contains(favorite.asset_id.as_str()));
         let document = BackupDocument {
             project: BackupProject {
                 id: project.id,
@@ -502,6 +522,9 @@ impl ProjectBackupService {
             batches,
             items,
             workflow_refs,
+            asset_tags,
+            asset_tag_links,
+            asset_favorites,
         };
         Ok(BuiltBackup { document, files })
     }
@@ -516,6 +539,7 @@ impl ProjectBackupService {
         preset_ids: &HashMap<String, String>,
         batch_ids: &HashMap<String, String>,
         item_ids: &HashMap<String, String>,
+        tag_ids: &HashMap<String, String>,
         restored_assets: &[RestoredAsset],
     ) -> Result<(), AppError> {
         let mut transaction = self
@@ -534,6 +558,7 @@ impl ProjectBackupService {
             preset_ids,
             batch_ids,
             item_ids,
+            tag_ids,
             restored_assets,
             &restored_snapshots,
         )
@@ -583,6 +608,40 @@ struct BackupDocument {
     batches: Vec<BackupBatch>,
     items: Vec<BackupBatchItem>,
     workflow_refs: Vec<WorkflowReference>,
+    #[serde(default)]
+    asset_tags: Vec<BackupAssetTag>,
+    #[serde(default)]
+    asset_tag_links: Vec<BackupAssetTagLink>,
+    #[serde(default)]
+    asset_favorites: Vec<BackupAssetFavorite>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupAssetTag {
+    id: String,
+    project_id: String,
+    name: String,
+    normalized_name: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupAssetTagLink {
+    asset_id: String,
+    tag_id: String,
+    project_id: String,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupAssetFavorite {
+    asset_id: String,
+    project_id: String,
+    created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1339,7 +1398,7 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || manifest.version != BACKUP_VERSION {
+    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2) {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -1378,6 +1437,65 @@ fn validate_document_entries(
             if !safe_zip_path(path) || !entry_names.contains(path) {
                 return Err(AppError::backup_invalid("备份缺少资产缩略图"));
             }
+        }
+    }
+    validate_organization_document(document)?;
+    Ok(())
+}
+
+fn validate_organization_document(document: &BackupDocument) -> Result<(), AppError> {
+    let asset_ids = document
+        .assets
+        .iter()
+        .map(|asset| asset.id.as_str())
+        .collect::<HashSet<_>>();
+    let tag_ids = document
+        .asset_tags
+        .iter()
+        .map(|tag| tag.id.as_str())
+        .collect::<HashSet<_>>();
+    if tag_ids.len() != document.asset_tags.len() {
+        return Err(AppError::backup_invalid("备份包含重复标签 ID"));
+    }
+    let normalized = document
+        .asset_tags
+        .iter()
+        .map(|tag| tag.normalized_name.as_str())
+        .collect::<HashSet<_>>();
+    if normalized.len() != document.asset_tags.len() {
+        return Err(AppError::backup_invalid("备份包含重复标签名称"));
+    }
+    if document
+        .asset_tags
+        .iter()
+        .any(|tag| tag.project_id != document.project.id)
+        || document
+            .asset_tag_links
+            .iter()
+            .any(|link| link.project_id != document.project.id)
+        || document
+            .asset_favorites
+            .iter()
+            .any(|favorite| favorite.project_id != document.project.id)
+    {
+        return Err(AppError::backup_invalid("备份组织数据项目归属不一致"));
+    }
+    let mut links = HashSet::new();
+    for link in &document.asset_tag_links {
+        if !asset_ids.contains(link.asset_id.as_str()) || !tag_ids.contains(link.tag_id.as_str()) {
+            return Err(AppError::backup_invalid("备份标签链接引用了未知素材或标签"));
+        }
+        if !links.insert((link.asset_id.as_str(), link.tag_id.as_str())) {
+            return Err(AppError::backup_invalid("备份包含重复标签链接"));
+        }
+    }
+    let mut favorites = HashSet::new();
+    for favorite in &document.asset_favorites {
+        if !asset_ids.contains(favorite.asset_id.as_str()) {
+            return Err(AppError::backup_invalid("备份收藏引用了未知素材"));
+        }
+        if !favorites.insert(favorite.asset_id.as_str()) {
+            return Err(AppError::backup_invalid("备份包含重复收藏"));
         }
     }
     Ok(())
@@ -1434,6 +1552,7 @@ fn copy_assets(
     assets: &[BackupAsset],
     asset_ids: &HashMap<String, String>,
 ) -> Result<Vec<RestoredAsset>, AppError> {
+    fs::create_dir_all(staging_root).map_err(|error| AppError::filesystem(error.to_string()))?;
     let mut restored = Vec::new();
     for asset in assets {
         if !safe_component(&asset.category) || !safe_component(&asset.asset_type) {
@@ -1617,6 +1736,7 @@ async fn restore_rows_in_transaction(
     preset_ids: &HashMap<String, String>,
     batch_ids: &HashMap<String, String>,
     item_ids: &HashMap<String, String>,
+    tag_ids: &HashMap<String, String>,
     restored_assets: &[RestoredAsset],
     restored_snapshots: &[BackupSnapshot],
 ) -> Result<(), AppError> {
@@ -1755,6 +1875,39 @@ async fn restore_rows_in_transaction(
         .bind(asset.metadata.to_string())
         .bind(&asset.created_at)
         .bind(&asset.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for tag in &document.asset_tags {
+        let tag_id = tag_ids
+            .get(&tag.id)
+            .ok_or_else(|| AppError::backup_invalid("标签 ID 映射缺失"))?;
+        sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(tag_id).bind(&project.id).bind(&tag.name).bind(&tag.normalized_name).bind(&tag.created_at).bind(&tag.updated_at)
+            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for link in &document.asset_tag_links {
+        let asset_id = asset_ids
+            .get(&link.asset_id)
+            .ok_or_else(|| AppError::backup_invalid("标签链接缺少资产映射"))?;
+        let tag_id = tag_ids
+            .get(&link.tag_id)
+            .ok_or_else(|| AppError::backup_invalid("标签链接缺少标签映射"))?;
+        sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES (?, ?, ?, ?)")
+            .bind(asset_id).bind(tag_id).bind(&project.id).bind(&link.created_at)
+            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for favorite in &document.asset_favorites {
+        let asset_id = asset_ids
+            .get(&favorite.asset_id)
+            .ok_or_else(|| AppError::backup_invalid("收藏缺少资产映射"))?;
+        sqlx::query(
+            "INSERT INTO asset_favorites (asset_id, project_id, created_at) VALUES (?, ?, ?)",
+        )
+        .bind(asset_id)
+        .bind(&project.id)
+        .bind(&favorite.created_at)
         .execute(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
@@ -1952,8 +2105,9 @@ mod tests {
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use std::collections::{HashMap, HashSet};
-    use std::path::PathBuf;
+    use std::{fs::File, io::Write, path::PathBuf};
     use tempfile::tempdir;
+    use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
     #[test]
     fn backup_path_validation_rejects_traversal_and_absolute_paths() {
@@ -2154,6 +2308,21 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES ('tag_people', 'project-backup', '人物', '人物', '2026-01-01T00:01:00Z', '2026-01-01T00:01:00Z'), ('tag_reference', 'project-backup', '参考图', '参考图', '2026-01-01T00:01:00Z', '2026-01-01T00:01:00Z')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES ('ast_backup', 'tag_people', 'project-backup', '2026-01-01T00:01:00Z'), ('ast_backup', 'tag_reference', 'project-backup', '2026-01-01T00:01:00Z')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO asset_favorites (asset_id, project_id, created_at) VALUES ('ast_backup', 'project-backup', '2026-01-01T00:01:00Z')").execute(&pool).await.unwrap();
+        let video_bytes = b"backup-video-bytes";
+        let video_sha = Sha256::digest(video_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let video_path = project_root.join("video.mp4");
+        std::fs::write(&video_path, video_bytes).unwrap();
+        sqlx::query("INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, duration_ms, file_size, metadata_json, created_at, updated_at) VALUES ('ast_video', 'project-backup', 'video', 'source_video', '视频', '视频.mp4', ?, ?, 'video/mp4', 1, 1, 1000, ?, '{}', '2026-01-01T00:02:00Z', '2026-01-01T00:02:00Z')")
+            .bind(video_path.to_string_lossy().to_string()).bind(video_sha).bind(video_bytes.len() as i64).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES ('tag_finish', 'project-backup', '成片', '成片', '2026-01-01T00:02:00Z', '2026-01-01T00:02:00Z')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES ('ast_video', 'tag_finish', 'project-backup', '2026-01-01T00:02:00Z')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO project_templates (id, name, normalized_name, description, workflow_version_id, recipe_id, values_json, created_at, updated_at) VALUES ('ptm_global', '全局模板', '全局模板', NULL, 'workflow-version-1', 'recipe-1', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").execute(&pool).await.unwrap();
 
         let service = ProjectBackupService::new(
             pool.clone(),
@@ -2168,6 +2337,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
+        assert_eq!(manifest.version, 2);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -2182,13 +2352,14 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(restored_count, 1);
-        let restored_path =
-            sqlx::query_scalar::<_, String>("SELECT storage_path FROM assets WHERE project_id = ?")
-                .bind(&restored.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        assert_eq!(restored_count, 2);
+        let restored_path = sqlx::query_scalar::<_, String>(
+            "SELECT storage_path FROM assets WHERE project_id = ? AND type = 'image'",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(restored_path).unwrap(), bytes);
         let restored_task_id: String =
             sqlx::query_scalar("SELECT id FROM tasks WHERE project_id = ?")
@@ -2197,7 +2368,7 @@ mod tests {
                 .await
                 .unwrap();
         let restored_asset_id: String =
-            sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ?")
+            sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ? AND type = 'image'")
                 .bind(&restored.id)
                 .fetch_one(&pool)
                 .await
@@ -2227,6 +2398,91 @@ mod tests {
             restored_asset_id.as_str()
         );
         assert_ne!(restored_asset_id, "ast_backup");
+        let restored_tags: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, name FROM asset_tags WHERE project_id = ? ORDER BY name")
+                .bind(&restored.id)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(restored_tags.len(), 3);
+        assert!(restored_tags
+            .iter()
+            .all(|(id, _)| !["tag_people", "tag_reference", "tag_finish"].contains(&id.as_str())));
+        let restored_links: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM asset_tag_links WHERE project_id = ? AND asset_id = ?",
+        )
+        .bind(&restored.id)
+        .bind(&restored_asset_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let restored_favorite: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM asset_favorites WHERE project_id = ? AND asset_id = ?",
+        )
+        .bind(&restored.id)
+        .bind(&restored_asset_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_links, 2);
+        assert_eq!(restored_favorite, 1);
+        let video_tag: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM asset_tag_links l JOIN assets a ON a.id = l.asset_id JOIN asset_tags t ON t.id = l.tag_id WHERE a.project_id = ? AND a.type = 'video' AND t.name = '成片'")
+            .bind(&restored.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(video_tag, 1);
+        let template_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM project_templates")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            template_count, 1,
+            "restoring a project must not duplicate global project templates"
+        );
+    }
+
+    #[tokio::test]
+    async fn fixed_v1_fixture_inspects_and_restores_with_empty_organization() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let archive_path = directory.path().join("legacy-v1.zip");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({"format":"ai-studio-project-backup","version":1,"createdBy":"0.1.0","project":{"id":"legacy-project","name":"旧项目"}});
+        let project = json!({
+            "project":{"id":"legacy-project","name":"旧项目"},"description":null,
+            "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z",
+            "activeTasksExcluded":0,"incompleteTasksExcluded":0,"tasks":[],"taskEvents":[],"assets":[],
+            "mappings":[],"snapshots":[],"presets":[],"batches":[],"items":[],"workflowRefs":[]
+        });
+        writer.start_file("manifest.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+            .unwrap();
+        writer.start_file("project.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&project).unwrap().as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let preview = service.inspect(archive_path).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let tags: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM asset_tags WHERE project_id = ?")
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let favorites: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM asset_favorites WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!((tags, favorites), (0, 0));
     }
 
     #[tokio::test]
@@ -2317,6 +2573,9 @@ mod tests {
             batches: Vec::new(),
             items: Vec::new(),
             workflow_refs: Vec::new(),
+            asset_tags: Vec::new(),
+            asset_tag_links: Vec::new(),
+            asset_favorites: Vec::new(),
         };
         let project = ProjectRecord {
             id: project_id.clone(),
@@ -2343,6 +2602,7 @@ mod tests {
                 &preset_ids,
                 &batch_ids,
                 &item_ids,
+                &HashMap::new(),
                 &[],
             )
             .await
@@ -2419,6 +2679,9 @@ mod tests {
             batches: Vec::new(),
             items: Vec::new(),
             workflow_refs: Vec::new(),
+            asset_tags: Vec::new(),
+            asset_tag_links: Vec::new(),
+            asset_favorites: Vec::new(),
         };
         let files = [super::BackupFileSource {
             zip_path: "assets/ast_large/content.bin".to_owned(),
