@@ -24,6 +24,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   BACKUP_INVALID: "项目备份无效或不受支持，请选择 AI Studio 导出的备份文件。",
   BACKUP_INSPECTION_EXPIRED: "备份预览已过期，请重新选择备份文件。",
   BACKUP_ASSET_HASH_MISMATCH: "项目备份中的素材校验失败，恢复已取消。",
+  BACKUP_SNAPSHOT_ASSET_REMAP_FAILED: "项目备份中的历史素材引用无法安全恢复，恢复已取消。",
   EXECUTION_ERROR: "生成执行失败，请查看任务详情中的技术信息。",
   EXECUTION_INTERRUPTED: "生成任务已被中断。",
   TASK_DOMAIN_ERROR: "任务状态操作失败，请查看技术详情。",

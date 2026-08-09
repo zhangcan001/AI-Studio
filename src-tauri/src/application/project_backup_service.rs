@@ -523,6 +523,7 @@ impl ProjectBackupService {
             .begin()
             .await
             .map_err(|error| AppError::database(error.to_string()))?;
+        let restored_snapshots = prepare_restored_snapshots(document, asset_ids)?;
         let result = restore_rows_in_transaction(
             &mut transaction,
             project,
@@ -534,6 +535,7 @@ impl ProjectBackupService {
             batch_ids,
             item_ids,
             restored_assets,
+            &restored_snapshots,
         )
         .await;
         match result {
@@ -1507,6 +1509,104 @@ fn write_zip_entry(
     Ok(())
 }
 
+fn remap_snapshot_asset_references(value: &mut Value, asset_ids: &HashMap<String, String>) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                remap_snapshot_asset_references(value, asset_ids);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                remap_snapshot_asset_references(value, asset_ids);
+            }
+        }
+        Value::String(value) => {
+            if let Some(remapped) = asset_ids.get(value) {
+                *value = remapped.clone();
+            }
+        }
+        Value::Bool(_) | Value::Number(_) | Value::Null => {}
+    }
+}
+
+fn collect_exact_asset_id_references(
+    value: &Value,
+    known_asset_ids: &HashSet<String>,
+) -> Vec<String> {
+    match value {
+        Value::Array(values) => values
+            .iter()
+            .flat_map(|value| collect_exact_asset_id_references(value, known_asset_ids))
+            .collect(),
+        Value::Object(values) => values
+            .values()
+            .flat_map(|value| collect_exact_asset_id_references(value, known_asset_ids))
+            .collect(),
+        Value::String(value) if known_asset_ids.contains(value) => vec![value.clone()],
+        Value::Bool(_) | Value::Number(_) | Value::Null | Value::String(_) => Vec::new(),
+    }
+}
+
+fn prepare_restored_snapshots(
+    document: &BackupDocument,
+    asset_ids: &HashMap<String, String>,
+) -> Result<Vec<BackupSnapshot>, AppError> {
+    let backup_asset_ids = document
+        .assets
+        .iter()
+        .map(|asset| asset.id.clone())
+        .collect::<HashSet<_>>();
+    if backup_asset_ids.len() != document.assets.len()
+        || backup_asset_ids.len() != asset_ids.len()
+        || backup_asset_ids
+            .iter()
+            .any(|asset_id| !asset_ids.contains_key(asset_id))
+    {
+        return Err(AppError::backup_snapshot_asset_remap_failed(
+            "备份快照资产映射不完整，恢复已取消。",
+        ));
+    }
+
+    let restored_asset_ids = asset_ids.values().cloned().collect::<HashSet<_>>();
+    if restored_asset_ids.len() != asset_ids.len() {
+        return Err(AppError::backup_snapshot_asset_remap_failed(
+            "备份快照资产映射存在重复目标，恢复已取消。",
+        ));
+    }
+
+    document
+        .snapshots
+        .iter()
+        .map(|snapshot| {
+            let mut user_inputs = snapshot.user_inputs.clone();
+            let mut resolved_inputs = snapshot.resolved_inputs.clone();
+            remap_snapshot_asset_references(&mut user_inputs, asset_ids);
+            remap_snapshot_asset_references(&mut resolved_inputs, asset_ids);
+
+            let stale_references =
+                collect_exact_asset_id_references(&user_inputs, &backup_asset_ids)
+                    .into_iter()
+                    .chain(collect_exact_asset_id_references(
+                        &resolved_inputs,
+                        &backup_asset_ids,
+                    ))
+                    .collect::<Vec<_>>();
+            if !stale_references.is_empty() {
+                return Err(AppError::backup_snapshot_asset_remap_failed(
+                    "恢复后的任务快照仍包含原项目素材引用，恢复已取消。",
+                ));
+            }
+
+            Ok(BackupSnapshot {
+                user_inputs,
+                resolved_inputs,
+                ..snapshot.clone()
+            })
+        })
+        .collect()
+}
+
 async fn restore_rows_in_transaction(
     transaction: &mut Transaction<'_, sqlx::Sqlite>,
     project: &ProjectRecord,
@@ -1518,6 +1618,7 @@ async fn restore_rows_in_transaction(
     batch_ids: &HashMap<String, String>,
     item_ids: &HashMap<String, String>,
     restored_assets: &[RestoredAsset],
+    restored_snapshots: &[BackupSnapshot],
 ) -> Result<(), AppError> {
     sqlx::query(
         "INSERT INTO projects (id, name, description, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1606,7 +1707,7 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
-    for snapshot in &document.snapshots {
+    for snapshot in restored_snapshots {
         let (Some(snapshot_id), Some(task_id)) = (
             snapshot_ids.get(&snapshot.id),
             task_ids.get(&snapshot.task_id),
@@ -1658,6 +1759,13 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    validate_restored_snapshot_asset_ownership(
+        transaction,
+        &project.id,
+        restored_snapshots,
+        asset_ids,
+    )
+    .await?;
     for mapping in &document.mappings {
         let (Some(task_id), Some(asset_id)) = (
             task_ids.get(&mapping.task_id),
@@ -1737,6 +1845,44 @@ async fn restore_rows_in_transaction(
     Ok(())
 }
 
+async fn validate_restored_snapshot_asset_ownership(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+    snapshots: &[BackupSnapshot],
+    asset_ids: &HashMap<String, String>,
+) -> Result<(), AppError> {
+    let restored_asset_ids = asset_ids.values().cloned().collect::<HashSet<_>>();
+    let references = snapshots
+        .iter()
+        .flat_map(|snapshot| {
+            collect_exact_asset_id_references(&snapshot.user_inputs, &restored_asset_ids)
+                .into_iter()
+                .chain(collect_exact_asset_id_references(
+                    &snapshot.resolved_inputs,
+                    &restored_asset_ids,
+                ))
+        })
+        .collect::<HashSet<_>>();
+
+    for asset_id in references {
+        let owned = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM assets WHERE id = ? AND project_id = ?",
+        )
+        .bind(&asset_id)
+        .bind(project_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        if owned == 0 {
+            return Err(AppError::backup_snapshot_asset_remap_failed(
+                "恢复后的任务快照引用了不属于当前项目的素材，恢复已取消。",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 async fn ensure_workflow_dependency(
     transaction: &mut Transaction<'_, sqlx::Sqlite>,
     reference: &WorkflowReference,
@@ -1795,9 +1941,18 @@ async fn ensure_version_recipe_dependency(
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_archive, restored_name, safe_zip_path, ProjectBackupService};
+    use super::{
+        collect_exact_asset_id_references, inspect_archive, remap_snapshot_asset_references,
+        restored_name, safe_zip_path, BackupAsset, BackupDocument, BackupProject, BackupSnapshot,
+        BackupTask, ProjectBackupService,
+    };
+    use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
+    use chrono::Utc;
+    use serde_json::json;
     use sha2::{Digest, Sha256};
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -1813,6 +1968,125 @@ mod tests {
     fn restored_project_name_is_capped() {
         assert!(restored_name(&"项目".repeat(80)).chars().count() <= 80);
         assert!(restored_name("原项目").ends_with("（恢复）"));
+    }
+
+    #[test]
+    fn remaps_single_exact_snapshot_asset_value() {
+        let mut value = json!({"reference_image": "ast_original_1"});
+        let mapping = HashMap::from([("ast_original_1".to_owned(), "ast_restored_1".to_owned())]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(value, json!({"reference_image": "ast_restored_1"}));
+    }
+
+    #[test]
+    fn remaps_multiple_assets_without_changing_order_or_duplicates() {
+        let mut value = json!({
+            "images": ["ast_original_1", "ast_original_2", "ast_original_1"]
+        });
+        let mapping = HashMap::from([
+            ("ast_original_1".to_owned(), "ast_restored_1".to_owned()),
+            ("ast_original_2".to_owned(), "ast_restored_2".to_owned()),
+        ]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(
+            value,
+            json!({"images": ["ast_restored_1", "ast_restored_2", "ast_restored_1"]})
+        );
+    }
+
+    #[test]
+    fn remaps_nested_snapshot_asset_values_but_not_object_keys() {
+        let mut value = json!({
+            "ast_original_1": "keep this key",
+            "nested": {"refs": ["ast_original_1"]}
+        });
+        let mapping = HashMap::from([("ast_original_1".to_owned(), "ast_restored_1".to_owned())]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(value["ast_original_1"], "keep this key");
+        assert_eq!(value["nested"]["refs"][0], "ast_restored_1");
+    }
+
+    #[test]
+    fn does_not_change_text_containing_an_asset_id() {
+        let mut value = json!({
+            "prompt": "use ast_original_1 in this sentence"
+        });
+        let mapping = HashMap::from([("ast_original_1".to_owned(), "ast_restored_1".to_owned())]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(value["prompt"], "use ast_original_1 in this sentence");
+    }
+
+    #[test]
+    fn does_not_change_unknown_asset_like_values() {
+        let mut value = json!({"prompt": "ast_unknown"});
+        let mapping = HashMap::from([("ast_original_1".to_owned(), "ast_restored_1".to_owned())]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(value, json!({"prompt": "ast_unknown"}));
+    }
+
+    #[test]
+    fn preserves_other_scalar_snapshot_inputs() {
+        let original = json!({
+            "prompt": "hello",
+            "seed": "123",
+            "width": 768,
+            "height": 1280,
+            "enabled": true,
+            "empty": null
+        });
+        let mut value = original.clone();
+        let mapping = HashMap::from([("ast_original_1".to_owned(), "ast_restored_1".to_owned())]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(value, original);
+    }
+
+    #[test]
+    fn h3_like_snapshot_remaps_reference_image_and_preserves_other_inputs() {
+        let mut value = json!({
+            "reference_image": {
+                "type": "image_asset",
+                "assetId": "ast_original_1"
+            },
+            "duration": 5,
+            "fps": "24",
+            "frames": 81
+        });
+        let mapping = HashMap::from([("ast_original_1".to_owned(), "ast_restored_1".to_owned())]);
+
+        remap_snapshot_asset_references(&mut value, &mapping);
+
+        assert_eq!(value["reference_image"]["assetId"], "ast_restored_1");
+        assert_eq!(value["duration"], 5);
+        assert_eq!(value["fps"], "24");
+        assert_eq!(value["frames"], 81);
+    }
+
+    #[test]
+    fn collects_only_exact_known_asset_id_values() {
+        let value = json!({
+            "exact": "ast_original_1",
+            "text": "use ast_original_1 in a prompt",
+            "unknown": "ast_unknown",
+            "nested": ["ast_original_1"]
+        });
+        let known = HashSet::from(["ast_original_1".to_owned()]);
+
+        assert_eq!(
+            collect_exact_asset_id_references(&value, &known),
+            vec!["ast_original_1", "ast_original_1"]
+        );
     }
 
     #[tokio::test]
@@ -1867,6 +2141,19 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO generation_snapshots (id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("snp_backup")
+        .bind("tsk_backup")
+        .bind("{}")
+        .bind("schema_version: 1\ninputs: {}\n")
+        .bind(r#"{"reference_image":{"type":"image_asset","assetId":"ast_backup"}}"#)
+        .bind(r#"{"reference_image":{"type":"image_asset","assetId":"ast_backup"}}"#)
+        .bind("2026-01-01T00:01:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let service = ProjectBackupService::new(
             pool.clone(),
@@ -1903,6 +2190,192 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(std::fs::read(restored_path).unwrap(), bytes);
+        let restored_task_id: String =
+            sqlx::query_scalar("SELECT id FROM tasks WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let restored_asset_id: String =
+            sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let restored_project_id: String =
+            sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
+                .bind(&restored_asset_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(restored_project_id, restored.id);
+        let snapshot: (String, String) = sqlx::query_as(
+            "SELECT user_inputs_json, resolved_inputs_json FROM generation_snapshots WHERE task_id = ?",
+        )
+        .bind(restored_task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let user_inputs: serde_json::Value = serde_json::from_str(&snapshot.0).unwrap();
+        let resolved_inputs: serde_json::Value = serde_json::from_str(&snapshot.1).unwrap();
+        assert_eq!(
+            user_inputs["reference_image"]["assetId"],
+            restored_asset_id.as_str()
+        );
+        assert_eq!(
+            resolved_inputs["reference_image"]["assetId"],
+            restored_asset_id.as_str()
+        );
+        assert_ne!(restored_asset_id, "ast_backup");
+    }
+
+    #[tokio::test]
+    async fn snapshot_remap_failure_rolls_back_all_restore_rows() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let now = Utc::now();
+        let project_id = "prj_snapshot_remap_atomicity".to_owned();
+        let task_id = "tsk_original".to_owned();
+        let snapshot_id = "snp_original".to_owned();
+        let document = BackupDocument {
+            project: BackupProject {
+                id: "project-original".to_owned(),
+                name: "原始项目".to_owned(),
+            },
+            description: None,
+            created_at: now.to_rfc3339(),
+            updated_at: now.to_rfc3339(),
+            active_tasks_excluded: 0,
+            incomplete_tasks_excluded: 0,
+            tasks: vec![BackupTask {
+                id: task_id.clone(),
+                workflow_id: "workflow-1".to_owned(),
+                workflow_version_id: "workflow-version-1".to_owned(),
+                recipe_id: "recipe-1".to_owned(),
+                status: "SUCCEEDED".to_owned(),
+                prompt_id: None,
+                queue_number: None,
+                progress_mode: "indeterminate".to_owned(),
+                progress_current: None,
+                progress_total: None,
+                current_node_id: None,
+                error_code: None,
+                error_message: None,
+                raw_error: None,
+                created_at: now.to_rfc3339(),
+                queued_at: None,
+                started_at: None,
+                finished_at: Some(now.to_rfc3339()),
+            }],
+            task_events: Vec::new(),
+            assets: vec![BackupAsset {
+                id: "ast_original_1".to_owned(),
+                asset_type: "image".to_owned(),
+                category: "source_image".to_owned(),
+                name: "源图".to_owned(),
+                original_name: "source.png".to_owned(),
+                sha256: String::new(),
+                mime_type: "image/png".to_owned(),
+                width: 1,
+                height: 1,
+                duration_ms: None,
+                file_size: 0,
+                source_task_id: Some(task_id.clone()),
+                metadata: json!({}),
+                created_at: now.to_rfc3339(),
+                updated_at: now.to_rfc3339(),
+                content_path: "assets/source_image/image/source.png".to_owned(),
+                thumbnail_path: None,
+            }],
+            mappings: Vec::new(),
+            snapshots: vec![BackupSnapshot {
+                id: snapshot_id.clone(),
+                task_id: task_id.clone(),
+                workflow: json!({}),
+                recipe_yaml: "schema_version: 1\ninputs: {}\n".to_owned(),
+                user_inputs: json!({
+                    "reference_image": {
+                        "type": "image_asset",
+                        "assetId": "ast_original_1"
+                    }
+                }),
+                resolved_inputs: json!({
+                    "reference_image": {
+                        "type": "image_asset",
+                        "assetId": "ast_original_1"
+                    }
+                }),
+                created_at: now.to_rfc3339(),
+            }],
+            presets: Vec::new(),
+            batches: Vec::new(),
+            items: Vec::new(),
+            workflow_refs: Vec::new(),
+        };
+        let project = ProjectRecord {
+            id: project_id.clone(),
+            name: "恢复项目".to_owned(),
+            description: None,
+            root_path: PathBuf::from("C:/restore/project"),
+            created_at: now,
+            updated_at: now,
+        };
+        let task_ids = HashMap::from([(task_id.clone(), "tsk_restored".to_owned())]);
+        let asset_ids = HashMap::new();
+        let snapshot_ids = HashMap::from([(snapshot_id, "snp_restored".to_owned())]);
+        let preset_ids = HashMap::new();
+        let batch_ids = HashMap::new();
+        let item_ids = HashMap::new();
+
+        let error = service
+            .restore_rows(
+                &project,
+                &document,
+                &task_ids,
+                &asset_ids,
+                &snapshot_ids,
+                &preset_ids,
+                &batch_ids,
+                &item_ids,
+                &[],
+            )
+            .await
+            .expect_err("incomplete snapshot mapping must abort restore");
+
+        assert_eq!(error.code(), "BACKUP_SNAPSHOT_ASSET_REMAP_FAILED");
+        let project_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id = ?")
+            .bind(&project_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE project_id = ?")
+            .bind(&project_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let snapshot_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM generation_snapshots WHERE task_id = 'tsk_restored'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let asset_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM assets WHERE project_id = ?")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert_eq!(project_count, 0);
+        assert_eq!(task_count, 0);
+        assert_eq!(snapshot_count, 0);
+        assert_eq!(asset_count, 0);
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub enum AppErrorCode {
     BackupInvalid,
     BackupInspectionExpired,
     BackupAssetHashMismatch,
+    BackupSnapshotAssetRemapFailed,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,6 +154,10 @@ impl AppError {
         Self::new(AppErrorCode::BackupAssetHashMismatch, message)
     }
 
+    pub fn backup_snapshot_asset_remap_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::BackupSnapshotAssetRemapFailed, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -182,6 +187,7 @@ impl AppError {
             AppErrorCode::BackupInvalid => "BACKUP_INVALID",
             AppErrorCode::BackupInspectionExpired => "BACKUP_INSPECTION_EXPIRED",
             AppErrorCode::BackupAssetHashMismatch => "BACKUP_ASSET_HASH_MISMATCH",
+            AppErrorCode::BackupSnapshotAssetRemapFailed => "BACKUP_SNAPSHOT_ASSET_REMAP_FAILED",
         }
     }
 

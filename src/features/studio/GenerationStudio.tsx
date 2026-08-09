@@ -98,7 +98,9 @@ export function GenerationStudio({
   }, []);
 
   useEffect(() => {
-    useStudioStore.getState().resetDraft();
+    // Project switches are reset by App.openProject before the new workspace
+    // mounts. Keep the current store draft here so history/preset loading is
+    // not cleared when the studio is mounted after navigation.
     setMissingAssetFields(new Set());
     setNotice(null);
     setPresets([]);
