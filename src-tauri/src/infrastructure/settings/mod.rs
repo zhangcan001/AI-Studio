@@ -215,6 +215,7 @@ mod tests {
             comfy: ComfySettings {
                 endpoint: "https://lan-host:9443".to_owned(),
             },
+            preferred_presets: std::collections::BTreeMap::new(),
         };
         store.save(&settings).await.unwrap();
         assert!(directory.path().join("settings.json").is_file());
@@ -232,6 +233,7 @@ mod tests {
             comfy: ComfySettings {
                 endpoint: "http://localhost:8188".to_owned(),
             },
+            preferred_presets: std::collections::BTreeMap::new(),
         };
         store.save(&old).await.unwrap();
         store.save(&new).await.unwrap();

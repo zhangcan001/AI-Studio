@@ -7,6 +7,16 @@ use tauri::State;
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PreferredPresetRequest {
+    pub project_id: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    #[serde(default)]
+    pub preset_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PresetCreateRequest {
     pub project_id: String,
     pub workflow_version_id: String,
@@ -90,6 +100,48 @@ pub async fn preset_delete(
         .delete(&project_id, &preset_id)
         .await
         .map_err(map_preset_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn preset_get_preferred(
+    state: State<'_, AppState>,
+    project_id: String,
+    workflow_version_id: String,
+    recipe_id: String,
+) -> Result<Option<String>, AppError> {
+    super::validate_project_id(&project_id)?;
+    Ok(state
+        .settings_service
+        .preferred_preset(&project_id, &workflow_version_id, &recipe_id))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn preset_set_preferred(
+    state: State<'_, AppState>,
+    request: PreferredPresetRequest,
+) -> Result<(), AppError> {
+    super::validate_project_id(&request.project_id)?;
+    if let Some(preset_id) = request.preset_id.as_deref() {
+        let preset = state
+            .preset_service
+            .get(&request.project_id, preset_id)
+            .await
+            .map_err(map_preset_error)?;
+        if preset.workflow_version_id != request.workflow_version_id
+            || preset.recipe_id != request.recipe_id
+        {
+            return Err(AppError::invalid_input("预设不属于当前工作流版本和配方。"));
+        }
+    }
+    state
+        .settings_service
+        .set_preferred_preset(
+            &request.project_id,
+            &request.workflow_version_id,
+            &request.recipe_id,
+            request.preset_id.as_deref(),
+        )
+        .await
 }
 
 fn into_application_values(

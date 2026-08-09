@@ -3,6 +3,7 @@ import {
   checkOnboardingCapability,
   cleanWorkflowStaging,
   compareWorkflowVersions,
+  createGeneration,
   discardOnboarding,
   duplicateWorkflowRecipe,
   exportWorkflowPackage,
@@ -30,12 +31,17 @@ import type {
   WorkflowProductionWorkspaceView,
   WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
+import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, stagingStatusLabel, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
 
 interface Props {
+  projectId?: string;
+  catalog: RecipeViewModel[];
+  comfyConnected: boolean;
   onCatalogChanged: () => Promise<void>;
   onOpenStudio: (workflowId: string, recipeId: string) => Promise<void>;
+  onOpenTask?: (taskId: string) => void;
 }
 
 const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
@@ -100,7 +106,7 @@ interface MetadataDraft {
   mode: string;
 }
 
-export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
+export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onOpenTask }: Props) {
   const [items, setItems] = useState<WorkflowProductionWorkspaceView[]>([]);
   const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
   const [search, setSearch] = useState("");
@@ -109,6 +115,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
   const [diff, setDiff] = useState<WorkflowVersionDiffView>();
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string>();
+  const [quickTestingId, setQuickTestingId] = useState<string>();
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, MappingDraft>>({});
   const [outputDraft, setOutputDraft] = useState<OutputDraft>(createDefaultOutputDraft);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
@@ -228,6 +235,44 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       setNotice("配方已复制，请检查映射并发布新的配方版本。");
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
+  async function quickTest(item: WorkflowProductionWorkspaceView) {
+    if (!projectId || !item.workflowVersionId) return;
+    const latestRecipeId = item.recipes[item.recipes.length - 1]?.recipeId;
+    const recipe = catalog.find((candidate) =>
+      candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === latestRecipeId,
+    );
+    if (!recipe) {
+      setWorkspaceError("当前配方尚未进入创作目录，请先刷新工作流。");
+      return;
+    }
+    if (!comfyConnected) {
+      setWorkspaceError("请先连接 ComfyUI，再执行快速测试。");
+      return;
+    }
+    const values = quickTestValues(recipe);
+    if (!values) {
+      setNotice("该工作流需要图片、视频或音频素材，请打开创作页补充最低必需输入。");
+      await onOpenStudio(recipe.workflowId, recipe.recipeId);
+      return;
+    }
+    setQuickTestingId(item.workflowVersionId);
+    setWorkspaceError(undefined);
+    try {
+      const task = await createGeneration({
+        projectId,
+        workflowVersionId: recipe.workflowVersionId,
+        recipeId: recipe.recipeId,
+        values,
+      });
+      setNotice(`快速测试任务已创建：${task.id}`);
+      onOpenTask?.(task.id);
+    } catch (testError: unknown) {
+      setWorkspaceError(toUserMessage(testError));
+    } finally {
+      setQuickTestingId(undefined);
     }
   }
 
@@ -385,6 +430,13 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       {error && <p className="error-message" role="alert">{error}</p>}
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
 
+      <section className="workflow-health-dashboard" aria-label="运行环境健康概览">
+        <div><span>运行包总数</span><strong>{items.length}</strong></div>
+        <div><span>生产就绪</span><strong>{items.filter((item) => item.readiness === "READY").length}</strong></div>
+        <div><span>待验证</span><strong>{items.filter((item) => item.readiness === "DEGRADED").length}</strong></div>
+        <div><span>阻塞诊断</span><strong>{items.filter((item) => item.readiness === "BLOCKED").length}</strong></div>
+      </section>
+
       <div className="workflow-production-toolbar">
         <input aria-label="搜索工作流" placeholder="按名称搜索" value={search} onChange={(event) => setSearch(event.target.value)} />
         <select aria-label="工作流筛选" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
@@ -394,7 +446,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       </div>
       <div className="workflow-catalog" aria-label="工作流运行包">
         <div className="workflow-catalog-header">
-          <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>运行记录</span><span>操作</span>
+          <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>就绪状态</span><span>运行记录</span><span>操作</span>
         </div>
         {visibleItems.map((item) => (
           <article className="workflow-catalog-row" key={`${item.packageName}:${item.workflowVersionId ?? "invalid"}`}>
@@ -404,11 +456,13 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
             <span>{item.mode ? workflowModeLabel(item.mode) : "—"}</span>
             <span>{packageStatusLabel(item.packageStatus)}</span>
             <span className={`workflow-capability workflow-capability-${item.capability.toLowerCase()}`}>{formatCapability(item.capability)}</span>
+            <span className={`workflow-readiness workflow-readiness-${item.readiness.toLowerCase()}`}>{formatReadiness(item.readiness)}</span>
             <span>{item.hasSuccessfulRun ? "已有成功运行" : `共 ${item.totalTasks} 个任务`}</span>
             <div className="workflow-row-actions">
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "停用" : "启用"}</button>}
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>重新检查</button>}
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>复制配方</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "快速测试"}</button>}
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
               {item.workflowId && <button type="button" className="quiet-button" onClick={() => void importWorkflow(item.workflowId)}>创建新版本</button>}
             </div>
@@ -422,8 +476,11 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
                 <span>配方数量 <strong>{item.recipes.length}</strong></span>
                 <span>活动任务 <strong>{item.activeTasks}</strong></span>
                 <span>任务总数 <strong>{item.totalTasks}</strong></span>
+                <span>最近真实验证 <strong>{item.liveVerifiedAt ? formatDateTime(item.liveVerifiedAt) : "尚未验证"}</strong></span>
               </div>
-              {!!item.capabilityIssues.length && <IssueList issues={item.capabilityIssues} />}
+              {!!item.readinessReasons.length && <ul className="workflow-issue-list">{item.readinessReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+              {!!item.capabilityIssues.length && <section className="workflow-dependency-diagnostics"><strong>依赖诊断 · 来源：ComfyUI /object_info</strong><IssueList issues={item.capabilityIssues} /></section>}
+              {!item.capabilityIssues.length && item.packageStatus === "VALID" && <p className="disabled-note">未发现节点依赖问题。模型或文件依赖只有在运行包明确声明并有可验证来源时才会报告，AI Studio 不猜测未声明依赖。</p>}
               {!!item.diagnostics.length && <ul className="workflow-issue-list">{item.diagnostics.map((diagnostic) => <li key={diagnostic.code}>{toUserMessage({ code: diagnostic.code, message: diagnostic.message })}</li>)}</ul>}
               {!!item.recipes.length && <div className="workflow-recipe-summary">{item.recipes.map((recipe) => <span key={recipe.recipeId}>配方 {recipe.version} · {recipe.inputCount} 个输入 · {recipe.outputCount} 个输出</span>)}</div>}
             </details>
@@ -726,6 +783,41 @@ function optionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+function quickTestValues(recipe: RecipeViewModel): GenerationValues | undefined {
+  const values: GenerationValues = {};
+  for (const field of recipe.fields) {
+    switch (field.type) {
+      case "textarea":
+        values[field.key] = {
+          type: "string",
+          value: field.default || (field.required ? "AI Studio 快速测试" : ""),
+        };
+        break;
+      case "integer":
+        if (field.default !== undefined) {
+          values[field.key] = { type: "integer", value: field.default };
+        } else if (field.required) {
+          values[field.key] = { type: "integer", value: field.min ?? 1 };
+        }
+        break;
+      case "seed":
+        values[field.key] = field.defaultMode === "fixed" && field.defaultValue
+          ? { type: "seed_fixed", value: field.defaultValue }
+          : { type: "seed_random" };
+        break;
+      case "image":
+      case "images":
+      case "video":
+      case "videos":
+      case "audio":
+      case "audios":
+        if (field.required) return undefined;
+        break;
+    }
+  }
+  return values;
+}
+
 function formatCapability(value: string): string {
   return {
     READY: "可用",
@@ -733,6 +825,14 @@ function formatCapability(value: string): string {
     INCOMPATIBLE_INPUT_VALUES: "输入值不兼容",
     COMFY_OFFLINE: "ComfyUI 离线",
     NOT_CHECKED: "尚未检查",
+  }[value] ?? "未知状态";
+}
+
+function formatReadiness(value: string): string {
+  return {
+    READY: "生产就绪",
+    DEGRADED: "待验证",
+    BLOCKED: "已阻塞",
   }[value] ?? "未知状态";
 }
 

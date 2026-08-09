@@ -99,6 +99,8 @@ pub struct WorkflowProductionWorkspaceView {
     pub recipe_sha256: Option<String>,
     pub enabled: bool,
     pub capability: String,
+    pub readiness: String,
+    pub readiness_reasons: Vec<String>,
     pub capability_issues:
         Vec<crate::application::workflow_onboarding_service::CapabilityIssueView>,
     pub node_count: usize,
@@ -108,6 +110,7 @@ pub struct WorkflowProductionWorkspaceView {
     pub has_successful_run: bool,
     pub latest_success_at: Option<String>,
     pub latest_failure_at: Option<String>,
+    pub live_verified_at: Option<String>,
     pub diagnostics: Vec<WorkflowDiagnosticView>,
 }
 
@@ -323,6 +326,8 @@ impl WorkflowLifecycleService {
                     .map(|recipe| recipe.recipe_sha256.clone()),
                 enabled,
                 capability: "NOT_CHECKED".to_owned(),
+                readiness: "BLOCKED".to_owned(),
+                readiness_reasons: vec!["运行包缺失，无法进入生产就绪状态。".to_owned()],
                 capability_issues: Vec::new(),
                 node_count: 0,
                 recipes: recipe_summaries(version),
@@ -331,6 +336,7 @@ impl WorkflowLifecycleService {
                 has_successful_run: version.has_successful_run,
                 latest_success_at: version.latest_success_at.clone(),
                 latest_failure_at: version.latest_failure_at.clone(),
+                live_verified_at: version.latest_success_at.clone(),
                 diagnostics: vec![WorkflowDiagnosticView {
                     code: "RUNTIME_PACKAGE_MISSING".to_owned(),
                     message: "database registration has no runtime package".to_owned(),
@@ -725,6 +731,15 @@ impl WorkflowLifecycleService {
         } else {
             "INVALID"
         };
+        let capability_state = capability_state(&capability);
+        let (readiness, readiness_reasons) = readiness_for(
+            enabled,
+            package_status,
+            &capability_state,
+            &diagnostics,
+            version.recipes.len(),
+            version.has_successful_run,
+        );
         Ok(WorkflowProductionWorkspaceView {
             package_name: package.package_name.clone(),
             package_status: package_status.to_owned(),
@@ -743,7 +758,9 @@ impl WorkflowLifecycleService {
             workflow_sha256: Some(version.workflow_sha256.clone()),
             recipe_sha256: selected_recipe.map(|recipe| recipe.recipe_sha256.clone()),
             enabled,
-            capability: capability_state(&capability),
+            capability: capability_state,
+            readiness,
+            readiness_reasons,
             capability_issues: capability.issues,
             node_count: workflow.value().as_object().map_or(0, Map::len),
             recipes: recipe_summaries(version),
@@ -752,6 +769,7 @@ impl WorkflowLifecycleService {
             has_successful_run: version.has_successful_run,
             latest_success_at: version.latest_success_at.clone(),
             latest_failure_at: version.latest_failure_at.clone(),
+            live_verified_at: version.latest_success_at.clone(),
             diagnostics,
         })
     }
@@ -851,6 +869,8 @@ fn invalid_package_view(
         recipe_sha256: None,
         enabled: false,
         capability: "NOT_CHECKED".to_owned(),
+        readiness: "BLOCKED".to_owned(),
+        readiness_reasons: vec![message.clone()],
         capability_issues: Vec::new(),
         node_count: 0,
         recipes: Vec::new(),
@@ -859,11 +879,64 @@ fn invalid_package_view(
         has_successful_run: false,
         latest_success_at: None,
         latest_failure_at: None,
+        live_verified_at: None,
         diagnostics: vec![WorkflowDiagnosticView {
             code: code.to_owned(),
             message,
         }],
     }
+}
+
+fn readiness_for(
+    enabled: bool,
+    package_status: &str,
+    capability: &str,
+    diagnostics: &[WorkflowDiagnosticView],
+    recipe_count: usize,
+    has_successful_run: bool,
+) -> (String, Vec<String>) {
+    let mut reasons = Vec::new();
+    if !enabled {
+        reasons.push("运行包已停用。".to_owned());
+    }
+    if package_status != "VALID" {
+        reasons.push("运行包校验未通过。".to_owned());
+    }
+    if recipe_count == 0 {
+        reasons.push("没有可用配方。".to_owned());
+    }
+    match capability {
+        "MISSING_NODES" => reasons.push("ComfyUI 缺少工作流节点。".to_owned()),
+        "INCOMPATIBLE_INPUT_VALUES" => {
+            reasons.push("工作流输入与当前 ComfyUI 能力不兼容。".to_owned())
+        }
+        "COMFY_OFFLINE" => reasons.push("ComfyUI 当前离线。".to_owned()),
+        "NOT_CHECKED" => reasons.push("尚未完成当前运行环境检查。".to_owned()),
+        _ => {}
+    }
+    if !diagnostics.is_empty() {
+        reasons.push(format!("存在 {} 条运行包诊断。", diagnostics.len()));
+    }
+    if !has_successful_run && reasons.is_empty() {
+        reasons.push("尚未完成真实生成验证。".to_owned());
+    }
+    let readiness = if !reasons.is_empty()
+        && (reasons.iter().any(|reason| {
+            reason.contains("停用")
+                || reason.contains("校验")
+                || reason.contains("缺少")
+                || reason.contains("不兼容")
+                || reason.contains("离线")
+                || reason.contains("没有可用")
+                || reason.contains("诊断")
+        })) {
+        "BLOCKED"
+    } else if !has_successful_run || capability == "NOT_CHECKED" {
+        "DEGRADED"
+    } else {
+        "READY"
+    };
+    (readiness.to_owned(), reasons)
 }
 
 fn recipe_summaries(version: &RuntimeWorkflowVersionRecord) -> Vec<WorkflowRecipeSummaryView> {
@@ -1243,7 +1316,9 @@ fn archive_error(message: impl Into<String>) -> WorkflowLifecycleError {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_archive, diff_workflow, parse_archive};
+    use super::{
+        build_archive, diff_workflow, parse_archive, readiness_for, WorkflowDiagnosticView,
+    };
     use crate::application::ports::WorkflowPackageBytes;
     use crate::domain::WorkflowDocument;
     use serde_json::json;
@@ -1288,5 +1363,23 @@ mod tests {
         let archive = writer.finish().unwrap().into_inner();
         let error = parse_archive(&archive).unwrap_err();
         assert_eq!(error.code(), "PACKAGE_ARCHIVE_UNEXPECTED_ENTRY");
+    }
+
+    #[test]
+    fn readiness_distinguishes_live_evidence_from_blocking_diagnostics() {
+        let (ready, reasons) = readiness_for(true, "VALID", "READY", &[], 1, true);
+        assert_eq!(ready, "READY");
+        assert!(reasons.is_empty());
+
+        let (degraded, reasons) = readiness_for(true, "VALID", "NOT_CHECKED", &[], 1, false);
+        assert_eq!(degraded, "DEGRADED");
+        assert!(!reasons.is_empty());
+
+        let diagnostics = vec![WorkflowDiagnosticView {
+            code: "WORKFLOW_RUNTIME_HASH_MISMATCH".to_owned(),
+            message: "hash mismatch".to_owned(),
+        }];
+        let (blocked, _) = readiness_for(true, "INVALID", "READY", &diagnostics, 1, true);
+        assert_eq!(blocked, "BLOCKED");
     }
 }

@@ -1444,11 +1444,16 @@ fn validate_document_entries(
 }
 
 fn validate_organization_document(document: &BackupDocument) -> Result<(), AppError> {
+    const MAX_PROJECT_TAGS: usize = 100;
+    const MAX_ASSET_TAGS: usize = 20;
     let asset_ids = document
         .assets
         .iter()
         .map(|asset| asset.id.as_str())
         .collect::<HashSet<_>>();
+    if document.asset_tags.len() > MAX_PROJECT_TAGS {
+        return Err(AppError::backup_invalid("备份项目标签数量超过 100 个上限"));
+    }
     let tag_ids = document
         .asset_tags
         .iter()
@@ -1457,13 +1462,20 @@ fn validate_organization_document(document: &BackupDocument) -> Result<(), AppEr
     if tag_ids.len() != document.asset_tags.len() {
         return Err(AppError::backup_invalid("备份包含重复标签 ID"));
     }
-    let normalized = document
-        .asset_tags
-        .iter()
-        .map(|tag| tag.normalized_name.as_str())
-        .collect::<HashSet<_>>();
-    if normalized.len() != document.asset_tags.len() {
-        return Err(AppError::backup_invalid("备份包含重复标签名称"));
+    let mut normalized = HashSet::new();
+    for tag in &document.asset_tags {
+        let (canonical_name, canonical_normalized_name) =
+            crate::application::organization_service::normalize_name(&tag.name, 32, "ASSET_TAG")
+                .map_err(|error| AppError::backup_invalid(format!("标签名称无效：{error}")))?;
+        if tag.name != canonical_name {
+            return Err(AppError::backup_invalid("备份包含非规范标签名称"));
+        }
+        if tag.normalized_name != canonical_normalized_name {
+            return Err(AppError::backup_invalid("备份包含不匹配的标签规范名称"));
+        }
+        if !normalized.insert(canonical_normalized_name) {
+            return Err(AppError::backup_invalid("备份包含重复标签名称"));
+        }
     }
     if document
         .asset_tags
@@ -1481,12 +1493,18 @@ fn validate_organization_document(document: &BackupDocument) -> Result<(), AppEr
         return Err(AppError::backup_invalid("备份组织数据项目归属不一致"));
     }
     let mut links = HashSet::new();
+    let mut tags_per_asset = HashMap::<&str, usize>::new();
     for link in &document.asset_tag_links {
         if !asset_ids.contains(link.asset_id.as_str()) || !tag_ids.contains(link.tag_id.as_str()) {
             return Err(AppError::backup_invalid("备份标签链接引用了未知素材或标签"));
         }
         if !links.insert((link.asset_id.as_str(), link.tag_id.as_str())) {
             return Err(AppError::backup_invalid("备份包含重复标签链接"));
+        }
+        let count = tags_per_asset.entry(link.asset_id.as_str()).or_default();
+        *count += 1;
+        if *count > MAX_ASSET_TAGS {
+            return Err(AppError::backup_invalid("备份素材标签数量超过 20 个上限"));
         }
     }
     let mut favorites = HashSet::new();
@@ -2096,8 +2114,9 @@ async fn ensure_version_recipe_dependency(
 mod tests {
     use super::{
         collect_exact_asset_id_references, inspect_archive, remap_snapshot_asset_references,
-        restored_name, safe_zip_path, BackupAsset, BackupDocument, BackupProject, BackupSnapshot,
-        BackupTask, ProjectBackupService,
+        restored_name, safe_zip_path, validate_organization_document, BackupAsset, BackupAssetTag,
+        BackupAssetTagLink, BackupDocument, BackupProject, BackupSnapshot, BackupTask,
+        ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
@@ -2241,6 +2260,141 @@ mod tests {
             collect_exact_asset_id_references(&value, &known),
             vec!["ast_original_1", "ast_original_1"]
         );
+    }
+
+    fn organization_document(
+        tags: Vec<BackupAssetTag>,
+        links: Vec<BackupAssetTagLink>,
+    ) -> BackupDocument {
+        BackupDocument {
+            project: BackupProject {
+                id: "project-organization".to_owned(),
+                name: "组织校验项目".to_owned(),
+            },
+            description: None,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            active_tasks_excluded: 0,
+            incomplete_tasks_excluded: 0,
+            tasks: Vec::new(),
+            task_events: Vec::new(),
+            assets: vec![BackupAsset {
+                id: "ast_organization".to_owned(),
+                asset_type: "image".to_owned(),
+                category: "source_image".to_owned(),
+                name: "测试素材".to_owned(),
+                original_name: "test.png".to_owned(),
+                sha256: String::new(),
+                mime_type: "image/png".to_owned(),
+                width: 1,
+                height: 1,
+                duration_ms: None,
+                file_size: 0,
+                source_task_id: None,
+                metadata: json!({}),
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+                content_path: "assets/source_image/image/test.png".to_owned(),
+                thumbnail_path: None,
+            }],
+            mappings: Vec::new(),
+            snapshots: Vec::new(),
+            presets: Vec::new(),
+            batches: Vec::new(),
+            items: Vec::new(),
+            workflow_refs: Vec::new(),
+            asset_tags: tags,
+            asset_tag_links: links,
+            asset_favorites: Vec::new(),
+        }
+    }
+
+    fn tag(id: &str, name: &str, normalized_name: &str) -> BackupAssetTag {
+        BackupAssetTag {
+            id: id.to_owned(),
+            project_id: "project-organization".to_owned(),
+            name: name.to_owned(),
+            normalized_name: normalized_name.to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn link(asset_id: &str, tag_id: &str) -> BackupAssetTagLink {
+        BackupAssetTagLink {
+            asset_id: asset_id.to_owned(),
+            tag_id: tag_id.to_owned(),
+            project_id: "project-organization".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+        }
+    }
+
+    #[test]
+    fn backup_blocks_invalid_tag_names_and_normalized_mismatches() {
+        for (name, normalized_name) in vec![
+            (String::new(), String::new()),
+            ("bad\nname".to_owned(), "bad\nname".to_owned()),
+            ("a".repeat(33), "a".repeat(33)),
+            ("  padded".to_owned(), "  padded".to_owned()),
+            ("Name".to_owned(), "wrong".to_owned()),
+        ] {
+            let error = validate_organization_document(&organization_document(
+                vec![tag("tag_1", &name, &normalized_name)],
+                Vec::new(),
+            ))
+            .expect_err("malformed tag must be blocked");
+            assert_eq!(error.code(), "BACKUP_INVALID");
+        }
+    }
+
+    #[test]
+    fn backup_blocks_duplicate_normalized_names() {
+        let error = validate_organization_document(&organization_document(
+            vec![tag("tag_1", "Name", "name"), tag("tag_2", "NAME", "name")],
+            Vec::new(),
+        ))
+        .expect_err("duplicate canonical names must be blocked");
+        assert_eq!(error.code(), "BACKUP_INVALID");
+    }
+
+    #[test]
+    fn backup_blocks_more_than_one_hundred_project_tags() {
+        let tags = (0..101)
+            .map(|index| {
+                let name = format!("tag{index}");
+                tag(&format!("tag_{index}"), &name, &name)
+            })
+            .collect();
+        assert!(validate_organization_document(&organization_document(tags, Vec::new())).is_err());
+    }
+
+    #[test]
+    fn backup_blocks_more_than_twenty_tags_on_one_asset() {
+        let tags = (0..21)
+            .map(|index| {
+                let name = format!("tag{index}");
+                tag(&format!("tag_{index}"), &name, &name)
+            })
+            .collect::<Vec<_>>();
+        let links = (0..21)
+            .map(|index| link("ast_organization", &format!("tag_{index}")))
+            .collect();
+        assert!(validate_organization_document(&organization_document(tags, links)).is_err());
+    }
+
+    #[test]
+    fn backup_accepts_one_hundred_project_tags_and_twenty_tags_on_one_asset() {
+        let tags = (0..100)
+            .map(|index| {
+                let name = format!("tag{index}");
+                tag(&format!("tag_{index}"), &name, &name)
+            })
+            .collect::<Vec<_>>();
+        let links = (0..20)
+            .map(|index| link("ast_organization", &format!("tag_{index}")))
+            .collect();
+        validate_organization_document(&organization_document(tags, links))
+            .expect("organization limits are inclusive");
     }
 
     #[tokio::test]

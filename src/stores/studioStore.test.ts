@@ -54,4 +54,13 @@ describe("studio media draft state", () => {
     });
     expect(useStudioStore.getState().values.video).toBeUndefined();
   });
+
+  it("marks user edits so a preferred preset cannot overwrite an active draft", () => {
+    useStudioStore.getState().loadDraft(mediaWorkflow, {});
+    expect(useStudioStore.getState().draftDirty).toBe(false);
+    useStudioStore.getState().setValue("note", { type: "string", value: "用户草稿" });
+    expect(useStudioStore.getState().draftDirty).toBe(true);
+    useStudioStore.getState().loadDraft(mediaWorkflow, {});
+    expect(useStudioStore.getState().draftDirty).toBe(false);
+  });
 });

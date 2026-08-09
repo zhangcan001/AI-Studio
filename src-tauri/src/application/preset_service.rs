@@ -51,6 +51,22 @@ impl PresetService {
             .collect())
     }
 
+    pub async fn get(
+        &self,
+        project_id: &str,
+        preset_id: &str,
+    ) -> Result<PresetView, PresetServiceError> {
+        validate_project_id(project_id)?;
+        let preset_id = PresetId::parse(preset_id.to_owned())
+            .map_err(|error| PresetServiceError::InvalidPresetId(error.to_string()))?;
+        let preset = self
+            .repository
+            .find_by_id(project_id, &preset_id)
+            .await?
+            .ok_or_else(|| PresetServiceError::NotFound(preset_id.to_string()))?;
+        Ok(PresetView::from(preset))
+    }
+
     pub async fn create(
         &self,
         project_id: &str,

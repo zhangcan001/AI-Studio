@@ -6,9 +6,11 @@ import {
   createGenerationBatch,
   createProjectTemplate,
   deletePreset,
+  getPreferredPreset,
   listPresets,
   refreshWorkflowLibrary,
   updatePreset,
+  setPreferredPreset,
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -99,6 +101,7 @@ export function GenerationStudio({
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
   const [presets, setPresets] = useState<PresetView[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [preferredPresetId, setPreferredPresetId] = useState<string | null>(null);
   const [presetName, setPresetName] = useState("");
   const [presetLoading, setPresetLoading] = useState(false);
   const [presetError, setPresetError] = useState<string>();
@@ -257,9 +260,22 @@ export function GenerationStudio({
     setPresetError(undefined);
     setSelectedPresetId("");
     setPresetName("");
-    void listPresets(projectId, selectedWorkflow.workflowVersionId, selectedWorkflow.recipeId)
-      .then((nextPresets) => {
-        if (active) setPresets(nextPresets);
+    void Promise.all([
+      listPresets(projectId, selectedWorkflow.workflowVersionId, selectedWorkflow.recipeId),
+      getPreferredPreset(projectId, selectedWorkflow.workflowVersionId, selectedWorkflow.recipeId),
+    ])
+      .then(([nextPresets, nextPreferredId]) => {
+        if (!active) return;
+        setPresets(nextPresets);
+        setPreferredPresetId(nextPreferredId);
+        const preferred = nextPreferredId
+          ? nextPresets.find((preset) => preset.id === nextPreferredId)
+          : undefined;
+        if (preferred && !useStudioStore.getState().draftDirty) {
+          useStudioStore.getState().loadDraft(selectedWorkflow, preferred.values);
+          setSelectedPresetId(preferred.id);
+          setPresetName(preferred.name);
+        }
       })
       .catch((loadError: unknown) => {
         if (active) setPresetError(toUserMessage(loadError));
@@ -334,12 +350,41 @@ export function GenerationStudio({
     setPresetLoading(true);
     setPresetError(undefined);
     try {
+      if (preferredPresetId === selectedPresetId) {
+        await setPreferredPreset({
+          projectId,
+          workflowVersionId: selectedWorkflow?.workflowVersionId ?? "",
+          recipeId: selectedWorkflow?.recipeId ?? "",
+        });
+        setPreferredPresetId(null);
+      }
       await deletePreset(projectId, selectedPresetId);
       setPresets((current) => current.filter((preset) => preset.id !== selectedPresetId));
       setSelectedPresetId("");
       setPresetName("");
     } catch (deleteError: unknown) {
       setPresetError(toUserMessage(deleteError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
+
+  async function togglePreferredPreset() {
+    if (!selectedWorkflow || !selectedPresetId) return;
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      const nextPreferredId = preferredPresetId === selectedPresetId ? undefined : selectedPresetId;
+      await setPreferredPreset({
+        projectId,
+        workflowVersionId: selectedWorkflow.workflowVersionId,
+        recipeId: selectedWorkflow.recipeId,
+        presetId: nextPreferredId,
+      });
+      setPreferredPresetId(nextPreferredId ?? null);
+      setNotice(nextPreferredId ? "已设为当前工作流默认预设。" : "已取消当前工作流默认预设。");
+    } catch (preferredError: unknown) {
+      setPresetError(toUserMessage(preferredError));
     } finally {
       setPresetLoading(false);
     }
@@ -586,9 +631,13 @@ export function GenerationStudio({
               <div className="preset-actions">
                 <button type="button" onClick={() => { setPresetName(""); setPresetError(undefined); setPresetEditorOpen(true); }} disabled={presetLoading}>{selectedPresetId ? "另存为" : "保存当前"}</button>
                 <button type="button" onClick={() => void savePresetChanges()} disabled={presetLoading || !selectedPresetId}>更新预设</button>
+                <button type="button" className="quiet-button" onClick={() => void togglePreferredPreset()} disabled={presetLoading || !selectedPresetId}>
+                  {preferredPresetId === selectedPresetId ? "取消默认" : "设为默认"}
+                </button>
                 <button type="button" className="quiet-button" onClick={() => void removePreset()} disabled={presetLoading || !selectedPresetId}>删除预设</button>
               </div>
             </div>
+            {preferredPresetId && <p className="preset-default-note" role="status">当前工作流会优先加载默认预设。</p>}
             {presetEditorOpen && (
               <div className="preset-inline-editor" aria-label="保存预设">
                 <label>

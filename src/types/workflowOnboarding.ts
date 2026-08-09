@@ -202,6 +202,8 @@ export interface WorkflowProductionWorkspaceView {
   recipeSha256?: string;
   enabled: boolean;
   capability: string;
+  readiness: "READY" | "DEGRADED" | "BLOCKED" | string;
+  readinessReasons: string[];
   capabilityIssues: CapabilityIssueView[];
   nodeCount: number;
   recipes: WorkflowRecipeSummaryView[];
@@ -210,6 +212,7 @@ export interface WorkflowProductionWorkspaceView {
   hasSuccessfulRun: boolean;
   latestSuccessAt?: string;
   latestFailureAt?: string;
+  liveVerifiedAt?: string;
   diagnostics: WorkflowDiagnosticView[];
 }
 

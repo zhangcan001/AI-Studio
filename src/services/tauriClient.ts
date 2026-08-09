@@ -457,6 +457,23 @@ export function listPresets(
   return invoke<PresetView[]>("preset_list", { projectId, workflowVersionId, recipeId });
 }
 
+export function getPreferredPreset(
+  projectId: string,
+  workflowVersionId: string,
+  recipeId: string,
+): Promise<string | null> {
+  return invoke<string | null>("preset_get_preferred", { projectId, workflowVersionId, recipeId });
+}
+
+export function setPreferredPreset(request: {
+  projectId: string;
+  workflowVersionId: string;
+  recipeId: string;
+  presetId?: string;
+}): Promise<void> {
+  return invoke<void>("preset_set_preferred", { request });
+}
+
 export function createPreset(request: {
   projectId: string;
   workflowVersionId: string;

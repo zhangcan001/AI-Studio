@@ -642,6 +642,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::preset::preset_create,
             commands::preset::preset_update,
             commands::preset::preset_delete,
+            commands::preset::preset_get_preferred,
+            commands::preset::preset_set_preferred,
             commands::asset::asset_list_by_task,
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,

@@ -508,7 +508,17 @@ function App() {
         />
       )}
       {workspace === "workflows" && (
-        <WorkflowWorkspace onCatalogChanged={reloadCatalog} onOpenStudio={openPublishedWorkflow} />
+        <WorkflowWorkspace
+          projectId={activeProject?.id}
+          catalog={catalog}
+          comfyConnected={isConnected}
+          onCatalogChanged={reloadCatalog}
+          onOpenStudio={openPublishedWorkflow}
+          onOpenTask={(taskId) => {
+            setFocusedTaskId(taskId);
+            setWorkspace("tasks");
+          }}
+        />
       )}
       {workspace === "settings" && (
         <SettingsWorkspace

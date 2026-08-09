@@ -110,6 +110,62 @@ impl SettingsService {
         }
     }
 
+    pub fn preferred_preset(
+        &self,
+        project_id: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Option<String> {
+        let settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
+        let key = crate::application::ports::settings_store::preferred_preset_key(
+            project_id,
+            workflow_version_id,
+            recipe_id,
+        );
+        settings.preferred_presets.get(&key).cloned()
+    }
+
+    pub async fn set_preferred_preset(
+        &self,
+        project_id: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        preset_id: Option<&str>,
+    ) -> Result<(), AppError> {
+        let key = crate::application::ports::settings_store::preferred_preset_key(
+            project_id,
+            workflow_version_id,
+            recipe_id,
+        );
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        match preset_id {
+            Some(preset_id) => {
+                next_settings
+                    .preferred_presets
+                    .insert(key, preset_id.to_owned());
+            }
+            None => {
+                next_settings.preferred_presets.remove(&key);
+            }
+        }
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(())
+    }
+
     pub async fn test_connection(&self, endpoint: &str) -> Result<EndpointTestView, AppError> {
         let config = parse_endpoint(endpoint)?;
         let adapter = self
@@ -144,11 +200,18 @@ impl SettingsService {
         // persisting and swapping the shared runtime adapter.
         adapter.health_check().await.map_err(endpoint_test_error)?;
 
+        let preferred_presets = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .preferred_presets
+            .clone();
         let next_settings = AppSettings {
             schema_version: 1,
             comfy: crate::application::ports::ComfySettings {
                 endpoint: config.endpoint(),
             },
+            preferred_presets,
         };
         self.store
             .save(&next_settings)

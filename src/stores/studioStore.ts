@@ -10,6 +10,7 @@ import type {
 interface StudioState {
   selectedWorkflow?: RecipeViewModel;
   values: GenerationValues;
+  draftDirty: boolean;
   validationErrors: Record<string, string>;
   pendingAssetIntent?: PendingStudioAssetIntent;
   reuseProvenance?: StudioReuseProvenance;
@@ -27,32 +28,35 @@ interface StudioState {
 
 export const useStudioStore = create<StudioState>((set) => ({
   values: {},
+  draftDirty: false,
   validationErrors: {},
   setSelectedWorkflow: (workflow) =>
     set({
       selectedWorkflow: workflow,
       values: workflow ? defaultValues(workflow) : {},
+      draftDirty: false,
       validationErrors: {},
       reuseProvenance: undefined,
     }),
   loadDraft: (workflow, values) =>
-    set({ selectedWorkflow: workflow, values, validationErrors: {} }),
+    set({ selectedWorkflow: workflow, values, draftDirty: false, validationErrors: {} }),
   setPendingAssetIntent: (pendingAssetIntent) => set({ pendingAssetIntent }),
   clearPendingAssetIntent: () => set({ pendingAssetIntent: undefined }),
   setReuseProvenance: (reuseProvenance) => set({ reuseProvenance }),
   setValue: (key, value) =>
-    set((state) => ({ values: { ...state.values, [key]: value } })),
+    set((state) => ({ values: { ...state.values, [key]: value }, draftDirty: true })),
   removeValue: (key) =>
     set((state) => {
       const values = { ...state.values };
       delete values[key];
-      return { values };
+      return { values, draftDirty: true };
     }),
   setValidationErrors: (validationErrors) => set({ validationErrors }),
   clearValidationErrors: () => set({ validationErrors: {} }),
   resetDraft: () =>
     set((state) => ({
       values: state.selectedWorkflow ? defaultValues(state.selectedWorkflow) : {},
+      draftDirty: false,
       validationErrors: {},
       pendingAssetIntent: undefined,
       reuseProvenance: undefined,
