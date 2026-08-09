@@ -352,9 +352,8 @@ impl From<ProductionQueueOverview> for ProductionQueueOverviewView {
 
 fn map_queue_error(error: ProductionQueueError) -> AppError {
     match error {
-        ProductionQueueError::InvalidInput(message) | ProductionQueueError::InvalidState(message) => {
-            AppError::invalid_input(message)
-        }
+        ProductionQueueError::InvalidInput(message)
+        | ProductionQueueError::InvalidState(message) => AppError::invalid_input(message),
         ProductionQueueError::NotFound(message) => AppError::invalid_input(message),
         ProductionQueueError::Repository(error) => super::map_repository_error(&error),
     }

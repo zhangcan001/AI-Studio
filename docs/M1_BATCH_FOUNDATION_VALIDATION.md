@@ -2,6 +2,8 @@
 
 Date: 2026-08-07
 
+Final status: PASS (validated 2026-08-09).
+
 Scope: first batch-production foundation for the intentionally limited production model set: Kera2 image generation and MiniMax H3 video generation. No third model runtime pack, scheduler, CSV import, or automatic retry policy is included.
 
 ## Implemented
@@ -30,19 +32,19 @@ Scope: first batch-production foundation for the intentionally limited productio
 
 ## Validation status
 
-Code-level changes are present, including Rust tests for empty and over-limit batch sizes. Full regression commands could not be executed through the current local MCP bash channel because the Windows host reports an unavailable/misconfigured WSL runtime before project commands start. This is an environment/tooling blocker, not a reported test failure.
+Status: PASS.
 
-Required regression commands when the local command channel is available:
+The previous WSL/tooling blocker was removed by running the project toolchain directly in native Windows PowerShell. The complete regression suite passed:
 
 - `cargo fmt --all -- --check`
 - `cargo check`
-- `cargo test -- --test-threads=1`
-- `pnpm test`
+- `cargo test -- --test-threads=1` — 238 passed, 0 failed
+- `pnpm test` — 13 files, 31 tests passed
 - `pnpm build`
 - `git diff --check`
 
-Until these commands run successfully, this document does not claim the batch foundation as final PASS.
+Production Validation 01 also exercised a real four-item Kera2 production batch through normal Tasks and confirmed ordered output Asset creation. Full evidence is recorded in `M1_PRODUCTION_VALIDATION_01.md`.
 
 ## Next stage
 
-`BATCH FOUNDATION 02 — task-list import + bounded retry policy` is the next stage only after Batch Foundation 01 passes regression validation. Retry policy must distinguish transient infrastructure errors from deterministic failures; MiniMax H3 GPU OOM must remain non-automatic by default.
+Batch Foundations 02–04 and Production Validation 01 are complete. The next work is limited to the separate MiniMax H3 16 GB OOM unblock; OOM retry remains non-automatic.

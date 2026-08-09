@@ -162,7 +162,9 @@ impl fmt::Display for ProductionQueueDomainError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidId(value) => write!(formatter, "invalid production queue id: {value}"),
-            Self::InvalidStatus(value) => write!(formatter, "invalid production queue status: {value}"),
+            Self::InvalidStatus(value) => {
+                write!(formatter, "invalid production queue status: {value}")
+            }
         }
     }
 }

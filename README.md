@@ -77,6 +77,8 @@ Production scope is intentionally limited to Kera2 for image generation and Mini
 - Production queue control/observability with archive/restore/safe delete, explicit skip/requeue,
   event-driven status refresh, project production summary, and direct Task-detail navigation
 
+Batch Foundations 01–04 and `PRODUCTION VALIDATION 01` are PASS. Native Windows Cargo/pnpm regression is green, and a real four-item Kera2 persistent queue passed strict ordering, pause/resume, desktop restart recovery, Asset Library output, Archive/Restore/Delete, and transient-failure Skip/Requeue gates. Evidence is recorded in `docs/M1_PRODUCTION_VALIDATION_01.md`.
+
 M1 fourth phase (Project Workspace + Project Isolation) code is complete. Historical task
 inputs are exposed through a safe DTO boundary; raw workflow payloads, recipe
 YAML, prompt IDs, storage paths, SHA-256 values, and asset metadata are not

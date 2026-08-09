@@ -25,7 +25,9 @@ const MAX_BATCH_ITEMS: usize = 100;
 
 fn validate_batch_size(item_count: usize) -> Result<(), AppError> {
     if item_count == 0 {
-        return Err(AppError::invalid_input("batch must contain at least one item"));
+        return Err(AppError::invalid_input(
+            "batch must contain at least one item",
+        ));
     }
     if item_count > MAX_BATCH_ITEMS {
         return Err(AppError::invalid_input(format!(

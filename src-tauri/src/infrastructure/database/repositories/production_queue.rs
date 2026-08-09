@@ -1,6 +1,6 @@
 use super::{
-    format_datetime, i64_to_u64, map_domain_error, map_sqlx_error, parse_datetime,
-    parse_json, parse_optional_datetime, serialize_json,
+    format_datetime, i64_to_u64, map_domain_error, map_sqlx_error, parse_datetime, parse_json,
+    parse_optional_datetime, serialize_json,
 };
 use crate::application::ports::{ProductionQueueRepository, RepositoryError};
 use crate::domain::{
@@ -47,8 +47,14 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         .map_err(map_sqlx_error)?;
 
         for item in items {
-            let values_json = serialize_json("production batch item values", Some(&item.values_json))?
-                .ok_or_else(|| RepositoryError::serialization("production batch item values", "missing value"))?;
+            let values_json =
+                serialize_json("production batch item values", Some(&item.values_json))?
+                    .ok_or_else(|| {
+                        RepositoryError::serialization(
+                            "production batch item values",
+                            "missing value",
+                        )
+                    })?;
             sqlx::query(
                 "INSERT INTO production_batch_items
                  (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
@@ -112,7 +118,9 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        let Some(batch) = batch else { return Ok(None); };
+        let Some(batch) = batch else {
+            return Ok(None);
+        };
         let items = sqlx::query_as::<_, ItemRow>(
             "SELECT id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status,
                     task_id, retry_of_item_id, error_code, error_message, created_at, updated_at
@@ -198,7 +206,9 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError> {
         if !status.is_terminal() {
-            return Err(RepositoryError::integrity("production queue finish_item requires terminal status"));
+            return Err(RepositoryError::integrity(
+                "production queue finish_item requires terminal status",
+            ));
         }
         let result = sqlx::query(
             "UPDATE production_batch_items
@@ -240,7 +250,9 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError> {
         let values_json = serialize_json("production batch item values", Some(&item.values_json))?
-            .ok_or_else(|| RepositoryError::serialization("production batch item values", "missing value"))?;
+            .ok_or_else(|| {
+                RepositoryError::serialization("production batch item values", "missing value")
+            })?;
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         sqlx::query(
             "INSERT INTO production_batch_items
@@ -332,15 +344,20 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             .execute(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
-            sqlx::query("UPDATE production_batches SET status = 'PAUSED', updated_at = ? WHERE id = ?")
-                .bind(&at)
-                .bind(batch_id)
-                .execute(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+            sqlx::query(
+                "UPDATE production_batches SET status = 'PAUSED', updated_at = ? WHERE id = ?",
+            )
+            .bind(&at)
+            .bind(batch_id)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
         }
         rows.into_iter()
-            .map(|id| ProductionBatchId::parse(id).map_err(|error| map_domain_error("production batch id", error)))
+            .map(|id| {
+                ProductionBatchId::parse(id)
+                    .map_err(|error| map_domain_error("production batch id", error))
+            })
             .collect()
     }
 }
@@ -360,7 +377,8 @@ struct BatchRow {
 impl BatchRow {
     fn try_into_domain(self) -> Result<ProductionBatch, RepositoryError> {
         Ok(ProductionBatch {
-            id: ProductionBatchId::parse(self.id).map_err(|error| map_domain_error("production batch id", error))?,
+            id: ProductionBatchId::parse(self.id)
+                .map_err(|error| map_domain_error("production batch id", error))?,
             project_id: self.project_id,
             name: self.name,
             status: ProductionBatchStatus::parse(&self.status)
@@ -401,12 +419,15 @@ impl ItemRow {
                 .map_err(|error| map_domain_error("production batch item id", error))?,
             batch_id: ProductionBatchId::parse(self.batch_id)
                 .map_err(|error| map_domain_error("production batch item batch id", error))?,
-            ordinal: u32::try_from(ordinal)
-                .map_err(|_| RepositoryError::serialization("production batch item ordinal", "value exceeds u32"))?,
+            ordinal: u32::try_from(ordinal).map_err(|_| {
+                RepositoryError::serialization("production batch item ordinal", "value exceeds u32")
+            })?,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             values_json: parse_json("production batch item values", Some(&self.values_json))?
-                .ok_or_else(|| RepositoryError::serialization("production batch item values", "missing value"))?,
+                .ok_or_else(|| {
+                    RepositoryError::serialization("production batch item values", "missing value")
+                })?,
             status: ProductionBatchItemStatus::parse(&self.status)
                 .map_err(|error| map_domain_error("production batch item status", error))?,
             task_id: self.task_id,
@@ -427,7 +448,9 @@ mod tests {
         ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
         ProductionBatchItemStatus, ProductionBatchStatus,
     };
-    use crate::infrastructure::database::{pool::initialize, repositories::test_support::seed_task_dependencies};
+    use crate::infrastructure::database::{
+        pool::initialize, repositories::test_support::seed_task_dependencies,
+    };
     use chrono::{TimeZone, Utc};
     use serde_json::json;
     use tempfile::tempdir;
@@ -435,7 +458,9 @@ mod tests {
     #[tokio::test]
     async fn uncertain_dispatch_is_failed_and_batch_is_paused_on_recovery() {
         let directory = tempdir().unwrap();
-        let pool = initialize(&directory.path().join("queue.db")).await.unwrap();
+        let pool = initialize(&directory.path().join("queue.db"))
+            .await
+            .unwrap();
         seed_task_dependencies(&pool).await;
         let repository = SqliteProductionQueueRepository::new(pool.clone());
         let now = Utc.with_ymd_and_hms(2026, 8, 8, 12, 0, 0).unwrap();
@@ -467,7 +492,10 @@ mod tests {
             updated_at: now,
         };
         repository.insert(&batch, &[item]).await.unwrap();
-        assert!(repository.set_item_dispatching(&item_id, now).await.unwrap());
+        assert!(repository
+            .set_item_dispatching(&item_id, now)
+            .await
+            .unwrap());
 
         let recovered = repository.recover_uncertain_dispatches(now).await.unwrap();
         assert_eq!(recovered, vec![batch_id.clone()]);
@@ -488,7 +516,9 @@ mod tests {
     #[tokio::test]
     async fn archive_restore_and_requeue_preserve_original_failure_evidence() {
         let directory = tempdir().unwrap();
-        let pool = initialize(&directory.path().join("operations.db")).await.unwrap();
+        let pool = initialize(&directory.path().join("operations.db"))
+            .await
+            .unwrap();
         seed_task_dependencies(&pool).await;
         let repository = SqliteProductionQueueRepository::new(pool.clone());
         let now = Utc.with_ymd_and_hms(2026, 8, 8, 13, 0, 0).unwrap();
@@ -564,7 +594,10 @@ mod tests {
         assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Failed);
         assert_eq!(detail.items[0].error_code.as_deref(), Some("COMFY_TIMEOUT"));
         assert_eq!(detail.items[1].status, ProductionBatchItemStatus::Pending);
-        assert_eq!(detail.items[1].retry_of_item_id.as_deref(), Some(source_id.as_str()));
+        assert_eq!(
+            detail.items[1].retry_of_item_id.as_deref(),
+            Some(source_id.as_str())
+        );
         pool.close().await;
     }
 }

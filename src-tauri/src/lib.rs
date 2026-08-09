@@ -9,8 +9,7 @@ mod infrastructure;
 pub use application::ports::{
     AssetRepository, AssetStore, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProductionQueueRepository, ProjectRepository, RepositoryError,
-    TaskRepository,
-    WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
+    TaskRepository, WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{

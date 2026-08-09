@@ -4,7 +4,7 @@ Date: 2026-08-08
 
 Scope: persistent production queues and local automation orchestration for the intentionally limited production model set: Kera2 image generation and MiniMax H3 video generation.
 
-Status: IMPLEMENTED / REGRESSION VALIDATION BLOCKED BY LOCAL COMMAND CHANNEL.
+Status: PASS (validated 2026-08-09).
 
 ## Durable queue model
 
@@ -115,25 +115,19 @@ No Wan, Flux, Qwen, or third-model runtime/UI path was added. Kera2 image genera
 - Existing SQLite migration tests were updated from 10 to 12 expected business tables and now include both production queue tables in the schema query.
 - Foundation 01/02 batch/import/retry tests remain in the working tree.
 
-Required regression commands before PASS:
+## Final regression and live validation
+
+Native Windows PowerShell removed the previous WSL command-channel blocker. The complete suite passed:
 
 - `cargo fmt --all -- --check`
 - `cargo check`
-- `cargo test -- --test-threads=1`
-- `pnpm test`
+- `cargo test -- --test-threads=1` — 238 passed, 0 failed
+- `pnpm test` — 13 files, 31 tests passed
 - `pnpm build`
 - `git diff --check`
 
-The current high-performance MCP bash channel still fails before project execution because the Windows host cannot start the configured WSL runtime. Therefore Foundation 01, 02, and 03 must not be labeled final PASS yet.
+A real four-item Kera2 persistent queue completed with four independent successful Tasks and four image Assets. Database timestamps confirmed strict ordinal execution with no overlap. Pause stopped the next dispatch after the active item completed; Resume continued from the next pending ordinal. AI Studio was then closed while the batch remained persisted as RUNNING and restarted; startup recovery resumed the remaining items without duplicate Tasks. Full evidence is recorded in `M1_PRODUCTION_VALIDATION_01.md`.
 
 ## Next recommended stage
 
-`BATCH FOUNDATION 04 — production queue operations + observability hardening`
-
-Recommended scope after regression validation:
-
-- delete/archive completed or unused queues
-- explicit failed-item skip/requeue controls with safety classification
-- queue/task event-driven UI refresh instead of manual refresh
-- production summary/dashboard for long-running Kera2 + MiniMax H3 jobs
-- final live Kera2 queue run and, when a 16 GB-compatible H3 workflow is available, live mixed Kera2/H3 queue validation
+Batch Foundation 04 and Production Validation 01 are complete. The next work is limited to the separate MiniMax H3 16 GB OOM unblock; no additional queue feature expansion is recommended.

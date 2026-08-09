@@ -4,7 +4,7 @@ Date: 2026-08-08
 
 Scope: production queue operations and observability hardening for the intentionally limited production model set: Kera2 image generation and MiniMax H3 video generation.
 
-Status: IMPLEMENTED / REGRESSION VALIDATION BLOCKED BY LOCAL COMMAND CHANNEL.
+Status: PASS (validated 2026-08-09).
 
 ## Queue lifecycle operations
 
@@ -106,31 +106,19 @@ No Wan, Flux, Qwen, or third-model runtime path was added. Product scope remains
 
 ## Regression status
 
-This stage must not be labeled PASS yet.
-
-Foundation 04 re-attempted both `cargo test` and `pnpm test`. Both commands failed before Cargo/pnpm or any project test began because the Windows host could not start the configured WSL runtime. This remains an environment/tooling blocker and is not an application regression result.
-
-Required before final PASS:
+Status: PASS. Native Windows PowerShell removed the previous WSL command-channel blocker. The complete suite passed:
 
 - `cargo fmt --all -- --check`
 - `cargo check`
-- `cargo test -- --test-threads=1`
-- `pnpm test`
+- `cargo test -- --test-threads=1` — 238 passed, 0 failed
+- `pnpm test` — 13 files, 31 tests passed
 - `pnpm build`
 - `git diff --check`
 
+The real production gate verified Archive, Restore, protected Delete, transient failure Skip, and transient failure Requeue through the live Tauri command boundary. Requeue preserved the original failed item and produced a successful linked retry with an Asset; Skip preserved the original Task/error evidence and completed without an Asset. The Studio UI reflected all queue overview counts and Asset Library outputs.
+
 ## Next recommended stage
 
-Do not expand automation features again before the current batch stack receives executable regression and live-production validation.
+`PRODUCTION VALIDATION 01 = PASS`.
 
-Recommended next stage:
-
-`PRODUCTION VALIDATION 01 — Kera2 persistent queue live gate + MiniMax H3 16GB runtime unblock`
-
-Goals:
-
-1. restore the local test/build command environment and run the complete Foundation 01–04 regression suite
-2. perform a real multi-item Kera2 persistent queue run, including pause/resume/restart/Asset verification
-3. validate archive/restore/skip/requeue against real Tasks without deleting Task/Asset evidence
-4. keep MiniMax H3 marked environment-blocked until the user supplies a workflow/model configuration that actually completes within the local 16 GB GPU environment
-5. only after H3 can complete a real video task, perform a mixed Kera2 + H3 persistent queue gate
+The next work is limited to MiniMax H3 runtime OOM analysis and a 16 GB-compatible live completion gate. No additional production-queue feature expansion is recommended before that work.

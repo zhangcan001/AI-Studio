@@ -2,11 +2,13 @@
 
 Date: 2026-08-07
 
+Final status: PASS (validated 2026-08-09).
+
 Scope: task-list import and bounded retry policy layered on the existing Kera2 image + MiniMax H3 video batch foundation. No third model production support and no second execution engine are introduced.
 
 ## Task-list import
 
-Status: IMPLEMENTED / regression validation pending.
+Status: PASS.
 
 The Studio batch panel accepts a local JSON task list. The file is parsed in React and converted into the same frozen batch items used by manual `Add current`; submission still uses `generation_create_batch` and the existing `GenerationService` pipeline.
 
@@ -44,7 +46,7 @@ CSV/Excel import is not included in this stage. JSON is the canonical automation
 
 ## Bounded retry policy
 
-Status: IMPLEMENTED / regression validation pending.
+Status: PASS.
 
 Retry is explicit and creates a new independent Task from the existing safe reusable draft. The failed original Task and its evidence are never modified or resubmitted in place.
 
@@ -94,19 +96,17 @@ Rust batch size tests from Batch Foundation 01 remain present.
 
 ## Regression status
 
-Full project regression commands remain BLOCKED by the current local MCP command channel before project execution: the Windows host reports an unavailable/misconfigured WSL runtime. A secondary MCP endpoint also returned HTTP 401. These are tooling/environment blockers and are not reported as application test failures.
-
-Required before final PASS:
+Status: PASS. Native Windows PowerShell provided a working Cargo/pnpm command environment. The complete suite passed:
 
 - `cargo fmt --all -- --check`
 - `cargo check`
-- `cargo test -- --test-threads=1`
-- `pnpm test`
+- `cargo test -- --test-threads=1` — 238 passed, 0 failed
+- `pnpm test` — 13 files, 31 tests passed
 - `pnpm build`
 - `git diff --check`
 
-This stage must not be labeled PASS until those commands run successfully.
+The live production gate additionally verified that a transient `COMFY_STREAM_DISCONNECTED` failure remains explicit, is safe to requeue, preserves the original failed item, and creates one successful independent retry item after ComfyUI returns. Deterministic `EXECUTION_ERROR` remains excluded.
 
 ## Next stage
 
-Recommended next stage after regression validation: `BATCH FOUNDATION 03 — persistent production queue + automation orchestration`. It should add durable batch/job grouping and controlled continuation without expanding beyond Kera2 and MiniMax H3.
+Batch Foundations 03–04 and Production Validation 01 are complete. The next work is limited to the separate MiniMax H3 16 GB OOM unblock.

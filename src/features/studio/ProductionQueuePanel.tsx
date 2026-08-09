@@ -37,7 +37,7 @@ export function ProductionQueuePanel({ projectId, batchItems, comfyConnected, on
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
-  const selectedIdRef = useRef<string>();
+  const selectedIdRef = useRef<string | undefined>(undefined);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
     selectedIdRef.current = next?.id;
@@ -412,4 +412,3 @@ function OverviewStat({ label, value }: { label: string; value: number }) {
     </span>
   );
 }
-

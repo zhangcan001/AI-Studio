@@ -1,6 +1,10 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
-use crate::application::generation_service::{CreateGenerationRequest, GenerationService, GenerationServiceError};
-use crate::application::ports::{Clock, ProductionQueueRepository, RepositoryError, TaskRepository};
+use crate::application::generation_service::{
+    CreateGenerationRequest, GenerationService, GenerationServiceError,
+};
+use crate::application::ports::{
+    Clock, ProductionQueueRepository, RepositoryError, TaskRepository,
+};
 use crate::domain::{
     AssetId, ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, SeedValue, TaskId,
@@ -126,13 +130,19 @@ impl ProductionQueueService {
         Ok(ProductionBatchDetail { batch, items })
     }
 
-    pub async fn list(&self, project_id: &str) -> Result<Vec<ProductionBatch>, ProductionQueueError> {
+    pub async fn list(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProductionBatch>, ProductionQueueError> {
         crate::domain::validate_project_id(project_id)
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         Ok(self.repository.list(project_id).await?)
     }
 
-    pub async fn overview(&self, project_id: &str) -> Result<ProductionQueueOverview, ProductionQueueError> {
+    pub async fn overview(
+        &self,
+        project_id: &str,
+    ) -> Result<ProductionQueueOverview, ProductionQueueError> {
         crate::domain::validate_project_id(project_id)
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         let batches = self.repository.list(project_id).await?;
@@ -156,9 +166,8 @@ impl ProductionQueueService {
             for item in detail.items {
                 match item.status {
                     ProductionBatchItemStatus::Pending => overview.pending_items += 1,
-                    ProductionBatchItemStatus::Dispatching | ProductionBatchItemStatus::Dispatched => {
-                        overview.active_items += 1
-                    }
+                    ProductionBatchItemStatus::Dispatching
+                    | ProductionBatchItemStatus::Dispatched => overview.active_items += 1,
                     ProductionBatchItemStatus::Succeeded => overview.succeeded_items += 1,
                     ProductionBatchItemStatus::Failed => overview.failed_items += 1,
                     ProductionBatchItemStatus::Cancelled => overview.cancelled_items += 1,
@@ -181,7 +190,11 @@ impl ProductionQueueService {
             .ok_or_else(|| ProductionQueueError::NotFound(batch_id.as_str().to_owned()))
     }
 
-    pub async fn start(self: &Arc<Self>, project_id: &str, batch_id: &str) -> Result<(), ProductionQueueError> {
+    pub async fn start(
+        self: &Arc<Self>,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
@@ -199,13 +212,22 @@ impl ProductionQueueService {
             ));
         }
         self.repository
-            .set_batch_status(project_id, &batch_id, ProductionBatchStatus::Running, self.clock.now())
+            .set_batch_status(
+                project_id,
+                &batch_id,
+                ProductionBatchStatus::Running,
+                self.clock.now(),
+            )
             .await?;
         self.spawn_if_needed(project_id.to_owned(), batch_id);
         Ok(())
     }
 
-    pub async fn pause(&self, project_id: &str, batch_id: &str) -> Result<(), ProductionQueueError> {
+    pub async fn pause(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
@@ -223,12 +245,21 @@ impl ProductionQueueService {
             ));
         }
         self.repository
-            .set_batch_status(project_id, &batch_id, ProductionBatchStatus::Paused, self.clock.now())
+            .set_batch_status(
+                project_id,
+                &batch_id,
+                ProductionBatchStatus::Paused,
+                self.clock.now(),
+            )
             .await?;
         Ok(())
     }
 
-    pub async fn archive(&self, project_id: &str, batch_id: &str) -> Result<(), ProductionQueueError> {
+    pub async fn archive(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
@@ -238,13 +269,22 @@ impl ProductionQueueService {
         ensure_batch_not_active(&detail, "archive")?;
         if detail.batch.archived_at.is_none() {
             self.repository
-                .set_archived_at(project_id, &batch_id, Some(self.clock.now()), self.clock.now())
+                .set_archived_at(
+                    project_id,
+                    &batch_id,
+                    Some(self.clock.now()),
+                    self.clock.now(),
+                )
                 .await?;
         }
         Ok(())
     }
 
-    pub async fn restore(&self, project_id: &str, batch_id: &str) -> Result<(), ProductionQueueError> {
+    pub async fn restore(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
@@ -259,7 +299,11 @@ impl ProductionQueueService {
         Ok(())
     }
 
-    pub async fn delete(&self, project_id: &str, batch_id: &str) -> Result<(), ProductionQueueError> {
+    pub async fn delete(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
@@ -309,7 +353,11 @@ impl ProductionQueueService {
                 "only failed or cancelled production items can be skipped".to_owned(),
             ));
         }
-        if !self.repository.set_item_skipped(&item.id, self.clock.now()).await? {
+        if !self
+            .repository
+            .set_item_skipped(&item.id, self.clock.now())
+            .await?
+        {
             return Err(ProductionQueueError::InvalidState(
                 "production item was not in a skippable state".to_owned(),
             ));
@@ -358,7 +406,9 @@ impl ProductionQueueService {
             .max()
             .unwrap_or(0)
             .checked_add(1)
-            .ok_or_else(|| ProductionQueueError::InvalidState("production queue ordinal overflow".to_owned()))?;
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidState("production queue ordinal overflow".to_owned())
+            })?;
         let now = self.clock.now();
         let retry = ProductionBatchItem {
             id: ProductionBatchItemId::new(),
@@ -411,7 +461,12 @@ impl ProductionQueueService {
                 tracing::error!(batch_id = %batch_id.as_str(), error = %error, "production queue runner failed");
                 let _ = service
                     .repository
-                    .set_batch_status(&project_id, &batch_id, ProductionBatchStatus::Paused, service.clock.now())
+                    .set_batch_status(
+                        &project_id,
+                        &batch_id,
+                        ProductionBatchStatus::Paused,
+                        service.clock.now(),
+                    )
                     .await;
             }
             service
@@ -447,7 +502,12 @@ impl ProductionQueueService {
             {
                 let Some(task_id) = active.task_id.as_deref() else {
                     self.repository
-                        .set_batch_status(project_id, batch_id, ProductionBatchStatus::Paused, self.clock.now())
+                        .set_batch_status(
+                            project_id,
+                            batch_id,
+                            ProductionBatchStatus::Paused,
+                            self.clock.now(),
+                        )
                         .await?;
                     return Err(ProductionQueueError::InvalidState(
                         "dispatched production item has no task id".to_owned(),
@@ -458,20 +518,29 @@ impl ProductionQueueService {
                 let task = self.task_repository.find_by_id(&task_id).await?;
                 let Some(task) = task else {
                     self.repository
-                        .set_batch_status(project_id, batch_id, ProductionBatchStatus::Paused, self.clock.now())
+                        .set_batch_status(
+                            project_id,
+                            batch_id,
+                            ProductionBatchStatus::Paused,
+                            self.clock.now(),
+                        )
                         .await?;
                     return Err(ProductionQueueError::InvalidState(
                         "production item references a missing task".to_owned(),
                     ));
                 };
                 let terminal = match task.status {
-                    TaskStatus::Succeeded => Some((ProductionBatchItemStatus::Succeeded, None, None)),
+                    TaskStatus::Succeeded => {
+                        Some((ProductionBatchItemStatus::Succeeded, None, None))
+                    }
                     TaskStatus::Failed => Some((
                         ProductionBatchItemStatus::Failed,
                         task.error.as_ref().map(|error| error.code.as_str()),
                         task.error.as_ref().map(|error| error.message.as_str()),
                     )),
-                    TaskStatus::Cancelled => Some((ProductionBatchItemStatus::Cancelled, None, None)),
+                    TaskStatus::Cancelled => {
+                        Some((ProductionBatchItemStatus::Cancelled, None, None))
+                    }
                     _ => None,
                 };
                 if let Some((status, code, message)) = terminal {
@@ -481,11 +550,7 @@ impl ProductionQueueService {
                     if detail.batch.status == ProductionBatchStatus::Paused {
                         return Ok(());
                     }
-                    if should_pause_after_terminal(
-                        status,
-                        code,
-                        detail.batch.continue_on_failure,
-                    ) {
+                    if should_pause_after_terminal(status, code, detail.batch.continue_on_failure) {
                         self.repository
                             .set_batch_status(
                                 project_id,
@@ -512,7 +577,12 @@ impl ProductionQueueService {
                 .any(|item| item.status == ProductionBatchItemStatus::Dispatching)
             {
                 self.repository
-                    .set_batch_status(project_id, batch_id, ProductionBatchStatus::Paused, self.clock.now())
+                    .set_batch_status(
+                        project_id,
+                        batch_id,
+                        ProductionBatchStatus::Paused,
+                        self.clock.now(),
+                    )
                     .await?;
                 return Err(ProductionQueueError::InvalidState(
                     "production batch contains an unresolved dispatching item".to_owned(),
@@ -600,7 +670,12 @@ impl ProductionQueueService {
                     .await?
                 {
                     self.repository
-                        .set_batch_status(project_id, batch_id, ProductionBatchStatus::Paused, self.clock.now())
+                        .set_batch_status(
+                            project_id,
+                            batch_id,
+                            ProductionBatchStatus::Paused,
+                            self.clock.now(),
+                        )
                         .await?;
                     return Err(ProductionQueueError::InvalidState(
                         "task was created but production item linkage was not persisted; batch paused to avoid duplicate dispatch"
@@ -731,7 +806,9 @@ fn generation_values_to_json(values: &BTreeMap<String, GenerationInputValue>) ->
     Value::Object(object)
 }
 
-fn generation_values_from_json(value: &Value) -> Result<BTreeMap<String, GenerationInputValue>, String> {
+fn generation_values_from_json(
+    value: &Value,
+) -> Result<BTreeMap<String, GenerationInputValue>, String> {
     let object = value
         .as_object()
         .ok_or_else(|| "production queue values must be a JSON object".to_owned())?;
@@ -750,7 +827,9 @@ fn generation_value_from_json(key: &str, value: &Value) -> Result<GenerationInpu
         .and_then(Value::as_str)
         .ok_or_else(|| format!("production queue value for {key} requires type"))?;
     match kind {
-        "string" => Ok(GenerationInputValue::Text(required_string(object, "value", key)?)),
+        "string" => Ok(GenerationInputValue::Text(required_string(
+            object, "value", key,
+        )?)),
         "integer" => Ok(GenerationInputValue::Integer(
             object
                 .get("value")
@@ -763,13 +842,27 @@ fn generation_value_from_json(key: &str, value: &Value) -> Result<GenerationInpu
                 .parse::<u64>()
                 .map_err(|_| format!("production queue seed for {key} is invalid"))?,
         ))),
-        "image_asset" => Ok(GenerationInputValue::ImageAsset(parse_asset(object, "assetId", key)?)),
-        "video_asset" => Ok(GenerationInputValue::VideoAsset(parse_asset(object, "assetId", key)?)),
-        "audio_asset" => Ok(GenerationInputValue::AudioAsset(parse_asset(object, "assetId", key)?)),
-        "image_assets" => Ok(GenerationInputValue::ImageAssets(parse_assets(object, key)?)),
-        "video_assets" => Ok(GenerationInputValue::VideoAssets(parse_assets(object, key)?)),
-        "audio_assets" => Ok(GenerationInputValue::AudioAssets(parse_assets(object, key)?)),
-        other => Err(format!("unsupported production queue value type {other} for {key}")),
+        "image_asset" => Ok(GenerationInputValue::ImageAsset(parse_asset(
+            object, "assetId", key,
+        )?)),
+        "video_asset" => Ok(GenerationInputValue::VideoAsset(parse_asset(
+            object, "assetId", key,
+        )?)),
+        "audio_asset" => Ok(GenerationInputValue::AudioAsset(parse_asset(
+            object, "assetId", key,
+        )?)),
+        "image_assets" => Ok(GenerationInputValue::ImageAssets(parse_assets(
+            object, key,
+        )?)),
+        "video_assets" => Ok(GenerationInputValue::VideoAssets(parse_assets(
+            object, key,
+        )?)),
+        "audio_assets" => Ok(GenerationInputValue::AudioAssets(parse_assets(
+            object, key,
+        )?)),
+        other => Err(format!(
+            "unsupported production queue value type {other} for {key}"
+        )),
     }
 }
 
@@ -794,9 +887,9 @@ fn parse_assets(object: &Map<String, Value>, key: &str) -> Result<Vec<AssetId>, 
     values
         .iter()
         .map(|value| {
-            let value = value
-                .as_str()
-                .ok_or_else(|| format!("production queue asset list for {key} contains a non-string id"))?;
+            let value = value.as_str().ok_or_else(|| {
+                format!("production queue asset list for {key} contains a non-string id")
+            })?;
             AssetId::parse(value.to_owned())
                 .map_err(|error| format!("production queue asset for {key} is invalid: {error}"))
         })
@@ -820,7 +913,9 @@ impl fmt::Display for ProductionQueueError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidInput(message) => write!(formatter, "INVALID_INPUT: {message}"),
-            Self::InvalidState(message) => write!(formatter, "PRODUCTION_QUEUE_INVALID_STATE: {message}"),
+            Self::InvalidState(message) => {
+                write!(formatter, "PRODUCTION_QUEUE_INVALID_STATE: {message}")
+            }
             Self::NotFound(id) => write!(formatter, "PRODUCTION_BATCH_NOT_FOUND: {id}"),
             Self::Repository(error) => write!(formatter, "{error}"),
         }
@@ -848,8 +943,14 @@ mod tests {
     #[test]
     fn queue_values_round_trip_without_losing_seed_or_asset_identity() {
         let mut values = BTreeMap::new();
-        values.insert("prompt".to_owned(), GenerationInputValue::Text("hello".to_owned()));
-        values.insert("seed".to_owned(), GenerationInputValue::Seed(SeedValue::Fixed(42)));
+        values.insert(
+            "prompt".to_owned(),
+            GenerationInputValue::Text("hello".to_owned()),
+        );
+        values.insert(
+            "seed".to_owned(),
+            GenerationInputValue::Seed(SeedValue::Fixed(42)),
+        );
         values.insert(
             "image".to_owned(),
             GenerationInputValue::ImageAsset(AssetId::parse("ast_test".to_owned()).unwrap()),
