@@ -1,4 +1,5 @@
 import type { AssetView } from "../../types/asset";
+import { assetDisplayName } from "../../i18n/statusLabels";
 
 export function VideoOutput({ asset, src }: { asset: AssetView; src: string }) {
   return (
@@ -7,7 +8,7 @@ export function VideoOutput({ asset, src }: { asset: AssetView; src: string }) {
       controls
       preload="metadata"
       playsInline
-      aria-label={asset.name}
+      aria-label={assetDisplayName(asset)}
     />
   );
 }

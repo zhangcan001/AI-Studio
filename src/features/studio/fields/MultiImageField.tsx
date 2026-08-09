@@ -8,6 +8,8 @@ import {
 } from "../../../services/tauriClient";
 import type { AssetView } from "../../../types/asset";
 import type { DraftValue } from "../../../types/generation";
+import { toUserMessage } from "../../../i18n/errorMessages";
+import { assetCategoryLabel } from "../../../i18n/statusLabels";
 
 interface Props {
   field: {
@@ -40,7 +42,7 @@ export function MultiImageField({ field, value, error, projectId, onChange, onAv
         if (active) setRecentAssets(assets);
       })
       .catch((loadError: unknown) => {
-        if (active) setMessage(loadError instanceof Error ? loadError.message : String(loadError));
+        if (active) setMessage(toUserMessage(loadError));
       });
     return () => {
       active = false;
@@ -71,7 +73,7 @@ export function MultiImageField({ field, value, error, projectId, onChange, onAv
       })
       .catch(() => {
         if (active) {
-          setMessage("One or more image assets are missing.");
+          setMessage("找不到一个或多个图片素材，请重新选择。");
           onAvailabilityChange?.(false);
         }
       });
@@ -126,7 +128,7 @@ export function MultiImageField({ field, value, error, projectId, onChange, onAv
       setRecentAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
       addAsset(asset.id);
     } catch (pickError: unknown) {
-      setMessage(pickError instanceof Error ? pickError.message : String(pickError));
+      setMessage(toUserMessage(pickError));
     } finally {
       setLoading(false);
     }
@@ -136,11 +138,11 @@ export function MultiImageField({ field, value, error, projectId, onChange, onAv
     <div className="field-control multi-image-field">
       <span>
         {field.label}
-        <em>{field.required ? `Required · ${field.minItems}-${field.maxItems}` : `Optional · up to ${field.maxItems}`}</em>
+        <em>{field.required ? `必填 · ${field.minItems}-${field.maxItems} 张` : `可选 · 最多 ${field.maxItems} 张`}</em>
       </span>
       <div className="multi-image-actions">
         <select
-          aria-label={`${field.label} asset picker`}
+          aria-label={`${field.label} 素材选择器`}
           value={pickerValue}
           onChange={(event) => {
             setPickerValue(event.target.value);
@@ -148,18 +150,18 @@ export function MultiImageField({ field, value, error, projectId, onChange, onAv
           }}
           disabled={selectedIds.length >= field.maxItems}
         >
-          <option value="">Add from Asset Library</option>
+          <option value="">从资产库添加</option>
           {recentAssets.map((asset) => (
             <option key={asset.id} value={asset.id} disabled={selectedIds.includes(asset.id)}>
-              {asset.name} · {asset.category === "source_image" ? "source" : "generated"}
+              {asset.name} · {assetCategoryLabel(asset.category)}
             </option>
           ))}
         </select>
         <button type="button" onClick={() => void chooseLocalImage()} disabled={loading || selectedIds.length >= field.maxItems}>
-          {loading ? "Importing..." : "Add local image"}
+          {loading ? "正在导入..." : "添加本地图片"}
         </button>
       </div>
-      <div className="multi-image-list" aria-label={`${field.label} selected images`}>
+      <div className="multi-image-list" aria-label={`${field.label} 已选图片`}>
         {selectedIds.map((assetId, index) => {
           const asset = assetsById[assetId];
           return (
@@ -168,18 +170,18 @@ export function MultiImageField({ field, value, error, projectId, onChange, onAv
               {previewUrls[assetId] && <img src={previewUrls[assetId]} alt={asset?.name ?? assetId} />}
               <span className="multi-image-name">{asset?.name ?? assetId}</span>
               <button type="button" onClick={() => setIds(selectedIds.filter((_, itemIndex) => itemIndex !== index))}>
-                Remove
+                移除
               </button>
               <button type="button" onClick={() => index > 0 && setIds(move(selectedIds, index, index - 1))} disabled={index === 0}>
-                Up
+                上移
               </button>
               <button type="button" onClick={() => index < selectedIds.length - 1 && setIds(move(selectedIds, index, index + 1))} disabled={index === selectedIds.length - 1}>
-                Down
+                下移
               </button>
             </div>
           );
         })}
-        {!selectedIds.length && <small className="field-hint">Add reference images in the order ComfyUI should receive them.</small>}
+        {!selectedIds.length && <small className="field-hint">请按 ComfyUI 接收顺序添加参考图片。</small>}
       </div>
       {message && <small className="field-error">{message}</small>}
       {error && <small className="field-error">{error}</small>}

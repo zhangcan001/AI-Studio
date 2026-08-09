@@ -14,6 +14,8 @@ import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeViewModel } from "../../types/generation";
 import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
+import { toUserMessage } from "../../i18n/errorMessages";
+import { workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
 import { cloneGenerationValues, retainFailedBatchItems, type BatchDraftItem } from "./batchDraft";
 import { parseBatchTaskList } from "./batchImport";
@@ -143,7 +145,7 @@ export function GenerationStudio({
         if (active) setPresets(nextPresets);
       })
       .catch((loadError: unknown) => {
-        if (active) setPresetError(loadError instanceof Error ? loadError.message : String(loadError));
+        if (active) setPresetError(toUserMessage(loadError));
       })
       .finally(() => {
         if (active) setPresetLoading(false);
@@ -165,7 +167,7 @@ export function GenerationStudio({
   async function savePreset() {
     if (!selectedWorkflow) return;
     if (!presetName.trim()) {
-      setPresetError("PRESET_NAME_REQUIRED: enter a name before saving.");
+      setPresetError("请输入预设名称后再保存。");
       return;
     }
     setPresetLoading(true);
@@ -181,7 +183,7 @@ export function GenerationStudio({
       setPresets((current) => [preset, ...current.filter((item) => item.id !== preset.id)]);
       applyPreset(preset);
     } catch (saveError: unknown) {
-      setPresetError(saveError instanceof Error ? saveError.message : String(saveError));
+      setPresetError(toUserMessage(saveError));
     } finally {
       setPresetLoading(false);
     }
@@ -190,7 +192,7 @@ export function GenerationStudio({
   async function savePresetChanges() {
     if (!selectedPresetId) return savePreset();
     if (!presetName.trim()) {
-      setPresetError("PRESET_NAME_REQUIRED: enter a name before saving.");
+      setPresetError("请输入预设名称后再保存。");
       return;
     }
     setPresetLoading(true);
@@ -200,7 +202,7 @@ export function GenerationStudio({
       setPresets((current) => current.map((item) => (item.id === preset.id ? preset : item)));
       applyPreset(preset);
     } catch (updateError: unknown) {
-      setPresetError(updateError instanceof Error ? updateError.message : String(updateError));
+      setPresetError(toUserMessage(updateError));
     } finally {
       setPresetLoading(false);
     }
@@ -208,7 +210,7 @@ export function GenerationStudio({
 
   async function removePreset() {
     if (!selectedPresetId) return;
-    if (!window.confirm("Delete this preset?")) return;
+    if (!window.confirm("确定删除这个预设吗？")) return;
     setPresetLoading(true);
     setPresetError(undefined);
     try {
@@ -217,7 +219,7 @@ export function GenerationStudio({
       setSelectedPresetId("");
       setPresetName("");
     } catch (deleteError: unknown) {
-      setPresetError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+      setPresetError(toUserMessage(deleteError));
     } finally {
       setPresetLoading(false);
     }
@@ -230,7 +232,7 @@ export function GenerationStudio({
       await refreshWorkflowLibrary();
       await onCatalogChanged();
     } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(toUserMessage(error));
     } finally {
       setRefreshing(false);
     }
@@ -239,7 +241,7 @@ export function GenerationStudio({
   async function generate() {
     if (!selectedWorkflow) return;
     if (!productionPolicy.canSubmitGeneration) {
-      setNotice("PRODUCTION_QUEUE_BUSY: wait for the active production queue before generating.");
+      setNotice("当前有生产队列正在运行，请等待完成或暂停后再开始生成。");
       return;
     }
     const nextErrors = validateRecipeValues(selectedWorkflow, values);
@@ -264,7 +266,7 @@ export function GenerationStudio({
       });
       adoptCreatedTask(task);
     } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(toUserMessage(error));
     } finally {
       setCreating(false);
     }
@@ -275,11 +277,11 @@ export function GenerationStudio({
     const nextErrors = validateRecipeValues(selectedWorkflow, values);
     setValidationErrors(nextErrors);
     if (Object.keys(nextErrors).length || hasUnsupportedField || missingAssetFields.size > 0) {
-      setBatchNotice("Current inputs are not ready to add to the batch.");
+      setBatchNotice("当前输入还未准备好，暂时无法添加到批量任务。");
       return;
     }
     if (batchItems.length >= 100) {
-      setBatchNotice("Batch limit reached: maximum 100 items.");
+      setBatchNotice("已达到批量任务上限，最多支持 100 项。");
       return;
     }
 
@@ -287,7 +289,7 @@ export function GenerationStudio({
       ...current,
       {
         id: crypto.randomUUID(),
-        workflowName: selectedWorkflow.name,
+        workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
         workflowVersionId: selectedWorkflow.workflowVersionId,
         recipeId: selectedWorkflow.recipeId,
         values: cloneGenerationValues(values),
@@ -306,27 +308,27 @@ export function GenerationStudio({
     try {
       const imported = parseBatchTaskList(await file.text(), catalog);
       if (batchItems.length + imported.length > 100) {
-        setBatchNotice("Batch import would exceed the 100 item limit.");
+        setBatchNotice("导入后将超过 100 项批量任务上限。");
         return;
       }
       setBatchItems((current) => [
         ...current,
         ...imported.map((item) => ({ ...item, id: crypto.randomUUID() })),
       ]);
-      setBatchNotice(`Imported ${imported.length} task${imported.length === 1 ? "" : "s"} from JSON.`);
+      setBatchNotice(`已从 JSON 导入 ${imported.length} 个任务。`);
     } catch (importError: unknown) {
-      setBatchNotice(importError instanceof Error ? importError.message : String(importError));
+      setBatchNotice(toUserMessage(importError));
     }
   }
 
   async function submitBatch() {
     if (!batchItems.length) return;
     if (!productionPolicy.canSubmitLocalBatch) {
-      setBatchNotice("PRODUCTION_QUEUE_BUSY: wait for the active production queue before submitting this batch.");
+      setBatchNotice("当前有生产队列正在运行，请等待完成或暂停后再提交批量任务。");
       return;
     }
     if (!comfyConnected || !taskEventsReady) {
-      setBatchNotice("Connect ComfyUI and restore the task event channel before submitting the batch.");
+      setBatchNotice("请先连接 ComfyUI 并恢复任务事件通道，再提交批量任务。");
       return;
     }
 
@@ -345,13 +347,13 @@ export function GenerationStudio({
       const failedIndexes = result.failed.map((item) => item.index);
       setBatchItems((current) => retainFailedBatchItems(current, failedIndexes));
       const failureSummary = result.failed.length
-        ? ` Failed: ${result.failed.map((item) => `#${item.index + 1} ${item.code}`).join(", ")}.`
+        ? ` 失败项：${result.failed.map((item) => `第 ${item.index + 1} 项（${item.code}）`).join("、")}。`
         : "";
       setBatchNotice(
-        `Batch submitted: ${result.created.length} created, ${result.failed.length} failed.${failureSummary}`,
+        `批量提交完成：成功创建 ${result.created.length} 个任务，${result.failed.length} 个任务提交失败。${failureSummary}`,
       );
     } catch (batchError: unknown) {
-      setBatchNotice(batchError instanceof Error ? batchError.message : String(batchError));
+      setBatchNotice(toUserMessage(batchError));
     } finally {
       setBatchSubmitting(false);
     }
@@ -365,7 +367,7 @@ export function GenerationStudio({
       const task = await cancelTask(projectId, currentTask.id);
       useTaskStore.getState().upsertTask(task);
     } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(toUserMessage(error));
     } finally {
       setCancelling(false);
     }
@@ -374,12 +376,12 @@ export function GenerationStudio({
   if (!catalog.length) {
     return (
       <section className="studio-empty">
-        <span className="section-label">Generation Studio</span>
-        <h2>No runnable Workflow installed</h2>
-        <p>Place a validated Workflow Package in the runtime directory, then refresh.</p>
+        <span className="section-label">创作工作台</span>
+        <h2>暂无可用工作流</h2>
+        <p>请先安装或发布经过校验的工作流，然后刷新列表。</p>
         <code>&lt;AIStudioData&gt;/workflow_library/</code>
         <button type="button" onClick={() => void refreshWorkflows()} disabled={refreshing}>
-          {refreshing ? "Refreshing..." : "Refresh Workflow"}
+          {refreshing ? "正在刷新..." : "刷新工作流"}
         </button>
         {notice && <p className="error-message">{notice}</p>}
       </section>
@@ -391,7 +393,7 @@ export function GenerationStudio({
       <section className="studio-panel">
         <div className="workflow-selector">
           <label>
-            <span>Workflow</span>
+            <span>工作流</span>
             <select
               value={selectedWorkflow ? `${selectedWorkflow.workflowVersionId}:${selectedWorkflow.recipeId}` : ""}
               onChange={(event) => {
@@ -406,22 +408,22 @@ export function GenerationStudio({
             >
               {catalog.map((recipe) => (
                 <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={`${recipe.workflowVersionId}:${recipe.recipeId}`}>
-                  {recipe.name}
+                  {workflowDisplayName(recipe.workflowId, recipe.name)}
                 </option>
               ))}
             </select>
           </label>
           <button type="button" className="quiet-button" onClick={() => void refreshWorkflows()} disabled={refreshing}>
-            {refreshing ? "Refreshing..." : "Refresh"}
+            {refreshing ? "正在刷新..." : "刷新"}
           </button>
         </div>
         {selectedWorkflow && (
           <>
-            <div className="preset-toolbar" aria-label="Preset Studio">
+            <div className="preset-toolbar" aria-label="预设管理">
               <label>
-                <span>Preset</span>
+                <span>预设</span>
                 <select
-                  aria-label="Saved presets"
+                  aria-label="已保存预设"
                   value={selectedPresetId}
                   onChange={(event) => {
                     const preset = presets.find((item) => item.id === event.target.value);
@@ -433,27 +435,30 @@ export function GenerationStudio({
                   }}
                   disabled={presetLoading}
                 >
-                  <option value="">Select a saved preset</option>
+                  <option value="">选择已保存的预设</option>
                   {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
                 </select>
               </label>
               <label>
-                <span>Preset name</span>
+                <span>预设名称</span>
                 <input
-                  aria-label="Preset name"
+                  aria-label="预设名称"
                   value={presetName}
                   maxLength={80}
                   onChange={(event) => setPresetName(event.target.value)}
-                  placeholder="e.g. Portrait soft light"
+                  placeholder="例如：柔光人像"
                 />
               </label>
               <div className="preset-actions">
-                <button type="button" onClick={() => void savePreset()} disabled={presetLoading}>{selectedPresetId ? "Save as new" : "Save"}</button>
-                <button type="button" onClick={() => void savePresetChanges()} disabled={presetLoading || !selectedPresetId}>Update</button>
-                <button type="button" className="quiet-button" onClick={() => void removePreset()} disabled={presetLoading || !selectedPresetId}>Delete</button>
+                <button type="button" onClick={() => void savePreset()} disabled={presetLoading}>{selectedPresetId ? "另存为新预设" : "保存预设"}</button>
+                <button type="button" onClick={() => void savePresetChanges()} disabled={presetLoading || !selectedPresetId}>更新预设</button>
+                <button type="button" className="quiet-button" onClick={() => void removePreset()} disabled={presetLoading || !selectedPresetId}>删除预设</button>
               </div>
             </div>
-            {presetError && <p className="error-message">Preset: {presetError}</p>}
+            {presetError && <p className="error-message">预设：{presetError}</p>}
+            {selectedWorkflow.workflowId === "wfl_minimax_h3_reference_video" && (
+              <p className="disabled-note">当前 16GB 显存配置已验证：0.1MP、最长 5 秒、4 步采样、单任务执行。</p>
+            )}
             <DynamicFormRenderer
               recipe={selectedWorkflow}
               values={values}
@@ -463,31 +468,31 @@ export function GenerationStudio({
               projectId={projectId}
               onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
             />
-            {!comfyConnected && <p className="disabled-note">Connect ComfyUI before generating.</p>}
+            {!comfyConnected && <p className="disabled-note">请先连接 ComfyUI，再开始生成。</p>}
             {!taskEventsReady && (
               <p className="disabled-note">
-                {taskEventError ?? "Preparing task event channel..."}
+                {taskEventError ?? "正在准备任务事件通道..."}
               </p>
             )}
             {productionAdmission.busy && (
-              <p className="disabled-note">Production queue active. Generate and Submit Batch are temporarily disabled.</p>
+              <p className="disabled-note">生产队列正在运行，开始生成和提交批量任务暂时不可用。</p>
             )}
-            {hasUnsupportedField && <p className="disabled-note">This Workflow has an unsupported field type.</p>}
+            {hasUnsupportedField && <p className="disabled-note">当前工作流包含暂不支持的输入类型。</p>}
             {missingAssetFields.size > 0 && (
-              <p className="disabled-note">Missing media asset. Choose a replacement before generating.</p>
+              <p className="disabled-note">缺少媒体素材，请重新选择后再生成。</p>
             )}
-            <section className="batch-panel" aria-label="Batch queue">
+              <section className="batch-panel" aria-label="临时批量任务">
               <div className="batch-panel-header">
                 <div>
-                  <span className="section-label">Batch queue</span>
-                  <p>Freeze the current Kera2 or MiniMax H3 inputs as an independent task.</p>
+                  <span className="section-label">临时批量任务</span>
+                  <p>将当前 Kera2 或 MiniMax H3 输入保存为独立任务。</p>
                 </div>
                 <div className="batch-actions">
                   <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting}>
-                    Add current
+                    添加当前任务
                   </button>
                   <label className="quiet-button batch-file-button">
-                    Import JSON
+                    导入 JSON
                     <input
                       type="file"
                       accept="application/json,.json"
@@ -508,7 +513,7 @@ export function GenerationStudio({
                     }}
                     disabled={batchSubmitting || !batchItems.length}
                   >
-                    Clear
+                    清空
                   </button>
                 </div>
               </div>
@@ -524,13 +529,13 @@ export function GenerationStudio({
                         onClick={() => removeBatchItem(item.id)}
                         disabled={batchSubmitting}
                       >
-                        Remove
+                        移除
                       </button>
                     </li>
                   ))}
                 </ol>
               ) : (
-                <p className="disabled-note">No items added yet.</p>
+                <p className="disabled-note">暂未添加任务。</p>
               )}
               <button
                 type="button"
@@ -543,7 +548,7 @@ export function GenerationStudio({
                   !productionPolicy.canSubmitLocalBatch
                 }
               >
-                {batchSubmitting ? "Submitting Batch..." : `Submit Batch (${batchItems.length})`}
+                {batchSubmitting ? "正在提交..." : `提交批量任务（${batchItems.length}）`}
               </button>
               {batchNotice && <p className="disabled-note">{batchNotice}</p>}
             </section>
@@ -557,7 +562,7 @@ export function GenerationStudio({
               onOpenTask={onOpenTask}
             />
             <button type="button" className="generate-button" onClick={() => void generate()} disabled={!canGenerate || creating}>
-              {creating ? "Creating Task..." : "Generate"}
+              {creating ? "正在创建任务..." : "开始生成"}
             </button>
           </>
         )}

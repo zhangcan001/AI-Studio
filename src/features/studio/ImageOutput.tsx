@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { getAssetMediaUrl, listAssetsByTask, readAssetImage } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 import type { TaskView } from "../../types/task";
+import { toUserMessage } from "../../i18n/errorMessages";
+import { assetDisplayName, assetTypeLabel, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 import { VideoOutput } from "./VideoOutput";
 
 interface LoadedAsset {
@@ -43,7 +45,7 @@ export function ImageOutput({ projectId, task }: { projectId: string; task?: Tas
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(toUserMessage(loadError));
         }
       });
 
@@ -56,8 +58,8 @@ export function ImageOutput({ projectId, task }: { projectId: string; task?: Tas
   if (!task || task.status !== "SUCCEEDED") {
     return (
       <section className="output-card empty-output">
-        <span className="section-label">Output</span>
-        <p>Your generated media will appear here.</p>
+        <span className="section-label">输出结果</span>
+        <p>生成的媒体会显示在这里。</p>
       </section>
     );
   }
@@ -66,36 +68,28 @@ export function ImageOutput({ projectId, task }: { projectId: string; task?: Tas
     <section className="output-card">
       <div className="section-heading">
         <div>
-          <span className="section-label">Output</span>
-          <h2>{images.length ? `${images.length} output${images.length === 1 ? "" : "s"}` : "Loading outputs..."}</h2>
+          <span className="section-label">输出结果</span>
+          <h2>{images.length ? `${images.length} 个输出结果` : "正在加载输出结果..."}</h2>
         </div>
       </div>
-      {error && <p className="error-message">Unable to load output: {error}</p>}
+      {error && <p className="error-message">输出结果加载失败：{error}</p>}
       <div className="output-grid">
-        {images.map(({ asset, url }) => (
-          <figure key={asset.id} className="asset-card">
-            {asset.assetType === "video" || asset.category === "generated_video" ? (
-              <VideoOutput asset={asset} src={url} />
-            ) : <img src={url} alt={asset.name} />}
-            <figcaption>
-              <strong>{asset.assetType === "video" || asset.category === "generated_video" ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`}</strong>
-              <span>{formatBytes(asset.fileSize)} · {asset.originalName}</span>
-            </figcaption>
-          </figure>
-        ))}
+        {images.map(({ asset, url }) => {
+          const displayName = assetDisplayName(asset);
+          const displayOriginalName = assetDisplayName(asset, asset.originalName);
+          return (
+            <figure key={asset.id} className="asset-card">
+              {asset.assetType === "video" || asset.category === "generated_video" ? (
+                <VideoOutput asset={{ ...asset, name: displayName }} src={url} />
+              ) : <img src={url} alt={displayName} />}
+              <figcaption>
+                <strong>{asset.assetType === "video" || asset.category === "generated_video" ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`}</strong>
+                <span>{assetTypeLabel(asset)} · {formatFileSize(asset.fileSize)} · {displayOriginalName}</span>
+              </figcaption>
+            </figure>
+          );
+        })}
       </div>
     </section>
   );
-}
-
-function formatDuration(value?: number | null): string {
-  if (!value || value < 0) return "Duration unavailable";
-  const totalSeconds = Math.round(value / 1000);
-  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }

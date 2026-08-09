@@ -20,7 +20,7 @@ export function IntegerField({ field, value, error, onChange }: Props) {
     <label className="field-control">
       <span>
         {field.label}
-        {field.required && <em>Required</em>}
+        {field.required && <em>必填</em>}
       </span>
       <input
         type="number"
@@ -40,7 +40,7 @@ export function IntegerField({ field, value, error, onChange }: Props) {
       <small className="field-hint">
         {field.min !== undefined && field.max !== undefined
           ? `${field.min} – ${field.max}`
-          : "Whole number"}
+          : "请输入整数"}
       </small>
       {error && <small className="field-error">{error}</small>}
     </label>

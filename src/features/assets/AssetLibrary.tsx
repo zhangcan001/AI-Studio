@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assetLibraryPage } from "../../services/tauriClient";
 import type { AssetCategoryFilter, AssetView, PageCursor } from "../../types/asset";
+import { toUserMessage } from "../../i18n/errorMessages";
 import { AssetGrid } from "./AssetGrid";
 import { AssetPreview } from "./AssetPreview";
 
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
-  { value: "ALL", label: "All" },
-  { value: "SOURCE_IMAGE", label: "Source images" },
-  { value: "SOURCE_VIDEO", label: "Source videos" },
-  { value: "SOURCE_AUDIO", label: "Source audio" },
-  { value: "GENERATED_IMAGE", label: "Generated images" },
-  { value: "GENERATED_VIDEO", label: "Generated videos" },
+  { value: "ALL", label: "全部" },
+  { value: "SOURCE_IMAGE", label: "源图片" },
+  { value: "SOURCE_VIDEO", label: "源视频" },
+  { value: "SOURCE_AUDIO", label: "源音频" },
+  { value: "GENERATED_IMAGE", label: "生成图片" },
+  { value: "GENERATED_VIDEO", label: "生成视频" },
 ];
 
 export function AssetLibrary({ projectId }: { projectId: string }) {
@@ -39,7 +40,7 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
         setCursor(page.nextCursor);
       } catch (loadError: unknown) {
         if (requestVersion.current === version) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(toUserMessage(loadError));
         }
       } finally {
         if (requestVersion.current === version) setLoading(false);
@@ -63,7 +64,7 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
       })
       .catch((loadError: unknown) => {
         if (requestVersion.current === version) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(toUserMessage(loadError));
         }
       })
       .finally(() => {
@@ -78,15 +79,15 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
     <section className="workspace-panel" aria-busy={loading}>
       <div className="section-heading workspace-heading">
         <div>
-          <span className="section-label">Assets</span>
-          <h2>Asset Library</h2>
-          <p className="section-description">Browse source media and generated outputs for this project.</p>
+          <span className="section-label">资产</span>
+          <h2>资产库</h2>
+          <p className="section-description">浏览当前项目的源素材和生成结果。</p>
         </div>
         <button type="button" className="quiet-button" onClick={() => void load(true)} disabled={loading}>
-          {loading ? "Refreshing..." : "Refresh"}
+          {loading ? "正在刷新..." : "刷新"}
         </button>
       </div>
-      <div className="filter-row" aria-label="Asset categories">
+      <div className="filter-row" aria-label="资产分类">
         {categories.map((item) => (
           <button
             key={item.value}
@@ -98,11 +99,11 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
           </button>
         ))}
       </div>
-      {error && <p className="error-message">Unable to load assets: {error}</p>}
+      {error && <p className="error-message">资产加载失败：{error}</p>}
       <AssetGrid projectId={projectId} assets={assets} onSelect={setSelectedAsset} />
       {cursor && (
         <button type="button" className="load-more-button" onClick={() => void load(false)} disabled={loading}>
-          {loading ? "Loading..." : "Load more"}
+          {loading ? "正在加载..." : "加载更多"}
         </button>
       )}
       {selectedAsset && (

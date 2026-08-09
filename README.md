@@ -16,6 +16,12 @@ recovery, a real ordered Kera2/MiniMax H3/Kera2 persistent queue, project-scoped
 assets and playback, and Windows Release fresh/existing database gates are all
 validated. Evidence is recorded in `docs/M1_RELEASE_CANDIDATE_01.md`.
 
+**M1 简体中文界面 = PASS。** 主导航、创作工作台、资产库、任务历史、项目、
+工作流、生产队列、ComfyUI 状态、空状态和用户可见错误提示已完成简体中文产品化。
+协议枚举、数据库 migration、用户提示词、用户文件名、模型名和技术标识保持不变；
+错误原文仅在折叠的技术详情中显示。验收证据记录在
+`docs/M1_ZH_CN_UI_VALIDATION.md`。
+
 - Desktop foundation and Rust application layering
 - SQLite migration and local application data directories
 - ComfyUI connection, `/system_stats`, and `/object_info` capability detection

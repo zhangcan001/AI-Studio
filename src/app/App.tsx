@@ -23,6 +23,8 @@ import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
+import { toUserMessage } from "../i18n/errorMessages";
+import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import "./App.css";
 
 type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows";
@@ -57,7 +59,7 @@ function App() {
     try {
       setProductionAdmission(await getProductionAdmissionStatus());
     } catch (admissionError: unknown) {
-      setError(admissionError instanceof Error ? admissionError.message : String(admissionError));
+      setError(toUserMessage(admissionError));
     }
   }, []);
 
@@ -83,7 +85,7 @@ function App() {
       .catch(() => {
         if (!cancelled) {
           setTaskEventsReady(false);
-          setTaskEventError("Task event channel unavailable");
+          setTaskEventError("任务事件通道不可用");
         }
       });
 
@@ -96,7 +98,7 @@ function App() {
       })
       .catch((bootstrapError: unknown) => {
         if (!cancelled) {
-          setError(bootstrapError instanceof Error ? bootstrapError.message : String(bootstrapError));
+          setError(toUserMessage(bootstrapError));
         }
       });
 
@@ -120,7 +122,7 @@ function App() {
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
-          const message = loadError instanceof Error ? loadError.message : String(loadError);
+          const message = toUserMessage(loadError);
           setProjectError(message);
           setError(message);
         }
@@ -150,7 +152,7 @@ function App() {
       })
       .catch((loadError: unknown) => {
         if (!cancelled && useProjectStore.getState().activeProjectId === requestedProjectId) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(toUserMessage(loadError));
         }
       })
       .finally(() => {
@@ -186,7 +188,7 @@ function App() {
       const comfy = await getComfyStatus();
       setBootstrapState((current) => (current ? { ...current, comfy } : current));
     } catch (connectionError: unknown) {
-      setError(connectionError instanceof Error ? connectionError.message : String(connectionError));
+      setError(toUserMessage(connectionError));
     } finally {
       setConnectionLoading(false);
     }
@@ -201,7 +203,7 @@ function App() {
         current ? { ...current, comfy: { ...current.comfy, capability } } : current,
       );
     } catch (refreshError: unknown) {
-      setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
+      setError(toUserMessage(refreshError));
     } finally {
       setCapabilityLoading(false);
     }
@@ -218,14 +220,14 @@ function App() {
       const workflow = nextCatalog.find((recipe) => recipe.workflowId === workflowId && recipe.recipeId === recipeId)
         ?? nextCatalog.find((recipe) => recipe.workflowId === workflowId);
       if (!workflow) {
-        setError("The published workflow is not available in the runtime catalog yet.");
+        setError("发布的工作流暂时还没有出现在运行目录中。");
         return;
       }
       useStudioStore.getState().setSelectedWorkflow(workflow);
       setWorkspace("studio");
       setError(null);
     } catch (openError: unknown) {
-      setError(openError instanceof Error ? openError.message : String(openError));
+      setError(toUserMessage(openError));
     }
   }
 
@@ -237,11 +239,10 @@ function App() {
       const report = await reconcileActiveTasks();
       setRecentTasks(await listRecentTasks(activeProjectId, 10));
       setRecoveryNotice(
-        `Reconciled ${report.examined} task${report.examined === 1 ? "" : "s"}: ` +
-          `${report.succeeded} updated, ${report.deferred} deferred, ${report.unresolved} unresolved.`,
+        `已检查 ${report.examined} 个任务：${report.succeeded} 个已更新，${report.deferred} 个等待后续同步，${report.unresolved} 个状态未确定。`,
       );
     } catch (recoveryError: unknown) {
-      setRecoveryNotice(recoveryError instanceof Error ? recoveryError.message : String(recoveryError));
+      setRecoveryNotice(toUserMessage(recoveryError));
     } finally {
       setReconciling(false);
     }
@@ -249,7 +250,7 @@ function App() {
 
   function loadHistoricalInputs(draft: ReusableGenerationDraft) {
     if (!activeProjectId || draft.projectId !== activeProjectId) {
-      setError("PROJECT_CONTEXT_CHANGED: open the task from its project before loading inputs.");
+      setError("当前任务属于其他项目，请先切换到对应项目。");
       return;
     }
     const workflow = catalog.find(
@@ -257,7 +258,7 @@ function App() {
         recipe.workflowVersionId === draft.workflowVersionId && recipe.recipeId === draft.recipeId,
     );
     if (!workflow) {
-      setError("This workflow version is no longer available in the runtime catalog.");
+      setError("当前工作流版本已不在运行目录中，请刷新工作流列表。");
       return;
     }
     useStudioStore.getState().loadDraft(workflow, draft.values);
@@ -281,42 +282,42 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">LOCAL WORKBENCH</p>
+          <p className="eyebrow">本地 AI 创作工作台</p>
           <h1>AI Studio</h1>
         </div>
         <div className="header-context-group">
           <div className="project-selector">
-            <label htmlFor="active-project">Project</label>
+            <label htmlFor="active-project">项目</label>
             <select
               id="active-project"
               value={activeProjectId ?? ""}
               onChange={(event) => openProject(event.target.value)}
               disabled={projectLoading || !projects.length || projectContextLoading}
             >
-              {!activeProjectId && <option value="">Loading projects...</option>}
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              {!activeProjectId && <option value="">正在加载项目...</option>}
+              {projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project.id, project.name)}</option>)}
             </select>
           </div>
           <button type="button" className="quiet-button header-new-project" onClick={() => setWorkspace("projects")}>
-            New Project
+            新建项目
           </button>
           {comfy && (
             <div className="header-status">
               <span className={`status-dot status-${comfy.status.toLowerCase()}`} />
-              <span>ComfyUI {comfy.status === "CONNECTED" ? "Connected" : comfy.status === "INCOMPATIBLE" ? "Incompatible" : "Offline"}</span>
-              <small>{comfy.devices[0]?.name ?? "GPU unavailable"}</small>
+              <span>ComfyUI {comfyStatusLabel(comfy.status)}</span>
+              <small>{comfy.devices[0]?.name ?? "GPU 不可用"}</small>
             </div>
           )}
         </div>
       </header>
 
-      <nav className="workspace-nav" aria-label="Workspace">
+      <nav className="workspace-nav" aria-label="工作区导航">
         {([
-          ["studio", "Studio"],
-          ["assets", "Assets"],
-          ["tasks", "Tasks"],
-          ["projects", "Projects"],
-          ["workflows", "Workflows"],
+          ["studio", "创作"],
+          ["assets", "资产库"],
+          ["tasks", "任务"],
+          ["projects", "项目"],
+          ["workflows", "工作流"],
         ] as const).map(([value, label]) => (
           <button
             type="button"
@@ -333,9 +334,9 @@ function App() {
       {workspace === "studio" && productionAdmission.busy && (
         <section className="production-admission-banner" role="status" aria-live="polite">
           <div>
-            <span className="section-label">Production queue active</span>
-            <strong>{productionAdmission.batchName ?? "Persistent production queue"}</strong>
-            <p>Interactive GPU submissions are paused until the active production work finishes.</p>
+            <span className="section-label">生产队列正在运行</span>
+            <strong>{productionAdmission.batchName ?? "生产队列"}</strong>
+            <p>当前 GPU 正在执行生产任务，新的生成任务暂时不可提交。</p>
           </div>
           <button
             type="button"
@@ -343,13 +344,13 @@ function App() {
             onClick={openProductionQueue}
             disabled={!productionAdmission.batchId || !productionAdmission.projectId}
           >
-            Open Queue
+            查看队列
           </button>
         </section>
       )}
 
       {projectContextLoading && activeProject && (
-        <p className="project-loading" role="status">Loading project…</p>
+        <p className="project-loading" role="status">正在加载项目...</p>
       )}
       {workspace === "studio" && (
         <ComfyStatusCard
@@ -364,16 +365,16 @@ function App() {
       {(hasActiveTasks || recoveryNotice) && (
         <section className="task-recovery-bar" aria-live="polite">
           <div>
-            <span className="section-label">Task recovery</span>
-            <p>{recoveryNotice ?? "Active tasks were found after startup."}</p>
+            <span className="section-label">任务恢复</span>
+            <p>{recoveryNotice ?? "启动后检测到尚未结束的任务。"}</p>
           </div>
           <button type="button" onClick={() => void reconcileTasks()} disabled={reconciling}>
-            {reconciling ? "Reconciling..." : "Reconcile tasks"}
+            {reconciling ? "正在同步..." : "重新同步任务"}
           </button>
         </section>
       )}
 
-      {!activeProject && projectError && <p className="error-message global-error">Unable to load projects: {projectError}</p>}
+      {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
       {activeProject && workspace === "studio" && (
         <section className="studio-layout">
           <GenerationStudio
@@ -417,8 +418,8 @@ function App() {
       )}
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
-      {error && <p className="error-message global-error">Notice: {error}</p>}
-      {bootstrapState && <p className="version">Version {bootstrapState.status.version}</p>}
+      {error && <p className="error-message global-error">提示：{error}</p>}
+      {bootstrapState && <p className="version">版本 {bootstrapState.status.version}</p>}
     </main>
   );
 }

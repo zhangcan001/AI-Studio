@@ -6,6 +6,9 @@ import type { ReusableGenerationDraft, TaskDetail } from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
 import { taskRetryDecision } from "./retryPolicy";
 import { productionInteractionPolicy } from "../studio/productionQueuePolicy";
+import { toUserMessage } from "../../i18n/errorMessages";
+import { fieldLabel, formatDateTime, taskStatusLabel, workflowDisplayName } from "../../i18n/statusLabels";
+import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 
 interface Props {
   projectId: string;
@@ -47,7 +50,7 @@ export function TaskHistoryDetail({
         if (active) setDraft(value);
       })
       .catch((error: unknown) => {
-        if (active) setDraftError(error instanceof Error ? error.message : String(error));
+        if (active) setDraftError(toUserMessage(error));
       })
       .finally(() => {
         if (active) setDraftLoading(false);
@@ -71,7 +74,7 @@ export function TaskHistoryDetail({
       useTaskStore.getState().adoptCreatedTask(task);
       setRetryCreatedTaskId(task.id);
     } catch (error: unknown) {
-      setRetryError(error instanceof Error ? error.message : String(error));
+      setRetryError(toUserMessage(error));
     } finally {
       setRetrying(false);
     }
@@ -79,36 +82,33 @@ export function TaskHistoryDetail({
 
   return (
     <div className="task-detail-view">
-      <button type="button" className="quiet-button back-button" onClick={onBack}>Back to history</button>
+      <button type="button" className="quiet-button back-button" onClick={onBack}>返回任务历史</button>
       <div className="section-heading workspace-heading">
         <div>
-          <span className="section-label">Task detail</span>
-          <h2>{detail.workflowName}</h2>
+          <span className="section-label">任务详情</span>
+          <h2>{workflowDisplayName(detail.workflowId, detail.workflowName)}</h2>
           <p className="section-description">{detail.id}</p>
         </div>
-        <span className={`status-pill task-${detail.status.toLowerCase()}`}>{detail.status}</span>
+        <span className={`status-pill task-${detail.status.toLowerCase()}`}>{taskStatusLabel(detail.status)}</span>
       </div>
       <div className="detail-facts">
-        <Fact label="Created" value={formatDate(detail.createdAt)} />
-        <Fact label="Started" value={detail.startedAt ? formatDate(detail.startedAt) : "—"} />
-        <Fact label="Finished" value={detail.finishedAt ? formatDate(detail.finishedAt) : "—"} />
-        <Fact label="Recipe" value={detail.recipeId} />
+        <Fact label="创建时间" value={formatDateTime(detail.createdAt)} />
+        <Fact label="开始时间" value={detail.startedAt ? formatDateTime(detail.startedAt) : "—"} />
+        <Fact label="完成时间" value={detail.finishedAt ? formatDateTime(detail.finishedAt) : "—"} />
+        <Fact label="配方 ID" value={detail.recipeId} />
       </div>
       {detail.errorCode && (
-        <div className="task-error">
-          <strong>{detail.errorCode}</strong>
-          <span>{detail.errorMessage ?? "The task did not complete successfully."}</span>
-        </div>
+        <UiErrorNotice error={{ code: detail.errorCode, message: detail.errorMessage ?? "任务未成功完成。" }} className="task-error" />
       )}
       {detail.status === "FAILED" && (
-        <section className="task-retry-panel" aria-label="Retry task">
+        <section className="task-retry-panel" aria-label="重试任务">
           <div>
-            <span className="section-label">Retry policy</span>
+            <span className="section-label">重试说明</span>
             <p>
               {retryCreatedTaskId
-                ? `Retry task created: ${retryCreatedTaskId}`
+                ? `已创建重试任务：${retryCreatedTaskId}`
                 : retryDecision.allowed
-                  ? "This looks transient. You can create one new task from the saved inputs."
+                  ? "该任务看起来是临时失败，可以使用已保存的输入创建一个新任务。"
                   : retryDecision.reason}
             </p>
           </div>
@@ -124,19 +124,19 @@ export function TaskHistoryDetail({
               Boolean(retryCreatedTaskId)
             }
           >
-            {retrying ? "Creating Retry..." : retryCreatedTaskId ? "Retry Created" : "Retry Once"}
+            {retrying ? "正在创建重试任务..." : retryCreatedTaskId ? "重试任务已创建" : "重试一次"}
           </button>
           {productionBusy && (
-            <p className="disabled-note">Production queue active. Retry Once is temporarily disabled.</p>
+            <p className="disabled-note">生产队列正在运行，重试一次暂时不可用。</p>
           )}
-          {retryError && <p className="error-message">Retry failed: {retryError}</p>}
+          {retryError && <p className="error-message">重试失败：{retryError}</p>}
         </section>
       )}
       <section className="detail-section">
         <div className="section-heading">
           <div>
-            <span className="section-label">Snapshot</span>
-            <h3>Saved inputs</h3>
+            <span className="section-label">输入快照</span>
+            <h3>已保存的输入</h3>
           </div>
           {detail.reusableDraft.available && (
             <button
@@ -144,24 +144,24 @@ export function TaskHistoryDetail({
               onClick={() => draft && onLoadInputs(draft)}
               disabled={draftLoading || !draft}
             >
-              {draftLoading ? "Loading inputs..." : "Load Inputs"}
+              {draftLoading ? "正在加载输入..." : "加载输入"}
             </button>
           )}
         </div>
         {!detail.reusableDraft.available && (
-          <p className="disabled-note">{detail.reusableDraft.reason ?? "Inputs unavailable for reuse."}</p>
+          <p className="disabled-note">{detail.reusableDraft.reason ? toUserMessage(detail.reusableDraft.reason) : "保存的输入不可用于再次生成。"}</p>
         )}
         {detail.reusableDraft.missingAssetIds.length > 0 && (
-          <p className="disabled-note">Missing media asset. Choose a replacement after loading inputs.</p>
+          <p className="disabled-note">缺少媒体素材，加载输入后请选择替代素材。</p>
         )}
-        {draftError && <p className="error-message">Inputs unavailable for reuse.</p>}
+        {draftError && <p className="error-message">输入加载失败：{draftError}</p>}
         {draft && <InputSnapshot values={draft.values} />}
       </section>
       <section className="detail-section">
         <div className="section-heading">
           <div>
-            <span className="section-label">Outputs</span>
-            <h3>{detail.outputAssets.length} asset{detail.outputAssets.length === 1 ? "" : "s"}</h3>
+            <span className="section-label">输出结果</span>
+            <h3>{detail.outputAssets.length} 个资产</h3>
           </div>
         </div>
         {detail.outputAssets.length ? (
@@ -171,7 +171,7 @@ export function TaskHistoryDetail({
             ))}
           </div>
         ) : (
-          <p className="empty-state">No output assets recorded.</p>
+          <p className="empty-state">暂无输出资产。</p>
         )}
       </section>
     </div>
@@ -192,7 +192,7 @@ function InputSnapshot({ values }: { values: Record<string, DraftValue> }) {
     <dl className="input-snapshot">
       {Object.entries(values).map(([key, value]) => (
         <div key={key}>
-          <dt>{key}</dt>
+          <dt>{fieldLabel(key)}</dt>
           <dd>{formatValue(value)}</dd>
         </div>
       ))}
@@ -203,28 +203,24 @@ function InputSnapshot({ values }: { values: Record<string, DraftValue> }) {
 function formatValue(value: DraftValue): string {
   switch (value.type) {
     case "string":
-      return value.value || "(empty)";
+      return value.value || "（空）";
     case "integer":
       return String(value.value);
     case "seed_random":
-      return "Random seed";
+      return "随机种子";
     case "seed_fixed":
       return value.value;
     case "image_asset":
       return value.assetId;
     case "image_assets":
-      return value.assetIds.length ? value.assetIds.join(" → ") : "No images";
+      return value.assetIds.length ? value.assetIds.join(" → ") : "暂无图片";
     case "video_asset":
       return value.assetId;
     case "audio_asset":
       return value.assetId;
     case "video_assets":
-      return value.assetIds.length ? value.assetIds.join(" → ") : "No videos";
+      return value.assetIds.length ? value.assetIds.join(" → ") : "暂无视频";
     case "audio_assets":
-      return value.assetIds.length ? value.assetIds.join(" → ") : "No audio";
+      return value.assetIds.length ? value.assetIds.join(" → ") : "暂无音频";
   }
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleString();
 }

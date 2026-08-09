@@ -20,6 +20,8 @@ import type {
 } from "../../types/productionQueue";
 import type { BatchDraftItem } from "./batchDraft";
 import { isSafeProductionQueueRequeue } from "./productionQueuePolicy";
+import { toUserMessage } from "../../i18n/errorMessages";
+import { productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 
 interface Props {
   projectId: string;
@@ -73,7 +75,7 @@ export function ProductionQueuePanel({
           }
         }
       } catch (error: unknown) {
-        setNotice(error instanceof Error ? error.message : String(error));
+        setNotice(toUserMessage(error));
       }
     },
     [projectId, setQueueDetail],
@@ -124,7 +126,7 @@ export function ProductionQueuePanel({
         if (active) setQueueDetail(focused);
       })
       .catch((error: unknown) => {
-        if (active) setNotice(error instanceof Error ? error.message : String(error));
+        if (active) setNotice(toUserMessage(error));
       })
       .finally(() => {
         if (active) {
@@ -156,11 +158,11 @@ export function ProductionQueuePanel({
   async function saveQueue() {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setNotice("Enter a production queue name.");
+      setNotice("请输入生产队列名称。");
       return;
     }
     if (!batchItems.length) {
-      setNotice("Add at least one item to the local batch first.");
+      setNotice("请先在临时批量任务中添加至少一项。");
       return;
     }
     setBusy(true);
@@ -177,9 +179,9 @@ export function ProductionQueuePanel({
         })),
       });
       setName("");
-      commitDetail(created, `Saved production queue with ${created.total} item${created.total === 1 ? "" : "s"}.`);
+      commitDetail(created, `已保存生产队列，共 ${created.total} 项。`);
     } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(toUserMessage(error));
     } finally {
       await onAdmissionChanged();
       setBusy(false);
@@ -192,7 +194,7 @@ export function ProductionQueuePanel({
     try {
       setQueueDetail(await getProductionQueue(projectId, batchId));
     } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(toUserMessage(error));
     } finally {
       setBusy(false);
     }
@@ -200,43 +202,43 @@ export function ProductionQueuePanel({
 
   async function startQueue(batchId: string) {
     if (!comfyConnected) {
-      setNotice("Connect ComfyUI before starting a production queue.");
+      setNotice("请先连接 ComfyUI，再开始生产队列。");
       return;
     }
     await runMutation(async () => {
       const updated = await startProductionQueue(projectId, batchId);
-      commitDetail(updated, "Production queue is running in the background.");
+      commitDetail(updated, "生产队列已在后台运行。");
     });
   }
 
   async function pauseQueue(batchId: string) {
     await runMutation(async () => {
       const updated = await pauseProductionQueue(projectId, batchId);
-      commitDetail(updated, "Queue paused. An already dispatched Task will be observed to its terminal state.");
+      commitDetail(updated, "队列已暂停，已经提交的任务会继续运行到结束。");
     });
   }
 
   async function archiveQueue(batchId: string) {
     await runMutation(async () => {
       const updated = await archiveProductionQueue(projectId, batchId);
-      commitDetail(updated, "Queue archived. Restore it before changing items or starting it again.");
+      commitDetail(updated, "队列已归档，如需修改或再次开始请先恢复队列。");
     });
   }
 
   async function restoreQueue(batchId: string) {
     await runMutation(async () => {
       const updated = await restoreProductionQueue(projectId, batchId);
-      commitDetail(updated, "Queue restored.");
+      commitDetail(updated, "队列已恢复。");
     });
   }
 
   async function deleteQueue(batchId: string) {
-    if (!window.confirm("Delete this archived production queue? Existing Tasks and Assets are kept.")) return;
+    if (!window.confirm("确定删除这个已归档的生产队列吗？已有任务和资产会保留。")) return;
     await runMutation(async () => {
       await deleteProductionQueue(projectId, batchId);
       setQueues((current) => current.filter((queue) => queue.id !== batchId));
       if (selectedIdRef.current === batchId) setQueueDetail(undefined);
-      setNotice("Archived queue deleted. Existing Tasks and Assets were not deleted.");
+      setNotice("已删除归档队列，已有任务和资产未被删除。");
       await refreshQueues(false);
     });
   }
@@ -245,7 +247,7 @@ export function ProductionQueuePanel({
     if (!detail) return;
     await runMutation(async () => {
       const updated = await skipProductionQueueItem(projectId, detail.id, itemId);
-      commitDetail(updated, "Item marked as skipped. Resume the queue explicitly when ready.");
+      commitDetail(updated, "该项已标记为跳过，需要时请手动继续队列。");
     });
   }
 
@@ -253,7 +255,7 @@ export function ProductionQueuePanel({
     if (!detail) return;
     await runMutation(async () => {
       const updated = await requeueProductionQueueItem(projectId, detail.id, itemId);
-      commitDetail(updated, "A new pending retry item was appended. The original failed Task remains unchanged.");
+      commitDetail(updated, "已追加新的等待重试项，原失败任务保持不变。");
     });
   }
 
@@ -263,7 +265,7 @@ export function ProductionQueuePanel({
     try {
       await operation();
     } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(toUserMessage(error));
     } finally {
       setBusy(false);
     }
@@ -272,36 +274,36 @@ export function ProductionQueuePanel({
   const detailEditable = Boolean(detail && !detail.archivedAt && detail.status !== "RUNNING");
 
   return (
-    <section className="production-queue-panel" aria-label="Persistent production queues">
+    <section className="production-queue-panel" aria-label="生产队列">
       <div className="production-queue-heading">
         <div>
-          <span className="section-label">Persistent production queue</span>
-          <p>Durable Kera2 + MiniMax H3 production orchestration. Task events refresh this view automatically.</p>
+          <span className="section-label">生产队列</span>
+          <p>管理 Kera2 和 MiniMax H3 的持久化生产任务，任务事件会自动刷新此页面。</p>
         </div>
         <button type="button" className="quiet-button" disabled={busy} onClick={() => void refreshQueues(true)}>
-          Refresh
+          刷新
         </button>
       </div>
 
       {overview && (
-        <div className="production-overview" aria-label="Production queue overview">
-          <OverviewStat label="Queues" value={overview.totalQueues} />
-          <OverviewStat label="Running" value={overview.runningQueues} />
-          <OverviewStat label="Pending" value={overview.pendingItems} />
-          <OverviewStat label="Active" value={overview.activeItems} />
-          <OverviewStat label="Succeeded" value={overview.succeededItems} />
-          <OverviewStat label="Failed" value={overview.failedItems} />
-          <OverviewStat label="Archived" value={overview.archivedQueues} />
+        <div className="production-overview" aria-label="生产队列概览">
+          <OverviewStat label="队列" value={overview.totalQueues} />
+          <OverviewStat label="运行中" value={overview.runningQueues} />
+          <OverviewStat label="等待中" value={overview.pendingItems} />
+          <OverviewStat label="执行中" value={overview.activeItems} />
+          <OverviewStat label="已完成" value={overview.succeededItems} />
+          <OverviewStat label="失败" value={overview.failedItems} />
+          <OverviewStat label="已归档" value={overview.archivedQueues} />
         </div>
       )}
 
       <div className="production-queue-create">
         <input
-          aria-label="Production queue name"
+          aria-label="生产队列名称"
           value={name}
           maxLength={120}
           onChange={(event) => setName(event.target.value)}
-          placeholder="e.g. EP01 Kera2 + H3 production"
+          placeholder="例如：第 01 集 Kera2 + H3"
         />
         <label className="production-queue-checkbox">
           <input
@@ -309,19 +311,19 @@ export function ProductionQueuePanel({
             checked={continueOnFailure}
             onChange={(event) => setContinueOnFailure(event.target.checked)}
           />
-          Continue after non-execution failure/cancel
+          非执行失败或取消后继续
         </label>
         <button type="button" disabled={busy || !batchItems.length} onClick={() => void saveQueue()}>
-          Save Queue ({batchItems.length})
+          保存队列（{batchItems.length}）
         </button>
       </div>
 
       <div className="production-queue-filter">
         <label className="production-queue-checkbox">
           <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
-          Show archived ({overview?.archivedQueues ?? 0})
+          显示已归档（{overview?.archivedQueues ?? 0}）
         </label>
-        <span>{visibleQueues.length} visible queue{visibleQueues.length === 1 ? "" : "s"}</span>
+        <span>显示 {visibleQueues.length} 个队列</span>
       </div>
 
       {visibleQueues.length ? (
@@ -335,21 +337,21 @@ export function ProductionQueuePanel({
                 disabled={busy}
               >
                 <strong>{queue.name}</strong>
-                <span>{queue.archivedAt ? "ARCHIVED" : queue.status}</span>
+                <span>{queue.archivedAt ? "已归档" : productionStatusLabel(queue.status)}</span>
               </button>
               <div className="production-queue-row-actions">
                 {queue.archivedAt ? (
                   <>
                     <button type="button" className="quiet-button" onClick={() => void restoreQueue(queue.id)} disabled={busy}>
-                      Restore
+                      恢复
                     </button>
                     <button type="button" className="quiet-button danger-button" onClick={() => void deleteQueue(queue.id)} disabled={busy}>
-                      Delete
+                      删除
                     </button>
                   </>
                 ) : queue.status === "RUNNING" ? (
                   <button type="button" className="quiet-button" onClick={() => void pauseQueue(queue.id)} disabled={busy}>
-                    Pause
+                    暂停
                   </button>
                 ) : (
                   <>
@@ -360,11 +362,11 @@ export function ProductionQueuePanel({
                         onClick={() => void startQueue(queue.id)}
                         disabled={busy || !comfyConnected}
                       >
-                        {queue.status === "PAUSED" ? "Resume" : "Start"}
+                        {queue.status === "PAUSED" ? "继续" : "开始"}
                       </button>
                     )}
                     <button type="button" className="quiet-button" onClick={() => void archiveQueue(queue.id)} disabled={busy}>
-                      Archive
+                      归档
                     </button>
                   </>
                 )}
@@ -373,27 +375,27 @@ export function ProductionQueuePanel({
           ))}
         </div>
       ) : (
-        <p className="disabled-note">No queues match the current filter.</p>
+        <p className="disabled-note">当前筛选条件下没有找到队列。</p>
       )}
 
       {detail && (
         <div className="production-queue-detail">
           <div className="production-queue-detail-heading">
             <div>
-              <span className="section-label">Selected queue</span>
+              <span className="section-label">当前队列</span>
               <strong>{detail.name}</strong>
-              <span>{detail.archivedAt ? "ARCHIVED" : detail.status}</span>
+              <span>{detail.archivedAt ? "已归档" : productionStatusLabel(detail.status)}</span>
             </div>
             <small>{detail.id}</small>
           </div>
           <div className="production-queue-stats">
-            <span>Total <strong>{detail.total}</strong></span>
-            <span>Pending <strong>{detail.pending}</strong></span>
-            <span>Active <strong>{detail.running}</strong></span>
-            <span>Succeeded <strong>{detail.succeeded}</strong></span>
-            <span>Failed <strong>{detail.failed}</strong></span>
-            <span>Cancelled <strong>{detail.cancelled}</strong></span>
-            <span>Skipped <strong>{detail.skipped}</strong></span>
+            <span>总数 <strong>{detail.total}</strong></span>
+            <span>等待中 <strong>{detail.pending}</strong></span>
+            <span>执行中 <strong>{detail.running}</strong></span>
+            <span>已完成 <strong>{detail.succeeded}</strong></span>
+            <span>失败 <strong>{detail.failed}</strong></span>
+            <span>已取消 <strong>{detail.cancelled}</strong></span>
+            <span>已跳过 <strong>{detail.skipped}</strong></span>
           </div>
           <ol className="production-queue-items">
             {detail.items.map((item) => {
@@ -404,32 +406,32 @@ export function ProductionQueuePanel({
               return (
                 <li key={item.id}>
                   <span>#{item.ordinal + 1}</span>
-                  <strong>{item.status}</strong>
+                  <strong>{productionItemStatusLabel(item.status)}</strong>
                   <div className="production-item-identity">
-                    <span>{item.taskId ?? "Not dispatched"}</span>
-                    {item.retryOfItemId && <small>Retry of {item.retryOfItemId}</small>}
+                    <span>{item.taskId ?? "尚未提交"}</span>
+                    {item.retryOfItemId && <small>重试自 {item.retryOfItemId}</small>}
                   </div>
                   <div className="production-item-error">
                     <span>{item.errorCode ?? "—"}</span>
-                    {item.errorMessage && <small>{item.errorMessage}</small>}
+                    {item.errorMessage && <small>{toUserMessage({ code: item.errorCode, message: item.errorMessage })}</small>}
                   </div>
                   <div className="production-item-actions">
                     {item.taskId && (
                       <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>
-                        Open Task
+                        查看任务
                       </button>
                     )}
                     {canSkip && (
                       <button type="button" className="quiet-button" onClick={() => void skipItem(item.id)} disabled={busy}>
-                        Skip
+                        跳过
                       </button>
                     )}
                     {canRequeue && (
                       <button type="button" className="quiet-button" onClick={() => void requeueItem(item.id)} disabled={busy}>
-                        Requeue
+                        重新排队
                       </button>
                     )}
-                    {reviewRequired && <span className="review-required">Review required</span>}
+                    {reviewRequired && <span className="review-required">需要检查</span>}
                   </div>
                 </li>
               );

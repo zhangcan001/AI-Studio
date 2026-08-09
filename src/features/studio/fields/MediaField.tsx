@@ -9,6 +9,8 @@ import {
 } from "../../../services/tauriClient";
 import type { AssetView } from "../../../types/asset";
 import type { DraftValue } from "../../../types/generation";
+import { toUserMessage } from "../../../i18n/errorMessages";
+import { assetCategoryLabel, formatDurationMs, formatFileSize } from "../../../i18n/statusLabels";
 
 type MediaKind = "video" | "audio";
 
@@ -44,7 +46,7 @@ export function MediaField({ field, value, error, projectId, onChange, onAvailab
         if (active) setRecentAssets(assets.filter((asset) => isCompatibleAsset(asset, field.type)));
       })
       .catch((loadError: unknown) => {
-        if (active) setMessage(loadError instanceof Error ? loadError.message : String(loadError));
+        if (active) setMessage(toUserMessage(loadError));
       });
     return () => {
       active = false;
@@ -73,7 +75,7 @@ export function MediaField({ field, value, error, projectId, onChange, onAvailab
       .then((asset) => {
         if (!active) return;
         if (!isCompatibleAsset(asset, field.type)) {
-          throw new Error(`Selected asset is not a ${field.type}.`);
+          throw new Error(`所选素材不是${field.type === "video" ? "视频" : "音频"}。`);
         }
         setResolvedAsset(asset);
         onAvailabilityChange?.(true);
@@ -81,7 +83,7 @@ export function MediaField({ field, value, error, projectId, onChange, onAvailab
       .catch((loadError: unknown) => {
         if (!active) return;
         setResolvedAsset(undefined);
-        setMessage(loadError instanceof Error ? loadError.message : `Missing ${field.type} asset`);
+        setMessage(toUserMessage(loadError));
         onAvailabilityChange?.(false);
       });
     return () => {
@@ -123,7 +125,7 @@ export function MediaField({ field, value, error, projectId, onChange, onAvailab
         : { type: "audio_asset", assetId: asset.id });
       onAvailabilityChange?.(true);
     } catch (pickError: unknown) {
-      setMessage(pickError instanceof Error ? pickError.message : String(pickError));
+      setMessage(toUserMessage(pickError));
     } finally {
       setLoading(false);
     }
@@ -135,24 +137,24 @@ export function MediaField({ field, value, error, projectId, onChange, onAvailab
     <div className="field-control media-field">
       <span>
         {field.label}
-        {field.required && <em>Required</em>}
+        {field.required && <em>必填</em>}
       </span>
       <div className="media-field-actions">
         <button type="button" onClick={() => void chooseLocal()} disabled={loading}>
-          {loading ? "Importing..." : `Import local ${field.type}`}
+          {loading ? "正在导入..." : `导入本地${field.type === "video" ? "视频" : "音频"}`}
         </button>
         <select
-          aria-label={`${field.label} recent ${field.type}s`}
+          aria-label={`${field.label} 最近使用的${field.type === "video" ? "视频" : "音频"}`}
           value={selectedAssetId}
           onChange={(event) => {
             const assetId = event.target.value;
             onChange(assetId ? toDraftValue(field.type, assetId) : undefined);
           }}
         >
-          <option value="">Select a recent {field.type}</option>
+          <option value="">选择最近使用的{field.type === "video" ? "视频" : "音频"}</option>
           {recentAssets.map((asset) => (
             <option key={asset.id} value={asset.id}>
-              {asset.name} · {asset.category.startsWith("source_") ? "source" : "generated"}
+              {asset.name} · {assetCategoryLabel(asset.category)}
             </option>
           ))}
         </select>
@@ -166,9 +168,9 @@ export function MediaField({ field, value, error, projectId, onChange, onAvailab
           )}
           <div>
             <strong>{selectedAsset.name}</strong>
-            <small>{formatDuration(selectedAsset.durationMs)} · {formatBytes(selectedAsset.fileSize)}</small>
+            <small>{formatDurationMs(selectedAsset.durationMs)} · {formatFileSize(selectedAsset.fileSize)}</small>
             {field.type === "video" && <small>{selectedAsset.width ?? "--"} × {selectedAsset.height ?? "--"}</small>}
-            <small>{selectedAsset.category}</small>
+            <small>{assetCategoryLabel(selectedAsset.category)}</small>
           </div>
         </div>
       )}
@@ -193,16 +195,4 @@ export function isCompatibleAsset(asset: AssetView, kind: MediaKind): boolean {
     return asset.assetType === "video" && ["source_video", "generated_video"].includes(asset.category);
   }
   return asset.assetType === "audio" && asset.category === "source_audio";
-}
-
-function formatDuration(value?: number | null): string {
-  if (!value || value < 0) return "Duration unavailable";
-  const totalSeconds = Math.round(value / 1000);
-  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }

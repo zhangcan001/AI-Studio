@@ -27,7 +27,7 @@ describe("task retry policy", () => {
   it("never quick-retries execution errors such as MiniMax H3 OOM", () => {
     const decision = taskRetryDecision(failedDetail("EXECUTION_ERROR"), true);
     expect(decision.allowed).toBe(false);
-    expect(decision.reason).toMatch(/out-of-memory/i);
+    expect(decision.reason).toContain("显存不足");
   });
 
   it("blocks retry when ComfyUI is offline or source media is missing", () => {

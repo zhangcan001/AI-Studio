@@ -37,7 +37,7 @@ describe("validateRecipeValues seed ranges", () => {
       seed: { type: "seed_fixed", value: "21" },
     });
 
-    expect(errors.seed).toContain("between 10 and 20");
+    expect(errors.seed).toContain("随机种子必须在 10 到 20 之间");
   });
 
   it("uses BigInt for the full u64 range when Recipe has no bounds", () => {
@@ -71,7 +71,7 @@ describe("validateRecipeValues image inputs", () => {
   };
 
   it("requires an image asset for a required image field", () => {
-    expect(validateRecipeValues(imageRecipe, {})).toEqual({ reference: "Choose an image." });
+    expect(validateRecipeValues(imageRecipe, {})).toEqual({ reference: "请选择图片。" });
     expect(
       validateRecipeValues(imageRecipe, {
         reference: { type: "image_asset", assetId: "ast_reference" },
@@ -96,7 +96,7 @@ describe("validateRecipeValues multi-image inputs", () => {
   it("requires the recipe minimum and keeps ordered ids as a valid value", () => {
     expect(validateRecipeValues(multiRecipe, {
       references: { type: "image_assets", assetIds: ["ast_first"] },
-    }).references).toContain("Choose between 2 and 3 images.");
+    }).references).toContain("请选择 2 到 3 张图片。");
     expect(validateRecipeValues(multiRecipe, {
       references: { type: "image_assets", assetIds: ["ast_first", "ast_second"] },
     })).toEqual({});
@@ -114,8 +114,8 @@ describe("validateRecipeValues media inputs", () => {
     };
 
     expect(validateRecipeValues(mediaRecipe, {})).toEqual({
-      video: "Choose a video.",
-      audio: "Choose an audio file.",
+      video: "请选择视频。",
+      audio: "请选择音频文件。",
     });
     expect(validateRecipeValues(mediaRecipe, {
       video: { type: "video_asset", assetId: "ast_video" },
@@ -130,7 +130,7 @@ describe("validateRecipeValues media inputs", () => {
     };
     expect(validateRecipeValues(mediaRecipe, {
       clips: { type: "video_assets", assetIds: ["ast_one"] },
-    }).clips).toContain("Choose between 2 and 3 videos.");
+    }).clips).toContain("请选择 2 到 3 个视频。");
     expect(validateRecipeValues(mediaRecipe, {
       clips: { type: "video_assets", assetIds: ["ast_one", "ast_two"] },
     })).toEqual({});

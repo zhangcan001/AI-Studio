@@ -1,6 +1,8 @@
 import { FormEvent, useState } from "react";
 import { createProject, updateProject } from "../../services/tauriClient";
 import type { ProjectView } from "../../types/project";
+import { toUserMessage } from "../../i18n/errorMessages";
+import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
 
 interface Props {
   projects: ProjectView[];
@@ -51,7 +53,7 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
       setFormMode(undefined);
       if (formMode?.kind === "create") onOpen(project.id);
     } catch (saveError: unknown) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      setError(toUserMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -61,23 +63,23 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
     <section className="workspace-panel project-workspace" aria-busy={saving}>
       <div className="section-heading workspace-heading">
         <div>
-          <span className="section-label">Workspace</span>
-          <h2>Projects</h2>
-          <p className="section-description">Organize tasks and assets into local project contexts.</p>
+          <span className="section-label">工作区</span>
+          <h2>项目</h2>
+          <p className="section-description">将任务和资产整理到本地项目中。</p>
         </div>
-        <button type="button" onClick={beginCreate} disabled={saving}>New Project</button>
+        <button type="button" onClick={beginCreate} disabled={saving}>新建项目</button>
       </div>
 
       {formMode && (
         <form className="project-form" onSubmit={(event) => void submit(event)}>
           <div className="section-heading">
             <div>
-              <span className="section-label">{formMode.kind === "create" ? "Create" : "Edit"}</span>
-              <h3>{formMode.kind === "create" ? "New project" : "Project details"}</h3>
+              <span className="section-label">{formMode.kind === "create" ? "创建" : "编辑"}</span>
+              <h3>{formMode.kind === "create" ? "新建项目" : "项目详情"}</h3>
             </div>
           </div>
           <label>
-            <span>Name</span>
+            <span>项目名称</span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -87,7 +89,7 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
             />
           </label>
           <label>
-            <span>Description <small>Optional</small></span>
+            <span>项目说明 <small>可选</small></span>
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
@@ -97,45 +99,41 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
           </label>
           {error && <p className="error-message" role="alert">{error}</p>}
           <div className="project-form-actions">
-            <button type="submit" disabled={saving}>{saving ? "Saving..." : formMode.kind === "create" ? "Create project" : "Save changes"}</button>
-            <button type="button" className="quiet-button" onClick={closeForm} disabled={saving}>Cancel</button>
+            <button type="submit" disabled={saving}>{saving ? "正在保存..." : formMode.kind === "create" ? "创建项目" : "保存修改"}</button>
+            <button type="button" className="quiet-button" onClick={closeForm} disabled={saving}>取消</button>
           </div>
         </form>
       )}
 
-      <div className="project-table" role="table" aria-label="Projects">
+      <div className="project-table" role="table" aria-label="项目列表">
         <div className="project-table-row project-table-header" role="row">
-          <span role="columnheader">Name</span>
-          <span role="columnheader">Description</span>
-          <span role="columnheader">Created</span>
-          <span role="columnheader">Updated</span>
-          <span role="columnheader">Status</span>
-          <span role="columnheader">Actions</span>
+          <span role="columnheader">名称</span>
+          <span role="columnheader">说明</span>
+          <span role="columnheader">创建时间</span>
+          <span role="columnheader">更新时间</span>
+          <span role="columnheader">状态</span>
+          <span role="columnheader">操作</span>
         </div>
         {projects.map((project) => {
           const active = project.id === activeProjectId;
           return (
             <div className="project-table-row" role="row" key={project.id}>
-              <strong role="cell">{project.name}</strong>
+              <strong role="cell">{projectDisplayName(project.id, project.name)}</strong>
               <span role="cell" className="project-description-cell">{project.description || "—"}</span>
-              <span role="cell">{formatDate(project.createdAt)}</span>
-              <span role="cell">{formatDate(project.updatedAt)}</span>
-              <span role="cell">{active ? <span className="active-project-badge">Active</span> : ""}</span>
+              <span role="cell">{formatDateTime(project.createdAt)}</span>
+              <span role="cell">{formatDateTime(project.updatedAt)}</span>
+              <span role="cell">{active ? <span className="active-project-badge">当前项目</span> : ""}</span>
               <span role="cell" className="project-row-actions">
                 <button type="button" onClick={() => onOpen(project.id)} disabled={active || saving}>
-                  Open
+                  打开
                 </button>
-                <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving}>Edit</button>
+                <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving}>编辑</button>
               </span>
             </div>
           );
         })}
-        {!projects.length && <p className="empty-state">No projects are available.</p>}
+        {!projects.length && <p className="empty-state">暂无项目。</p>}
       </div>
     </section>
   );
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleString();
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
+import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 
 interface Props {
   projectId: string;
@@ -63,53 +64,28 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
   const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
   const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
   const mediaUrl = isVideo ? getAssetMediaUrl(projectId, asset.id, "video") : isAudio ? getAssetMediaUrl(projectId, asset.id, "audio") : undefined;
-  const typeLabel = asset.category === "source_image"
-    ? "Source image"
-    : asset.category === "source_video"
-      ? "Source video"
-      : asset.category === "source_audio"
-        ? "Source audio"
-        : isVideo
-          ? "Generated video"
-          : isAudio
-            ? "Audio"
-            : "Generated image";
+  const typeLabel = assetTypeLabel(asset);
+  const displayName = assetDisplayName(asset);
 
   return (
     <button ref={cardRef} type="button" className="asset-library-card" onClick={() => onSelect(asset)}>
       <span className="asset-library-image">
         {previewUrl ? (
-          <img src={previewUrl} alt={asset.name} loading="lazy" />
+          <img src={previewUrl} alt={displayName} loading="lazy" />
         ) : isVideo && mediaUrl ? (
-          <video src={mediaUrl} aria-label={asset.name} preload="metadata" muted playsInline />
+          <video src={mediaUrl} aria-label={displayName} preload="metadata" muted playsInline />
         ) : (
-          <span className="asset-image-placeholder">{isAudio ? "Audio asset" : isVideo ? "Video preview" : "Preview unavailable"}</span>
+          <span className="asset-image-placeholder">{isAudio ? "音频素材" : isVideo ? "视频预览" : "暂无预览"}</span>
         )}
       </span>
       <span className="asset-library-card-copy">
-        <strong>{asset.name}</strong>
+        <strong>{displayName}</strong>
         <span>{typeLabel}</span>
         <small>
-          {isVideo || isAudio ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatBytes(asset.fileSize)}
+          {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatFileSize(asset.fileSize)}
         </small>
-        <small>{formatDate(asset.createdAt)}</small>
+        <small>{formatDateTime(asset.createdAt)}</small>
       </span>
     </button>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleString();
-}
-
-function formatDuration(value?: number | null): string {
-  if (!value || value < 0) return "Duration unavailable";
-  const totalSeconds = Math.round(value / 1000);
-  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }

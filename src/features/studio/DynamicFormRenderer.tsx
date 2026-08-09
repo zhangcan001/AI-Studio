@@ -1,4 +1,5 @@
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
+import { fieldLabel } from "../../i18n/statusLabels";
 import { IntegerField } from "./fields/IntegerField";
 import { ImageField } from "./fields/ImageField";
 import { MultiImageField } from "./fields/MultiImageField";
@@ -62,7 +63,7 @@ function renderField(
       return (
         <TextAreaField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           onChange={(next) => onChange(field.key, next)}
@@ -73,7 +74,7 @@ function renderField(
       return (
         <IntegerField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           onChange={(next) => onChange(field.key, next)}
@@ -83,7 +84,7 @@ function renderField(
       return (
         <SeedField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           onChange={(next) => onChange(field.key, next)}
@@ -93,7 +94,7 @@ function renderField(
       return (
         <ImageField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           projectId={projectId}
@@ -105,7 +106,7 @@ function renderField(
       return (
         <MultiImageField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           projectId={projectId}
@@ -118,7 +119,7 @@ function renderField(
       return (
         <MediaField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           projectId={projectId}
@@ -131,7 +132,7 @@ function renderField(
       return (
         <MultiMediaField
           key={field.key}
-          field={field}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
           error={error}
           projectId={projectId}
@@ -142,7 +143,7 @@ function renderField(
     default:
       return (
         <div key={fieldRecord.key} className="unsupported-field">
-          Unsupported Field: {fieldRecord.type}
+          暂不支持的输入类型：{fieldRecord.type}
         </div>
       );
   }
@@ -157,29 +158,29 @@ export function validateRecipeValues(
     const value = values[field.key];
     if (field.type === "textarea") {
       if (field.required && (!value || value.type !== "string" || value.value.trim() === "")) {
-        errors[field.key] = "This field is required.";
+        errors[field.key] = "此项为必填项。";
       }
     } else if (field.type === "integer") {
       if (!value || value.type !== "integer" || !Number.isInteger(value.value)) {
-        if (field.required) errors[field.key] = "Enter a whole number.";
+        if (field.required) errors[field.key] = "请输入整数。";
       } else if (field.min !== undefined && value.value < field.min) {
-        errors[field.key] = `Must be at least ${field.min}.`;
+        errors[field.key] = `数值不能小于 ${field.min}。`;
       } else if (field.max !== undefined && value.value > field.max) {
-        errors[field.key] = `Must be at most ${field.max}.`;
+        errors[field.key] = `数值不能大于 ${field.max}。`;
       }
     } else if (field.type === "seed" && value?.type === "seed_fixed") {
       if (!/^\d+$/.test(value.value) || value.value.length > 20) {
-        errors[field.key] = "Use a decimal u64 seed string.";
+        errors[field.key] = "请输入十进制随机种子。";
       } else {
         try {
           const seed = BigInt(value.value);
           const min = BigInt(field.minValue ?? "0");
           const max = BigInt(field.maxValue ?? U64_MAX);
           if (seed < min || seed > max) {
-            errors[field.key] = `Seed must be between ${min} and ${max}.`;
+            errors[field.key] = `随机种子必须在 ${min} 到 ${max} 之间。`;
           }
         } catch {
-          errors[field.key] = "Use a decimal u64 seed string.";
+          errors[field.key] = "请输入十进制随机种子。";
         }
       }
     } else if (
@@ -187,27 +188,27 @@ export function validateRecipeValues(
       field.required &&
       (!value || value.type !== "image_asset" || !value.assetId.trim())
     ) {
-      errors[field.key] = "Choose an image.";
+      errors[field.key] = "请选择图片。";
     } else if (field.type === "images") {
       const imageIds = value?.type === "image_assets" ? value.assetIds : [];
       if (imageIds.length > field.maxItems || (imageIds.length > 0 && imageIds.length < field.minItems)) {
-        errors[field.key] = `Choose between ${field.minItems} and ${field.maxItems} images.`;
+        errors[field.key] = `请选择 ${field.minItems} 到 ${field.maxItems} 张图片。`;
       } else if (field.required && imageIds.length < field.minItems) {
-        errors[field.key] = `Choose at least ${field.minItems} images.`;
+        errors[field.key] = `至少请选择 ${field.minItems} 张图片。`;
       }
     } else if (field.type === "video" || field.type === "audio") {
       const expectedType = field.type === "video" ? "video_asset" : "audio_asset";
       if (field.required && (!value || value.type !== expectedType || !value.assetId.trim())) {
-        errors[field.key] = field.type === "audio" ? "Choose an audio file." : "Choose a video.";
+        errors[field.key] = field.type === "audio" ? "请选择音频文件。" : "请选择视频。";
       }
     } else if (field.type === "videos" || field.type === "audios") {
       const expectedType = field.type === "videos" ? "video_assets" : "audio_assets";
       const assetIds = value?.type === expectedType ? value.assetIds : [];
       const label = field.type === "videos" ? "videos" : "audio files";
       if (assetIds.length > field.maxItems || (assetIds.length > 0 && assetIds.length < field.minItems)) {
-        errors[field.key] = `Choose between ${field.minItems} and ${field.maxItems} ${label}.`;
+        errors[field.key] = `请选择 ${field.minItems} 到 ${field.maxItems} 个${label === "videos" ? "视频" : "音频文件"}。`;
       } else if (field.required && assetIds.length < field.minItems) {
-        errors[field.key] = `Choose at least ${field.minItems} ${label}.`;
+        errors[field.key] = `至少请选择 ${field.minItems} 个${label === "videos" ? "视频" : "音频文件"}。`;
       }
     }
   }

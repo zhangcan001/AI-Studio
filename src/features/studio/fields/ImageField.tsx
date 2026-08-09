@@ -8,6 +8,8 @@ import {
 } from "../../../services/tauriClient";
 import type { AssetView } from "../../../types/asset";
 import type { DraftValue } from "../../../types/generation";
+import { toUserMessage } from "../../../i18n/errorMessages";
+import { assetCategoryLabel, formatFileSize } from "../../../i18n/statusLabels";
 
 interface Props {
   field: {
@@ -37,7 +39,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
         if (active) setRecentAssets(assets);
       })
       .catch((loadError: unknown) => {
-        if (active) setMessage(loadError instanceof Error ? loadError.message : String(loadError));
+        if (active) setMessage(toUserMessage(loadError));
       });
     return () => {
       active = false;
@@ -73,7 +75,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
       .catch(() => {
         if (!active) return;
         setResolvedAsset(undefined);
-        setMessage("Missing image asset");
+        setMessage("找不到图片素材，请重新选择。");
         onAvailabilityChange?.(false);
       });
     return () => {
@@ -97,7 +99,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
       })
       .catch((previewError: unknown) => {
         if (active) {
-          setMessage(previewError instanceof Error ? previewError.message : String(previewError));
+          setMessage(toUserMessage(previewError));
           onAvailabilityChange?.(false);
         }
       });
@@ -117,7 +119,7 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
       onChange({ type: "image_asset", assetId: asset.id });
       onAvailabilityChange?.(true);
     } catch (pickError: unknown) {
-      setMessage(pickError instanceof Error ? pickError.message : String(pickError));
+      setMessage(toUserMessage(pickError));
     } finally {
       setLoading(false);
     }
@@ -127,24 +129,24 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
     <div className="field-control image-field">
       <span>
         {field.label}
-        {field.required && <em>Required</em>}
+        {field.required && <em>必填</em>}
       </span>
       <div className="image-field-actions">
         <button type="button" onClick={() => void chooseLocalImage()} disabled={loading}>
-          {loading ? "Importing..." : "Choose local image"}
+          {loading ? "正在导入..." : "选择本地图片"}
         </button>
         <select
-          aria-label={`${field.label} recent images`}
+          aria-label={`${field.label} 最近使用的图片`}
           value={selectedAssetId}
           onChange={(event) => {
             const assetId = event.target.value;
             onChange(assetId ? { type: "image_asset", assetId } : undefined);
           }}
         >
-          <option value="">Select a recent image</option>
+          <option value="">选择最近使用的图片</option>
           {recentAssets.map((asset) => (
             <option key={asset.id} value={asset.id}>
-              {asset.name} · {asset.category === "source_image" ? "source" : "generated"}
+              {asset.name} · {assetCategoryLabel(asset.category)}
             </option>
           ))}
         </select>
@@ -155,9 +157,9 @@ export function ImageField({ field, value, error, projectId, onChange, onAvailab
           <div>
             <strong>{selectedAsset.name}</strong>
             <small>
-              {selectedAsset.width} × {selectedAsset.height} · {(selectedAsset.fileSize / 1024).toFixed(1)} KB
+              {selectedAsset.width} × {selectedAsset.height} · {formatFileSize(selectedAsset.fileSize)}
             </small>
-            <small>{selectedAsset.category === "source_image" ? "Source image" : "Generated image"}</small>
+            <small>{assetCategoryLabel(selectedAsset.category)}</small>
           </div>
         </div>
       )}

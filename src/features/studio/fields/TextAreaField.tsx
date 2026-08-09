@@ -18,7 +18,7 @@ export function TextAreaField({ field, value, error, onChange, onGenerate }: Pro
     <label className="field-control">
       <span>
         {field.label}
-        {field.required && <em>Required</em>}
+        {field.required && <em>必填</em>}
       </span>
       <textarea
         value={text}

@@ -9,7 +9,7 @@ interface Props {
 
 export function AssetGrid({ projectId, assets, onSelect }: Props) {
   if (!assets.length) {
-    return <p className="empty-state">No assets found in this category.</p>;
+    return <p className="empty-state">当前筛选条件下没有找到资产。</p>;
   }
   return (
     <div className="asset-library-grid">

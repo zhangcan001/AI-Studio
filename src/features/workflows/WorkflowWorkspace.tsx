@@ -30,6 +30,8 @@ import type {
   WorkflowProductionWorkspaceView,
   WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
+import { toUserMessage } from "../../i18n/errorMessages";
+import { formatDateTime, stagingStatusLabel, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
 
 interface Props {
   onCatalogChanged: () => Promise<void>;
@@ -37,13 +39,13 @@ interface Props {
 }
 
 const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
-  { value: "inspect", label: "Inspect" },
-  { value: "compatibility", label: "Compatibility" },
-  { value: "inputs", label: "Inputs" },
-  { value: "outputs", label: "Outputs" },
-  { value: "metadata", label: "Metadata" },
-  { value: "validate", label: "Validate" },
-  { value: "publish", label: "Publish" },
+  { value: "inspect", label: "检查工作流" },
+  { value: "compatibility", label: "兼容性检查" },
+  { value: "inputs", label: "输入映射" },
+  { value: "outputs", label: "输出映射" },
+  { value: "metadata", label: "基本信息" },
+  { value: "validate", label: "校验" },
+  { value: "publish", label: "发布" },
 ];
 
 const fieldTypes: WorkflowFieldType[] = [
@@ -128,7 +130,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       setItems(workspace.items);
       setStaging(workspace.staging);
     } catch (loadError: unknown) {
-      setWorkspaceError(errorMessage(loadError));
+      setWorkspaceError(toUserMessage(loadError));
     } finally {
       setWorkspaceLoading(false);
     }
@@ -170,7 +172,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
         await loadWorkspace();
       }
     } catch (importError: unknown) {
-      setError(errorMessage(importError));
+      setError(toUserMessage(importError));
     } finally {
       setLoading(false);
     }
@@ -181,12 +183,12 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     try {
       const restored = await importWorkflowPackageBackup();
       if (restored) {
-        setNotice(`${restored.status}: ${restored.workflowVersion}`);
+        setNotice(`工作流备份已恢复：${restored.workflowVersion}`);
         await loadWorkspace();
         await onCatalogChanged();
       }
     } catch (importError: unknown) {
-      setWorkspaceError(errorMessage(importError));
+      setWorkspaceError(toUserMessage(importError));
     }
   }
 
@@ -196,9 +198,9 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       await setWorkflowEnabled(item.workflowVersionId, !item.enabled);
       await loadWorkspace();
       await onCatalogChanged();
-      setNotice(`${item.name ?? item.packageName} ${item.enabled ? "disabled" : "enabled"}.`);
+      setNotice(`${item.name ?? item.packageName} 已${item.enabled ? "停用" : "启用"}。`);
     } catch (actionError: unknown) {
-      setWorkspaceError(errorMessage(actionError));
+      setWorkspaceError(toUserMessage(actionError));
     }
   }
 
@@ -209,7 +211,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       await loadWorkspace();
       setNotice(`${item.name ?? item.packageName}: ${formatCapability(capability.state)}`);
     } catch (actionError: unknown) {
-      setWorkspaceError(errorMessage(actionError));
+      setWorkspaceError(toUserMessage(actionError));
     }
   }
 
@@ -219,9 +221,9 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       const duplicated = await duplicateWorkflowRecipe(item.workflowVersionId, item.recipes[item.recipes.length - 1]?.recipeId);
       setDraft(duplicated);
       setStep("inputs");
-      setNotice("Recipe duplicated. Review mappings and publish the new Recipe version.");
+      setNotice("配方已复制，请检查映射并发布新的配方版本。");
     } catch (actionError: unknown) {
-      setWorkspaceError(errorMessage(actionError));
+      setWorkspaceError(toUserMessage(actionError));
     }
   }
 
@@ -230,7 +232,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     try {
       setDiff(await compareWorkflowVersions(selectedVersions[0], selectedVersions[1]));
     } catch (actionError: unknown) {
-      setWorkspaceError(errorMessage(actionError));
+      setWorkspaceError(toUserMessage(actionError));
     }
   }
 
@@ -273,7 +275,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     await runDraftAction(async () => {
       const result = await publishOnboarding(draft.draftId);
       setPublished({ workflowId: result.workflowId, recipeId: result.recipeId });
-      setNotice(`Published ${result.packageName}. The runtime catalog was refreshed.`);
+      setNotice(`已发布 ${result.packageName}，运行目录已刷新。`);
       await loadWorkspace();
       await onCatalogChanged();
       setStep("publish");
@@ -285,7 +287,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     await runDraftAction(async () => {
       await discardOnboarding(draft.draftId);
       reset();
-      setNotice("Draft discarded.");
+      setNotice("草稿已丢弃。");
     });
   }
 
@@ -295,7 +297,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     try {
       await action();
     } catch (actionError: unknown) {
-      setError(errorMessage(actionError));
+      setError(toUserMessage(actionError));
     } finally {
       setLoading(false);
     }
@@ -306,7 +308,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     await runDraftAction(async () => {
       const nextDraft = await setOnboardingMetadata(draft.draftId, metadataDraft);
       updateDraft(nextDraft);
-      setNotice("Metadata saved. Validate again before publishing.");
+      setNotice("基本信息已保存，请重新校验后再发布。");
     });
   }
 
@@ -330,7 +332,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     await runDraftAction(async () => {
       const nextDraft = await setOnboardingInputMapping(draft.draftId, request);
       updateDraft(nextDraft);
-      setNotice(`${mapping.label} is mapped to ${nodeId}.${input.name}.`);
+      setNotice(`${mapping.label} 已绑定到 ${nodeId}.${input.name}。`);
     });
   }
 
@@ -351,7 +353,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     await runDraftAction(async () => {
       const nextDraft = await setOnboardingOutputMapping(draft.draftId, request);
       updateDraft(nextDraft);
-      setNotice(`${outputDraft.label} is now a ${outputDraft.type} output.`);
+      setNotice(`${outputDraft.label} 已设置为${outputDraft.type === "video" ? "视频" : "图片"}输出。`);
     });
   }
 
@@ -364,14 +366,14 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
     <section className="workspace-panel workflow-workspace" aria-busy={loading || workspaceLoading}>
       <div className="section-heading workspace-heading">
         <div>
-          <span className="section-label">Workspace</span>
-          <h2>Workflows</h2>
-          <p className="section-description">Import a ComfyUI API workflow, map its safe inputs, then publish an atomic runtime package.</p>
+          <span className="section-label">工作区</span>
+          <h2>工作流管理</h2>
+          <p className="section-description">导入 ComfyUI API 工作流，配置安全输入后发布工作流运行包。</p>
         </div>
         <div className="workflow-workspace-actions">
-          <button type="button" onClick={() => void loadWorkspace()} disabled={workspaceLoading}>Refresh</button>
-          <button type="button" onClick={() => void importWorkflow()} disabled={loading}>Import API Workflow</button>
-          <button type="button" onClick={() => void importBackup()} disabled={loading}>Import Package Backup</button>
+          <button type="button" onClick={() => void loadWorkspace()} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
+          <button type="button" onClick={() => void importWorkflow()} disabled={loading}>导入 API 工作流</button>
+          <button type="button" onClick={() => void importBackup()} disabled={loading}>导入工作流备份</button>
       </div>
       </div>
 
@@ -380,66 +382,66 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
 
       <div className="workflow-production-toolbar">
-        <input aria-label="Search workflows" placeholder="Search by name" value={search} onChange={(event) => setSearch(event.target.value)} />
-        <select aria-label="Workflow filter" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
-          <option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="issues">Issues</option>
+        <input aria-label="搜索工作流" placeholder="按名称搜索" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <select aria-label="工作流筛选" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
+          <option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已停用</option><option value="issues">有问题</option>
         </select>
-        <button type="button" onClick={() => void compareSelected()} disabled={selectedVersions.length !== 2}>Compare selected versions</button>
+        <button type="button" onClick={() => void compareSelected()} disabled={selectedVersions.length !== 2}>比较选中的版本</button>
       </div>
-      <div className="workflow-catalog" aria-label="Workflow packages">
+      <div className="workflow-catalog" aria-label="工作流运行包">
         <div className="workflow-catalog-header">
-          <span>Compare</span><span>Workflow Name</span><span>Version</span><span>Mode</span><span>Runtime</span><span>Capability</span><span>Runs</span><span>Actions</span>
+          <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>运行记录</span><span>操作</span>
         </div>
         {visibleItems.map((item) => (
           <article className="workflow-catalog-row" key={`${item.packageName}:${item.workflowVersionId ?? "invalid"}`}>
-            <input type="checkbox" aria-label={`Compare ${item.name ?? item.packageName}`} checked={item.workflowVersionId ? selectedVersions.includes(item.workflowVersionId) : false} onChange={() => toggleSelected(item)} disabled={!item.workflowVersionId} />
-            <strong>{item.name ?? item.packageName}</strong>
+            <input type="checkbox" aria-label={`比较 ${workflowDisplayName(item.workflowId, item.name ?? item.packageName)}`} checked={item.workflowVersionId ? selectedVersions.includes(item.workflowVersionId) : false} onChange={() => toggleSelected(item)} disabled={!item.workflowVersionId} />
+            <strong>{workflowDisplayName(item.workflowId, item.name ?? item.packageName)}</strong>
             <span>{item.workflowVersion ?? "—"}</span>
-            <span>{item.mode ?? "—"}</span>
-            <span>{item.packageStatus}</span>
+            <span>{item.mode ? workflowModeLabel(item.mode) : "—"}</span>
+            <span>{packageStatusLabel(item.packageStatus)}</span>
             <span className={`workflow-capability workflow-capability-${item.capability.toLowerCase()}`}>{formatCapability(item.capability)}</span>
-            <span>{item.hasSuccessfulRun ? "Success" : `${item.totalTasks} total`}</span>
+            <span>{item.hasSuccessfulRun ? "已有成功运行" : `共 ${item.totalTasks} 个任务`}</span>
             <div className="workflow-row-actions">
-              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "Disable" : "Enable"}</button>}
-              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>Recheck</button>}
-              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>Duplicate Recipe</button>}
-              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>Export</button>}
-              {item.workflowId && <button type="button" className="quiet-button" onClick={() => void importWorkflow(item.workflowId)}>Create new version</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "停用" : "启用"}</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>重新检查</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>复制配方</button>}
+              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
+              {item.workflowId && <button type="button" className="quiet-button" onClick={() => void importWorkflow(item.workflowId)}>创建新版本</button>}
             </div>
             <details className="workflow-catalog-detail">
-              <summary>Details</summary>
+              <summary>查看详情</summary>
               <div className="workflow-detail-grid">
-                <span>Enabled <strong>{item.enabled ? "Yes" : "No"}</strong></span>
-                <span>Workflow SHA-256 <strong>{item.workflowSha256 ?? "—"}</strong></span>
-                <span>Recipe SHA-256 <strong>{item.recipeSha256 ?? "—"}</strong></span>
-                <span>Nodes <strong>{item.nodeCount}</strong></span>
-                <span>Recipes <strong>{item.recipes.length}</strong></span>
-                <span>Active tasks <strong>{item.activeTasks}</strong></span>
-                <span>Total tasks <strong>{item.totalTasks}</strong></span>
+                <span>启用状态 <strong>{item.enabled ? "已启用" : "已停用"}</strong></span>
+                <span>工作流 SHA-256 <strong>{item.workflowSha256 ?? "—"}</strong></span>
+                <span>配方 SHA-256 <strong>{item.recipeSha256 ?? "—"}</strong></span>
+                <span>节点数量 <strong>{item.nodeCount}</strong></span>
+                <span>配方数量 <strong>{item.recipes.length}</strong></span>
+                <span>活动任务 <strong>{item.activeTasks}</strong></span>
+                <span>任务总数 <strong>{item.totalTasks}</strong></span>
               </div>
               {!!item.capabilityIssues.length && <IssueList issues={item.capabilityIssues} />}
-              {!!item.diagnostics.length && <ul className="workflow-issue-list">{item.diagnostics.map((diagnostic) => <li key={diagnostic.code}>{diagnostic.code}: {diagnostic.message}</li>)}</ul>}
-              {!!item.recipes.length && <div className="workflow-recipe-summary">{item.recipes.map((recipe) => <span key={recipe.recipeId}>Recipe {recipe.version} · {recipe.inputCount} inputs · {recipe.outputCount} outputs</span>)}</div>}
+              {!!item.diagnostics.length && <ul className="workflow-issue-list">{item.diagnostics.map((diagnostic) => <li key={diagnostic.code}>{toUserMessage({ code: diagnostic.code, message: diagnostic.message })}</li>)}</ul>}
+              {!!item.recipes.length && <div className="workflow-recipe-summary">{item.recipes.map((recipe) => <span key={recipe.recipeId}>配方 {recipe.version} · {recipe.inputCount} 个输入 · {recipe.outputCount} 个输出</span>)}</div>}
             </details>
           </article>
         ))}
-        {!visibleItems.length && !workspaceLoading && <p className="empty-state">No workflows match the current filter.</p>}
+        {!visibleItems.length && !workspaceLoading && <p className="empty-state">当前筛选条件下没有找到工作流。</p>}
       </div>
 
-      {!!staging.length && <div className="workflow-diagnostics-panel"><h3>Diagnostics</h3>{staging.map((entry) => <div key={entry.stagingId}><span>{entry.status}</span><code>{entry.stagingId}</code><button type="button" className="quiet-button" onClick={() => void cleanWorkflowStaging(entry.stagingId)} disabled={entry.inUse}>{entry.inUse ? "In use" : "Clean staging"}</button></div>)}</div>}
+      {!!staging.length && <div className="workflow-diagnostics-panel"><h3>运行诊断</h3>{staging.map((entry) => <div key={entry.stagingId}><span>{stagingStatusLabel(entry.status)}</span><code>{entry.stagingId}</code><button type="button" className="quiet-button" onClick={() => void cleanWorkflowStaging(entry.stagingId)} disabled={entry.inUse}>{entry.inUse ? "使用中" : "清理暂存"}</button></div>)}</div>}
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
 
       {draft && (
         <div className="workflow-onboarding-panel">
           <div className="workflow-onboarding-heading">
             <div>
-              <span className="section-label">API workflow onboarding</span>
+              <span className="section-label">API 工作流导入向导</span>
               <h3>{draft.manifest.name}</h3>
-              <p className="section-description">{draft.originalFilename} · {draft.nodeCount} nodes · {draft.uniqueClassCount} classes</p>
+              <p className="section-description">{draft.originalFilename} · {draft.nodeCount} 个节点 · {draft.uniqueClassCount} 种节点类型</p>
             </div>
-            <button type="button" className="quiet-button" onClick={() => void discardDraft()} disabled={loading}>Discard draft</button>
+            <button type="button" className="quiet-button" onClick={() => void discardDraft()} disabled={loading}>丢弃草稿</button>
           </div>
-          <div className="workflow-step-tabs" role="tablist" aria-label="Workflow onboarding steps">
+          <div className="workflow-step-tabs" role="tablist" aria-label="工作流导入步骤">
             {steps.map((item) => (
               <button
                 type="button"
@@ -502,12 +504,12 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
 function InspectPane({ draft, onContinue }: { draft: WorkflowOnboardingDraftView; onContinue: () => void }) {
   return (
     <div className="workflow-onboarding-pane">
-      <div className="workflow-stats"><span>SHA-256 <strong>{draft.workflowSha256}</strong></span><span>Nodes <strong>{draft.nodeCount}</strong></span><span>Classes <strong>{draft.uniqueClassCount}</strong></span></div>
-      <p className="section-description">Technical node IDs, class types and mappings are intentionally shown only in this onboarding workspace.</p>
+      <div className="workflow-stats"><span>SHA-256 <strong>{draft.workflowSha256}</strong></span><span>节点数量 <strong>{draft.nodeCount}</strong></span><span>节点类型数量 <strong>{draft.uniqueClassCount}</strong></span></div>
+      <p className="section-description">节点 ID、节点类型和映射仅在此导入向导中作为技术信息显示。</p>
       <div className="workflow-node-list">
         {draft.nodes.map((node) => <NodeCard key={node.nodeId} node={node} />)}
       </div>
-      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>Check compatibility</button></div>
+      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>检查兼容性</button></div>
     </div>
   );
 }
@@ -515,10 +517,10 @@ function InspectPane({ draft, onContinue }: { draft: WorkflowOnboardingDraftView
 function NodeCard({ node }: { node: WorkflowNodeView }) {
   return (
     <details className="workflow-node-card">
-      <summary><strong>Node {node.nodeId}</strong><span>{node.title}</span><code>{node.classType}</code></summary>
+      <summary><strong>节点 {node.nodeId}</strong><span>{node.title}</span><code>{node.classType}</code></summary>
       <div className="workflow-node-inputs">
-        {node.inputs.map((input) => <div key={input.name}><span>{input.name}</span><small>{input.currentValueSummary}{input.isLinked ? " · Connected" : ""}</small></div>)}
-        {!node.inputs.length && <small>No literal inputs.</small>}
+        {node.inputs.map((input) => <div key={input.name}><span>{input.name}</span><small>{input.currentValueSummary}{input.isLinked ? " · 已连接" : ""}</small></div>)}
+        {!node.inputs.length && <small>暂无字面量输入。</small>}
       </div>
     </details>
   );
@@ -530,11 +532,11 @@ function CompatibilityPane({ draft, loading, onCheck, onContinue }: { draft: Wor
     <div className="workflow-onboarding-pane">
       <div className={`workflow-capability-banner workflow-capability-${capability.state.toLowerCase()}`}>
         <strong>{formatCapability(capability.state)}</strong>
-        <span>{capability.checkedAt ? `Checked ${new Date(capability.checkedAt).toLocaleString()}` : "Capability has not been checked yet."}</span>
+        <span>{capability.checkedAt ? `检查时间：${formatDateTime(capability.checkedAt)}` : "尚未检查兼容状态。"}</span>
       </div>
-      <button type="button" onClick={onCheck} disabled={loading}>{loading ? "Checking..." : "Check ComfyUI capability"}</button>
+      <button type="button" onClick={onCheck} disabled={loading}>{loading ? "正在检查..." : "检查 ComfyUI 兼容状态"}</button>
       {!!capability.issues.length && <IssueList issues={capability.issues} />}
-      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>Configure inputs</button></div>
+      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>配置输入</button></div>
     </div>
   );
 }
@@ -556,7 +558,7 @@ function InputsPane({
 }) {
   return (
     <div className="workflow-onboarding-pane">
-      <p className="section-description">Choose the semantic field and confirm each mapping. Connected inputs remain protected and cannot be bound directly.</p>
+      <p className="section-description">选择语义字段并确认每项映射。已连接的输入受到保护，不能直接绑定。</p>
       <div className="workflow-input-list">
         {draft.nodes.flatMap((node) => node.inputs.map((input) => {
           const key = mappingKey(node.nodeId, input.name);
@@ -565,28 +567,28 @@ function InputsPane({
           return (
             <div className="workflow-input-card" key={key}>
               <div className="workflow-input-heading"><strong>{node.nodeId}.{input.name}</strong><span>{input.currentValueSummary}</span></div>
-              {input.isLinked ? <p className="disabled-note">Connected input — not directly bindable</p> : (
+              {input.isLinked ? <p className="disabled-note">已连接输入，不能直接绑定。</p> : (
                 <div className="workflow-mapping-form">
-                  <label>Semantic key<input value={mapping.semanticKey} onChange={(event) => onPatch(key, { semanticKey: event.target.value })} /></label>
-                  <label>Field type<select value={mapping.fieldType} onChange={(event) => onPatch(key, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-                  <label>Label<input value={mapping.label} onChange={(event) => onPatch(key, { label: event.target.value })} /></label>
-                  <label className="checkbox-label"><input type="checkbox" checked={mapping.required} onChange={(event) => onPatch(key, { required: event.target.checked })} /> Required</label>
+                  <label>语义键<input value={mapping.semanticKey} onChange={(event) => onPatch(key, { semanticKey: event.target.value })} /></label>
+                  <label>字段类型<select value={mapping.fieldType} onChange={(event) => onPatch(key, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
+                  <label>显示名称<input value={mapping.label} onChange={(event) => onPatch(key, { label: event.target.value })} /></label>
+                  <label className="checkbox-label"><input type="checkbox" checked={mapping.required} onChange={(event) => onPatch(key, { required: event.target.checked })} /> 必填</label>
                   {mapping.fieldType === "integer" || mapping.fieldType === "seed" ? <>
-                    <label>Default<input value={mapping.defaultValue} onChange={(event) => onPatch(key, { defaultValue: event.target.value })} /></label>
-                    <label>Min<input value={mapping.minValue} onChange={(event) => onPatch(key, { minValue: event.target.value })} inputMode="numeric" /></label>
-                    <label>Max<input value={mapping.maxValue} onChange={(event) => onPatch(key, { maxValue: event.target.value })} inputMode="numeric" /></label>
+                    <label>默认值<input value={mapping.defaultValue} onChange={(event) => onPatch(key, { defaultValue: event.target.value })} /></label>
+                    <label>最小值<input value={mapping.minValue} onChange={(event) => onPatch(key, { minValue: event.target.value })} inputMode="numeric" /></label>
+                    <label>最大值<input value={mapping.maxValue} onChange={(event) => onPatch(key, { maxValue: event.target.value })} inputMode="numeric" /></label>
                   </> : null}
-                  {mapping.fieldType.endsWith("s") ? <label>Max items<input value={mapping.maxItems} onChange={(event) => onPatch(key, { maxItems: event.target.value })} inputMode="numeric" /></label> : null}
-                  <button type="button" onClick={() => onBind(node.nodeId, input)} disabled={!input.bindable}>Confirm mapping</button>
+                  {mapping.fieldType.endsWith("s") ? <label>最大数量<input value={mapping.maxItems} onChange={(event) => onPatch(key, { maxItems: event.target.value })} inputMode="numeric" /></label> : null}
+                  <button type="button" onClick={() => onBind(node.nodeId, input)} disabled={!input.bindable}>确认映射</button>
                 </div>
               )}
-              {input.allowedOptions.length > 0 && <small className="field-hint">Available options: {input.allowedOptions.join(", ")}</small>}
-              {existing && <div className="workflow-existing-mapping"><span>Mapped as <strong>{existing.label}</strong></span><button type="button" className="quiet-button" onClick={() => onRemove(existing)}>Remove</button></div>}
+              {input.allowedOptions.length > 0 && <small className="field-hint">可用选项：{input.allowedOptions.join(", ")}</small>}
+              {existing && <div className="workflow-existing-mapping"><span>已映射为 <strong>{existing.label}</strong></span><button type="button" className="quiet-button" onClick={() => onRemove(existing)}>移除</button></div>}
             </div>
           );
         }))}
       </div>
-      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>Configure outputs</button></div>
+      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>配置输出</button></div>
     </div>
   );
 }
@@ -594,17 +596,17 @@ function InputsPane({
 function OutputsPane({ draft, candidates, outputDraft, onChange, onAdd, onContinue }: { draft: WorkflowOnboardingDraftView; candidates: WorkflowNodeView[]; outputDraft: OutputDraft; onChange: (value: OutputDraft) => void; onAdd: () => void; onContinue: () => void }) {
   return (
     <div className="workflow-onboarding-pane">
-      <p className="section-description">Declare the user-facing outputs explicitly. Output IDs are stable snake_case keys used by the runtime package.</p>
+      <p className="section-description">明确声明用户可见的输出结果。输出 ID 是运行包使用的稳定 snake_case 技术键。</p>
       <div className="workflow-mapping-form workflow-output-form">
-        <label>Output ID<input value={outputDraft.outputId} onChange={(event) => onChange({ ...outputDraft, outputId: event.target.value })} /></label>
-        <label>Label<input value={outputDraft.label} onChange={(event) => onChange({ ...outputDraft, label: event.target.value })} /></label>
-        <label>Type<select value={outputDraft.type} onChange={(event) => onChange({ ...outputDraft, type: event.target.value as "image" | "video" })}><option value="image">image</option><option value="video">video</option></select></label>
-        <label>Output node<select value={outputDraft.nodeId} onChange={(event) => onChange({ ...outputDraft, nodeId: event.target.value })}>{candidates.map((node) => <option key={node.nodeId} value={node.nodeId}>Node {node.nodeId} · {node.classType}</option>)}</select></label>
-        <label className="checkbox-label"><input type="checkbox" checked={outputDraft.required} onChange={(event) => onChange({ ...outputDraft, required: event.target.checked })} /> Required</label>
-        <button type="button" onClick={onAdd} disabled={!outputDraft.nodeId}>Confirm output</button>
+        <label>输出 ID<input value={outputDraft.outputId} onChange={(event) => onChange({ ...outputDraft, outputId: event.target.value })} /></label>
+        <label>显示名称<input value={outputDraft.label} onChange={(event) => onChange({ ...outputDraft, label: event.target.value })} /></label>
+        <label>类型<select value={outputDraft.type} onChange={(event) => onChange({ ...outputDraft, type: event.target.value as "image" | "video" })}><option value="image">图片</option><option value="video">视频</option></select></label>
+        <label>输出节点<select value={outputDraft.nodeId} onChange={(event) => onChange({ ...outputDraft, nodeId: event.target.value })}>{candidates.map((node) => <option key={node.nodeId} value={node.nodeId}>节点 {node.nodeId} · {node.classType}</option>)}</select></label>
+        <label className="checkbox-label"><input type="checkbox" checked={outputDraft.required} onChange={(event) => onChange({ ...outputDraft, required: event.target.checked })} /> 必填</label>
+        <button type="button" onClick={onAdd} disabled={!outputDraft.nodeId}>确认输出</button>
       </div>
-      <div className="workflow-output-list">{draft.outputMappings.map((output) => <div key={output.outputId}><strong>{output.label}</strong><span>{output.outputId} · {output.type} · node {output.nodeId}</span></div>)}</div>
-      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>Set metadata</button></div>
+      <div className="workflow-output-list">{draft.outputMappings.map((output) => <div key={output.outputId}><strong>{output.label}</strong><span>{output.outputId} · {output.type === "video" ? "视频" : "图片"} · 节点 {output.nodeId}</span></div>)}</div>
+      <div className="workflow-pane-actions"><button type="button" onClick={onContinue}>设置基本信息</button></div>
     </div>
   );
 }
@@ -613,14 +615,14 @@ function MetadataPane({ draft, onChange, onSave, onContinue }: { draft: Metadata
   return (
     <div className="workflow-onboarding-pane">
       <div className="workflow-mapping-form workflow-metadata-form">
-        <label>Workflow ID<input value={draft.workflowId} onChange={(event) => onChange({ ...draft, workflowId: event.target.value })} /></label>
-        <label>Name<input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
-        <label>Workflow version<input value={draft.workflowVersion} onChange={(event) => onChange({ ...draft, workflowVersion: event.target.value })} /></label>
-        <label>Recipe version<input value={draft.recipeVersion} onChange={(event) => onChange({ ...draft, recipeVersion: event.target.value })} /></label>
-        <label>Category<input value={draft.category} onChange={(event) => onChange({ ...draft, category: event.target.value })} /></label>
-        <label>Mode<input value={draft.mode} onChange={(event) => onChange({ ...draft, mode: event.target.value })} /></label>
+        <label>工作流 ID<input value={draft.workflowId} onChange={(event) => onChange({ ...draft, workflowId: event.target.value })} /></label>
+        <label>名称<input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
+        <label>工作流版本<input value={draft.workflowVersion} onChange={(event) => onChange({ ...draft, workflowVersion: event.target.value })} /></label>
+        <label>配方版本<input value={draft.recipeVersion} onChange={(event) => onChange({ ...draft, recipeVersion: event.target.value })} /></label>
+        <label>分类<input value={draft.category} onChange={(event) => onChange({ ...draft, category: event.target.value })} /></label>
+        <label>模式<input value={draft.mode} onChange={(event) => onChange({ ...draft, mode: event.target.value })} /></label>
       </div>
-      <div className="workflow-pane-actions"><button type="button" onClick={onSave}>Save metadata</button><button type="button" onClick={onContinue}>Validate draft</button></div>
+      <div className="workflow-pane-actions"><button type="button" onClick={onSave}>保存基本信息</button><button type="button" onClick={onContinue}>校验草稿</button></div>
     </div>
   );
 }
@@ -628,20 +630,20 @@ function MetadataPane({ draft, onChange, onSave, onContinue }: { draft: Metadata
 function ValidatePane({ draft, loading, onValidate, onPublish }: { draft: WorkflowOnboardingDraftView; loading: boolean; onValidate: () => void; onPublish: () => void }) {
   const validation = draft.validation;
   const checks = [
-    ["API format", validation.apiFormat],
-    ["Recipe", validation.recipe],
-    ["Bindings", validation.bindings],
-    ["Outputs", validation.outputs],
-    ["Manifest", validation.manifest],
-    ["Capability", validation.capability],
-    ["Dry run", validation.dryRun],
+    ["API 格式", validation.apiFormat],
+    ["配方", validation.recipe],
+    ["输入绑定", validation.bindings],
+    ["输出", validation.outputs],
+    ["清单", validation.manifest],
+    ["兼容状态", validation.capability],
+    ["试运行", validation.dryRun],
   ] as const;
   return (
     <div className="workflow-onboarding-pane">
       <div className="workflow-validation-grid">{checks.map(([label, valid]) => <span key={label} className={valid ? "workflow-check-pass" : "workflow-check-fail"}>{valid ? "✓" : "!"} {label}</span>)}</div>
-      {!!validation.issues.length && <ul className="workflow-issue-list">{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
-      <details className="workflow-recipe-preview"><summary>Advanced: generated Recipe YAML</summary><pre>{draft.recipe.yaml ?? "Recipe is not valid yet."}</pre></details>
-      <div className="workflow-pane-actions"><button type="button" onClick={onValidate} disabled={loading}>{loading ? "Validating..." : "Validate again"}</button><button type="button" onClick={onPublish} disabled={!validation.readyToPublish}>Continue to publish</button></div>
+      {!!validation.issues.length && <ul className="workflow-issue-list">{validation.issues.map((issue) => <li key={issue}>{localizeWorkflowIssue(issue)}</li>)}</ul>}
+      <details className="workflow-recipe-preview"><summary>高级信息：生成的 Recipe YAML</summary><pre>{draft.recipe.yaml ?? "配方当前还未通过校验。"}</pre></details>
+      <div className="workflow-pane-actions"><button type="button" onClick={onValidate} disabled={loading}>{loading ? "正在校验..." : "再次校验"}</button><button type="button" onClick={onPublish} disabled={!validation.readyToPublish}>继续发布</button></div>
     </div>
   );
 }
@@ -650,10 +652,10 @@ function PublishPane({ draft, published, loading, onPublish, onOpenStudio }: { d
   return (
     <div className="workflow-onboarding-pane">
       <div className={`workflow-publish-state ${draft.validation.readyToPublish ? "workflow-check-pass" : "workflow-check-fail"}`}>
-        {draft.validation.readyToPublish ? "Ready to publish" : "Publishing is disabled until all checks pass."}
+        {draft.validation.readyToPublish ? "可以发布" : "所有检查通过后才能发布。"}
       </div>
-      <button type="button" onClick={onPublish} disabled={loading || !draft.validation.readyToPublish}>{loading ? "Publishing..." : "Publish runtime package"}</button>
-      {published && <div className="workflow-published-result"><strong>Published successfully</strong><span>Package is available in Studio after catalog refresh.</span><button type="button" onClick={onOpenStudio}>Open in Studio</button></div>}
+      <button type="button" onClick={onPublish} disabled={loading || !draft.validation.readyToPublish}>{loading ? "正在发布..." : "发布工作流运行包"}</button>
+      {published && <div className="workflow-published-result"><strong>发布成功</strong><span>刷新目录后即可在创作工作台使用该运行包。</span><button type="button" onClick={onOpenStudio}>在创作工作台中打开</button></div>}
     </div>
   );
 }
@@ -661,30 +663,30 @@ function PublishPane({ draft, published, loading, onPublish, onOpenStudio }: { d
 function VersionDiffPane({ diff, onClose }: { diff: WorkflowVersionDiffView; onClose: () => void }) {
   return (
     <details className="workflow-diff-panel" open>
-      <summary>Version diff · {diff.versionA} vs {diff.versionB}</summary>
+      <summary>版本差异 · {diff.versionA} 对比 {diff.versionB}</summary>
       <div className="workflow-detail-grid">
-        <span>Nodes <strong>{diff.nodeCountA} → {diff.nodeCountB}</strong></span>
-        <span>Added <strong>{diff.addedNodes.length}</strong></span>
-        <span>Removed <strong>{diff.removedNodes.length}</strong></span>
-        <span>Class changes <strong>{diff.changedClassTypes.length}</strong></span>
-        <span>Literal changes <strong>{diff.changedLiteralInputs.length}</strong></span>
-        <span>Link changes <strong>{diff.changedLinks.length}</strong></span>
+        <span>节点数量 <strong>{diff.nodeCountA} → {diff.nodeCountB}</strong></span>
+        <span>新增节点 <strong>{diff.addedNodes.length}</strong></span>
+        <span>移除节点 <strong>{diff.removedNodes.length}</strong></span>
+        <span>类型变化 <strong>{diff.changedClassTypes.length}</strong></span>
+        <span>字面量变化 <strong>{diff.changedLiteralInputs.length}</strong></span>
+        <span>连接变化 <strong>{diff.changedLinks.length}</strong></span>
       </div>
-      {!!diff.addedNodes.length && <p>Added nodes: {diff.addedNodes.join(", ")}</p>}
-      {!!diff.removedNodes.length && <p>Removed nodes: {diff.removedNodes.join(", ")}</p>}
-      {!!diff.changedClassTypes.length && <ul className="workflow-issue-list">{diff.changedClassTypes.map((change) => <li key={change.nodeId}>Node {change.nodeId}: {change.from} → {change.to}</li>)}</ul>}
-      {!!diff.changedLiteralInputs.length && <ul className="workflow-issue-list">{diff.changedLiteralInputs.map((change) => <li key={`${change.nodeId}:${change.input}`}>Node {change.nodeId}.{change.input}: {change.from} → {change.to}</li>)}</ul>}
-      {!!diff.changedLinks.length && <ul className="workflow-issue-list">{diff.changedLinks.map((change) => <li key={`${change.nodeId}:${change.input}`}>Node connection changed: {change.nodeId}.{change.input}</li>)}</ul>}
-      {!!diff.recipeInputChanges.length && <p>Recipe inputs: {diff.recipeInputChanges.join("; ")}</p>}
-      {!!diff.bindingChanges.length && <p>Bindings: {diff.bindingChanges.join("; ")}</p>}
-      {!!diff.outputChanges.length && <p>Outputs: {diff.outputChanges.join("; ")}</p>}
-      <button type="button" className="quiet-button" onClick={onClose}>Close diff</button>
+      {!!diff.addedNodes.length && <p>新增节点：{diff.addedNodes.join(", ")}</p>}
+      {!!diff.removedNodes.length && <p>移除节点：{diff.removedNodes.join(", ")}</p>}
+      {!!diff.changedClassTypes.length && <ul className="workflow-issue-list">{diff.changedClassTypes.map((change) => <li key={change.nodeId}>节点 {change.nodeId}：{change.from} → {change.to}</li>)}</ul>}
+      {!!diff.changedLiteralInputs.length && <ul className="workflow-issue-list">{diff.changedLiteralInputs.map((change) => <li key={`${change.nodeId}:${change.input}`}>节点 {change.nodeId}.{change.input}：{change.from} → {change.to}</li>)}</ul>}
+      {!!diff.changedLinks.length && <ul className="workflow-issue-list">{diff.changedLinks.map((change) => <li key={`${change.nodeId}:${change.input}`}>节点连接已变化：{change.nodeId}.{change.input}</li>)}</ul>}
+      {!!diff.recipeInputChanges.length && <p>配方输入：{diff.recipeInputChanges.join("；")}</p>}
+      {!!diff.bindingChanges.length && <p>输入绑定：{diff.bindingChanges.join("；")}</p>}
+      {!!diff.outputChanges.length && <p>输出：{diff.outputChanges.join("；")}</p>}
+      <button type="button" className="quiet-button" onClick={onClose}>关闭差异</button>
     </details>
   );
 }
 
 function IssueList({ issues }: { issues: WorkflowOnboardingDraftView["capability"]["issues"] }) {
-  return <ul className="workflow-issue-list">{issues.map((issue) => <li key={`${issue.code}:${issue.nodeId ?? ""}:${issue.inputName ?? ""}`}>{issue.message}</li>)}</ul>;
+  return <ul className="workflow-issue-list">{issues.map((issue) => <li key={`${issue.code}:${issue.nodeId ?? ""}:${issue.inputName ?? ""}`}>{toUserMessage({ code: issue.code, message: issue.message })}</li>)}</ul>;
 }
 
 function defaultMapping(nodeId: string, input: WorkflowInputView): MappingDraft {
@@ -704,7 +706,7 @@ function defaultMapping(nodeId: string, input: WorkflowInputView): MappingDraft 
 }
 
 function emptyMapping(): MappingDraft {
-  return { semanticKey: "input_value", fieldType: "textarea", label: "Value", required: true, defaultValue: "", minValue: "", maxValue: "", minItems: "", maxItems: "", itemIndex: "" };
+  return { semanticKey: "input_value", fieldType: "textarea", label: "值", required: true, defaultValue: "", minValue: "", maxValue: "", minItems: "", maxItems: "", itemIndex: "" };
 }
 
 function mappingKey(nodeId: string, inputName: string): string {
@@ -721,9 +723,46 @@ function optionalNumber(value: string): number | undefined {
 }
 
 function formatCapability(value: string): string {
-  return value.replace(/_/g, " ").toLowerCase().replace(/(^| )\S/g, (letter: string) => letter.toUpperCase());
+  return {
+    READY: "可用",
+    MISSING_NODES: "缺少节点",
+    INCOMPATIBLE_INPUT_VALUES: "输入值不兼容",
+    COMFY_OFFLINE: "ComfyUI 离线",
+    NOT_CHECKED: "尚未检查",
+  }[value] ?? "未知状态";
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function packageStatusLabel(value: string): string {
+  return {
+    VALID: "有效",
+    INVALID: "无效",
+    MISSING: "缺失",
+    STAGED: "待发布",
+  }[value] ?? "未知状态";
+}
+
+function fieldTypeLabel(value: WorkflowFieldType): string {
+  return {
+    textarea: "多行文本",
+    integer: "整数",
+    seed: "随机种子",
+    image: "图片",
+    images: "多张图片",
+    video: "视频",
+    videos: "多个视频",
+    audio: "音频",
+    audios: "多个音频",
+  }[value];
+}
+
+function localizeWorkflowIssue(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("api") && normalized.includes("format")) return "该文件不是 ComfyUI API 格式工作流。";
+  if (normalized.includes("recipe")) return "配方校验未通过，请检查输入映射和输出映射。";
+  if (normalized.includes("binding")) return "输入绑定校验未通过，请检查每个输入映射。";
+  if (normalized.includes("output")) return "输出校验未通过，请至少配置一个有效输出。";
+  if (normalized.includes("manifest")) return "工作流基本信息校验未通过。";
+  if (normalized.includes("capability")) return "ComfyUI 兼容性校验未通过。";
+  if (normalized.includes("dry run")) return "工作流试运行未通过。";
+  return "工作流校验未通过，请查看技术详情。";
 }

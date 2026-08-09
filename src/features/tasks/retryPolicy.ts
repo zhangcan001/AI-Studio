@@ -16,28 +16,28 @@ export interface RetryDecision {
 
 export function taskRetryDecision(detail: TaskDetail, comfyConnected: boolean): RetryDecision {
   if (detail.status !== "FAILED") {
-    return { allowed: false, reason: "Only failed tasks can be retried." };
+    return { allowed: false, reason: "只有失败的任务可以重试。" };
   }
   if (!detail.errorCode) {
-    return { allowed: false, reason: "The failure has no retry classification." };
+    return { allowed: false, reason: "该失败没有可用的重试分类。" };
   }
   if (detail.errorCode === "EXECUTION_ERROR") {
     return {
       allowed: false,
-      reason: "Execution failures require review. GPU out-of-memory errors are never retried automatically.",
+      reason: "执行失败需要人工检查。GPU 显存不足不会自动重试。",
     };
   }
   if (!RETRYABLE_ERROR_CODES.has(detail.errorCode)) {
-    return { allowed: false, reason: "This failure is not classified as transient." };
+    return { allowed: false, reason: "该失败未被归类为临时错误。" };
   }
   if (!detail.reusableDraft.available) {
-    return { allowed: false, reason: detail.reusableDraft.reason ?? "Saved inputs are unavailable." };
+    return { allowed: false, reason: detail.reusableDraft.reason ?? "保存的输入不可用。" };
   }
   if (detail.reusableDraft.missingAssetIds.length > 0) {
-    return { allowed: false, reason: "A referenced media asset is missing." };
+    return { allowed: false, reason: "缺少引用的媒体素材。" };
   }
   if (!comfyConnected) {
-    return { allowed: false, reason: "Reconnect ComfyUI before retrying." };
+    return { allowed: false, reason: "请重新连接 ComfyUI 后再重试。" };
   }
   return { allowed: true };
 }

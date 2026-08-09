@@ -4,6 +4,7 @@ import { subscribeTaskUpdates } from "../../services/taskEvents";
 import type { PageCursor } from "../../types/asset";
 import type { ReusableGenerationDraft, TaskDetail, TaskHistoryFilter, TaskHistoryItem } from "../../types/history";
 import type { TaskStatus } from "../../types/task";
+import { toUserMessage } from "../../i18n/errorMessages";
 import { AssetPreview } from "../assets/AssetPreview";
 import { TaskHistoryDetail } from "./TaskHistoryDetail";
 import { TaskHistoryList } from "./TaskHistoryList";
@@ -47,7 +48,7 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
         setActivityNotice(false);
       } catch (loadError: unknown) {
         if (requestVersion.current === version) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
+          setError(toUserMessage(loadError));
         }
       } finally {
         if (requestVersion.current === version) setLoading(false);
@@ -113,7 +114,7 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
       if (detailVersion.current === version) setDetail(nextDetail);
     } catch (loadError: unknown) {
       if (detailVersion.current === version) {
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        setError(toUserMessage(loadError));
       }
     }
   }
@@ -155,12 +156,12 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
           />
           {activityNotice && (
             <div className="activity-notice" role="status">
-              New task activity is available. <button type="button" onClick={() => void loadPage(true)}>Refresh history</button>
+              有新的任务活动。<button type="button" onClick={() => void loadPage(true)}>刷新任务历史</button>
             </div>
           )}
         </>
       )}
-      {error && <p className="error-message">Unable to load task history: {error}</p>}
+      {error && <p className="error-message">任务历史加载失败：{error}</p>}
       {previewAsset && (
         <AssetPreview projectId={projectId} asset={previewAsset} onClose={() => setPreviewAssetId(undefined)} />
       )}

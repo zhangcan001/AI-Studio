@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
+import { assetDisplayName, assetTypeLabel, formatDurationMs } from "../../i18n/statusLabels";
 
 interface Props {
   projectId: string;
@@ -46,7 +47,7 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
         setUrl(objectUrl);
       })
       .catch(() => {
-        if (active) setError("Preview unavailable");
+        if (active) setError("暂无预览，请稍后重试。");
       });
     return () => {
       active = false;
@@ -57,6 +58,8 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
 
   const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
   const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
+  const displayName = assetDisplayName(asset);
+  const displayOriginalName = assetDisplayName(asset, asset.originalName);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -72,35 +75,29 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
         className="asset-preview-panel"
         role="dialog"
         aria-modal="true"
-        aria-label={`${asset.name} preview`}
+        aria-label={`${displayName} 预览`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="section-heading">
           <div>
-            <span className="section-label">Asset preview</span>
-            <h2>{asset.name}</h2>
+            <span className="section-label">资产预览</span>
+            <h2>{displayName}</h2>
           </div>
-          <button type="button" className="quiet-button" onClick={onClose} aria-label="Close preview">
-            Close
+          <button type="button" className="quiet-button" onClick={onClose} aria-label="关闭预览">
+            关闭
           </button>
         </div>
         <div className="asset-preview-image">
           {isVideo && url ? (
-            <video src={url} poster={posterUrl} controls preload="metadata" playsInline aria-label={asset.name} />
+            <video src={url} poster={posterUrl} controls preload="metadata" playsInline aria-label={displayName} />
           ) : isAudio && url ? (
-            <audio src={url} controls preload="metadata" aria-label={asset.name} />
-          ) : url ? <img src={url} alt={asset.name} /> : <p>{error ?? "Loading preview..."}</p>}
+            <audio src={url} controls preload="metadata" aria-label={displayName} />
+          ) : url ? <img src={url} alt={displayName} /> : <p>{error ?? "正在加载预览..."}</p>}
         </div>
         <p className="asset-preview-meta">
-          {asset.originalName} · {isVideo || isAudio ? formatDuration(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {asset.mimeType}
+          {assetTypeLabel(asset)} · {displayOriginalName} · {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {asset.mimeType}
         </p>
       </section>
     </div>
   );
-}
-
-function formatDuration(value?: number | null): string {
-  if (!value || value < 0) return "Duration unavailable";
-  const totalSeconds = Math.round(value / 1000);
-  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
