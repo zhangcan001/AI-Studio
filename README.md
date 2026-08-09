@@ -143,6 +143,11 @@ execution. Evidence and operating limits are recorded in
 Kera2 image generation and MiniMax H3 reference-to-video are now the two
 live-validated production runtimes. No third model runtime pack is planned.
 
+**AI Studio 0.1.0 Final Release Gate = PASS.** NSIS is the primary Windows
+installer; the final release evidence, artifact hashes, clean install/data
+preservation gate, and user-facing notes are recorded in
+`docs/M1_FINAL_RELEASE_GATE.md` and `docs/RELEASE_NOTES_0.1.0.md`.
+
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
 installed as runtime packages, and no model files are bundled or modified.
