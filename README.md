@@ -22,6 +22,11 @@ validated. Evidence is recorded in `docs/M1_RELEASE_CANDIDATE_01.md`.
 错误原文仅在折叠的技术详情中显示。验收证据记录在
 `docs/M1_ZH_CN_UI_VALIDATION.md`。
 
+**M1 Product UX Polish = PASS.** Creation-first Studio, catalog-driven workflow cards,
+project-scoped graphical asset picker, compact task status, result-first preview,
+and Kera2/H3 live UX gates are validated. Evidence is recorded in
+`docs/M1_PRODUCT_UX_POLISH_VALIDATION.md`.
+
 - Desktop foundation and Rust application layering
 - SQLite migration and local application data directories
 - ComfyUI connection, `/system_stats`, and `/object_info` capability detection

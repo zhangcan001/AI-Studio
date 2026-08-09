@@ -1,8 +1,10 @@
 # M1 PRODUCT UX POLISH 验证记录
 
 日期：2026-08-09
-基线：0e8a9fc fix: close zh-cn ui final sweep
+前置基线：0e8a9fc fix: close zh-cn ui final sweep
+Final Validation Gate 基线：a4c3062 docs: record m1 ux polish validation
 验证实现提交：015f741 feat: polish m1 creation workspace ux
+本轮验收补测提交：ea08e48 test: cover asset picker cancel boundary
 
 ## 范围
 
@@ -112,6 +114,8 @@ Windows CUA 状态抓取对 Tauri WebView2 返回 context not found，因此 rel
 
 ## Release Validation
 
+本轮在 Windows 原生环境实际执行。Cargo 命令在 `src-tauri` 目录执行，前端与 Tauri 命令在仓库根目录执行。
+
 执行命令：
 
 - cargo fmt --all -- --check
@@ -122,4 +126,103 @@ Windows CUA 状态抓取对 Tauri WebView2 返回 context not found，因此 rel
 - git diff --check
 - pnpm tauri build
 
-实际测试数量和最终 PASS/FAIL 以最终报告为准。
+实际结果：
+
+- Rust：244 passed，0 failed。
+- Frontend：19 个测试文件通过，51 tests passed，0 failed。
+- `pnpm tauri build`：Release EXE、MSI、NSIS 均成功生成。
+
+## Source Sanity Gate
+
+- `WorkflowLauncher`、`StudioModeTabs`、`GenerationActionBar`、`AssetPickerDialog`、`CreationResultPanel`、`generationBlockedReason`：PASS。
+- Tab 切换只改变展示模式，不调用 `resetDraft`；Project 切换仍调用 `resetDraft`：PASS。
+- Asset Picker 的列表、导入和缩略图读取均使用当前 `projectId`；未把 `storage_path` 或绝对路径暴露给 React：PASS。
+- Production Admission 仍参与 `canGenerate` 和阻塞原因判断：PASS。
+- Asset Picker 回归覆盖图片/视频/音频筛选、单选、多选顺序、`maxItems` 以及取消不提交：PASS。
+- M1 ZH-CN UI：PASS；普通英文 UI：0。
+
+## Final Report
+
+最终结论：**M1 PRODUCT UX POLISH = PASS**
+
+### 创作首页
+
+工作流卡片：PASS
+
+单次创作：PASS
+
+批量生产：PASS
+
+生成按钮主操作：PASS
+
+批量工具干扰主流程：MUST BE NO
+
+### 素材选择器
+
+图片：PASS
+
+视频：PASS
+
+音频：PASS
+
+多素材顺序：PASS
+
+跨项目素材：MUST BE NO
+
+绝对路径进入 React：MUST BE NO
+
+### 任务与结果
+
+任务状态：PASS
+
+取消：PASS
+
+图片主预览：PASS
+
+视频主预览：PASS
+
+结果需要额外寻找：MUST BE NO
+
+### Runtime
+
+Kera2 Live：PASS
+
+MiniMax H3 Live：PASS
+
+H3 16GB 安全 Profile：PASS
+
+Production Admission regression：PASS
+
+### Desktop
+
+1180×760：PASS
+
+1366×768：PASS
+
+1920×1080：PASS
+
+Horizontal overflow：MUST BE NO
+
+### Tests
+
+Rust：244 passing
+
+Frontend test files：19
+
+Frontend tests：51 passing
+
+cargo fmt：PASS
+
+cargo check：PASS
+
+cargo test：PASS
+
+pnpm test：PASS
+
+pnpm build：PASS
+
+git diff --check：PASS
+
+pnpm tauri build：PASS
+
+本轮完成最终验收后停止，不进入 Daily Use、Settings、Logs、Crash reporting、Auto update、新模型、Cloud 或 Login 阶段。
