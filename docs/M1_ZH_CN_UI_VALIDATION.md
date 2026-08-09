@@ -24,7 +24,7 @@
 | 项目 | PASS | 项目列表、创建/编辑、当前项目、默认项目 |
 | 工作流 | PASS | 导入、筛选、版本、能力、诊断、映射向导、校验和发布 |
 | 生产队列 | PASS | 运行/暂停/完成、队列项、归档/恢复/删除、跳过/重新排队 |
-| ComfyUI 状态 | PASS | 已连接、离线、不兼容、Endpoint、版本、GPU、VRAM、节点数量 |
+| ComfyUI 状态 | PASS | 已连接、离线、不兼容、接口地址、版本、GPU、VRAM、节点数量 |
 | 错误提示 | PASS | 已知错误码中文化；未知原文只在“技术详情”折叠区显示 |
 | 空状态 | PASS | 无工作流、无任务、无资产、无输出等状态均为中文 |
 | ARIA / Tooltip | PASS | 导航、筛选、预览、媒体选择器、任务重试和工作流导入关键控件均有中文可访问名称 |
@@ -43,7 +43,7 @@
 
 允许保留的品牌、技术和数据 Token：
 
-`AI Studio`、`ComfyUI`、`Kera2`、`MiniMax H3`、`GPU`、`VRAM`、`FPS`、`API`、`JSON`、`YAML`、`SHA-256`、`ID`、`URL`、`Endpoint`、`T2I`、`I2I`、`H3`、`cuda:0`、`NVIDIA GeForce RTX 5060 Ti`、`PNG`、`JPEG`、`WebP`、`MP4`、`B`、`KB`、`MB`、`GB`、`snake_case`，以及任务/资产/工作流的技术 ID。
+`AI Studio`、`ComfyUI`、`Kera2`、`MiniMax H3`、`GPU`、`VRAM`、`FPS`、`API`、`JSON`、`YAML`、`SHA-256`、`ID`、`URL`、`T2I`、`I2I`、`H3`、`cuda:0`、`NVIDIA GeForce RTX 5060 Ti`、`PNG`、`JPEG`、`WebP`、`MP4`、`B`、`KB`、`MB`、`GB`、`snake_case`，以及任务/资产/工作流的技术 ID。`Endpoint` 不属于允许的普通界面标签，界面使用“接口地址”。
 
 以上 Token 属于品牌、格式、协议、设备、单位、模型名或技术标识，不作为普通英文界面文案统计。没有在本文件写入用户提示词、模型路径、工作流 JSON 或本机私有目录。
 
@@ -66,6 +66,35 @@
 
 ComfyUI 离线的后端状态处理沿用既有 offline adapter/mock gate，并由 `comfyStatusLabel` 映射为“离线”；本次桌面窗口保持真实 ComfyUI 运行，未为验收中断用户正在使用的本地服务。
 
+## ZH-CN FINAL SWEEP
+
+本轮只处理普通用户可见文案，不进入 Product UX Polish：
+
+- 修复 `src/features/workflows/WorkflowWorkspace.tsx` 的默认输出映射：技术 ID 保持 `output_1`，显示名称由 `Output` 改为“输出结果”。
+- 完整复核 `src/app/**/*.tsx`、`src/features/**/*.tsx`、`src/i18n/**/*.tsx` 中的 JSX 文本、按钮/标签/选项、placeholder、title、aria-label、summary、通知、错误提示、确认框和会进入界面的默认值。
+- 新增 `WorkflowWorkspace.test.ts`，锁定默认输出显示名称为“输出结果”，并验证技术 ID 未被中文化。
+- 新增 `uiCopyGuard.test.ts`，使用正式页面的固定用户可见文案 fixture 守卫已知普通英文文案；不扫描变量名、className、技术详情或测试 fixture。
+- `Endpoint` 已从普通 UI 允许列表移除；接口卡片使用“接口地址”。
+
+Final Sweep 结果：
+
+| 项目 | 结果 |
+| --- | --- |
+| 已确认 Output 漏项 | FIXED |
+| 普通英文按钮 | 0 |
+| 普通英文标题 | 0 |
+| 普通英文提示 | 0 |
+| 普通英文默认显示名称 | 0 |
+| 工作流输出映射默认显示名称 | “输出结果” |
+
+## Windows UI Smoke（Final Sweep）
+
+- Release executable 已启动，窗口标题为 `AI Studio - 本地 AI 创作工作台`，HTML `lang` 为 `zh-CN`。
+- 创作、资产库、任务、项目、工作流五个页面均已打开并显示中文主内容；各页无横向溢出。
+- 工作流页的“导入 API 工作流”入口已在真实窗口中确认并触发原生“打开”文件选择框；桌面控件服务无法读取/操作该 Tauri 模态框（返回 `node_repl exec context not found`），因此没有伪造文件选择结果或执行生成。
+- 输出映射默认显示名称由 `WorkflowWorkspace.test.ts` 在构建前回归中确认是“输出结果”，技术 ID 仍是 `output_1`。
+- 真实 ComfyUI 窗口检查值保持有效：接口地址 `http://127.0.0.1:8188`、版本 `0.30.2`、GPU `NVIDIA GeForce RTX 5060 Ti`、VRAM `1.7 GB 空闲 / 15.9 GB 总量`、节点数量 `4485`。
+
 ## 修改文件列表
 
 - `index.html`、`README.md`
@@ -80,7 +109,8 @@ ComfyUI 离线的后端状态处理沿用既有 offline adapter/mock gate，并�
 - `src/features/studio/GenerationStudio.tsx`、`DynamicFormRenderer.tsx`、`DynamicFormRenderer.test.ts`、`TaskProgressCard.tsx`、`ImageOutput.tsx`、`VideoOutput.tsx`、`ProductionQueuePanel.tsx`
 - `src/features/studio/fields/` 下的文本、整数、Seed、图片、多图片、媒体、多媒体字段组件
 - `src/features/tasks/TaskHistory.tsx`、`TaskHistoryDetail.tsx`、`TaskHistoryList.tsx`、`retryPolicy.ts`、`retryPolicy.test.ts`
-- `src/features/workflows/WorkflowWorkspace.tsx`
+- `src/features/workflows/WorkflowWorkspace.tsx`、`WorkflowWorkspace.test.ts`
+- `src/i18n/uiCopyGuard.test.ts`
 - `docs/M1_ZH_CN_UI_VALIDATION.md`
 
 `src-tauri/` 只执行回归检查，本阶段没有修改 Rust 业务代码、AppState、Commands、错误协议或数据库 migration。
@@ -116,11 +146,12 @@ Rust DTO / protocol enum
 | `cargo fmt --all -- --check` | PASS |
 | `cargo check` | PASS |
 | `cargo test -- --test-threads=1` | PASS，244 passed，0 failed |
-| `pnpm test` | PASS，14 test files，40 passed，0 failed |
+| `pnpm test` | PASS，16 test files，42 passed，0 failed |
 | `pnpm build` | PASS |
+| `git diff --check` | PASS |
 | `pnpm tauri build` | PASS，Windows x64 release executable、MSI、NSIS bundle 均生成 |
 
-新增前端测试覆盖：状态映射、生产状态、资产分类、工作流别名、默认项目别名、日期安全格式化、已知错误码和未知错误原文隔离。
+新增前端测试覆盖：状态映射、生产状态、资产分类、工作流别名、默认项目别名、日期安全格式化、已知错误码和未知错误原文隔离、工作流输出默认显示名称、正式页面普通英文文案守卫。
 
 ## 技术债
 

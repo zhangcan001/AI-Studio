@@ -81,6 +81,16 @@ interface OutputDraft {
   required: boolean;
 }
 
+export function createDefaultOutputDraft(): OutputDraft {
+  return {
+    outputId: "output_1",
+    label: "输出结果",
+    type: "image",
+    nodeId: "",
+    required: true,
+  };
+}
+
 interface MetadataDraft {
   workflowId: string;
   name: string;
@@ -100,13 +110,7 @@ export function WorkflowWorkspace({ onCatalogChanged, onOpenStudio }: Props) {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string>();
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, MappingDraft>>({});
-  const [outputDraft, setOutputDraft] = useState<OutputDraft>({
-    outputId: "output_1",
-    label: "Output",
-    type: "image",
-    nodeId: "",
-    required: true,
-  });
+  const [outputDraft, setOutputDraft] = useState<OutputDraft>(createDefaultOutputDraft);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
   const draft = useWorkflowOnboardingStore((state) => state.draft);
