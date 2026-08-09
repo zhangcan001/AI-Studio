@@ -37,3 +37,11 @@ export function toggleAssetSelection(
   if (selectedIds.length >= maxItems) return selectedIds;
   return [...selectedIds, assetId];
 }
+
+export function applyAssetPickerAction(
+  committedIds: string[],
+  draftIds: string[],
+  action: "cancel" | "confirm",
+): string[] {
+  return action === "confirm" ? [...draftIds] : [...committedIds];
+}

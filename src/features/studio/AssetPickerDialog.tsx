@@ -11,6 +11,7 @@ import { toUserMessage } from "../../i18n/errorMessages";
 import { assetDisplayName, assetTypeLabel, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 import {
   filterPickerAssets,
+  applyAssetPickerAction,
   type AssetPickerFilter,
   type AssetPickerKind,
   toggleAssetSelection,
@@ -155,7 +156,7 @@ export function AssetPickerDialog({
           </button>
           <div>
             <span className="asset-picker-selection">已选择 {selection.length}{multiple ? ` / ${maxItems}` : ""}</span>
-            <button type="button" onClick={() => onConfirm(selection)} disabled={!selection.length || importing}>确定</button>
+            <button type="button" onClick={() => onConfirm(applyAssetPickerAction(selectedIds, selection, "confirm"))} disabled={!selection.length || importing}>确定</button>
           </div>
         </div>
       </section>

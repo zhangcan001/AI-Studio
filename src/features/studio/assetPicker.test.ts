@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssetView } from "../../types/asset";
-import { filterPickerAssets, toggleAssetSelection } from "./assetPicker";
+import { applyAssetPickerAction, filterPickerAssets, toggleAssetSelection } from "./assetPicker";
 
 const assets = [
   { id: "img-source", assetType: "image", category: "source_image", name: "source", fileSize: 1 },
@@ -23,5 +23,13 @@ describe("素材选择器", () => {
     expect(toggleAssetSelection(["a"], "b", true, 2)).toEqual(["a", "b"]);
     expect(toggleAssetSelection(["a", "b"], "c", true, 2)).toEqual(["a", "b"]);
     expect(toggleAssetSelection(["a", "b"], "a", true, 2)).toEqual(["b"]);
+  });
+
+  it("取消不改变已提交选择，确定才提交选择器草稿", () => {
+    const committed = ["existing"];
+    const draft = ["existing", "new"];
+
+    expect(applyAssetPickerAction(committed, draft, "cancel")).toEqual(["existing"]);
+    expect(applyAssetPickerAction(committed, draft, "confirm")).toEqual(draft);
   });
 });
