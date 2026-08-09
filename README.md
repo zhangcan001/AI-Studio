@@ -10,6 +10,12 @@ M1 progress:
 
 Production scope is intentionally limited to Kera2 for image generation and MiniMax H3 for video generation. The shared runtime remains generic, but no third model runtime pack is part of the product plan.
 
+**M1 Release Candidate 01 = PASS.** Global single-GPU production admission,
+cross-project and interactive submission safety, deterministic restart
+recovery, a real ordered Kera2/MiniMax H3/Kera2 persistent queue, project-scoped
+assets and playback, and Windows Release fresh/existing database gates are all
+validated. Evidence is recorded in `docs/M1_RELEASE_CANDIDATE_01.md`.
+
 - Desktop foundation and Rust application layering
 - SQLite migration and local application data directories
 - ComfyUI connection, `/system_stats`, and `/object_info` capability detection
@@ -76,6 +82,8 @@ Production scope is intentionally limited to Kera2 for image generation and Mini
   restart recovery, uncertain-dispatch duplicate protection, and fatal execution-error stop
 - Production queue control/observability with archive/restore/safe delete, explicit skip/requeue,
   event-driven status refresh, project production summary, and direct Task-detail navigation
+- Global production admission allowing one persistent production batch across all projects,
+  with active-item protection, interactive submission blocking, and deterministic legacy recovery
 
 Batch Foundations 01–04 and `PRODUCTION VALIDATION 01` are PASS. Native Windows Cargo/pnpm regression is green, and a real four-item Kera2 persistent queue passed strict ordering, pause/resume, desktop restart recovery, Asset Library output, Archive/Restore/Delete, and transient-failure Skip/Requeue gates. Evidence is recorded in `docs/M1_PRODUCTION_VALIDATION_01.md`.
 
