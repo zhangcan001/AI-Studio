@@ -254,8 +254,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 &loaded_settings.settings.comfy.endpoint,
             ) {
                 Ok(config) => config,
-                Err(error) => {
-                    tracing::warn!(error = %error, "invalid persisted ComfyUI endpoint; using default");
+                Err(_error) => {
+                    tracing::warn!(
+                        error_type = "invalid_persisted_endpoint",
+                        "invalid persisted ComfyUI endpoint; using default"
+                    );
                     loaded_settings.settings = application::ports::AppSettings::default();
                     loaded_settings.warning = Some(
                         "设置文件无法读取，当前已使用默认配置。".to_owned(),
@@ -387,6 +390,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 comfy_runtime,
                 comfy_service.clone(),
                 diagnostics_service.clone(),
+                production_queue_service.clone(),
                 adapter_factory,
             ));
             let project_service = Arc::new(ProjectService::new(
@@ -396,7 +400,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             ));
             let project_backup_service = Arc::new(ProjectBackupService::new(
                 database_pool.clone(),
-                project_repository.clone(),
                 data_dirs.projects.clone(),
                 data_dirs.cache.clone(),
             ));

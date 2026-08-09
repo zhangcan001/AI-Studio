@@ -1,16 +1,16 @@
-use crate::application::ports::{ProjectRecord, ProjectRepository};
+use crate::application::ports::ProjectRecord;
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{FromRow, SqlitePool, Transaction};
+use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{Read, Write},
+    io::{self, BufWriter, Read, Write},
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::Duration,
 };
 use uuid::Uuid;
@@ -82,22 +82,15 @@ struct Inspection {
 
 pub struct ProjectBackupService {
     pool: SqlitePool,
-    project_repository: Arc<dyn ProjectRepository>,
     projects_dir: PathBuf,
     inspection_dir: PathBuf,
     inspections: Mutex<HashMap<String, Inspection>>,
 }
 
 impl ProjectBackupService {
-    pub fn new(
-        pool: SqlitePool,
-        project_repository: Arc<dyn ProjectRepository>,
-        projects_dir: PathBuf,
-        cache_dir: PathBuf,
-    ) -> Self {
+    pub fn new(pool: SqlitePool, projects_dir: PathBuf, cache_dir: PathBuf) -> Self {
         Self {
             pool,
-            project_repository,
             projects_dir,
             inspection_dir: cache_dir.join("backup-inspections"),
             inspections: Mutex::new(HashMap::new()),
@@ -110,15 +103,50 @@ impl ProjectBackupService {
         destination: PathBuf,
     ) -> Result<ProjectBackupExportView, AppError> {
         let built = self.build_backup(project_id).await?;
-        let bytes = build_zip(&built.document, &built.files)?;
-        fs::write(&destination, &bytes).map_err(|error| AppError::filesystem(error.to_string()))?;
+        let parent = destination
+            .parent()
+            .ok_or_else(|| AppError::filesystem("备份保存目录不可用"))?;
+        fs::create_dir_all(parent).map_err(|error| AppError::filesystem(error.to_string()))?;
+        let temporary = parent.join(format!(
+            ".{}.backup-{}.tmp",
+            destination
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("project"),
+            Uuid::new_v4()
+        ));
+        let document = built.document.clone();
+        let files = built.files.clone();
+        let temporary_for_writer = temporary.clone();
+        let write_result = match tokio::task::spawn_blocking(move || {
+            write_zip_to_path(&document, &files, &temporary_for_writer)
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                return Err(AppError::internal(format!("备份写入任务失败：{error}")));
+            }
+        };
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        if let Err(error) = publish_backup_file(&temporary, &destination) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        let bytes = fs::metadata(&destination)
+            .map_err(|error| AppError::filesystem(error.to_string()))?
+            .len();
         Ok(ProjectBackupExportView {
             file_name: destination
                 .file_name()
                 .and_then(|value| value.to_str())
                 .unwrap_or("AI-Studio-Project-Backup.zip")
                 .to_owned(),
-            bytes: bytes.len() as u64,
+            bytes,
             entries: 5 + built.files.len(),
             active_tasks_excluded: built.document.active_tasks_excluded,
         })
@@ -312,11 +340,15 @@ impl ProjectBackupService {
     }
 
     async fn build_backup(&self, project_id: &str) -> Result<BuiltBackup, AppError> {
-        let project = self
-            .project_repository
-            .find_by_id(project_id)
+        // Keep the metadata snapshot short: no filesystem reads or ZIP writes
+        // happen while this SQLite read transaction is open.
+        let mut transaction = self
+            .pool
+            .begin()
             .await
-            .map_err(|error| AppError::database(error.to_string()))?
+            .map_err(|error| AppError::database(error.to_string()))?;
+        let project = query_project(&mut transaction, project_id)
+            .await?
             .ok_or_else(|| AppError::project_not_found(project_id.to_owned()))?;
         let db_tasks = sqlx::query_as::<_, DbTask>(
             "SELECT id, project_id, workflow_id, workflow_version_id, recipe_id, status,
@@ -325,7 +357,7 @@ impl ProjectBackupService {
              queued_at, started_at, finished_at FROM tasks WHERE project_id = ? ORDER BY created_at, id",
         )
         .bind(project_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         let db_assets = sqlx::query_as::<_, DbAsset>(
@@ -334,7 +366,7 @@ impl ProjectBackupService {
              source_task_id, metadata_json, created_at, updated_at FROM assets WHERE project_id = ? ORDER BY created_at, id",
         )
         .bind(project_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         let active_ids = db_tasks
@@ -342,22 +374,31 @@ impl ProjectBackupService {
             .filter(|task| !is_terminal_task(&task.status))
             .map(|task| task.id.clone())
             .collect::<HashSet<_>>();
-        let mut excluded_tasks = active_ids.clone();
-        let mut incomplete_tasks = HashSet::new();
-        for task in db_tasks
+        let excluded_tasks = active_ids.clone();
+        let included_task_ids = db_tasks
             .iter()
-            .filter(|task| is_terminal_task(&task.status))
-        {
-            let has_incomplete_asset = db_assets.iter().any(|asset| {
-                asset.source_task_id.as_deref() == Some(task.id.as_str())
-                    && !asset_file_is_valid(asset).unwrap_or(false)
-            });
-            if has_incomplete_asset {
-                incomplete_tasks.insert(task.id.clone());
-                excluded_tasks.insert(task.id.clone());
-            }
-        }
+            .filter(|task| !excluded_tasks.contains(&task.id))
+            .map(|task| task.id.clone())
+            .collect::<HashSet<_>>();
+        let tasks = db_tasks
+            .into_iter()
+            .filter(|task| included_task_ids.contains(&task.id))
+            .map(BackupTask::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let task_events = query_task_events(&mut transaction, &included_task_ids).await?;
+        let snapshots = query_snapshots(&mut transaction, &included_task_ids).await?;
+        let mappings = query_mappings(&mut transaction, &included_task_ids).await?;
+        let presets = query_presets(&mut transaction, project_id).await?;
+        let batches = query_batches(&mut transaction, project_id).await?;
+        let items = query_batch_items(&mut transaction, &batches).await?;
+        let workflow_refs = collect_workflow_refs(&tasks);
+        transaction
+            .commit()
+            .await
+            .map_err(|error| AppError::database(error.to_string()))?;
 
+        // Only after the short metadata transaction commits do we inspect and
+        // stream potentially large asset files.
         let mut files = Vec::new();
         let mut assets = Vec::new();
         for asset in db_assets {
@@ -368,33 +409,55 @@ impl ProjectBackupService {
             {
                 continue;
             }
-            if !asset_file_is_valid(&asset)? {
-                return Err(AppError::backup_asset_hash_mismatch(format!(
-                    "资产 {} 文件不存在或校验值不匹配",
-                    asset.id
-                )));
+            if !safe_component(&asset.id) {
+                return Err(AppError::backup_invalid("资产 ID 不能用于备份路径"));
             }
             let extension = extension_for_path(&asset.storage_path);
             let content_path = format!("assets/{}/content.{}", asset.id, extension);
-            files.push(BackupFile {
-                path: content_path.clone(),
-                bytes: fs::read(&asset.storage_path)
-                    .map_err(|error| AppError::filesystem(error.to_string()))?,
+            let content_metadata = fs::metadata(&asset.storage_path).map_err(|error| {
+                AppError::backup_asset_hash_mismatch(format!(
+                    "备份资产不存在或不可读取：{}：{error}",
+                    asset.id
+                ))
+            })?;
+            if !content_metadata.is_file() {
+                return Err(AppError::backup_asset_hash_mismatch(format!(
+                    "备份资产不是普通文件：{}",
+                    asset.id
+                )));
+            }
+            let expected_size = asset
+                .file_size
+                .map(|size| {
+                    u64::try_from(size).map_err(|_| {
+                        AppError::backup_asset_hash_mismatch(format!(
+                            "资产 {} 文件大小无效",
+                            asset.id
+                        ))
+                    })
+                })
+                .transpose()?
+                .unwrap_or(content_metadata.len());
+            files.push(BackupFileSource {
+                zip_path: content_path.clone(),
+                source_path: PathBuf::from(&asset.storage_path),
+                expected_size,
+                expected_sha256: Some(asset.sha256.clone()),
             });
             let thumbnail_path = asset.thumbnail_path.as_ref().and_then(|path| {
-                if Path::new(path).is_file() {
-                    let extension = extension_for_path(path);
-                    let zip_path = format!("assets/{}/thumbnail.{}", asset.id, extension);
-                    fs::read(path).ok().map(|bytes| {
-                        files.push(BackupFile {
-                            path: zip_path.clone(),
-                            bytes,
-                        });
-                        zip_path
-                    })
-                } else {
-                    None
+                let metadata = fs::metadata(path).ok()?;
+                if !metadata.is_file() {
+                    return None;
                 }
+                let extension = extension_for_path(path);
+                let zip_path = format!("assets/{}/thumbnail.{}", asset.id, extension);
+                files.push(BackupFileSource {
+                    zip_path: zip_path.clone(),
+                    source_path: PathBuf::from(path),
+                    expected_size: metadata.len(),
+                    expected_sha256: None,
+                });
+                Some(zip_path)
             });
             assets.push(BackupAsset {
                 id: asset.id,
@@ -407,7 +470,11 @@ impl ProjectBackupService {
                 width: asset.width.unwrap_or_default(),
                 height: asset.height.unwrap_or_default(),
                 duration_ms: asset.duration_ms,
-                file_size: asset.file_size.unwrap_or_default(),
+                file_size: asset.file_size.map(Ok).unwrap_or_else(|| {
+                    i64::try_from(expected_size).map_err(|_| {
+                        AppError::backup_asset_hash_mismatch("资产文件大小超出支持范围")
+                    })
+                })?,
                 source_task_id: asset.source_task_id,
                 metadata: parse_value(asset.metadata_json.as_deref(), "asset metadata")?,
                 created_at: asset.created_at,
@@ -416,23 +483,6 @@ impl ProjectBackupService {
                 thumbnail_path,
             });
         }
-        let included_task_ids = db_tasks
-            .iter()
-            .filter(|task| !excluded_tasks.contains(&task.id))
-            .map(|task| task.id.clone())
-            .collect::<HashSet<_>>();
-        let tasks = db_tasks
-            .into_iter()
-            .filter(|task| included_task_ids.contains(&task.id))
-            .map(BackupTask::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        let task_events = query_task_events(&self.pool, &included_task_ids).await?;
-        let snapshots = query_snapshots(&self.pool, &included_task_ids).await?;
-        let mappings = query_mappings(&self.pool, &included_task_ids).await?;
-        let presets = query_presets(&self.pool, project_id).await?;
-        let batches = query_batches(&self.pool, project_id).await?;
-        let items = query_batch_items(&self.pool, &batches).await?;
-        let workflow_refs = collect_workflow_refs(&tasks);
         let document = BackupDocument {
             project: BackupProject {
                 id: project.id,
@@ -442,7 +492,7 @@ impl ProjectBackupService {
             created_at: project.created_at.to_rfc3339(),
             updated_at: project.updated_at.to_rfc3339(),
             active_tasks_excluded: active_ids.len(),
-            incomplete_tasks_excluded: incomplete_tasks.len(),
+            incomplete_tasks_excluded: 0,
             tasks,
             task_events,
             assets,
@@ -502,13 +552,15 @@ impl ProjectBackupService {
 #[derive(Clone)]
 struct BuiltBackup {
     document: BackupDocument,
-    files: Vec<BackupFile>,
+    files: Vec<BackupFileSource>,
 }
 
 #[derive(Clone)]
-struct BackupFile {
-    path: String,
-    bytes: Vec<u8>,
+struct BackupFileSource {
+    zip_path: String,
+    source_path: PathBuf,
+    expected_size: u64,
+    expected_sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -657,6 +709,16 @@ struct WorkflowReference {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+}
+
+#[derive(FromRow)]
+struct DbProject {
+    id: String,
+    name: String,
+    description: Option<String>,
+    root_path: String,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(FromRow)]
@@ -845,16 +907,37 @@ fn hash_bytes(bytes: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn asset_file_is_valid(asset: &DbAsset) -> Result<bool, AppError> {
-    let path = Path::new(&asset.storage_path);
-    if !path.is_file() {
-        return Ok(false);
-    }
-    let bytes = fs::read(path).map_err(|error| AppError::filesystem(error.to_string()))?;
-    Ok(asset
-        .file_size
-        .is_none_or(|size| size == bytes.len() as i64)
-        && hash_bytes(&bytes).eq_ignore_ascii_case(&asset.sha256))
+async fn query_project(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Option<ProjectRecord>, AppError> {
+    let row = sqlx::query_as::<_, DbProject>(
+        "SELECT id, name, description, root_path, created_at, updated_at FROM projects WHERE id = ?",
+    )
+    .bind(project_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    row.map(|row| {
+        if row.root_path.trim().is_empty() {
+            return Err(AppError::database("项目 root_path 不能为空"));
+        }
+        let created_at = DateTime::parse_from_rfc3339(&row.created_at)
+            .map(|value| value.with_timezone(&Utc))
+            .map_err(|error| AppError::database(format!("项目 created_at 无效：{error}")))?;
+        let updated_at = DateTime::parse_from_rfc3339(&row.updated_at)
+            .map(|value| value.with_timezone(&Utc))
+            .map_err(|error| AppError::database(format!("项目 updated_at 无效：{error}")))?;
+        Ok(ProjectRecord {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            root_path: PathBuf::from(row.root_path),
+            created_at,
+            updated_at,
+        })
+    })
+    .transpose()
 }
 
 fn collect_workflow_refs(tasks: &[BackupTask]) -> Vec<WorkflowReference> {
@@ -872,7 +955,7 @@ fn collect_workflow_refs(tasks: &[BackupTask]) -> Vec<WorkflowReference> {
 }
 
 async fn query_task_events(
-    pool: &SqlitePool,
+    transaction: &mut Transaction<'_, Sqlite>,
     task_ids: &HashSet<String>,
 ) -> Result<Vec<BackupTaskEvent>, AppError> {
     let mut result = Vec::new();
@@ -881,7 +964,7 @@ async fn query_task_events(
             "SELECT id, task_id, sequence, event_type, payload_json, created_at FROM task_events WHERE task_id = ? ORDER BY sequence",
         )
         .bind(task_id)
-        .fetch_all(pool)
+        .fetch_all(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         for row in rows {
@@ -899,7 +982,7 @@ async fn query_task_events(
 }
 
 async fn query_snapshots(
-    pool: &SqlitePool,
+    transaction: &mut Transaction<'_, Sqlite>,
     task_ids: &HashSet<String>,
 ) -> Result<Vec<BackupSnapshot>, AppError> {
     let mut result = Vec::new();
@@ -908,7 +991,7 @@ async fn query_snapshots(
             "SELECT id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, created_at FROM generation_snapshots WHERE task_id = ?",
         )
         .bind(task_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         if let Some(row) = row {
@@ -927,7 +1010,7 @@ async fn query_snapshots(
 }
 
 async fn query_mappings(
-    pool: &SqlitePool,
+    transaction: &mut Transaction<'_, Sqlite>,
     task_ids: &HashSet<String>,
 ) -> Result<Vec<BackupMapping>, AppError> {
     let mut result = Vec::new();
@@ -936,7 +1019,7 @@ async fn query_mappings(
             "SELECT task_id, output_id, ordinal, asset_id, created_at FROM task_output_assets WHERE task_id = ? ORDER BY output_id, ordinal",
         )
         .bind(task_id)
-        .fetch_all(pool)
+        .fetch_all(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         result.extend(rows.into_iter().map(|row| BackupMapping {
@@ -950,12 +1033,15 @@ async fn query_mappings(
     Ok(result)
 }
 
-async fn query_presets(pool: &SqlitePool, project_id: &str) -> Result<Vec<BackupPreset>, AppError> {
+async fn query_presets(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupPreset>, AppError> {
     let rows = sqlx::query_as::<_, DbPreset>(
         "SELECT id, project_id, workflow_version_id, recipe_id, name, values_json, created_at, updated_at FROM presets WHERE project_id = ? ORDER BY updated_at, id",
     )
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **transaction)
     .await
     .map_err(|error| AppError::database(error.to_string()))?;
     rows.into_iter()
@@ -973,12 +1059,15 @@ async fn query_presets(pool: &SqlitePool, project_id: &str) -> Result<Vec<Backup
         .collect()
 }
 
-async fn query_batches(pool: &SqlitePool, project_id: &str) -> Result<Vec<BackupBatch>, AppError> {
+async fn query_batches(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupBatch>, AppError> {
     let rows = sqlx::query_as::<_, DbBatch>(
         "SELECT id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at FROM production_batches WHERE project_id = ? ORDER BY created_at, id",
     )
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **transaction)
     .await
     .map_err(|error| AppError::database(error.to_string()))?;
     Ok(rows
@@ -996,7 +1085,7 @@ async fn query_batches(pool: &SqlitePool, project_id: &str) -> Result<Vec<Backup
 }
 
 async fn query_batch_items(
-    pool: &SqlitePool,
+    transaction: &mut Transaction<'_, Sqlite>,
     batches: &[BackupBatch],
 ) -> Result<Vec<BackupBatchItem>, AppError> {
     let mut result = Vec::new();
@@ -1005,7 +1094,7 @@ async fn query_batch_items(
             "SELECT id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at FROM production_batch_items WHERE batch_id = ? ORDER BY ordinal",
         )
         .bind(&batch.id)
-        .fetch_all(pool)
+        .fetch_all(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         for row in rows {
@@ -1029,7 +1118,13 @@ async fn query_batch_items(
     Ok(result)
 }
 
-fn build_zip(document: &BackupDocument, files: &[BackupFile]) -> Result<Vec<u8>, AppError> {
+const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
+
+fn write_zip_to_path(
+    document: &BackupDocument,
+    files: &[BackupFileSource],
+    destination: &Path,
+) -> Result<(), AppError> {
     if files.len().saturating_add(5) > MAX_ENTRIES {
         return Err(AppError::backup_invalid("备份文件数量超过限制"));
     }
@@ -1039,7 +1134,9 @@ fn build_zip(document: &BackupDocument, files: &[BackupFile]) -> Result<Vec<u8>,
         created_by: env!("CARGO_PKG_VERSION").to_owned(),
         project: document.project.clone(),
     };
-    let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let file = File::create(destination)
+        .map_err(|error| AppError::filesystem(format!("备份临时文件创建失败：{error}")))?;
+    let mut writer = ZipWriter::new(BufWriter::with_capacity(STREAM_CHUNK_BYTES, file));
     let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
     write_zip_json(&mut writer, "manifest.json", &manifest, options)?;
     write_zip_json(&mut writer, "project.json", document, options)?;
@@ -1057,28 +1154,94 @@ fn build_zip(document: &BackupDocument, files: &[BackupFile]) -> Result<Vec<u8>,
         options,
     )?;
     for file in files {
-        if file.bytes.len() as u64 > MAX_ENTRY_BYTES {
+        if file.expected_size > MAX_ENTRY_BYTES {
             return Err(AppError::backup_invalid("备份资产超过单文件大小限制"));
         }
         writer
-            .start_file(&file.path, options)
+            .start_file(&file.zip_path, options)
             .map_err(|error| AppError::backup_invalid(format!("备份文件写入失败：{error}")))?;
-        writer
-            .write_all(&file.bytes)
-            .map_err(|error| AppError::filesystem(error.to_string()))?;
+        write_source_to_zip(&mut writer, file)?;
     }
-    let bytes = writer
+    let buffered = writer
         .finish()
-        .map(|cursor| cursor.into_inner())
         .map_err(|error| AppError::backup_invalid(format!("备份压缩包生成失败：{error}")))?;
-    if bytes.len() as u64 > MAX_ZIP_BYTES {
+    let file = buffered
+        .into_inner()
+        .map_err(|error| AppError::filesystem(error.into_error().to_string()))?;
+    file.sync_all()
+        .map_err(|error| AppError::filesystem(format!("备份临时文件同步失败：{error}")))?;
+    let bytes = fs::metadata(destination)
+        .map_err(|error| AppError::filesystem(error.to_string()))?
+        .len();
+    if bytes > MAX_ZIP_BYTES {
         return Err(AppError::backup_invalid("备份压缩包超过 20 GiB 限制"));
     }
-    Ok(bytes)
+    Ok(())
 }
 
-fn write_zip_json<T: Serialize>(
-    writer: &mut ZipWriter<std::io::Cursor<Vec<u8>>>,
+fn write_source_to_zip<W: Write + io::Seek>(
+    writer: &mut ZipWriter<W>,
+    source: &BackupFileSource,
+) -> Result<(), AppError> {
+    let mut input = File::open(&source.source_path).map_err(|error| {
+        if source.expected_sha256.is_some() {
+            AppError::backup_asset_hash_mismatch(format!("备份资产读取失败：{}", source.zip_path))
+        } else {
+            AppError::filesystem(error.to_string())
+        }
+    })?;
+    let mut buffer = vec![0_u8; STREAM_CHUNK_BYTES];
+    let mut hasher = Sha256::new();
+    let mut total = 0_u64;
+    loop {
+        let read = input.read(&mut buffer).map_err(|error| {
+            if source.expected_sha256.is_some() {
+                AppError::backup_asset_hash_mismatch(format!(
+                    "备份资产读取失败：{}",
+                    source.zip_path
+                ))
+            } else {
+                AppError::filesystem(error.to_string())
+            }
+        })?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| AppError::backup_invalid("备份资产大小溢出"))?;
+        if total > MAX_ENTRY_BYTES {
+            return Err(AppError::backup_invalid("备份资产超过单文件大小限制"));
+        }
+        hasher.update(&buffer[..read]);
+        writer
+            .write_all(&buffer[..read])
+            .map_err(|error| AppError::filesystem(error.to_string()))?;
+    }
+    if total != source.expected_size {
+        return Err(AppError::backup_asset_hash_mismatch(format!(
+            "备份资产大小不匹配：{}",
+            source.zip_path
+        )));
+    }
+    if let Some(expected_sha256) = &source.expected_sha256 {
+        let actual_sha256 = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        if !actual_sha256.eq_ignore_ascii_case(expected_sha256) {
+            return Err(AppError::backup_asset_hash_mismatch(format!(
+                "备份资产校验值不匹配：{}",
+                source.zip_path
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn write_zip_json<W: Write + io::Seek, T: Serialize>(
+    writer: &mut ZipWriter<W>,
     path: &str,
     value: &T,
     options: FileOptions,
@@ -1092,6 +1255,45 @@ fn write_zip_json<T: Serialize>(
         .write_all(&bytes)
         .map_err(|error| AppError::filesystem(error.to_string()))?;
     Ok(())
+}
+
+fn publish_backup_file(source: &Path, destination: &Path) -> Result<(), AppError> {
+    replace_backup_file(source, destination)
+        .map_err(|error| AppError::filesystem(format!("备份文件发布失败：{error}")))
+}
+
+#[cfg(windows)]
+fn replace_backup_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::{ffi::OsStr, iter::once, os::windows::ffi::OsStrExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = OsStr::new(source)
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let destination = OsStr::new(destination)
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_backup_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
 }
 
 fn inspect_archive(
@@ -1594,13 +1796,8 @@ async fn ensure_version_recipe_dependency(
 #[cfg(test)]
 mod tests {
     use super::{inspect_archive, restored_name, safe_zip_path, ProjectBackupService};
-    use crate::application::ports::ProjectRepository;
-    use crate::infrastructure::{
-        database::{initialize, SqliteProjectRepository},
-        filesystem::AppDataDirs,
-    };
+    use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
     use sha2::{Digest, Sha256};
-    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[test]
@@ -1673,7 +1870,6 @@ mod tests {
 
         let service = ProjectBackupService::new(
             pool.clone(),
-            Arc::new(SqliteProjectRepository::new(pool.clone())) as Arc<dyn ProjectRepository>,
             data_dirs.projects.clone(),
             data_dirs.cache.clone(),
         );
@@ -1707,6 +1903,64 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(std::fs::read(restored_path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn streaming_backup_writes_large_asset_without_building_an_in_memory_zip() {
+        use std::fs::File;
+        use zip::ZipArchive;
+
+        const LARGE_ASSET_BYTES: u64 = 256 * 1024 * 1024;
+        let directory = tempdir().unwrap();
+        let source_path = directory.path().join("large.bin");
+        let source = File::create(&source_path).unwrap();
+        source.set_len(LARGE_ASSET_BYTES).unwrap();
+        source.sync_all().unwrap();
+
+        let mut hasher = Sha256::new();
+        let zero_chunk = vec![0_u8; super::STREAM_CHUNK_BYTES];
+        for _ in 0..(LARGE_ASSET_BYTES / super::STREAM_CHUNK_BYTES as u64) {
+            hasher.update(&zero_chunk);
+        }
+        let expected_sha256 = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let document = super::BackupDocument {
+            project: super::BackupProject {
+                id: "project-large".to_owned(),
+                name: "大文件项目".to_owned(),
+            },
+            description: None,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            active_tasks_excluded: 0,
+            incomplete_tasks_excluded: 0,
+            tasks: Vec::new(),
+            task_events: Vec::new(),
+            assets: Vec::new(),
+            mappings: Vec::new(),
+            snapshots: Vec::new(),
+            presets: Vec::new(),
+            batches: Vec::new(),
+            items: Vec::new(),
+            workflow_refs: Vec::new(),
+        };
+        let files = [super::BackupFileSource {
+            zip_path: "assets/ast_large/content.bin".to_owned(),
+            source_path,
+            expected_size: LARGE_ASSET_BYTES,
+            expected_sha256: Some(expected_sha256),
+        }];
+        let archive_path = directory.path().join("large-backup.zip");
+        super::write_zip_to_path(&document, &files, &archive_path).unwrap();
+
+        let archive_size = std::fs::metadata(&archive_path).unwrap().len();
+        assert!(archive_size < LARGE_ASSET_BYTES);
+        let mut archive = ZipArchive::new(File::open(&archive_path).unwrap()).unwrap();
+        let entry = archive.by_name("assets/ast_large/content.bin").unwrap();
+        assert_eq!(entry.size(), LARGE_ASSET_BYTES);
     }
 
     #[test]

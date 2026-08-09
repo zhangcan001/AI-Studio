@@ -1,18 +1,45 @@
 use crate::application::{
     comfy_service::{ComfyRuntime, ComfyService},
-    diagnostics_service::DiagnosticsService,
+    diagnostics_service::{DiagnosticsService, RuntimeActivityStatusView},
     ports::{
         AppSettings, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory, ComfyConnectionConfig,
         SettingsStore,
     },
+    production_queue_service::ProductionQueueService,
 };
 use crate::error::AppError;
+use async_trait::async_trait;
 use serde::Serialize;
 use std::sync::{Arc, RwLock};
+use tokio::sync::OwnedMutexGuard;
 
 const ENDPOINT_CHANGE_BUSY_MESSAGE: &str =
     "当前仍有生成任务或生产队列正在运行，完成后才能切换 ComfyUI。";
 const ENDPOINT_TEST_FAILED_MESSAGE: &str = "无法连接到该 ComfyUI 地址。";
+
+#[async_trait]
+pub trait RuntimeActivityProvider: Send + Sync {
+    async fn runtime_activity_status(&self) -> Result<RuntimeActivityStatusView, AppError>;
+}
+
+#[async_trait]
+impl RuntimeActivityProvider for DiagnosticsService {
+    async fn runtime_activity_status(&self) -> Result<RuntimeActivityStatusView, AppError> {
+        DiagnosticsService::runtime_activity_status(self).await
+    }
+}
+
+#[async_trait]
+pub trait RuntimeConfigurationAdmission: Send + Sync {
+    async fn acquire(&self) -> OwnedMutexGuard<()>;
+}
+
+#[async_trait]
+impl RuntimeConfigurationAdmission for ProductionQueueService {
+    async fn acquire(&self) -> OwnedMutexGuard<()> {
+        self.acquire_runtime_configuration_admission().await
+    }
+}
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -38,7 +65,8 @@ pub struct SettingsService {
     store: Arc<dyn SettingsStore>,
     runtime: Arc<ComfyRuntime>,
     comfy_service: Arc<ComfyService>,
-    diagnostics_service: Arc<DiagnosticsService>,
+    activity_provider: Arc<dyn RuntimeActivityProvider>,
+    configuration_admission: Arc<dyn RuntimeConfigurationAdmission>,
     adapter_factory: Arc<dyn ComfyAdapterFactory>,
     settings: RwLock<AppSettings>,
     warning: RwLock<Option<String>>,
@@ -50,14 +78,16 @@ impl SettingsService {
         loaded: crate::application::ports::LoadedSettings,
         runtime: Arc<ComfyRuntime>,
         comfy_service: Arc<ComfyService>,
-        diagnostics_service: Arc<DiagnosticsService>,
+        activity_provider: Arc<dyn RuntimeActivityProvider>,
+        configuration_admission: Arc<dyn RuntimeConfigurationAdmission>,
         adapter_factory: Arc<dyn ComfyAdapterFactory>,
     ) -> Self {
         Self {
             store,
             runtime,
             comfy_service,
-            diagnostics_service,
+            activity_provider,
+            configuration_admission,
             adapter_factory,
             settings: RwLock::new(loaded.settings),
             warning: RwLock::new(loaded.warning),
@@ -91,19 +121,28 @@ impl SettingsService {
 
     pub async fn save_and_apply(&self, endpoint: &str) -> Result<SettingsView, AppError> {
         let config = parse_endpoint(endpoint)?;
-        let activity = self.diagnostics_service.runtime_activity_status().await?;
+        let adapter = self
+            .adapter_factory
+            .create(config.clone())
+            .map_err(endpoint_test_error)?;
+        // Test the candidate before acquiring the global gate so a slow remote
+        // endpoint does not block generation or queue dispatch.
+        test_adapter(&*adapter, config.endpoint()).await?;
+
+        // The final activity check and every state-changing operation below
+        // are serialized with generation_create, generation_create_batch,
+        // production queue start, and recovery through the same admission gate.
+        let _configuration_admission = self.configuration_admission.acquire().await;
+        let activity = self.activity_provider.runtime_activity_status().await?;
         if activity.active_task_count > 0 || activity.production_busy {
             return Err(AppError::comfy_endpoint_change_busy(
                 ENDPOINT_CHANGE_BUSY_MESSAGE,
             ));
         }
 
-        let adapter = self
-            .adapter_factory
-            .create(config.clone())
-            .map_err(endpoint_test_error)?;
-        // Test both endpoints before persisting or swapping the shared runtime.
-        test_adapter(&*adapter, config.endpoint()).await?;
+        // Recheck the candidate while the gate is held, immediately before
+        // persisting and swapping the shared runtime adapter.
+        adapter.health_check().await.map_err(endpoint_test_error)?;
 
         let next_settings = AppSettings {
             schema_version: 1,
@@ -192,8 +231,20 @@ fn endpoint_test_error(error: ComfyAdapterError) -> AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_endpoint;
-    use crate::application::ports::ComfyConnectionConfig;
+    use super::*;
+    use crate::application::diagnostics_service::RuntimeActivityStatusView;
+    use crate::application::ports::{
+        AppSettings, ComfyConnectionConfig, ComfyEventSubscription, ComfyHealth, ComfyHistory,
+        ComfyOutputData, ComfyOutputFile, LoadedSettings, PromptSubmission, SettingsStore,
+        SystemStats,
+    };
+    use async_trait::async_trait;
+    use serde_json::Value;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
+    use tokio::sync::{Mutex as AsyncMutex, Notify};
 
     #[test]
     fn endpoint_validation_normalizes_and_rejects_unsafe_forms() {
@@ -214,5 +265,215 @@ mod tests {
                 "{endpoint} must be rejected"
             );
         }
+    }
+
+    #[derive(Default)]
+    struct MemorySettingsStore {
+        saved: Mutex<Vec<AppSettings>>,
+    }
+
+    #[async_trait]
+    impl SettingsStore for MemorySettingsStore {
+        async fn load(&self) -> LoadedSettings {
+            LoadedSettings {
+                settings: AppSettings::default(),
+                warning: None,
+            }
+        }
+
+        async fn save(&self, settings: &AppSettings) -> Result<(), AppError> {
+            self.saved.lock().unwrap().push(settings.clone());
+            Ok(())
+        }
+    }
+
+    struct TestActivityProvider {
+        status: Mutex<RuntimeActivityStatusView>,
+    }
+
+    #[async_trait]
+    impl RuntimeActivityProvider for TestActivityProvider {
+        async fn runtime_activity_status(&self) -> Result<RuntimeActivityStatusView, AppError> {
+            Ok(self.status.lock().unwrap().clone())
+        }
+    }
+
+    struct TestAdmission {
+        gate: Arc<AsyncMutex<()>>,
+    }
+
+    #[async_trait]
+    impl RuntimeConfigurationAdmission for TestAdmission {
+        async fn acquire(&self) -> OwnedMutexGuard<()> {
+            Arc::clone(&self.gate).lock_owned().await
+        }
+    }
+
+    #[derive(Clone)]
+    struct BlockingAdapter {
+        health_calls: Arc<AtomicUsize>,
+        health_started: Arc<Notify>,
+        allow_first_health: Arc<Notify>,
+    }
+
+    impl BlockingAdapter {
+        fn new() -> Self {
+            Self {
+                health_calls: Arc::new(AtomicUsize::new(0)),
+                health_started: Arc::new(Notify::new()),
+                allow_first_health: Arc::new(Notify::new()),
+            }
+        }
+
+        fn health(&self) -> ComfyHealth {
+            ComfyHealth {
+                system: SystemStats {
+                    comfyui_version: Some("test".to_owned()),
+                    python_version: None,
+                    os: None,
+                    ram_total: None,
+                    ram_free: None,
+                    devices: Vec::new(),
+                },
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ComfyAdapter for BlockingAdapter {
+        async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            if self.health_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.health_started.notify_one();
+                self.allow_first_health.notified().await;
+            }
+            Ok(self.health())
+        }
+
+        async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
+            Ok(self.health().system)
+        }
+
+        async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
+            Ok(serde_json::json!({"TestNode": {}}))
+        }
+
+        async fn get_history(&self, _prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn download_output(
+            &self,
+            _file: &ComfyOutputFile,
+        ) -> Result<ComfyOutputData, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn submit_workflow(
+            &self,
+            _client_id: &str,
+            _prompt_id: &str,
+            _workflow: Value,
+        ) -> Result<PromptSubmission, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn subscribe_events(
+            &self,
+            _client_id: &str,
+        ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+    }
+
+    struct TestFactory {
+        adapter: BlockingAdapter,
+    }
+
+    impl ComfyAdapterFactory for TestFactory {
+        fn create(
+            &self,
+            _config: ComfyConnectionConfig,
+        ) -> Result<Arc<dyn ComfyAdapter>, ComfyAdapterError> {
+            Ok(Arc::new(self.adapter.clone()))
+        }
+    }
+
+    fn test_settings_service(
+        activity: Arc<TestActivityProvider>,
+        admission: Arc<TestAdmission>,
+        store: Arc<MemorySettingsStore>,
+        adapter: BlockingAdapter,
+    ) -> Arc<SettingsService> {
+        let config = ComfyConnectionConfig::default();
+        let runtime = Arc::new(ComfyRuntime::new(Arc::new(adapter.clone()), config));
+        let comfy_service = Arc::new(ComfyService::from_runtime(runtime.clone()));
+        Arc::new(SettingsService::new(
+            store,
+            LoadedSettings {
+                settings: AppSettings::default(),
+                warning: None,
+            },
+            runtime,
+            comfy_service,
+            activity,
+            admission,
+            Arc::new(TestFactory { adapter }),
+        ))
+    }
+
+    async fn assert_busy_change_is_rejected(status: RuntimeActivityStatusView) {
+        let adapter = BlockingAdapter::new();
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore::default());
+        let service = test_settings_service(
+            activity.clone(),
+            admission.clone(),
+            store.clone(),
+            adapter.clone(),
+        );
+
+        let running = {
+            let service = service.clone();
+            tokio::spawn(async move { service.save_and_apply("http://localhost:8188").await })
+        };
+        adapter.health_started.notified().await;
+
+        // Simulate a competing generation/queue operation winning the same
+        // global admission gate while the candidate endpoint is being tested.
+        let competing_gate = admission.acquire().await;
+        *activity.status.lock().unwrap() = status;
+        drop(competing_gate);
+        adapter.allow_first_health.notify_one();
+
+        let error = running.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), "COMFY_ENDPOINT_CHANGE_BUSY");
+        assert_eq!(service.settings().endpoint, "http://127.0.0.1:8188");
+        assert_eq!(store.saved.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn active_task_cannot_race_endpoint_apply_after_candidate_test() {
+        assert_busy_change_is_rejected(RuntimeActivityStatusView {
+            active_task_count: 1,
+            production_busy: false,
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn production_queue_cannot_race_endpoint_apply_after_candidate_test() {
+        assert_busy_change_is_rejected(RuntimeActivityStatusView {
+            active_task_count: 0,
+            production_busy: true,
+        })
+        .await;
     }
 }

@@ -3,8 +3,8 @@ use crate::error::AppError;
 use async_trait::async_trait;
 use std::{
     fs::{self, File},
-    io::Write,
-    path::PathBuf,
+    io::{self, Write},
+    path::{Path, PathBuf},
 };
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ impl JsonSettingsStore {
                 };
             }
             Err(error) => {
-                tracing::warn!(error = %error, path = %self.path.display(), "settings file could not be read");
+                tracing::warn!(error_kind = ?error.kind(), "settings file could not be read");
                 return LoadedSettings {
                     settings: AppSettings::default(),
                     warning: Some(SETTINGS_READ_WARNING.to_owned()),
@@ -44,12 +44,18 @@ impl JsonSettingsStore {
                 settings,
                 warning: None,
             },
-            Ok(_) => LoadedSettings {
-                settings: AppSettings::default(),
-                warning: Some(SETTINGS_READ_WARNING.to_owned()),
-            },
-            Err(error) => {
-                tracing::warn!(error = %error, path = %self.path.display(), "settings JSON is invalid");
+            Ok(_) => {
+                tracing::warn!(
+                    error_kind = "unsupported_schema",
+                    "settings JSON is unsupported"
+                );
+                LoadedSettings {
+                    settings: AppSettings::default(),
+                    warning: Some(SETTINGS_READ_WARNING.to_owned()),
+                }
+            }
+            Err(_error) => {
+                tracing::warn!(error_kind = "invalid_json", "settings JSON is invalid");
                 LoadedSettings {
                     settings: AppSettings::default(),
                     warning: Some(SETTINGS_READ_WARNING.to_owned()),
@@ -81,25 +87,51 @@ impl JsonSettingsStore {
             return Err(error);
         }
 
-        if let Err(error) = fs::rename(&temp_path, &self.path) {
-            // Windows cannot rename over an existing file. Remove the old
-            // file only after the replacement has been fully written.
-            if self.path.exists() {
-                fs::remove_file(&self.path)
-                    .and_then(|_| fs::rename(&temp_path, &self.path))
-                    .map_err(|replace_error| {
-                        AppError::filesystem(format!("设置文件替换失败：{replace_error}"))
-                    })?;
-            } else {
-                let _ = fs::remove_file(&temp_path);
-                return Err(AppError::filesystem(error.to_string()));
-            }
+        if let Err(error) = replace_settings_file(&temp_path, &self.path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(AppError::filesystem(format!("设置文件替换失败：{error}")));
         }
         if let Ok(directory) = File::open(parent) {
             let _ = directory.sync_all();
         }
         Ok(())
     }
+}
+
+#[cfg(windows)]
+fn replace_settings_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_settings_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
 }
 
 #[async_trait]
@@ -117,7 +149,25 @@ impl SettingsStore for JsonSettingsStore {
 mod tests {
     use super::JsonSettingsStore;
     use crate::application::ports::{AppSettings, ComfySettings, SettingsStore};
+    use std::{
+        io::Write,
+        sync::{Arc, Mutex},
+    };
     use tempfile::tempdir;
+
+    #[derive(Clone)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[tokio::test]
     async fn missing_settings_use_default_without_warning() {
@@ -170,5 +220,60 @@ mod tests {
         assert!(directory.path().join("settings.json").is_file());
         assert_eq!(store.load().await.settings, settings);
         assert!(!directory.path().join("settings.tmp").exists());
+    }
+
+    #[tokio::test]
+    async fn successful_replacement_keeps_only_complete_new_settings() {
+        let directory = tempdir().unwrap();
+        let store = JsonSettingsStore::new(directory.path().to_owned());
+        let old = AppSettings::default();
+        let new = AppSettings {
+            schema_version: 1,
+            comfy: ComfySettings {
+                endpoint: "http://localhost:8188".to_owned(),
+            },
+        };
+        store.save(&old).await.unwrap();
+        store.save(&new).await.unwrap();
+        assert_eq!(store.load().await.settings, new);
+    }
+
+    #[tokio::test]
+    async fn replacement_failure_keeps_existing_target_entry() {
+        let directory = tempdir().unwrap();
+        let target = directory.path().join("settings.json");
+        std::fs::write(&target, br#"{"schemaVersion":1}"#).unwrap();
+        let source = directory.path().join("settings-source.tmp");
+        let _error = super::replace_settings_file(&source, &target).unwrap_err();
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            r#"{"schemaVersion":1}"#
+        );
+    }
+
+    #[test]
+    fn invalid_settings_warning_does_not_write_absolute_path_to_raw_log() {
+        let directory = tempdir().unwrap();
+        let private_directory = directory.path().join("PRIVATE_USER");
+        std::fs::create_dir_all(&private_directory).unwrap();
+        std::fs::write(private_directory.join("settings.json"), "{not-json").unwrap();
+        let store = JsonSettingsStore::new(private_directory);
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let output_for_writer = output.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_target(false)
+            .with_writer(move || LogBuffer(output_for_writer.clone()))
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let loaded = store.load_sync();
+            assert!(loaded.warning.is_some());
+        });
+
+        let raw_log = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        assert!(!raw_log.contains("PRIVATE_USER"));
+        assert!(!raw_log.contains("C:\\Users\\"));
+        assert!(!raw_log.contains("settings.json"));
     }
 }

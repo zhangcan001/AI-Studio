@@ -215,12 +215,19 @@ impl ProductionQueueService {
     pub async fn acquire_interactive_admission(
         &self,
     ) -> Result<OwnedMutexGuard<()>, ProductionQueueError> {
-        let guard = Arc::clone(&self.admission_gate).lock_owned().await;
+        let guard = self.acquire_runtime_configuration_admission().await;
         let status = self.admission_status_excluding(None).await?;
         if status.busy {
             return Err(ProductionQueueError::Busy(status));
         }
         Ok(guard)
+    }
+
+    /// Serializes endpoint/configuration changes with interactive generation
+    /// and production dispatch. Callers must perform their final activity
+    /// check while holding the returned guard.
+    pub async fn acquire_runtime_configuration_admission(&self) -> OwnedMutexGuard<()> {
+        Arc::clone(&self.admission_gate).lock_owned().await
     }
 
     async fn admission_status_excluding(

@@ -34,11 +34,19 @@
 }
 ```
 
-缺少设置文件时使用默认地址；JSON 损坏或 schema 不支持时使用默认设置，并显示：`设置文件无法读取，当前已使用默认配置。`。读取失败不会自动覆盖原文件。保存流程为临时文件写入、`sync_all`、替换目标文件，并尽力同步父目录。
+缺少设置文件时使用默认地址；JSON 损坏或 schema 不支持时使用默认设置，并显示：`设置文件无法读取，当前已使用默认配置。`。读取失败不会自动覆盖原文件。保存流程为临时文件写入、`sync_all`、原子替换目标文件，并尽力同步父目录。
 
-Endpoint 变更必须先成功请求 `/system_stats` 和 `/object_info`，失败地址不会保存。存在活动任务或生产队列占用时，后端返回 `COMFY_ENDPOINT_CHANGE_BUSY`，不会只依赖前端按钮禁用。
+Endpoint 变更必须先成功请求 `/system_stats` 和 `/object_info`，失败地址不会保存。候选地址测试在共享 admission gate 外执行；获得与生成、批量生成、生产队列启动和恢复相同的 gate 后，后端再次检查全局活动状态并执行快速 health check，再在 guard 内完成保存、runtime 替换、能力缓存失效与刷新。存在活动任务或生产队列占用时返回 `COMFY_ENDPOINT_CHANGE_BUSY`，不会只依赖前端按钮禁用。
 
-## 3. 调用链
+## 3. Hardening Fixes
+
+- Endpoint 竞态：`SettingsService` 使用 `ProductionQueueService.admission_gate` 的同一底层锁；最终 activity check 与 `runtime.replace()` 之间不允许新的 generation、batch 或 production queue submission 插入。新增确定性 active-task / production-queue 并发回归，确认拒绝时 settings 与 runtime 均保持不变。
+- 原始日志隐私：settings 读取失败只记录错误类别，不记录错误字符串、文件内容或绝对路径；新增 raw tracing 输出测试，覆盖带 `PRIVATE_USER` 特征路径的损坏 JSON。
+- Windows 原子保存：Windows 使用 `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`，非 Windows 使用同步后的临时文件 rename；不再删除旧 settings 文件作为替换 fallback，替换失败时旧内容保持可读，临时文件尽力清理。
+- 流式项目备份：数据库元数据在一个短 SQLite read transaction 中快照，提交后才读取文件；ZIP 直接写入临时文件，资产和缩略图使用堆上的固定 1 MiB buffer 流式写入并校验大小/SHA-256，完成 `finish` 与 `sync_all` 后才原子发布。20 GiB ZIP、10 GiB entry、100,000 entries 限制保持不变，校验失败不会发布目标 ZIP。
+- Backup format 保持 v1；恢复继续使用新 ID、staging 与事务，不提交 Comfy prompt、不上传输入、不自动 dispatch。
+
+## 4. 调用链
 
 ```text
 React SettingsWorkspace / ProjectWorkspace
@@ -51,7 +59,7 @@ React SettingsWorkspace / ProjectWorkspace
 
 生成、恢复、取消、能力探测和状态查询继续通过同一个共享 Adapter Handle；切换地址时替换底层 adapter，失效并刷新 capability cache，不让 Domain 层感知 Endpoint。
 
-## 4. 项目备份格式与恢复安全
+## 5. 项目备份格式与恢复安全
 
 备份 manifest 使用：
 
@@ -70,11 +78,11 @@ React SettingsWorkspace / ProjectWorkspace
 
 ZIP 校验拒绝 traversal、绝对路径、Windows drive path、符号链接、缺少首项 manifest、错误格式、超限 entry、超限总大小和损坏 JSON。资产写入 staging 后按 SHA-256 与大小校验，任一必需资产失败返回 `BACKUP_ASSET_HASH_MISMATCH`，不进行 partial restore。
 
-## 5. 自动化回归
+## 6. 自动化回归
 
 | 检查 | 结果 |
 | --- | --- |
-| Rust 测试 | `258 passed; 0 failed` |
+| Rust 测试 | `264 passed; 0 failed` |
 | 前端测试文件 | `23 passed` |
 | 前端测试 | `58 passed; 0 failed` |
 | `cargo fmt --all -- --check` | PASS |
@@ -91,7 +99,7 @@ ZIP 校验拒绝 traversal、绝对路径、Windows drive path、符号链接、
 - `src-tauri/target/release/bundle/nsis/AI Studio_0.2.0_x64-setup.exe`
 - `src-tauri/target/release/bundle/msi/AI Studio_0.2.0_x64_en-US.msi`
 
-## 6. 真实 ComfyUI 检查
+## 7. 真实 ComfyUI 检查
 
 本机真实 Endpoint：`http://127.0.0.1:8188`
 
@@ -102,14 +110,14 @@ ZIP 校验拒绝 traversal、绝对路径、Windows drive path、符号链接、
 | 设备数 | `1` |
 | GPU | `cuda:0 NVIDIA GeForce RTX 5060 Ti : cudaMallocAsync` |
 | VRAM 总量 | `17,102,864,384` bytes |
-| VRAM 空闲 | `2,101,927,486` bytes |
+| VRAM 空闲 | `2,122,075,710` bytes |
 | 节点数量 | `4,485` |
 
-正式版可执行文件已启动，日志确认数据库、运行时工作流库、启动恢复和 ComfyUI capability 初始化成功，并使用默认 Endpoint。Windows Computer Use 在读取 Tauri WebView accessibility/screenshot 状态时连续返回 `node_repl exec context not found`，因此本轮没有盲操作原生文件对话框；设置页和项目页的行为由 Tauri/Rust 与前端回归覆盖，原生对话框 Smoke 仍需在可用的桌面自动化环境中手动复核。
+本轮重新启动 release executable，日志确认数据库、001–007 migration、运行时工作流库、启动恢复和 ComfyUI capability 初始化成功，并使用默认 Endpoint。Windows Computer Use 在读取 Tauri WebView accessibility/screenshot 状态时连续返回 `node_repl exec context not found`，因此本轮没有盲操作原生文件对话框；设置页和项目页的行为由 Tauri/Rust 与前端回归覆盖，原生对话框 Smoke 仍需在可用的桌面自动化环境中手动复核。
 
 Endpoint 的非法 scheme、凭据、query、fragment、规范化、设置损坏回退、JSON 保存回读和共享 Adapter A→B 切换已有自动化覆盖。真实 `http://localhost:8188` 的 UI 测试/保存/重启流程以及切换后的 Kera2 生成未在本轮桌面辅助接口失效后重新执行；既有 Kera2/H3 实机证据保持不变，不伪造为本轮重新验收结果。
 
-## 7. 发布与 Migration 保护
+## 8. 发布与 Migration 保护
 
 - `v0.1.0` Tag 仍指向正式 commit `c3cbbaa6ece05939bc93c75c906f409e3bacea24`。
 - `src-tauri/migrations/` 无本轮改动。
@@ -117,7 +125,7 @@ Endpoint 的非法 scheme、凭据、query、fragment、规范化、设置损坏
 - 未创建 GitHub Release。
 - 未修改 v0.1.0 Release notes 或已发布安装包。
 
-## 8. 最终 Gate 状态
+## 9. 最终 Gate 状态
 
 代码实现、自动化回归、开发版安装包构建和真实 ComfyUI HTTP 检查均通过；但本轮 Windows Computer Use 无法读取 Tauri WebView，导致真实 `localhost` 保存/重启、切换后 Kera2、真实项目备份恢复及媒体/历史复用 Gate 没有完成。
 
@@ -129,11 +137,11 @@ M2 FOUNDATION PACK 01 = CODE PASS / LIVE GATE PARTIAL
 
 待桌面辅助接口恢复后，完成上述真实 Gate 才能将最终状态升级为 `M2 FOUNDATION PACK 01 = PASS`。
 
-## 9. 后续技术债
+## 10. 后续技术债
 
 1. 在桌面自动化接口可用后补做 `localhost` Endpoint 保存/重启持久化、Endpoint 切换后的 Kera2、当前真实项目备份 roundtrip、恢复媒体预览/播放和恢复历史输入复用 Gate。
 2. 目前 backup inspection token 保存在内存并有时限，应用退出后不会保留待恢复 inspection。
-3. Windows 设置文件替换包含兼容性 fallback；若目标文件被外部程序锁定，仍会返回保存错误，不会覆盖写入半文件。
+3. Windows 设置文件替换已使用 `MoveFileExW` 原子替换语义；若目标文件被外部程序锁定，仍会返回保存错误，并保留旧文件，不会覆盖写入半文件。
 4. H3 本轮不重新消耗 GPU 资源，沿用既有实机证据与共享 Adapter 自动化覆盖。
 
 本轮到此停止，不进入 M2 Productivity Pack 02、第三模型 Runtime、云同步或自动更新。
