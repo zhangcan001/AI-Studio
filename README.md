@@ -2,7 +2,7 @@
 
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
-Current development version: `0.2.0` (M2 Foundation Pack 01).
+Current version: `0.2.0` (M2 Foundation Pack 01–04 complete; ready for release).
 The released `0.1.0` baseline remains available in the Git history and GitHub
 Release; this development cycle does not modify its tag or release assets.
 
@@ -152,10 +152,12 @@ installer; the final release evidence, artifact hashes, clean install/data
 preservation gate, and user-facing notes are recorded in
 `docs/M1_FINAL_RELEASE_GATE.md` and `docs/RELEASE_NOTES_0.1.0.md`.
 
-M2 Foundation Pack 01 adds migration-free persistent settings, a validated and
-live-switchable ComfyUI endpoint, and validated project backup preview/export/
-restore. It is development-only until the M2 gate is complete; no `0.2.0`
-tag or GitHub Release has been created.
+M2 Foundation Pack 01–04 adds migration-free persistent settings, a validated
+and live-switchable ComfyUI endpoint, project backup preview/export/restore,
+asset organization, runtime health/readiness diagnostics, preferred presets,
+workflow variants, and workflow quick testing. The 0.2.0 release artifacts are
+built and documented in `docs/RELEASE_NOTES_0.2.0.md`; no Git tag or GitHub
+Release was created by the development automation.
 
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
