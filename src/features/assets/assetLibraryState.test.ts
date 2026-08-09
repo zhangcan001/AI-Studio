@@ -20,4 +20,8 @@ describe("asset library pagination state", () => {
       "ast_2",
     ]);
   });
+
+  it("resets old results when a new query starts", () => {
+    expect(mergeAssetPage([asset("old")], [asset("new")], true).map((item) => item.id)).toEqual(["new"]);
+  });
 });

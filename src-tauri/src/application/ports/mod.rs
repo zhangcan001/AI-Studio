@@ -23,7 +23,10 @@ pub mod workflow_run_repository;
 pub mod workflow_runtime_repository;
 pub mod workflow_runtime_state_repository;
 
-pub use asset_browse_repository::{AssetBrowseRepository, AssetCategoryFilter};
+pub use asset_browse_repository::{
+    AssetBrowseRepository, AssetCategoryFilter, AssetCreatedOrder, AssetLibraryQuery,
+    AssetMediaTypeFilter, AssetSourceFilter,
+};
 pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
 pub use asset_store::{
     AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile,
@@ -48,7 +51,10 @@ pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreEr
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use repository_error::RepositoryError;
 pub use settings_store::{AppSettings, ComfySettings, LoadedSettings, SettingsStore};
-pub use task_history_repository::{TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository};
+pub use task_history_repository::{
+    TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,
+    TaskHistoryTimeFilter, TaskHistoryWorkflowOption,
+};
 pub use task_repository::TaskRepository;
 pub use task_update_sink::{
     NoopTaskUpdateSink, TaskUpdatePayload, TaskUpdateSink, TASK_UPDATED_EVENT,

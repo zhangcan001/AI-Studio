@@ -32,6 +32,32 @@ impl TaskHistoryFilter {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TaskHistoryTimeFilter {
+    #[default]
+    All,
+    Today,
+    Last7Days,
+    Last30Days,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskHistoryQuery {
+    pub project_id: String,
+    pub filter: TaskHistoryFilter,
+    pub workflow_id: Option<String>,
+    pub keyword: Option<String>,
+    pub time_filter: TaskHistoryTimeFilter,
+    pub cursor: Option<PageCursor>,
+    pub limit: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskHistoryWorkflowOption {
+    pub workflow_id: String,
+    pub workflow_name: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TaskHistoryRecord {
     pub task: Task,
@@ -43,11 +69,13 @@ pub struct TaskHistoryRecord {
 pub trait TaskHistoryRepository: Send + Sync {
     async fn list_page(
         &self,
-        project_id: &str,
-        filter: TaskHistoryFilter,
-        cursor: Option<PageCursor>,
-        limit: u32,
+        query: TaskHistoryQuery,
     ) -> Result<PageResult<TaskHistoryRecord>, RepositoryError>;
+
+    async fn list_workflow_options(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<TaskHistoryWorkflowOption>, RepositoryError>;
 
     async fn find_detail(
         &self,

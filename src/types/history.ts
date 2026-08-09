@@ -3,6 +3,22 @@ import type { GenerationValues } from "./generation";
 import type { TaskStatus } from "./task";
 
 export type TaskHistoryFilter = "ALL" | "ACTIVE" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+export type TaskHistoryTimeFilter = "ALL" | "TODAY" | "LAST_7_DAYS" | "LAST_30_DAYS";
+
+export interface TaskHistoryQuery {
+  projectId: string;
+  filter: TaskHistoryFilter;
+  workflowId?: string;
+  keyword?: string;
+  timeFilter: TaskHistoryTimeFilter;
+  cursor?: PageCursor;
+  limit?: number;
+}
+
+export interface TaskHistoryWorkflowOption {
+  workflowId: string;
+  workflowName: string;
+}
 
 export interface TaskHistoryItem {
   id: string;
@@ -22,6 +38,7 @@ export interface TaskHistoryItem {
 export interface TaskHistoryPage {
   items: TaskHistoryItem[];
   nextCursor?: PageCursor;
+  workflowOptions: TaskHistoryWorkflowOption[];
 }
 
 export interface ReusableDraftAvailability {
@@ -53,6 +70,7 @@ export interface ReusableGenerationDraft {
   workflowVersionId: string;
   recipeId: string;
   workflowName: string;
+  createdAt: string;
   values: GenerationValues;
   missingAssetIds: string[];
 }

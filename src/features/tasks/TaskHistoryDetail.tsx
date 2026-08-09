@@ -144,7 +144,7 @@ export function TaskHistoryDetail({
               onClick={() => draft && onLoadInputs(draft)}
               disabled={draftLoading || !draft}
             >
-              {draftLoading ? "正在加载输入..." : "加载输入"}
+              {draftLoading ? "正在加载到创作..." : "加载到创作"}
             </button>
           )}
         </div>

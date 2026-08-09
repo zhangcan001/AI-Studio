@@ -11,11 +11,11 @@ import {
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
-import type { RecipeViewModel } from "../../types/generation";
+import type { RecipeField, RecipeViewModel } from "../../types/generation";
 import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { workflowDisplayName } from "../../i18n/statusLabels";
+import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
 import { cloneGenerationValues, retainFailedBatchItems, type BatchDraftItem } from "./batchDraft";
 import { parseBatchTaskList } from "./batchImport";
@@ -27,6 +27,27 @@ import { generationBlockedReason } from "./generationBlockedReason";
 import { StudioModeTabs, type StudioMode } from "./StudioModeTabs";
 import { WorkflowLauncher } from "./WorkflowLauncher";
 import { NoWorkflowGuide } from "./NoWorkflowGuide";
+import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
+
+function fieldTypeLabel(type: RecipeField["type"]): string {
+  switch (type) {
+    case "image":
+    case "images":
+      return "图片";
+    case "video":
+    case "videos":
+      return "视频";
+    case "audio":
+    case "audios":
+      return "音频";
+    case "textarea":
+      return "文字";
+    case "integer":
+      return "数字";
+    case "seed":
+      return "种子";
+  }
+}
 
 interface Props {
   projectId: string;
@@ -62,6 +83,8 @@ export function GenerationStudio({
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const values = useStudioStore((state) => state.values);
   const validationErrors = useStudioStore((state) => state.validationErrors);
+  const pendingAssetIntent = useStudioStore((state) => state.pendingAssetIntent);
+  const reuseProvenance = useStudioStore((state) => state.reuseProvenance);
   const setSelectedWorkflow = useStudioStore((state) => state.setSelectedWorkflow);
   const setValue = useStudioStore((state) => state.setValue);
   const removeValue = useStudioStore((state) => state.removeValue);
@@ -83,6 +106,7 @@ export function GenerationStudio({
   const [batchNotice, setBatchNotice] = useState<string>();
   const [studioMode, setStudioMode] = useState<StudioMode>("single");
   const [presetEditorOpen, setPresetEditorOpen] = useState(false);
+  const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const handleAssetAvailabilityChange = useCallback((key: string, available: boolean) => {
     setMissingAssetFields((current) => {
       const next = new Set(current);
@@ -130,6 +154,56 @@ export function GenerationStudio({
       setMissingAssetFields(new Set());
     }
   }, [catalog, selectedWorkflow, setSelectedWorkflow]);
+
+  function applyPendingAsset(field: RecipeField, replaceSingle: boolean) {
+    if (!selectedWorkflow || !pendingAssetIntent) return;
+    const result = assignAssetToField(field, useStudioStore.getState().values, pendingAssetIntent.assetId, replaceSingle);
+    if (result.kind === "requires_confirmation") {
+      if (window.confirm("当前输入已有素材，是否替换当前素材？")) {
+        applyPendingAsset(field, true);
+      }
+      return;
+    }
+    setAssetIntentTargets([]);
+    useStudioStore.getState().clearPendingAssetIntent();
+    if (result.kind === "max_items") {
+      setNotice(`“${field.label}”已达到素材数量上限。`);
+      return;
+    }
+    if (result.kind !== "applied") {
+      setNotice("当前工作流没有可使用此素材的输入项。");
+      return;
+    }
+    useStudioStore.getState().loadDraft(selectedWorkflow, result.values);
+    setMissingAssetFields((current) => {
+      const next = new Set(current);
+      next.delete(field.key);
+      return next;
+    });
+    setNotice("已将素材加入创作。");
+  }
+
+  useEffect(() => {
+    if (!pendingAssetIntent || !selectedWorkflow) return;
+    if (pendingAssetIntent.projectId !== projectId) {
+      useStudioStore.getState().clearPendingAssetIntent();
+      setAssetIntentTargets([]);
+      setNotice("素材属于其他项目，已取消使用。");
+      return;
+    }
+    const targets = compatibleAssetFields(selectedWorkflow, pendingAssetIntent.assetType);
+    if (!targets.length) {
+      useStudioStore.getState().clearPendingAssetIntent();
+      setAssetIntentTargets([]);
+      setNotice("当前工作流没有可使用此素材的输入项。");
+      return;
+    }
+    if (targets.length > 1) {
+      setAssetIntentTargets(targets);
+      return;
+    }
+    applyPendingAsset(targets[0], false);
+  }, [pendingAssetIntent, projectId, selectedWorkflow]);
 
   const hasUnsupportedField = useMemo(
     () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
@@ -424,6 +498,7 @@ export function GenerationStudio({
           selectedWorkflow={selectedWorkflow}
           onSelect={(workflow) => {
             setSelectedWorkflow(workflow);
+            setAssetIntentTargets([]);
             setMissingAssetFields(new Set());
             setPresetEditorOpen(false);
           }}
@@ -439,6 +514,37 @@ export function GenerationStudio({
                 {refreshing ? "正在刷新..." : "刷新工作流"}
               </button>
             </div>
+            {reuseProvenance && (
+              <div className="studio-provenance" role="status">
+                <strong>已加载历史任务参数</strong>
+                <span>{reuseProvenance.workflowName} · {formatDateTime(reuseProvenance.createdAt)}</span>
+              </div>
+            )}
+            {assetIntentTargets.length > 1 && pendingAssetIntent && (
+              <section className="asset-intent-targets" aria-label="选择素材用途">
+                <div>
+                  <strong>选择素材用途</strong>
+                  <p>请选择要填入的输入项，当前素材不会自动提交生成。</p>
+                </div>
+                <div className="asset-intent-target-list">
+                  {assetIntentTargets.map((field) => (
+                    <button key={field.key} type="button" onClick={() => applyPendingAsset(field, false)}>
+                      {field.label} · {fieldTypeLabel(field.type)}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => {
+                      useStudioStore.getState().clearPendingAssetIntent();
+                      setAssetIntentTargets([]);
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </section>
+            )}
             <div className="preset-toolbar" aria-label="预设管理">
               <label>
                 <span>预设</span>
@@ -586,7 +692,7 @@ export function GenerationStudio({
             </section>}
           </>
         )}
-        {notice && <p className="error-message">{notice}</p>}
+        {notice && <p className="studio-notice" role="status">{notice}</p>}
       </section>
       <CreationResultPanel
         projectId={projectId}

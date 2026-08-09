@@ -6,13 +6,13 @@ import type {
   DiagnosticsSummary,
   RuntimeActivityStatus,
 } from "../types/diagnostics";
-import type { AssetCategoryFilter, AssetLibraryPage, AssetView, PageCursor } from "../types/asset";
+import type { AssetLibraryPage, AssetLibraryQuery, AssetView } from "../types/asset";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type {
   ReusableGenerationDraft,
   TaskDetail,
-  TaskHistoryFilter,
   TaskHistoryPage,
+  TaskHistoryQuery,
 } from "../types/history";
 import type { TaskView } from "../types/task";
 import type {
@@ -381,12 +381,9 @@ export function getAsset(projectId: string, assetId: string): Promise<AssetView>
 }
 
 export function taskHistoryPage(
-  projectId: string,
-  filter: TaskHistoryFilter,
-  cursor?: PageCursor,
-  limit = 30,
+  query: TaskHistoryQuery,
 ): Promise<TaskHistoryPage> {
-  return invoke<TaskHistoryPage>("task_history_page", { projectId, filter, cursor, limit });
+  return invoke<TaskHistoryPage>("task_history_page", { query });
 }
 
 export function getTaskDetail(projectId: string, taskId: string): Promise<TaskDetail> {
@@ -397,13 +394,8 @@ export function getReusableDraft(projectId: string, taskId: string): Promise<Reu
   return invoke<ReusableGenerationDraft>("task_get_reusable_draft", { projectId, taskId });
 }
 
-export function assetLibraryPage(
-  projectId: string,
-  category: AssetCategoryFilter,
-  cursor?: PageCursor,
-  limit = 30,
-): Promise<AssetLibraryPage> {
-  return invoke<AssetLibraryPage>("asset_library_page", { projectId, category, cursor, limit });
+export function assetLibraryPage(query: AssetLibraryQuery): Promise<AssetLibraryPage> {
+  return invoke<AssetLibraryPage>("asset_library_page", { query });
 }
 
 export function listPresets(

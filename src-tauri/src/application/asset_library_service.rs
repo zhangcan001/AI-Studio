@@ -1,6 +1,6 @@
 use crate::application::asset_query_service::{AssetSummaryView, AssetView};
 use crate::application::pagination::PageCursor;
-use crate::application::ports::{AssetBrowseRepository, AssetCategoryFilter, RepositoryError};
+use crate::application::ports::{AssetBrowseRepository, AssetLibraryQuery, RepositoryError};
 use std::{error::Error, fmt, sync::Arc};
 
 pub struct AssetLibraryService {
@@ -14,18 +14,18 @@ impl AssetLibraryService {
 
     pub async fn list_page(
         &self,
-        project_id: &str,
-        category: AssetCategoryFilter,
-        cursor: Option<PageCursor>,
-        limit: u32,
+        mut query: AssetLibraryQuery,
     ) -> Result<AssetLibraryPageView, AssetLibraryError> {
-        if project_id.trim().is_empty() {
+        if query.project_id.trim().is_empty() {
             return Err(AssetLibraryError::InvalidProjectId);
         }
-        let page = self
-            .repository
-            .list_page(project_id, category, cursor, limit.clamp(1, 100))
-            .await?;
+        query.project_id = query.project_id.trim().to_owned();
+        query.keyword = query.keyword.and_then(|keyword| {
+            let keyword = keyword.trim().to_owned();
+            (!keyword.is_empty()).then_some(keyword)
+        });
+        query.limit = query.limit.clamp(1, 100);
+        let page = self.repository.list_page(query).await?;
         Ok(AssetLibraryPageView {
             items: page.items.into_iter().map(AssetView::from).collect(),
             next_cursor: page.next_cursor,

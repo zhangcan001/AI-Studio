@@ -1,13 +1,20 @@
 import type { PageCursor } from "../../types/asset";
-import type { TaskHistoryFilter, TaskHistoryItem } from "../../types/history";
+import type { TaskHistoryFilter, TaskHistoryItem, TaskHistoryTimeFilter, TaskHistoryWorkflowOption } from "../../types/history";
 import { workflowDisplayName, formatDateTime, taskStatusLabel } from "../../i18n/statusLabels";
 
 interface Props {
   filter: TaskHistoryFilter;
+  keyword: string;
+  workflowId: string;
+  timeFilter: TaskHistoryTimeFilter;
+  workflowOptions: TaskHistoryWorkflowOption[];
   items: TaskHistoryItem[];
   nextCursor?: PageCursor;
   loading: boolean;
   onFilterChange: (filter: TaskHistoryFilter) => void;
+  onKeywordChange: (keyword: string) => void;
+  onWorkflowChange: (workflowId: string) => void;
+  onTimeFilterChange: (filter: TaskHistoryTimeFilter) => void;
   onSelect: (taskId: string) => void;
   onRefresh: () => void;
   onLoadMore: () => void;
@@ -23,10 +30,17 @@ const filters: Array<{ value: TaskHistoryFilter; label: string }> = [
 
 export function TaskHistoryList({
   filter,
+  keyword,
+  workflowId,
+  timeFilter,
+  workflowOptions,
   items,
   nextCursor,
   loading,
   onFilterChange,
+  onKeywordChange,
+  onWorkflowChange,
+  onTimeFilterChange,
   onSelect,
   onRefresh,
   onLoadMore,
@@ -54,6 +68,28 @@ export function TaskHistoryList({
             {item.label}
           </button>
         ))}
+      </div>
+      <div className="task-history-query" aria-label="任务查询">
+        <label className="task-history-search">
+          <span>搜索任务</span>
+          <input value={keyword} onChange={(event) => onKeywordChange(event.target.value)} placeholder="任务 ID 或工作流名称" />
+        </label>
+        <label>
+          <span>工作流</span>
+          <select value={workflowId} onChange={(event) => onWorkflowChange(event.target.value)}>
+            <option value="">全部工作流</option>
+            {workflowOptions.map((option) => <option key={option.workflowId} value={option.workflowId}>{workflowDisplayName(option.workflowId, option.workflowName)}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>时间</span>
+          <select value={timeFilter} onChange={(event) => onTimeFilterChange(event.target.value as TaskHistoryTimeFilter)}>
+            <option value="ALL">全部时间</option>
+            <option value="TODAY">今天</option>
+            <option value="LAST_7_DAYS">最近7天</option>
+            <option value="LAST_30_DAYS">最近30天</option>
+          </select>
+        </label>
       </div>
       <div className="task-history-list">
         {items.map((task) => (

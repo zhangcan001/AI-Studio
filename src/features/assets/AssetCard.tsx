@@ -7,9 +7,12 @@ interface Props {
   projectId: string;
   asset: AssetView;
   onSelect: (asset: AssetView) => void;
+  compareMode?: boolean;
+  compared?: boolean;
+  onToggleCompare?: (asset: AssetView) => void;
 }
 
-export function AssetCard({ projectId, asset, onSelect }: Props) {
+export function AssetCard({ projectId, asset, onSelect, compareMode = false, compared = false, onToggleCompare }: Props) {
   const cardRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>();
@@ -68,7 +71,13 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
   const displayName = assetDisplayName(asset);
 
   return (
-    <button ref={cardRef} type="button" className="asset-library-card" onClick={() => onSelect(asset)}>
+    <button
+      ref={cardRef}
+      type="button"
+      className={`asset-library-card${compareMode && compared ? " asset-library-card-compared" : ""}`}
+      aria-pressed={compareMode ? compared : undefined}
+      onClick={() => (compareMode && onToggleCompare ? onToggleCompare(asset) : onSelect(asset))}
+    >
       <span className="asset-library-image">
         {previewUrl ? (
           <img src={previewUrl} alt={displayName} loading="lazy" />
@@ -77,6 +86,7 @@ export function AssetCard({ projectId, asset, onSelect }: Props) {
         ) : (
           <span className="asset-image-placeholder">{isAudio ? "音频素材" : isVideo ? "视频预览" : "暂无预览"}</span>
         )}
+        {compareMode && !isAudio && <span className="asset-compare-badge">{compared ? "已选对比" : "加入对比"}</span>}
       </span>
       <span className="asset-library-card-copy">
         <strong>{displayName}</strong>

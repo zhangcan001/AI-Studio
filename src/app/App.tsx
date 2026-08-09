@@ -13,6 +13,7 @@ import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
 import { useProjectStore } from "../stores/projectStore";
 import type { RecipeViewModel } from "../types/generation";
+import type { AssetView } from "../types/asset";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
 import { AssetLibrary } from "../features/assets/AssetLibrary";
 import { TaskHistory } from "../features/tasks/TaskHistory";
@@ -23,6 +24,7 @@ import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
+import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { toUserMessage } from "../i18n/errorMessages";
@@ -184,6 +186,7 @@ function App() {
     if (projectId === activeProjectId) return;
     useTaskStore.getState().clear();
     useStudioStore.getState().resetDraft();
+    useStudioStore.getState().clearPendingAssetIntent();
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
     setError(null);
@@ -296,6 +299,26 @@ function App() {
       return;
     }
     useStudioStore.getState().loadDraft(workflow, draft.values);
+    useStudioStore.getState().setReuseProvenance({
+      workflowName: draft.workflowName,
+      createdAt: draft.createdAt,
+    });
+    setError(null);
+    setWorkspace("studio");
+  }
+
+  function useAssetInStudio(asset: AssetView) {
+    if (!activeProjectId) return;
+    const assetType = asset.assetType === "video" || asset.category.endsWith("_video")
+      ? "video"
+      : asset.assetType === "audio" || asset.category === "source_audio"
+        ? "audio"
+        : "image";
+    useStudioStore.getState().setPendingAssetIntent({
+      projectId: activeProjectId,
+      assetId: asset.id,
+      assetType: assetType as StudioAssetType,
+    });
     setError(null);
     setWorkspace("studio");
   }
@@ -441,7 +464,16 @@ function App() {
           />
         </section>
       )}
-      {activeProject && workspace === "assets" && <AssetLibrary projectId={activeProject.id} />}
+      {activeProject && workspace === "assets" && (
+        <AssetLibrary
+          projectId={activeProject.id}
+          onUseInStudio={useAssetInStudio}
+          onOpenTask={(taskId) => {
+            setFocusedTaskId(taskId);
+            setWorkspace("tasks");
+          }}
+        />
+      )}
       {activeProject && workspace === "tasks" && (
         <TaskHistory
           projectId={activeProject.id}

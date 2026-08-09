@@ -2,7 +2,7 @@ use crate::application::asset_query_service::{AssetSummaryView, AssetView};
 use crate::application::pagination::PageCursor;
 use crate::application::ports::{
     AssetRepository, GenerationDefinitionRepository, GenerationSnapshotRepository, RepositoryError,
-    TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository, TaskOutputAssetMapping,
+    TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository, TaskOutputAssetMapping,
 };
 use crate::compiler::RecipeParser;
 use crate::domain::{
@@ -42,18 +42,29 @@ impl TaskHistoryService {
 
     pub async fn list_page(
         &self,
-        project_id: &str,
-        filter: TaskHistoryFilter,
-        cursor: Option<PageCursor>,
-        limit: u32,
+        mut query: TaskHistoryQuery,
     ) -> Result<TaskHistoryPageView, TaskHistoryError> {
-        if project_id.trim().is_empty() {
+        if query.project_id.trim().is_empty() {
             return Err(TaskHistoryError::InvalidProjectId);
         }
-        let page = self
+        query.project_id = query.project_id.trim().to_owned();
+        query.workflow_id = query.workflow_id.and_then(|workflow_id| {
+            let workflow_id = workflow_id.trim().to_owned();
+            (!workflow_id.is_empty()).then_some(workflow_id)
+        });
+        query.keyword = query.keyword.and_then(|keyword| {
+            let keyword = keyword.trim().to_owned();
+            (!keyword.is_empty()).then_some(keyword)
+        });
+        query.limit = query.limit.clamp(1, 100);
+        let page = self.history_repository.list_page(query.clone()).await?;
+        let workflow_options = self
             .history_repository
-            .list_page(project_id, filter, cursor, limit.clamp(1, 100))
-            .await?;
+            .list_workflow_options(&query.project_id)
+            .await?
+            .into_iter()
+            .map(TaskHistoryWorkflowOptionView::from)
+            .collect();
         Ok(TaskHistoryPageView {
             items: page
                 .items
@@ -61,6 +72,7 @@ impl TaskHistoryService {
                 .map(TaskHistoryItemView::from_record)
                 .collect(),
             next_cursor: page.next_cursor,
+            workflow_options,
         })
     }
 
@@ -172,6 +184,7 @@ impl TaskHistoryService {
             workflow_version_id: record.task.workflow_version_id,
             recipe_id: record.task.recipe_id,
             workflow_name: record.workflow_name,
+            created_at: record.task.created_at,
             values: draft.values,
             missing_asset_ids: draft.missing_asset_ids,
         })
@@ -305,6 +318,23 @@ fn validate_project_id(value: &str) -> Result<(), TaskHistoryError> {
 pub struct TaskHistoryPageView {
     pub items: Vec<TaskHistoryItemView>,
     pub next_cursor: Option<PageCursor>,
+    pub workflow_options: Vec<TaskHistoryWorkflowOptionView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskHistoryWorkflowOptionView {
+    pub workflow_id: String,
+    pub workflow_name: String,
+}
+
+impl From<crate::application::ports::TaskHistoryWorkflowOption> for TaskHistoryWorkflowOptionView {
+    fn from(value: crate::application::ports::TaskHistoryWorkflowOption) -> Self {
+        Self {
+            workflow_id: value.workflow_id,
+            workflow_name: value.workflow_name,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -378,6 +408,7 @@ pub struct ReusableGenerationDraftView {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub workflow_name: String,
+    pub created_at: DateTime<Utc>,
     pub values: BTreeMap<String, DraftValueView>,
     pub missing_asset_ids: Vec<String>,
 }

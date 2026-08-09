@@ -4,7 +4,8 @@ use super::{
 };
 use crate::application::pagination::{PageCursor, PageResult};
 use crate::application::ports::{
-    RepositoryError, TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository,
+    RepositoryError, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,
+    TaskHistoryTimeFilter, TaskHistoryWorkflowOption,
 };
 use crate::domain::{Task, TaskError, TaskId, TaskProgress, TaskStatus};
 use async_trait::async_trait;
@@ -36,18 +37,15 @@ const TASK_HISTORY_SELECT: &str = "SELECT
 impl TaskHistoryRepository for SqliteTaskHistoryRepository {
     async fn list_page(
         &self,
-        project_id: &str,
-        filter: TaskHistoryFilter,
-        cursor: Option<PageCursor>,
-        limit: u32,
+        request: TaskHistoryQuery,
     ) -> Result<PageResult<TaskHistoryRecord>, RepositoryError> {
-        let requested_limit = limit.clamp(1, 100);
+        let requested_limit = request.limit.clamp(1, 100);
         let mut query = QueryBuilder::<Sqlite>::new(TASK_HISTORY_SELECT);
         query
             .push(" WHERE t.project_id = ")
-            .push_bind(project_id.to_owned());
+            .push_bind(request.project_id);
 
-        if let Some(statuses) = filter.statuses() {
+        if let Some(statuses) = request.filter.statuses() {
             query.push(" AND t.status IN (");
             for (index, status) in statuses.iter().enumerate() {
                 if index > 0 {
@@ -58,7 +56,27 @@ impl TaskHistoryRepository for SqliteTaskHistoryRepository {
             query.push(")");
         }
 
-        if let Some(cursor) = cursor {
+        if let Some(workflow_id) = request.workflow_id {
+            query.push(" AND t.workflow_id = ").push_bind(workflow_id);
+        }
+
+        if let Some(keyword) = request.keyword {
+            let pattern = format!("%{keyword}%");
+            query
+                .push(" AND (t.id LIKE ")
+                .push_bind(pattern.clone())
+                .push(" OR w.name LIKE ")
+                .push_bind(pattern)
+                .push(")");
+        }
+
+        if let Some(cutoff) = time_cutoff(request.time_filter) {
+            query
+                .push(" AND t.created_at >= ")
+                .push_bind(cutoff.to_rfc3339());
+        }
+
+        if let Some(cursor) = request.cursor {
             let created_at = cursor.created_at.to_rfc3339();
             query
                 .push(" AND (t.created_at < ")
@@ -95,6 +113,37 @@ impl TaskHistoryRepository for SqliteTaskHistoryRepository {
         Ok(PageResult { items, next_cursor })
     }
 
+    async fn list_workflow_options(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<TaskHistoryWorkflowOption>, RepositoryError> {
+        #[derive(sqlx::FromRow)]
+        struct WorkflowOptionRow {
+            workflow_id: String,
+            workflow_name: String,
+        }
+
+        sqlx::query_as::<_, WorkflowOptionRow>(
+            "SELECT DISTINCT t.workflow_id, w.name AS workflow_name
+             FROM tasks t
+             INNER JOIN workflows w ON w.id = t.workflow_id
+             WHERE t.project_id = ?
+             ORDER BY w.name ASC, t.workflow_id ASC",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| TaskHistoryWorkflowOption {
+                    workflow_id: row.workflow_id,
+                    workflow_name: row.workflow_name,
+                })
+                .collect()
+        })
+        .map_err(map_sqlx_error)
+    }
+
     async fn find_detail(
         &self,
         project_id: &str,
@@ -114,6 +163,18 @@ impl TaskHistoryRepository for SqliteTaskHistoryRepository {
             .map_err(map_sqlx_error)?
             .map(TaskHistoryRow::try_into_record)
             .transpose()
+    }
+}
+
+fn time_cutoff(filter: TaskHistoryTimeFilter) -> Option<chrono::DateTime<chrono::Utc>> {
+    let now = chrono::Utc::now();
+    match filter {
+        TaskHistoryTimeFilter::All => None,
+        TaskHistoryTimeFilter::Today => now.date_naive().and_hms_opt(0, 0, 0).map(|value| {
+            chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(value, chrono::Utc)
+        }),
+        TaskHistoryTimeFilter::Last7Days => Some(now - chrono::Duration::days(7)),
+        TaskHistoryTimeFilter::Last30Days => Some(now - chrono::Duration::days(30)),
     }
 }
 
@@ -258,7 +319,10 @@ impl TaskHistoryRow {
 mod tests {
     use super::SqliteTaskHistoryRepository;
     use crate::application::pagination::PageCursor;
-    use crate::application::ports::{TaskHistoryFilter, TaskHistoryRepository, TaskRepository};
+    use crate::application::ports::{
+        TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRepository, TaskHistoryTimeFilter,
+        TaskRepository,
+    };
     use crate::domain::{Task, TaskError, TaskStateMachine, TaskStatus};
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use chrono::{Duration, TimeZone, Utc};
@@ -277,6 +341,23 @@ mod tests {
             .create(task, &task.created_event())
             .await
             .unwrap();
+    }
+
+    fn query(
+        project_id: &str,
+        filter: TaskHistoryFilter,
+        cursor: Option<PageCursor>,
+        limit: u32,
+    ) -> TaskHistoryQuery {
+        TaskHistoryQuery {
+            project_id: project_id.to_owned(),
+            filter,
+            workflow_id: None,
+            keyword: None,
+            time_filter: TaskHistoryTimeFilter::All,
+            cursor,
+            limit,
+        }
     }
 
     #[tokio::test]
@@ -311,13 +392,18 @@ mod tests {
         }
 
         let page = repository
-            .list_page("project-1", TaskHistoryFilter::All, None, 1)
+            .list_page(query("project-1", TaskHistoryFilter::All, None, 1))
             .await
             .unwrap();
         assert_eq!(page.items.len(), 1);
         assert!(page.next_cursor.is_some());
         let next = repository
-            .list_page("project-1", TaskHistoryFilter::All, page.next_cursor, 1)
+            .list_page(query(
+                "project-1",
+                TaskHistoryFilter::All,
+                page.next_cursor,
+                1,
+            ))
             .await
             .unwrap();
         assert_eq!(next.items.len(), 1);
@@ -325,7 +411,7 @@ mod tests {
         assert!(next.next_cursor.is_none());
         assert_eq!(
             repository
-                .list_page("project-2", TaskHistoryFilter::All, None, 10)
+                .list_page(query("project-2", TaskHistoryFilter::All, None, 10))
                 .await
                 .unwrap()
                 .items
@@ -401,12 +487,123 @@ mod tests {
             .await
             .unwrap();
         let rows = repository
-            .list_page("project-1", TaskHistoryFilter::Active, None, 10)
+            .list_page(query("project-1", TaskHistoryFilter::Active, None, 10))
             .await
             .unwrap()
             .items;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].task.status, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn applies_workflow_keyword_time_filters_and_returns_project_options() {
+        let (pool, repository) = setup().await;
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO workflows (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES ('workflow-2', '视频工作流', 'test', 'video', 'workflow-version-2', ?, ?)",
+        )
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workflow_versions (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('workflow-version-2', 'workflow-2', '1', '{}', 'sha-2', ?)",
+        )
+        .bind(now.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('recipe-2', 'workflow-version-2', '1', 1, 'schema_version: 1', 'sha-2', ?)",
+        )
+        .bind(now.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let recent = Task::new(
+            "project-1",
+            "workflow-2",
+            "workflow-version-2",
+            "recipe-2",
+            now - Duration::hours(1),
+        );
+        let old = Task::new(
+            "project-1",
+            "workflow-2",
+            "workflow-version-2",
+            "recipe-2",
+            now - Duration::days(40),
+        );
+        let other_workflow = Task::new(
+            "project-1",
+            "workflow-1",
+            "workflow-version-1",
+            "recipe-1",
+            now - Duration::hours(2),
+        );
+        insert_task(&pool, &recent).await;
+        insert_task(&pool, &old).await;
+        insert_task(&pool, &other_workflow).await;
+
+        let filtered = repository
+            .list_page(TaskHistoryQuery {
+                project_id: "project-1".to_owned(),
+                filter: TaskHistoryFilter::All,
+                workflow_id: Some("workflow-2".to_owned()),
+                keyword: Some("视频".to_owned()),
+                time_filter: TaskHistoryTimeFilter::Last30Days,
+                cursor: None,
+                limit: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].task.id, recent.id);
+
+        for time_filter in [
+            TaskHistoryTimeFilter::Today,
+            TaskHistoryTimeFilter::Last7Days,
+        ] {
+            let page = repository
+                .list_page(TaskHistoryQuery {
+                    project_id: "project-1".to_owned(),
+                    filter: TaskHistoryFilter::All,
+                    workflow_id: Some("workflow-2".to_owned()),
+                    keyword: Some("视频".to_owned()),
+                    time_filter,
+                    cursor: None,
+                    limit: 10,
+                })
+                .await
+                .unwrap();
+            assert_eq!(page.items.len(), 1);
+        }
+
+        let id_search = repository
+            .list_page(TaskHistoryQuery {
+                project_id: "project-1".to_owned(),
+                filter: TaskHistoryFilter::All,
+                workflow_id: None,
+                keyword: Some(recent.id.as_str().to_owned()),
+                time_filter: TaskHistoryTimeFilter::All,
+                cursor: None,
+                limit: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(id_search.items.len(), 1);
+        assert_eq!(id_search.items[0].task.id, recent.id);
+
+        let options = repository.list_workflow_options("project-1").await.unwrap();
+        assert_eq!(options.len(), 2);
+        assert!(options.iter().any(|option| {
+            option.workflow_id == "workflow-2" && option.workflow_name == "视频工作流"
+        }));
     }
 
     #[tokio::test]

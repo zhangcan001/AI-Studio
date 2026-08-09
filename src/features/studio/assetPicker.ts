@@ -1,7 +1,26 @@
-import type { AssetView } from "../../types/asset";
+import type { AssetLibraryQuery, AssetMediaTypeFilter, AssetSourceFilter, AssetView, PageCursor } from "../../types/asset";
 
 export type AssetPickerKind = "image" | "video" | "audio";
 export type AssetPickerFilter = "all" | "source" | "generated";
+
+export function buildAssetPickerQuery(
+  projectId: string,
+  kind: AssetPickerKind,
+  filter: AssetPickerFilter,
+  keyword: string,
+  cursor?: PageCursor,
+): AssetLibraryQuery {
+  return {
+    projectId,
+    category: "ALL",
+    keyword: keyword.trim() || undefined,
+    mediaType: kind.toUpperCase() as AssetMediaTypeFilter,
+    sourceKind: (filter === "source" ? "SOURCE" : filter === "generated" ? "GENERATED" : "ALL") as AssetSourceFilter,
+    createdOrder: "NEWEST",
+    cursor,
+    limit: 30,
+  };
+}
 
 export function isAssetPickerCompatible(asset: AssetView, kind: AssetPickerKind): boolean {
   if (kind === "image") {

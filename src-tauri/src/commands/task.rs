@@ -1,7 +1,6 @@
 use crate::{
     app_state::AppState,
-    application::pagination::PageCursor,
-    application::ports::TaskHistoryFilter,
+    application::ports::{TaskHistoryFilter, TaskHistoryQuery, TaskHistoryTimeFilter},
     application::task_cancellation_service::TaskCancellationError,
     application::task_history_service::{
         ReusableGenerationDraftView, TaskDetailView, TaskHistoryError, TaskHistoryPageView,
@@ -92,18 +91,68 @@ impl From<TaskHistoryFilterDto> for TaskHistoryFilter {
     }
 }
 
+impl Default for TaskHistoryFilterDto {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TaskHistoryTimeFilterDto {
+    #[default]
+    All,
+    Today,
+    Last7Days,
+    Last30Days,
+}
+
+impl From<TaskHistoryTimeFilterDto> for TaskHistoryTimeFilter {
+    fn from(value: TaskHistoryTimeFilterDto) -> Self {
+        match value {
+            TaskHistoryTimeFilterDto::All => Self::All,
+            TaskHistoryTimeFilterDto::Today => Self::Today,
+            TaskHistoryTimeFilterDto::Last7Days => Self::Last7Days,
+            TaskHistoryTimeFilterDto::Last30Days => Self::Last30Days,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskHistoryQueryDto {
+    pub project_id: String,
+    #[serde(default)]
+    pub filter: TaskHistoryFilterDto,
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+    #[serde(default)]
+    pub keyword: Option<String>,
+    #[serde(default)]
+    pub time_filter: TaskHistoryTimeFilterDto,
+    #[serde(default)]
+    pub cursor: Option<crate::application::pagination::PageCursor>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn task_history_page(
     state: State<'_, AppState>,
-    project_id: String,
-    filter: TaskHistoryFilterDto,
-    cursor: Option<PageCursor>,
-    limit: Option<u32>,
+    query: TaskHistoryQueryDto,
 ) -> Result<TaskHistoryPageView, AppError> {
-    super::validate_project_id(&project_id)?;
+    super::validate_project_id(&query.project_id)?;
     state
         .task_history_service
-        .list_page(&project_id, filter.into(), cursor, limit.unwrap_or(30))
+        .list_page(TaskHistoryQuery {
+            project_id: query.project_id,
+            filter: query.filter.into(),
+            workflow_id: query.workflow_id,
+            keyword: query.keyword,
+            time_filter: query.time_filter.into(),
+            cursor: query.cursor,
+            limit: query.limit.unwrap_or(30),
+        })
         .await
         .map_err(map_history_error)
 }

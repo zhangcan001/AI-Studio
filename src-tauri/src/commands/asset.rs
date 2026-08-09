@@ -1,5 +1,9 @@
 use crate::{
     app_state::AppState,
+    application::ports::{
+        AssetCategoryFilter, AssetCreatedOrder, AssetLibraryQuery, AssetMediaTypeFilter,
+        AssetSourceFilter,
+    },
     application::{
         asset_library_service::{AssetLibraryError, AssetLibraryPageView},
         asset_query_service::{AssetQueryError, AssetView},
@@ -8,7 +12,6 @@ use crate::{
             MAX_SOURCE_VIDEO_BYTES,
         },
     },
-    application::{pagination::PageCursor, ports::AssetCategoryFilter},
     error::AppError,
 };
 use tauri::{ipc::Response, AppHandle, State};
@@ -77,18 +80,107 @@ impl From<AssetCategoryFilterDto> for AssetCategoryFilter {
     }
 }
 
+impl Default for AssetCategoryFilterDto {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetMediaTypeFilterDto {
+    #[default]
+    All,
+    Image,
+    Video,
+    Audio,
+}
+
+impl From<AssetMediaTypeFilterDto> for AssetMediaTypeFilter {
+    fn from(value: AssetMediaTypeFilterDto) -> Self {
+        match value {
+            AssetMediaTypeFilterDto::All => Self::All,
+            AssetMediaTypeFilterDto::Image => Self::Image,
+            AssetMediaTypeFilterDto::Video => Self::Video,
+            AssetMediaTypeFilterDto::Audio => Self::Audio,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetSourceFilterDto {
+    #[default]
+    All,
+    Source,
+    Generated,
+}
+
+impl From<AssetSourceFilterDto> for AssetSourceFilter {
+    fn from(value: AssetSourceFilterDto) -> Self {
+        match value {
+            AssetSourceFilterDto::All => Self::All,
+            AssetSourceFilterDto::Source => Self::Source,
+            AssetSourceFilterDto::Generated => Self::Generated,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetCreatedOrderDto {
+    #[default]
+    Newest,
+    Oldest,
+}
+
+impl From<AssetCreatedOrderDto> for AssetCreatedOrder {
+    fn from(value: AssetCreatedOrderDto) -> Self {
+        match value {
+            AssetCreatedOrderDto::Newest => Self::Newest,
+            AssetCreatedOrderDto::Oldest => Self::Oldest,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetLibraryQueryDto {
+    pub project_id: String,
+    #[serde(default)]
+    pub category: AssetCategoryFilterDto,
+    #[serde(default)]
+    pub keyword: Option<String>,
+    #[serde(default)]
+    pub media_type: AssetMediaTypeFilterDto,
+    #[serde(default)]
+    pub source_kind: AssetSourceFilterDto,
+    #[serde(default)]
+    pub created_order: AssetCreatedOrderDto,
+    #[serde(default)]
+    pub cursor: Option<crate::application::pagination::PageCursor>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn asset_library_page(
     state: State<'_, AppState>,
-    project_id: String,
-    category: AssetCategoryFilterDto,
-    cursor: Option<PageCursor>,
-    limit: Option<u32>,
+    query: AssetLibraryQueryDto,
 ) -> Result<AssetLibraryPageView, AppError> {
-    super::validate_project_id(&project_id)?;
+    super::validate_project_id(&query.project_id)?;
     state
         .asset_library_service
-        .list_page(&project_id, category.into(), cursor, limit.unwrap_or(30))
+        .list_page(AssetLibraryQuery {
+            project_id: query.project_id,
+            category: query.category.into(),
+            keyword: query.keyword,
+            media_type: query.media_type.into(),
+            source_kind: query.source_kind.into(),
+            created_order: query.created_order.into(),
+            cursor: query.cursor,
+            limit: query.limit.unwrap_or(30),
+        })
         .await
         .map_err(map_asset_library_error)
 }

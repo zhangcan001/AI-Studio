@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getTaskDetail, taskHistoryPage } from "../../services/tauriClient";
 import { subscribeTaskUpdates } from "../../services/taskEvents";
 import type { PageCursor } from "../../types/asset";
-import type { ReusableGenerationDraft, TaskDetail, TaskHistoryFilter, TaskHistoryItem } from "../../types/history";
+import type { ReusableGenerationDraft, TaskDetail, TaskHistoryFilter, TaskHistoryItem, TaskHistoryTimeFilter, TaskHistoryWorkflowOption } from "../../types/history";
 import type { TaskStatus } from "../../types/task";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { AssetPreview } from "../assets/AssetPreview";
 import { TaskHistoryDetail } from "./TaskHistoryDetail";
 import { TaskHistoryList } from "./TaskHistoryList";
+import { mergeTaskHistoryItems } from "./taskHistoryState";
 
 interface Props {
   projectId: string;
@@ -19,6 +20,11 @@ interface Props {
 
 export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, onLoadInputs }: Props) {
   const [filter, setFilter] = useState<TaskHistoryFilter>("ALL");
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [workflowId, setWorkflowId] = useState("");
+  const [timeFilter, setTimeFilter] = useState<TaskHistoryTimeFilter>("ALL");
+  const [workflowOptions, setWorkflowOptions] = useState<TaskHistoryWorkflowOption[]>([]);
   const [items, setItems] = useState<TaskHistoryItem[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
   const [loading, setLoading] = useState(false);
@@ -30,6 +36,15 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
   const requestVersion = useRef(0);
   const detailVersion = useRef(0);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setKeyword(keywordInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [keywordInput]);
+
+  useEffect(() => {
+    setWorkflowId("");
+  }, [projectId]);
+
   const loadPage = useCallback(
     async (reset: boolean) => {
       const version = ++requestVersion.current;
@@ -37,14 +52,19 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
       setLoading(true);
       setError(undefined);
       try {
-        const page = await taskHistoryPage(projectId, filter, requestedCursor, 30);
+        const page = await taskHistoryPage({
+          projectId,
+          filter,
+          workflowId: workflowId || undefined,
+          keyword: keyword || undefined,
+          timeFilter,
+          cursor: requestedCursor,
+          limit: 30,
+        });
         if (requestVersion.current !== version) return;
-        setItems((current) =>
-          reset
-            ? page.items
-            : [...current, ...page.items.filter((item) => !current.some((existing) => existing.id === item.id))],
-        );
+        setItems((current) => mergeTaskHistoryItems(current, page.items, reset));
         setCursor(page.nextCursor);
+        setWorkflowOptions(page.workflowOptions);
         setActivityNotice(false);
       } catch (loadError: unknown) {
         if (requestVersion.current === version) {
@@ -54,7 +74,7 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
         if (requestVersion.current === version) setLoading(false);
       }
     },
-    [cursor, filter, projectId],
+    [cursor, filter, keyword, projectId, timeFilter, workflowId],
   );
 
   useEffect(() => {
@@ -66,7 +86,7 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
     setPreviewAssetId(undefined);
     setActivityNotice(false);
     void loadPage(true);
-  }, [filter, projectId]); // loadPage intentionally captures the reset context for this effect.
+  }, [filter, keyword, projectId, timeFilter, workflowId]); // loadPage intentionally captures the reset context for this effect.
 
   useEffect(() => {
     let active = true;
@@ -146,10 +166,17 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
         <>
           <TaskHistoryList
             filter={filter}
+            keyword={keywordInput}
+            workflowId={workflowId}
+            timeFilter={timeFilter}
+            workflowOptions={workflowOptions}
             items={items}
             nextCursor={cursor}
             loading={loading}
             onFilterChange={setFilter}
+            onKeywordChange={setKeywordInput}
+            onWorkflowChange={setWorkflowId}
+            onTimeFilterChange={setTimeFilter}
             onSelect={(taskId) => void selectTask(taskId)}
             onRefresh={() => void loadPage(true)}
             onLoadMore={() => void loadPage(false)}

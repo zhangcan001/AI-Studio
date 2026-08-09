@@ -5,16 +5,28 @@ interface Props {
   projectId: string;
   assets: AssetView[];
   onSelect: (asset: AssetView) => void;
+  emptyMessage?: string;
+  compareMode?: boolean;
+  compareIds?: string[];
+  onToggleCompare?: (asset: AssetView) => void;
 }
 
-export function AssetGrid({ projectId, assets, onSelect }: Props) {
+export function AssetGrid({ projectId, assets, onSelect, emptyMessage = "没有找到符合条件的素材。", compareMode, compareIds = [], onToggleCompare }: Props) {
   if (!assets.length) {
-    return <p className="empty-state">当前筛选条件下没有找到资产。</p>;
+    return <p className="empty-state">{emptyMessage}</p>;
   }
   return (
     <div className="asset-library-grid">
       {assets.map((asset) => (
-        <AssetCard key={asset.id} projectId={projectId} asset={asset} onSelect={onSelect} />
+        <AssetCard
+          key={asset.id}
+          projectId={projectId}
+          asset={asset}
+          onSelect={onSelect}
+          compareMode={compareMode}
+          compared={compareIds.includes(asset.id)}
+          onToggleCompare={onToggleCompare}
+        />
       ))}
     </div>
   );

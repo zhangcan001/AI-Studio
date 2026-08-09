@@ -76,3 +76,16 @@ export type DraftValue =
   | { type: "audio_assets"; assetIds: string[] };
 
 export type GenerationValues = Record<string, DraftValue>;
+
+export type StudioAssetType = "image" | "video" | "audio";
+
+export interface PendingStudioAssetIntent {
+  projectId: string;
+  assetId: string;
+  assetType: StudioAssetType;
+}
+
+export interface StudioReuseProvenance {
+  workflowName: string;
+  createdAt: string;
+}

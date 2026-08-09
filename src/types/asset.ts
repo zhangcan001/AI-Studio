@@ -10,6 +10,7 @@ export interface AssetView {
   durationMs?: number | null;
   fileSize: number;
   createdAt: string;
+  sourceTaskId?: string;
   thumbnailAvailable?: boolean;
 }
 
@@ -20,6 +21,21 @@ export type AssetCategoryFilter =
   | "SOURCE_AUDIO"
   | "GENERATED_IMAGE"
   | "GENERATED_VIDEO";
+
+export type AssetMediaTypeFilter = "ALL" | "IMAGE" | "VIDEO" | "AUDIO";
+export type AssetSourceFilter = "ALL" | "SOURCE" | "GENERATED";
+export type AssetCreatedOrder = "NEWEST" | "OLDEST";
+
+export interface AssetLibraryQuery {
+  projectId: string;
+  category: AssetCategoryFilter;
+  keyword?: string;
+  mediaType: AssetMediaTypeFilter;
+  sourceKind: AssetSourceFilter;
+  createdOrder: AssetCreatedOrder;
+  cursor?: PageCursor;
+  limit?: number;
+}
 
 export interface AssetLibraryPage {
   items: AssetView[];

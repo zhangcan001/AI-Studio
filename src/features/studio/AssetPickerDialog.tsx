@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  listRecentAssets,
+  assetLibraryPage,
   pickAndImportAudio,
   pickAndImportImage,
   pickAndImportVideo,
   readAssetThumbnail,
 } from "../../services/tauriClient";
-import type { AssetView } from "../../types/asset";
+import type {
+  AssetView,
+  PageCursor,
+} from "../../types/asset";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { assetDisplayName, assetTypeLabel, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 import {
+  buildAssetPickerQuery,
   filterPickerAssets,
   applyAssetPickerAction,
   type AssetPickerFilter,
@@ -40,28 +44,46 @@ export function AssetPickerDialog({
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [selection, setSelection] = useState<string[]>(selectedIds);
   const [filter, setFilter] = useState<AssetPickerFilter>("all");
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [nextCursor, setNextCursor] = useState<PageCursor>();
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string>();
+  const requestVersion = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setKeyword(keywordInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [keywordInput]);
+
+  const query = useMemo(() => buildAssetPickerQuery(projectId, kind, filter, keyword), [filter, kind, keyword, projectId]);
 
   useEffect(() => {
     dialogRef.current?.focus();
     let active = true;
+    const version = ++requestVersion.current;
     setLoading(true);
-    void listRecentAssets(projectId, 100)
-      .then((nextAssets) => {
-        if (active) setAssets(nextAssets);
+    setError(undefined);
+    setAssets([]);
+    setNextCursor(undefined);
+    void assetLibraryPage(query)
+      .then((page) => {
+        if (active && requestVersion.current === version) {
+          setAssets(page.items);
+          setNextCursor(page.nextCursor);
+        }
       })
       .catch((loadError: unknown) => {
-        if (active) setError(toUserMessage(loadError));
+        if (active && requestVersion.current === version) setError(toUserMessage(loadError));
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active && requestVersion.current === version) setLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [query]);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -74,6 +96,27 @@ export function AssetPickerDialog({
   const visibleAssets = useMemo(() => filterPickerAssets(assets, kind, filter), [assets, filter, kind]);
   const title = kind === "image" ? "选择图片" : kind === "video" ? "选择视频" : "选择音频";
   const importLabel = kind === "image" ? "导入本地图片" : kind === "video" ? "导入本地视频" : "导入本地音频";
+
+  async function loadNextPage() {
+    if (!nextCursor || loading) return;
+    const version = ++requestVersion.current;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const page = await assetLibraryPage({ ...query, cursor: nextCursor });
+      if (requestVersion.current !== version) return;
+      setAssets((current) => {
+        const byId = new Map(current.map((asset) => [asset.id, asset]));
+        for (const asset of page.items) byId.set(asset.id, asset);
+        return [...byId.values()];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (loadError: unknown) {
+      if (requestVersion.current === version) setError(toUserMessage(loadError));
+    } finally {
+      if (requestVersion.current === version) setLoading(false);
+    }
+  }
 
   function toggle(assetId: string) {
     setSelection((current) => toggleAssetSelection(current, assetId, multiple, maxItems));
@@ -128,6 +171,16 @@ export function AssetPickerDialog({
             </button>
           ))}
         </div>
+        <label className="asset-picker-search">
+          <span>搜索素材</span>
+          <input
+            type="search"
+            value={keywordInput}
+            onChange={(event) => setKeywordInput(event.target.value)}
+            placeholder="搜索名称或原始文件名"
+            aria-label="搜索素材"
+          />
+        </label>
         {loading ? (
           <p className="asset-picker-empty" role="status">正在加载当前项目素材...</p>
         ) : visibleAssets.length ? (
@@ -147,7 +200,12 @@ export function AssetPickerDialog({
             })}
           </div>
         ) : (
-          <p className="asset-picker-empty">当前项目没有可选择的{title.replace("选择", "")}。</p>
+          <p className="asset-picker-empty">{keyword ? "没有找到符合条件的素材。" : `当前项目没有可选择的${title.replace("选择", "")}。`}</p>
+        )}
+        {nextCursor && !loading && (
+          <button type="button" className="quiet-button asset-picker-load-more" onClick={() => void loadNextPage()}>
+            加载更多
+          </button>
         )}
         {error && <p className="error-message" role="alert">{error}</p>}
         <div className="asset-picker-footer">

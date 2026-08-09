@@ -1,12 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assetLibraryPage } from "../../services/tauriClient";
-import type { AssetCategoryFilter, AssetView, PageCursor } from "../../types/asset";
+import type {
+  AssetCategoryFilter,
+  AssetCreatedOrder,
+  AssetLibraryQuery,
+  AssetMediaTypeFilter,
+  AssetSourceFilter,
+  AssetView,
+  PageCursor,
+} from "../../types/asset";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { AssetCompareWorkspace } from "./AssetCompareWorkspace";
+import { toggleCompareSelection } from "./assetCompare";
+import { mergeAssetPage } from "./assetLibraryState";
 import { AssetGrid } from "./AssetGrid";
 import { AssetPreview } from "./AssetPreview";
 
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
-  { value: "ALL", label: "全部" },
+  { value: "ALL", label: "全部分类" },
   { value: "SOURCE_IMAGE", label: "源图片" },
   { value: "SOURCE_VIDEO", label: "源视频" },
   { value: "SOURCE_AUDIO", label: "源音频" },
@@ -14,66 +25,96 @@ const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "GENERATED_VIDEO", label: "生成视频" },
 ];
 
-export function AssetLibrary({ projectId }: { projectId: string }) {
+interface Props {
+  projectId: string;
+  onUseInStudio: (asset: AssetView) => void;
+  onOpenTask: (taskId: string) => void;
+}
+
+export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
   const [category, setCategory] = useState<AssetCategoryFilter>("ALL");
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [mediaType, setMediaType] = useState<AssetMediaTypeFilter>("ALL");
+  const [sourceKind, setSourceKind] = useState<AssetSourceFilter>("ALL");
+  const [createdOrder, setCreatedOrder] = useState<AssetCreatedOrder>("NEWEST");
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
   const [selectedAsset, setSelectedAsset] = useState<AssetView>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareAssets, setCompareAssets] = useState<AssetView[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   const requestVersion = useRef(0);
 
-  const load = useCallback(
-    async (reset: boolean) => {
-      const version = ++requestVersion.current;
-      const requestedCursor = reset ? undefined : cursor;
-      setLoading(true);
-      setError(undefined);
-      try {
-        const page = await assetLibraryPage(projectId, category, requestedCursor, 30);
-        if (requestVersion.current !== version) return;
-        setAssets((current) =>
-          reset
-            ? page.items
-            : [...current, ...page.items.filter((asset) => !current.some((item) => item.id === asset.id))],
-        );
-        setCursor(page.nextCursor);
-      } catch (loadError: unknown) {
-        if (requestVersion.current === version) {
-          setError(toUserMessage(loadError));
-        }
-      } finally {
-        if (requestVersion.current === version) setLoading(false);
-      }
-    },
-    [category, cursor, projectId],
-  );
+  useEffect(() => {
+    const timer = window.setTimeout(() => setKeyword(keywordInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [keywordInput]);
+
+  const query = useMemo<AssetLibraryQuery>(() => ({
+    projectId,
+    category,
+    keyword: keyword || undefined,
+    mediaType,
+    sourceKind,
+    createdOrder,
+    limit: 30,
+  }), [category, createdOrder, keyword, mediaType, projectId, sourceKind]);
+
+  const requestPage = useCallback(async (requestedCursor: PageCursor | undefined, reset: boolean) => {
+    const version = ++requestVersion.current;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const page = await assetLibraryPage({ ...query, cursor: requestedCursor });
+      if (requestVersion.current !== version) return;
+      setAssets((current) => mergeAssetPage(current, page.items, reset));
+      setCursor(page.nextCursor);
+    } catch (loadError: unknown) {
+      if (requestVersion.current === version) setError(toUserMessage(loadError));
+    } finally {
+      if (requestVersion.current === version) setLoading(false);
+    }
+  }, [query]);
 
   useEffect(() => {
-    const version = ++requestVersion.current;
     setAssets([]);
     setCursor(undefined);
     setSelectedAsset(undefined);
     setError(undefined);
-    setLoading(true);
-    void assetLibraryPage(projectId, category, undefined, 30)
-      .then((page) => {
-        if (requestVersion.current !== version) return;
-        setAssets(page.items);
-        setCursor(page.nextCursor);
-      })
-      .catch((loadError: unknown) => {
-        if (requestVersion.current === version) {
-          setError(toUserMessage(loadError));
-        }
-      })
-      .finally(() => {
-        if (requestVersion.current === version) setLoading(false);
-      });
+    void requestPage(undefined, true);
     return () => {
       requestVersion.current += 1;
     };
-  }, [category, projectId]);
+  }, [requestPage]);
+
+  useEffect(() => {
+    setCompareMode(false);
+    setCompareAssets([]);
+    setCompareOpen(false);
+  }, [projectId]);
+
+  function clearFilters() {
+    setKeywordInput("");
+    setKeyword("");
+    setCategory("ALL");
+    setMediaType("ALL");
+    setSourceKind("ALL");
+    setCreatedOrder("NEWEST");
+    setNotice(undefined);
+  }
+
+  function toggleCompare(asset: AssetView) {
+    const result = toggleCompareSelection(compareAssets, asset);
+    setCompareAssets(result.assets);
+    setNotice(result.notice);
+  }
+
+  const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL");
+  const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
 
   return (
     <section className="workspace-panel" aria-busy={loading}>
@@ -81,12 +122,49 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
         <div>
           <span className="section-label">资产</span>
           <h2>资产库</h2>
-          <p className="section-description">浏览当前项目的源素材和生成结果。</p>
+          <p className="section-description">搜索、筛选、对比当前项目的源素材和生成结果。</p>
         </div>
-        <button type="button" className="quiet-button" onClick={() => void load(true)} disabled={loading}>
-          {loading ? "正在刷新..." : "刷新"}
-        </button>
+        <div className="asset-library-actions">
+          <button type="button" className={compareMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setCompareMode((value) => !value)}>
+            {compareMode ? "结束对比选择" : "选择进行对比"}
+          </button>
+          <button type="button" className="quiet-button" onClick={() => void requestPage(undefined, true)} disabled={loading}>
+            {loading ? "正在刷新..." : "刷新"}
+          </button>
+        </div>
       </div>
+
+      <div className="asset-library-query" aria-label="资产查询">
+        <label className="asset-search-field">
+          <span>搜索素材</span>
+          <input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="搜索名称或原始文件名" />
+        </label>
+        <label>
+          <span>来源</span>
+          <select value={sourceKind} onChange={(event) => setSourceKind(event.target.value as AssetSourceFilter)}>
+            <option value="ALL">全部</option>
+            <option value="SOURCE">源素材</option>
+            <option value="GENERATED">生成结果</option>
+          </select>
+        </label>
+        <label>
+          <span>类型</span>
+          <select value={mediaType} onChange={(event) => setMediaType(event.target.value as AssetMediaTypeFilter)}>
+            <option value="ALL">全部类型</option>
+            <option value="IMAGE">图片</option>
+            <option value="VIDEO">视频</option>
+            <option value="AUDIO">音频</option>
+          </select>
+        </label>
+        <label>
+          <span>排序</span>
+          <select value={createdOrder} onChange={(event) => setCreatedOrder(event.target.value as AssetCreatedOrder)}>
+            <option value="NEWEST">最新优先</option>
+            <option value="OLDEST">最早优先</option>
+          </select>
+        </label>
+      </div>
+
       <div className="filter-row" aria-label="资产分类">
         {categories.map((item) => (
           <button
@@ -100,14 +178,61 @@ export function AssetLibrary({ projectId }: { projectId: string }) {
         ))}
       </div>
       {error && <p className="error-message">资产加载失败：{error}</p>}
-      <AssetGrid projectId={projectId} assets={assets} onSelect={setSelectedAsset} />
+      {notice && <p className="studio-notice" role="status">{notice}</p>}
+      <AssetGrid
+        projectId={projectId}
+        assets={assets}
+        emptyMessage={emptyMessage}
+        onSelect={setSelectedAsset}
+        compareMode={compareMode}
+        compareIds={compareAssets.map((asset) => asset.id)}
+        onToggleCompare={toggleCompare}
+      />
+      {hasFilters && !loading && (
+        <button type="button" className="quiet-button clear-asset-filters" onClick={clearFilters}>清除筛选</button>
+      )}
       {cursor && (
-        <button type="button" className="load-more-button" onClick={() => void load(false)} disabled={loading}>
-          {loading ? "正在加载..." : "加载更多"}
+        <button type="button" className="load-more-button" onClick={() => void requestPage(cursor, false)} disabled={loading}>
+          {loading ? "正在加载..." : "加载下一页"}
         </button>
       )}
+      {compareMode && (
+        <section className="asset-compare-tray" aria-label="对比素材">
+          <div>
+            <strong>对比素材（{compareAssets.length}/4）</strong>
+            <span>选择2到4个相同类型的图片或视频。</span>
+          </div>
+          <div className="asset-compare-tray-items">
+            {compareAssets.map((asset) => (
+              <button key={asset.id} type="button" className="quiet-button" onClick={() => toggleCompare(asset)}>
+                {asset.name} ×
+              </button>
+            ))}
+            <button type="button" onClick={() => setCompareOpen(true)} disabled={compareAssets.length < 2}>打开对比</button>
+            <button type="button" className="quiet-button" onClick={() => setCompareAssets([])} disabled={!compareAssets.length}>清空</button>
+          </div>
+        </section>
+      )}
       {selectedAsset && (
-        <AssetPreview projectId={projectId} asset={selectedAsset} onClose={() => setSelectedAsset(undefined)} />
+        <AssetPreview
+          projectId={projectId}
+          asset={selectedAsset}
+          onClose={() => setSelectedAsset(undefined)}
+          onUseInStudio={onUseInStudio}
+          onOpenTask={onOpenTask}
+        />
+      )}
+      {compareOpen && compareAssets.length >= 2 && (
+        <AssetCompareWorkspace
+          projectId={projectId}
+          assets={compareAssets}
+          onRemove={(assetId) => setCompareAssets((items) => items.filter((asset) => asset.id !== assetId))}
+          onClear={() => {
+            setCompareAssets([]);
+            setCompareOpen(false);
+          }}
+          onClose={() => setCompareOpen(false)}
+        />
       )}
     </section>
   );

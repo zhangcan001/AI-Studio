@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssetView } from "../../types/asset";
-import { applyAssetPickerAction, filterPickerAssets, toggleAssetSelection } from "./assetPicker";
+import { applyAssetPickerAction, buildAssetPickerQuery, filterPickerAssets, toggleAssetSelection } from "./assetPicker";
 
 const assets = [
   { id: "img-source", assetType: "image", category: "source_image", name: "source", fileSize: 1 },
@@ -23,6 +23,20 @@ describe("素材选择器", () => {
     expect(toggleAssetSelection(["a"], "b", true, 2)).toEqual(["a", "b"]);
     expect(toggleAssetSelection(["a", "b"], "c", true, 2)).toEqual(["a", "b"]);
     expect(toggleAssetSelection(["a", "b"], "a", true, 2)).toEqual(["b"]);
+  });
+
+  it("使用后端查询限制媒体类型、来源和关键词，并支持游标分页", () => {
+    const cursor = { createdAt: "2026-01-01T00:00:00Z", id: "asset-1" };
+    expect(buildAssetPickerQuery("project-1", "image", "source", " 人物 ", cursor)).toEqual({
+      projectId: "project-1",
+      category: "ALL",
+      keyword: "人物",
+      mediaType: "IMAGE",
+      sourceKind: "SOURCE",
+      createdOrder: "NEWEST",
+      cursor,
+      limit: 30,
+    });
   });
 
   it("取消不改变已提交选择，确定才提交选择器草稿", () => {

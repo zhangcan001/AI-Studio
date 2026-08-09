@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
-import { assetDisplayName, assetTypeLabel, formatDurationMs } from "../../i18n/statusLabels";
+import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 
 interface Props {
   projectId: string;
   asset: AssetView;
   onClose: () => void;
+  onUseInStudio?: (asset: AssetView) => void;
+  onOpenTask?: (taskId: string) => void;
 }
 
-export function AssetPreview({ projectId, asset, onClose }: Props) {
+export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenTask }: Props) {
   const [url, setUrl] = useState<string>();
   const [posterUrl, setPosterUrl] = useState<string>();
   const [error, setError] = useState<string>();
@@ -83,9 +85,17 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
             <span className="section-label">资产预览</span>
             <h2>{displayName}</h2>
           </div>
-          <button type="button" className="quiet-button" onClick={onClose} aria-label="关闭预览">
-            关闭
-          </button>
+          <div className="asset-preview-actions">
+            {onUseInStudio && <button type="button" onClick={() => onUseInStudio(asset)}>用于创作</button>}
+            {asset.sourceTaskId && onOpenTask && (
+              <button type="button" className="quiet-button" onClick={() => onOpenTask(asset.sourceTaskId!)}>
+                查看生成任务
+              </button>
+            )}
+            <button type="button" className="quiet-button" onClick={onClose} aria-label="关闭预览">
+              关闭
+            </button>
+          </div>
         </div>
         <div className="asset-preview-image">
           {isVideo && url ? (
@@ -95,7 +105,7 @@ export function AssetPreview({ projectId, asset, onClose }: Props) {
           ) : url ? <img src={url} alt={displayName} /> : <p>{error ?? "正在加载预览..."}</p>}
         </div>
         <p className="asset-preview-meta">
-          {assetTypeLabel(asset)} · {displayOriginalName} · {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {asset.mimeType}
+          {assetTypeLabel(asset)} · {displayOriginalName} · {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatFileSize(asset.fileSize)} · {formatDateTime(asset.createdAt)}
         </p>
       </section>
     </div>

@@ -26,13 +26,57 @@ impl AssetCategoryFilter {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AssetMediaTypeFilter {
+    #[default]
+    All,
+    Image,
+    Video,
+    Audio,
+}
+
+impl AssetMediaTypeFilter {
+    pub fn asset_type(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            Self::Image => Some("image"),
+            Self::Video => Some("video"),
+            Self::Audio => Some("audio"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AssetSourceFilter {
+    #[default]
+    All,
+    Source,
+    Generated,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AssetCreatedOrder {
+    #[default]
+    Newest,
+    Oldest,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssetLibraryQuery {
+    pub project_id: String,
+    pub category: AssetCategoryFilter,
+    pub keyword: Option<String>,
+    pub media_type: AssetMediaTypeFilter,
+    pub source_kind: AssetSourceFilter,
+    pub created_order: AssetCreatedOrder,
+    pub cursor: Option<PageCursor>,
+    pub limit: u32,
+}
+
 #[async_trait]
 pub trait AssetBrowseRepository: Send + Sync {
     async fn list_page(
         &self,
-        project_id: &str,
-        category: AssetCategoryFilter,
-        cursor: Option<PageCursor>,
-        limit: u32,
+        query: AssetLibraryQuery,
     ) -> Result<PageResult<Asset>, RepositoryError>;
 }
