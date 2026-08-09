@@ -18,7 +18,7 @@ AI Studio 0.2.0 是 M2 Foundation 与 Runtime Productization 的本地 Windows �
 - 本版本不新增数据库 migration 009。
 - 不新增第三模型，不包含 H3 显存策略扩展。
 - 模型、文件等未声明依赖不会被客户端猜测；依赖诊断只使用运行包声明和 ComfyUI `/object_info` 可验证信息。
-- 版本未创建 Git tag 或 GitHub Release，发布动作由维护者在最终验收后执行。
+- 已创建 Git tag `v0.2.0` 和 GitHub Release；Windows 安装包与 SHA-256 清单作为 Release 资产提供。
 
 ## 构建产物
 
@@ -31,3 +31,5 @@ SHA-256：
 - `ai-studio.exe`: `CEE816A343978DB26BFFFA2A1D66D6D28391C9A8FF73DDB4762689FA1161FBAC`
 - `AI Studio_0.2.0_x64_en-US.msi`: `E8DB7CA8FD9001DDC4A09C3F4221130FE0BC6D9CB782256E340C448F9064825C`
 - `AI Studio_0.2.0_x64-setup.exe`: `C61C532C400D61F106F6E959249B390647E0A325542228C53BAA7EAE8531B130`
+
+完整清单见 `docs/RELEASE_SHA256_0.2.0.txt`。

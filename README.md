@@ -156,8 +156,9 @@ M2 Foundation Pack 01–04 adds migration-free persistent settings, a validated
 and live-switchable ComfyUI endpoint, project backup preview/export/restore,
 asset organization, runtime health/readiness diagnostics, preferred presets,
 workflow variants, and workflow quick testing. The 0.2.0 release artifacts are
-built and documented in `docs/RELEASE_NOTES_0.2.0.md`; no Git tag or GitHub
-Release was created by the development automation.
+built and documented in `docs/RELEASE_NOTES_0.2.0.md` and
+`docs/RELEASE_SHA256_0.2.0.txt`. The formal `v0.2.0` GitHub Release is
+available from the repository releases page.
 
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
