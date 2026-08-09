@@ -31,6 +31,8 @@ import { StudioModeTabs, type StudioMode } from "./StudioModeTabs";
 import { WorkflowLauncher } from "./WorkflowLauncher";
 import { NoWorkflowGuide } from "./NoWorkflowGuide";
 import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
+import { CreationModeHint } from "../runtime/CreationModeHint";
+import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfilePanel";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -539,6 +541,12 @@ export function GenerationStudio({
     }
   }
 
+  function applyRuntimeProfile(nextValues: typeof values) {
+    if (!selectedWorkflow) return;
+    useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
+    setMissingAssetFields(new Set());
+  }
+
   if (!catalog.length) {
     return (
       <NoWorkflowGuide
@@ -576,6 +584,7 @@ export function GenerationStudio({
                 {refreshing ? "正在刷新..." : "刷新工作流"}
               </button>
             </div>
+            <CreationModeHint recipe={selectedWorkflow} />
             {reuseProvenance && (
               <div className="studio-provenance" role="status">
                 <strong>已加载历史任务参数</strong>
@@ -661,6 +670,7 @@ export function GenerationStudio({
                 {templateError && <p className="error-message" role="alert">{templateError}</p>}
               </section>
             )}
+            <RuntimeParameterProfilePanel recipe={selectedWorkflow} values={values} onApply={applyRuntimeProfile} />
             {selectedWorkflow.workflowId === "wfl_minimax_h3_reference_video" && (
               <details className="h3-safety-note">
                 <summary>✓ 16GB 安全配置</summary>

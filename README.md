@@ -2,7 +2,8 @@
 
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
-Current version: `0.2.0` (M2 Foundation Pack 01–04 complete; ready for release).
+Released: `0.2.0` (M2 Foundation Pack 01–04 verified; immutable release).
+Development: `0.3.0` (M3 Creation Expansion Pack 05).
 The released `0.1.0` baseline remains available in the Git history and GitHub
 Release; this development cycle does not modify its tag or release assets.
 
@@ -12,7 +13,10 @@ M0 = PASS.
 
 M1 progress:
 
-Production scope is intentionally limited to Kera2 for image generation and MiniMax H3 for video generation. The shared runtime remains generic, but no third model runtime pack is part of the product plan.
+The shared runtime remains generic. Kera2 image generation and MiniMax H3
+reference-to-video are the live-validated production runtimes; M3 Pack 05 adds
+model-agnostic runtime onboarding and creation expansion without bundling or
+downloading model files.
 
 **M1 Release Candidate 01 = PASS.** Global single-GPU production admission,
 cross-project and interactive submission safety, deterministic restart
@@ -144,8 +148,10 @@ UNet, 0.1 MP, four sampling steps, a 1–5 second Recipe range, and single-task
 execution. Evidence and operating limits are recorded in
 `docs/M1_MINIMAX_H3_RUNTIME_VALIDATION.md`.
 
-Kera2 image generation and MiniMax H3 reference-to-video are now the two
-live-validated production runtimes. No third model runtime pack is planned.
+Kera2 image generation and MiniMax H3 reference-to-video are the two
+live-validated production runtimes on the frozen 0.2.0 line. The 0.3.0
+development line adds model-agnostic runtime onboarding; it does not bundle or
+download a third model.
 
 **AI Studio 0.1.0 Final Release Gate = PASS.** NSIS is the primary Windows
 installer; the final release evidence, artifact hashes, clean install/data
@@ -159,6 +165,13 @@ workflow variants, and workflow quick testing. The 0.2.0 release artifacts are
 built and documented in `docs/RELEASE_NOTES_0.2.0.md` and
 `docs/RELEASE_SHA256_0.2.0.txt`. The formal `v0.2.0` GitHub Release is
 available from the repository releases page.
+
+The v0.2.0 post-release integrity audit is recorded in
+`docs/POST_RELEASE_AUDIT_0.2.0.md`. The v0.2.0 tag and Release remain frozen;
+new work is development-only on the 0.3.0 line.
+
+M3 Pack 05 implementation notes and the third-runtime environment boundary are
+recorded in `docs/M3_CREATION_EXPANSION_PACK_05.md`.
 
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not

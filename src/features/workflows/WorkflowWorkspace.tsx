@@ -180,6 +180,17 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       const imported = await pickApiWorkflow(existingWorkflowId);
       if (imported) {
         setDraft(imported);
+        const validation = imported.validation;
+        const failedChecks = [
+          !validation.apiFormat && "API 格式",
+          !validation.recipe && "配方",
+          !validation.bindings && "输入映射",
+          !validation.outputs && "输出映射",
+        ].filter((value): value is string => Boolean(value));
+        setNotice(failedChecks.length
+          ? `导入质量初检完成：${imported.nodeCount} 个节点；待处理：${failedChecks.join("、")}。`
+          : `导入质量初检通过：${imported.nodeCount} 个节点、${imported.uniqueClassCount} 种节点类型；请继续完成能力检查与试运行。`,
+        );
         await loadWorkspace();
       }
     } catch (importError: unknown) {
@@ -423,8 +434,21 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           <button type="button" onClick={() => void loadWorkspace()} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
           <button type="button" onClick={() => void importWorkflow()} disabled={loading}>导入 API 工作流</button>
           <button type="button" onClick={() => void importBackup()} disabled={loading}>导入工作流备份</button>
+        </div>
       </div>
-      </div>
+
+      <section className="workflow-import-quality" aria-label="工作流导入质量门">
+        <div>
+          <span className="section-label">导入质量门</span>
+          <strong>API 格式 → 节点与依赖 → 输入/输出映射 → 试运行</strong>
+          <p>编辑器 UI JSON 会明确提示转换；导入过程不会下载模型，也不会猜测未声明的本机依赖。</p>
+        </div>
+        <ul>
+          <li>校验 JSON 根结构、节点类型与输入对象</li>
+          <li>检查疑似凭据和本机绝对路径</li>
+          <li>发布前必须完成能力检查、输出映射和真实快速测试</li>
+        </ul>
+      </section>
 
       {workspaceError && <p className="error-message" role="alert">{workspaceError}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}

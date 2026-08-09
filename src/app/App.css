@@ -441,6 +441,23 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 
 .workflow-workspace { display: grid; gap: 18px; }
 .workflow-workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.workflow-import-quality {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.8fr);
+  gap: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--ux-border);
+  border-radius: 10px;
+  color: var(--ux-muted);
+  background: var(--ux-surface-1);
+  font-size: 0.78rem;
+}
+
+.workflow-import-quality > div { display: grid; gap: 4px; }
+.workflow-import-quality strong { color: var(--ux-text); }
+.workflow-import-quality p { margin: 0; }
+.workflow-import-quality ul { display: grid; gap: 3px; margin: 0; padding-left: 18px; }
 .workflow-production-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
 .workflow-production-toolbar input { min-width: 220px; }
 .workflow-notice { margin: 0; padding: 10px 12px; border: 1px solid #3d7956; border-radius: 9px; color: #b9f5cd; background: #173725; }
@@ -765,6 +782,21 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   font-size: 0.8rem;
 }
 
+.workflow-launcher-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(220px, 1fr);
+  gap: 8px;
+}
+
+.workflow-launcher-controls label,
+.runtime-profile-name,
+.runtime-profile-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
 .workflow-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -819,6 +851,78 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 
 .studio-input-heading {
   margin-top: 18px;
+}
+
+.creation-mode-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--ux-border);
+  border-radius: 9px;
+  background: var(--ux-surface-1);
+}
+
+.creation-mode-hint p {
+  margin: 0;
+  color: var(--ux-muted);
+  font-size: 0.8rem;
+}
+
+.creation-mode-hint small {
+  flex: 0 0 auto;
+  color: var(--ux-accent);
+  font-size: 0.74rem;
+}
+
+.runtime-profile-panel {
+  margin-top: 12px;
+  border: 1px solid var(--ux-border);
+  border-radius: 9px;
+  background: var(--ux-surface-1);
+}
+
+.runtime-profile-panel summary {
+  padding: 11px 12px;
+  cursor: pointer;
+  color: var(--ux-text);
+  font-weight: 700;
+}
+
+.runtime-profile-content {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.runtime-profile-content > p,
+.runtime-profile-content > small {
+  margin: 0;
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+}
+
+.runtime-profile-toolbar {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.runtime-profile-toolbar select {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.runtime-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.runtime-profile-notice {
+  color: var(--ux-text) !important;
 }
 
 .studio-input-heading p,
@@ -2205,6 +2309,17 @@ summary:focus-visible {
   .asset-compare-grid-3,
   .asset-compare-grid-4 {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-launcher-controls,
+  .runtime-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .creation-mode-hint,
+  .runtime-profile-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .asset-compare-workspace {

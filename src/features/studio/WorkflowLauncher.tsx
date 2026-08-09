@@ -1,5 +1,7 @@
+import { useMemo, useState } from "react";
 import type { RecipeViewModel } from "../../types/generation";
 import { workflowDescription, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
+import { filterRuntimeCatalog, runtimeKindFor, runtimeKindLabel, type RuntimeFilter } from "../runtime/pack05";
 
 interface Props {
   catalog: RecipeViewModel[];
@@ -8,6 +10,10 @@ interface Props {
 }
 
 export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props) {
+  const [filter, setFilter] = useState<RuntimeFilter>("all");
+  const [search, setSearch] = useState("");
+  const visibleCatalog = useMemo(() => filterRuntimeCatalog(catalog, filter, search), [catalog, filter, search]);
+
   return (
     <section className="workflow-launcher" aria-labelledby="workflow-launcher-title">
       <div className="section-heading workflow-launcher-heading">
@@ -16,10 +22,26 @@ export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props)
           <h2 id="workflow-launcher-title">选择创作类型</h2>
           <p className="section-description">先选一个工作流，再填写输入参数。</p>
         </div>
-        <span className="workflow-launcher-count">{catalog.length} 个工作流</span>
+        <span className="workflow-launcher-count">{visibleCatalog.length} / {catalog.length} 个工作流</span>
+      </div>
+      <div className="workflow-launcher-controls">
+        <label>
+          <span>创作类型</span>
+          <select aria-label="运行时类型筛选" value={filter} onChange={(event) => setFilter(event.target.value as RuntimeFilter)}>
+            <option value="all">全部</option>
+            <option value="image">图片</option>
+            <option value="video">视频</option>
+            <option value="audio">音频</option>
+            <option value="mixed">复合</option>
+          </select>
+        </label>
+        <label>
+          <span>搜索</span>
+          <input aria-label="搜索运行时" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="按名称或模式搜索" />
+        </label>
       </div>
       <div className="workflow-card-grid" role="list" aria-label="可用工作流">
-        {catalog.map((recipe) => {
+        {visibleCatalog.map((recipe) => {
           const selected = recipe.workflowVersionId === selectedWorkflow?.workflowVersionId && recipe.recipeId === selectedWorkflow?.recipeId;
           return (
             <div key={`${recipe.workflowVersionId}:${recipe.recipeId}`} role="listitem">
@@ -32,7 +54,7 @@ export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props)
                 <span className="workflow-card-mark" aria-hidden="true">{workflowModeLabel(recipe.mode).slice(0, 1)}</span>
                 <span className="workflow-card-copy">
                   <strong>{workflowDisplayName(recipe.workflowId, recipe.name)}</strong>
-                  <small>{workflowModeLabel(recipe.mode)}</small>
+                  <small>{runtimeKindLabel(runtimeKindFor(recipe))} · {workflowModeLabel(recipe.mode)}</small>
                   <span>{workflowDescription(recipe.mode)}</span>
                 </span>
                 <span className="workflow-card-state" aria-hidden="true">{selected ? "已选择" : "选择"}</span>
@@ -41,6 +63,7 @@ export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props)
           );
         })}
       </div>
+      {!visibleCatalog.length && <p className="disabled-note">没有匹配的运行时，请调整筛选条件。</p>}
     </section>
   );
 }
