@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   getComfyStatus,
+  getProductionAdmissionStatus,
   listGenerationCatalog,
   listProjects,
   listRecentTasks,
@@ -21,6 +22,7 @@ import { bootstrap, type BootstrapState } from "./bootstrap";
 import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { ProjectView } from "../types/project";
+import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import "./App.css";
 
 type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows";
@@ -28,6 +30,7 @@ type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows";
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
+  const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +41,7 @@ function App() {
   const [reconciling, setReconciling] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [projectContextLoading, setProjectContextLoading] = useState(false);
+  const [productionAdmission, setProductionAdmission] = useState<ProductionAdmissionStatus>({ busy: false });
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
   const activeProject = useProjectStore((state) => state.activeProject());
@@ -49,11 +53,22 @@ function App() {
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
   const recentTasks = useTaskStore((state) => state.recentTasks);
 
+  const refreshProductionAdmission = useCallback(async () => {
+    try {
+      setProductionAdmission(await getProductionAdmissionStatus());
+    } catch (admissionError: unknown) {
+      setError(admissionError instanceof Error ? admissionError.message : String(admissionError));
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    let admissionRefreshTimer: number | undefined;
 
     void subscribeTaskUpdates((task) => {
+      if (admissionRefreshTimer !== undefined) window.clearTimeout(admissionRefreshTimer);
+      admissionRefreshTimer = window.setTimeout(() => void refreshProductionAdmission(), 1_000);
       const currentProjectId = useProjectStore.getState().activeProjectId;
       if (!currentProjectId || task.projectId !== currentProjectId) return;
       useTaskStore.getState().upsertTask(task);
@@ -87,9 +102,14 @@ function App() {
 
     return () => {
       cancelled = true;
+      if (admissionRefreshTimer !== undefined) window.clearTimeout(admissionRefreshTimer);
       unlisten?.();
     };
-  }, []);
+  }, [refreshProductionAdmission]);
+
+  useEffect(() => {
+    void refreshProductionAdmission();
+  }, [refreshProductionAdmission]);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,6 +169,14 @@ function App() {
     setProjectContextLoading(true);
     setError(null);
     setWorkspace("studio");
+  }
+
+  function openProductionQueue() {
+    const { batchId, projectId } = productionAdmission;
+    if (!batchId || !projectId) return;
+    setFocusedProductionBatchId(batchId);
+    if (projectId !== activeProjectId) openProject(projectId);
+    else setWorkspace("studio");
   }
 
   async function reconnectComfy() {
@@ -302,6 +330,24 @@ function App() {
         ))}
       </nav>
 
+      {workspace === "studio" && productionAdmission.busy && (
+        <section className="production-admission-banner" role="status" aria-live="polite">
+          <div>
+            <span className="section-label">Production queue active</span>
+            <strong>{productionAdmission.batchName ?? "Persistent production queue"}</strong>
+            <p>Interactive GPU submissions are paused until the active production work finishes.</p>
+          </div>
+          <button
+            type="button"
+            className="quiet-button"
+            onClick={openProductionQueue}
+            disabled={!productionAdmission.batchId || !productionAdmission.projectId}
+          >
+            Open Queue
+          </button>
+        </section>
+      )}
+
       {projectContextLoading && activeProject && (
         <p className="project-loading" role="status">Loading project…</p>
       )}
@@ -336,7 +382,11 @@ function App() {
             comfyConnected={isConnected}
             taskEventsReady={taskEventsReady}
             taskEventError={taskEventError}
+            productionAdmission={productionAdmission}
+            focusProductionBatchId={focusedProductionBatchId}
             onCatalogChanged={reloadCatalog}
+            onProductionAdmissionChanged={refreshProductionAdmission}
+            onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
               setWorkspace("tasks");
@@ -349,6 +399,7 @@ function App() {
         <TaskHistory
           projectId={activeProject.id}
           comfyConnected={isConnected}
+          productionBusy={productionAdmission.busy}
           focusTaskId={focusedTaskId}
           onLoadInputs={loadHistoricalInputs}
         />

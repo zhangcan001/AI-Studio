@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProductionBatchItemView } from "../../types/productionQueue";
-import { isSafeProductionQueueRequeue } from "./productionQueuePolicy";
+import { isSafeProductionQueueRequeue, productionInteractionPolicy } from "./productionQueuePolicy";
 
 function item(status: ProductionBatchItemView["status"], errorCode?: string): ProductionBatchItemView {
   return {
@@ -29,5 +29,27 @@ describe("production queue requeue policy", () => {
     expect(isSafeProductionQueueRequeue(item("FAILED", "QUEUE_COMPILE_ERROR"))).toBe(false);
     expect(isSafeProductionQueueRequeue(item("PENDING"))).toBe(false);
     expect(isSafeProductionQueueRequeue(item("SUCCEEDED"))).toBe(false);
+  });
+});
+
+describe("production interaction admission", () => {
+  it("blocks all GPU submission entrances while production is active", () => {
+    const policy = productionInteractionPolicy(true);
+    expect(policy.canSubmitGeneration).toBe(false);
+    expect(policy.canSubmitLocalBatch).toBe(false);
+    expect(policy.canRetryTask).toBe(false);
+  });
+
+  it("keeps draft editing and project switching available", () => {
+    const policy = productionInteractionPolicy(true);
+    expect(policy.canEditDraft).toBe(true);
+    expect(policy.canSwitchProject).toBe(true);
+  });
+
+  it("releases submission after production becomes idle", () => {
+    const policy = productionInteractionPolicy(false);
+    expect(policy.canSubmitGeneration).toBe(true);
+    expect(policy.canSubmitLocalBatch).toBe(true);
+    expect(policy.canRetryTask).toBe(true);
   });
 });

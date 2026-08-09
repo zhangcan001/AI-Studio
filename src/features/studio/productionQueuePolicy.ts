@@ -14,3 +14,21 @@ export function isSafeProductionQueueRequeue(item: ProductionBatchItemView): boo
   if (item.status !== "FAILED" && item.status !== "SKIPPED") return false;
   return Boolean(item.errorCode && TRANSIENT_REQUEUE_ERRORS.has(item.errorCode));
 }
+
+export interface ProductionInteractionPolicy {
+  canSubmitGeneration: boolean;
+  canSubmitLocalBatch: boolean;
+  canRetryTask: boolean;
+  canEditDraft: true;
+  canSwitchProject: true;
+}
+
+export function productionInteractionPolicy(busy: boolean): ProductionInteractionPolicy {
+  return {
+    canSubmitGeneration: !busy,
+    canSubmitLocalBatch: !busy,
+    canRetryTask: !busy,
+    canEditDraft: true,
+    canSwitchProject: true,
+  };
+}

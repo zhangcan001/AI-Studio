@@ -2,7 +2,7 @@ use super::{
     format_datetime, i64_to_u64, map_domain_error, map_sqlx_error, parse_datetime, parse_json,
     parse_optional_datetime, serialize_json,
 };
-use crate::application::ports::{ProductionQueueRepository, RepositoryError};
+use crate::application::ports::{ActiveProductionItem, ProductionQueueRepository, RepositoryError};
 use crate::domain::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
@@ -96,12 +96,35 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
     async fn list_running(&self) -> Result<Vec<ProductionBatch>, RepositoryError> {
         let rows = sqlx::query_as::<_, BatchRow>(
             "SELECT id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at
-             FROM production_batches WHERE status = 'RUNNING' AND archived_at IS NULL ORDER BY updated_at ASC, id ASC",
+             FROM production_batches WHERE status = 'RUNNING' AND archived_at IS NULL ORDER BY created_at ASC, id ASC",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
         rows.into_iter().map(BatchRow::try_into_domain).collect()
+    }
+
+    async fn list_active_items(&self) -> Result<Vec<ActiveProductionItem>, RepositoryError> {
+        let rows = sqlx::query_as::<_, ActiveItemRow>(
+            "SELECT
+                b.id AS batch_id, b.project_id, b.name AS batch_name,
+                b.status AS batch_status, b.continue_on_failure, b.archived_at,
+                b.created_at AS batch_created_at, b.updated_at AS batch_updated_at,
+                i.id AS item_id, i.ordinal, i.workflow_version_id, i.recipe_id,
+                i.values_json, i.status AS item_status, i.task_id, i.retry_of_item_id,
+                i.error_code, i.error_message, i.created_at AS item_created_at,
+                i.updated_at AS item_updated_at
+             FROM production_batch_items i
+             INNER JOIN production_batches b ON b.id = i.batch_id
+             WHERE i.status IN ('DISPATCHING', 'DISPATCHED')
+             ORDER BY b.created_at ASC, b.id ASC, i.ordinal ASC, i.id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(ActiveItemRow::try_into_domain)
+            .collect()
     }
 
     async fn find_detail(
@@ -411,6 +434,65 @@ struct ItemRow {
     updated_at: String,
 }
 
+#[derive(sqlx::FromRow)]
+struct ActiveItemRow {
+    batch_id: String,
+    project_id: String,
+    batch_name: String,
+    batch_status: String,
+    continue_on_failure: i64,
+    archived_at: Option<String>,
+    batch_created_at: String,
+    batch_updated_at: String,
+    item_id: String,
+    ordinal: i64,
+    workflow_version_id: String,
+    recipe_id: String,
+    values_json: String,
+    item_status: String,
+    task_id: Option<String>,
+    retry_of_item_id: Option<String>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    item_created_at: String,
+    item_updated_at: String,
+}
+
+impl ActiveItemRow {
+    fn try_into_domain(self) -> Result<ActiveProductionItem, RepositoryError> {
+        let batch_id = self.batch_id.clone();
+        Ok(ActiveProductionItem {
+            batch: BatchRow {
+                id: self.batch_id,
+                project_id: self.project_id,
+                name: self.batch_name,
+                status: self.batch_status,
+                continue_on_failure: self.continue_on_failure,
+                archived_at: self.archived_at,
+                created_at: self.batch_created_at,
+                updated_at: self.batch_updated_at,
+            }
+            .try_into_domain()?,
+            item: ItemRow {
+                id: self.item_id,
+                batch_id,
+                ordinal: self.ordinal,
+                workflow_version_id: self.workflow_version_id,
+                recipe_id: self.recipe_id,
+                values_json: self.values_json,
+                status: self.item_status,
+                task_id: self.task_id,
+                retry_of_item_id: self.retry_of_item_id,
+                error_code: self.error_code,
+                error_message: self.error_message,
+                created_at: self.item_created_at,
+                updated_at: self.item_updated_at,
+            }
+            .try_into_domain()?,
+        })
+    }
+}
+
 impl ItemRow {
     fn try_into_domain(self) -> Result<ProductionBatchItem, RepositoryError> {
         let ordinal = i64_to_u64("production batch item ordinal", self.ordinal)?;
@@ -597,6 +679,86 @@ mod tests {
         assert_eq!(
             detail.items[1].retry_of_item_id.as_deref(),
             Some(source_id.as_str())
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn global_running_and_active_queries_are_stable_across_projects() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("global-admission.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Project 2', 'C:/project-2', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 8, 14, 0, 0).unwrap();
+        let first_id = ProductionBatchId::parse("pbt_a_running".to_owned()).unwrap();
+        let second_id = ProductionBatchId::parse("pbt_b_running".to_owned()).unwrap();
+
+        for (batch_id, project_id, name) in [
+            (second_id.clone(), "project-2", "Second"),
+            (first_id.clone(), "project-1", "First"),
+        ] {
+            let item_id = ProductionBatchItemId::new();
+            repository
+                .insert(
+                    &ProductionBatch {
+                        id: batch_id.clone(),
+                        project_id: project_id.to_owned(),
+                        name: name.to_owned(),
+                        status: ProductionBatchStatus::Running,
+                        continue_on_failure: false,
+                        archived_at: None,
+                        created_at: now,
+                        updated_at: now,
+                    },
+                    &[ProductionBatchItem {
+                        id: item_id.clone(),
+                        batch_id,
+                        ordinal: 0,
+                        workflow_version_id: "workflow-version-1".to_owned(),
+                        recipe_id: "recipe-1".to_owned(),
+                        values_json: json!({}),
+                        status: ProductionBatchItemStatus::Pending,
+                        task_id: None,
+                        retry_of_item_id: None,
+                        error_code: None,
+                        error_message: None,
+                        created_at: now,
+                        updated_at: now,
+                    }],
+                )
+                .await
+                .unwrap();
+            if project_id == "project-2" {
+                assert!(repository
+                    .set_item_dispatching(&item_id, now)
+                    .await
+                    .unwrap());
+            }
+        }
+
+        let running = repository.list_running().await.unwrap();
+        assert_eq!(
+            running
+                .iter()
+                .map(|batch| batch.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![first_id.as_str(), second_id.as_str()]
+        );
+        let active = repository.list_active_items().await.unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].batch.project_id, "project-2");
+        assert_eq!(
+            active[0].item.status,
+            ProductionBatchItemStatus::Dispatching
         );
         pool.close().await;
     }

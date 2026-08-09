@@ -16,6 +16,7 @@ import type {
   ProductionBatchCreateItem,
   ProductionBatchDetail,
   ProductionBatchSummary,
+  ProductionAdmissionStatus,
   ProductionQueueOverview,
 } from "../types/productionQueue";
 import type {
@@ -207,6 +208,10 @@ export function listProductionQueues(projectId: string): Promise<ProductionBatch
 
 export function getProductionQueueOverview(projectId: string): Promise<ProductionQueueOverview> {
   return invoke<ProductionQueueOverview>("production_queue_overview", { projectId });
+}
+
+export function getProductionAdmissionStatus(): Promise<ProductionAdmissionStatus> {
+  return invoke<ProductionAdmissionStatus>("production_queue_admission_status");
 }
 
 export function getProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {

@@ -3,8 +3,9 @@ use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError,
 };
 use crate::application::ports::{
-    Clock, ProductionQueueRepository, RepositoryError, TaskRepository,
+    ActiveProductionItem, Clock, ProductionQueueRepository, RepositoryError, TaskRepository,
 };
+use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::domain::{
     AssetId, ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, SeedValue, TaskId,
@@ -17,6 +18,7 @@ use std::{
     fmt,
     sync::{Arc, Mutex},
 };
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio::time::{sleep, Duration};
 
 const MAX_PRODUCTION_BATCH_ITEMS: usize = 100;
@@ -52,12 +54,24 @@ pub struct ProductionQueueOverview {
     pub skipped_items: usize,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProductionAdmissionView {
+    pub busy: bool,
+    pub batch_id: Option<String>,
+    pub project_id: Option<String>,
+    pub batch_name: Option<String>,
+    pub active_task_id: Option<String>,
+}
+
 pub struct ProductionQueueService {
     repository: Arc<dyn ProductionQueueRepository>,
     task_repository: Arc<dyn TaskRepository>,
     generation_service: Arc<GenerationService>,
+    task_recovery_service: Arc<TaskRecoveryService>,
     clock: Arc<dyn Clock>,
     running_batches: Arc<Mutex<HashSet<String>>>,
+    admission_gate: Arc<AsyncMutex<()>>,
+    recovery_tasks: Arc<Mutex<HashSet<String>>>,
 }
 
 impl ProductionQueueService {
@@ -65,14 +79,18 @@ impl ProductionQueueService {
         repository: Arc<dyn ProductionQueueRepository>,
         task_repository: Arc<dyn TaskRepository>,
         generation_service: Arc<GenerationService>,
+        task_recovery_service: Arc<TaskRecoveryService>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             repository,
             task_repository,
             generation_service,
+            task_recovery_service,
             clock,
             running_batches: Arc::new(Mutex::new(HashSet::new())),
+            admission_gate: Arc::new(AsyncMutex::new(())),
+            recovery_tasks: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -190,12 +208,42 @@ impl ProductionQueueService {
             .ok_or_else(|| ProductionQueueError::NotFound(batch_id.as_str().to_owned()))
     }
 
+    pub async fn admission_status(&self) -> Result<ProductionAdmissionView, ProductionQueueError> {
+        self.admission_status_excluding(None).await
+    }
+
+    pub async fn acquire_interactive_admission(
+        &self,
+    ) -> Result<OwnedMutexGuard<()>, ProductionQueueError> {
+        let guard = Arc::clone(&self.admission_gate).lock_owned().await;
+        let status = self.admission_status_excluding(None).await?;
+        if status.busy {
+            return Err(ProductionQueueError::Busy(status));
+        }
+        Ok(guard)
+    }
+
+    async fn admission_status_excluding(
+        &self,
+        excluded_batch_id: Option<&ProductionBatchId>,
+    ) -> Result<ProductionAdmissionView, ProductionQueueError> {
+        let active = self.repository.list_active_items().await?;
+        let running = self.repository.list_running().await?;
+        Ok(find_admission_blocker(
+            &running,
+            &active,
+            excluded_batch_id.map(ProductionBatchId::as_str),
+        )
+        .unwrap_or_default())
+    }
+
     pub async fn start(
         self: &Arc<Self>,
         project_id: &str,
         batch_id: &str,
     ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
+        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
         let detail = self
             .repository
             .find_detail(project_id, &batch_id)
@@ -210,6 +258,10 @@ impl ProductionQueueService {
             return Err(ProductionQueueError::InvalidState(
                 "completed production batches cannot be restarted".to_owned(),
             ));
+        }
+        let blocker = self.admission_status_excluding(Some(&batch_id)).await?;
+        if blocker.busy {
+            return Err(ProductionQueueError::Busy(blocker));
         }
         self.repository
             .set_batch_status(
@@ -430,6 +482,7 @@ impl ProductionQueueService {
     }
 
     pub async fn recover_and_resume(self: &Arc<Self>) -> Result<(), ProductionQueueError> {
+        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
         let uncertain = self
             .repository
             .recover_uncertain_dispatches(self.clock.now())
@@ -437,9 +490,84 @@ impl ProductionQueueService {
         for batch_id in uncertain {
             tracing::warn!(batch_id = %batch_id.as_str(), "production batch paused after uncertain dispatch recovery");
         }
+        let mut active = self.repository.list_active_items().await?;
+        for record in &active {
+            if record.item.status != ProductionBatchItemStatus::Dispatched {
+                continue;
+            }
+            let Some(task_id) = record.item.task_id.as_deref() else {
+                continue;
+            };
+            let task_id = TaskId::parse(task_id.to_owned())
+                .map_err(|error| ProductionQueueError::InvalidState(error.to_string()))?;
+            let Some(task) = self.task_repository.find_by_id(&task_id).await? else {
+                continue;
+            };
+            let terminal = match task.status {
+                TaskStatus::Succeeded => Some((ProductionBatchItemStatus::Succeeded, None, None)),
+                TaskStatus::Failed => Some((
+                    ProductionBatchItemStatus::Failed,
+                    task.error.as_ref().map(|error| error.code.as_str()),
+                    task.error.as_ref().map(|error| error.message.as_str()),
+                )),
+                TaskStatus::Cancelled => Some((ProductionBatchItemStatus::Cancelled, None, None)),
+                _ => None,
+            };
+            if let Some((status, code, message)) = terminal {
+                self.repository
+                    .finish_item(&record.item.id, status, code, message, self.clock.now())
+                    .await?;
+            }
+        }
+        active = self.repository.list_active_items().await?;
+        {
+            let mut recovery_tasks = self
+                .recovery_tasks
+                .lock()
+                .expect("production recovery task registry mutex poisoned");
+            for record in &active {
+                if let Some(task_id) = &record.item.task_id {
+                    recovery_tasks.insert(task_id.clone());
+                }
+            }
+        }
         let running = self.repository.list_running().await?;
-        for batch in running {
-            self.spawn_if_needed(batch.project_id, batch.id);
+        let selection = select_recovery(&running, &active);
+
+        for batch in &running {
+            if selection.primary_batch_id.as_deref() != Some(batch.id.as_str()) {
+                self.repository
+                    .set_batch_status(
+                        &batch.project_id,
+                        &batch.id,
+                        ProductionBatchStatus::Paused,
+                        self.clock.now(),
+                    )
+                    .await?;
+            }
+        }
+
+        if selection.conflict {
+            tracing::warn!(
+                code = "PRODUCTION_ADMISSION_RECOVERY_CONFLICT",
+                active_items = active.len(),
+                "multiple active production tasks found; all queue dispatch is paused"
+            );
+            let mut observed = HashSet::new();
+            for record in active {
+                if observed.insert(record.batch.id.as_str().to_owned()) {
+                    self.spawn_if_needed(record.batch.project_id, record.batch.id);
+                }
+            }
+        } else if let Some(primary_id) = selection.primary_batch_id {
+            let primary = active
+                .iter()
+                .map(|record| &record.batch)
+                .chain(running.iter())
+                .find(|batch| batch.id.as_str() == primary_id);
+            if let Some(primary) = primary {
+                self.spawn_if_needed(primary.project_id.clone(), primary.id.clone());
+            }
         }
         Ok(())
     }
@@ -547,6 +675,10 @@ impl ProductionQueueService {
                     self.repository
                         .finish_item(&active.id, status, code, message, self.clock.now())
                         .await?;
+                    self.recovery_tasks
+                        .lock()
+                        .expect("production recovery task registry mutex poisoned")
+                        .remove(task_id.as_str());
                     if detail.batch.status == ProductionBatchStatus::Paused {
                         return Ok(());
                     }
@@ -560,6 +692,22 @@ impl ProductionQueueService {
                             )
                             .await?;
                         return Ok(());
+                    }
+                    continue;
+                }
+                let needs_recovery_observation = self
+                    .recovery_tasks
+                    .lock()
+                    .expect("production recovery task registry mutex poisoned")
+                    .contains(task_id.as_str());
+                if needs_recovery_observation {
+                    sleep(Duration::from_secs(2)).await;
+                    if let Err(error) = self.task_recovery_service.reconcile_active().await {
+                        tracing::warn!(
+                            task_id = %task_id.as_str(),
+                            error = %error,
+                            "production restart task observation was deferred"
+                        );
                     }
                     continue;
                 }
@@ -699,6 +847,63 @@ impl ProductionQueueService {
 
             sleep(Duration::from_millis(750)).await;
         }
+    }
+}
+
+fn find_admission_blocker(
+    running: &[ProductionBatch],
+    active: &[ActiveProductionItem],
+    excluded_batch_id: Option<&str>,
+) -> Option<ProductionAdmissionView> {
+    if let Some(record) = active
+        .iter()
+        .find(|record| Some(record.batch.id.as_str()) != excluded_batch_id)
+    {
+        return Some(ProductionAdmissionView {
+            busy: true,
+            batch_id: Some(record.batch.id.as_str().to_owned()),
+            project_id: Some(record.batch.project_id.clone()),
+            batch_name: Some(record.batch.name.clone()),
+            active_task_id: record.item.task_id.clone(),
+        });
+    }
+    running
+        .iter()
+        .find(|batch| Some(batch.id.as_str()) != excluded_batch_id)
+        .map(|batch| ProductionAdmissionView {
+            busy: true,
+            batch_id: Some(batch.id.as_str().to_owned()),
+            project_id: Some(batch.project_id.clone()),
+            batch_name: Some(batch.name.clone()),
+            active_task_id: None,
+        })
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RecoverySelection {
+    primary_batch_id: Option<String>,
+    conflict: bool,
+}
+
+fn select_recovery(
+    running: &[ProductionBatch],
+    active: &[ActiveProductionItem],
+) -> RecoverySelection {
+    if active.len() > 1 {
+        return RecoverySelection {
+            primary_batch_id: None,
+            conflict: true,
+        };
+    }
+    if let Some(record) = active.first() {
+        return RecoverySelection {
+            primary_batch_id: Some(record.batch.id.as_str().to_owned()),
+            conflict: false,
+        };
+    }
+    RecoverySelection {
+        primary_batch_id: running.first().map(|batch| batch.id.as_str().to_owned()),
+        conflict: false,
     }
 }
 
@@ -905,6 +1110,7 @@ fn parse_batch_id(value: &str) -> Result<ProductionBatchId, ProductionQueueError
 pub enum ProductionQueueError {
     InvalidInput(String),
     InvalidState(String),
+    Busy(ProductionAdmissionView),
     NotFound(String),
     Repository(RepositoryError),
 }
@@ -916,6 +1122,10 @@ impl fmt::Display for ProductionQueueError {
             Self::InvalidState(message) => {
                 write!(formatter, "PRODUCTION_QUEUE_INVALID_STATE: {message}")
             }
+            Self::Busy(_) => write!(
+                formatter,
+                "PRODUCTION_QUEUE_BUSY: A production queue is already running. Pause or finish it before starting another queue."
+            ),
             Self::NotFound(id) => write!(formatter, "PRODUCTION_BATCH_NOT_FOUND: {id}"),
             Self::Repository(error) => write!(formatter, "{error}"),
         }
@@ -933,11 +1143,17 @@ impl From<RepositoryError> for ProductionQueueError {
 #[cfg(test)]
 mod tests {
     use super::{
-        generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
-        should_pause_after_terminal,
+        find_admission_blocker, generation_values_from_json, generation_values_to_json,
+        is_transient_requeue_error, select_recovery, should_pause_after_terminal,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
-    use crate::domain::{AssetId, ProductionBatchItemStatus, SeedValue};
+    use crate::application::ports::ActiveProductionItem;
+    use crate::domain::{
+        AssetId, ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
+        ProductionBatchItemStatus, ProductionBatchStatus, SeedValue,
+    };
+    use chrono::Utc;
+    use serde_json::json;
     use std::collections::BTreeMap;
 
     #[test]
@@ -989,5 +1205,101 @@ mod tests {
         assert!(is_transient_requeue_error("COMFY_STREAM_DISCONNECTED"));
         assert!(!is_transient_requeue_error("EXECUTION_ERROR"));
         assert!(!is_transient_requeue_error("QUEUE_DISPATCH_UNCERTAIN"));
+    }
+
+    #[test]
+    fn global_admission_blocks_other_projects_and_allows_the_same_batch() {
+        let running = batch("project-a", "Running A", ProductionBatchStatus::Running);
+        let paused_active = batch("project-b", "Paused B", ProductionBatchStatus::Paused);
+        let active = active_item(paused_active.clone(), Some("tsk_active"));
+
+        let blocker = find_admission_blocker(&[running], &[active.clone()], None).unwrap();
+        assert_eq!(blocker.project_id.as_deref(), Some("project-b"));
+        assert_eq!(blocker.active_task_id.as_deref(), Some("tsk_active"));
+
+        assert!(find_admission_blocker(&[], &[active], Some(paused_active.id.as_str())).is_none());
+    }
+
+    #[test]
+    fn terminal_item_release_leaves_admission_available() {
+        assert!(find_admission_blocker(&[], &[], None).is_none());
+    }
+
+    #[test]
+    fn recovery_selects_one_deterministic_running_batch() {
+        let first = batch("project-a", "First", ProductionBatchStatus::Running);
+        let second = batch("project-b", "Second", ProductionBatchStatus::Running);
+        let selection = select_recovery(&[first.clone(), second], &[]);
+        assert_eq!(
+            selection.primary_batch_id.as_deref(),
+            Some(first.id.as_str())
+        );
+        assert!(!selection.conflict);
+    }
+
+    #[test]
+    fn recovery_prioritizes_the_batch_with_an_active_task() {
+        let first = batch("project-a", "First", ProductionBatchStatus::Running);
+        let second = batch("project-b", "Second", ProductionBatchStatus::Running);
+        let selection = select_recovery(
+            &[first, second.clone()],
+            &[active_item(second.clone(), Some("tsk_active"))],
+        );
+        assert_eq!(
+            selection.primary_batch_id.as_deref(),
+            Some(second.id.as_str())
+        );
+        assert!(!selection.conflict);
+    }
+
+    #[test]
+    fn recovery_conflict_never_selects_a_dispatching_primary() {
+        let first = batch("project-a", "First", ProductionBatchStatus::Running);
+        let second = batch("project-b", "Second", ProductionBatchStatus::Running);
+        let selection = select_recovery(
+            &[first.clone(), second.clone()],
+            &[
+                active_item(first, Some("tsk_first")),
+                active_item(second, Some("tsk_second")),
+            ],
+        );
+        assert_eq!(selection.primary_batch_id, None);
+        assert!(selection.conflict);
+    }
+
+    fn batch(project_id: &str, name: &str, status: ProductionBatchStatus) -> ProductionBatch {
+        let now = Utc::now();
+        ProductionBatch {
+            id: ProductionBatchId::new(),
+            project_id: project_id.to_owned(),
+            name: name.to_owned(),
+            status,
+            continue_on_failure: false,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn active_item(batch: ProductionBatch, task_id: Option<&str>) -> ActiveProductionItem {
+        let now = Utc::now();
+        ActiveProductionItem {
+            item: ProductionBatchItem {
+                id: ProductionBatchItemId::new(),
+                batch_id: batch.id.clone(),
+                ordinal: 0,
+                workflow_version_id: "wfv_test".to_owned(),
+                recipe_id: "rcp_test".to_owned(),
+                values_json: json!({}),
+                status: ProductionBatchItemStatus::Dispatched,
+                task_id: task_id.map(ToOwned::to_owned),
+                retry_of_item_id: None,
+                error_code: None,
+                error_message: None,
+                created_at: now,
+                updated_at: now,
+            },
+            batch,
+        }
     }
 }

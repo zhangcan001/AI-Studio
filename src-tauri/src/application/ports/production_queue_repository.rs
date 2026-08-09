@@ -7,6 +7,12 @@ use chrono::{DateTime, Utc};
 
 use super::RepositoryError;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActiveProductionItem {
+    pub batch: ProductionBatch,
+    pub item: ProductionBatchItem,
+}
+
 #[async_trait]
 pub trait ProductionQueueRepository: Send + Sync {
     async fn insert(
@@ -18,6 +24,8 @@ pub trait ProductionQueueRepository: Send + Sync {
     async fn list(&self, project_id: &str) -> Result<Vec<ProductionBatch>, RepositoryError>;
 
     async fn list_running(&self) -> Result<Vec<ProductionBatch>, RepositoryError>;
+
+    async fn list_active_items(&self) -> Result<Vec<ActiveProductionItem>, RepositoryError>;
 
     async fn find_detail(
         &self,

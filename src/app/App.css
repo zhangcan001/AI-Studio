@@ -109,6 +109,22 @@ p { line-height: 1.5; }
 .task-recovery-bar p { margin: 0; color: #b9c8df; }
 .task-recovery-bar button { flex: none; }
 
+.production-admission-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 13px 16px;
+  border: 1px solid #8a6a3c;
+  border-radius: 12px;
+  background: #302718;
+}
+.production-admission-banner div { display: grid; gap: 2px; }
+.production-admission-banner strong { color: #fff1cf; }
+.production-admission-banner p { margin: 0; color: #d9c7a1; font-size: 0.84rem; }
+.production-admission-banner button { flex: none; min-height: 40px; }
+
 button {
   padding: 9px 13px;
   border: 1px solid #4d658f;
@@ -207,6 +223,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .task-retry-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; margin-top: 12px; padding: 12px; border: 1px solid #35435b; border-radius: 8px; background: #111720; }
 .task-retry-panel p { margin: 4px 0 0; color: #b9c8df; font-size: 0.82rem; }
 .task-retry-panel .error-message { grid-column: 1 / -1; margin: 0; }
+.task-retry-panel .disabled-note { grid-column: 1 / -1; margin: 0; color: #ffcf9e; }
 .indeterminate-message { color: #b9c8df; }
 .step-progress { margin-top: 20px; }
 .progress-label { color: #c8d3e5; font-size: 0.82rem; }
@@ -458,6 +475,8 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .media-selection-summary { grid-template-columns: 1fr; }
   .task-recovery-bar { align-items: stretch; flex-direction: column; }
   .task-recovery-bar button { width: 100%; }
+  .production-admission-banner { align-items: stretch; flex-direction: column; }
+  .production-admission-banner button { width: 100%; }
   .task-retry-panel { grid-template-columns: 1fr; }
   .task-retry-panel button { width: 100%; }
   .production-overview, .production-queue-create, .production-queue-stats { grid-template-columns: 1fr; }

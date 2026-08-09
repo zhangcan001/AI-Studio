@@ -282,12 +282,6 @@ fn run_application() -> Result<(), AppError> {
                 .with_task_update_sink(task_update_sink.clone())
                 .with_execution_registry(execution_registry.clone()),
             );
-            let production_queue_service = Arc::new(ProductionQueueService::new(
-                production_queue_repository,
-                task_repository.clone(),
-                generation_service.clone(),
-                clock.clone(),
-            ));
             let generation_catalog_service =
                 Arc::new(GenerationCatalogService::new(definition_repository.clone()));
             let task_query_service = Arc::new(TaskQueryService::new(
@@ -322,14 +316,21 @@ fn run_application() -> Result<(), AppError> {
                 task_update_sink.clone(),
             ));
             let task_recovery_service = Arc::new(TaskRecoveryService::new(
-                task_repository,
-                snapshot_repository,
+                task_repository.clone(),
+                snapshot_repository.clone(),
                 asset_repository.clone(),
-                comfy_adapter,
+                comfy_adapter.clone(),
                 project_repository.clone(),
                 asset_store.clone(),
                 clock.clone(),
                 task_update_sink,
+            ));
+            let production_queue_service = Arc::new(ProductionQueueService::new(
+                production_queue_repository,
+                task_repository,
+                generation_service.clone(),
+                task_recovery_service.clone(),
+                clock.clone(),
             ));
             let project_service = Arc::new(ProjectService::new(
                 project_repository.clone(),
@@ -427,6 +428,7 @@ fn run_application() -> Result<(), AppError> {
             commands::production_queue::production_queue_create,
             commands::production_queue::production_queue_list,
             commands::production_queue::production_queue_overview,
+            commands::production_queue::production_queue_admission_status,
             commands::production_queue::production_queue_get,
             commands::production_queue::production_queue_start,
             commands::production_queue::production_queue_pause,

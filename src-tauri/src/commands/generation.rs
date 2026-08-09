@@ -218,6 +218,11 @@ pub async fn generation_create(
     request: GenerationCreateRequest,
 ) -> Result<TaskView, AppError> {
     let request = request.into_application()?;
+    let _admission = state
+        .production_queue_service
+        .acquire_interactive_admission()
+        .await
+        .map_err(super::production_queue::map_queue_error)?;
     let task = state
         .generation_service
         .start_generation(request)
@@ -238,6 +243,11 @@ pub async fn generation_create_batch(
     crate::domain::validate_project_id(&request.project_id)
         .map_err(|error| AppError::invalid_input(error.to_string()))?;
     validate_batch_size(request.items.len())?;
+    let _admission = state
+        .production_queue_service
+        .acquire_interactive_admission()
+        .await
+        .map_err(super::production_queue::map_queue_error)?;
 
     let mut created = Vec::with_capacity(request.items.len());
     let mut failed = Vec::new();

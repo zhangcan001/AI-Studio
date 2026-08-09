@@ -25,10 +25,21 @@ interface Props {
   projectId: string;
   batchItems: BatchDraftItem[];
   comfyConnected: boolean;
+  focusBatchId?: string;
+  onAdmissionChanged: () => Promise<void>;
+  onFocusedBatchOpened: () => void;
   onOpenTask: (taskId: string) => void;
 }
 
-export function ProductionQueuePanel({ projectId, batchItems, comfyConnected, onOpenTask }: Props) {
+export function ProductionQueuePanel({
+  projectId,
+  batchItems,
+  comfyConnected,
+  focusBatchId,
+  onAdmissionChanged,
+  onFocusedBatchOpened,
+  onOpenTask,
+}: Props) {
   const [name, setName] = useState("");
   const [continueOnFailure, setContinueOnFailure] = useState(false);
   const [queues, setQueues] = useState<ProductionBatchSummary[]>([]);
@@ -87,7 +98,10 @@ export function ProductionQueuePanel({ projectId, batchItems, comfyConnected, on
       if (!active || task.projectId !== projectId) return;
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
       // The queue runner observes the persisted terminal Task shortly after this event.
-      refreshTimer = window.setTimeout(() => void refreshQueues(true), 900);
+      refreshTimer = window.setTimeout(() => {
+        void refreshQueues(true);
+        void onAdmissionChanged();
+      }, 900);
     })
       .then((cleanup) => {
         if (active) unlisten = cleanup;
@@ -99,7 +113,29 @@ export function ProductionQueuePanel({ projectId, batchItems, comfyConnected, on
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
       unlisten?.();
     };
-  }, [projectId, refreshQueues]);
+  }, [onAdmissionChanged, projectId, refreshQueues]);
+
+  useEffect(() => {
+    if (!focusBatchId) return;
+    let active = true;
+    setBusy(true);
+    void getProductionQueue(projectId, focusBatchId)
+      .then((focused) => {
+        if (active) setQueueDetail(focused);
+      })
+      .catch((error: unknown) => {
+        if (active) setNotice(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (active) {
+          setBusy(false);
+          onFocusedBatchOpened();
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [focusBatchId, onFocusedBatchOpened, projectId, setQueueDetail]);
 
   const visibleQueues = useMemo(
     () => queues.filter((queue) => showArchived || !queue.archivedAt),
@@ -145,6 +181,7 @@ export function ProductionQueuePanel({ projectId, batchItems, comfyConnected, on
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
+      await onAdmissionChanged();
       setBusy(false);
     }
   }

@@ -24,6 +24,7 @@ pub enum AppErrorCode {
     AssetReadFailed,
     ReusableDraftUnavailable,
     WorkflowOnboardingError,
+    ProductionQueueBusy,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +112,12 @@ impl AppError {
         Self::new(AppErrorCode::WorkflowOnboardingError, message)
     }
 
+    pub fn production_queue_busy(message: impl Into<String>, details: Value) -> Self {
+        let mut error = Self::new(AppErrorCode::ProductionQueueBusy, message);
+        error.details = Some(details);
+        error
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -132,6 +139,7 @@ impl AppError {
             AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
             AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
             AppErrorCode::WorkflowOnboardingError => "WORKFLOW_ONBOARDING_ERROR",
+            AppErrorCode::ProductionQueueBusy => "PRODUCTION_QUEUE_BUSY",
         }
     }
 

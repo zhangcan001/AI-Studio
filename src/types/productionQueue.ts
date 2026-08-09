@@ -59,6 +59,14 @@ export interface ProductionQueueOverview {
   skippedItems: number;
 }
 
+export interface ProductionAdmissionStatus {
+  busy: boolean;
+  batchId?: string;
+  projectId?: string;
+  batchName?: string;
+  activeTaskId?: string;
+}
+
 export interface ProductionBatchCreateItem {
   workflowVersionId: string;
   recipeId: string;

@@ -5,12 +5,14 @@ import type { DraftValue } from "../../types/generation";
 import type { ReusableGenerationDraft, TaskDetail } from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
 import { taskRetryDecision } from "./retryPolicy";
+import { productionInteractionPolicy } from "../studio/productionQueuePolicy";
 
 interface Props {
   projectId: string;
   detail: TaskDetail;
   loadingDraft: boolean;
   comfyConnected: boolean;
+  productionBusy: boolean;
   onBack: () => void;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
   onOpenAsset: (assetId: string) => void;
@@ -21,6 +23,7 @@ export function TaskHistoryDetail({
   detail,
   loadingDraft: detailLoading,
   comfyConnected,
+  productionBusy,
   onBack,
   onLoadInputs,
   onOpenAsset,
@@ -32,6 +35,7 @@ export function TaskHistoryDetail({
   const [retryError, setRetryError] = useState<string>();
   const [retryCreatedTaskId, setRetryCreatedTaskId] = useState<string>();
   const retryDecision = taskRetryDecision(detail, comfyConnected);
+  const productionPolicy = productionInteractionPolicy(productionBusy);
 
   useEffect(() => {
     if (!detail.reusableDraft.available) return;
@@ -54,7 +58,7 @@ export function TaskHistoryDetail({
   }, [detail.id, detail.reusableDraft.available, projectId]);
 
   async function retryOnce() {
-    if (!retryDecision.allowed || !draft || retryCreatedTaskId) return;
+    if (!retryDecision.allowed || !draft || retryCreatedTaskId || !productionPolicy.canRetryTask) return;
     setRetrying(true);
     setRetryError(undefined);
     try {
@@ -113,6 +117,7 @@ export function TaskHistoryDetail({
             onClick={() => void retryOnce()}
             disabled={
               !retryDecision.allowed ||
+              !productionPolicy.canRetryTask ||
               retrying ||
               draftLoading ||
               !draft ||
@@ -121,6 +126,9 @@ export function TaskHistoryDetail({
           >
             {retrying ? "Creating Retry..." : retryCreatedTaskId ? "Retry Created" : "Retry Once"}
           </button>
+          {productionBusy && (
+            <p className="disabled-note">Production queue active. Retry Once is temporarily disabled.</p>
+          )}
           {retryError && <p className="error-message">Retry failed: {retryError}</p>}
         </section>
       )}

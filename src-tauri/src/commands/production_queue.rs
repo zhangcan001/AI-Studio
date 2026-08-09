@@ -1,8 +1,8 @@
 use crate::{
     app_state::AppState,
     application::production_queue_service::{
-        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueError,
-        ProductionQueueOverview,
+        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionAdmissionView,
+        ProductionQueueError, ProductionQueueOverview,
     },
     domain::{ProductionBatch, ProductionBatchDetail, ProductionBatchItem},
     error::AppError,
@@ -105,6 +105,16 @@ pub struct ProductionQueueOverviewView {
     pub skipped_items: usize,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionAdmissionStatusView {
+    pub busy: bool,
+    pub batch_id: Option<String>,
+    pub project_id: Option<String>,
+    pub batch_name: Option<String>,
+    pub active_task_id: Option<String>,
+}
+
 #[tauri::command]
 pub async fn production_queue_create(
     state: State<'_, AppState>,
@@ -149,6 +159,18 @@ pub async fn production_queue_overview(
     state
         .production_queue_service
         .overview(&project_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
+pub async fn production_queue_admission_status(
+    state: State<'_, AppState>,
+) -> Result<ProductionAdmissionStatusView, AppError> {
+    state
+        .production_queue_service
+        .admission_status()
         .await
         .map(Into::into)
         .map_err(map_queue_error)
@@ -350,10 +372,31 @@ impl From<ProductionQueueOverview> for ProductionQueueOverviewView {
     }
 }
 
-fn map_queue_error(error: ProductionQueueError) -> AppError {
+impl From<ProductionAdmissionView> for ProductionAdmissionStatusView {
+    fn from(admission: ProductionAdmissionView) -> Self {
+        Self {
+            busy: admission.busy,
+            batch_id: admission.batch_id,
+            project_id: admission.project_id,
+            batch_name: admission.batch_name,
+            active_task_id: admission.active_task_id,
+        }
+    }
+}
+
+pub(crate) fn map_queue_error(error: ProductionQueueError) -> AppError {
     match error {
         ProductionQueueError::InvalidInput(message)
         | ProductionQueueError::InvalidState(message) => AppError::invalid_input(message),
+        ProductionQueueError::Busy(admission) => AppError::production_queue_busy(
+            "A production queue is already running. Pause or finish it before starting another queue.",
+            serde_json::json!({
+                "batchId": admission.batch_id,
+                "projectId": admission.project_id,
+                "name": admission.batch_name,
+                "activeTaskId": admission.active_task_id,
+            }),
+        ),
         ProductionQueueError::NotFound(message) => AppError::invalid_input(message),
         ProductionQueueError::Repository(error) => super::map_repository_error(&error),
     }

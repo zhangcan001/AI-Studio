@@ -13,11 +13,13 @@ import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeViewModel } from "../../types/generation";
 import type { PresetView } from "../../types/preset";
+import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
 import { cloneGenerationValues, retainFailedBatchItems, type BatchDraftItem } from "./batchDraft";
 import { parseBatchTaskList } from "./batchImport";
 import { ImageOutput } from "./ImageOutput";
 import { ProductionQueuePanel } from "./ProductionQueuePanel";
+import { productionInteractionPolicy } from "./productionQueuePolicy";
 import { TaskProgressCard } from "./TaskProgressCard";
 
 interface Props {
@@ -26,7 +28,11 @@ interface Props {
   comfyConnected: boolean;
   taskEventsReady: boolean;
   taskEventError?: string;
+  productionAdmission: ProductionAdmissionStatus;
+  focusProductionBatchId?: string;
   onCatalogChanged: () => Promise<void>;
+  onProductionAdmissionChanged: () => Promise<void>;
+  onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
 }
 
@@ -36,7 +42,11 @@ export function GenerationStudio({
   comfyConnected,
   taskEventsReady,
   taskEventError,
+  productionAdmission,
+  focusProductionBatchId,
   onCatalogChanged,
+  onProductionAdmissionChanged,
+  onProductionBatchFocused,
   onOpenTask,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
@@ -109,10 +119,12 @@ export function GenerationStudio({
     () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
     [selectedWorkflow],
   );
+  const productionPolicy = productionInteractionPolicy(productionAdmission.busy);
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
   const canGenerate = Boolean(
     comfyConnected &&
       taskEventsReady &&
+      productionPolicy.canSubmitGeneration &&
       selectedWorkflow &&
       !hasUnsupportedField &&
       missingAssetFields.size === 0 &&
@@ -226,6 +238,10 @@ export function GenerationStudio({
 
   async function generate() {
     if (!selectedWorkflow) return;
+    if (!productionPolicy.canSubmitGeneration) {
+      setNotice("PRODUCTION_QUEUE_BUSY: wait for the active production queue before generating.");
+      return;
+    }
     const nextErrors = validateRecipeValues(selectedWorkflow, values);
     setValidationErrors(nextErrors);
     if (
@@ -305,6 +321,10 @@ export function GenerationStudio({
 
   async function submitBatch() {
     if (!batchItems.length) return;
+    if (!productionPolicy.canSubmitLocalBatch) {
+      setBatchNotice("PRODUCTION_QUEUE_BUSY: wait for the active production queue before submitting this batch.");
+      return;
+    }
     if (!comfyConnected || !taskEventsReady) {
       setBatchNotice("Connect ComfyUI and restore the task event channel before submitting the batch.");
       return;
@@ -449,6 +469,9 @@ export function GenerationStudio({
                 {taskEventError ?? "Preparing task event channel..."}
               </p>
             )}
+            {productionAdmission.busy && (
+              <p className="disabled-note">Production queue active. Generate and Submit Batch are temporarily disabled.</p>
+            )}
             {hasUnsupportedField && <p className="disabled-note">This Workflow has an unsupported field type.</p>}
             {missingAssetFields.size > 0 && (
               <p className="disabled-note">Missing media asset. Choose a replacement before generating.</p>
@@ -512,7 +535,13 @@ export function GenerationStudio({
               <button
                 type="button"
                 onClick={() => void submitBatch()}
-                disabled={!batchItems.length || batchSubmitting || !comfyConnected || !taskEventsReady}
+                disabled={
+                  !batchItems.length ||
+                  batchSubmitting ||
+                  !comfyConnected ||
+                  !taskEventsReady ||
+                  !productionPolicy.canSubmitLocalBatch
+                }
               >
                 {batchSubmitting ? "Submitting Batch..." : `Submit Batch (${batchItems.length})`}
               </button>
@@ -522,6 +551,9 @@ export function GenerationStudio({
               projectId={projectId}
               batchItems={batchItems}
               comfyConnected={comfyConnected}
+              focusBatchId={focusProductionBatchId}
+              onAdmissionChanged={onProductionAdmissionChanged}
+              onFocusedBatchOpened={onProductionBatchFocused}
               onOpenTask={onOpenTask}
             />
             <button type="button" className="generate-button" onClick={() => void generate()} disabled={!canGenerate || creating}>

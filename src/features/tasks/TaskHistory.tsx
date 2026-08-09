@@ -11,11 +11,12 @@ import { TaskHistoryList } from "./TaskHistoryList";
 interface Props {
   projectId: string;
   comfyConnected: boolean;
+  productionBusy: boolean;
   focusTaskId?: string;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
 }
 
-export function TaskHistory({ projectId, comfyConnected, focusTaskId, onLoadInputs }: Props) {
+export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, onLoadInputs }: Props) {
   const [filter, setFilter] = useState<TaskHistoryFilter>("ALL");
   const [items, setItems] = useState<TaskHistoryItem[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
@@ -131,6 +132,7 @@ export function TaskHistory({ projectId, comfyConnected, focusTaskId, onLoadInpu
           detail={detail}
           loadingDraft={false}
           comfyConnected={comfyConnected}
+          productionBusy={productionBusy}
           onBack={() => {
             setSelectedTaskId(undefined);
             setDetail(undefined);
