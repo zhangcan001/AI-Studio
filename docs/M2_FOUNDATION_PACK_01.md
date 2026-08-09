@@ -117,7 +117,19 @@ Endpoint 的非法 scheme、凭据、query、fragment、规范化、设置损坏
 - 未创建 GitHub Release。
 - 未修改 v0.1.0 Release notes 或已发布安装包。
 
-## 8. 后续技术债
+## 8. 最终 Gate 状态
+
+代码实现、自动化回归、开发版安装包构建和真实 ComfyUI HTTP 检查均通过；但本轮 Windows Computer Use 无法读取 Tauri WebView，导致真实 `localhost` 保存/重启、切换后 Kera2、真实项目备份恢复及媒体/历史复用 Gate 没有完成。
+
+因此本轮准确状态为：
+
+```text
+M2 FOUNDATION PACK 01 = CODE PASS / LIVE GATE PARTIAL
+```
+
+待桌面辅助接口恢复后，完成上述真实 Gate 才能将最终状态升级为 `M2 FOUNDATION PACK 01 = PASS`。
+
+## 9. 后续技术债
 
 1. 在桌面自动化接口可用后补做 `localhost` Endpoint 保存/重启持久化、Endpoint 切换后的 Kera2、当前真实项目备份 roundtrip、恢复媒体预览/播放和恢复历史输入复用 Gate。
 2. 目前 backup inspection token 保存在内存并有时限，应用退出后不会保留待恢复 inspection。
