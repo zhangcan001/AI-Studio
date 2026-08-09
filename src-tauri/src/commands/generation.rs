@@ -8,7 +8,7 @@ use crate::{
     domain::SeedValue,
     error::AppError,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tauri::State;
 
@@ -19,6 +19,57 @@ pub struct GenerationCreateRequest {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub values: BTreeMap<String, InputValueDto>,
+}
+
+const MAX_BATCH_ITEMS: usize = 100;
+
+fn validate_batch_size(item_count: usize) -> Result<(), AppError> {
+    if item_count == 0 {
+        return Err(AppError::invalid_input("batch must contain at least one item"));
+    }
+    if item_count > MAX_BATCH_ITEMS {
+        return Err(AppError::invalid_input(format!(
+            "batch contains {item_count} items; maximum is {MAX_BATCH_ITEMS}"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationBatchCreateRequest {
+    pub project_id: String,
+    pub items: Vec<GenerationBatchItemRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationBatchItemRequest {
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub values: BTreeMap<String, InputValueDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationBatchCreateResult {
+    pub created: Vec<GenerationBatchCreatedItem>,
+    pub failed: Vec<GenerationBatchFailedItem>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationBatchCreatedItem {
+    pub index: usize,
+    pub task: TaskView,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationBatchFailedItem {
+    pub index: usize,
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +193,23 @@ impl GenerationCreateRequest {
     }
 }
 
+impl GenerationBatchItemRequest {
+    fn into_application(self, project_id: String) -> Result<CreateGenerationRequest, AppError> {
+        let values = self
+            .values
+            .into_iter()
+            .map(|(key, value)| Ok((key.clone(), value.into_application(&key)?)))
+            .collect::<Result<BTreeMap<_, _>, AppError>>()?;
+
+        Ok(CreateGenerationRequest {
+            project_id,
+            workflow_version_id: self.workflow_version_id,
+            recipe_id: self.recipe_id,
+            values,
+        })
+    }
+}
+
 #[tauri::command]
 pub async fn generation_create(
     state: State<'_, AppState>,
@@ -158,6 +226,61 @@ pub async fn generation_create(
         .view(task)
         .await
         .map_err(|error| AppError::internal(error.to_string()))
+}
+
+#[tauri::command]
+pub async fn generation_create_batch(
+    state: State<'_, AppState>,
+    request: GenerationBatchCreateRequest,
+) -> Result<GenerationBatchCreateResult, AppError> {
+    crate::domain::validate_project_id(&request.project_id)
+        .map_err(|error| AppError::invalid_input(error.to_string()))?;
+    validate_batch_size(request.items.len())?;
+
+    let mut created = Vec::with_capacity(request.items.len());
+    let mut failed = Vec::new();
+
+    for (index, item) in request.items.into_iter().enumerate() {
+        let application_request = match item.into_application(request.project_id.clone()) {
+            Ok(application_request) => application_request,
+            Err(error) => {
+                failed.push(GenerationBatchFailedItem {
+                    index,
+                    code: error.code().to_owned(),
+                    message: error.message,
+                });
+                continue;
+            }
+        };
+
+        let task = match state
+            .generation_service
+            .start_generation(application_request)
+            .await
+        {
+            Ok(task) => task,
+            Err(error) => {
+                let error = map_generation_error(error);
+                failed.push(GenerationBatchFailedItem {
+                    index,
+                    code: error.code().to_owned(),
+                    message: error.message,
+                });
+                continue;
+            }
+        };
+
+        match state.task_query_service.view(task).await {
+            Ok(task) => created.push(GenerationBatchCreatedItem { index, task }),
+            Err(error) => failed.push(GenerationBatchFailedItem {
+                index,
+                code: "TASK_VIEW_ERROR".to_owned(),
+                message: error.to_string(),
+            }),
+        }
+    }
+
+    Ok(GenerationBatchCreateResult { created, failed })
 }
 
 fn map_generation_error(error: GenerationServiceError) -> AppError {
@@ -177,5 +300,25 @@ fn map_generation_error(error: GenerationServiceError) -> AppError {
         | GenerationServiceError::OutputCollection(_)
         | GenerationServiceError::AssetImport(_)
         | GenerationServiceError::ExecutionFailed { .. } => AppError::internal(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_batch_size, MAX_BATCH_ITEMS};
+
+    #[test]
+    fn batch_size_rejects_empty_batch() {
+        let error = validate_batch_size(0).unwrap_err();
+        assert_eq!(error.code(), "INVALID_INPUT");
+        assert!(error.message.contains("at least one"));
+    }
+
+    #[test]
+    fn batch_size_accepts_limit_and_rejects_over_limit() {
+        validate_batch_size(MAX_BATCH_ITEMS).unwrap();
+        let error = validate_batch_size(MAX_BATCH_ITEMS + 1).unwrap_err();
+        assert_eq!(error.code(), "INVALID_INPUT");
+        assert!(error.message.contains("maximum"));
     }
 }

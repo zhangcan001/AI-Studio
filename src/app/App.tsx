@@ -27,6 +27,7 @@ type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows";
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
+  const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +112,10 @@ function App() {
       cancelled = true;
     };
   }, [setProjectError, setProjectLoading, setProjects]);
+
+  useEffect(() => {
+    setFocusedTaskId(undefined);
+  }, [activeProjectId]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -332,12 +337,21 @@ function App() {
             taskEventsReady={taskEventsReady}
             taskEventError={taskEventError}
             onCatalogChanged={reloadCatalog}
+            onOpenTask={(taskId) => {
+              setFocusedTaskId(taskId);
+              setWorkspace("tasks");
+            }}
           />
         </section>
       )}
       {activeProject && workspace === "assets" && <AssetLibrary projectId={activeProject.id} />}
       {activeProject && workspace === "tasks" && (
-        <TaskHistory projectId={activeProject.id} onLoadInputs={loadHistoricalInputs} />
+        <TaskHistory
+          projectId={activeProject.id}
+          comfyConnected={isConnected}
+          focusTaskId={focusedTaskId}
+          onLoadInputs={loadHistoricalInputs}
+        />
       )}
       {workspace === "projects" && (
         <ProjectWorkspace

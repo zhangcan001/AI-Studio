@@ -13,6 +13,12 @@ import type { TaskView } from "../types/task";
 import type { ProjectView } from "../types/project";
 import type { PresetView } from "../types/preset";
 import type {
+  ProductionBatchCreateItem,
+  ProductionBatchDetail,
+  ProductionBatchSummary,
+  ProductionQueueOverview,
+} from "../types/productionQueue";
+import type {
   CapabilityCheckView,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
@@ -166,6 +172,81 @@ export function createGeneration(request: {
   values: GenerationValues;
 }): Promise<TaskView> {
   return invoke<TaskView>("generation_create", { request });
+}
+
+export interface GenerationBatchItemRequest {
+  workflowVersionId: string;
+  recipeId: string;
+  values: GenerationValues;
+}
+
+export interface GenerationBatchCreateResult {
+  created: Array<{ index: number; task: TaskView }>;
+  failed: Array<{ index: number; code: string; message: string }>;
+}
+
+export function createGenerationBatch(request: {
+  projectId: string;
+  items: GenerationBatchItemRequest[];
+}): Promise<GenerationBatchCreateResult> {
+  return invoke<GenerationBatchCreateResult>("generation_create_batch", { request });
+}
+
+export function createProductionQueue(request: {
+  projectId: string;
+  name: string;
+  continueOnFailure: boolean;
+  items: ProductionBatchCreateItem[];
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_create", { request });
+}
+
+export function listProductionQueues(projectId: string): Promise<ProductionBatchSummary[]> {
+  return invoke<ProductionBatchSummary[]>("production_queue_list", { projectId });
+}
+
+export function getProductionQueueOverview(projectId: string): Promise<ProductionQueueOverview> {
+  return invoke<ProductionQueueOverview>("production_queue_overview", { projectId });
+}
+
+export function getProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_get", { projectId, batchId });
+}
+
+export function startProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_start", { projectId, batchId });
+}
+
+export function pauseProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_pause", { projectId, batchId });
+}
+
+export function archiveProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_archive", { projectId, batchId });
+}
+
+export function restoreProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_restore", { projectId, batchId });
+}
+
+export function deleteProductionQueue(projectId: string, batchId: string): Promise<void> {
+  return invoke<void>("production_queue_delete", { projectId, batchId });
+}
+
+export function skipProductionQueueItem(
+  projectId: string,
+  batchId: string,
+  itemId: string,
+): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_skip_item", { projectId, batchId, itemId });
+}
+
+export function requeueProductionQueueItem(
+  projectId: string,
+  batchId: string,
+  itemId: string,
+): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_requeue_item", { projectId, batchId, itemId });
 }
 
 export function listProjects(): Promise<ProjectView[]> {

@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod comfy;
 pub mod generation;
 pub mod preset;
+pub mod production_queue;
 pub mod project;
 pub mod task;
 pub mod workflow_library;

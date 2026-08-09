@@ -24,7 +24,7 @@ use std::{
     fmt,
     sync::Arc,
 };
-use tokio::sync::watch;
+use tokio::sync::{watch, Semaphore};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -114,6 +114,7 @@ pub struct GenerationService {
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
     execution_registry: TaskExecutionRegistry,
+    submission_gate: Arc<Semaphore>,
     compiler: WorkflowCompiler,
 }
 
@@ -157,6 +158,7 @@ impl GenerationService {
             clock,
             task_update_sink: Arc::new(NoopTaskUpdateSink),
             execution_registry: TaskExecutionRegistry::default(),
+            submission_gate: Arc::new(Semaphore::new(1)),
             compiler: WorkflowCompiler,
         }
     }
@@ -391,6 +393,14 @@ impl GenerationService {
             return Ok(task);
         }
 
+        let submission_permit = Arc::clone(&self.submission_gate)
+            .acquire_owned()
+            .await
+            .expect("generation submission gate should remain open");
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
+
         let client_id = Uuid::new_v4().to_string();
         let prompt_id = Uuid::new_v4().to_string();
         let submission_event =
@@ -462,6 +472,7 @@ impl GenerationService {
                 ));
             }
         }
+        drop(submission_permit);
 
         let mut cancel_action_sent = false;
         loop {

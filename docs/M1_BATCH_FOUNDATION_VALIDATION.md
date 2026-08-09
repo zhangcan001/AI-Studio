@@ -1,0 +1,48 @@
+# M1 Batch Foundation Validation
+
+Date: 2026-08-07
+
+Scope: first batch-production foundation for the intentionally limited production model set: Kera2 image generation and MiniMax H3 video generation. No third model runtime pack, scheduler, CSV import, or automatic retry policy is included.
+
+## Implemented
+
+- Added `generation_create_batch` as a separate command; existing `generation_create` remains unchanged.
+- Batch request is project-scoped and limited to 1..100 items.
+- Each item retains its own workflow version, recipe, values snapshot, Task ID, Task lifecycle, cancellation/recovery path, and output Asset mapping.
+- Batch creation is partial-success: one item failing validation/definition lookup does not remove Tasks already created for other items.
+- Batch response preserves input order through per-item indexes and returns safe `code` + `message` failures.
+- React Studio can freeze the current Kera2 or MiniMax H3 form values into a local batch draft, remove items, clear the draft, and submit the batch.
+- Frozen batch items are copied values; later changes to the current Studio form do not mutate items already added to the batch.
+- Project switching clears the local batch draft.
+- A generic `Semaphore(1)` submission gate serializes the ComfyUI subscription + `/prompt` submission boundary so a large batch does not concurrently flood the local ComfyUI endpoint. The permit is released after the Task reaches the submitted/queued boundary; execution, cancellation, history tracking, and ComfyUI queue behavior remain on the existing pipeline.
+- MiniMax H3 OOM behavior is not retried or hidden by the batch layer. An H3 Task can still fail independently while Kera2 or other valid items in the same batch continue through their own lifecycle.
+
+## Explicitly not included
+
+- CSV / Excel / JSON task-list import
+- Batch persistence as a new database entity
+- Priority scheduling
+- Cron / timed automation
+- Automatic retry
+- OOM retry
+- Model downloading or custom-node installation
+- Wan / Flux / Qwen / third-model production support
+
+## Validation status
+
+Code-level changes are present, including Rust tests for empty and over-limit batch sizes. Full regression commands could not be executed through the current local MCP bash channel because the Windows host reports an unavailable/misconfigured WSL runtime before project commands start. This is an environment/tooling blocker, not a reported test failure.
+
+Required regression commands when the local command channel is available:
+
+- `cargo fmt --all -- --check`
+- `cargo check`
+- `cargo test -- --test-threads=1`
+- `pnpm test`
+- `pnpm build`
+- `git diff --check`
+
+Until these commands run successfully, this document does not claim the batch foundation as final PASS.
+
+## Next stage
+
+`BATCH FOUNDATION 02 — task-list import + bounded retry policy` is the next stage only after Batch Foundation 01 passes regression validation. Retry policy must distinguish transient infrastructure errors from deterministic failures; MiniMax H3 GPU OOM must remain non-automatic by default.

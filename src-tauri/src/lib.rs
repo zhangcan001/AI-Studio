@@ -8,14 +8,16 @@ mod infrastructure;
 
 pub use application::ports::{
     AssetRepository, AssetStore, Clock, GenerationDefinitionRepository,
-    GenerationSnapshotRepository, ProjectRepository, RepositoryError, TaskRepository,
+    GenerationSnapshotRepository, ProductionQueueRepository, ProjectRepository, RepositoryError,
+    TaskRepository,
     WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{
     SqliteAssetRepository, SqliteGenerationDefinitionRepository,
-    SqliteGenerationSnapshotRepository, SqlitePresetRepository, SqliteProjectRepository,
-    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteGenerationSnapshotRepository, SqlitePresetRepository, SqliteProductionQueueRepository,
+    SqliteProjectRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -28,6 +30,7 @@ use application::{
     media_protocol::MediaProtocolService,
     ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
     preset_service::PresetService,
+    production_queue_service::ProductionQueueService,
     project_bootstrap::DefaultProjectBootstrap,
     project_service::ProjectService,
     source_asset_import_service::SourceAssetImportService,
@@ -181,6 +184,9 @@ fn run_application() -> Result<(), AppError> {
             let preset_repository: Arc<dyn application::ports::PresetRepository> = Arc::new(
                 infrastructure::database::SqlitePresetRepository::new(database_pool.clone()),
             );
+            let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> = Arc::new(
+                infrastructure::database::SqliteProductionQueueRepository::new(database_pool.clone()),
+            );
             let project_directory_store: Arc<dyn application::ports::ProjectDirectoryStore> =
                 Arc::new(FileSystemProjectDirectoryStore::new(
                     data_dirs.projects.clone(),
@@ -277,6 +283,12 @@ fn run_application() -> Result<(), AppError> {
                 .with_task_update_sink(task_update_sink.clone())
                 .with_execution_registry(execution_registry.clone()),
             );
+            let production_queue_service = Arc::new(ProductionQueueService::new(
+                production_queue_repository,
+                task_repository.clone(),
+                generation_service.clone(),
+                clock.clone(),
+            ));
             let generation_catalog_service =
                 Arc::new(GenerationCatalogService::new(definition_repository.clone()));
             let task_query_service = Arc::new(TaskQueryService::new(
@@ -339,6 +351,7 @@ fn run_application() -> Result<(), AppError> {
                 )));
             }
             let startup_recovery = task_recovery_service.clone();
+            let startup_production_queue = production_queue_service.clone();
             app.manage(AppState::new(
                 data_dirs,
                 comfy_service,
@@ -356,19 +369,28 @@ fn run_application() -> Result<(), AppError> {
                 task_recovery_service,
                 project_service,
                 preset_service,
+                production_queue_service,
             ));
 
             tauri::async_runtime::spawn(async move {
                 match startup_recovery.reconcile_active().await {
-                    Ok(report) => tracing::info!(
-                        examined = report.examined,
-                        succeeded = report.succeeded,
-                        failed = report.failed,
-                        deferred = report.deferred,
-                        unresolved = report.unresolved,
-                        "startup task recovery completed"
+                    Ok(report) => {
+                        tracing::info!(
+                            examined = report.examined,
+                            succeeded = report.succeeded,
+                            failed = report.failed,
+                            deferred = report.deferred,
+                            unresolved = report.unresolved,
+                            "startup task recovery completed"
+                        );
+                        if let Err(error) = startup_production_queue.recover_and_resume().await {
+                            tracing::warn!(error = %error, "startup production queue recovery failed");
+                        }
+                    }
+                    Err(error) => tracing::warn!(
+                        error = %error,
+                        "startup task recovery failed; production queue auto-resume skipped"
                     ),
-                    Err(error) => tracing::warn!(error = %error, "startup task recovery failed"),
                 }
             });
 
@@ -402,6 +424,18 @@ fn run_application() -> Result<(), AppError> {
             commands::workflow_lifecycle::workflow_clean_staging,
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
+            commands::generation::generation_create_batch,
+            commands::production_queue::production_queue_create,
+            commands::production_queue::production_queue_list,
+            commands::production_queue::production_queue_overview,
+            commands::production_queue::production_queue_get,
+            commands::production_queue::production_queue_start,
+            commands::production_queue::production_queue_pause,
+            commands::production_queue::production_queue_archive,
+            commands::production_queue::production_queue_restore,
+            commands::production_queue::production_queue_delete,
+            commands::production_queue::production_queue_skip_item,
+            commands::production_queue::production_queue_requeue_item,
             commands::project::project_list,
             commands::project::project_create,
             commands::project::project_update,

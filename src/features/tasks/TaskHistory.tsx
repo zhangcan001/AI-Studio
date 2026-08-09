@@ -10,10 +10,12 @@ import { TaskHistoryList } from "./TaskHistoryList";
 
 interface Props {
   projectId: string;
+  comfyConnected: boolean;
+  focusTaskId?: string;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
 }
 
-export function TaskHistory({ projectId, onLoadInputs }: Props) {
+export function TaskHistory({ projectId, comfyConnected, focusTaskId, onLoadInputs }: Props) {
   const [filter, setFilter] = useState<TaskHistoryFilter>("ALL");
   const [items, setItems] = useState<TaskHistoryItem[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
@@ -115,6 +117,10 @@ export function TaskHistory({ projectId, onLoadInputs }: Props) {
     }
   }
 
+  useEffect(() => {
+    if (focusTaskId) void selectTask(focusTaskId);
+  }, [focusTaskId, projectId]); // The focused id is an explicit navigation request; selectTask reads current project state.
+
   const previewAsset = detail?.outputAssets.find((asset) => asset.id === previewAssetId);
 
   return (
@@ -124,6 +130,7 @@ export function TaskHistory({ projectId, onLoadInputs }: Props) {
           projectId={projectId}
           detail={detail}
           loadingDraft={false}
+          comfyConnected={comfyConnected}
           onBack={() => {
             setSelectedTaskId(undefined);
             setDetail(undefined);

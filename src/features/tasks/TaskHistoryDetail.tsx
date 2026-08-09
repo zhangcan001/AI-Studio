@@ -1,22 +1,37 @@
 import { useEffect, useState } from "react";
-import { getReusableDraft } from "../../services/tauriClient";
+import { createGeneration, getReusableDraft } from "../../services/tauriClient";
+import { useTaskStore } from "../../stores/taskStore";
 import type { DraftValue } from "../../types/generation";
 import type { ReusableGenerationDraft, TaskDetail } from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
+import { taskRetryDecision } from "./retryPolicy";
 
 interface Props {
   projectId: string;
   detail: TaskDetail;
   loadingDraft: boolean;
+  comfyConnected: boolean;
   onBack: () => void;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
   onOpenAsset: (assetId: string) => void;
 }
 
-export function TaskHistoryDetail({ projectId, detail, loadingDraft: detailLoading, onBack, onLoadInputs, onOpenAsset }: Props) {
+export function TaskHistoryDetail({
+  projectId,
+  detail,
+  loadingDraft: detailLoading,
+  comfyConnected,
+  onBack,
+  onLoadInputs,
+  onOpenAsset,
+}: Props) {
   const [draft, setDraft] = useState<ReusableGenerationDraft>();
   const [draftLoading, setDraftLoading] = useState(detailLoading);
   const [draftError, setDraftError] = useState<string>();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string>();
+  const [retryCreatedTaskId, setRetryCreatedTaskId] = useState<string>();
+  const retryDecision = taskRetryDecision(detail, comfyConnected);
 
   useEffect(() => {
     if (!detail.reusableDraft.available) return;
@@ -37,6 +52,26 @@ export function TaskHistoryDetail({ projectId, detail, loadingDraft: detailLoadi
       active = false;
     };
   }, [detail.id, detail.reusableDraft.available, projectId]);
+
+  async function retryOnce() {
+    if (!retryDecision.allowed || !draft || retryCreatedTaskId) return;
+    setRetrying(true);
+    setRetryError(undefined);
+    try {
+      const task = await createGeneration({
+        projectId,
+        workflowVersionId: draft.workflowVersionId,
+        recipeId: draft.recipeId,
+        values: draft.values,
+      });
+      useTaskStore.getState().adoptCreatedTask(task);
+      setRetryCreatedTaskId(task.id);
+    } catch (error: unknown) {
+      setRetryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   return (
     <div className="task-detail-view">
@@ -60,6 +95,34 @@ export function TaskHistoryDetail({ projectId, detail, loadingDraft: detailLoadi
           <strong>{detail.errorCode}</strong>
           <span>{detail.errorMessage ?? "The task did not complete successfully."}</span>
         </div>
+      )}
+      {detail.status === "FAILED" && (
+        <section className="task-retry-panel" aria-label="Retry task">
+          <div>
+            <span className="section-label">Retry policy</span>
+            <p>
+              {retryCreatedTaskId
+                ? `Retry task created: ${retryCreatedTaskId}`
+                : retryDecision.allowed
+                  ? "This looks transient. You can create one new task from the saved inputs."
+                  : retryDecision.reason}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void retryOnce()}
+            disabled={
+              !retryDecision.allowed ||
+              retrying ||
+              draftLoading ||
+              !draft ||
+              Boolean(retryCreatedTaskId)
+            }
+          >
+            {retrying ? "Creating Retry..." : retryCreatedTaskId ? "Retry Created" : "Retry Once"}
+          </button>
+          {retryError && <p className="error-message">Retry failed: {retryError}</p>}
+        </section>
       )}
       <section className="detail-section">
         <div className="section-heading">

@@ -76,7 +76,8 @@ mod tests {
         sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN \
              ('projects', 'workflows', 'workflow_versions', 'recipes', 'tasks', 'assets', \
-              'generation_snapshots', 'task_events', 'presets', 'task_output_assets')",
+              'generation_snapshots', 'task_events', 'presets', 'task_output_assets', \
+               'production_batches', 'production_batch_items')",
         )
         .fetch_one(pool)
         .await
@@ -92,7 +93,7 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 10);
+        assert_eq!(table_count(&pool).await, 12);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
                 .fetch_one(&pool)
@@ -126,7 +127,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 10);
+        assert_eq!(table_count(&second_pool).await, 12);
         second_pool.close().await;
     }
 }

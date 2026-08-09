@@ -6,6 +6,7 @@
 pub mod asset;
 pub mod generation_snapshot;
 pub mod preset;
+pub mod production_queue;
 pub mod project_id;
 pub mod recipe;
 pub mod task;
@@ -17,6 +18,11 @@ pub use asset::{
 };
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
 pub use preset::{Preset, PresetDomainError, PresetId};
+pub use production_queue::{
+    ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
+    ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
+    ProductionQueueDomainError,
+};
 pub use project_id::{validate_project_id, ProjectIdValidationError};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,

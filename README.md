@@ -8,6 +8,8 @@ M0 = PASS.
 
 M1 progress:
 
+Production scope is intentionally limited to Kera2 for image generation and MiniMax H3 for video generation. The shared runtime remains generic, but no third model runtime pack is part of the product plan.
+
 - Desktop foundation and Rust application layering
 - SQLite migration and local application data directories
 - ComfyUI connection, `/system_stats`, and `/object_info` capability detection
@@ -66,6 +68,14 @@ M1 progress:
   and project-scoped missing-asset validation
 - Source video/audio playback through the bounded local media protocol and
   Asset Library source-media filters
+- Batch foundation with independent per-item Task creation, partial-failure reporting,
+  frozen frontend batch drafts, and a single-concurrency ComfyUI submission gate
+- JSON task-list import and explicit transient-error `Retry Once` from reusable snapshots;
+  `EXECUTION_ERROR` (including MiniMax H3 GPU OOM) is never quick-retried
+- Persistent project-scoped production queues with ordered Task dispatch, pause/resume,
+  restart recovery, uncertain-dispatch duplicate protection, and fatal execution-error stop
+- Production queue control/observability with archive/restore/safe delete, explicit skip/requeue,
+  event-driven status refresh, project production summary, and direct Task-detail navigation
 
 M1 fourth phase (Project Workspace + Project Isolation) code is complete. Historical task
 inputs are exposed through a safe DTO boundary; raw workflow payloads, recipe

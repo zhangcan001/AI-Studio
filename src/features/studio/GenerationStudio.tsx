@@ -3,6 +3,7 @@ import {
   cancelTask,
   createPreset,
   createGeneration,
+  createGenerationBatch,
   deletePreset,
   listPresets,
   refreshWorkflowLibrary,
@@ -13,7 +14,10 @@ import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeViewModel } from "../../types/generation";
 import type { PresetView } from "../../types/preset";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
+import { cloneGenerationValues, retainFailedBatchItems, type BatchDraftItem } from "./batchDraft";
+import { parseBatchTaskList } from "./batchImport";
 import { ImageOutput } from "./ImageOutput";
+import { ProductionQueuePanel } from "./ProductionQueuePanel";
 import { TaskProgressCard } from "./TaskProgressCard";
 
 interface Props {
@@ -23,6 +27,7 @@ interface Props {
   taskEventsReady: boolean;
   taskEventError?: string;
   onCatalogChanged: () => Promise<void>;
+  onOpenTask: (taskId: string) => void;
 }
 
 export function GenerationStudio({
@@ -32,6 +37,7 @@ export function GenerationStudio({
   taskEventsReady,
   taskEventError,
   onCatalogChanged,
+  onOpenTask,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const values = useStudioStore((state) => state.values);
@@ -52,6 +58,9 @@ export function GenerationStudio({
   const [presetName, setPresetName] = useState("");
   const [presetLoading, setPresetLoading] = useState(false);
   const [presetError, setPresetError] = useState<string>();
+  const [batchItems, setBatchItems] = useState<BatchDraftItem[]>([]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [batchNotice, setBatchNotice] = useState<string>();
   const handleAssetAvailabilityChange = useCallback((key: string, available: boolean) => {
     setMissingAssetFields((current) => {
       const next = new Set(current);
@@ -74,6 +83,9 @@ export function GenerationStudio({
     setSelectedPresetId("");
     setPresetName("");
     setPresetError(undefined);
+    setBatchItems([]);
+    setBatchSubmitting(false);
+    setBatchNotice(undefined);
   }, [projectId]);
 
   useEffect(() => {
@@ -242,6 +254,89 @@ export function GenerationStudio({
     }
   }
 
+  function addCurrentToBatch() {
+    if (!selectedWorkflow) return;
+    const nextErrors = validateRecipeValues(selectedWorkflow, values);
+    setValidationErrors(nextErrors);
+    if (Object.keys(nextErrors).length || hasUnsupportedField || missingAssetFields.size > 0) {
+      setBatchNotice("Current inputs are not ready to add to the batch.");
+      return;
+    }
+    if (batchItems.length >= 100) {
+      setBatchNotice("Batch limit reached: maximum 100 items.");
+      return;
+    }
+
+    setBatchItems((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        workflowName: selectedWorkflow.name,
+        workflowVersionId: selectedWorkflow.workflowVersionId,
+        recipeId: selectedWorkflow.recipeId,
+        values: cloneGenerationValues(values),
+      },
+    ]);
+    setBatchNotice(undefined);
+  }
+
+  function removeBatchItem(id: string) {
+    setBatchItems((current) => current.filter((item) => item.id !== id));
+    setBatchNotice(undefined);
+  }
+
+  async function importBatchTaskList(file?: File) {
+    if (!file) return;
+    try {
+      const imported = parseBatchTaskList(await file.text(), catalog);
+      if (batchItems.length + imported.length > 100) {
+        setBatchNotice("Batch import would exceed the 100 item limit.");
+        return;
+      }
+      setBatchItems((current) => [
+        ...current,
+        ...imported.map((item) => ({ ...item, id: crypto.randomUUID() })),
+      ]);
+      setBatchNotice(`Imported ${imported.length} task${imported.length === 1 ? "" : "s"} from JSON.`);
+    } catch (importError: unknown) {
+      setBatchNotice(importError instanceof Error ? importError.message : String(importError));
+    }
+  }
+
+  async function submitBatch() {
+    if (!batchItems.length) return;
+    if (!comfyConnected || !taskEventsReady) {
+      setBatchNotice("Connect ComfyUI and restore the task event channel before submitting the batch.");
+      return;
+    }
+
+    setBatchSubmitting(true);
+    setBatchNotice(undefined);
+    try {
+      const result = await createGenerationBatch({
+        projectId,
+        items: batchItems.map((item) => ({
+          workflowVersionId: item.workflowVersionId,
+          recipeId: item.recipeId,
+          values: item.values,
+        })),
+      });
+      result.created.forEach(({ task }) => adoptCreatedTask(task));
+      const failedIndexes = result.failed.map((item) => item.index);
+      setBatchItems((current) => retainFailedBatchItems(current, failedIndexes));
+      const failureSummary = result.failed.length
+        ? ` Failed: ${result.failed.map((item) => `#${item.index + 1} ${item.code}`).join(", ")}.`
+        : "";
+      setBatchNotice(
+        `Batch submitted: ${result.created.length} created, ${result.failed.length} failed.${failureSummary}`,
+      );
+    } catch (batchError: unknown) {
+      setBatchNotice(batchError instanceof Error ? batchError.message : String(batchError));
+    } finally {
+      setBatchSubmitting(false);
+    }
+  }
+
   async function cancelCurrentTask() {
     if (!currentTask) return;
     setCancelling(true);
@@ -358,6 +453,77 @@ export function GenerationStudio({
             {missingAssetFields.size > 0 && (
               <p className="disabled-note">Missing media asset. Choose a replacement before generating.</p>
             )}
+            <section className="batch-panel" aria-label="Batch queue">
+              <div className="batch-panel-header">
+                <div>
+                  <span className="section-label">Batch queue</span>
+                  <p>Freeze the current Kera2 or MiniMax H3 inputs as an independent task.</p>
+                </div>
+                <div className="batch-actions">
+                  <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting}>
+                    Add current
+                  </button>
+                  <label className="quiet-button batch-file-button">
+                    Import JSON
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      disabled={batchSubmitting}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        void importBatchTaskList(file);
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => {
+                      setBatchItems([]);
+                      setBatchNotice(undefined);
+                    }}
+                    disabled={batchSubmitting || !batchItems.length}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              {batchItems.length ? (
+                <ol className="batch-list">
+                  {batchItems.map((item, index) => (
+                    <li key={item.id}>
+                      <span>#{index + 1}</span>
+                      <strong>{item.workflowName}</strong>
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => removeBatchItem(item.id)}
+                        disabled={batchSubmitting}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="disabled-note">No items added yet.</p>
+              )}
+              <button
+                type="button"
+                onClick={() => void submitBatch()}
+                disabled={!batchItems.length || batchSubmitting || !comfyConnected || !taskEventsReady}
+              >
+                {batchSubmitting ? "Submitting Batch..." : `Submit Batch (${batchItems.length})`}
+              </button>
+              {batchNotice && <p className="disabled-note">{batchNotice}</p>}
+            </section>
+            <ProductionQueuePanel
+              projectId={projectId}
+              batchItems={batchItems}
+              comfyConnected={comfyConnected}
+              onOpenTask={onOpenTask}
+            />
             <button type="button" className="generate-button" onClick={() => void generate()} disabled={!canGenerate || creating}>
               {creating ? "Creating Task..." : "Generate"}
             </button>
