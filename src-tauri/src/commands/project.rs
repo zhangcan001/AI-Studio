@@ -97,7 +97,7 @@ pub async fn project_backup_restore(
     state.project_backup_service.restore(&inspection_id).await
 }
 
-fn map_project_error(error: ProjectServiceError) -> AppError {
+pub(crate) fn map_project_error(error: ProjectServiceError) -> AppError {
     match error {
         ProjectServiceError::InvalidName(message)
         | ProjectServiceError::InvalidDescription(message)

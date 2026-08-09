@@ -51,6 +51,19 @@ impl AssetBrowseRepository for SqliteAssetBrowseRepository {
                 query.push(" AND category LIKE 'generated_%'");
             }
         }
+        if request.favorite_only {
+            query.push(" AND EXISTS (SELECT 1 FROM asset_favorites f WHERE f.asset_id = assets.id AND f.project_id = assets.project_id)");
+        }
+        if let Some(tag_id) = request
+            .tag_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            query.push(" AND EXISTS (SELECT 1 FROM asset_tag_links l WHERE l.asset_id = assets.id AND l.project_id = assets.project_id AND l.tag_id = ")
+                .push_bind(tag_id)
+                .push(")");
+        }
         if let Some(keyword) = request.keyword.and_then(|keyword| {
             let keyword = keyword.trim().to_owned();
             (!keyword.is_empty()).then_some(keyword)
@@ -285,6 +298,8 @@ mod tests {
                 keyword: None,
                 media_type: AssetMediaTypeFilter::All,
                 source_kind: AssetSourceFilter::All,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Newest,
                 cursor: None,
                 limit: 1,
@@ -299,6 +314,8 @@ mod tests {
                 keyword: None,
                 media_type: AssetMediaTypeFilter::All,
                 source_kind: AssetSourceFilter::All,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Newest,
                 cursor: first.next_cursor,
                 limit: 1,
@@ -315,6 +332,8 @@ mod tests {
                     keyword: None,
                     media_type: AssetMediaTypeFilter::All,
                     source_kind: AssetSourceFilter::All,
+                    favorite_only: false,
+                    tag_id: None,
                     created_order: AssetCreatedOrder::Newest,
                     cursor: None,
                     limit: 10,
@@ -415,6 +434,8 @@ mod tests {
                 keyword: Some(" cat ".to_owned()),
                 media_type: AssetMediaTypeFilter::Image,
                 source_kind: AssetSourceFilter::Generated,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Newest,
                 cursor: None,
                 limit: 1,
@@ -432,6 +453,8 @@ mod tests {
                 keyword: None,
                 media_type: AssetMediaTypeFilter::Image,
                 source_kind: AssetSourceFilter::All,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Oldest,
                 cursor: None,
                 limit: 1,
@@ -446,6 +469,8 @@ mod tests {
                 keyword: None,
                 media_type: AssetMediaTypeFilter::Image,
                 source_kind: AssetSourceFilter::All,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Oldest,
                 cursor: oldest.next_cursor,
                 limit: 1,
@@ -460,6 +485,8 @@ mod tests {
                 keyword: Some("cat".to_owned()),
                 media_type: AssetMediaTypeFilter::All,
                 source_kind: AssetSourceFilter::All,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Newest,
                 cursor: None,
                 limit: 10,
@@ -499,6 +526,19 @@ mod tests {
             .collect::<Vec<_>>();
         repository.insert_many(&assets).await.unwrap();
 
+        for index in 0..100 {
+            sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES (?, 'project-1', ?, ?, '2026-03-01T00:00:00+00:00', '2026-03-01T00:00:00+00:00')")
+                .bind(format!("tag_perf_{index:03}")).bind(format!("性能{index:03}")).bind(format!("性能{index:03}")).execute(&pool).await.unwrap();
+        }
+        for index in 0..1_000 {
+            sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES (?, ?, 'project-1', '2026-03-01T00:00:00+00:00')")
+                .bind(format!("ast_perf_{index:04}")).bind(format!("tag_perf_{:03}", index % 100)).execute(&pool).await.unwrap();
+            if index % 2 == 0 {
+                sqlx::query("INSERT INTO asset_favorites (asset_id, project_id, created_at) VALUES (?, 'project-1', '2026-03-01T00:00:00+00:00')")
+                    .bind(format!("ast_perf_{index:04}")).execute(&pool).await.unwrap();
+            }
+        }
+
         let browser = SqliteAssetBrowseRepository::new(pool);
         let page = browser
             .list_page(AssetLibraryQuery {
@@ -507,6 +547,8 @@ mod tests {
                 keyword: Some("synthetic-".to_owned()),
                 media_type: AssetMediaTypeFilter::Image,
                 source_kind: AssetSourceFilter::Source,
+                favorite_only: false,
+                tag_id: None,
                 created_order: AssetCreatedOrder::Newest,
                 cursor: None,
                 limit: 30,
@@ -518,5 +560,204 @@ mod tests {
         assert!(page.next_cursor.is_some());
         assert_eq!(page.items[0].name, "synthetic-0999.png");
         assert_eq!(page.items[29].name, "synthetic-0970.png");
+        let organized = browser
+            .list_page(AssetLibraryQuery {
+                project_id: "project-1".to_owned(),
+                category: AssetCategoryFilter::SourceImage,
+                keyword: Some("synthetic-".to_owned()),
+                media_type: AssetMediaTypeFilter::Image,
+                source_kind: AssetSourceFilter::Source,
+                favorite_only: true,
+                tag_id: Some("tag_perf_000".to_owned()),
+                created_order: AssetCreatedOrder::Newest,
+                cursor: None,
+                limit: 5,
+            })
+            .await
+            .unwrap();
+        assert_eq!(organized.items.len(), 5);
+        assert!(organized.next_cursor.is_some());
+    }
+
+    #[tokio::test]
+    async fn combines_favorite_tag_keyword_media_source_order_cursor_and_project_filters() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES ('project-2', 'Other', 'C:/other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id, status, progress_mode, created_at) VALUES ('tsk_browse_org', 'project-1', 'workflow-1', 'workflow-version-1', 'recipe-1', 'SUCCEEDED', 'indeterminate', '2026-01-01T00:00:00Z')").execute(&pool).await.unwrap();
+        for (id, project, category, kind, name, created) in [
+            (
+                "ast_a",
+                "project-1",
+                "source_image",
+                "image",
+                "人物参考图",
+                "2026-01-01T00:00:01+00:00",
+            ),
+            (
+                "ast_b",
+                "project-1",
+                "generated_image",
+                "image",
+                "人物成图",
+                "2026-01-01T00:00:02+00:00",
+            ),
+            (
+                "ast_c",
+                "project-1",
+                "generated_video",
+                "video",
+                "最终成片",
+                "2026-01-01T00:00:03+00:00",
+            ),
+            (
+                "ast_d",
+                "project-2",
+                "source_image",
+                "image",
+                "人物其他项目",
+                "2026-01-01T00:00:04+00:00",
+            ),
+        ] {
+            sqlx::query("INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, file_size, source_task_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, '{}', ?, ?)")
+                .bind(id).bind(project).bind(kind).bind(category).bind(name).bind(name).bind(format!("C:/{id}")).bind("a".repeat(64)).bind(if kind == "video" { "video/mp4" } else { "image/png" }).bind(category.starts_with("generated_").then_some("tsk_browse_org")).bind(created).bind(created).execute(&pool).await.unwrap();
+        }
+        for (id, project, name) in [
+            ("tag_people", "project-1", "人物"),
+            ("tag_finish", "project-1", "成片"),
+            ("tag_other", "project-2", "人物"),
+        ] {
+            sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").bind(id).bind(project).bind(name).bind(name).execute(&pool).await.unwrap();
+        }
+        for (asset, tag, project) in [
+            ("ast_a", "tag_people", "project-1"),
+            ("ast_b", "tag_people", "project-1"),
+            ("ast_c", "tag_finish", "project-1"),
+            ("ast_d", "tag_other", "project-2"),
+        ] {
+            sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES (?, ?, ?, '2026-01-01T00:00:00Z')").bind(asset).bind(tag).bind(project).execute(&pool).await.unwrap();
+        }
+        for (asset, project) in [
+            ("ast_a", "project-1"),
+            ("ast_c", "project-1"),
+            ("ast_d", "project-2"),
+        ] {
+            sqlx::query("INSERT INTO asset_favorites (asset_id, project_id, created_at) VALUES (?, ?, '2026-01-01T00:00:00Z')").bind(asset).bind(project).execute(&pool).await.unwrap();
+        }
+        let browser = SqliteAssetBrowseRepository::new(pool);
+        let base = |favorite_only,
+                    tag_id: Option<&str>,
+                    keyword: Option<&str>,
+                    media_type,
+                    source_kind,
+                    created_order,
+                    cursor,
+                    limit| AssetLibraryQuery {
+            project_id: "project-1".to_owned(),
+            category: AssetCategoryFilter::All,
+            keyword: keyword.map(str::to_owned),
+            media_type,
+            source_kind,
+            favorite_only,
+            tag_id: tag_id.map(str::to_owned),
+            created_order,
+            cursor,
+            limit,
+        };
+        let favorites = browser
+            .list_page(base(
+                true,
+                None,
+                None,
+                AssetMediaTypeFilter::All,
+                AssetSourceFilter::All,
+                AssetCreatedOrder::Newest,
+                None,
+                10,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            favorites
+                .items
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
+            ["ast_c", "ast_a"]
+        );
+        let people = browser
+            .list_page(base(
+                false,
+                Some("tag_people"),
+                None,
+                AssetMediaTypeFilter::All,
+                AssetSourceFilter::All,
+                AssetCreatedOrder::Newest,
+                None,
+                10,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(people.items.len(), 2);
+        let combined = browser
+            .list_page(base(
+                true,
+                Some("tag_people"),
+                Some("参考"),
+                AssetMediaTypeFilter::Image,
+                AssetSourceFilter::Source,
+                AssetCreatedOrder::Oldest,
+                None,
+                10,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(combined.items[0].id.as_str(), "ast_a");
+        let first = browser
+            .list_page(base(
+                false,
+                Some("tag_people"),
+                None,
+                AssetMediaTypeFilter::Image,
+                AssetSourceFilter::All,
+                AssetCreatedOrder::Oldest,
+                None,
+                1,
+            ))
+            .await
+            .unwrap();
+        let second = browser
+            .list_page(base(
+                false,
+                Some("tag_people"),
+                None,
+                AssetMediaTypeFilter::Image,
+                AssetSourceFilter::All,
+                AssetCreatedOrder::Oldest,
+                first.next_cursor,
+                1,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(first.items[0].id.as_str(), "ast_a");
+        assert_eq!(second.items[0].id.as_str(), "ast_b");
+        let isolated = browser
+            .list_page(AssetLibraryQuery {
+                project_id: "project-2".to_owned(),
+                category: AssetCategoryFilter::All,
+                keyword: None,
+                media_type: AssetMediaTypeFilter::All,
+                source_kind: AssetSourceFilter::All,
+                favorite_only: true,
+                tag_id: Some("tag_other".to_owned()),
+                created_order: AssetCreatedOrder::Newest,
+                cursor: None,
+                limit: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(isolated.items.len(), 1);
+        assert_eq!(isolated.items[0].project_id, "project-2");
     }
 }

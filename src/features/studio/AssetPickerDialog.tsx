@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   assetLibraryPage,
+  listAssetTags,
   pickAndImportAudio,
   pickAndImportImage,
   pickAndImportVideo,
@@ -10,6 +11,7 @@ import type {
   AssetView,
   PageCursor,
 } from "../../types/asset";
+import type { AssetTag } from "../../types/organization";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { assetDisplayName, assetTypeLabel, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 import {
@@ -44,6 +46,9 @@ export function AssetPickerDialog({
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [selection, setSelection] = useState<string[]>(selectedIds);
   const [filter, setFilter] = useState<AssetPickerFilter>("all");
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [tagId, setTagId] = useState("");
+  const [tags, setTags] = useState<AssetTag[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [nextCursor, setNextCursor] = useState<PageCursor>();
@@ -57,7 +62,11 @@ export function AssetPickerDialog({
     return () => window.clearTimeout(timer);
   }, [keywordInput]);
 
-  const query = useMemo(() => buildAssetPickerQuery(projectId, kind, filter, keyword), [filter, kind, keyword, projectId]);
+  const query = useMemo(() => buildAssetPickerQuery(projectId, kind, filter, keyword, favoriteOnly, tagId), [favoriteOnly, filter, kind, keyword, projectId, tagId]);
+
+  useEffect(() => {
+    void listAssetTags(projectId).then(setTags).catch(() => setTags([]));
+  }, [projectId]);
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -181,6 +190,19 @@ export function AssetPickerDialog({
             aria-label="搜索素材"
           />
         </label>
+        <div className="asset-picker-organization-filters">
+          <label className="check-control">
+            <input type="checkbox" checked={favoriteOnly} onChange={(event) => setFavoriteOnly(event.target.checked)} />
+            <span>仅收藏</span>
+          </label>
+          <label>
+            <span>标签</span>
+            <select value={tagId} onChange={(event) => setTagId(event.target.value)}>
+              <option value="">全部标签</option>
+              {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+            </select>
+          </label>
+        </div>
         {loading ? (
           <p className="asset-picker-empty" role="status">正在加载当前项目素材...</p>
         ) : visibleAssets.length ? (

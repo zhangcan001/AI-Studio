@@ -1,14 +1,19 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   createProject,
   exportProjectBackup,
   inspectProjectBackup,
   restoreProjectBackup,
   updateProject,
+  createProjectFromTemplate,
+  deleteProjectTemplate,
+  listProjectTemplates,
+  updateProjectTemplate,
 } from "../../services/tauriClient";
 import type { ProjectBackupPreview, ProjectView } from "../../types/project";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
+import type { ProjectTemplate, TemplateProjectResult } from "../../types/organization";
 
 interface Props {
   projects: ProjectView[];
@@ -16,11 +21,12 @@ interface Props {
   onOpen: (projectId: string) => void;
   onProjectUpdated: (project: ProjectView) => void;
   onProjectRestored: (project: ProjectView) => void;
+  onTemplateProjectCreated: (result: TemplateProjectResult) => void;
 }
 
 type FormMode = { kind: "create" } | { kind: "edit"; project: ProjectView };
 
-export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectUpdated, onProjectRestored }: Props) {
+export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectUpdated, onProjectRestored, onTemplateProjectCreated }: Props) {
   const [formMode, setFormMode] = useState<FormMode>();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -29,6 +35,48 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupPreview, setBackupPreview] = useState<ProjectBackupPreview>();
   const [backupNotice, setBackupNotice] = useState<string>();
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateForm, setTemplateForm] = useState<{ kind: "edit" | "createProject"; template: ProjectTemplate }>();
+  const [templateName, setTemplateName] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+
+  async function reloadTemplates() {
+    setTemplates(await listProjectTemplates());
+  }
+
+  useEffect(() => { void reloadTemplates().catch((value) => setError(toUserMessage(value))); }, []);
+
+  function beginTemplateForm(kind: "edit" | "createProject", template: ProjectTemplate) {
+    setTemplateForm({ kind, template });
+    setTemplateName(kind === "edit" ? template.name : `${template.name} 项目`);
+    setTemplateDescription(template.description ?? "");
+    setError(undefined);
+  }
+
+  async function submitTemplateForm(event: FormEvent) {
+    event.preventDefault();
+    if (!templateForm) return;
+    setTemplateBusy(true); setError(undefined);
+    try {
+      if (templateForm.kind === "edit") {
+        await updateProjectTemplate(templateForm.template.id, templateName, templateDescription.trim() || undefined);
+        await reloadTemplates();
+      } else {
+        const result = await createProjectFromTemplate(templateForm.template.id, templateName, templateDescription.trim() || undefined);
+        onProjectUpdated(result.project);
+        onTemplateProjectCreated(result);
+      }
+      setTemplateForm(undefined);
+    } catch (value) { setError(toUserMessage(value)); } finally { setTemplateBusy(false); }
+  }
+
+  async function removeTemplate(template: ProjectTemplate) {
+    if (!window.confirm(`删除项目模板“${template.name}”？此操作不会删除项目、工作流、预设或素材。`)) return;
+    setTemplateBusy(true); setError(undefined);
+    try { await deleteProjectTemplate(template.id); await reloadTemplates(); }
+    catch (value) { setError(toUserMessage(value)); } finally { setTemplateBusy(false); }
+  }
 
   function beginCreate() {
     setFormMode({ kind: "create" });
@@ -132,6 +180,7 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
       </div>
 
       {backupNotice && <p className="settings-notice" role="status">{backupNotice}</p>}
+      {error && !formMode && <p className="error-message" role="alert">{error}</p>}
       {backupPreview && (
         <section className="project-backup-preview" aria-labelledby="project-backup-preview-title">
           <div className="section-heading">
@@ -184,6 +233,23 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
           </div>
         </form>
       )}
+
+      <section className="project-templates" aria-labelledby="project-templates-title">
+        <div className="section-heading"><div><span className="section-label">可复用创作起点</span><h3 id="project-templates-title">项目模板</h3><p className="section-description">从已保存的工作流和无素材参数创建新项目。</p></div></div>
+        <div className="project-template-grid">
+          {templates.map((template) => <article key={template.id} className="project-template-card">
+            <div><strong>{template.name}</strong><p>{template.description || "暂无说明"}</p><small>{template.available ? "工作流可用" : "工作流当前不可用"}</small></div>
+            <div><button type="button" onClick={() => beginTemplateForm("createProject", template)} disabled={templateBusy || !template.available}>从模板新建</button><button type="button" className="quiet-button" onClick={() => beginTemplateForm("edit", template)} disabled={templateBusy}>编辑</button><button type="button" className="quiet-button" onClick={() => void removeTemplate(template)} disabled={templateBusy}>删除</button></div>
+          </article>)}
+          {!templates.length && <p className="empty-state">尚未保存项目模板。请在创作页保存当前草稿。</p>}
+        </div>
+        {templateForm && <form className="project-form project-template-form" onSubmit={(event) => void submitTemplateForm(event)}>
+          <div className="section-heading"><div><span className="section-label">{templateForm.kind === "edit" ? "编辑模板" : "创建新项目"}</span><h3>{templateForm.template.name}</h3></div></div>
+          <label><span>{templateForm.kind === "edit" ? "模板名称" : "项目名称"}</span><input autoFocus required maxLength={80} value={templateName} onChange={(event) => setTemplateName(event.target.value)} /></label>
+          <label><span>{templateForm.kind === "edit" ? "模板说明" : "项目说明"} <small>可选</small></span><textarea rows={3} maxLength={500} value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} /></label>
+          <div className="project-form-actions"><button type="submit" disabled={templateBusy || !templateName.trim()}>{templateBusy ? "正在保存..." : templateForm.kind === "edit" ? "保存修改" : "创建并打开"}</button><button type="button" className="quiet-button" onClick={() => setTemplateForm(undefined)} disabled={templateBusy}>取消</button></div>
+        </form>}
+      </section>
 
       <div className="project-table" role="table" aria-label="项目列表">
         <div className="project-table-row project-table-header" role="row">

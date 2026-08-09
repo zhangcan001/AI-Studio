@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod comfy;
 pub mod diagnostics;
 pub mod generation;
+pub mod organization;
 pub mod preset;
 pub mod production_queue;
 pub mod project;

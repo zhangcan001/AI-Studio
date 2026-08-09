@@ -1,15 +1,24 @@
 use crate::application::asset_query_service::{AssetSummaryView, AssetView};
 use crate::application::pagination::PageCursor;
-use crate::application::ports::{AssetBrowseRepository, AssetLibraryQuery, RepositoryError};
+use crate::application::ports::{
+    AssetBrowseRepository, AssetLibraryQuery, OrganizationRepository, RepositoryError,
+};
 use std::{error::Error, fmt, sync::Arc};
 
 pub struct AssetLibraryService {
     repository: Arc<dyn AssetBrowseRepository>,
+    organization_repository: Arc<dyn OrganizationRepository>,
 }
 
 impl AssetLibraryService {
-    pub fn new(repository: Arc<dyn AssetBrowseRepository>) -> Self {
-        Self { repository }
+    pub fn new(
+        repository: Arc<dyn AssetBrowseRepository>,
+        organization_repository: Arc<dyn OrganizationRepository>,
+    ) -> Self {
+        Self {
+            repository,
+            organization_repository,
+        }
     }
 
     pub async fn list_page(
@@ -25,9 +34,29 @@ impl AssetLibraryService {
             (!keyword.is_empty()).then_some(keyword)
         });
         query.limit = query.limit.clamp(1, 100);
+        let project_id = query.project_id.clone();
         let page = self.repository.list_page(query).await?;
+        let asset_ids = page
+            .items
+            .iter()
+            .map(|asset| asset.id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let mut organization = self
+            .organization_repository
+            .organization_for_assets(&project_id, &asset_ids)
+            .await?;
         Ok(AssetLibraryPageView {
-            items: page.items.into_iter().map(AssetView::from).collect(),
+            items: page
+                .items
+                .into_iter()
+                .map(|asset| {
+                    let asset_id = asset.id.as_str().to_owned();
+                    AssetView::from_asset_and_organization(
+                        asset,
+                        organization.remove(&asset_id).unwrap_or_default(),
+                    )
+                })
+                .collect(),
             next_cursor: page.next_cursor,
         })
     }

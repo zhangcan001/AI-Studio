@@ -1,6 +1,6 @@
 use crate::application::ports::{
-    AssetRepository, AssetStore, AssetStoreError, GenerationDefinitionRepository, RepositoryError,
-    TaskOutputAssetMapping, TaskRepository,
+    AssetRepository, AssetStore, AssetStoreError, GenerationDefinitionRepository,
+    OrganizationRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
 };
 use crate::compiler::RecipeParser;
 use crate::domain::{AssetId, AssetType, TaskId};
@@ -13,6 +13,7 @@ pub struct AssetQueryService {
     asset_store: Arc<dyn AssetStore>,
     task_repository: Option<Arc<dyn TaskRepository>>,
     definition_repository: Option<Arc<dyn GenerationDefinitionRepository>>,
+    organization_repository: Option<Arc<dyn OrganizationRepository>>,
 }
 
 impl AssetQueryService {
@@ -25,7 +26,16 @@ impl AssetQueryService {
             asset_store,
             task_repository: None,
             definition_repository: None,
+            organization_repository: None,
         }
+    }
+
+    pub fn with_organization_repository(
+        mut self,
+        repository: Arc<dyn OrganizationRepository>,
+    ) -> Self {
+        self.organization_repository = Some(repository);
+        self
     }
 
     pub fn with_output_order_repositories(
@@ -126,7 +136,19 @@ impl AssetQueryService {
         if asset.project_id != project_id {
             return Err(AssetQueryError::NotFound(asset_id.as_str().to_owned()));
         }
-        Ok(AssetSummaryView::from(asset))
+        let organization = if let Some(repository) = &self.organization_repository {
+            repository
+                .organization_for_assets(project_id, &[asset_id.as_str().to_owned()])
+                .await?
+                .remove(asset_id.as_str())
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        Ok(AssetSummaryView::from_asset_and_organization(
+            asset,
+            organization,
+        ))
     }
 
     pub async fn read_image(
@@ -231,6 +253,15 @@ pub struct AssetSummaryView {
     pub created_at: DateTime<Utc>,
     pub source_task_id: Option<String>,
     pub thumbnail_available: bool,
+    pub is_favorite: bool,
+    pub tags: Vec<TagSummaryView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagSummaryView {
+    pub id: String,
+    pub name: String,
 }
 
 impl From<crate::domain::Asset> for AssetSummaryView {
@@ -260,7 +291,28 @@ impl From<crate::domain::Asset> for AssetSummaryView {
                 .source_task_id
                 .map(|task_id| task_id.as_str().to_owned()),
             thumbnail_available: asset.thumbnail_path.is_some(),
+            is_favorite: false,
+            tags: Vec::new(),
         }
+    }
+}
+
+impl AssetSummaryView {
+    pub fn from_asset_and_organization(
+        asset: crate::domain::Asset,
+        organization: crate::application::ports::AssetOrganization,
+    ) -> Self {
+        let mut view = Self::from(asset);
+        view.is_favorite = organization.is_favorite;
+        view.tags = organization
+            .tags
+            .into_iter()
+            .map(|tag| TagSummaryView {
+                id: tag.id,
+                name: tag.name,
+            })
+            .collect();
+        view
     }
 }
 

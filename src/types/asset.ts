@@ -12,6 +12,8 @@ export interface AssetView {
   createdAt: string;
   sourceTaskId?: string;
   thumbnailAvailable?: boolean;
+  isFavorite: boolean;
+  tags: Array<{ id: string; name: string }>;
 }
 
 export type AssetCategoryFilter =
@@ -32,6 +34,8 @@ export interface AssetLibraryQuery {
   keyword?: string;
   mediaType: AssetMediaTypeFilter;
   sourceKind: AssetSourceFilter;
+  favoriteOnly?: boolean;
+  tagId?: string;
   createdOrder: AssetCreatedOrder;
   cursor?: PageCursor;
   limit?: number;

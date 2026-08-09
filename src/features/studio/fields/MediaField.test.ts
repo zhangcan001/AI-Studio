@@ -13,6 +13,8 @@ function asset(assetType: string, category: string): AssetView {
     mimeType: `${assetType}/test`,
     fileSize: 1,
     createdAt: "2026-01-01T00:00:00Z",
+    isFavorite: false,
+    tags: [],
   };
 }
 

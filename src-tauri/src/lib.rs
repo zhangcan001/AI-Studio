@@ -14,9 +14,9 @@ pub use application::ports::{
 };
 pub use infrastructure::database::{
     SqliteAssetRepository, SqliteGenerationDefinitionRepository,
-    SqliteGenerationSnapshotRepository, SqlitePresetRepository, SqliteProductionQueueRepository,
-    SqliteProjectRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRunRepository,
+    SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
+    SqliteProductionQueueRepository, SqliteProjectRepository, SqliteTaskRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -28,12 +28,14 @@ use application::{
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
     media_protocol::MediaProtocolService,
+    organization_service::OrganizationService,
     ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
     preset_service::PresetService,
     production_queue_service::ProductionQueueService,
     project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
     project_service::ProjectService,
+    project_template_service::ProjectTemplateService,
     settings_service::SettingsService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
@@ -201,6 +203,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(infrastructure::database::SqliteAssetBrowseRepository::new(
                     database_pool.clone(),
                 ));
+            let organization_repository: Arc<dyn application::ports::OrganizationRepository> =
+                Arc::new(SqliteOrganizationRepository::new(database_pool.clone()));
             let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
             let preset_repository: Arc<dyn application::ports::PresetRepository> = Arc::new(
                 infrastructure::database::SqlitePresetRepository::new(database_pool.clone()),
@@ -337,9 +341,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     .with_output_order_repositories(
                         Arc::new(SqliteTaskRepository::new(database_pool.clone())),
                         definition_repository.clone(),
-                    ),
+                    )
+                    .with_organization_repository(organization_repository.clone()),
             );
-            let asset_library_service = Arc::new(AssetLibraryService::new(asset_browse_repository));
+            let asset_library_service = Arc::new(AssetLibraryService::new(
+                asset_browse_repository,
+                organization_repository.clone(),
+            ));
             let task_history_service = Arc::new(TaskHistoryService::new(
                 task_history_repository,
                 snapshot_repository.clone(),
@@ -398,6 +406,16 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_directory_store,
                 clock.clone(),
             ));
+            let organization_service = Arc::new(OrganizationService::new(
+                organization_repository.clone(),
+                clock.clone(),
+            ));
+            let project_template_service = Arc::new(ProjectTemplateService::new(
+                organization_repository,
+                definition_repository.clone(),
+                project_service.clone(),
+                clock.clone(),
+            ));
             let project_backup_service = Arc::new(ProjectBackupService::new(
                 database_pool.clone(),
                 data_dirs.projects.clone(),
@@ -436,6 +454,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_service,
                 project_backup_service,
                 preset_service,
+                organization_service,
+                project_template_service,
                 production_queue_service,
                 diagnostics_service,
                 settings_service,
@@ -606,6 +626,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_backup_export,
             commands::project::project_backup_inspect,
             commands::project::project_backup_restore,
+            commands::organization::project_template_list,
+            commands::organization::project_template_create,
+            commands::organization::project_template_update,
+            commands::organization::project_template_delete,
+            commands::organization::project_template_create_project,
             commands::task::task_get,
             commands::task::task_list_recent,
             commands::task::task_cancel,
@@ -626,6 +651,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::asset::asset_read_thumbnail,
             commands::asset::asset_library_page,
             commands::asset::asset_get
+            ,commands::organization::asset_tag_list
+            ,commands::organization::asset_tag_create
+            ,commands::organization::asset_tag_rename
+            ,commands::organization::asset_tag_delete
+            ,commands::organization::asset_tag_assign
+            ,commands::organization::asset_tag_remove
+            ,commands::organization::asset_set_favorite
         ])
         .run(tauri::generate_context!())
         .map_err(|_| AppError::initialization("Tauri runtime failed"))

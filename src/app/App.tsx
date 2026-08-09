@@ -14,6 +14,7 @@ import { useTaskStore } from "../stores/taskStore";
 import { useProjectStore } from "../stores/projectStore";
 import type { RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
+import type { TemplateProjectResult } from "../types/organization";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
 import { AssetLibrary } from "../features/assets/AssetLibrary";
 import { TaskHistory } from "../features/tasks/TaskHistory";
@@ -333,6 +334,19 @@ function App() {
     openProject(project.id);
   }
 
+  function handleTemplateProjectCreated(result: TemplateProjectResult) {
+    useProjectStore.getState().upsertProject(result.project);
+    openProject(result.project.id);
+    const workflow = catalog.find((item) => item.workflowVersionId === result.workflowVersionId && item.recipeId === result.recipeId);
+    if (!workflow) {
+      setError("模板项目已创建，但工作流当前不可用。");
+      return;
+    }
+    useStudioStore.getState().loadDraft(workflow, result.values);
+    setWorkspace("studio");
+    setError(null);
+  }
+
   const comfy = bootstrapState?.comfy;
   const isConnected = comfy?.status === "CONNECTED";
   const hasActiveTasks = recentTasks.some((task) =>
@@ -490,6 +504,7 @@ function App() {
           onOpen={openProject}
           onProjectUpdated={handleProjectUpdated}
           onProjectRestored={handleProjectRestored}
+          onTemplateProjectCreated={handleTemplateProjectCreated}
         />
       )}
       {workspace === "workflows" && (

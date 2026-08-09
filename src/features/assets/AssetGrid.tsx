@@ -9,9 +9,10 @@ interface Props {
   compareMode?: boolean;
   compareIds?: string[];
   onToggleCompare?: (asset: AssetView) => void;
+  onFavorite?: (asset: AssetView) => void;
 }
 
-export function AssetGrid({ projectId, assets, onSelect, emptyMessage = "没有找到符合条件的素材。", compareMode, compareIds = [], onToggleCompare }: Props) {
+export function AssetGrid({ projectId, assets, onSelect, emptyMessage = "没有找到符合条件的素材。", compareMode, compareIds = [], onToggleCompare, onFavorite }: Props) {
   if (!assets.length) {
     return <p className="empty-state">{emptyMessage}</p>;
   }
@@ -26,6 +27,7 @@ export function AssetGrid({ projectId, assets, onSelect, emptyMessage = "没有�
           compareMode={compareMode}
           compared={compareIds.includes(asset.id)}
           onToggleCompare={onToggleCompare}
+          onFavorite={onFavorite}
         />
       ))}
     </div>

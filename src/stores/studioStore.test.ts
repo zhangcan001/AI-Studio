@@ -34,4 +34,24 @@ describe("studio media draft state", () => {
     expect(values.videos).toEqual({ type: "video_assets", assetIds: [] });
     expect(values.audios).toEqual({ type: "audio_assets", assetIds: [] });
   });
+
+  it("loads an asset-free project template draft without inventing media references", () => {
+    const workflow: RecipeViewModel = {
+      ...mediaWorkflow,
+      fields: [
+        { key: "prompt", type: "textarea", label: "提示词", required: true, default: "" },
+        { key: "seed", type: "seed", label: "随机种子", defaultMode: "random" },
+        { key: "video", type: "video", label: "参考视频", required: false },
+      ],
+    };
+    useStudioStore.getState().loadDraft(workflow, {
+      prompt: { type: "string", value: "人物海报" },
+      seed: { type: "seed_fixed", value: "42" },
+    });
+    expect(useStudioStore.getState().values).toEqual({
+      prompt: { type: "string", value: "人物海报" },
+      seed: { type: "seed_fixed", value: "42" },
+    });
+    expect(useStudioStore.getState().values.video).toBeUndefined();
+  });
 });

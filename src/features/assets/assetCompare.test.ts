@@ -11,6 +11,8 @@ const asset = (id: string, assetType: "image" | "video" | "audio"): AssetView =>
   mimeType: `${assetType}/test`,
   fileSize: 1,
   createdAt: "2026-01-01T00:00:00Z",
+  isFavorite: false,
+  tags: [],
 });
 
 describe("资产对比选择", () => {

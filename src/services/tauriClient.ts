@@ -7,6 +7,7 @@ import type {
   RuntimeActivityStatus,
 } from "../types/diagnostics";
 import type { AssetLibraryPage, AssetLibraryQuery, AssetView } from "../types/asset";
+import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type {
   ReusableGenerationDraft,
@@ -396,6 +397,56 @@ export function getReusableDraft(projectId: string, taskId: string): Promise<Reu
 
 export function assetLibraryPage(query: AssetLibraryQuery): Promise<AssetLibraryPage> {
   return invoke<AssetLibraryPage>("asset_library_page", { query });
+}
+
+export function listAssetTags(projectId: string): Promise<AssetTag[]> {
+  return invoke<AssetTag[]>("asset_tag_list", { projectId });
+}
+
+export function createAssetTag(projectId: string, name: string): Promise<AssetTag> {
+  return invoke<AssetTag>("asset_tag_create", { projectId, name });
+}
+
+export function renameAssetTag(projectId: string, tagId: string, name: string): Promise<AssetTag> {
+  return invoke<AssetTag>("asset_tag_rename", { projectId, tagId, name });
+}
+
+export function deleteAssetTag(projectId: string, tagId: string): Promise<void> {
+  return invoke<void>("asset_tag_delete", { projectId, tagId });
+}
+
+export function assignAssetTag(projectId: string, assetId: string, tagId: string): Promise<void> {
+  return invoke<void>("asset_tag_assign", { projectId, assetId, tagId });
+}
+
+export function removeAssetTag(projectId: string, assetId: string, tagId: string): Promise<void> {
+  return invoke<void>("asset_tag_remove", { projectId, assetId, tagId });
+}
+
+export function setAssetFavorite(projectId: string, assetId: string, favorite: boolean): Promise<void> {
+  return invoke<void>("asset_set_favorite", { projectId, assetId, favorite });
+}
+
+export function listProjectTemplates(): Promise<ProjectTemplate[]> {
+  return invoke<ProjectTemplate[]>("project_template_list");
+}
+
+export function createProjectTemplate(request: {
+  name: string; description?: string; workflowVersionId: string; recipeId: string; values: GenerationValues;
+}): Promise<ProjectTemplate> {
+  return invoke<ProjectTemplate>("project_template_create", { request });
+}
+
+export function updateProjectTemplate(templateId: string, name: string, description?: string): Promise<ProjectTemplate> {
+  return invoke<ProjectTemplate>("project_template_update", { templateId, name, description });
+}
+
+export function deleteProjectTemplate(templateId: string): Promise<void> {
+  return invoke<void>("project_template_delete", { templateId });
+}
+
+export function createProjectFromTemplate(templateId: string, name: string, description?: string): Promise<TemplateProjectResult> {
+  return invoke<TemplateProjectResult>("project_template_create_project", { templateId, name, description });
 }
 
 export function listPresets(

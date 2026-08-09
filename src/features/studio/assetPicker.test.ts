@@ -27,12 +27,14 @@ describe("素材选择器", () => {
 
   it("使用后端查询限制媒体类型、来源和关键词，并支持游标分页", () => {
     const cursor = { createdAt: "2026-01-01T00:00:00Z", id: "asset-1" };
-    expect(buildAssetPickerQuery("project-1", "image", "source", " 人物 ", cursor)).toEqual({
+    expect(buildAssetPickerQuery("project-1", "image", "source", " 人物 ", true, "tag-person", cursor)).toEqual({
       projectId: "project-1",
       category: "ALL",
       keyword: "人物",
       mediaType: "IMAGE",
       sourceKind: "SOURCE",
+      favoriteOnly: true,
+      tagId: "tag-person",
       createdOrder: "NEWEST",
       cursor,
       limit: 30,

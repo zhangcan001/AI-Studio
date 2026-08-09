@@ -156,6 +156,10 @@ pub struct AssetLibraryQueryDto {
     #[serde(default)]
     pub source_kind: AssetSourceFilterDto,
     #[serde(default)]
+    pub favorite_only: bool,
+    #[serde(default)]
+    pub tag_id: Option<String>,
+    #[serde(default)]
     pub created_order: AssetCreatedOrderDto,
     #[serde(default)]
     pub cursor: Option<crate::application::pagination::PageCursor>,
@@ -177,6 +181,8 @@ pub async fn asset_library_page(
             keyword: query.keyword,
             media_type: query.media_type.into(),
             source_kind: query.source_kind.into(),
+            favorite_only: query.favorite_only,
+            tag_id: query.tag_id,
             created_order: query.created_order.into(),
             cursor: query.cursor,
             limit: query.limit.unwrap_or(30),

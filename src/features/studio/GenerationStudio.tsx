@@ -4,6 +4,7 @@ import {
   createPreset,
   createGeneration,
   createGenerationBatch,
+  createProjectTemplate,
   deletePreset,
   listPresets,
   refreshWorkflowLibrary,
@@ -107,6 +108,11 @@ export function GenerationStudio({
   const [studioMode, setStudioMode] = useState<StudioMode>("single");
   const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateError, setTemplateError] = useState<string>();
   const handleAssetAvailabilityChange = useCallback((key: string, available: boolean) => {
     setMissingAssetFields((current) => {
       const next = new Set(current);
@@ -136,7 +142,18 @@ export function GenerationStudio({
     setBatchNotice(undefined);
     setStudioMode("single");
     setPresetEditorOpen(false);
+    setTemplateEditorOpen(false);
   }, [projectId]);
+
+  async function saveProjectTemplate() {
+    if (!selectedWorkflow || !templateName.trim()) return;
+    setTemplateSaving(true); setTemplateError(undefined);
+    try {
+      await createProjectTemplate({ name: templateName, description: templateDescription.trim() || undefined, workflowVersionId: selectedWorkflow.workflowVersionId, recipeId: selectedWorkflow.recipeId, values });
+      setTemplateEditorOpen(false); setTemplateName(""); setTemplateDescription("");
+      setNotice("项目模板已保存；素材输入不会写入模板。");
+    } catch (value) { setTemplateError(toUserMessage(value)); } finally { setTemplateSaving(false); }
+  }
 
   useEffect(() => {
     const next = selectedWorkflow
@@ -583,6 +600,18 @@ export function GenerationStudio({
               </div>
             )}
             {presetError && <p className="error-message">预设：{presetError}</p>}
+            <div className="project-template-toolbar">
+              <button type="button" className="quiet-button" onClick={() => { setTemplateError(undefined); setTemplateEditorOpen(true); }}>保存为项目模板</button>
+              <small>保存当前文字、数字和种子；不保存图片、视频或音频素材。</small>
+            </div>
+            {templateEditorOpen && (
+              <section className="project-template-editor" aria-label="保存为项目模板">
+                <label><span>模板名称</span><input autoFocus maxLength={80} value={templateName} placeholder="例如：Kera2 海报起点" onChange={(event) => setTemplateName(event.target.value)} /></label>
+                <label><span>模板说明 <small>可选</small></span><textarea rows={2} maxLength={500} value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} /></label>
+                <div><button type="button" onClick={() => void saveProjectTemplate()} disabled={templateSaving || !templateName.trim()}>{templateSaving ? "正在保存..." : "保存模板"}</button><button type="button" className="quiet-button" onClick={() => setTemplateEditorOpen(false)} disabled={templateSaving}>取消</button></div>
+                {templateError && <p className="error-message" role="alert">{templateError}</p>}
+              </section>
+            )}
             {selectedWorkflow.workflowId === "wfl_minimax_h3_reference_video" && (
               <details className="h3-safety-note">
                 <summary>✓ 16GB 安全配置</summary>

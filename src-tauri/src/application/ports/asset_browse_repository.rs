@@ -68,6 +68,8 @@ pub struct AssetLibraryQuery {
     pub keyword: Option<String>,
     pub media_type: AssetMediaTypeFilter,
     pub source_kind: AssetSourceFilter,
+    pub favorite_only: bool,
+    pub tag_id: Option<String>,
     pub created_order: AssetCreatedOrder,
     pub cursor: Option<PageCursor>,
     pub limit: u32,

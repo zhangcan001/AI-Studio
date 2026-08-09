@@ -10,9 +10,10 @@ interface Props {
   compareMode?: boolean;
   compared?: boolean;
   onToggleCompare?: (asset: AssetView) => void;
+  onFavorite?: (asset: AssetView) => void;
 }
 
-export function AssetCard({ projectId, asset, onSelect, compareMode = false, compared = false, onToggleCompare }: Props) {
+export function AssetCard({ projectId, asset, onSelect, compareMode = false, compared = false, onToggleCompare, onFavorite }: Props) {
   const cardRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>();
@@ -71,13 +72,8 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
   const displayName = assetDisplayName(asset);
 
   return (
-    <button
-      ref={cardRef}
-      type="button"
-      className={`asset-library-card${compareMode && compared ? " asset-library-card-compared" : ""}`}
-      aria-pressed={compareMode ? compared : undefined}
-      onClick={() => (compareMode && onToggleCompare ? onToggleCompare(asset) : onSelect(asset))}
-    >
+    <article className={`asset-library-card${compareMode && compared ? " asset-library-card-compared" : ""}`}>
+      <button ref={cardRef} type="button" className="asset-library-card-main" aria-pressed={compareMode ? compared : undefined} onClick={() => (compareMode && onToggleCompare ? onToggleCompare(asset) : onSelect(asset))}>
       <span className="asset-library-image">
         {previewUrl ? (
           <img src={previewUrl} alt={displayName} loading="lazy" />
@@ -95,7 +91,18 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
           {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatFileSize(asset.fileSize)}
         </small>
         <small>{formatDateTime(asset.createdAt)}</small>
+        <span className="asset-tag-chips" aria-label="素材标签">
+          {asset.tags.slice(0, 3).map((tag) => <span key={tag.id}>{tag.name}</span>)}
+          {asset.tags.length > 3 && <span>+{asset.tags.length - 3}</span>}
+        </span>
       </span>
-    </button>
+      </button>
+      {onFavorite && (
+        <button type="button" className="asset-favorite-button" aria-label={asset.isFavorite ? "取消收藏素材" : "收藏素材"} aria-pressed={asset.isFavorite} onClick={() => onFavorite(asset)}>
+          <span aria-hidden="true">{asset.isFavorite ? "★" : "☆"}</span>
+          {asset.isFavorite ? "已收藏" : "收藏"}
+        </button>
+      )}
+    </article>
   );
 }

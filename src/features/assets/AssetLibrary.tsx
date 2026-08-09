@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assetLibraryPage } from "../../services/tauriClient";
+import { assetLibraryPage, getAsset, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
 import type {
   AssetCategoryFilter,
   AssetCreatedOrder,
@@ -15,6 +15,9 @@ import { toggleCompareSelection } from "./assetCompare";
 import { mergeAssetPage } from "./assetLibraryState";
 import { AssetGrid } from "./AssetGrid";
 import { AssetPreview } from "./AssetPreview";
+import { TagManagerDialog } from "./TagManagerDialog";
+import type { AssetTag } from "../../types/organization";
+import { replaceAssetOrganization } from "./assetOrganization";
 
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "ALL", label: "全部分类" },
@@ -38,6 +41,10 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
   const [mediaType, setMediaType] = useState<AssetMediaTypeFilter>("ALL");
   const [sourceKind, setSourceKind] = useState<AssetSourceFilter>("ALL");
   const [createdOrder, setCreatedOrder] = useState<AssetCreatedOrder>("NEWEST");
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [tagId, setTagId] = useState("");
+  const [tags, setTags] = useState<AssetTag[]>([]);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [cursor, setCursor] = useState<PageCursor>();
   const [selectedAsset, setSelectedAsset] = useState<AssetView>();
@@ -60,9 +67,19 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
     keyword: keyword || undefined,
     mediaType,
     sourceKind,
+    favoriteOnly,
+    tagId: tagId || undefined,
     createdOrder,
     limit: 30,
-  }), [category, createdOrder, keyword, mediaType, projectId, sourceKind]);
+  }), [category, createdOrder, favoriteOnly, keyword, mediaType, projectId, sourceKind, tagId]);
+
+  const reloadTags = useCallback(async () => {
+    const next = await listAssetTags(projectId);
+    setTags(next);
+    if (tagId && !next.some((tag) => tag.id === tagId)) setTagId("");
+  }, [projectId, tagId]);
+
+  useEffect(() => { void reloadTags().catch(() => setTags([])); }, [reloadTags]);
 
   const requestPage = useCallback(async (requestedCursor: PageCursor | undefined, reset: boolean) => {
     const version = ++requestVersion.current;
@@ -103,8 +120,26 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
     setCategory("ALL");
     setMediaType("ALL");
     setSourceKind("ALL");
+    setFavoriteOnly(false);
+    setTagId("");
     setCreatedOrder("NEWEST");
     setNotice(undefined);
+  }
+
+  async function toggleFavorite(asset: AssetView) {
+    try {
+      await setAssetFavorite(projectId, asset.id, !asset.isFavorite);
+      const refreshed = await getAsset(projectId, asset.id);
+      applyOrganizationAsset(refreshed);
+      if (favoriteOnly && !refreshed.isFavorite) void requestPage(undefined, true);
+    } catch (value) { setError(toUserMessage(value)); }
+  }
+
+  function applyOrganizationAsset(refreshed: AssetView) {
+    setAssets((current) => replaceAssetOrganization(current, refreshed));
+    setSelectedAsset((current) => current?.id === refreshed.id ? refreshed : current);
+    setCompareAssets((current) => replaceAssetOrganization(current, refreshed));
+    void reloadTags().catch(() => undefined);
   }
 
   function toggleCompare(asset: AssetView) {
@@ -113,7 +148,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
     setNotice(result.notice);
   }
 
-  const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL");
+  const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL" || favoriteOnly || tagId);
   const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
 
   return (
@@ -125,6 +160,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
           <p className="section-description">搜索、筛选、对比当前项目的源素材和生成结果。</p>
         </div>
         <div className="asset-library-actions">
+          <button type="button" className="quiet-button" onClick={() => setTagManagerOpen(true)}>管理标签</button>
           <button type="button" className={compareMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setCompareMode((value) => !value)}>
             {compareMode ? "结束对比选择" : "选择进行对比"}
           </button>
@@ -146,6 +182,17 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
             <option value="SOURCE">源素材</option>
             <option value="GENERATED">生成结果</option>
           </select>
+        </label>
+        <label>
+          <span>标签</span>
+          <select value={tagId} onChange={(event) => setTagId(event.target.value)}>
+            <option value="">全部标签</option>
+            {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+          </select>
+        </label>
+        <label className="check-control asset-favorite-filter">
+          <input type="checkbox" checked={favoriteOnly} onChange={(event) => setFavoriteOnly(event.target.checked)} />
+          <span>仅收藏</span>
         </label>
         <label>
           <span>类型</span>
@@ -187,6 +234,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
         compareMode={compareMode}
         compareIds={compareAssets.map((asset) => asset.id)}
         onToggleCompare={toggleCompare}
+        onFavorite={(asset) => void toggleFavorite(asset)}
       />
       {hasFilters && !loading && (
         <button type="button" className="quiet-button clear-asset-filters" onClick={clearFilters}>清除筛选</button>
@@ -220,8 +268,11 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
           onClose={() => setSelectedAsset(undefined)}
           onUseInStudio={onUseInStudio}
           onOpenTask={onOpenTask}
+          allTags={tags}
+          onOrganizationChanged={applyOrganizationAsset}
         />
       )}
+      {tagManagerOpen && <TagManagerDialog projectId={projectId} onClose={() => setTagManagerOpen(false)} onChanged={(nextTags) => { setTags(nextTags); void requestPage(undefined, true); }} />}
       {compareOpen && compareAssets.length >= 2 && (
         <AssetCompareWorkspace
           projectId={projectId}

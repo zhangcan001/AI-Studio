@@ -8,6 +8,8 @@ export function buildAssetPickerQuery(
   kind: AssetPickerKind,
   filter: AssetPickerFilter,
   keyword: string,
+  favoriteOnly = false,
+  tagId?: string,
   cursor?: PageCursor,
 ): AssetLibraryQuery {
   return {
@@ -16,6 +18,8 @@ export function buildAssetPickerQuery(
     keyword: keyword.trim() || undefined,
     mediaType: kind.toUpperCase() as AssetMediaTypeFilter,
     sourceKind: (filter === "source" ? "SOURCE" : filter === "generated" ? "GENERATED" : "ALL") as AssetSourceFilter,
+    favoriteOnly,
+    tagId: tagId || undefined,
     createdOrder: "NEWEST",
     cursor,
     limit: 30,

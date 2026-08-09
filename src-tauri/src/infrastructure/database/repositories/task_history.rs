@@ -575,7 +575,7 @@ mod tests {
             "workflow-2",
             "workflow-version-2",
             "recipe-2",
-            now - Duration::hours(1),
+            now,
         );
         let old = Task::new(
             "project-1",
