@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "AI Studio",
+        "title": "AI Studio - 本地 AI 创作工作台",
         "width": 1180,
-        "height": 760
+        "height": 760,
+        "minWidth": 1000,
+        "minHeight": 700
       }
     ],
     "security": {
@@ -23,6 +25,8 @@
   },
   "bundle": {
     "active": true,
+    "shortDescription": "本地 AI 创作工作台",
+    "longDescription": "面向本地 ComfyUI 的 AI 图片与视频创作工作台。",
     "targets": "all",
     "icon": [
       "icons/32x32.png",

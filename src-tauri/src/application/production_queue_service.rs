@@ -586,7 +586,7 @@ impl ProductionQueueService {
         let service = Arc::clone(self);
         tokio::spawn(async move {
             if let Err(error) = service.run_loop(&project_id, &batch_id).await {
-                tracing::error!(batch_id = %batch_id.as_str(), error = %error, "production queue runner failed");
+                tracing::error!(batch_id = %batch_id.as_str(), error_type = std::any::type_name_of_val(&error), "production queue runner failed");
                 let _ = service
                     .repository
                     .set_batch_status(
@@ -705,7 +705,7 @@ impl ProductionQueueService {
                     if let Err(error) = self.task_recovery_service.reconcile_active().await {
                         tracing::warn!(
                             task_id = %task_id.as_str(),
-                            error = %error,
+                            error_type = std::any::type_name_of_val(&error),
                             "production restart task observation was deferred"
                         );
                     }

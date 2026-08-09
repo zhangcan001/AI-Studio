@@ -129,12 +129,12 @@ impl AssetImportService {
                         Some(stored_thumbnail.path.display().to_string())
                     }
                     Err(error) => {
-                        tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail write skipped; full asset remains available");
+                        tracing::warn!(asset_id = %asset_id, error_type = std::any::type_name_of_val(&error), "thumbnail write skipped; full asset remains available");
                         None
                     }
                 },
                 Err(error) => {
-                    tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail generation skipped; full asset remains available");
+                    tracing::warn!(asset_id = %asset_id, error_type = std::any::type_name_of_val(&error), "thumbnail generation skipped; full asset remains available");
                     None
                 }
             };
@@ -269,12 +269,12 @@ impl AssetImportService {
                     Some(stored_thumbnail.path.display().to_string())
                 }
                 Err(error) => {
-                    tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail write skipped; full asset remains available");
+                    tracing::warn!(asset_id = %asset_id, error_type = std::any::type_name_of_val(&error), "thumbnail write skipped; full asset remains available");
                     None
                 }
             },
             Err(error) => {
-                tracing::warn!(asset_id = %asset_id, error = %error, "thumbnail generation skipped; full asset remains available");
+                tracing::warn!(asset_id = %asset_id, error_type = std::any::type_name_of_val(&error), "thumbnail generation skipped; full asset remains available");
                 None
             }
         };
@@ -408,7 +408,7 @@ impl AssetImportService {
                     Some(stored_poster.path.display().to_string())
                 }
                 Err(error) => {
-                    tracing::warn!(asset_id = %asset_id, error = %error, "video poster write skipped");
+                    tracing::warn!(asset_id = %asset_id, error_type = std::any::type_name_of_val(&error), "video poster write skipped");
                     None
                 }
             }
@@ -467,8 +467,7 @@ impl AssetImportService {
         for path in paths {
             if let Err(error) = self.asset_store.delete(path).await {
                 tracing::error!(
-                    path = %path.display(),
-                    error = %error,
+                    error_type = std::any::type_name_of_val(&error),
                     "asset compensation delete failed"
                 );
             }

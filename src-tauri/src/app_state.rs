@@ -1,6 +1,7 @@
 use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
 use crate::application::comfy_service::ComfyService;
+use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
 use crate::application::preset_service::PresetService;
@@ -35,6 +36,7 @@ pub struct AppState {
     pub project_service: Arc<ProjectService>,
     pub preset_service: Arc<PresetService>,
     pub production_queue_service: Arc<ProductionQueueService>,
+    pub diagnostics_service: Arc<DiagnosticsService>,
 }
 
 impl AppState {
@@ -56,6 +58,7 @@ impl AppState {
         project_service: Arc<ProjectService>,
         preset_service: Arc<PresetService>,
         production_queue_service: Arc<ProductionQueueService>,
+        diagnostics_service: Arc<DiagnosticsService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -75,6 +78,7 @@ impl AppState {
             project_service,
             preset_service,
             production_queue_service,
+            diagnostics_service,
         }
     }
 }

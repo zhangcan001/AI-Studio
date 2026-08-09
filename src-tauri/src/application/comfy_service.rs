@@ -82,6 +82,10 @@ impl ComfyService {
         }
     }
 
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
     pub async fn get_status(&self) -> Result<ComfyStatusView, AppError> {
         let cached_capability = self.cached_capability().await;
 
@@ -91,7 +95,6 @@ impl ComfyService {
                 tracing::warn!(
                     endpoint = %self.endpoint,
                     error_type = error.kind(),
-                    error = %error,
                     "ComfyUI health check failed"
                 );
 
@@ -112,7 +115,6 @@ impl ComfyService {
             tracing::warn!(
                 endpoint = %self.endpoint,
                 error_type = error.kind(),
-                error = %error,
                 "ComfyUI capability refresh failed"
             );
             app_error_for_adapter_error(error)

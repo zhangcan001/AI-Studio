@@ -1,6 +1,7 @@
 pub mod asset;
 pub mod catalog;
 pub mod comfy;
+pub mod diagnostics;
 pub mod generation;
 pub mod preset;
 pub mod production_queue;
@@ -38,7 +39,6 @@ pub(crate) fn map_repository_error(error: &crate::application::ports::Repository
 pub struct AppStatus {
     pub backend: &'static str,
     pub database: &'static str,
-    pub data_root: String,
     pub version: &'static str,
 }
 
@@ -58,7 +58,6 @@ pub fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, AppError>
     Ok(AppStatus {
         backend: "ready",
         database: "ready",
-        data_root: state.data_dirs.root.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
     })
 }

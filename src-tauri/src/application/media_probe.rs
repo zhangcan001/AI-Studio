@@ -58,12 +58,15 @@ impl MediaProbe for CommandMediaProbe {
         {
             Ok(output) => output,
             Err(error) => {
-                tracing::debug!(error = %error, "ffprobe unavailable; video metadata remains optional");
+                tracing::debug!(
+                    error_type = std::any::type_name_of_val(&error),
+                    "ffprobe unavailable; video metadata remains optional"
+                );
                 return VideoMetadata::default();
             }
         };
         if !output.status.success() {
-            tracing::debug!(path = %path.display(), "ffprobe could not inspect video");
+            tracing::debug!("ffprobe could not inspect video");
             return VideoMetadata::default();
         }
         parse_probe_json(&output.stdout)
@@ -86,14 +89,17 @@ impl MediaProbe for CommandMediaProbe {
         {
             Ok(output) => output,
             Err(error) => {
-                tracing::debug!(error = %error, "ffmpeg unavailable; video poster skipped");
+                tracing::debug!(
+                    error_type = std::any::type_name_of_val(&error),
+                    "ffmpeg unavailable; video poster skipped"
+                );
                 return None;
             }
         };
         if output.status.success() && !output.stdout.is_empty() {
             Some(output.stdout)
         } else {
-            tracing::debug!(path = %path.display(), "ffmpeg did not produce a video poster");
+            tracing::debug!("ffmpeg did not produce a video poster");
             None
         }
     }
@@ -115,12 +121,15 @@ impl MediaProbe for CommandMediaProbe {
         {
             Ok(output) => output,
             Err(error) => {
-                tracing::debug!(error = %error, "ffprobe unavailable; audio metadata remains optional");
+                tracing::debug!(
+                    error_type = std::any::type_name_of_val(&error),
+                    "ffprobe unavailable; audio metadata remains optional"
+                );
                 return AudioMetadata::default();
             }
         };
         if !output.status.success() {
-            tracing::debug!(path = %path.display(), "ffprobe could not inspect audio");
+            tracing::debug!("ffprobe could not inspect audio");
             return AudioMetadata::default();
         }
         AudioMetadata {

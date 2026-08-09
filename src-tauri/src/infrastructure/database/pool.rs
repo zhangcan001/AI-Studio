@@ -20,23 +20,16 @@ pub async fn initialize(database_path: &Path) -> Result<SqlitePool, AppError> {
         .max_connections(5)
         .connect_with(options)
         .await
-        .map_err(|error| {
-            AppError::database(format!(
-                "failed to connect to SQLite at {}: {error}",
-                database_path.display()
-            ))
-        })?;
+        .map_err(|_| AppError::database("failed to connect to SQLite"))?;
 
     configure_pragmas(&pool).await?;
-    tracing::info!(path = %database_path.display(), "database connected");
+    tracing::info!("database connected");
 
-    MIGRATOR.run(&pool).await.map_err(|error| {
-        AppError::database(format!(
-            "database migration failed for {}: {error}",
-            database_path.display()
-        ))
-    })?;
-    tracing::info!(path = %database_path.display(), "migration completed");
+    MIGRATOR
+        .run(&pool)
+        .await
+        .map_err(|_| AppError::database("database migration failed"))?;
+    tracing::info!("database migration completed");
 
     Ok(pool)
 }
@@ -45,23 +38,17 @@ async fn configure_pragmas(pool: &SqlitePool) -> Result<(), AppError> {
     sqlx::query("PRAGMA foreign_keys = ON")
         .execute(pool)
         .await
-        .map_err(|error| {
-            AppError::database(format!("failed to enable SQLite foreign keys: {error}"))
-        })?;
+        .map_err(|_| AppError::database("failed to enable SQLite foreign keys"))?;
 
     sqlx::query("PRAGMA journal_mode = WAL")
         .fetch_one(pool)
         .await
-        .map_err(|error| {
-            AppError::database(format!("failed to enable SQLite WAL mode: {error}"))
-        })?;
+        .map_err(|_| AppError::database("failed to enable SQLite WAL mode"))?;
 
     sqlx::query("PRAGMA busy_timeout = 5000")
         .execute(pool)
         .await
-        .map_err(|error| {
-            AppError::database(format!("failed to set SQLite busy timeout: {error}"))
-        })?;
+        .map_err(|_| AppError::database("failed to set SQLite busy timeout"))?;
 
     Ok(())
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   getComfyStatus,
+  getRuntimeActivityStatus,
   getProductionAdmissionStatus,
   listGenerationCatalog,
   listProjects,
@@ -17,6 +18,7 @@ import { AssetLibrary } from "../features/assets/AssetLibrary";
 import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
+import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { useStudioStore } from "../stores/studioStore";
@@ -25,15 +27,19 @@ import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
+import { StartupScreen } from "./StartupScreen";
+import { useSafeExit } from "./useSafeExit";
 import "./App.css";
 
-type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows";
+type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows" | "settings";
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
   const [catalog, setCatalog] = useState<RecipeViewModel[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [taskEventsReady, setTaskEventsReady] = useState(false);
@@ -54,6 +60,7 @@ function App() {
   const setProjectError = useProjectStore((state) => state.setError);
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
   const recentTasks = useTaskStore((state) => state.recentTasks);
+  useSafeExit();
 
   const refreshProductionAdmission = useCallback(async () => {
     try {
@@ -93,12 +100,24 @@ function App() {
       .then(([state, recipes]) => {
         if (!cancelled) {
           setBootstrapState(state);
+          setStartupError(null);
           setCatalog(recipes);
+          void getRuntimeActivityStatus()
+            .then((activity) => {
+              if (cancelled || (activity.activeTaskCount === 0 && !activity.productionBusy)) return;
+              setRecoveryNotice("正在同步上次未完成的任务……");
+              return reconcileActiveTasks().then((report) => {
+                if (!cancelled) setRecoveryNotice(`已同步 ${report.examined} 个任务。`);
+              });
+            })
+            .catch(() => {
+              if (!cancelled) setRecoveryNotice("上次任务状态暂时无法确认，请稍后重新同步。");
+            });
         }
       })
       .catch((bootstrapError: unknown) => {
         if (!cancelled) {
-          setError(toUserMessage(bootstrapError));
+          setStartupError(toUserMessage(bootstrapError));
         }
       });
 
@@ -107,7 +126,7 @@ function App() {
       if (admissionRefreshTimer !== undefined) window.clearTimeout(admissionRefreshTimer);
       unlisten?.();
     };
-  }, [refreshProductionAdmission]);
+  }, [refreshProductionAdmission, startupAttempt]);
 
   useEffect(() => {
     void refreshProductionAdmission();
@@ -194,6 +213,13 @@ function App() {
     }
   }
 
+  function retryStartup() {
+    setBootstrapState(null);
+    setStartupError(null);
+    setError(null);
+    setStartupAttempt((attempt) => attempt + 1);
+  }
+
   async function refreshCapabilities() {
     setCapabilityLoading(true);
     setError(null);
@@ -278,6 +304,10 @@ function App() {
       .includes(task.status),
   );
 
+  if (!bootstrapState) {
+    return <StartupScreen error={startupError} onRetry={retryStartup} />;
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -318,6 +348,7 @@ function App() {
           ["tasks", "任务"],
           ["projects", "项目"],
           ["workflows", "工作流"],
+          ["settings", "设置"],
         ] as const).map(([value, label]) => (
           <button
             type="button"
@@ -388,6 +419,8 @@ function App() {
             onCatalogChanged={reloadCatalog}
             onProductionAdmissionChanged={refreshProductionAdmission}
             onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
+            onOpenWorkflows={() => setWorkspace("workflows")}
+            onReconnectComfy={() => void reconnectComfy()}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
               setWorkspace("tasks");
@@ -415,6 +448,15 @@ function App() {
       )}
       {workspace === "workflows" && (
         <WorkflowWorkspace onCatalogChanged={reloadCatalog} onOpenStudio={openPublishedWorkflow} />
+      )}
+      {workspace === "settings" && (
+        <SettingsWorkspace
+          comfy={comfy}
+          connectionLoading={connectionLoading}
+          capabilityLoading={capabilityLoading}
+          onReconnect={() => void reconnectComfy()}
+          onRefreshCapabilities={() => void refreshCapabilities()}
+        />
       )}
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}

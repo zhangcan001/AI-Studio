@@ -24,6 +24,7 @@ use application::{
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
     comfy_service::ComfyService,
+    diagnostics_service::DiagnosticsService,
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
     media_protocol::MediaProtocolService,
@@ -43,6 +44,7 @@ use application::{
     workflow_onboarding_service::WorkflowOnboardingService,
 };
 use error::AppError;
+use infrastructure::logging::LoggingStatus;
 use infrastructure::{
     comfy::ComfyHttpAdapter,
     database,
@@ -53,31 +55,51 @@ use infrastructure::{
     tauri::TauriTaskUpdateSink,
     time::SystemClock,
 };
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    initialize_logging();
+    let logging_status = initialize_logging();
     tracing::info!("application starting");
 
-    if let Err(error) = run_application() {
-        tracing::error!(code = error.code(), message = %error.message, "application failed to start");
-        eprintln!("AI Studio failed to start: {error}");
+    if let Err(error) = run_application(logging_status) {
+        tracing::error!(code = error.code(), "application failed to start");
+        eprintln!("AI Studio failed to start ({})", error.code());
         std::process::exit(1);
     }
 }
 
-fn initialize_logging() {
-    // TODO(DEV-M0): add persistent file logging under AppDataDirs::logs.
-    let _ = tracing_subscriber::fmt().with_target(false).try_init();
+fn initialize_logging() -> LoggingStatus {
+    infrastructure::logging::initialize(default_logs_dir().as_deref())
 }
 
-fn run_application() -> Result<(), AppError> {
+fn default_logs_dir() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("XDG_DATA_HOME"))
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .map(|base| base.join("AIStudio").join("AIStudioData").join("logs"))
+}
+
+fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
     let media_protocol_slot: Arc<Mutex<Option<Arc<MediaProtocolService>>>> =
         Arc::new(Mutex::new(None));
     let setup_media_protocol_slot = Arc::clone(&media_protocol_slot);
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+    builder
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol(
             "aistudio-media",
@@ -138,19 +160,16 @@ fn run_application() -> Result<(), AppError> {
             },
         )
         .setup(move |app| {
+            let result = (|| -> Result<(), AppError> {
             let data_root = app
                 .path()
                 .local_data_dir()
-                .map_err(|error| {
-                    AppError::initialization(format!(
-                        "failed to resolve local data directory: {error}"
-                    ))
-                })?
+                .map_err(|_| AppError::initialization("failed to resolve local data directory"))?
                 .join("AIStudio")
                 .join("AIStudioData");
 
             let data_dirs = AppDataDirs::initialize(data_root)?;
-            tracing::info!(path = %data_dirs.root.display(), "data directory initialized");
+            tracing::info!("application data directory initialized");
 
             let database_pool =
                 tauri::async_runtime::block_on(database::initialize(&data_dirs.database))?;
@@ -194,9 +213,9 @@ fn run_application() -> Result<(), AppError> {
             let project_bootstrap =
                 DefaultProjectBootstrap::new(project_repository.clone(), clock.clone());
             tauri::async_runtime::block_on(
-                project_bootstrap.ensure_default_project(&data_dirs.projects),
+            project_bootstrap.ensure_default_project(&data_dirs.projects),
             )
-            .map_err(|error| AppError::initialization(error.to_string()))?;
+            .map_err(|_| AppError::initialization("default project initialization failed"))?;
 
             let workflow_library_repository: Arc<dyn WorkflowLibraryRepository> = Arc::new(
                 infrastructure::database::SqliteWorkflowLibraryRepository::new(
@@ -219,15 +238,14 @@ fn run_application() -> Result<(), AppError> {
                     "runtime workflow library synchronized"
                 ),
                 Err(error) => tracing::warn!(
-                    error = %error,
+                    error_type = std::any::type_name_of_val(&error),
                     "runtime workflow library synchronization skipped"
                 ),
             }
 
             let comfy_config = ComfyConnectionConfig::default();
-            let comfy_adapter = ComfyHttpAdapter::new(comfy_config.clone()).map_err(|error| {
-                AppError::initialization(format!("failed to create ComfyUI HTTP client: {error}"))
-            })?;
+            let comfy_adapter = ComfyHttpAdapter::new(comfy_config.clone())
+                .map_err(|_| AppError::initialization("ComfyUI HTTP client initialization failed"))?;
             let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(comfy_adapter);
             let comfy_service = Arc::new(ComfyService::new(comfy_adapter.clone(), &comfy_config));
             let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
@@ -327,10 +345,19 @@ fn run_application() -> Result<(), AppError> {
             ));
             let production_queue_service = Arc::new(ProductionQueueService::new(
                 production_queue_repository,
-                task_repository,
+                task_repository.clone(),
                 generation_service.clone(),
                 task_recovery_service.clone(),
                 clock.clone(),
+            ));
+            let diagnostics_service = Arc::new(DiagnosticsService::new(
+                database_pool.clone(),
+                task_repository,
+                comfy_service.clone(),
+                workflow_lifecycle_service.clone(),
+                production_queue_service.clone(),
+                data_dirs.logs.clone(),
+                logging_status,
             ));
             let project_service = Arc::new(ProjectService::new(
                 project_repository.clone(),
@@ -370,6 +397,7 @@ fn run_application() -> Result<(), AppError> {
                 project_service,
                 preset_service,
                 production_queue_service,
+                diagnostics_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -384,21 +412,39 @@ fn run_application() -> Result<(), AppError> {
                             "startup task recovery completed"
                         );
                         if let Err(error) = startup_production_queue.recover_and_resume().await {
-                            tracing::warn!(error = %error, "startup production queue recovery failed");
+                            tracing::warn!(
+                                error_type = std::any::type_name_of_val(&error),
+                                "startup production queue recovery failed"
+                            );
                         }
                     }
                     Err(error) => tracing::warn!(
-                        error = %error,
+                        error_type = std::any::type_name_of_val(&error),
                         "startup task recovery failed; production queue auto-resume skipped"
                     ),
                 }
             });
 
             Ok(())
+            })();
+            if let Err(error) = &result {
+                let _ = app
+                    .dialog()
+                    .message(format!(
+                        "AI Studio 启动失败\n\n无法初始化本地创作环境。\n\n错误代码：{}\n\n请重试或查看诊断日志。",
+                        error.code()
+                    ))
+                    .title("AI Studio")
+                    .blocking_show();
+            }
+            Ok(result?)
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::get_app_status,
+            commands::diagnostics::runtime_activity_status,
+            commands::diagnostics::diagnostics_summary,
+            commands::diagnostics::diagnostics_export,
             commands::comfy::comfy_get_status,
             commands::comfy::comfy_refresh_capabilities,
             commands::workflow_library::workflow_library_refresh,
@@ -462,7 +508,7 @@ fn run_application() -> Result<(), AppError> {
             commands::asset::asset_get
         ])
         .run(tauri::generate_context!())
-        .map_err(|error| AppError::initialization(format!("Tauri runtime failed: {error}")))
+        .map_err(|_| AppError::initialization("Tauri runtime failed"))
 }
 
 fn query_param(query: Option<&str>, key: &str) -> Option<String> {

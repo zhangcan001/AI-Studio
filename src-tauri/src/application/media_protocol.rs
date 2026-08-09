@@ -172,9 +172,8 @@ impl MediaResponse {
         }
     }
 
-    fn server_error(error: impl Into<String>) -> Self {
-        let error = error.into();
-        tracing::error!(error = %error, "asset media protocol failed");
+    fn server_error(_error: impl Into<String>) -> Self {
+        tracing::error!("asset media protocol failed");
         Self {
             status: 500,
             headers: BTreeMap::new(),

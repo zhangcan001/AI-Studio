@@ -4,6 +4,7 @@ pub mod asset_query_service;
 #[cfg(test)]
 mod cancellation_e2e;
 pub mod comfy_service;
+pub mod diagnostics_service;
 pub mod generation_catalog_service;
 #[cfg(test)]
 mod generation_e2e;

@@ -26,6 +26,7 @@ import { GenerationActionBar } from "./GenerationActionBar";
 import { generationBlockedReason } from "./generationBlockedReason";
 import { StudioModeTabs, type StudioMode } from "./StudioModeTabs";
 import { WorkflowLauncher } from "./WorkflowLauncher";
+import { NoWorkflowGuide } from "./NoWorkflowGuide";
 
 interface Props {
   projectId: string;
@@ -39,6 +40,8 @@ interface Props {
   onProductionAdmissionChanged: () => Promise<void>;
   onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
+  onOpenWorkflows: () => void;
+  onReconnectComfy: () => void;
 }
 
 export function GenerationStudio({
@@ -53,6 +56,8 @@ export function GenerationStudio({
   onProductionAdmissionChanged,
   onProductionBatchFocused,
   onOpenTask,
+  onOpenWorkflows,
+  onReconnectComfy,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const values = useStudioStore((state) => state.values);
@@ -398,16 +403,13 @@ export function GenerationStudio({
 
   if (!catalog.length) {
     return (
-      <section className="studio-empty">
-        <span className="section-label">创作工作台</span>
-        <h2>暂无可用工作流</h2>
-        <p>请先安装或发布经过校验的工作流，然后刷新列表。</p>
-        <code>&lt;AIStudioData&gt;/workflow_library/</code>
-        <button type="button" onClick={() => void refreshWorkflows()} disabled={refreshing}>
-          {refreshing ? "正在刷新..." : "刷新工作流"}
-        </button>
-        {notice && <p className="error-message">{notice}</p>}
-      </section>
+      <NoWorkflowGuide
+        refreshing={refreshing}
+        notice={notice}
+        onOpenWorkflows={onOpenWorkflows}
+        onReconnectComfy={onReconnectComfy}
+        onRefresh={() => void refreshWorkflows()}
+      />
     );
   }
 

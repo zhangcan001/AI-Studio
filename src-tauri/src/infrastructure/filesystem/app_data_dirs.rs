@@ -30,14 +30,17 @@ impl AppDataDirs {
             ("workflow_library", directories.workflow_library.as_path()),
             ("workflow_staging", directories.workflow_staging.as_path()),
             ("cache", directories.cache.as_path()),
-            ("logs", directories.logs.as_path()),
         ] {
-            fs::create_dir_all(path).map_err(|error| {
-                AppError::filesystem(format!(
-                    "failed to create {name} directory at {}: {error}",
-                    path.display()
-                ))
-            })?;
+            fs::create_dir_all(path)
+                .map_err(|_| AppError::filesystem(format!("failed to create {name} directory")))?;
+        }
+
+        if let Err(error) = fs::create_dir_all(&directories.logs) {
+            tracing::warn!(
+                directory = "logs",
+                error_type = std::any::type_name_of_val(&error),
+                "persistent logging directory is unavailable"
+            );
         }
 
         Ok(directories)

@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppStatus } from "../types/app";
 import type { CapabilitySummary, ComfyStatus } from "../types/comfy";
+import type {
+  DiagnosticsExport,
+  DiagnosticsSummary,
+  RuntimeActivityStatus,
+} from "../types/diagnostics";
 import type { AssetCategoryFilter, AssetLibraryPage, AssetView, PageCursor } from "../types/asset";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type {
@@ -49,6 +54,18 @@ export function getComfyStatus(): Promise<ComfyStatus> {
 
 export function refreshComfyCapabilities(): Promise<CapabilitySummary> {
   return invoke<CapabilitySummary>("comfy_refresh_capabilities");
+}
+
+export function getRuntimeActivityStatus(): Promise<RuntimeActivityStatus> {
+  return invoke<RuntimeActivityStatus>("runtime_activity_status");
+}
+
+export function getDiagnosticsSummary(): Promise<DiagnosticsSummary> {
+  return invoke<DiagnosticsSummary>("diagnostics_summary");
+}
+
+export function exportDiagnostics(): Promise<DiagnosticsExport | null> {
+  return invoke<DiagnosticsExport | null>("diagnostics_export");
 }
 
 export interface WorkflowSyncReport {

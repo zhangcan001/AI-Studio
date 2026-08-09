@@ -198,7 +198,10 @@ impl GenerationService {
                 .execute_prepared(request, definition, background_task, cancel_signal)
                 .await
             {
-                tracing::error!(error = %error, "background generation failed");
+                tracing::error!(
+                    error_type = std::any::type_name_of_val(&error),
+                    "background generation failed"
+                );
             }
         });
         Ok(task)
@@ -850,7 +853,7 @@ impl GenerationService {
         {
             tracing::error!(
                 task_id = %task.id,
-                error = %error,
+                error_type = std::any::type_name_of_val(&error),
                 "assets imported but SUCCEEDED task persistence failed"
             );
             return Err(error.into());
@@ -896,7 +899,7 @@ impl GenerationService {
             Err(error) => {
                 tracing::error!(
                     task_id = %task.id,
-                    error = %error,
+                    error_type = std::any::type_name_of_val(&error),
                     "failed to persist FAILED task state"
                 );
                 GenerationServiceError::Repository(error)
