@@ -2,7 +2,7 @@
 
 日期：2026-08-09
 基线：0e8a9fc fix: close zh-cn ui final sweep
-验证实现提交：见本文件提交记录（最终提交前由 Git 写入）
+验证实现提交：015f741 feat: polish m1 creation workspace ux
 
 ## 范围
 
