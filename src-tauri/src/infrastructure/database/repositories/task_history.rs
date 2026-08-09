@@ -9,6 +9,7 @@ use crate::application::ports::{
 };
 use crate::domain::{Task, TaskError, TaskId, TaskProgress, TaskStatus};
 use async_trait::async_trait;
+use chrono::{DateTime, Local, LocalResult, NaiveDate, TimeZone, Utc};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 #[derive(Clone)]
@@ -166,15 +167,59 @@ impl TaskHistoryRepository for SqliteTaskHistoryRepository {
     }
 }
 
-fn time_cutoff(filter: TaskHistoryTimeFilter) -> Option<chrono::DateTime<chrono::Utc>> {
-    let now = chrono::Utc::now();
+fn time_cutoff(filter: TaskHistoryTimeFilter) -> Option<DateTime<Utc>> {
+    let now = Utc::now();
     match filter {
         TaskHistoryTimeFilter::All => None,
-        TaskHistoryTimeFilter::Today => now.date_naive().and_hms_opt(0, 0, 0).map(|value| {
-            chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(value, chrono::Utc)
-        }),
+        TaskHistoryTimeFilter::Today => Some(today_start_utc()),
         TaskHistoryTimeFilter::Last7Days => Some(now - chrono::Duration::days(7)),
         TaskHistoryTimeFilter::Last30Days => Some(now - chrono::Duration::days(30)),
+    }
+}
+
+fn today_start_utc() -> DateTime<Utc> {
+    let local_now = Local::now();
+    local_date_start_utc(&Local, local_now.date_naive())
+        .unwrap_or_else(|| local_now.with_timezone(&Utc))
+}
+
+fn local_date_start_utc<Tz>(timezone: &Tz, date: NaiveDate) -> Option<DateTime<Utc>>
+where
+    Tz: TimeZone,
+{
+    let midnight = date.and_hms_opt(0, 0, 0)?;
+    if let Some(start) = resolve_local_datetime_utc(timezone, midnight) {
+        return Some(start);
+    }
+
+    // Some time zones can skip local midnight during an offset transition.
+    // Resolve the earliest valid instant on that local calendar date without panicking.
+    for seconds_after_midnight in 1..86_400 {
+        let Some(candidate) =
+            midnight.checked_add_signed(chrono::Duration::seconds(seconds_after_midnight))
+        else {
+            break;
+        };
+        if let Some(start) = resolve_local_datetime_utc(timezone, candidate) {
+            return Some(start);
+        }
+    }
+    None
+}
+
+fn resolve_local_datetime_utc<Tz>(
+    timezone: &Tz,
+    local_datetime: chrono::NaiveDateTime,
+) -> Option<DateTime<Utc>>
+where
+    Tz: TimeZone,
+{
+    match timezone.from_local_datetime(&local_datetime) {
+        LocalResult::Single(value) => Some(value.with_timezone(&Utc)),
+        LocalResult::Ambiguous(first, second) => {
+            Some(first.with_timezone(&Utc).min(second.with_timezone(&Utc)))
+        }
+        LocalResult::None => None,
     }
 }
 
@@ -317,7 +362,7 @@ impl TaskHistoryRow {
 
 #[cfg(test)]
 mod tests {
-    use super::SqliteTaskHistoryRepository;
+    use super::{local_date_start_utc, today_start_utc, SqliteTaskHistoryRepository};
     use crate::application::pagination::PageCursor;
     use crate::application::ports::{
         TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRepository, TaskHistoryTimeFilter,
@@ -325,7 +370,7 @@ mod tests {
     };
     use crate::domain::{Task, TaskError, TaskStateMachine, TaskStatus};
     use crate::infrastructure::database::{initialize, repositories::test_support};
-    use chrono::{Duration, TimeZone, Utc};
+    use chrono::{Duration, FixedOffset, TimeZone, Utc};
     use sqlx::SqlitePool;
     use tempfile::tempdir;
 
@@ -604,6 +649,111 @@ mod tests {
         assert!(options.iter().any(|option| {
             option.workflow_id == "workflow-2" && option.workflow_name == "视频工作流"
         }));
+    }
+
+    #[test]
+    fn local_today_cutoff_uses_utc_plus_eight_calendar_day() {
+        let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+        let local_now = timezone.with_ymd_and_hms(2026, 8, 10, 1, 0, 0).unwrap();
+
+        assert_eq!(
+            local_now.with_timezone(&Utc),
+            Utc.with_ymd_and_hms(2026, 8, 9, 17, 0, 0).unwrap()
+        );
+        assert_eq!(
+            local_date_start_utc(&timezone, local_now.date_naive()),
+            Some(Utc.with_ymd_and_hms(2026, 8, 9, 16, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn local_today_cutoff_uses_utc_minus_seven_calendar_day() {
+        let timezone = FixedOffset::west_opt(7 * 60 * 60).unwrap();
+        let local_now = timezone.with_ymd_and_hms(2026, 8, 9, 21, 0, 0).unwrap();
+
+        assert_eq!(
+            local_now.with_timezone(&Utc),
+            Utc.with_ymd_and_hms(2026, 8, 10, 4, 0, 0).unwrap()
+        );
+        assert_eq!(
+            local_date_start_utc(&timezone, local_now.date_naive()),
+            Some(Utc.with_ymd_and_hms(2026, 8, 9, 7, 0, 0).unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn today_combines_status_workflow_keyword_project_and_keyset_filters() {
+        let (pool, repository) = setup().await;
+        let today_start = today_start_utc();
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Other', 'C:/other', ?, ?)",
+        )
+        .bind(today_start.to_rfc3339())
+        .bind(today_start.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (id, project_id, created_at) in [
+            ("tsk_today_first", "project-1", today_start),
+            ("tsk_today_second", "project-1", today_start),
+            (
+                "tsk_local_yesterday",
+                "project-1",
+                today_start - Duration::seconds(1),
+            ),
+            ("tsk_other_project_today", "project-2", today_start),
+        ] {
+            sqlx::query(
+                "INSERT INTO tasks (
+                    id, project_id, workflow_id, workflow_version_id, recipe_id,
+                    status, progress_mode, created_at, queued_at, started_at, finished_at
+                 ) VALUES (?, ?, 'workflow-1', 'workflow-version-1', 'recipe-1',
+                    'SUCCEEDED', 'indeterminate', ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(project_id)
+            .bind(created_at.to_rfc3339())
+            .bind(created_at.to_rfc3339())
+            .bind(created_at.to_rfc3339())
+            .bind(created_at.to_rfc3339())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let first_page = repository
+            .list_page(TaskHistoryQuery {
+                project_id: "project-1".to_owned(),
+                filter: TaskHistoryFilter::Succeeded,
+                workflow_id: Some("workflow-1".to_owned()),
+                keyword: Some("Workflow".to_owned()),
+                time_filter: TaskHistoryTimeFilter::Today,
+                cursor: None,
+                limit: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(first_page.items.len(), 1);
+        assert_eq!(first_page.items[0].task.id.as_str(), "tsk_today_second");
+        assert!(first_page.next_cursor.is_some());
+
+        let second_page = repository
+            .list_page(TaskHistoryQuery {
+                project_id: "project-1".to_owned(),
+                filter: TaskHistoryFilter::Succeeded,
+                workflow_id: Some("workflow-1".to_owned()),
+                keyword: Some("Workflow".to_owned()),
+                time_filter: TaskHistoryTimeFilter::Today,
+                cursor: first_page.next_cursor,
+                limit: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(second_page.items.len(), 1);
+        assert_eq!(second_page.items[0].task.id.as_str(), "tsk_today_first");
+        assert!(second_page.next_cursor.is_none());
     }
 
     #[tokio::test]
