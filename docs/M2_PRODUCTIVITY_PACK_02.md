@@ -83,7 +83,7 @@ Live 操作在当前发布版桌面程序、当前项目和本机 ComfyUI 上完
 
 | 检查 | 结果 |
 | --- | --- |
-| Rust 单元测试 | 276 passed / 0 failed |
+| Rust 单元测试 | 279 passed / 0 failed |
 | Frontend 测试文件 | 25 passed |
 | Frontend 测试 | 67 passed |
 | `cargo fmt --all -- --check` | PASS |
@@ -95,6 +95,18 @@ Live 操作在当前发布版桌面程序、当前项目和本机 ComfyUI 上完
 | `pnpm tauri build` | PASS |
 
 发布构建同时生成 Windows release executable、MSI 和 NSIS 安装包。
+
+## Local Today Filter Blocker Fix
+
+- Root cause：任务历史“今天”错误地使用 UTC 午夜，界面实际表达的是 UTC 日历日，而不是用户 Windows 本地日历日。
+- Fix：Rust Backend 使用 OS `Local` 时区解析本地日期的最早有效时间，再转换为 UTC RFC3339 cutoff；数据库 UTC 存储与 7/30 天滚动窗口不变。
+- DST safety：本地午夜为 `Single` 时直接使用；`Ambiguous` 时选择最早 UTC instant；`None` 时安全查找该本地日期最早有效 instant，不使用 `unwrap()` 假定午夜永远存在。
+- UTC+ boundary test：PASS；UTC+8 本地 `2026-08-10 01:00` 对应的当天起点为 `2026-08-09 16:00Z`。
+- UTC- boundary test：PASS；UTC-7 本地仍为 8 月 9 日而 UTC 已为 8 月 10 日时，当天起点仍按本地 8 月 9 日计算。
+- Project isolation：PASS。
+- Today + SUCCEEDED + workflow + keyword + keyset pagination：PASS。
+- Live Today filter：PASS；Windows `China Standard Time` 下，全部历史包含 8 月 6 日与 8 月 9 日，选择“今天”后只显示 24 条本地 8 月 9 日任务。
+- History reuse smoke：PASS；加载 Kera2 历史输入后返回 Studio，最新任务保持不变，没有自动生成。
 
 ## 架构与约束复核
 
