@@ -11,7 +11,7 @@ Scope: Kera2 persistent production queue live acceptance on the existing Windows
 - `BATCH FOUNDATION 02 = PASS`
 - `BATCH FOUNDATION 03 = PASS`
 - `BATCH FOUNDATION 04 = PASS`
-- `MINIMAX H3 16GB RUNTIME = ENVIRONMENT BLOCKED` (unchanged; not addressed here)
+- `MINIMAX H3 16GB RUNTIME = NOT IN SCOPE` (later completed in its dedicated gate)
 
 ## Windows command environment
 
@@ -134,4 +134,6 @@ The live WebView/Tauri boundary reported the expected production overview and th
 
 ## Next stage
 
-Stop adding production queue features. The next task is only the dedicated MiniMax H3 OOM unblock and a real 16 GB-compatible video completion gate.
+This gate stopped before MiniMax work as required. The subsequent dedicated
+MiniMax H3 16 GB completion and playback gate is now PASS; its evidence is in
+`docs/M1_MINIMAX_H3_RUNTIME_VALIDATION.md`.

@@ -100,21 +100,29 @@ historical draft compatibility. The exact evidence is recorded in
 M1 Video Foundation validation is recorded in
 `docs/M1_VIDEO_FOUNDATION_VALIDATION.md`. It covers the generic video protocol,
 streaming persistence, atomic task output mappings, bounded local playback,
-video output cards, and the no-package NOT RUN gate for Generic Video and
-MiniMax H3 live execution.
+video output cards, and the historical no-package gate that preceded the live
+MiniMax H3 runtime package.
 
 M1 Media Input Pack validation is recorded in
 `docs/M1_MEDIA_INPUT_PACK_VALIDATION.md`. It covers source video/audio input,
 generic media upload, media-aware Recipe compilation and preparation,
-project-scoped playback, and the MiniMax H3 NOT RUN gate.
+project-scoped playback, and the historical MiniMax H3 input-readiness gate.
 
-The ComfyUI live gate passed independently: `http://127.0.0.1:8188` reported
-version `0.30.1`, one NVIDIA GeForce RTX 5060 Ti device, and 4,486 nodes. The
+The current ComfyUI live gate passed at `http://127.0.0.1:8188` with version
+`0.30.2`, one NVIDIA GeForce RTX 5060 Ti device, and 4,485 nodes. The
 offline/restart gate also passed: port 8188 became unavailable while AI
 Studio stayed alive, and restarting ComfyUI restored the API.
 
-M1 live I2I is not run because no validated runtime I2I Workflow Package was supplied.
-The existing M0 text-to-image runtime remains the only live generation package.
+The MiniMax H3 16 GB runtime gate is PASS. Immutable Workflow Package `1.1.2`
+completed a real 5.167-second reference-to-video Task on the RTX 5060 Ti,
+persisted the MP4 in Asset Library, and played it through the native Windows
+desktop media protocol. The bounded profile uses the installed pruned NVFP4
+UNet, 0.1 MP, four sampling steps, a 1–5 second Recipe range, and single-task
+execution. Evidence and operating limits are recorded in
+`docs/M1_MINIMAX_H3_RUNTIME_VALIDATION.md`.
+
+Kera2 image generation and MiniMax H3 reference-to-video are now the two
+live-validated production runtimes. No third model runtime pack is planned.
 
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not

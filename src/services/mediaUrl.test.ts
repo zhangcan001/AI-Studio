@@ -13,4 +13,9 @@ describe("asset media URL", () => {
     expect(buildAssetMediaUrl("prj_default", "ast_audio", "audio"))
       .toBe("aistudio-media://localhost/audio?projectId=prj_default&assetId=ast_audio");
   });
+
+  it("uses Wry's HTTP custom-protocol mapping on Windows", () => {
+    expect(buildAssetMediaUrl("prj_default", "ast_video", "video", "Windows NT 10.0"))
+      .toBe("http://aistudio-media.localhost/video?projectId=prj_default&assetId=ast_video");
+  });
 });

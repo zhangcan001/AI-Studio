@@ -1,117 +1,148 @@
-# M1 MiniMax H3 Runtime Validation
+# M1 MiniMax H3 16 GB Runtime Validation
 
-Date: 2026-08-06
+Date: 2026-08-09
 
-Scope: the user-supplied MiniMax H3 API workflow, onboarding, capability
-validation, package publication, and one real reference-image runtime attempt.
-No MiniMax-specific core branch, database migration, model installer, or
-custom-node installer was added.
+Scope: unblock the user-supplied MiniMax H3 reference-to-video workflow on an
+NVIDIA GeForce RTX 5060 Ti 16 GB, publish a bounded runtime package through the
+existing onboarding path, complete a real AI Studio generation, import the
+video into Asset Library, and verify native desktop playback. No database
+migration, model installer, custom-node installer, or MiniMax-specific core
+execution branch was added.
 
 ## Final gate
 
 - `MINIMAX_H3_RUNTIME_INPUT = READY`
-- `MINIMAX H3 RUNTIME = ENVIRONMENT BLOCKED`
-- Blocking reason: the real ComfyUI execution reached the sampler and failed
-  with `torch.OutOfMemoryError` on the available GPU.
+- `MINIMAX_H3_16GB_RUNTIME = PASS`
+- `MINIMAX_H3_VIDEO_ASSET = PASS`
+- `MINIMAX_H3_DESKTOP_PLAYBACK = PASS`
 
-The runtime status is not reported as PASS because no real H3 mode completed
-with a video output. This is not an input-format, capability, or mapping
-failure.
+The previous `ENVIRONMENT BLOCKED` result is superseded. A real five-second H3
+video completed through AI Studio on the target 16 GB GPU and became a playable
+project asset.
 
-## Workflow and package
+## Root cause
 
-- API-format validation: PASS
-- Raw workflow SHA-256: `a1053180b2e703fc9ae60163675a5cd29c3ed86b560cc2a580468e9ae2cf4bde`
-- Graph: 21 nodes, 20 unique classes
-- Detected mode: reference image to video
-- Capability recheck: PASS (`READY`)
-- Atomic onboarding publication: PASS
-- Published package identity: `minimax_h3_reference_video_1_0_0_a1053180`
-- Raw workflow bytes: preserved locally and ignored by Git; no full real
-  workflow is committed
+The original graph had three independent problems that amplified or obscured
+the OOM:
 
-The existing onboarding flow was used end to end: API inspection, local
-capability lookup, generic input/output mapping, dry-run validation, and
-atomic package publication. Height and length links were preserved because
-the current onboarding contract does not bind linked inputs directly.
+1. H3 `width` remained a 1344 literal, `ResolutionSelector.width` was linked to
+   H3 `height`, and `ResolutionSelector.height` was linked to H3 `length`.
+2. The intended duration expression was not connected to H3 `length` at all.
+   The nominal ten-second control therefore did not bound the actual frame
+   count.
+3. The original pruned INT8 UNet filename was no longer available in the live
+   ComfyUI model list, while the installed pruned NVFP4 variant was available.
 
-## Mapping gate
+The initial reduced direct probe preserved the bad links and still completed,
+but `ffprobe` proved that it produced 430 frames at 1344 x 256 and 17.917
+seconds instead of the intended short probe. That result confirmed the NVFP4
+memory reduction while also exposing the incorrect graph semantics.
 
-| Contract field | Result | Evidence |
-| --- | --- | --- |
-| Prompt | PASS | Required H3 text input mapped generically; no prompt content is stored in this document |
-| Width | PASS | Existing graph value and `/object_info` bounds accepted |
-| Height | PRESERVED | Existing graph link retained; no fabricated direct input |
-| Length | PRESERVED | Existing graph link retained; no fabricated direct input |
-| Seed | PASS | Integer seed mapping uses the capability-defined range |
-| Reference image | PASS | One imported project asset maps to the connected reference-image slot |
-| First frame / last frame | NOT APPLICABLE | Not evidenced by this graph |
-| Reference video / audio | NOT APPLICABLE | Not evidenced by this graph |
-| Video output | PASS | Generic video output candidate maps the terminal SaveVideo result |
+The final graph uses these links:
 
-## Real ComfyUI gate
+- `ResolutionSelector.width -> MiniMaxH3ReferenceToVideo.width`
+- `ResolutionSelector.height -> MiniMaxH3ReferenceToVideo.height`
+- `ComfyMathExpression.INT -> MiniMaxH3ReferenceToVideo.length`
+- `duration_seconds -> PrimitiveFloat -> ComfyMathExpression`
 
-Observed before execution:
+The expression's INT output is index 1. An intermediate package linked index 0
+(FLOAT); ComfyUI correctly rejected it before execution, and AI Studio
+persisted the failed validation task. The immutable package was superseded
+rather than edited in place.
+
+## Final 16 GB package
+
+- Workflow: `wfl_minimax_h3_reference_video`
+- Version: `1.1.2`
+- Package: `minimax_h3_reference_video_1_1_2_0385e8c5`
+- Workflow SHA-256:
+  `0385e8c53ae005444ae8d12d72145c3c24b681e6fb93f9ba896be9c675a5020a`
+- Graph: 22 nodes, 21 unique classes
+- Capability: `READY`, no issues
+- Onboarding validation: API, Recipe, bindings, output, manifest, capability,
+  and dry run all PASS
+- UNet: installed pruned NVFP4 variant
+- Attention: MiniMax H3 memory-efficient SageAttention patch
+- Sampling: installed H3 Turbo 4-Step LoRA, four scheduler steps
+- Resolution: 0.1 MP, 9:16, multiple of 32
+- Duration Recipe range: 1–5 seconds; five seconds is the live-validated upper
+  bound for this profile
+- Output prefix: `video/MiniMax_H3_16GB`
+
+The runtime package remains in the local workflow library. Raw user workflow
+bytes and model files remain ignored by Git and are not bundled in the app.
+
+## Real AI Studio gate
 
 - Endpoint: `http://127.0.0.1:8188`
-- Version: `0.30.1`
-- GPU: `NVIDIA GeForce RTX 5060 Ti` (`cuda:0`)
-- VRAM: approximately 15.9 GB total and 14.7 GB free at inspection time
-- `/object_info` node count: 4,486
+- ComfyUI: `0.30.2`
+- GPU: NVIDIA GeForce RTX 5060 Ti
+- Reported VRAM: 17,102,864,384 bytes (approximately 15.9 GiB)
+- Final task: `tsk_e815637d-04f5-4155-a827-9a038e04b117`
+- Prompt queue number: 4
+- Task result: `SUCCEEDED`
+- Warm execution time: approximately 56 seconds
+- Peak observed by `nvidia-smi` during a five-second run: approximately
+  14,933 MiB used and 1,118 MiB free
+- Output asset: `ast_bff9b28c-1879-4699-8904-0ef2c4d0bb46`
 
-The published recipe was executed through the existing
-`GenerationService`/ComfyAdapter path with a project-scoped reference asset.
-ComfyUI accepted the prompt and began execution. The task then failed at the
-sampler with a GPU out-of-memory error. AI Studio persisted the terminal
-`FAILED` state and the raw error payload; no output asset was created.
+The 1.1.1 candidate also completed before the duration cap was tightened. The
+final 1.1.2 package was run again so the active workflow version itself has
+successful-run evidence.
 
-## Output and lifecycle gates
+## Video and Asset Library gate
 
-- Task lifecycle: PASS for queue, execution, and persisted failure handling
-- Video asset: NOT CREATED because the runtime failed before output
-- Audio track: NOT VERIFIED
-- Poster: NOT VERIFIED
-- Local playback: NOT VERIFIED for this failed task
-- Cancel: NOT RUN because the task reached a terminal error before a useful
-  cancellation window
-- Offline playback: NOT RUN in this H3 gate; existing media protocol tests
-  remain passing
-- Preset/project isolation: existing automated isolation coverage PASS; H3
-  native UI isolation gate NOT RUN
-- Workflow export: existing generic export coverage PASS; H3-specific export
-  gate NOT RUN
-- Diagnostics: package hash, registration, and capability checks PASS; live
-  successful-run evidence is correctly absent
+- File: MP4, H.264 video plus AAC stereo audio
+- Dimensions: 256 x 416
+- Frame rate: 24 fps
+- Frames: 124
+- Duration: 5.167 seconds
+- File size: 237,867 bytes
+- Persisted SHA-256 matched the stored file
+- Project-scoped Task-to-Asset mapping: PASS
+- Generated-video Asset Library filter: PASS
+- Thumbnail creation and visual inspection: PASS
+- Decoded frame count: 124
+- Unique decoded frame hashes: 124, confirming a non-static video
 
-The native Workflows wizard interaction was not claimed as a pass because the
-local desktop WebView automation adapter could not provide stable geometry for
-the required interaction. The desktop app itself remained usable and showed
-the connected ComfyUI status during the live check.
+## Windows playback correction
+
+The valid MP4 initially failed in WebView2 because the frontend built a
+macOS/Linux-style `aistudio-media://localhost/...` URL. Wry maps registered
+custom protocols to `http://<scheme>.localhost/...` on Windows. The URL builder
+now selects the Windows form from the user agent and retains the custom-scheme
+form on other platforms.
+
+Native Asset Preview verification after the fix:
+
+- URL: Windows Wry custom-protocol form
+- `readyState`: 4
+- Browser duration: 5.167 seconds
+- Browser dimensions: 256 x 416
+- Media error: none
+- Playback clock advanced from 0 to 0.860 seconds during the automated check
 
 ## Regression checks
 
 - `cargo fmt --all -- --check`: PASS
 - `cargo check`: PASS
-- `cargo test -- --test-threads=1`: PASS — 231 passed, 0 failed
-- `pnpm test`: PASS — 9 files, 21 tests passed
+- `cargo test -- --test-threads=1`: PASS — 238 passed, 0 failed
+- `pnpm test`: PASS — 13 files, 32 tests passed
 - `pnpm build`: PASS
-- `pnpm tauri dev`: ATTEMPTED; desktop process reached the connected runtime
-  state, native wizard interaction remains pending
-- `git diff --check`: PASS before final publication
+- Windows custom-protocol URL unit test: PASS
+- `git diff --check`: PASS
 
-## Technical debt
+## Operating constraints
 
-- The current graph exceeds the available GPU memory at its existing runtime
-  settings; the workflow was not altered to hide this environment limitation.
-- Height and length remain graph-linked inputs and are not direct recipe fields
-  until the generic onboarding contract supports safe linked-input controls.
-- Native desktop acceptance still needs a stable manual or WebView automation
-  pass.
-- Successful video asset import, playback, poster extraction, and optional
-  audio verification require a runtime environment that can finish the H3
-  graph.
+- Treat 0.1 MP, at most five seconds, and one active H3 task as hard limits on
+  this 16 GB profile.
+- Do not increase H3 resolution, duration, or concurrency automatically. The
+  observed five-second run had roughly 1.1 GB of remaining physical VRAM at
+  peak.
+- Only the five-second upper bound was run in this gate. Shorter Recipe values
+  are bounded but were not individually quality-validated.
+- Higher-resolution or longer H3 production requires a separate measured
+  profile, more VRAM, or additional model/runtime optimization.
 
-## Next stage
-
-Only `MODEL RUNTIME PACK 02 — Wan / Flux / Qwen` is recommended next. This
-change stops here.
+This gate stops after the 16 GB H3 completion and playback result. No third
+model runtime pack is entered here.
