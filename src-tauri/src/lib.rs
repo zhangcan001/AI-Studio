@@ -59,8 +59,8 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use tauri::Manager;
-use tauri_plugin_dialog::DialogExt;
+use tauri::{Manager, WindowEvent};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -438,6 +438,79 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     .blocking_show();
             }
             Ok(result?)
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+
+                let window = window.clone();
+                let app_handle = window.app_handle().clone();
+                let diagnostics_service: Option<Arc<DiagnosticsService>> = app_handle
+                    .try_state::<AppState>()
+                    .map(|state| Arc::clone(&state.diagnostics_service));
+
+                tauri::async_runtime::spawn(async move {
+                    let activity = match diagnostics_service {
+                        Some(service) => tokio::time::timeout(
+                            std::time::Duration::from_secs(2),
+                            service.runtime_activity_status(),
+                        )
+                        .await
+                        .ok()
+                        .and_then(Result::ok),
+                        None => None,
+                    };
+
+                    let Some(activity) = activity else {
+                        app_handle
+                            .dialog()
+                            .message(
+                                "暂时无法确认任务状态。为保护正在运行的任务，是否仍要退出？",
+                            )
+                            .title("安全退出")
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "退出应用".to_owned(),
+                                "继续运行".to_owned(),
+                            ))
+                            .parent(&window)
+                            .show(move |confirmed| {
+                                if confirmed {
+                                    tracing::info!("safe exit confirmed");
+                                    let _ = window.destroy();
+                                } else {
+                                    tracing::info!("safe exit cancelled");
+                                }
+                            });
+                        return;
+                    };
+
+                    if activity.active_task_count == 0 && !activity.production_busy {
+                        tracing::info!("safe exit confirmed");
+                        let _ = window.destroy();
+                        return;
+                    }
+
+                    app_handle
+                        .dialog()
+                        .message(
+                            "当前仍有生成任务或生产队列正在运行。\n\n退出不会取消任务，但关闭期间将无法显示实时进度。",
+                        )
+                        .title("安全退出")
+                        .buttons(MessageDialogButtons::OkCancelCustom(
+                            "退出应用".to_owned(),
+                            "继续运行".to_owned(),
+                        ))
+                        .parent(&window)
+                        .show(move |confirmed| {
+                            if confirmed {
+                                tracing::info!("safe exit confirmed");
+                                let _ = window.destroy();
+                            } else {
+                                tracing::info!("safe exit cancelled");
+                            }
+                        });
+                });
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,

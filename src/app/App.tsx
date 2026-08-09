@@ -28,7 +28,6 @@ import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
-import { useSafeExit } from "./useSafeExit";
 import "./App.css";
 
 type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows" | "settings";
@@ -60,7 +59,6 @@ function App() {
   const setProjectError = useProjectStore((state) => state.setError);
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
   const recentTasks = useTaskStore((state) => state.recentTasks);
-  useSafeExit();
 
   const refreshProductionAdmission = useCallback(async () => {
     try {
