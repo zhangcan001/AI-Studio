@@ -110,12 +110,12 @@ ZIP 校验拒绝 traversal、绝对路径、Windows drive path、符号链接、
 | 设备数 | `1` |
 | GPU | `cuda:0 NVIDIA GeForce RTX 5060 Ti : cudaMallocAsync` |
 | VRAM 总量 | `17,102,864,384` bytes |
-| VRAM 空闲 | `2,122,075,710` bytes |
+| VRAM 空闲 | `2,102,627,902` bytes |
 | 节点数量 | `4,485` |
 
-本轮重新启动 release executable，日志确认数据库、001–007 migration、运行时工作流库、启动恢复和 ComfyUI capability 初始化成功，并使用默认 Endpoint。Windows Computer Use 在读取 Tauri WebView accessibility/screenshot 状态时连续返回 `node_repl exec context not found`，因此本轮没有盲操作原生文件对话框；设置页和项目页的行为由 Tauri/Rust 与前端回归覆盖，原生对话框 Smoke 仍需在可用的桌面自动化环境中手动复核。
+本轮重新构建并启动 0.2.0 release executable，日志确认数据库、001–007 migration、运行时工作流库、启动恢复和 ComfyUI capability 初始化成功，并使用默认 Endpoint。`http://localhost:8188` 的真实 `system_stats` 与 `object_info` HTTP 请求均返回成功；节点数通过严格 JSON 解析确认为 4,485。
 
-Endpoint 的非法 scheme、凭据、query、fragment、规范化、设置损坏回退、JSON 保存回读和共享 Adapter A→B 切换已有自动化覆盖。真实 `http://localhost:8188` 的 UI 测试/保存/重启流程以及切换后的 Kera2 生成未在本轮桌面辅助接口失效后重新执行；既有 Kera2/H3 实机证据保持不变，不伪造为本轮重新验收结果。
+Endpoint 的非法 scheme、凭据、query、fragment、规范化、设置损坏回退、JSON 保存回读和共享 Adapter A→B 切换已有自动化覆盖。Windows Computer Use 在读取 Tauri WebView accessibility/screenshot 状态时连续返回 `node_repl exec context not found`，因此没有盲操作设置页、原生文件对话框或项目页；真实 UI 保存/重启、切换后的 Kera2 和项目备份恢复仍未完成。
 
 ## 8. 发布与 Migration 保护
 
@@ -125,7 +125,32 @@ Endpoint 的非法 scheme、凭据、query、fragment、规范化、设置损坏
 - 未创建 GitHub Release。
 - 未修改 v0.1.0 Release notes 或已发布安装包。
 
-## 9. 最终 Gate 状态
+## 9. Final Live Gate
+
+| Gate | 结果 | 证据/边界 |
+| --- | --- | --- |
+| Endpoint localhost test | PASS | 真实 ComfyUI HTTP `/system_stats` 与 `/object_info` 成功；版本/GPU/VRAM/节点数已记录 |
+| Endpoint save/apply | NOT RUN | Tauri WebView 状态读取失败，未绕过 UI 直接改设置 |
+| Endpoint restart persistence | NOT RUN | 未完成 UI 保存 localhost 后的重启确认 |
+| Capability refresh | PASS | release 启动真实刷新 capability，节点数 4,485；Endpoint 切换后的 UI 刷新未执行 |
+| Busy change blocked | AUTOMATED PASS / NOT RE-RUN LIVE | 264 Rust 回归含 active task 与 production queue 确定性并发测试 |
+| Kera2 after endpoint switch | NOT RUN | 未完成真实 UI Endpoint 切换后的新生成 |
+| Return to 127.0.0.1 | NOT RUN | 未通过 UI 改动用户 Endpoint |
+| Raw log privacy | PASS | 真实 persistent log 在损坏 settings 启动后扫描，四类禁止特征均为 0 |
+| Project export | NOT RUN | 未通过项目页和原生 Save Dialog 导出 |
+| Restore preview | NOT RUN | 未通过项目页和原生 Open Dialog 预览 |
+| Project restore | NOT RUN | 真实 UI restore 未执行 |
+| Image preview | NOT RUN | 依赖真实 UI restore |
+| H3 video playback | NOT RUN | 本轮不重新生成 H3，真实恢复项目播放未执行 |
+| Snapshot asset remap | NOT RUN | 依赖真实 UI restore 与历史任务检查 |
+| Preset restore | NOT RUN | 依赖真实 UI restore |
+| Production history | NOT RUN | 依赖真实 UI restore |
+| Historical input reuse | NOT RUN | 依赖真实 UI restore 与 UI 点击加载输入 |
+| Generation from restored project | NOT RUN | 依赖历史输入复用 Gate |
+
+本轮 Computer Use 初始化和窗口枚举正常，但 `get_window_state` 对 Tauri WebView 及普通 Chrome 窗口都返回 `node_repl exec context not found`。因此没有进行盲点坐标或内部 service 绕过，以上 NOT RUN 均为未完成，不计为 PASS。
+
+## 10. 最终 Gate 状态
 
 代码实现、自动化回归、开发版安装包构建和真实 ComfyUI HTTP 检查均通过；但本轮 Windows Computer Use 无法读取 Tauri WebView，导致真实 `localhost` 保存/重启、切换后 Kera2、真实项目备份恢复及媒体/历史复用 Gate 没有完成。
 
@@ -137,7 +162,7 @@ M2 FOUNDATION PACK 01 = CODE PASS / LIVE GATE PARTIAL
 
 待桌面辅助接口恢复后，完成上述真实 Gate 才能将最终状态升级为 `M2 FOUNDATION PACK 01 = PASS`。
 
-## 10. 后续技术债
+## 11. 后续技术债
 
 1. 在桌面自动化接口可用后补做 `localhost` Endpoint 保存/重启持久化、Endpoint 切换后的 Kera2、当前真实项目备份 roundtrip、恢复媒体预览/播放和恢复历史输入复用 Gate。
 2. 目前 backup inspection token 保存在内存并有时限，应用退出后不会保留待恢复 inspection。
