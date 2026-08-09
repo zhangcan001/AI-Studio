@@ -1,9 +1,9 @@
 use crate::application::ports::{
-    CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
-    ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
-    ComfyInputUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyOutputStream,
-    ComfyQueueState, ComfySavedResult, ComfyUploadedInput, DeviceInfo, PromptSubmission,
-    SystemStats,
+    CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory,
+    ComfyConnectionConfig, ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory,
+    ComfyHistoryStatus, ComfyInputUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile,
+    ComfyOutputStream, ComfyQueueState, ComfySavedResult, ComfyUploadedInput, DeviceInfo,
+    PromptSubmission, SystemStats,
 };
 use crate::infrastructure::comfy::dto::{
     CancelResponseDto, PromptRequestDto, PromptResponseDto, SystemStatsDto, UploadResponseDto,
@@ -513,6 +513,21 @@ impl ComfyHttpAdapter {
                     .map(|item| item.map(|bytes| bytes.to_vec())),
             ),
         }))
+    }
+}
+
+pub struct ComfyHttpAdapterFactory;
+
+impl ComfyAdapterFactory for ComfyHttpAdapterFactory {
+    fn create(
+        &self,
+        config: ComfyConnectionConfig,
+    ) -> Result<Arc<dyn ComfyAdapter>, ComfyAdapterError> {
+        ComfyHttpAdapter::new(config)
+            .map(|adapter| Arc::new(adapter) as Arc<dyn ComfyAdapter>)
+            .map_err(|error| {
+                ComfyAdapterError::Incompatible(format!("HTTP 客户端初始化失败：{error}"))
+            })
     }
 }
 

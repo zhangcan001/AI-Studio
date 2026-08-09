@@ -15,7 +15,12 @@ import type {
   TaskHistoryPage,
 } from "../types/history";
 import type { TaskView } from "../types/task";
-import type { ProjectView } from "../types/project";
+import type {
+  ProjectBackupExportView,
+  ProjectBackupPreview,
+  ProjectView,
+} from "../types/project";
+import type { ComfyEndpointTest, ComfySettingsView } from "../types/settings";
 import type { PresetView } from "../types/preset";
 import type {
   ProductionBatchCreateItem,
@@ -54,6 +59,18 @@ export function getComfyStatus(): Promise<ComfyStatus> {
 
 export function refreshComfyCapabilities(): Promise<CapabilitySummary> {
   return invoke<CapabilitySummary>("comfy_refresh_capabilities");
+}
+
+export function getComfySettings(): Promise<ComfySettingsView> {
+  return invoke<ComfySettingsView>("comfy_get_settings");
+}
+
+export function testComfyConnection(endpoint: string): Promise<ComfyEndpointTest> {
+  return invoke<ComfyEndpointTest>("comfy_test_connection", { endpoint });
+}
+
+export function saveComfyEndpoint(endpoint: string): Promise<ComfySettingsView> {
+  return invoke<ComfySettingsView>("comfy_save_endpoint", { endpoint });
 }
 
 export function getRuntimeActivityStatus(): Promise<RuntimeActivityStatus> {
@@ -285,6 +302,18 @@ export function updateProject(
   description?: string,
 ): Promise<ProjectView> {
   return invoke<ProjectView>("project_update", { projectId, name, description });
+}
+
+export function exportProjectBackup(projectId: string): Promise<ProjectBackupExportView | null> {
+  return invoke<ProjectBackupExportView | null>("project_backup_export", { projectId });
+}
+
+export function inspectProjectBackup(): Promise<ProjectBackupPreview | null> {
+  return invoke<ProjectBackupPreview | null>("project_backup_inspect");
+}
+
+export function restoreProjectBackup(inspectionId: string): Promise<ProjectView> {
+  return invoke<ProjectView>("project_backup_restore", { inspectionId });
 }
 
 export function getTask(projectId: string, taskId: string): Promise<TaskView> {

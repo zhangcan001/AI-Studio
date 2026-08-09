@@ -1,10 +1,14 @@
 use crate::application::ports::{
-    ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig, DeviceInfo, SystemStats,
+    ComfyAdapter, ComfyAdapterError, ComfyAdapterHandle, ComfyConnectionConfig, DeviceInfo,
+    SystemStats,
 };
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock as StdRwLock},
+};
 use tokio::sync::RwLock;
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -68,39 +72,84 @@ pub struct ComfyStatusView {
 }
 
 pub struct ComfyService {
-    adapter: Arc<dyn ComfyAdapter>,
-    endpoint: String,
+    runtime: Arc<ComfyRuntime>,
     capability_cache: Arc<RwLock<Option<CapabilityCache>>>,
 }
 
-impl ComfyService {
-    pub fn new(adapter: Arc<dyn ComfyAdapter>, config: &ComfyConnectionConfig) -> Self {
+pub struct ComfyRuntime {
+    handle: Arc<ComfyAdapterHandle>,
+    config: StdRwLock<ComfyConnectionConfig>,
+}
+
+impl ComfyRuntime {
+    pub fn new(adapter: Arc<dyn ComfyAdapter>, config: ComfyConnectionConfig) -> Self {
         Self {
-            adapter,
-            endpoint: config.endpoint(),
+            handle: Arc::new(ComfyAdapterHandle::new(adapter)),
+            config: StdRwLock::new(config),
+        }
+    }
+
+    pub fn adapter(&self) -> Arc<dyn ComfyAdapter> {
+        self.handle.clone()
+    }
+
+    pub fn config(&self) -> ComfyConnectionConfig {
+        self.config
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub fn endpoint(&self) -> String {
+        self.config().endpoint()
+    }
+
+    pub fn replace(&self, config: ComfyConnectionConfig, adapter: Arc<dyn ComfyAdapter>) {
+        self.handle.replace(adapter);
+        *self
+            .config
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = config;
+    }
+}
+
+impl ComfyService {
+    #[cfg(test)]
+    pub fn new(adapter: Arc<dyn ComfyAdapter>, config: &ComfyConnectionConfig) -> Self {
+        Self::from_runtime(Arc::new(ComfyRuntime::new(adapter, config.clone())))
+    }
+
+    pub fn from_runtime(runtime: Arc<ComfyRuntime>) -> Self {
+        Self {
+            runtime,
             capability_cache: Arc::new(RwLock::new(None)),
         }
     }
 
-    pub fn endpoint(&self) -> &str {
-        &self.endpoint
+    pub fn endpoint(&self) -> String {
+        self.runtime.endpoint()
+    }
+
+    pub async fn invalidate_capabilities(&self) {
+        *self.capability_cache.write().await = None;
     }
 
     pub async fn get_status(&self) -> Result<ComfyStatusView, AppError> {
         let cached_capability = self.cached_capability().await;
+        let endpoint = self.endpoint();
 
-        match self.adapter.health_check().await {
-            Ok(health) => Ok(self.connected_status(health.system, cached_capability)),
+        match self.runtime.adapter().health_check().await {
+            Ok(health) => Ok(self.connected_status(health.system, cached_capability, endpoint)),
             Err(error) => {
                 tracing::warn!(
-                    endpoint = %self.endpoint,
+                    endpoint = %endpoint,
                     error_type = error.kind(),
                     "ComfyUI health check failed"
                 );
 
                 Ok(ComfyStatusView {
                     status: status_for_adapter_error(&error),
-                    endpoint: self.endpoint.clone(),
+                    endpoint,
                     comfyui_version: None,
                     system: None,
                     devices: Vec::new(),
@@ -111,14 +160,20 @@ impl ComfyService {
     }
 
     pub async fn refresh_capabilities(&self) -> Result<CapabilitySummary, AppError> {
-        let object_info = self.adapter.get_object_info().await.map_err(|error| {
-            tracing::warn!(
-                endpoint = %self.endpoint,
-                error_type = error.kind(),
-                "ComfyUI capability refresh failed"
-            );
-            app_error_for_adapter_error(error)
-        })?;
+        let endpoint = self.endpoint();
+        let object_info = self
+            .runtime
+            .adapter()
+            .get_object_info()
+            .await
+            .map_err(|error| {
+                tracing::warn!(
+                    endpoint = %endpoint,
+                    error_type = error.kind(),
+                    "ComfyUI capability refresh failed"
+                );
+                app_error_for_adapter_error(error)
+            })?;
 
         let object = object_info.as_object().ok_or_else(|| {
             AppError::comfy_protocol_error("ComfyUI object_info response is not an object")
@@ -134,7 +189,7 @@ impl ComfyService {
         *self.capability_cache.write().await = Some(cache);
 
         tracing::info!(
-            endpoint = %self.endpoint,
+            endpoint = %endpoint,
             node_count = summary.node_count,
             "ComfyUI capability cache refreshed"
         );
@@ -154,10 +209,11 @@ impl ComfyService {
         &self,
         stats: SystemStats,
         capability: Option<CapabilitySummary>,
+        endpoint: String,
     ) -> ComfyStatusView {
         ComfyStatusView {
             status: ComfyConnectionStatus::Connected,
-            endpoint: self.endpoint.clone(),
+            endpoint,
             comfyui_version: stats.comfyui_version,
             system: Some(SystemSummary {
                 python_version: stats.python_version,

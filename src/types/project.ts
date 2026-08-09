@@ -5,3 +5,24 @@ export interface ProjectView {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ProjectBackupExportView {
+  fileName: string;
+  bytes: number;
+  entries: number;
+  activeTasksExcluded: number;
+}
+
+export interface ProjectBackupPreview {
+  inspectionId: string;
+  projectName: string;
+  imageCount: number;
+  videoCount: number;
+  audioCount: number;
+  historyTasks: number;
+  presets: number;
+  productionQueues: number;
+  missingWorkflows: string[];
+  activeTasksExcluded: number;
+  warning: string;
+}

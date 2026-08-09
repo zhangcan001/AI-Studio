@@ -23,16 +23,18 @@ use app_state::AppState;
 use application::{
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
-    comfy_service::ComfyService,
+    comfy_service::{ComfyRuntime, ComfyService},
     diagnostics_service::DiagnosticsService,
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
     media_protocol::MediaProtocolService,
-    ports::{ComfyAdapter, ComfyConnectionConfig, WorkflowLibrarySource},
+    ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
     preset_service::PresetService,
     production_queue_service::ProductionQueueService,
+    project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
     project_service::ProjectService,
+    settings_service::SettingsService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
     task_execution_registry::TaskExecutionRegistry,
@@ -46,12 +48,13 @@ use application::{
 use error::AppError;
 use infrastructure::logging::LoggingStatus;
 use infrastructure::{
-    comfy::ComfyHttpAdapter,
+    comfy::ComfyHttpAdapterFactory,
     database,
     filesystem::{
         AppDataDirs, FileSystemAssetStore, FileSystemProjectDirectoryStore,
         FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore,
     },
+    settings::JsonSettingsStore,
     tauri::TauriTaskUpdateSink,
     time::SystemClock,
 };
@@ -243,11 +246,30 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 ),
             }
 
-            let comfy_config = ComfyConnectionConfig::default();
-            let comfy_adapter = ComfyHttpAdapter::new(comfy_config.clone())
+            let settings_store: Arc<dyn SettingsStore> =
+                Arc::new(JsonSettingsStore::new(data_dirs.config.clone()));
+            let mut loaded_settings =
+                tauri::async_runtime::block_on(settings_store.load());
+            let comfy_config = match ComfyConnectionConfig::from_endpoint(
+                &loaded_settings.settings.comfy.endpoint,
+            ) {
+                Ok(config) => config,
+                Err(error) => {
+                    tracing::warn!(error = %error, "invalid persisted ComfyUI endpoint; using default");
+                    loaded_settings.settings = application::ports::AppSettings::default();
+                    loaded_settings.warning = Some(
+                        "设置文件无法读取，当前已使用默认配置。".to_owned(),
+                    );
+                    ComfyConnectionConfig::default()
+                }
+            };
+            let adapter_factory = Arc::new(ComfyHttpAdapterFactory);
+            let initial_adapter = adapter_factory
+                .create(comfy_config.clone())
                 .map_err(|_| AppError::initialization("ComfyUI HTTP client initialization failed"))?;
-            let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(comfy_adapter);
-            let comfy_service = Arc::new(ComfyService::new(comfy_adapter.clone(), &comfy_config));
+            let comfy_runtime = Arc::new(ComfyRuntime::new(initial_adapter, comfy_config));
+            let comfy_adapter = comfy_runtime.adapter();
+            let comfy_service = Arc::new(ComfyService::from_runtime(comfy_runtime.clone()));
             let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
                 infrastructure::database::SqliteWorkflowRunRepository::new(database_pool.clone()),
             );
@@ -359,10 +381,24 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 data_dirs.logs.clone(),
                 logging_status,
             ));
+            let settings_service = Arc::new(SettingsService::new(
+                settings_store,
+                loaded_settings,
+                comfy_runtime,
+                comfy_service.clone(),
+                diagnostics_service.clone(),
+                adapter_factory,
+            ));
             let project_service = Arc::new(ProjectService::new(
                 project_repository.clone(),
                 project_directory_store,
                 clock.clone(),
+            ));
+            let project_backup_service = Arc::new(ProjectBackupService::new(
+                database_pool.clone(),
+                project_repository.clone(),
+                data_dirs.projects.clone(),
+                data_dirs.cache.clone(),
             ));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository,
@@ -395,9 +431,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_cancellation_service,
                 task_recovery_service,
                 project_service,
+                project_backup_service,
                 preset_service,
                 production_queue_service,
                 diagnostics_service,
+                settings_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -520,6 +558,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::diagnostics::diagnostics_export,
             commands::comfy::comfy_get_status,
             commands::comfy::comfy_refresh_capabilities,
+            commands::comfy::comfy_get_settings,
+            commands::comfy::comfy_test_connection,
+            commands::comfy::comfy_save_endpoint,
             commands::workflow_library::workflow_library_refresh,
             commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
             commands::workflow_onboarding::workflow_onboarding_get,
@@ -559,6 +600,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_list,
             commands::project::project_create,
             commands::project::project_update,
+            commands::project::project_backup_export,
+            commands::project::project_backup_inspect,
+            commands::project::project_backup_restore,
             commands::task::task_get,
             commands::task::task_list_recent,
             commands::task::task_cancel,

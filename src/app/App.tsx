@@ -233,6 +233,16 @@ function App() {
     }
   }
 
+  async function refreshRuntimeAfterEndpoint() {
+    try {
+      const [nextComfy, nextCatalog] = await Promise.all([getComfyStatus(), listGenerationCatalog()]);
+      setBootstrapState((current) => (current ? { ...current, comfy: nextComfy } : current));
+      setCatalog(nextCatalog);
+    } catch (refreshError: unknown) {
+      setError(toUserMessage(refreshError));
+    }
+  }
+
   async function reloadCatalog() {
     setCatalog(await listGenerationCatalog());
   }
@@ -293,6 +303,11 @@ function App() {
   function handleProjectUpdated(project: ProjectView) {
     useProjectStore.getState().upsertProject(project);
     setError(null);
+  }
+
+  function handleProjectRestored(project: ProjectView) {
+    useProjectStore.getState().upsertProject(project);
+    openProject(project.id);
   }
 
   const comfy = bootstrapState?.comfy;
@@ -442,6 +457,7 @@ function App() {
           activeProjectId={activeProjectId}
           onOpen={openProject}
           onProjectUpdated={handleProjectUpdated}
+          onProjectRestored={handleProjectRestored}
         />
       )}
       {workspace === "workflows" && (
@@ -454,6 +470,7 @@ function App() {
           capabilityLoading={capabilityLoading}
           onReconnect={() => void reconnectComfy()}
           onRefreshCapabilities={() => void refreshCapabilities()}
+          onEndpointApplied={() => void refreshRuntimeAfterEndpoint()}
         />
       )}
 

@@ -1,6 +1,11 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::{Arc, RwLock},
+};
+use url::Url;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComfyConnectionConfig {
@@ -40,6 +45,67 @@ impl ComfyConnectionConfig {
             "{protocol}://{}:{}/ws?clientId={client_id}",
             self.host, self.port
         )
+    }
+
+    pub fn from_endpoint(endpoint: &str) -> Result<Self, ComfyEndpointError> {
+        let endpoint = endpoint.trim();
+        if endpoint.is_empty() {
+            return Err(ComfyEndpointError::invalid("地址不能为空".to_owned()));
+        }
+        let parsed = Url::parse(endpoint)
+            .map_err(|error| ComfyEndpointError::invalid(format!("地址格式无效：{error}")))?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err(ComfyEndpointError::invalid(
+                "仅支持 http:// 或 https:// 地址".to_owned(),
+            ));
+        }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(ComfyEndpointError::invalid(
+                "ComfyUI 地址不能包含用户名或密码".to_owned(),
+            ));
+        }
+        if parsed.query().is_some() || parsed.fragment().is_some() {
+            return Err(ComfyEndpointError::invalid(
+                "ComfyUI 地址不能包含查询参数或片段".to_owned(),
+            ));
+        }
+        if !parsed.path().is_empty() && parsed.path() != "/" {
+            return Err(ComfyEndpointError::invalid(
+                "ComfyUI 地址不能包含 API 路径".to_owned(),
+            ));
+        }
+        let host = parsed
+            .host_str()
+            .filter(|host| !host.trim().is_empty())
+            .ok_or_else(|| ComfyEndpointError::invalid("ComfyUI 地址缺少主机名".to_owned()))?;
+        let port = parsed
+            .port_or_known_default()
+            .ok_or_else(|| ComfyEndpointError::invalid("ComfyUI 地址缺少有效端口".to_owned()))?;
+        let host = if host.contains(':') && !host.starts_with('[') {
+            format!("[{host}]")
+        } else {
+            host.to_owned()
+        };
+        Ok(Self::new(parsed.scheme(), host, port))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyEndpointError {
+    message: String,
+}
+
+impl fmt::Display for ComfyEndpointError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ComfyEndpointError {}
+
+impl ComfyEndpointError {
+    fn invalid(message: String) -> Self {
+        Self { message }
     }
 }
 
@@ -401,7 +467,193 @@ pub trait ComfyAdapter: Send + Sync {
     ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError>;
 }
 
+pub trait ComfyAdapterFactory: Send + Sync {
+    fn create(
+        &self,
+        config: ComfyConnectionConfig,
+    ) -> Result<Arc<dyn ComfyAdapter>, ComfyAdapterError>;
+}
+
 #[async_trait]
 pub trait ComfyEventSubscription: Send {
     async fn next_event(&mut self) -> Result<Option<ComfyExecutionEvent>, ComfyAdapterError>;
+}
+
+/// A stable adapter reference shared by every application service.
+///
+/// Requests clone the current adapter before awaiting, so replacing the
+/// endpoint never holds a lock across an HTTP or WebSocket operation.
+pub struct ComfyAdapterHandle {
+    current: RwLock<Arc<dyn ComfyAdapter>>,
+}
+
+impl ComfyAdapterHandle {
+    pub fn new(adapter: Arc<dyn ComfyAdapter>) -> Self {
+        Self {
+            current: RwLock::new(adapter),
+        }
+    }
+
+    pub fn replace(&self, adapter: Arc<dyn ComfyAdapter>) {
+        *self
+            .current
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = adapter;
+    }
+
+    pub fn current(&self) -> Arc<dyn ComfyAdapter> {
+        self.current
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+}
+
+#[async_trait]
+impl ComfyAdapter for ComfyAdapterHandle {
+    async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+        self.current().health_check().await
+    }
+
+    async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
+        self.current().get_system_stats().await
+    }
+
+    async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
+        self.current().get_object_info().await
+    }
+
+    async fn upload_input_file(
+        &self,
+        upload: ComfyInputUpload,
+    ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+        self.current().upload_input_file(upload).await
+    }
+
+    async fn upload_image(
+        &self,
+        upload: ComfyImageUpload,
+    ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
+        self.current().upload_image(upload).await
+    }
+
+    async fn cancel_prompt(
+        &self,
+        prompt_id: &str,
+    ) -> Result<CancelPromptResult, ComfyAdapterError> {
+        self.current().cancel_prompt(prompt_id).await
+    }
+
+    async fn get_queue_state(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
+        self.current().get_queue_state().await
+    }
+
+    async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+        self.current().get_history(prompt_id).await
+    }
+
+    async fn download_output(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<ComfyOutputData, ComfyAdapterError> {
+        self.current().download_output(file).await
+    }
+
+    async fn open_output_stream(
+        &self,
+        file: &ComfyOutputFile,
+    ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+        self.current().open_output_stream(file).await
+    }
+
+    async fn submit_workflow(
+        &self,
+        client_id: &str,
+        prompt_id: &str,
+        workflow: Value,
+    ) -> Result<PromptSubmission, ComfyAdapterError> {
+        self.current()
+            .submit_workflow(client_id, prompt_id, workflow)
+            .await
+    }
+
+    async fn subscribe_events(
+        &self,
+        client_id: &str,
+    ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+        self.current().subscribe_events(client_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TaggedAdapter(&'static str);
+
+    #[async_trait]
+    impl ComfyAdapter for TaggedAdapter {
+        async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            Ok(ComfyHealth {
+                system: SystemStats {
+                    comfyui_version: Some(self.0.to_owned()),
+                    python_version: None,
+                    os: None,
+                    ram_total: None,
+                    ram_free: None,
+                    devices: Vec::new(),
+                },
+            })
+        }
+
+        async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
+            Ok(self.health_check().await?.system)
+        }
+
+        async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
+            Ok(serde_json::json!({ self.0: {} }))
+        }
+
+        async fn get_history(&self, _prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn download_output(
+            &self,
+            _file: &ComfyOutputFile,
+        ) -> Result<ComfyOutputData, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn submit_workflow(
+            &self,
+            _client_id: &str,
+            _prompt_id: &str,
+            _workflow: Value,
+        ) -> Result<PromptSubmission, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+
+        async fn subscribe_events(
+            &self,
+            _client_id: &str,
+        ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_handle_routes_each_request_to_the_current_adapter() {
+        let handle = ComfyAdapterHandle::new(Arc::new(TaggedAdapter("A")));
+        assert_eq!(
+            handle.health_check().await.unwrap().system.comfyui_version,
+            Some("A".to_owned())
+        );
+        handle.replace(Arc::new(TaggedAdapter("B")));
+        assert_eq!(
+            handle.health_check().await.unwrap().system.comfyui_version,
+            Some("B".to_owned())
+        );
+        assert!(handle.get_object_info().await.unwrap().get("B").is_some());
+    }
 }

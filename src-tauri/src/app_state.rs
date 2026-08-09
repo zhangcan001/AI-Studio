@@ -6,7 +6,9 @@ use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
 use crate::application::preset_service::PresetService;
 use crate::application::production_queue_service::ProductionQueueService;
+use crate::application::project_backup_service::ProjectBackupService;
 use crate::application::project_service::ProjectService;
+use crate::application::settings_service::SettingsService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
 use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::application::task_history_service::TaskHistoryService;
@@ -34,9 +36,11 @@ pub struct AppState {
     pub task_cancellation_service: Arc<TaskCancellationService>,
     pub task_recovery_service: Arc<TaskRecoveryService>,
     pub project_service: Arc<ProjectService>,
+    pub project_backup_service: Arc<ProjectBackupService>,
     pub preset_service: Arc<PresetService>,
     pub production_queue_service: Arc<ProductionQueueService>,
     pub diagnostics_service: Arc<DiagnosticsService>,
+    pub settings_service: Arc<SettingsService>,
 }
 
 impl AppState {
@@ -56,9 +60,11 @@ impl AppState {
         task_cancellation_service: Arc<TaskCancellationService>,
         task_recovery_service: Arc<TaskRecoveryService>,
         project_service: Arc<ProjectService>,
+        project_backup_service: Arc<ProjectBackupService>,
         preset_service: Arc<PresetService>,
         production_queue_service: Arc<ProductionQueueService>,
         diagnostics_service: Arc<DiagnosticsService>,
+        settings_service: Arc<SettingsService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -76,9 +82,11 @@ impl AppState {
             task_cancellation_service,
             task_recovery_service,
             project_service,
+            project_backup_service,
             preset_service,
             production_queue_service,
             diagnostics_service,
+            settings_service,
         }
     }
 }

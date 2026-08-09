@@ -25,6 +25,13 @@ pub enum AppErrorCode {
     ReusableDraftUnavailable,
     WorkflowOnboardingError,
     ProductionQueueBusy,
+    ComfyEndpointInvalid,
+    ComfyEndpointTestFailed,
+    ComfyEndpointChangeBusy,
+    SettingsSaveFailed,
+    BackupInvalid,
+    BackupInspectionExpired,
+    BackupAssetHashMismatch,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +125,34 @@ impl AppError {
         error
     }
 
+    pub fn comfy_endpoint_invalid(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ComfyEndpointInvalid, message)
+    }
+
+    pub fn comfy_endpoint_test_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ComfyEndpointTestFailed, message)
+    }
+
+    pub fn comfy_endpoint_change_busy(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ComfyEndpointChangeBusy, message)
+    }
+
+    pub fn settings_save_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::SettingsSaveFailed, message)
+    }
+
+    pub fn backup_invalid(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::BackupInvalid, message)
+    }
+
+    pub fn backup_inspection_expired(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::BackupInspectionExpired, message)
+    }
+
+    pub fn backup_asset_hash_mismatch(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::BackupAssetHashMismatch, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -140,6 +175,13 @@ impl AppError {
             AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
             AppErrorCode::WorkflowOnboardingError => "WORKFLOW_ONBOARDING_ERROR",
             AppErrorCode::ProductionQueueBusy => "PRODUCTION_QUEUE_BUSY",
+            AppErrorCode::ComfyEndpointInvalid => "COMFY_ENDPOINT_INVALID",
+            AppErrorCode::ComfyEndpointTestFailed => "COMFY_ENDPOINT_TEST_FAILED",
+            AppErrorCode::ComfyEndpointChangeBusy => "COMFY_ENDPOINT_CHANGE_BUSY",
+            AppErrorCode::SettingsSaveFailed => "SETTINGS_SAVE_FAILED",
+            AppErrorCode::BackupInvalid => "BACKUP_INVALID",
+            AppErrorCode::BackupInspectionExpired => "BACKUP_INSPECTION_EXPIRED",
+            AppErrorCode::BackupAssetHashMismatch => "BACKUP_ASSET_HASH_MISMATCH",
         }
     }
 

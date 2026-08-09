@@ -1,6 +1,12 @@
 import { FormEvent, useState } from "react";
-import { createProject, updateProject } from "../../services/tauriClient";
-import type { ProjectView } from "../../types/project";
+import {
+  createProject,
+  exportProjectBackup,
+  inspectProjectBackup,
+  restoreProjectBackup,
+  updateProject,
+} from "../../services/tauriClient";
+import type { ProjectBackupPreview, ProjectView } from "../../types/project";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
 
@@ -9,16 +15,20 @@ interface Props {
   activeProjectId?: string;
   onOpen: (projectId: string) => void;
   onProjectUpdated: (project: ProjectView) => void;
+  onProjectRestored: (project: ProjectView) => void;
 }
 
 type FormMode = { kind: "create" } | { kind: "edit"; project: ProjectView };
 
-export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectUpdated }: Props) {
+export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectUpdated, onProjectRestored }: Props) {
   const [formMode, setFormMode] = useState<FormMode>();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupPreview, setBackupPreview] = useState<ProjectBackupPreview>();
+  const [backupNotice, setBackupNotice] = useState<string>();
 
   function beginCreate() {
     setFormMode({ kind: "create" });
@@ -59,6 +69,53 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
     }
   }
 
+  async function exportBackup(projectId: string) {
+    setBackupBusy(true);
+    setError(undefined);
+    setBackupNotice(undefined);
+    try {
+      const exported = await exportProjectBackup(projectId);
+      if (exported) {
+        setBackupNotice(`项目备份已保存：${exported.fileName}（${exported.entries} 个文件）`);
+      }
+    } catch (backupError: unknown) {
+      setError(toUserMessage(backupError));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function inspectBackup() {
+    setBackupBusy(true);
+    setError(undefined);
+    setBackupNotice(undefined);
+    try {
+      const preview = await inspectProjectBackup();
+      if (preview) setBackupPreview(preview);
+    } catch (backupError: unknown) {
+      setError(toUserMessage(backupError));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function restoreBackup() {
+    if (!backupPreview) return;
+    if (!window.confirm(`确认恢复项目“${backupPreview.projectName}”？恢复后会创建一个新项目，不会自动生成。`)) return;
+    setBackupBusy(true);
+    setError(undefined);
+    try {
+      const restored = await restoreProjectBackup(backupPreview.inspectionId);
+      setBackupPreview(undefined);
+      setBackupNotice(`项目已恢复：${restored.name}`);
+      onProjectRestored(restored);
+    } catch (backupError: unknown) {
+      setError(toUserMessage(backupError));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
   return (
     <section className="workspace-panel project-workspace" aria-busy={saving}>
       <div className="section-heading workspace-heading">
@@ -67,8 +124,31 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
           <h2>项目</h2>
           <p className="section-description">将任务和资产整理到本地项目中。</p>
         </div>
-        <button type="button" onClick={beginCreate} disabled={saving}>新建项目</button>
+        <div className="project-heading-actions">
+          <button type="button" onClick={() => activeProjectId && void exportBackup(activeProjectId)} disabled={saving || backupBusy || !activeProjectId}>导出备份</button>
+          <button type="button" onClick={() => void inspectBackup()} disabled={saving || backupBusy}>恢复项目</button>
+          <button type="button" onClick={beginCreate} disabled={saving || backupBusy}>新建项目</button>
+        </div>
       </div>
+
+      {backupNotice && <p className="settings-notice" role="status">{backupNotice}</p>}
+      {backupPreview && (
+        <section className="project-backup-preview" aria-labelledby="project-backup-preview-title">
+          <div className="section-heading">
+            <div>
+              <span className="section-label">备份预览</span>
+              <h3 id="project-backup-preview-title">{backupPreview.projectName}</h3>
+            </div>
+            <button type="button" className="quiet-button" onClick={() => setBackupPreview(undefined)} disabled={backupBusy}>取消</button>
+          </div>
+          <p>图片 {backupPreview.imageCount} · 视频 {backupPreview.videoCount} · 音频 {backupPreview.audioCount} · 历史任务 {backupPreview.historyTasks} · 预设 {backupPreview.presets} · 生产队列 {backupPreview.productionQueues}</p>
+          {backupPreview.missingWorkflows.length > 0 && <p className="error-message">缺少工作流：{backupPreview.missingWorkflows.join("、")}；历史记录仍可恢复。</p>}
+          <p className="settings-warning">{backupPreview.warning}</p>
+          <button type="button" className="primary-action" onClick={() => void restoreBackup()} disabled={backupBusy}>
+            {backupBusy ? "正在恢复……" : "确认恢复项目"}
+          </button>
+        </section>
+      )}
 
       {formMode && (
         <form className="project-form" onSubmit={(event) => void submit(event)}>
@@ -124,10 +204,11 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
               <span role="cell">{formatDateTime(project.updatedAt)}</span>
               <span role="cell">{active ? <span className="active-project-badge">当前项目</span> : ""}</span>
               <span role="cell" className="project-row-actions">
-                <button type="button" onClick={() => onOpen(project.id)} disabled={active || saving}>
+                <button type="button" onClick={() => onOpen(project.id)} disabled={active || saving || backupBusy}>
                   打开
                 </button>
-                <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving}>编辑</button>
+                <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving || backupBusy}>编辑</button>
+                <button type="button" className="quiet-button" onClick={() => void exportBackup(project.id)} disabled={saving || backupBusy}>导出备份</button>
               </span>
             </div>
           );

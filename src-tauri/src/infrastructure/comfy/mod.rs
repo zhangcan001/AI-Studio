@@ -3,4 +3,4 @@
 mod client;
 mod dto;
 
-pub use client::ComfyHttpAdapter;
+pub use client::ComfyHttpAdapterFactory;

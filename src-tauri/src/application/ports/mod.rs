@@ -12,6 +12,7 @@ pub mod production_queue_repository;
 pub mod project_directory_store;
 pub mod project_repository;
 pub mod repository_error;
+pub mod settings_store;
 pub mod task_history_repository;
 pub mod task_repository;
 pub mod task_update_sink;
@@ -31,11 +32,11 @@ pub use clock::{Clock, MonotonicEventClock};
 #[allow(unused_imports)]
 pub use comfy_adapter::ComfyUploadedImage;
 pub use comfy_adapter::{
-    CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyConnectionConfig,
-    ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyHistoryStatus,
-    ComfyImageUpload, ComfyInputStream, ComfyInputUpload, ComfyNodeOutput, ComfyOutputData,
-    ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult, ComfyUploadedInput,
-    DeviceInfo, PromptSubmission, SystemStats,
+    CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory, ComfyAdapterHandle,
+    ComfyConnectionConfig, ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory,
+    ComfyHistoryStatus, ComfyImageUpload, ComfyInputStream, ComfyInputUpload, ComfyNodeOutput,
+    ComfyOutputData, ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult,
+    ComfyUploadedInput, DeviceInfo, PromptSubmission, SystemStats,
 };
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
@@ -46,6 +47,7 @@ pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepos
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use repository_error::RepositoryError;
+pub use settings_store::{AppSettings, ComfySettings, LoadedSettings, SettingsStore};
 pub use task_history_repository::{TaskHistoryFilter, TaskHistoryRecord, TaskHistoryRepository};
 pub use task_repository::TaskRepository;
 pub use task_update_sink::{

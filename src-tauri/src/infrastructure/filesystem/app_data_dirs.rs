@@ -10,6 +10,7 @@ pub struct AppDataDirs {
     pub workflow_staging: PathBuf,
     pub cache: PathBuf,
     pub logs: PathBuf,
+    pub config: PathBuf,
 }
 
 impl AppDataDirs {
@@ -21,6 +22,7 @@ impl AppDataDirs {
             workflow_staging: root.join("workflow_staging"),
             cache: root.join("cache"),
             logs: root.join("logs"),
+            config: root.join("config"),
             root,
         };
 
@@ -30,6 +32,7 @@ impl AppDataDirs {
             ("workflow_library", directories.workflow_library.as_path()),
             ("workflow_staging", directories.workflow_staging.as_path()),
             ("cache", directories.cache.as_path()),
+            ("config", directories.config.as_path()),
         ] {
             fs::create_dir_all(path)
                 .map_err(|_| AppError::filesystem(format!("failed to create {name} directory")))?;
@@ -67,6 +70,7 @@ mod tests {
         assert_eq!(directories.workflow_staging, root.join("workflow_staging"));
         assert_eq!(directories.cache, root.join("cache"));
         assert_eq!(directories.logs, root.join("logs"));
+        assert_eq!(directories.config, root.join("config"));
     }
 
     #[test]
@@ -81,6 +85,7 @@ mod tests {
         assert!(directories.workflow_staging.is_dir());
         assert!(directories.cache.is_dir());
         assert!(directories.logs.is_dir());
+        assert!(directories.config.is_dir());
         assert!(!directories.database.exists());
     }
 }

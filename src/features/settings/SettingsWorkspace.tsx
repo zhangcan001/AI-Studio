@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   exportDiagnostics,
+  getComfySettings,
   getDiagnosticsSummary,
+  saveComfyEndpoint,
+  testComfyConnection,
 } from "../../services/tauriClient";
 import type { DiagnosticsSummary } from "../../types/diagnostics";
 import type { ComfyStatus } from "../../types/comfy";
+import type { ComfyEndpointTest, ComfySettingsView } from "../../types/settings";
 import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 import { formatFileSize } from "../../i18n/statusLabels";
 import { ComfyStatus as ComfyStatusCard } from "../comfy/ComfyStatus";
@@ -15,6 +19,7 @@ interface Props {
   capabilityLoading: boolean;
   onReconnect: () => void;
   onRefreshCapabilities: () => void;
+  onEndpointApplied?: () => void;
 }
 
 export function SettingsWorkspace({
@@ -23,12 +28,18 @@ export function SettingsWorkspace({
   capabilityLoading,
   onReconnect,
   onRefreshCapabilities,
+  onEndpointApplied,
 }: Props) {
   const [summary, setSummary] = useState<DiagnosticsSummary>();
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState<string>();
+  const [settings, setSettings] = useState<ComfySettingsView>();
+  const [endpointDraft, setEndpointDraft] = useState("");
+  const [endpointTesting, setEndpointTesting] = useState(false);
+  const [endpointApplying, setEndpointApplying] = useState(false);
+  const [endpointTest, setEndpointTest] = useState<ComfyEndpointTest>();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -45,6 +56,55 @@ export function SettingsWorkspace({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getComfySettings()
+      .then((loaded) => {
+        if (!cancelled) {
+          setSettings(loaded);
+          setEndpointDraft(loaded.endpoint);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setError(loadError);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function testEndpoint() {
+    setEndpointTesting(true);
+    setError(undefined);
+    setNotice(undefined);
+    setEndpointTest(undefined);
+    try {
+      setEndpointTest(await testComfyConnection(endpointDraft));
+    } catch (testError: unknown) {
+      setError(testError);
+    } finally {
+      setEndpointTesting(false);
+    }
+  }
+
+  async function applyEndpoint() {
+    setEndpointApplying(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const next = await saveComfyEndpoint(endpointDraft);
+      setSettings(next);
+      setEndpointDraft(next.endpoint);
+      setEndpointTest(undefined);
+      setNotice("ComfyUI 地址已保存并应用。");
+      onEndpointApplied?.();
+    } catch (applyError: unknown) {
+      setError(applyError);
+    } finally {
+      setEndpointApplying(false);
+    }
+  }
 
   async function exportBundle() {
     setExporting(true);
@@ -107,9 +167,12 @@ export function SettingsWorkspace({
         <div className="settings-card-heading">
           <div>
             <h3 id="settings-comfy-title">ComfyUI 运行环境</h3>
-            <p>接口地址只读显示，连接操作沿用创作页的运行环境检查。</p>
+            <p>可保存本机或局域网 ComfyUI 地址，应用后立即生效。</p>
           </div>
-          {summary && <span className={`status-pill comfy-${summary.comfyStatus.toLowerCase()}`}>{comfyStatusLabel(summary.comfyStatus)}</span>}
+          <div className="settings-card-heading-status">
+            {settings && endpointDraft.trim() !== settings.endpoint && <span className="settings-dirty-pill">尚未应用</span>}
+            {summary && <span className={`status-pill comfy-${summary.comfyStatus.toLowerCase()}`}>{comfyStatusLabel(summary.comfyStatus)}</span>}
+          </div>
         </div>
         <ComfyStatusCard
           status={comfy}
@@ -118,6 +181,31 @@ export function SettingsWorkspace({
           onReconnect={onReconnect}
           onRefreshCapabilities={onRefreshCapabilities}
         />
+        <div className="settings-endpoint-form">
+          <label htmlFor="comfy-endpoint">ComfyUI 地址</label>
+          <div className="settings-endpoint-row">
+            <input
+              id="comfy-endpoint"
+              value={endpointDraft || settings?.endpoint || comfy?.endpoint || ""}
+              onChange={(event) => setEndpointDraft(event.target.value)}
+              placeholder="http://127.0.0.1:8188"
+              spellCheck={false}
+              disabled={endpointTesting || endpointApplying}
+            />
+            <button type="button" onClick={() => void testEndpoint()} disabled={endpointTesting || endpointApplying || !endpointDraft.trim()}>
+              {endpointTesting ? "正在测试……" : "测试连接"}
+            </button>
+            <button type="button" className="primary-action" onClick={() => void applyEndpoint()} disabled={endpointTesting || endpointApplying || !endpointDraft.trim()}>
+              {endpointApplying ? "正在保存……" : "保存并应用"}
+            </button>
+          </div>
+          {settings?.warning && <p className="settings-warning" role="status">{settings.warning}</p>}
+          {endpointTest && (
+            <p className="settings-notice" role="status">
+              已连接：{endpointTest.version ?? "版本未知"} · GPU {endpointTest.gpu.join("、") || "不可用"} · 节点 {endpointTest.nodeCount}
+            </p>
+          )}
+        </div>
         <dl className="settings-list settings-comfy-summary">
           <div><dt>版本</dt><dd>{summary?.comfyVersion ?? comfy?.comfyuiVersion ?? "--"}</dd></div>
           <div><dt>GPU</dt><dd>{summary?.gpuName ?? "--"}</dd></div>

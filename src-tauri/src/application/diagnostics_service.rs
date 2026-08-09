@@ -322,7 +322,7 @@ mod tests {
 
     fn sample_summary() -> DiagnosticsSummaryView {
         DiagnosticsSummaryView {
-            app_version: "0.1.0".to_owned(),
+            app_version: env!("CARGO_PKG_VERSION").to_owned(),
             platform: "windows".to_owned(),
             architecture: "x86_64".to_owned(),
             run_mode: "正式版".to_owned(),

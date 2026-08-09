@@ -331,6 +331,9 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 
 .project-loading { margin: 0 0 16px; padding: 10px 12px; border: 1px solid #4d658f; border-radius: 9px; color: #b9c8df; background: #182337; }
 .project-workspace { display: grid; gap: 18px; }
+.project-heading-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.project-backup-preview { display: grid; gap: 10px; padding: 16px; border: 1px solid #4d658f; border-radius: 12px; background: #182337; }
+.project-backup-preview p { margin: 0; color: #b9c8df; }
 .project-form { display: grid; gap: 14px; padding: 16px; border: 1px solid #35435b; border-radius: 12px; background: #111720; }
 .project-form label { display: grid; gap: 7px; color: #d5deec; font-weight: 600; }
 .project-form label small { color: #8997ad; font-size: 0.75rem; font-weight: 400; }
@@ -1307,6 +1310,23 @@ summary:focus-visible {
   gap: 12px;
 }
 
+.settings-card-heading-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-dirty-pill {
+  border: 1px solid var(--ux-border-strong, #48617f);
+  border-radius: 999px;
+  color: var(--ux-accent-strong, #427be4);
+  font-size: 12px;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
 .settings-card-heading p {
   margin: 0 0 12px;
   color: var(--ux-muted, #9aabc1);
@@ -1344,6 +1364,12 @@ summary:focus-visible {
 .settings-comfy-card {
   margin-top: 12px;
 }
+
+.settings-endpoint-form { display: grid; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ux-border, #2c3a4e); }
+.settings-endpoint-form label { color: var(--ux-muted, #9aabc1); font-size: 0.82rem; font-weight: 700; }
+.settings-endpoint-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-endpoint-row input { flex: 1 1 320px; min-width: 220px; }
+.settings-warning { margin: 0; padding: 9px 11px; border: 1px solid #886c35; border-radius: 8px; color: #f6d99a; background: #332a18; }
 
 .settings-comfy-card .comfy-status-card {
   margin: 0;
