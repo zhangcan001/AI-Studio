@@ -3,7 +3,10 @@
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
 Released: `0.2.0` (M2 Foundation Pack 01–04 verified; immutable release).
-Development: `0.3.0` (independent Krea2 image batches + MiniMax H3 video batches; simplified live gate pending).
+Development: `0.3.0` (`CODE READY / LIVE VALIDATION DEFERRED`; independent Krea2 image batches + MiniMax H3 video batches).
+The frozen 0.3.0 product defines Krea2 as independent batch image generation
+and MiniMax H3 as independent asset + prompt batch video generation. There is
+no automatic Krea2→H3 pipeline; live validation is `DEFERRED BY PRODUCT OWNER`.
 The released `0.1.0` baseline remains available in the Git history and GitHub
 Release; this development cycle does not modify its tag or release assets.
 
@@ -185,6 +188,13 @@ created.
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
 installed as runtime packages, and no model files are bundled or modified.
+
+The current local catalog exposes one active production Recipe for the official
+MiniMax H3 workflow ID (`wfl_minimax_h3_reference_video`), version `1.1.2`;
+historical H3 package versions remain in compatibility storage. Technical debt:
+the ordinary H3 workspace currently assumes one active production Recipe for
+the official workflow ID. The 0.3.0 code freeze does not add a Recipe registry
+or selection system.
 
 ## Development
 

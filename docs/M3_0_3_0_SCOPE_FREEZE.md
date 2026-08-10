@@ -24,6 +24,7 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 - 队列严格串行执行，`continueOnFailure` 保留失败项并允许后续项目继续；致命执行错误仍按既有队列策略暂停。
 - H3 产品安全配置显示为 `0.1 MP · 4 步 · 单任务串行`；公开时长下拉严格来自 Recipe 的 `duration_seconds`，当前正式范围为 1–5 秒、默认 5 秒。
 - H3 Recipe 必须具备精确语义键：`prompt` textarea、`reference_image` image/images、`duration_seconds` integer、`seed` seed 和 video output；契约缺失时显示 `H3 runtime unavailable`，不静默猜字段。
+- H3 Recipe 选择审计确认当前 Catalog 只暴露正式 workflow ID 的一个活动生产 Recipe（`1.1.2`）；历史 H3 包继续保留用于兼容。技术债：普通 H3 workspace 当前假设正式 workflow ID 只有一个活动生产 Recipe；本次冻结不新增 Recipe Registry 或选择系统。
 
 ## Compatibility contract
 

@@ -18,6 +18,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
 | H3 Recipe contract | 只接受精确语义键；`duration_seconds` 从 Recipe 生成 1–5 秒下拉，默认 5 秒，非法范围阻断。 |
+| H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有 `1.1.2`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
 | Migration / backup safety | Fresh DB、001–010→011 保留性、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
 | Regression | Rust 323 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Tauri installer build。 |
