@@ -18,6 +18,7 @@ interface Props {
   onGenerate: () => void;
   projectId: string;
   onImageAssetAvailabilityChange?: (key: string, available: boolean) => void;
+  hiddenFieldKeys?: string[];
 }
 
 export function DynamicFormRenderer({
@@ -28,10 +29,11 @@ export function DynamicFormRenderer({
   onGenerate,
   projectId,
   onImageAssetAvailabilityChange,
+  hiddenFieldKeys = [],
 }: Props) {
   return (
     <div className="dynamic-form">
-      {recipe.fields.map((field) =>
+      {recipe.fields.filter((field) => !hiddenFieldKeys.includes(field.key)).map((field) =>
         renderField(
           field,
           values,

@@ -2820,7 +2820,96 @@ summary:focus-visible {
   gap: 0.5rem;
 }
 
-/* Batch workspace hierarchy: editor first, then a full-width horizontal production rail. */
+/* Batch mode is a focused, full-width workflow: prompt input first, queue below. */
+.studio-panel-batch {
+  grid-column: 1 / -1;
+}
+
+.studio-panel-batch .batch-production-view {
+  width: 100%;
+}
+
+.studio-panel-batch .batch-panel {
+  background: var(--ux-surface-1);
+}
+
+.studio-panel-batch .batch-list {
+  gap: 8px;
+}
+
+.studio-panel-batch .batch-prompt-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.studio-panel-batch .batch-prompt-card-header,
+.studio-panel-batch .batch-prompt-card > label {
+  grid-column: 1;
+}
+
+.studio-panel-batch .batch-prompt-card-header {
+  grid-row: 1;
+}
+
+.studio-panel-batch .batch-prompt-card > label {
+  grid-row: 2;
+}
+
+.studio-panel-batch .batch-prompt-card-actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-content: flex-end;
+}
+
+.batch-optional-parameters {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--ux-border);
+  border-radius: 9px;
+  background: var(--ux-surface-0);
+}
+
+.batch-optional-parameters > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.batch-optional-parameters > summary::-webkit-details-marker {
+  display: none;
+}
+
+.batch-optional-parameters > summary > span {
+  display: grid;
+  gap: 2px;
+}
+
+.batch-optional-parameters > summary strong {
+  color: var(--ux-text);
+}
+
+.batch-optional-parameters > summary small,
+.batch-optional-parameters > p {
+  color: var(--ux-muted);
+  font-size: 0.75rem;
+}
+
+.batch-optional-parameters > p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.batch-optional-parameters .dynamic-form {
+  gap: 12px;
+  padding: 4px 0 0;
+}
+
+/* Batch workspace hierarchy: editor first, then a full-width production list. */
 .studio-panel-batch .batch-production-view {
   grid-template-columns: 1fr;
   gap: 16px;
@@ -3159,6 +3248,26 @@ summary:focus-visible {
 }
 
 @media (max-width: 560px) {
+  .studio-panel-batch .batch-prompt-card {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-panel-batch .batch-prompt-card-header,
+  .studio-panel-batch .batch-prompt-card > label,
+  .studio-panel-batch .batch-prompt-card-actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .studio-panel-batch .batch-prompt-card-actions {
+    justify-content: flex-start;
+  }
+
+  .batch-optional-parameters > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .production-inline-item-toggle {
     grid-template-columns: 34px 68px minmax(0, 1fr) auto;
     gap: 8px;

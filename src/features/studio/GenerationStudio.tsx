@@ -859,6 +859,7 @@ export function GenerationStudio({
         </section>
         {selectedWorkflow && (
           <>
+            {studioMode !== "batch" && <>
             <div className="studio-input-heading">
               <div>
                 <span className="section-label">公开参数</span>
@@ -987,6 +988,7 @@ export function GenerationStudio({
               projectId={projectId}
               onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
             />
+            </>}
             {krea2ConfigError && <p className="error-message" role="alert">{krea2ConfigError}</p>}
             {studioMode === "experiment" && (
               <ExperimentPlannerPanel
@@ -1049,6 +1051,26 @@ export function GenerationStudio({
                   </button>
                 </div>
               </div>
+              <details className="batch-optional-parameters">
+                <summary>
+                  <span>
+                    <span className="section-label">批量参数</span>
+                    <strong>可选共享参数</strong>
+                  </span>
+                  <small>仅影响之后添加的项目</small>
+                </summary>
+                <p>Prompt 在下方列表中单独编辑；这里的数字和种子参数会作为新项目的默认值。</p>
+                <DynamicFormRenderer
+                  recipe={selectedWorkflow}
+                  values={values}
+                  validationErrors={validationErrors}
+                  hiddenFieldKeys={krea2Prompt ? [krea2Prompt.key] : []}
+                  onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
+                  onGenerate={() => void generate()}
+                  projectId={projectId}
+                  onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
+                />
+              </details>
               <div className="batch-prompt-paste">
                 <label>
                   <span>直接粘贴提示词</span>
@@ -1132,13 +1154,13 @@ export function GenerationStudio({
         )}
         {notice && <p className="studio-notice" role="status">{notice}</p>}
       </section>
-      <CreationResultPanel
+      {studioMode !== "batch" && <CreationResultPanel
         projectId={projectId}
         task={currentTask}
         cancelling={cancelling}
         onCancel={() => void cancelCurrentTask()}
         onOpenTask={currentTask ? () => onOpenTask(currentTask.id) : undefined}
-      />
+      />}
     </>
   );
 }
