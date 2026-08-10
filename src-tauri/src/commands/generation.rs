@@ -170,6 +170,13 @@ impl InputValueDto {
     }
 }
 
+pub(crate) fn input_value_into_application(
+    value: InputValueDto,
+    key: &str,
+) -> Result<GenerationInputValue, AppError> {
+    value.into_application(key)
+}
+
 fn parse_asset_id(value: &str, key: &str, kind: &str) -> Result<crate::domain::AssetId, AppError> {
     crate::domain::AssetId::parse(value.to_owned()).map_err(|error| {
         AppError::invalid_input(format!("{kind} asset id for {key} is invalid: {error}"))
@@ -177,7 +184,7 @@ fn parse_asset_id(value: &str, key: &str, kind: &str) -> Result<crate::domain::A
 }
 
 impl GenerationCreateRequest {
-    fn into_application(self) -> Result<CreateGenerationRequest, AppError> {
+    pub(crate) fn into_application(self) -> Result<CreateGenerationRequest, AppError> {
         crate::domain::validate_project_id(&self.project_id)
             .map_err(|error| AppError::invalid_input(error.to_string()))?;
         let values = self
@@ -295,7 +302,7 @@ pub async fn generation_create_batch(
     Ok(GenerationBatchCreateResult { created, failed })
 }
 
-fn map_generation_error(error: GenerationServiceError) -> AppError {
+pub(crate) fn map_generation_error(error: GenerationServiceError) -> AppError {
     match &error {
         GenerationServiceError::DefinitionNotFound { .. } => {
             AppError::generation_definition_not_found(error.to_string())
@@ -311,6 +318,7 @@ fn map_generation_error(error: GenerationServiceError) -> AppError {
         | GenerationServiceError::StreamDisconnected(_)
         | GenerationServiceError::OutputCollection(_)
         | GenerationServiceError::AssetImport(_)
+        | GenerationServiceError::TaskCreatedHook { .. }
         | GenerationServiceError::ExecutionFailed { .. } => AppError::internal(error.to_string()),
     }
 }

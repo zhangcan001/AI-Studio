@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 3;
+const BACKUP_VERSION: u32 = 4;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -60,6 +60,7 @@ pub struct ProjectBackupPreviewView {
     pub presets: usize,
     pub production_queues: usize,
     pub prompt_entries: usize,
+    pub shots: usize,
     pub missing_workflows: Vec<String>,
     pub active_tasks_excluded: usize,
     pub warning: String,
@@ -185,6 +186,7 @@ impl ProjectBackupService {
             presets: document.presets.len(),
             production_queues: document.batches.len(),
             prompt_entries: document.prompt_entries.len(),
+            shots: document.shots.len(),
             missing_workflows,
             active_tasks_excluded: document.active_tasks_excluded,
             warning: "项目备份包含项目历史、提示词和素材，请妥善保存。".to_owned(),
@@ -261,6 +263,14 @@ impl ProjectBackupService {
         for item in &document.items {
             item_ids.insert(item.id.clone(), format!("pbi_{}", Uuid::new_v4().simple()));
         }
+        let mut shot_ids = HashMap::new();
+        for shot in &document.shots {
+            shot_ids.insert(shot.id.clone(), format!("sht_{}", Uuid::new_v4()));
+        }
+        let mut shot_generation_link_ids = HashMap::new();
+        for link in &document.shot_generation_links {
+            shot_generation_link_ids.insert(link.id.clone(), format!("sgl_{}", Uuid::new_v4()));
+        }
         let mut tag_ids = HashMap::new();
         for tag in &document.asset_tags {
             tag_ids.insert(tag.id.clone(), format!("tag_{}", Uuid::new_v4()));
@@ -300,6 +310,8 @@ impl ProjectBackupService {
                 &batch_ids,
                 &item_ids,
                 &tag_ids,
+                &shot_ids,
+                &shot_generation_link_ids,
                 &restored_assets,
             )
             .await;
@@ -410,6 +422,10 @@ impl ProjectBackupService {
         let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
+        let mut shots = query_shots(&mut transaction, project_id).await?;
+        let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
+        let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
+        let mut shot_generation_links = query_shot_generation_links(&mut transaction).await?;
         let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
             "SELECT id, project_id, name, normalized_name, created_at, updated_at FROM asset_tags WHERE project_id = ? ORDER BY created_at, id",
         ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
@@ -419,7 +435,70 @@ impl ProjectBackupService {
         let mut asset_favorites = sqlx::query_as::<_, BackupAssetFavorite>(
             "SELECT asset_id, project_id, created_at FROM asset_favorites WHERE project_id = ? ORDER BY created_at, asset_id",
         ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-        let workflow_refs = collect_workflow_refs(&tasks);
+        let included_asset_ids = db_assets
+            .iter()
+            .filter(|asset| {
+                asset
+                    .source_task_id
+                    .as_ref()
+                    .is_none_or(|task_id| !excluded_tasks.contains(task_id))
+            })
+            .map(|asset| asset.id.as_str())
+            .collect::<HashSet<_>>();
+        let included_batch_item_ids = items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<HashSet<_>>();
+        let included_shot_ids = shots
+            .iter()
+            .map(|shot| shot.id.clone())
+            .collect::<HashSet<_>>();
+        for shot in &mut shots {
+            if shot
+                .selected_image_asset_id
+                .as_ref()
+                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
+            {
+                shot.selected_image_asset_id = None;
+            }
+            if shot
+                .selected_video_asset_id
+                .as_ref()
+                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
+            {
+                shot.selected_video_asset_id = None;
+            }
+        }
+        shot_stage_configs.retain(|config| included_shot_ids.contains(config.shot_id.as_str()));
+        shot_reference_assets.retain(|reference| {
+            included_shot_ids.contains(reference.shot_id.as_str())
+                && included_asset_ids.contains(reference.asset_id.as_str())
+        });
+        shot_generation_links.retain(|link| {
+            included_shot_ids.contains(link.shot_id.as_str())
+                && link
+                    .task_id
+                    .as_ref()
+                    .is_none_or(|task_id| included_task_ids.contains(task_id))
+                && link
+                    .production_batch_item_id
+                    .as_ref()
+                    .is_none_or(|item_id| included_batch_item_ids.contains(item_id.as_str()))
+        });
+        let mut workflow_refs = collect_workflow_refs(&tasks);
+        for config in &shot_stage_configs {
+            let reference = WorkflowReference {
+                workflow_id: config.workflow_id.clone(),
+                workflow_version_id: config.workflow_version_id.clone(),
+                recipe_id: config.recipe_id.clone(),
+            };
+            if !workflow_refs.iter().any(|item| {
+                item.workflow_version_id == reference.workflow_version_id
+                    && item.recipe_id == reference.recipe_id
+            }) {
+                workflow_refs.push(reference);
+            }
+        }
         transaction
             .commit()
             .await
@@ -541,6 +620,10 @@ impl ProjectBackupService {
             asset_tags,
             asset_tag_links,
             asset_favorites,
+            shots,
+            shot_stage_configs,
+            shot_reference_assets,
+            shot_generation_links,
         };
         Ok(BuiltBackup { document, files })
     }
@@ -558,6 +641,8 @@ impl ProjectBackupService {
         batch_ids: &HashMap<String, String>,
         item_ids: &HashMap<String, String>,
         tag_ids: &HashMap<String, String>,
+        shot_ids: &HashMap<String, String>,
+        shot_generation_link_ids: &HashMap<String, String>,
         restored_assets: &[RestoredAsset],
     ) -> Result<(), AppError> {
         let mut transaction = self
@@ -579,6 +664,8 @@ impl ProjectBackupService {
             batch_ids,
             item_ids,
             tag_ids,
+            shot_ids,
+            shot_generation_link_ids,
             restored_assets,
             &restored_snapshots,
         )
@@ -638,6 +725,14 @@ struct BackupDocument {
     asset_tag_links: Vec<BackupAssetTagLink>,
     #[serde(default)]
     asset_favorites: Vec<BackupAssetFavorite>,
+    #[serde(default)]
+    shots: Vec<BackupShot>,
+    #[serde(default)]
+    shot_stage_configs: Vec<BackupShotStageConfig>,
+    #[serde(default)]
+    shot_reference_assets: Vec<BackupShotReferenceAsset>,
+    #[serde(default)]
+    shot_generation_links: Vec<BackupShotGenerationLink>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -810,6 +905,54 @@ struct BackupBatchItem {
     error_message: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupShot {
+    id: String,
+    project_id: String,
+    ordinal: i64,
+    name: String,
+    prompt_text: String,
+    prompt_entry_id: Option<String>,
+    prompt_version_id: Option<String>,
+    selected_image_asset_id: Option<String>,
+    selected_video_asset_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotStageConfig {
+    shot_id: String,
+    stage: String,
+    workflow_id: String,
+    workflow_version_id: String,
+    recipe_id: String,
+    scalar_values: Value,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotReferenceAsset {
+    shot_id: String,
+    stage: String,
+    asset_id: String,
+    ordinal: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotGenerationLink {
+    id: String,
+    shot_id: String,
+    stage: String,
+    task_id: Option<String>,
+    production_batch_item_id: Option<String>,
+    created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -1305,6 +1448,153 @@ async fn query_batch_items(
     Ok(result)
 }
 
+#[derive(FromRow)]
+struct DbShot {
+    id: String,
+    project_id: String,
+    ordinal: i64,
+    name: String,
+    prompt_text: String,
+    prompt_entry_id: Option<String>,
+    prompt_version_id: Option<String>,
+    selected_image_asset_id: Option<String>,
+    selected_video_asset_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbShotStageConfig {
+    shot_id: String,
+    stage: String,
+    workflow_id: String,
+    workflow_version_id: String,
+    recipe_id: String,
+    scalar_values_json: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbShotReferenceAsset {
+    shot_id: String,
+    stage: String,
+    asset_id: String,
+    ordinal: i64,
+}
+
+#[derive(FromRow)]
+struct DbShotGenerationLink {
+    id: String,
+    shot_id: String,
+    stage: String,
+    task_id: Option<String>,
+    production_batch_item_id: Option<String>,
+    created_at: String,
+}
+
+async fn query_shots(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupShot>, AppError> {
+    let rows = sqlx::query_as::<_, DbShot>(
+        "SELECT id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
+                selected_image_asset_id, selected_video_asset_id, created_at, updated_at
+         FROM shots WHERE project_id = ? ORDER BY ordinal, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupShot {
+            id: row.id,
+            project_id: row.project_id,
+            ordinal: row.ordinal,
+            name: row.name,
+            prompt_text: row.prompt_text,
+            prompt_entry_id: row.prompt_entry_id,
+            prompt_version_id: row.prompt_version_id,
+            selected_image_asset_id: row.selected_image_asset_id,
+            selected_video_asset_id: row.selected_video_asset_id,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
+}
+
+async fn query_shot_stage_configs(
+    transaction: &mut Transaction<'_, Sqlite>,
+) -> Result<Vec<BackupShotStageConfig>, AppError> {
+    let rows = sqlx::query_as::<_, DbShotStageConfig>(
+        "SELECT c.shot_id, c.stage, v.workflow_id, c.workflow_version_id, c.recipe_id,
+                c.scalar_values_json, c.updated_at
+         FROM shot_stage_configs c
+         JOIN workflow_versions v ON v.id = c.workflow_version_id
+         ORDER BY c.shot_id, c.stage",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(BackupShotStageConfig {
+                shot_id: row.shot_id,
+                stage: row.stage,
+                workflow_id: row.workflow_id,
+                workflow_version_id: row.workflow_version_id,
+                recipe_id: row.recipe_id,
+                scalar_values: parse_value(Some(&row.scalar_values_json), "镜头阶段参数")?,
+                updated_at: row.updated_at,
+            })
+        })
+        .collect()
+}
+
+async fn query_shot_reference_assets(
+    transaction: &mut Transaction<'_, Sqlite>,
+) -> Result<Vec<BackupShotReferenceAsset>, AppError> {
+    let rows = sqlx::query_as::<_, DbShotReferenceAsset>(
+        "SELECT shot_id, stage, asset_id, ordinal
+         FROM shot_reference_assets ORDER BY shot_id, stage, ordinal, asset_id",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupShotReferenceAsset {
+            shot_id: row.shot_id,
+            stage: row.stage,
+            asset_id: row.asset_id,
+            ordinal: row.ordinal,
+        })
+        .collect())
+}
+
+async fn query_shot_generation_links(
+    transaction: &mut Transaction<'_, Sqlite>,
+) -> Result<Vec<BackupShotGenerationLink>, AppError> {
+    let rows = sqlx::query_as::<_, DbShotGenerationLink>(
+        "SELECT id, shot_id, stage, task_id, production_batch_item_id, created_at
+         FROM shot_generation_links ORDER BY shot_id, created_at, id",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupShotGenerationLink {
+            id: row.id,
+            shot_id: row.shot_id,
+            stage: row.stage,
+            task_id: row.task_id,
+            production_batch_item_id: row.production_batch_item_id,
+            created_at: row.created_at,
+        })
+        .collect())
+}
+
 const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
 
 fn write_zip_to_path(
@@ -1524,7 +1814,7 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3) {
+    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4) {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -1567,6 +1857,164 @@ fn validate_document_entries(
     }
     validate_organization_document(document)?;
     validate_prompt_document(document)?;
+    validate_shot_document(document)?;
+    Ok(())
+}
+
+fn validate_shot_document(document: &BackupDocument) -> Result<(), AppError> {
+    use crate::domain::{canonical_shot_name, validate_scalar_values, ShotStage};
+
+    let mut shot_ids = HashSet::new();
+    let mut ordinals = Vec::with_capacity(document.shots.len());
+    let asset_types = document
+        .assets
+        .iter()
+        .map(|asset| (asset.id.as_str(), asset.asset_type.as_str()))
+        .collect::<HashMap<_, _>>();
+    let prompt_entry_ids = document
+        .prompt_entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect::<HashSet<_>>();
+    let prompt_versions = document
+        .prompt_versions
+        .iter()
+        .map(|version| (version.id.as_str(), version.prompt_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    for shot in &document.shots {
+        if shot.project_id != document.project.id
+            || shot.id.trim().is_empty()
+            || !shot_ids.insert(shot.id.as_str())
+        {
+            return Err(AppError::backup_invalid("备份镜头 ID 或项目归属无效"));
+        }
+        if shot.ordinal < 0 {
+            return Err(AppError::backup_invalid("备份镜头序号无效"));
+        }
+        canonical_shot_name(&shot.name)
+            .map_err(|error| AppError::backup_invalid(format!("镜头名称无效：{error}")))?;
+        if shot.prompt_entry_id.is_some() != shot.prompt_version_id.is_some() {
+            return Err(AppError::backup_invalid(
+                "备份镜头 Prompt provenance 不完整",
+            ));
+        }
+        if let (Some(entry_id), Some(version_id)) = (&shot.prompt_entry_id, &shot.prompt_version_id)
+        {
+            if !prompt_entry_ids.contains(entry_id.as_str())
+                || prompt_versions.get(version_id.as_str()).copied() != Some(entry_id.as_str())
+            {
+                return Err(AppError::backup_invalid(
+                    "备份镜头 Prompt provenance 引用无效",
+                ));
+            }
+        }
+        if shot
+            .selected_image_asset_id
+            .as_ref()
+            .is_some_and(|asset_id| asset_types.get(asset_id.as_str()).copied() != Some("image"))
+            || shot
+                .selected_video_asset_id
+                .as_ref()
+                .is_some_and(|asset_id| {
+                    asset_types.get(asset_id.as_str()).copied() != Some("video")
+                })
+        {
+            return Err(AppError::backup_invalid("备份镜头选定素材类型无效"));
+        }
+        ordinals.push(shot.ordinal);
+    }
+    ordinals.sort_unstable();
+    if ordinals
+        .iter()
+        .enumerate()
+        .any(|(index, ordinal)| *ordinal != index as i64)
+    {
+        return Err(AppError::backup_invalid("备份镜头序号必须从 0 连续排列"));
+    }
+
+    let mut stage_configs = HashSet::new();
+    for config in &document.shot_stage_configs {
+        if !shot_ids.contains(config.shot_id.as_str())
+            || ShotStage::try_from_str(&config.stage).is_err()
+            || config.workflow_id.trim().is_empty()
+            || config.workflow_version_id.trim().is_empty()
+            || config.recipe_id.trim().is_empty()
+            || !stage_configs.insert((config.shot_id.as_str(), config.stage.as_str()))
+        {
+            return Err(AppError::backup_invalid("备份镜头阶段配置无效或重复"));
+        }
+        validate_scalar_values(&config.scalar_values)
+            .map_err(|error| AppError::backup_invalid(format!("镜头阶段参数无效：{error}")))?;
+    }
+
+    let mut references = HashSet::new();
+    let mut reference_ordinals = HashMap::<(&str, &str), Vec<i64>>::new();
+    for reference in &document.shot_reference_assets {
+        if !shot_ids.contains(reference.shot_id.as_str())
+            || ShotStage::try_from_str(&reference.stage).is_err()
+            || asset_types.get(reference.asset_id.as_str()).copied() != Some("image")
+            || reference.ordinal < 0
+            || !references.insert((
+                reference.shot_id.as_str(),
+                reference.stage.as_str(),
+                reference.asset_id.as_str(),
+            ))
+        {
+            return Err(AppError::backup_invalid(
+                "备份镜头 Reference 素材关系无效或重复",
+            ));
+        }
+        reference_ordinals
+            .entry((reference.shot_id.as_str(), reference.stage.as_str()))
+            .or_default()
+            .push(reference.ordinal);
+    }
+    for mut ordinals in reference_ordinals.into_values() {
+        ordinals.sort_unstable();
+        if ordinals
+            .iter()
+            .enumerate()
+            .any(|(index, ordinal)| *ordinal != index as i64)
+        {
+            return Err(AppError::backup_invalid("备份镜头 Reference 序号必须连续"));
+        }
+    }
+
+    let task_ids = document
+        .tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<HashSet<_>>();
+    let item_ids = document
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut link_ids = HashSet::new();
+    let mut linked_tasks = HashSet::new();
+    for link in &document.shot_generation_links {
+        if !shot_ids.contains(link.shot_id.as_str())
+            || ShotStage::try_from_str(&link.stage).is_err()
+            || !link_ids.insert(link.id.as_str())
+            || link
+                .task_id
+                .as_ref()
+                .is_some_and(|task_id| !task_ids.contains(task_id.as_str()))
+            || link
+                .production_batch_item_id
+                .as_ref()
+                .is_some_and(|item_id| !item_ids.contains(item_id.as_str()))
+        {
+            return Err(AppError::backup_invalid(
+                "备份镜头生成关联无效或引用未知任务",
+            ));
+        }
+        if let Some(task_id) = &link.task_id {
+            if !linked_tasks.insert(task_id.as_str()) {
+                return Err(AppError::backup_invalid("备份镜头生成关联重复引用任务"));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1940,6 +2388,8 @@ async fn restore_rows_in_transaction(
     batch_ids: &HashMap<String, String>,
     item_ids: &HashMap<String, String>,
     tag_ids: &HashMap<String, String>,
+    shot_ids: &HashMap<String, String>,
+    shot_generation_link_ids: &HashMap<String, String>,
     restored_assets: &[RestoredAsset],
     restored_snapshots: &[BackupSnapshot],
 ) -> Result<(), AppError> {
@@ -2242,6 +2692,129 @@ async fn restore_rows_in_transaction(
             .bind(item_id).bind(batch_id).bind(item.ordinal).bind(&item.workflow_version_id).bind(&item.recipe_id).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
             .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
     }
+    for shot in &document.shots {
+        let shot_id = shot_ids
+            .get(&shot.id)
+            .ok_or_else(|| AppError::backup_invalid("镜头 ID 映射缺失"))?;
+        let prompt_entry_id = shot
+            .prompt_entry_id
+            .as_ref()
+            .and_then(|id| prompt_ids.get(id))
+            .map(String::as_str);
+        let prompt_version_id = shot
+            .prompt_version_id
+            .as_ref()
+            .and_then(|id| prompt_version_ids.get(id))
+            .map(String::as_str);
+        let selected_image_asset_id = shot
+            .selected_image_asset_id
+            .as_ref()
+            .and_then(|id| asset_ids.get(id))
+            .map(String::as_str);
+        let selected_video_asset_id = shot
+            .selected_video_asset_id
+            .as_ref()
+            .and_then(|id| asset_ids.get(id))
+            .map(String::as_str);
+        sqlx::query(
+            "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, prompt_entry_id,
+             prompt_version_id, selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(shot_id)
+        .bind(&project.id)
+        .bind(shot.ordinal)
+        .bind(&shot.name)
+        .bind(&shot.prompt_text)
+        .bind(prompt_entry_id)
+        .bind(prompt_version_id)
+        .bind(selected_image_asset_id)
+        .bind(selected_video_asset_id)
+        .bind(&shot.created_at)
+        .bind(&shot.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for config in &document.shot_stage_configs {
+        let shot_id = shot_ids
+            .get(&config.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("镜头阶段配置缺少镜头映射"))?;
+        ensure_workflow_dependency(
+            transaction,
+            &WorkflowReference {
+                workflow_id: config.workflow_id.clone(),
+                workflow_version_id: config.workflow_version_id.clone(),
+                recipe_id: config.recipe_id.clone(),
+            },
+        )
+        .await?;
+        sqlx::query(
+            "INSERT INTO shot_stage_configs
+             (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(shot_id)
+        .bind(&config.stage)
+        .bind(&config.workflow_version_id)
+        .bind(&config.recipe_id)
+        .bind(config.scalar_values.to_string())
+        .bind(&config.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for reference in &document.shot_reference_assets {
+        let shot_id = shot_ids
+            .get(&reference.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("镜头 Reference 缺少镜头映射"))?;
+        let asset_id = asset_ids
+            .get(&reference.asset_id)
+            .ok_or_else(|| AppError::backup_invalid("镜头 Reference 缺少素材映射"))?;
+        sqlx::query(
+            "INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(shot_id)
+        .bind(&reference.stage)
+        .bind(asset_id)
+        .bind(reference.ordinal)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for link in &document.shot_generation_links {
+        let link_id = shot_generation_link_ids
+            .get(&link.id)
+            .ok_or_else(|| AppError::backup_invalid("镜头生成关联 ID 映射缺失"))?;
+        let shot_id = shot_ids
+            .get(&link.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("镜头生成关联缺少镜头映射"))?;
+        let task_id = link
+            .task_id
+            .as_ref()
+            .and_then(|id| task_ids.get(id))
+            .map(String::as_str);
+        let item_id = link
+            .production_batch_item_id
+            .as_ref()
+            .and_then(|id| item_ids.get(id))
+            .map(String::as_str);
+        sqlx::query(
+            "INSERT INTO shot_generation_links
+             (id, shot_id, stage, task_id, production_batch_item_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(link_id)
+        .bind(shot_id)
+        .bind(&link.stage)
+        .bind(task_id)
+        .bind(item_id)
+        .bind(&link.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     Ok(())
 }
 
@@ -2537,6 +3110,10 @@ mod tests {
             asset_tags: tags,
             asset_tag_links: links,
             asset_favorites: Vec::new(),
+            shots: Vec::new(),
+            shot_stage_configs: Vec::new(),
+            shot_reference_assets: Vec::new(),
+            shot_generation_links: Vec::new(),
         }
     }
 
@@ -2785,6 +3362,29 @@ mod tests {
             .bind(video_path.to_string_lossy().to_string()).bind(video_sha).bind(video_bytes.len() as i64).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES ('tag_finish', 'project-backup', '成片', '成片', '2026-01-01T00:02:00Z', '2026-01-01T00:02:00Z')").execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES ('ast_video', 'tag_finish', 'project-backup', '2026-01-01T00:02:00Z')").execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id, selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
+             VALUES ('sht_backup', 'project-backup', 0, '开场镜头', '人物，柔光', 'prm_backup', 'prv_backup_2', 'ast_backup', 'ast_video', '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_stage_configs (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+             VALUES ('sht_backup', 'image', 'workflow-version-1', 'recipe-1', '{\"steps\":{\"type\":\"integer\",\"value\":4}}', '2026-01-01T00:03:00Z'),
+                    ('sht_backup', 'video', 'workflow-version-1', 'recipe-1', '{\"seed\":{\"type\":\"seed_random\"}}', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal) VALUES ('sht_backup', 'image', 'ast_backup', 0), ('sht_backup', 'video', 'ast_backup', 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO shot_generation_links (id, shot_id, stage, task_id, created_at) VALUES ('sgl_backup', 'sht_backup', 'image', 'tsk_backup', '2026-01-01T00:03:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO project_templates (id, name, normalized_name, description, workflow_version_id, recipe_id, values_json, created_at, updated_at) VALUES ('ptm_global', '全局模板', '全局模板', NULL, 'workflow-version-1', 'recipe-1', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").execute(&pool).await.unwrap();
 
         let service = ProjectBackupService::new(
@@ -2800,13 +3400,14 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 3);
+        assert_eq!(manifest.version, 4);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
         assert!(!names.contains("recipe.yaml"));
         let preview = service.inspect(archive_path).await.unwrap();
         assert_eq!(preview.image_count, 1);
+        assert_eq!(preview.shots, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, "project-backup");
         let restored_count =
@@ -2914,6 +3515,37 @@ mod tests {
         .await
         .unwrap();
         assert_eq!((restored_prompt_count, restored_version_count), (1, 2));
+        let restored_shot: (String, String, String, String) = sqlx::query_as(
+            "SELECT id, prompt_entry_id, prompt_version_id, selected_image_asset_id FROM shots WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_shot.0, "sht_backup");
+        assert_ne!(restored_shot.1, "prm_backup");
+        assert_ne!(restored_shot.2, "prv_backup_2");
+        assert_ne!(restored_shot.3, "ast_backup");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_stage_configs WHERE shot_id = ?"
+            )
+            .bind(&restored_shot.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE shot_id = ?"
+            )
+            .bind(&restored_shot.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -3004,6 +3636,50 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn fixed_v3_fixture_restores_with_empty_shot_data() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let archive_path = directory.path().join("legacy-v3.zip");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({"format":"ai-studio-project-backup","version":3,"createdBy":"0.2.0","project":{"id":"legacy-v3-project","name":"旧项目 v3"}});
+        let project = json!({
+            "project":{"id":"legacy-v3-project","name":"旧项目 v3"},"description":null,
+            "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z",
+            "activeTasksExcluded":0,"incompleteTasksExcluded":0,"tasks":[],"taskEvents":[],"assets":[],
+            "mappings":[],"snapshots":[],"presets":[],"batches":[],"items":[],"workflowRefs":[],
+            "assetTags":[],"assetTagLinks":[],"assetFavorites":[]
+        });
+        writer.start_file("manifest.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+            .unwrap();
+        writer.start_file("project.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&project).unwrap().as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let preview = service.inspect(archive_path).await.unwrap();
+        assert_eq!(preview.shots, 0);
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shots WHERE project_id = ?")
+                .bind(restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
             0
         );
     }
@@ -3117,6 +3793,10 @@ mod tests {
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
+            shots: Vec::new(),
+            shot_stage_configs: Vec::new(),
+            shot_reference_assets: Vec::new(),
+            shot_generation_links: Vec::new(),
         };
         let project = ProjectRecord {
             id: project_id.clone(),
@@ -3148,6 +3828,8 @@ mod tests {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &HashMap::new(),
+                &HashMap::new(),
                 &HashMap::new(),
                 &[],
             )
@@ -3237,6 +3919,10 @@ mod tests {
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
+            shots: Vec::new(),
+            shot_stage_configs: Vec::new(),
+            shot_reference_assets: Vec::new(),
+            shot_generation_links: Vec::new(),
         };
         let files = [super::BackupFileSource {
             zip_path: "assets/ast_large/content.bin".to_owned(),

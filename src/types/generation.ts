@@ -61,6 +61,7 @@ export interface RecipeViewModel {
   category: string;
   mode: string;
   fields: RecipeField[];
+  outputTypes?: Array<"image" | "video">;
 }
 
 export type DraftValue =

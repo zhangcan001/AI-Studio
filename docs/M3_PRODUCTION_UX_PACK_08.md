@@ -14,13 +14,13 @@ Pack 08 completes the first production-UX productization pass on the existing St
 - Prompt Library listing now uses `(updated_at, id)` keyset pagination with project/kind/keyword/tag filters, cursor continuation, stable ordering, and a 300 ms frontend filter debounce. Page size is bounded to 30–100.
 - Asset organization has project-scoped transactional bulk favorite/tag operations, a maximum of 100 selected assets, cross-project rejection, and an independent selection mode that does not alter compare selection.
 - Production queue name presets are persisted in `settings.json`, validated and deduplicated, and exposed in the queue creation panel without adding task data or a database migration.
-- Pack 09 has started with a pure project-scoped Shot source model and tests only. It is not connected to the database, Task system, or generation scheduler.
+- Pack 09 is now implemented as a project-scoped Shot production workspace on the existing GenerationService / Task / Snapshot / Asset chain.
 
 ## Schema and upgrade boundary
 
-- Migrations `001–009` remain the complete schema line; `001–009` are immutable and no `010_shots.sql` was created.
-- The existing local database at `%LOCALAPPDATA%\AIStudio\AIStudioData\app.db` was read-only inspected at migration 8, then passed the real application migrator smoke gate and now records successful migration 9 (`prompt library`) with `prompt_entries` and `prompt_versions` present.
-- Queue-name presets remain settings data. Shot source work remains source-only until its model and migration contract are explicitly approved.
+- Migrations `001–009` remain immutable. Pack 09 adds immutable-after-apply `010_shot_production.sql` for Shot orchestration metadata; it does not alter `tasks` or add a second Task system.
+- The existing local database at `%LOCALAPPDATA%\AIStudio\AIStudioData\app.db` previously passed the migration 8 → 9 smoke gate; Pack 09 adds the 9 → 10 upgrade gate.
+- Queue-name presets remain settings data. The active production runtime scope is Kera2 image keyframes + MiniMax H3 reference-image-to-video.
 
 ## Verification
 
@@ -34,4 +34,4 @@ Pack 08 completes the first production-UX productization pass on the existing St
 
 The Pack 06 Kera2 four-item gate and Pack 07 five-action desktop gate remain `LIVE PENDING`. This audit did not have an observable, controllable desktop UI state, and the available GPU memory was low; therefore no batch/item/task/asset/snapshot evidence is claimed. The source and automated regression are code-pass, while GPU generation and the full desktop interaction chain require a later observable run.
 
-Pack 06 and Pack 07 closeout documents have been kept explicitly at `CODE PASS / LIVE PENDING`; Pack 09 remains `SOURCE STARTED`.
+Pack 06 and Pack 07 closeout documents remain explicitly at `CODE PASS / LIVE PENDING`. Pack 09 is documented in `docs/M3_SHOT_PRODUCTION_PACK_09.md`.

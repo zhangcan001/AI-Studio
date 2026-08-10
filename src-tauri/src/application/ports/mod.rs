@@ -15,6 +15,7 @@ pub mod project_repository;
 pub mod prompt_library_repository;
 pub mod repository_error;
 pub mod settings_store;
+pub mod shot_repository;
 pub mod task_history_repository;
 pub mod task_repository;
 pub mod task_update_sink;
@@ -60,6 +61,10 @@ pub use prompt_library_repository::{
 pub use repository_error::RepositoryError;
 pub use settings_store::{
     AppSettings, ComfySettings, LoadedSettings, RuntimeParameterProfile, SettingsStore,
+};
+pub use shot_repository::{
+    ShotData, ShotGenerationLinkRecord, ShotRecord, ShotReferenceAssetRecord, ShotRepository,
+    ShotStageConfigRecord,
 };
 pub use task_history_repository::{
     TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,

@@ -4,6 +4,7 @@ import {
   createPreset,
   createGeneration,
   createGenerationBatch,
+  generateShot,
   createProductionQueue,
   createProjectTemplate,
   deletePreset,
@@ -17,10 +18,11 @@ import {
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
-import type { RecipeField, RecipeViewModel } from "../../types/generation";
+import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ReusableGenerationDraft } from "../../types/history";
 import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
+import type { ShotInputValues, ShotStage } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
@@ -80,6 +82,7 @@ interface Props {
   onOpenTask: (taskId: string) => void;
   onOpenWorkflows: () => void;
   onReconnectComfy: () => void;
+  shotContext?: { shotId: string; stage: ShotStage };
 }
 
 export function GenerationStudio({
@@ -96,6 +99,7 @@ export function GenerationStudio({
   onOpenTask,
   onOpenWorkflows,
   onReconnectComfy,
+  shotContext,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const values = useStudioStore((state) => state.values);
@@ -453,12 +457,19 @@ export function GenerationStudio({
     setCreating(true);
     setNotice(null);
     try {
-      const task = await createGeneration({
-        projectId,
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        values,
-      });
+      const task = shotContext
+        ? await generateShot({
+            projectId,
+            shotId: shotContext.shotId,
+            stage: shotContext.stage,
+            values: shotScalarValues(selectedWorkflow, values),
+          })
+        : await createGeneration({
+            projectId,
+            workflowVersionId: selectedWorkflow.workflowVersionId,
+            recipeId: selectedWorkflow.recipeId,
+            values,
+          });
       adoptCreatedTask(task);
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
@@ -991,4 +1002,16 @@ export function GenerationStudio({
       />
     </>
   );
+}
+
+function shotScalarValues(recipe: RecipeViewModel, values: Record<string, DraftValue>): ShotInputValues {
+  const result: ShotInputValues = {};
+  for (const field of recipe.fields) {
+    if (field.type !== "integer" && field.type !== "seed") continue;
+    const value = values[field.key];
+    if (value?.type === "integer" || value?.type === "seed_random" || value?.type === "seed_fixed") {
+      result[field.key] = value;
+    }
+  }
+  return result;
 }

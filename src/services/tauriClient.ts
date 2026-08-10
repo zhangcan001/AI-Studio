@@ -9,6 +9,7 @@ import type {
 import type { AssetLibraryPage, AssetLibraryQuery, AssetView } from "../types/asset";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
+import type { ShotInputValues, ShotStage, ShotView } from "../types/shot";
 import type {
   ReusableGenerationDraft,
   TaskDetail,
@@ -261,6 +262,77 @@ export function createGeneration(request: {
   values: GenerationValues;
 }): Promise<TaskView> {
   return invoke<TaskView>("generation_create", { request });
+}
+
+export function listShots(projectId: string): Promise<ShotView[]> {
+  return invoke<ShotView[]>("shot_list", { projectId });
+}
+
+export function getShot(projectId: string, shotId: string): Promise<ShotView> {
+  return invoke<ShotView>("shot_get", { projectId, shotId });
+}
+
+export function createShot(projectId: string): Promise<ShotView> {
+  return invoke<ShotView>("shot_create", { projectId });
+}
+
+export function updateShot(request: {
+  projectId: string;
+  shotId: string;
+  name: string;
+  promptText: string;
+  promptEntryId?: string;
+  promptVersionId?: string;
+}): Promise<ShotView> {
+  return invoke<ShotView>("shot_update", { request });
+}
+
+export function deleteShot(projectId: string, shotId: string): Promise<void> {
+  return invoke<void>("shot_delete", { projectId, shotId });
+}
+
+export function reorderShots(projectId: string, orderedIds: string[]): Promise<ShotView[]> {
+  return invoke<ShotView[]>("shot_reorder", { request: { projectId, orderedIds } });
+}
+
+export function setShotStageConfig(request: {
+  projectId: string;
+  shotId: string;
+  stage: ShotStage;
+  workflowVersionId: string;
+  recipeId: string;
+  values: ShotInputValues;
+}): Promise<ShotView> {
+  return invoke<ShotView>("shot_stage_config_set", { request });
+}
+
+export function replaceShotReferences(request: {
+  projectId: string;
+  shotId: string;
+  stage: ShotStage;
+  assetIds: string[];
+}): Promise<ShotView> {
+  return invoke<ShotView>("shot_references_replace", { request });
+}
+
+export function selectShotResult(request: {
+  projectId: string;
+  shotId: string;
+  stage: ShotStage;
+  assetId: string;
+  fromLinkedTask?: boolean;
+}): Promise<ShotView> {
+  return invoke<ShotView>("shot_result_select", { request });
+}
+
+export function generateShot(request: {
+  projectId: string;
+  shotId: string;
+  stage: ShotStage;
+  values?: ShotInputValues;
+  productionBatchItemId?: string;
+}): Promise<TaskView> {
+  return invoke<TaskView>("shot_generate", { request });
 }
 
 export interface GenerationBatchItemRequest {

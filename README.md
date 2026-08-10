@@ -3,7 +3,7 @@
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
 Released: `0.2.0` (M2 Foundation Pack 01–04 verified; immutable release).
-Development: `0.3.0` (M3 Creation Expansion Pack 05).
+Development: `0.3.0` (M3 Shot Production Pack 09; Pack 10 source follows).
 The released `0.1.0` baseline remains available in the Git history and GitHub
 Release; this development cycle does not modify its tag or release assets.
 
@@ -13,10 +13,10 @@ M0 = PASS.
 
 M1 progress:
 
-The shared runtime remains generic. Kera2 image generation and MiniMax H3
-reference-to-video are the live-validated production runtimes; M3 Pack 05 adds
-model-agnostic runtime onboarding and creation expansion without bundling or
-downloading model files.
+The shared runtime remains generic. The frozen 0.3.0 production scope is Kera2
+image generation for Shot keyframes and MiniMax H3 reference-image-to-video.
+Workflow / Recipe / Schema / Capability / onboarding / diagnostics architecture
+remains model-agnostic, while active production remains limited to these two runtimes.
 
 **M1 Release Candidate 01 = PASS.** Global single-GPU production admission,
 cross-project and interactive submission safety, deterministic restart
@@ -66,7 +66,7 @@ and Kera2/H3 live UX gates are validated. Evidence is recorded in
 - Prompt-specific ComfyUI cancellation with modern API and safe legacy queue fallback
 - Startup task recovery and manual history/queue reconciliation without automatic resubmit
 - Cancel and recovery UI driven by persisted `task://updated` events, without frontend polling
-- Workspace navigation between Studio, Assets, and Tasks
+- Workspace navigation between Studio, Shot Production, Assets, and Tasks
 - Project-scoped task history with status filters, keyset pagination, detail views, and safe snapshot reuse
 - Project-scoped Asset Library with category filters, keyset pagination, binary previews, and Blob URL cleanup
 - Local-first historical input loading that never auto-generates a new task
@@ -148,10 +148,11 @@ UNet, 0.1 MP, four sampling steps, a 1–5 second Recipe range, and single-task
 execution. Evidence and operating limits are recorded in
 `docs/M1_MINIMAX_H3_RUNTIME_VALIDATION.md`.
 
-Kera2 image generation and MiniMax H3 reference-to-video are the two
-live-validated production runtimes on the frozen 0.2.0 line. The 0.3.0
-development line adds model-agnostic runtime onboarding; it does not bundle or
-download a third model.
+Kera2 image generation and MiniMax H3 reference-to-video remain the only
+production runtimes in the frozen 0.3.0 scope. Pack 09 adds a project-scoped
+Shot production pipeline on the existing GenerationService → Task → Snapshot →
+Asset chain; it does not create a second Task system or auto-submit another
+runtime.
 
 **AI Studio 0.1.0 Final Release Gate = PASS.** NSIS is the primary Windows
 installer; the final release evidence, artifact hashes, clean install/data
@@ -170,8 +171,10 @@ The v0.2.0 post-release integrity audit is recorded in
 `docs/POST_RELEASE_AUDIT_0.2.0.md`. The v0.2.0 tag and Release remain frozen;
 new work is development-only on the 0.3.0 line.
 
-M3 Pack 05 implementation notes and the third-runtime environment boundary are
-recorded in `docs/M3_CREATION_EXPANSION_PACK_05.md`.
+The current M3 scope and evidence are recorded in
+`docs/M3_SHOT_PRODUCTION_PACK_09.md`. Pack 05–08 remain historical milestone
+records; Pack 10 source direction is recorded in
+`docs/M3_SHOT_BATCH_PACK_10_SOURCE.md`.
 
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not

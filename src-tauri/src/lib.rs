@@ -38,6 +38,7 @@ use application::{
     project_template_service::ProjectTemplateService,
     prompt_library_service::PromptLibraryService,
     settings_service::SettingsService,
+    shot_service::ShotService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
     task_execution_registry::TaskExecutionRegistry,
@@ -212,6 +213,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let prompt_library_repository: Arc<dyn application::ports::PromptLibraryRepository> = Arc::new(
                 infrastructure::database::SqlitePromptLibraryRepository::new(database_pool.clone()),
+            );
+            let shot_repository: Arc<dyn application::ports::ShotRepository> = Arc::new(
+                infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
             );
             let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> = Arc::new(
                 infrastructure::database::SqliteProductionQueueRepository::new(database_pool.clone()),
@@ -389,7 +393,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             ));
             let diagnostics_service = Arc::new(DiagnosticsService::new(
                 database_pool.clone(),
-                task_repository,
+                task_repository.clone(),
                 comfy_service.clone(),
                 workflow_lifecycle_service.clone(),
                 production_queue_service.clone(),
@@ -427,12 +431,22 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             ));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository,
-                definition_repository,
+                definition_repository.clone(),
                 asset_repository.clone(),
                 clock.clone(),
             ));
             let prompt_library_service = Arc::new(PromptLibraryService::new(
+                prompt_library_repository.clone(),
+                clock.clone(),
+            ));
+            let shot_service = Arc::new(ShotService::new(
+                shot_repository,
+                task_repository.clone(),
+                asset_repository.clone(),
+                definition_repository.clone(),
                 prompt_library_repository,
+                task_query_service.clone(),
+                generation_service.clone(),
                 clock,
             ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
@@ -463,6 +477,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_backup_service,
                 preset_service,
                 prompt_library_service,
+                shot_service,
                 organization_service,
                 project_template_service,
                 production_queue_service,
@@ -647,6 +662,16 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::prompt_library::prompt_library_add_version,
             commands::prompt_library::prompt_library_update_metadata,
             commands::prompt_library::prompt_library_delete,
+            commands::shot::shot_list,
+            commands::shot::shot_get,
+            commands::shot::shot_create,
+            commands::shot::shot_update,
+            commands::shot::shot_delete,
+            commands::shot::shot_reorder,
+            commands::shot::shot_stage_config_set,
+            commands::shot::shot_references_replace,
+            commands::shot::shot_result_select,
+            commands::shot::shot_generate,
             commands::organization::project_template_list,
             commands::organization::project_template_create,
             commands::organization::project_template_update,

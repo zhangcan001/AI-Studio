@@ -977,6 +977,7 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
         GenerationServiceError::StreamDisconnected(_) => "COMFY_STREAM_DISCONNECTED",
         GenerationServiceError::OutputCollection(_) => "OUTPUT_COLLECTION_ERROR",
         GenerationServiceError::AssetImport(_) => "ASSET_IMPORT_ERROR",
+        GenerationServiceError::TaskCreatedHook { .. } => "TASK_HOOK_ERROR",
         GenerationServiceError::ExecutionFailed { .. } => "EXECUTION_ERROR",
     }
 }

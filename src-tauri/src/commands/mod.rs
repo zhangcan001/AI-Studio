@@ -9,6 +9,7 @@ pub mod production_queue;
 pub mod project;
 pub mod prompt_library;
 pub mod settings;
+pub mod shot;
 pub mod task;
 pub mod workflow_library;
 pub mod workflow_lifecycle;

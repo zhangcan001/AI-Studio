@@ -1,6 +1,8 @@
-# M3 CREATION FLOW PACK 09 = SOURCE STARTED
+# M3 CREATION FLOW PACK 09 = HISTORICAL SOURCE NOTE
 
-Pack 08 完成后已进入 Pack 09 source slice。本轮只建立 project-scoped Shot 领域模型与纯函数测试，尚未接入数据库、Task 新体系或生成调度器。
+本文件保留 Pack 09 初始 source slice 的历史记录。正式实现已进入
+`docs/M3_SHOT_PRODUCTION_PACK_09.md`，并复用现有 GenerationService / Task /
+Snapshot / Asset 链路；没有创建第二套 Task 状态体系。
 
 当前模型覆盖：
 
@@ -10,4 +12,6 @@ Pack 08 完成后已进入 Pack 09 source slice。本轮只建立 project-scoped
 - reference asset IDs、selected result asset ID、shot status
 - 项目内重排与结果选择的纯逻辑
 
-后续在新增迁移前需要先确认模型；`001–009` 保持 immutable，暂不创建 `010_shots.sql`。Shot 生成必须复用 Studio / GenerationService / normal Task / Asset 链路，不创建第二套 Task 状态体系。
+历史 source slice 的“尚未接入数据库”描述不再代表当前状态。`001–009` 仍保持
+immutable，Pack 09 的正式迁移为 `010_shot_production.sql`；活动生产范围冻结为
+Kera2 图片关键帧 + MiniMax H3 参考图生视频。

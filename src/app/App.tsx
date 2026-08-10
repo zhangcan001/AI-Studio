@@ -21,11 +21,13 @@ import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
+import { ShotWorkspace } from "../features/shots/ShotWorkspace";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
+import type { ShotStage, ShotView } from "../types/shot";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { toUserMessage } from "../i18n/errorMessages";
@@ -33,10 +35,11 @@ import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import "./App.css";
 
-type Workspace = "studio" | "assets" | "tasks" | "projects" | "workflows" | "settings";
+type Workspace = "studio" | "shots" | "assets" | "tasks" | "projects" | "workflows" | "settings";
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
+  const [shotContext, setShotContext] = useState<{ shotId: string; stage: ShotStage }>();
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
@@ -157,7 +160,12 @@ function App() {
 
   useEffect(() => {
     setFocusedTaskId(undefined);
+    setShotContext(undefined);
   }, [activeProjectId]);
+
+  useEffect(() => {
+    if (workspace !== "studio") setShotContext(undefined);
+  }, [workspace]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -188,6 +196,7 @@ function App() {
     useTaskStore.getState().clear();
     useStudioStore.getState().resetDraft();
     useStudioStore.getState().clearPendingAssetIntent();
+    setShotContext(undefined);
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
     setError(null);
@@ -262,6 +271,7 @@ function App() {
         return;
       }
       useStudioStore.getState().setSelectedWorkflow(workflow);
+      setShotContext(undefined);
       setWorkspace("studio");
       setError(null);
     } catch (openError: unknown) {
@@ -304,6 +314,7 @@ function App() {
       workflowName: draft.workflowName,
       createdAt: draft.createdAt,
     });
+    setShotContext(undefined);
     setError(null);
     setWorkspace("studio");
   }
@@ -320,6 +331,7 @@ function App() {
       assetId: asset.id,
       assetType: assetType as StudioAssetType,
     });
+    setShotContext(undefined);
     setError(null);
     setWorkspace("studio");
   }
@@ -343,6 +355,28 @@ function App() {
       return;
     }
     useStudioStore.getState().loadDraft(workflow, result.values);
+    setShotContext(undefined);
+    setWorkspace("studio");
+    setError(null);
+  }
+
+  function openShotInStudio(shot: ShotView, stage: ShotStage, recipe: RecipeViewModel) {
+    if (!activeProjectId || shot.projectId !== activeProjectId) return;
+    const studio = useStudioStore.getState();
+    studio.setSelectedWorkflow(recipe);
+    const current = useStudioStore.getState();
+    const config = shot.stageConfigs.find((item) => item.stage === stage);
+    Object.entries(config?.scalarValues ?? {}).forEach(([key, value]) => current.setValue(key, value));
+    const promptField = recipe.fields.find((field) => field.type === "textarea");
+    if (promptField) current.setValue(promptField.key, { type: "string", value: shot.promptText });
+    const imageField = recipe.fields.find((field) => field.type === "image" || field.type === "images");
+    const selectedImage = shot.selectedImageAssetId;
+    if (imageField && selectedImage) {
+      current.setValue(imageField.key, imageField.type === "images"
+        ? { type: "image_assets", assetIds: [selectedImage] }
+        : { type: "image_asset", assetId: selectedImage });
+    }
+    setShotContext({ shotId: shot.id, stage });
     setWorkspace("studio");
     setError(null);
   }
@@ -394,6 +428,7 @@ function App() {
       <nav className="workspace-nav" aria-label="工作区导航">
         {([
           ["studio", "创作"],
+          ["shots", "镜头制作"],
           ["assets", "资产库"],
           ["tasks", "任务"],
           ["projects", "项目"],
@@ -465,6 +500,7 @@ function App() {
             taskEventsReady={taskEventsReady}
             taskEventError={taskEventError}
             productionAdmission={productionAdmission}
+            shotContext={shotContext}
             focusProductionBatchId={focusedProductionBatchId}
             onCatalogChanged={reloadCatalog}
             onProductionAdmissionChanged={refreshProductionAdmission}
@@ -477,6 +513,13 @@ function App() {
             }}
           />
         </section>
+      )}
+      {activeProject && workspace === "shots" && (
+        <ShotWorkspace
+          projectId={activeProject.id}
+          catalog={catalog}
+          onOpenInStudio={openShotInStudio}
+        />
       )}
       {activeProject && workspace === "assets" && (
         <AssetLibrary

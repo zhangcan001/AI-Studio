@@ -18,7 +18,7 @@ No ExperimentTask, special executor, direct `/prompt` submission, or React-side 
 | Winner promotion | PASS — `getReusableDraft → Studio Draft`, provenance retained, no automatic Task or `/prompt` |
 | Runtime profile persistence | PASS — Tauri settings backend, `settings.json`, legacy localStorage migration only after backend save |
 | Import hardening | PASS — exact normalized credential-key detection; `tokenizer`, `tokens`, and `token_count` remain valid |
-| Third runtime | `THIRD_RUNTIME_INPUT_REQUIRED` — no API workflow package was supplied |
+| Production runtime scope | PASS — Pack 06 remains model-agnostic and the active 0.3.0 production scope is Kera2 + MiniMax H3 only |
 
 The result grid now distinguishes the original session base (`与实验基础参数比较`) from restart-safe comparison (`与首个实验结果比较`). When the original base is unavailable after restart, the first reusable result is explicitly labeled `比较基准`; no queue name or field-change inference is used. The experiment name prefix remains UI-only.
 
@@ -28,4 +28,4 @@ Pure Pack 06 tests cover dimension limits, field-owned ranges, frozen Seeds, car
 
 The Kera2 four-item GPU Live Gate is an environment operation and must be recorded with its actual batch/item/task/asset/snapshot evidence. During this audit the existing desktop window could not expose a controllable UI state (`SetIsBorderRequired failed: 不支持此接口`) and the ComfyUI host reported only about 1.8 GiB free VRAM, so no unobservable GPU run is claimed as evidence. The implementation and automated regression are code-pass; the local Live Gate remains explicitly environment-pending rather than fabricated.
 
-Pack 07 is now implemented in the same development line. Migrations `001–008` remain unchanged; `009_prompt_library.sql` belongs to Pack 07.
+Pack 07 is now implemented in the same development line. Migrations `001–008` remain unchanged; `009_prompt_library.sql` belongs to Pack 07. Pack 09 subsequently adds `010_shot_production.sql` for Shot orchestration metadata only.

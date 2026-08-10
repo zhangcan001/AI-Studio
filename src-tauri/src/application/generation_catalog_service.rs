@@ -2,7 +2,7 @@ use crate::application::ports::{
     AvailableGenerationDefinition, GenerationDefinitionRepository, RepositoryError,
 };
 use crate::compiler::RecipeParser;
-use crate::domain::{InputDefinition, SeedDefault};
+use crate::domain::{InputDefinition, OutputType, SeedDefault};
 use serde::Serialize;
 use std::{error::Error, fmt, sync::Arc};
 
@@ -34,6 +34,7 @@ pub struct RecipeViewModel {
     pub category: String,
     pub mode: String,
     pub fields: Vec<FieldViewModel>,
+    pub output_types: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -124,6 +125,14 @@ impl RecipeViewModel {
     ) -> Result<Self, GenerationCatalogError> {
         let recipe = RecipeParser::parse(&definition.recipe_yaml)
             .map_err(|error| GenerationCatalogError::InvalidRecipe(error.to_string()))?;
+        let output_types = recipe
+            .outputs
+            .iter()
+            .map(|output| match output.output_type {
+                OutputType::Image => "image".to_owned(),
+                OutputType::Video => "video".to_owned(),
+            })
+            .collect();
         let fields = recipe
             .inputs
             .into_iter()
@@ -233,6 +242,7 @@ impl RecipeViewModel {
             category: definition.category,
             mode: definition.mode,
             fields,
+            output_types,
         })
     }
 }

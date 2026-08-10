@@ -22,6 +22,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     error::Error,
     fmt,
+    future::Future,
     sync::Arc,
 };
 use tokio::sync::{watch, Semaphore};
@@ -50,6 +51,10 @@ pub enum GenerationServiceError {
     StreamDisconnected(String),
     OutputCollection(OutputCollectorError),
     AssetImport(AssetImportError),
+    TaskCreatedHook {
+        task_id: String,
+        error: RepositoryError,
+    },
     ExecutionFailed {
         code: String,
         message: String,
@@ -77,6 +82,10 @@ impl fmt::Display for GenerationServiceError {
             }
             Self::OutputCollection(error) => write!(formatter, "{error}"),
             Self::AssetImport(error) => write!(formatter, "{error}"),
+            Self::TaskCreatedHook { task_id, error } => write!(
+                formatter,
+                "TASK_CREATED_HOOK_FAILED: task {task_id} could not be linked before execution: {error}"
+            ),
             Self::ExecutionFailed { code, message } => write!(formatter, "{code}: {message}"),
         }
     }
@@ -188,7 +197,56 @@ impl GenerationService {
         self: &Arc<Self>,
         request: CreateGenerationRequest,
     ) -> Result<Task, GenerationServiceError> {
+        self.start_generation_with_task_hook(request, |_| async { Ok::<(), RepositoryError>(()) })
+            .await
+    }
+
+    pub async fn start_generation_with_task_hook<F, Fut>(
+        self: &Arc<Self>,
+        request: CreateGenerationRequest,
+        hook: F,
+    ) -> Result<Task, GenerationServiceError>
+    where
+        F: FnOnce(&Task) -> Fut + Send,
+        Fut: Future<Output = Result<(), RepositoryError>> + Send,
+    {
         let (request, definition, task) = self.prepare_task(request).await?;
+        if let Err(error) = hook(&task).await {
+            let mut failed_task = task.clone();
+            let failure = TaskError {
+                code: "TASK_HOOK_FAILED".to_owned(),
+                message: format!("task could not be linked before execution: {error}"),
+                raw: None,
+            };
+            match failed_task.fail(failure, self.clock.now()) {
+                Ok(event) => {
+                    if let Err(compensation_error) = self
+                        .task_repository
+                        .persist_transition(&failed_task, &event, TaskStatus::Created)
+                        .await
+                    {
+                        tracing::error!(
+                            task_id = %task.id,
+                            error = %compensation_error,
+                            "failed to compensate task after pre-execution hook failure"
+                        );
+                    } else {
+                        self.task_update_sink.publish(&failed_task);
+                    }
+                }
+                Err(compensation_error) => {
+                    tracing::error!(
+                        task_id = %task.id,
+                        error = %compensation_error,
+                        "failed to transition task after pre-execution hook failure"
+                    );
+                }
+            }
+            return Err(GenerationServiceError::TaskCreatedHook {
+                task_id: task.id.to_string(),
+                error,
+            });
+        }
         let (cancel_signal, guard) = self.execution_registry.register(task.id.clone());
         let service = Arc::clone(self);
         let background_task = task.clone();
