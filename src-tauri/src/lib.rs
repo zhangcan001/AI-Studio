@@ -400,6 +400,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let production_queue_service = Arc::new(ProductionQueueService::new(
                 production_queue_repository,
                 task_repository.clone(),
+                definition_repository.clone(),
                 generation_service.clone(),
                 shot_batch_repository.clone(),
                 task_recovery_service.clone(),

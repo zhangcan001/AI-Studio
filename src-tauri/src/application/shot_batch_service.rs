@@ -7,13 +7,15 @@ use crate::application::ports::{
     ShotRepository, TaskRepository,
 };
 use crate::application::product_runtime_scope::production_runtime_for_stage;
-use crate::application::production_queue_service::generation_values_to_json;
+use crate::application::production_queue_service::{
+    freeze_random_seed_values, generation_values_to_json,
+};
 use crate::application::shot_service::scalar_values_from_json;
 use crate::compiler::{RecipeParser, WorkflowCompiler};
 use crate::domain::{
     derive_stage_status, AssetId, AssetType, CompileRequest, InputDefinition, OutputType,
     ProductionBatch, ProductionBatchDetail, ProductionBatchItem, ProductionBatchItemId,
-    ProductionBatchStatus, ShotStage, TaskId, TaskStatus, WorkflowDocument,
+    ProductionBatchStatus, Recipe, ShotStage, TaskId, TaskStatus, WorkflowDocument,
 };
 use serde::Serialize;
 use std::{
@@ -65,6 +67,7 @@ struct PlannedShot {
     workflow_version_id: String,
     recipe_id: String,
     values: BTreeMap<String, GenerationInputValue>,
+    recipe: Option<Recipe>,
 }
 
 pub struct ShotBatchService {
@@ -187,6 +190,14 @@ impl ShotBatchService {
         let mut bindings = Vec::with_capacity(selected.len());
         for (ordinal, shot) in selected.iter().enumerate() {
             let item_id = ProductionBatchItemId::new();
+            let recipe = shot.recipe.as_ref().ok_or_else(|| {
+                ShotBatchServiceError::InvalidInput(format!(
+                    "镜头「{}」缺少有效 Recipe",
+                    shot.row.name
+                ))
+            })?;
+            let values = freeze_random_seed_values(shot.values.clone(), recipe)
+                .map_err(ShotBatchServiceError::InvalidInput)?;
             items.push(ProductionBatchItem {
                 id: item_id.clone(),
                 batch_id: batch_id.clone(),
@@ -195,7 +206,7 @@ impl ShotBatchService {
                 })?,
                 workflow_version_id: shot.workflow_version_id.clone(),
                 recipe_id: shot.recipe_id.clone(),
-                values_json: generation_values_to_json(&shot.values),
+                values_json: generation_values_to_json(&values),
                 status: crate::domain::ProductionBatchItemStatus::Pending,
                 task_id: None,
                 retry_of_item_id: None,
@@ -363,6 +374,7 @@ impl ShotBatchService {
                 workflow_version_id: String::new(),
                 recipe_id: String::new(),
                 values: BTreeMap::new(),
+                recipe: None,
             });
         };
         let available_definition = available_definitions
@@ -391,6 +403,7 @@ impl ShotBatchService {
                 workflow_version_id: config.workflow_version_id.clone(),
                 recipe_id: config.recipe_id.clone(),
                 values: BTreeMap::new(),
+                recipe: None,
             });
         };
         let recipe = match RecipeParser::parse(&definition.recipe_yaml) {
@@ -403,6 +416,7 @@ impl ShotBatchService {
                     workflow_version_id: config.workflow_version_id.clone(),
                     recipe_id: config.recipe_id.clone(),
                     values: BTreeMap::new(),
+                    recipe: None,
                 });
             }
         };
@@ -540,6 +554,7 @@ impl ShotBatchService {
             workflow_version_id: config.workflow_version_id.clone(),
             recipe_id: config.recipe_id.clone(),
             values,
+            recipe: Some(recipe),
         })
     }
 

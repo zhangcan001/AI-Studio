@@ -3,25 +3,25 @@ use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError,
 };
 use crate::application::ports::{
-    ActiveProductionItem, Clock, ProductionQueueRepository, RepositoryError, ShotBatchRepository,
-    TaskRepository,
+    ActiveProductionItem, Clock, GenerationDefinitionRepository, ProductionQueueRepository,
+    RepositoryError, ShotBatchRepository, TaskRepository,
 };
 use crate::application::task_recovery_service::TaskRecoveryService;
+use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
 use crate::domain::{
-    AssetId, ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
-    ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, SeedValue, TaskId,
-    TaskStatus,
+    AssetId, InputDefinition, ProductionBatch, ProductionBatchDetail, ProductionBatchId,
+    ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
+    Recipe, SeedValue, TaskId, TaskStatus,
 };
 use serde_json::{json, Map, Value};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fmt,
     sync::{Arc, Mutex},
 };
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio::time::{sleep, Duration};
-use uuid::Uuid;
 
 const MAX_PRODUCTION_BATCH_ITEMS: usize = 100;
 
@@ -68,6 +68,7 @@ pub struct ProductionAdmissionView {
 pub struct ProductionQueueService {
     repository: Arc<dyn ProductionQueueRepository>,
     task_repository: Arc<dyn TaskRepository>,
+    definition_repository: Arc<dyn GenerationDefinitionRepository>,
     generation_service: Arc<GenerationService>,
     shot_batch_repository: Arc<dyn ShotBatchRepository>,
     task_recovery_service: Arc<TaskRecoveryService>,
@@ -81,6 +82,7 @@ impl ProductionQueueService {
     pub fn new(
         repository: Arc<dyn ProductionQueueRepository>,
         task_repository: Arc<dyn TaskRepository>,
+        definition_repository: Arc<dyn GenerationDefinitionRepository>,
         generation_service: Arc<GenerationService>,
         shot_batch_repository: Arc<dyn ShotBatchRepository>,
         task_recovery_service: Arc<TaskRecoveryService>,
@@ -89,6 +91,7 @@ impl ProductionQueueService {
         Self {
             repository,
             task_repository,
+            definition_repository,
             generation_service,
             shot_batch_repository,
             task_recovery_service,
@@ -129,32 +132,74 @@ impl ProductionQueueService {
             created_at: now,
             updated_at: now,
         };
-        let items = request
-            .items
-            .into_iter()
-            .enumerate()
-            .map(|(index, item)| {
-                let values = freeze_random_seed_values(item.values);
-                ProductionBatchItem {
-                    id: ProductionBatchItemId::new(),
-                    batch_id: batch_id.clone(),
-                    ordinal: u32::try_from(index)
-                        .expect("production batch item index must fit u32"),
-                    workflow_version_id: item.workflow_version_id,
-                    recipe_id: item.recipe_id,
-                    values_json: generation_values_to_json(&values),
-                    status: ProductionBatchItemStatus::Pending,
-                    task_id: None,
-                    retry_of_item_id: None,
-                    error_code: None,
-                    error_message: None,
-                    created_at: now,
-                    updated_at: now,
-                }
-            })
-            .collect::<Vec<_>>();
+        let mut recipes = HashMap::<(String, String), Recipe>::new();
+        let mut items = Vec::with_capacity(request.items.len());
+        for (index, item) in request.items.into_iter().enumerate() {
+            let definition_key = (item.workflow_version_id.clone(), item.recipe_id.clone());
+            let recipe = if let Some(recipe) = recipes.get(&definition_key) {
+                recipe.clone()
+            } else {
+                let recipe = self
+                    .load_recipe(&item.workflow_version_id, &item.recipe_id)
+                    .await?;
+                recipes.insert(definition_key, recipe.clone());
+                recipe
+            };
+            let values = freeze_random_seed_values(item.values, &recipe)
+                .map_err(ProductionQueueError::InvalidInput)?;
+            items.push(ProductionBatchItem {
+                id: ProductionBatchItemId::new(),
+                batch_id: batch_id.clone(),
+                ordinal: u32::try_from(index).expect("production batch item index must fit u32"),
+                workflow_version_id: item.workflow_version_id,
+                recipe_id: item.recipe_id,
+                values_json: generation_values_to_json(&values),
+                status: ProductionBatchItemStatus::Pending,
+                task_id: None,
+                retry_of_item_id: None,
+                error_code: None,
+                error_message: None,
+                created_at: now,
+                updated_at: now,
+            });
+        }
         self.repository.insert(&batch, &items).await?;
         Ok(ProductionBatchDetail { batch, items })
+    }
+
+    async fn load_recipe(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<Recipe, ProductionQueueError> {
+        let definition = self
+            .definition_repository
+            .find(workflow_version_id, recipe_id)
+            .await?
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidInput(format!(
+                    "generation Recipe is unavailable for workflow version {workflow_version_id} and Recipe {recipe_id}"
+                ))
+            })?;
+        let recipe = RecipeParser::parse(&definition.recipe_yaml).map_err(|error| {
+            ProductionQueueError::InvalidInput(format!("generation Recipe is invalid: {error}"))
+        })?;
+        RecipeValidator::validate(&recipe).map_err(|error| {
+            ProductionQueueError::InvalidInput(format!("generation Recipe is invalid: {error}"))
+        })?;
+        Ok(recipe)
+    }
+
+    async fn prepare_queue_values(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        values_json: &Value,
+    ) -> Result<BTreeMap<String, GenerationInputValue>, ProductionQueueError> {
+        let values =
+            generation_values_from_json(values_json).map_err(ProductionQueueError::InvalidInput)?;
+        let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
+        freeze_random_seed_values(values, &recipe).map_err(ProductionQueueError::InvalidInput)
     }
 
     pub async fn list(
@@ -478,13 +523,20 @@ impl ProductionQueueService {
                 ProductionQueueError::InvalidState("production queue ordinal overflow".to_owned())
             })?;
         let now = self.clock.now();
+        let source_values = self
+            .prepare_queue_values(
+                &source.workflow_version_id,
+                &source.recipe_id,
+                &source.values_json,
+            )
+            .await?;
         let retry = ProductionBatchItem {
             id: ProductionBatchItemId::new(),
             batch_id: batch_id.clone(),
             ordinal,
             workflow_version_id: source.workflow_version_id.clone(),
             recipe_id: source.recipe_id.clone(),
-            values_json: source.values_json.clone(),
+            values_json: generation_values_to_json(&source_values),
             status: ProductionBatchItemStatus::Pending,
             task_id: None,
             retry_of_item_id: Some(source.id.as_str().to_owned()),
@@ -790,15 +842,23 @@ impl ProductionQueueService {
                 {
                     continue;
                 }
-                let values = match generation_values_from_json(&next.values_json) {
+                let values = match self
+                    .prepare_queue_values(
+                        &next.workflow_version_id,
+                        &next.recipe_id,
+                        &next.values_json,
+                    )
+                    .await
+                {
                     Ok(values) => values,
                     Err(error) => {
+                        let message = error.to_string();
                         self.repository
                             .finish_item(
                                 &next.id,
                                 ProductionBatchItemStatus::Failed,
                                 Some("QUEUE_VALUES_INVALID"),
-                                Some(&error),
+                                Some(&message),
                                 self.clock.now(),
                             )
                             .await?;
@@ -1073,19 +1133,42 @@ pub(crate) fn generation_values_to_json(values: &BTreeMap<String, GenerationInpu
     Value::Object(object)
 }
 
-fn freeze_random_seed_values(
+pub(crate) fn freeze_random_seed_values(
     values: BTreeMap<String, GenerationInputValue>,
-) -> BTreeMap<String, GenerationInputValue> {
+    recipe: &Recipe,
+) -> Result<BTreeMap<String, GenerationInputValue>, String> {
+    let mut resolver = SeedResolver::default();
     values
         .into_iter()
         .map(|(key, value)| {
             let value = match value {
-                GenerationInputValue::Seed(SeedValue::Random) => {
-                    GenerationInputValue::Seed(SeedValue::Fixed(Uuid::new_v4().as_u128() as u64))
+                GenerationInputValue::Seed(seed @ SeedValue::Random) => {
+                    let Some(InputDefinition::Seed { min, max, .. }) = recipe.inputs.get(&key)
+                    else {
+                        return Err(format!(
+                            "seed input \"{key}\" is not declared as a Recipe seed input"
+                        ));
+                    };
+                    let resolved = resolver.resolve(&key, &seed, *min, *max);
+                    GenerationInputValue::Seed(SeedValue::Fixed(resolved))
+                }
+                GenerationInputValue::Seed(seed @ SeedValue::Fixed(value)) => {
+                    let Some(InputDefinition::Seed { min, max, .. }) = recipe.inputs.get(&key)
+                    else {
+                        return Err(format!(
+                            "seed input \"{key}\" is not declared as a Recipe seed input"
+                        ));
+                    };
+                    if min.is_some_and(|min| value < min) || max.is_some_and(|max| value > max) {
+                        return Err(format!(
+                            "seed input \"{key}\" value {value} is outside the Recipe range"
+                        ));
+                    }
+                    GenerationInputValue::Seed(seed)
                 }
                 other => other,
             };
-            (key, value)
+            Ok((key, value))
         })
         .collect()
 }
@@ -1229,8 +1312,9 @@ mod tests {
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::ActiveProductionItem;
     use crate::domain::{
-        AssetId, ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
-        ProductionBatchItemStatus, ProductionBatchStatus, SeedValue,
+        AssetId, InputDefinition, ProductionBatch, ProductionBatchId, ProductionBatchItem,
+        ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, Recipe,
+        SeedDefault, SeedValue, WorkflowRef,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -1267,7 +1351,45 @@ mod tests {
             GenerationInputValue::Seed(SeedValue::Fixed(42)),
         );
 
-        let frozen = freeze_random_seed_values(values);
+        let recipe = Recipe {
+            schema_version: 1,
+            id: "test_recipe".to_owned(),
+            name: "Test Recipe".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: [
+                (
+                    "seed_random".to_owned(),
+                    InputDefinition::Seed {
+                        label: "Random Seed".to_owned(),
+                        default: SeedDefault::Random,
+                        min: Some(10),
+                        max: Some(20),
+                    },
+                ),
+                (
+                    "seed_fixed".to_owned(),
+                    InputDefinition::Seed {
+                        label: "Fixed Seed".to_owned(),
+                        default: SeedDefault::Fixed(42),
+                        min: Some(0),
+                        max: Some(100),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            bindings: Vec::new(),
+            outputs: Vec::new(),
+        };
+
+        let frozen = freeze_random_seed_values(values, &recipe).unwrap();
+        let random_seed = match frozen.get("seed_random") {
+            Some(GenerationInputValue::Seed(SeedValue::Fixed(seed))) => *seed,
+            other => panic!("expected a bounded fixed seed, got {other:?}"),
+        };
+        assert!((10..=20).contains(&random_seed));
         assert!(matches!(
             frozen.get("seed_random"),
             Some(GenerationInputValue::Seed(SeedValue::Fixed(_)))
@@ -1276,6 +1398,40 @@ mod tests {
             frozen.get("seed_fixed"),
             Some(&GenerationInputValue::Seed(SeedValue::Fixed(42)))
         );
+    }
+
+    #[test]
+    fn production_queue_rejects_fixed_seed_outside_recipe_range() {
+        let recipe = Recipe {
+            schema_version: 1,
+            id: "test_recipe".to_owned(),
+            name: "Test Recipe".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: [(
+                "seed".to_owned(),
+                InputDefinition::Seed {
+                    label: "Seed".to_owned(),
+                    default: SeedDefault::Random,
+                    min: Some(0),
+                    max: Some(100),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            bindings: Vec::new(),
+            outputs: Vec::new(),
+        };
+        let values = [(
+            "seed".to_owned(),
+            GenerationInputValue::Seed(SeedValue::Fixed(101)),
+        )]
+        .into_iter()
+        .collect();
+
+        let error = freeze_random_seed_values(values, &recipe).unwrap_err();
+        assert!(error.contains("outside the Recipe range"));
     }
 
     #[test]

@@ -26,7 +26,7 @@ Date: 2026-08-10
 
 ## Verification status
 
-Code Gate 结果为 Rust 324 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Windows 安装包构建。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
+Code Gate 结果为 Rust 325 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Windows 安装包构建。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
 当前候选线状态：
 
