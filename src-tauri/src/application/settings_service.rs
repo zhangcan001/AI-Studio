@@ -3,7 +3,7 @@ use crate::application::{
     diagnostics_service::{DiagnosticsService, RuntimeActivityStatusView},
     ports::{
         AppSettings, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory, ComfyConnectionConfig,
-        SettingsStore,
+        RuntimeParameterProfile, SettingsStore,
     },
     production_queue_service::ProductionQueueService,
 };
@@ -128,6 +128,70 @@ impl SettingsService {
         settings.preferred_presets.get(&key).cloned()
     }
 
+    pub fn runtime_profiles(&self) -> Vec<RuntimeParameterProfile> {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .runtime_profiles
+            .clone()
+    }
+
+    pub async fn save_runtime_profile(
+        &self,
+        mut profile: RuntimeParameterProfile,
+    ) -> Result<RuntimeParameterProfile, AppError> {
+        validate_runtime_profile(&profile)?;
+        profile.id = profile.id.trim().to_owned();
+        profile.workflow_version_id = profile.workflow_version_id.trim().to_owned();
+        profile.recipe_id = profile.recipe_id.trim().to_owned();
+        profile.name = profile.name.trim().to_owned();
+        profile.updated_at = profile.updated_at.trim().to_owned();
+        profile.values.retain(|key, _| !key.trim().is_empty());
+
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings
+            .runtime_profiles
+            .retain(|current| current.id != profile.id);
+        next_settings.runtime_profiles.insert(0, profile.clone());
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(profile)
+    }
+
+    pub async fn delete_runtime_profile(&self, profile_id: &str) -> Result<(), AppError> {
+        let profile_id = profile_id.trim();
+        if profile_id.is_empty() {
+            return Err(AppError::invalid_input("参数档案 ID 不能为空。"));
+        }
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings
+            .runtime_profiles
+            .retain(|profile| profile.id != profile_id);
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(())
+    }
+
     pub async fn set_preferred_preset(
         &self,
         project_id: &str,
@@ -206,12 +270,19 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .preferred_presets
             .clone();
+        let runtime_profiles = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .runtime_profiles
+            .clone();
         let next_settings = AppSettings {
             schema_version: 1,
             comfy: crate::application::ports::ComfySettings {
                 endpoint: config.endpoint(),
             },
             preferred_presets,
+            runtime_profiles,
         };
         self.store
             .save(&next_settings)
@@ -245,6 +316,31 @@ impl SettingsService {
 fn parse_endpoint(endpoint: &str) -> Result<ComfyConnectionConfig, AppError> {
     ComfyConnectionConfig::from_endpoint(endpoint)
         .map_err(|error| AppError::comfy_endpoint_invalid(error.to_string()))
+}
+
+fn validate_runtime_profile(profile: &RuntimeParameterProfile) -> Result<(), AppError> {
+    if profile.id.trim().is_empty() {
+        return Err(AppError::invalid_input("参数档案 ID 不能为空。"));
+    }
+    if profile.workflow_version_id.trim().is_empty() {
+        return Err(AppError::invalid_input("参数档案必须关联工作流版本。"));
+    }
+    if profile.recipe_id.trim().is_empty() {
+        return Err(AppError::invalid_input("参数档案必须关联 Recipe。"));
+    }
+    if profile.name.trim().is_empty() {
+        return Err(AppError::invalid_input("参数档案名称不能为空。"));
+    }
+    if profile.name.chars().count() > 80 {
+        return Err(AppError::invalid_input("参数档案名称最多 80 个字符。"));
+    }
+    if profile.updated_at.trim().is_empty() {
+        return Err(AppError::invalid_input("参数档案更新时间不能为空。"));
+    }
+    if profile.values.keys().any(|key| key.trim().is_empty()) {
+        return Err(AppError::invalid_input("参数档案包含空的字段键。"));
+    }
+    Ok(())
 }
 
 async fn test_adapter(
@@ -298,8 +394,8 @@ mod tests {
     use crate::application::diagnostics_service::RuntimeActivityStatusView;
     use crate::application::ports::{
         AppSettings, ComfyConnectionConfig, ComfyEventSubscription, ComfyHealth, ComfyHistory,
-        ComfyOutputData, ComfyOutputFile, LoadedSettings, PromptSubmission, SettingsStore,
-        SystemStats,
+        ComfyOutputData, ComfyOutputFile, LoadedSettings, PromptSubmission,
+        RuntimeParameterProfile, SettingsStore, SystemStats,
     };
     use async_trait::async_trait;
     use serde_json::Value;
@@ -538,5 +634,60 @@ mod tests {
             production_busy: true,
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn runtime_profiles_are_saved_listed_and_deleted_with_settings() {
+        let adapter = BlockingAdapter::new();
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore::default());
+        let service = test_settings_service(activity, admission, store.clone(), adapter.clone());
+        let profile = RuntimeParameterProfile {
+            id: "profile-1".to_owned(),
+            workflow_version_id: "wfv-1".to_owned(),
+            recipe_id: "rcp-1".to_owned(),
+            name: "预览".to_owned(),
+            values: std::collections::BTreeMap::from([
+                ("steps".to_owned(), 8),
+                ("width".to_owned(), 512),
+            ]),
+            updated_at: "2026-08-10T00:00:00Z".to_owned(),
+        };
+
+        assert_eq!(
+            service.save_runtime_profile(profile.clone()).await.unwrap(),
+            profile
+        );
+        assert_eq!(service.runtime_profiles(), vec![profile]);
+        assert_eq!(
+            store
+                .saved
+                .lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .runtime_profiles
+                .len(),
+            1
+        );
+
+        service.delete_runtime_profile("profile-1").await.unwrap();
+        assert!(service.runtime_profiles().is_empty());
+        assert!(store
+            .saved
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .runtime_profiles
+            .is_empty());
     }
 }

@@ -13,3 +13,12 @@ export interface ComfyEndpointTest {
   vramFree?: number | null;
   nodeCount: number;
 }
+
+export interface RuntimeParameterProfile {
+  id: string;
+  workflowVersionId: string;
+  recipeId: string;
+  name: string;
+  values: Record<string, number>;
+  updatedAt: string;
+}

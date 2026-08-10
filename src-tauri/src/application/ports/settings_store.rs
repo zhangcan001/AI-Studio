@@ -10,6 +10,8 @@ pub struct AppSettings {
     pub comfy: ComfySettings,
     #[serde(default)]
     pub preferred_presets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub runtime_profiles: Vec<RuntimeParameterProfile>,
 }
 
 impl Default for AppSettings {
@@ -18,8 +20,20 @@ impl Default for AppSettings {
             schema_version: 1,
             comfy: ComfySettings::default(),
             preferred_presets: BTreeMap::new(),
+            runtime_profiles: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeParameterProfile {
+    pub id: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub name: String,
+    pub values: BTreeMap<String, i64>,
+    pub updated_at: String,
 }
 
 pub fn preferred_preset_key(

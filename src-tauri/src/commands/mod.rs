@@ -7,6 +7,7 @@ pub mod organization;
 pub mod preset;
 pub mod production_queue;
 pub mod project;
+pub mod settings;
 pub mod task;
 pub mod workflow_library;
 pub mod workflow_lifecycle;

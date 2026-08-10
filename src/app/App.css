@@ -925,6 +925,191 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   color: var(--ux-text) !important;
 }
 
+.experiment-planner,
+.experiment-result-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--ux-border);
+  border-radius: 10px;
+  background: var(--ux-surface-1);
+}
+
+.experiment-planner-heading,
+.experiment-result-heading,
+.experiment-dimension-heading,
+.experiment-plan-summary,
+.experiment-compare-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.experiment-planner-heading h3,
+.experiment-result-heading h3 {
+  margin: 3px 0 0;
+}
+
+.experiment-planner-heading p,
+.experiment-result-heading p {
+  margin: 5px 0 0;
+  color: var(--ux-muted);
+  font-size: 0.8rem;
+}
+
+.experiment-dimension-count {
+  flex: 0 0 auto;
+  color: var(--ux-accent);
+  font-size: 0.78rem;
+}
+
+.experiment-dimension-list,
+.experiment-result-cards {
+  display: grid;
+  gap: 9px;
+}
+
+.experiment-dimension-card,
+.experiment-result-card {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--ux-border);
+  border-radius: 8px;
+  background: var(--ux-surface-0);
+}
+
+.experiment-dimension-heading strong,
+.experiment-result-card-heading strong {
+  color: var(--ux-text);
+}
+
+.experiment-dimension-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(220px, 1.3fr);
+  gap: 9px;
+}
+
+.experiment-dimension-form label,
+.experiment-values-input {
+  display: grid;
+  gap: 5px;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
+.experiment-values-input {
+  grid-column: 1 / -1;
+}
+
+.experiment-planner-actions,
+.experiment-result-assets,
+.experiment-result-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.experiment-blocked-reason,
+.experiment-video-warning,
+.experiment-issue-list,
+.experiment-plan-summary,
+.experiment-result-grid > .disabled-note {
+  margin: 0;
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+}
+
+.experiment-issue-list {
+  display: grid;
+  gap: 4px;
+  padding-left: 20px;
+  color: var(--ux-danger);
+}
+
+.experiment-video-warning {
+  color: var(--ux-warning);
+}
+
+.experiment-plan-summary {
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: var(--ux-surface-2);
+}
+
+.experiment-plan-table {
+  display: grid;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.experiment-plan-row {
+  display: grid;
+  grid-template-columns: 52px minmax(180px, 1fr) minmax(110px, 0.7fr) 90px 70px;
+  gap: 8px;
+  align-items: center;
+  min-width: 560px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  color: var(--ux-muted);
+  background: var(--ux-surface-0);
+  font-size: 0.76rem;
+}
+
+.experiment-plan-header {
+  color: var(--ux-text);
+  background: var(--ux-surface-2);
+  font-weight: 700;
+}
+
+.experiment-submit-button {
+  justify-self: start;
+}
+
+.experiment-compare-toolbar {
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
+.experiment-result-cards {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.experiment-result-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.experiment-result-facts div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.experiment-result-facts dt {
+  color: var(--ux-muted);
+}
+
+.experiment-result-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ux-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experiment-promote-button {
+  width: 100%;
+}
+
 .studio-input-heading p,
 .creation-result-heading p {
   margin: 4px 0 0;
@@ -2320,6 +2505,18 @@ summary:focus-visible {
   .runtime-profile-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .experiment-planner-heading,
+  .experiment-result-heading,
+  .experiment-plan-summary,
+  .experiment-compare-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .experiment-dimension-form {
+    grid-template-columns: 1fr;
   }
 
   .asset-compare-workspace {

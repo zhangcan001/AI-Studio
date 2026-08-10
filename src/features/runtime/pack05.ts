@@ -37,50 +37,16 @@ export function filterRuntimeCatalog(
   });
 }
 
-export interface RuntimeParameterValues {
-  steps?: number;
-  width?: number;
-  height?: number;
-  durationSeconds?: number;
-  concurrency?: number;
-}
+export type RuntimeParameterValues = Record<string, number>;
 
-export type RuntimeParameterKey = keyof RuntimeParameterValues;
-
-const parameterKeys: RuntimeParameterKey[] = ["steps", "width", "height", "durationSeconds", "concurrency"];
-
-const parameterLimits: Record<RuntimeParameterKey, { min: number; max: number }> = {
-  steps: { min: 1, max: 100 },
-  width: { min: 64, max: 8192 },
-  height: { min: 64, max: 8192 },
-  durationSeconds: { min: 1, max: 600 },
-  concurrency: { min: 1, max: 8 },
-};
-
-export function runtimeParameterLabel(key: RuntimeParameterKey): string {
-  switch (key) {
-    case "steps":
-      return "步数";
-    case "width":
-      return "宽度";
-    case "height":
-      return "高度";
-    case "durationSeconds":
-      return "时长（秒）";
-    case "concurrency":
-      return "并发上限";
-  }
-}
-
-export function sanitizeRuntimeParameterValues(input: Partial<RuntimeParameterValues>): RuntimeParameterValues {
-  const result: RuntimeParameterValues = {};
-  for (const key of parameterKeys) {
-    const value = input[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
-    const limits = parameterLimits[key];
-    result[key] = Math.min(limits.max, Math.max(limits.min, Math.round(value)));
-  }
-  return result;
+export function sanitizeRuntimeParameterValues(input: Record<string, unknown>): RuntimeParameterValues {
+  return Object.fromEntries(
+    Object.entries(input).flatMap(([key, value]) => (
+      key.trim() && typeof value === "number" && Number.isSafeInteger(value)
+        ? [[key.trim(), value]]
+        : []
+    )),
+  );
 }
 
 export interface RuntimeParameterProfile {
@@ -98,7 +64,11 @@ export function runtimeProfileKey(recipe: Pick<RecipeViewModel, "workflowVersion
   return `${recipe.workflowVersionId}:${recipe.recipeId}`;
 }
 
-export function listRuntimeParameterProfiles(): RuntimeParameterProfile[] {
+export interface LegacyRuntimeParameterProfile extends RuntimeParameterProfile {
+  values: RuntimeParameterValues;
+}
+
+export function listLegacyRuntimeParameterProfiles(): LegacyRuntimeParameterProfile[] {
   if (typeof globalThis.localStorage === "undefined") return [];
   try {
     const raw = globalThis.localStorage.getItem(profileStorageKey);
@@ -113,7 +83,7 @@ export function listRuntimeParameterProfiles(): RuntimeParameterProfile[] {
         workflowVersionId: item.workflowVersionId,
         recipeId: item.recipeId,
         name: item.name,
-        values: sanitizeRuntimeParameterValues(item.values as Partial<RuntimeParameterValues>),
+        values: sanitizeRuntimeParameterValues(item.values),
         updatedAt: item.updatedAt,
       }];
     });
@@ -122,33 +92,56 @@ export function listRuntimeParameterProfiles(): RuntimeParameterProfile[] {
   }
 }
 
-export function saveRuntimeParameterProfile(profile: RuntimeParameterProfile): RuntimeParameterProfile {
-  const next = { ...profile, name: profile.name.trim(), values: sanitizeRuntimeParameterValues(profile.values) };
-  if (typeof globalThis.localStorage === "undefined") return next;
-  const profiles = listRuntimeParameterProfiles().filter((item) => item.id !== next.id);
-  profiles.unshift(next);
-  globalThis.localStorage.setItem(profileStorageKey, JSON.stringify(profiles));
-  return next;
+export function removeLegacyRuntimeParameterProfiles(): void {
+  if (typeof globalThis.localStorage === "undefined") return;
+  globalThis.localStorage.removeItem(profileStorageKey);
 }
 
-export function deleteRuntimeParameterProfile(profileId: string): void {
-  if (typeof globalThis.localStorage === "undefined") return;
-  const profiles = listRuntimeParameterProfiles().filter((item) => item.id !== profileId);
-  globalThis.localStorage.setItem(profileStorageKey, JSON.stringify(profiles));
+export interface RuntimeProfileMigrationResult {
+  profile?: RuntimeParameterProfile;
+  unresolvedKeys: string[];
+}
+
+const legacyFieldAliases: Record<string, string[]> = {
+  steps: ["steps"],
+  width: ["width"],
+  height: ["height"],
+  durationSeconds: ["durationSeconds", "duration_seconds"],
+};
+
+export function migrateLegacyRuntimeProfile(
+  recipe: RecipeViewModel,
+  profile: LegacyRuntimeParameterProfile,
+): RuntimeProfileMigrationResult {
+  const integerKeys = new Set(recipe.fields.filter((field) => field.type === "integer").map((field) => field.key));
+  const values: RuntimeParameterValues = {};
+  const unresolvedKeys: string[] = [];
+  for (const [legacyKey, value] of Object.entries(profile.values)) {
+    // Concurrency was never an executable setting; deliberately omit it from
+    // the backend profile instead of carrying forward misleading state.
+    if (legacyKey === "concurrency") continue;
+    const targetKey = (legacyFieldAliases[legacyKey] ?? [legacyKey]).find((candidate) => integerKeys.has(candidate));
+    if (!targetKey) {
+      unresolvedKeys.push(legacyKey);
+      continue;
+    }
+    values[targetKey] = value;
+  }
+  if (unresolvedKeys.length) return { unresolvedKeys };
+  return {
+    unresolvedKeys: [],
+    profile: {
+      ...profile,
+      values,
+    },
+  };
 }
 
 export interface AppliedRuntimeProfile {
   values: GenerationValues;
   appliedFields: string[];
-  ignoredParameters: RuntimeParameterKey[];
+  ignoredParameters: string[];
 }
-
-const parameterMatchers: Record<Exclude<RuntimeParameterKey, "concurrency">, RegExp> = {
-  steps: /(steps?|iterations?|步数|迭代)/i,
-  width: /(width|pixel.?width|宽度|像素宽)/i,
-  height: /(height|pixel.?height|高度|像素高)/i,
-  durationSeconds: /(duration|seconds?|length|时长|秒)/i,
-};
 
 export function applyRuntimeParameterProfile(
   recipe: RecipeViewModel,
@@ -157,15 +150,12 @@ export function applyRuntimeParameterProfile(
 ): AppliedRuntimeProfile {
   const nextValues = { ...values };
   const appliedFields: string[] = [];
-  const ignoredParameters: RuntimeParameterKey[] = [];
-  const bindableKeys: Array<Exclude<RuntimeParameterKey, "concurrency">> = ["steps", "width", "height", "durationSeconds"];
+  const ignoredParameters: string[] = [];
 
-  for (const key of bindableKeys) {
-    const value = profile.values[key];
-    if (value === undefined) continue;
-    const field = recipe.fields.find((candidate) => candidate.type === "integer" && parameterMatchers[key].test(`${candidate.key} ${candidate.label}`));
+  for (const [fieldKey, value] of Object.entries(profile.values)) {
+    const field = recipe.fields.find((candidate) => candidate.type === "integer" && candidate.key === fieldKey);
     if (!field || field.type !== "integer") {
-      ignoredParameters.push(key);
+      ignoredParameters.push(fieldKey);
       continue;
     }
     const bounded = Math.min(field.max ?? Number.MAX_SAFE_INTEGER, Math.max(field.min ?? Number.MIN_SAFE_INTEGER, value));
@@ -210,7 +200,7 @@ export function inspectWorkflowImport(text: string, fileName = "workflow.json"):
   if (Array.isArray(parsed.nodes)) {
     const nodes = parsed.nodes.filter(isRecord);
     const classes = new Set(nodes.map((node) => stringValue(node.type) ?? stringValue(node.class_type)).filter((value): value is string => Boolean(value)));
-    errors.push("检测到 ComfyUI 编辑器 UI 格式；请导出 API 格式后再导入。");
+    errors.push("检测到 ComfyUI 编辑器格式。请在 ComfyUI 中导出 API 格式工作流后重新导入。");
     return { accepted: false, format: "ui", nodeCount: nodes.length, uniqueClassCount: classes.size, outputCandidateCount: countOutputCandidates(classes), errors, warnings };
   }
 
@@ -257,7 +247,27 @@ function containsAbsolutePath(value: unknown): boolean {
 function containsSecretLikeKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsSecretLikeKey);
   if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, child]) => /(password|token|secret|api.?key)/i.test(key) || containsSecretLikeKey(child));
+  const secretKeys = new Set([
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "credentials",
+  ]);
+  return Object.entries(value).some(([key, child]) => {
+    const normalized = key
+      .trim()
+      .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+      .replace(/[\s-]+/g, "_")
+      .toLocaleLowerCase();
+    return secretKeys.has(normalized) || secretKeys.has(normalized.replace(/_/g, "")) || containsSecretLikeKey(child);
+  });
 }
 
 export interface RuntimeQueueItem {

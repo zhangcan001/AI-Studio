@@ -88,4 +88,6 @@ export interface PendingStudioAssetIntent {
 export interface StudioReuseProvenance {
   workflowName: string;
   createdAt: string;
+  sourceBatchName?: string;
+  sourceTaskId?: string;
 }

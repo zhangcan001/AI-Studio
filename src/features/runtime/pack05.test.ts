@@ -5,6 +5,7 @@ import {
   evaluateRuntimeGate,
   filterRuntimeCatalog,
   inspectWorkflowImport,
+  migrateLegacyRuntimeProfile,
   runtimeKindFor,
   sanitizeRuntimeParameterValues,
   validateMultiRuntimeQueue,
@@ -34,8 +35,8 @@ describe("M3 Pack 05 runtime contracts", () => {
     expect(filterRuntimeCatalog([imageRecipe, { ...imageRecipe, workflowVersionId: "video-v1", category: "video", mode: "text_to_video" }], "video")).toHaveLength(1);
   });
 
-  it("bounds generic runtime parameters without model-specific rules", () => {
-    expect(sanitizeRuntimeParameterValues({ steps: 999, width: 1, durationSeconds: 0, concurrency: 99 })).toEqual({ steps: 100, width: 64, durationSeconds: 1, concurrency: 8 });
+  it("keeps only safe integer values without model-specific bounds", () => {
+    expect(sanitizeRuntimeParameterValues({ steps: 999, width: 1, durationSeconds: 0, tokenizer: 4.5 })).toEqual({ steps: 999, width: 1, durationSeconds: 0 });
   });
 
   it("applies only parameters that have matching integer recipe fields", () => {
@@ -53,6 +54,32 @@ describe("M3 Pack 05 runtime contracts", () => {
     expect(result.ignoredParameters).toEqual([]);
   });
 
+  it("binds profiles by exact integer field key and ignores unknown keys", () => {
+    const result = applyRuntimeParameterProfile(imageRecipe, {}, {
+      id: "profile-2",
+      workflowVersionId: imageRecipe.workflowVersionId,
+      recipeId: imageRecipe.recipeId,
+      name: "直接绑定",
+      values: { steps: 12, tokenizer: 4 },
+      updatedAt: "2026-08-10T00:00:00.000Z",
+    });
+    expect(result.values.steps).toEqual({ type: "integer", value: 12 });
+    expect(result.ignoredParameters).toEqual(["tokenizer"]);
+  });
+
+  it("migrates legacy semantic keys with explicit aliases and ignores concurrency", () => {
+    const result = migrateLegacyRuntimeProfile(imageRecipe, {
+      id: "legacy-1",
+      workflowVersionId: imageRecipe.workflowVersionId,
+      recipeId: imageRecipe.recipeId,
+      name: "旧档案",
+      values: { steps: 12, durationSeconds: 5, concurrency: 4 },
+      updatedAt: "2026-08-10T00:00:00.000Z",
+    });
+    expect(result.unresolvedKeys).toEqual(["durationSeconds"]);
+    expect(result.profile).toBeUndefined();
+  });
+
   it("rejects UI-format workflow files while accepting API-format graphs", () => {
     const ui = inspectWorkflowImport(JSON.stringify({ nodes: [{ id: 1, type: "SaveImage" }] }));
     expect(ui.accepted).toBe(false);
@@ -66,6 +93,13 @@ describe("M3 Pack 05 runtime contracts", () => {
     const report = inspectWorkflowImport(JSON.stringify({ "1": { class_type: "CustomNode", inputs: { api_key: "secret" } } }));
     expect(report.accepted).toBe(false);
     expect(report.errors).toContain("工作流包含疑似凭据字段，请移除凭据后再导入。");
+  });
+
+  it("does not flag tokenizer or token_count as credential keys", () => {
+    const report = inspectWorkflowImport(JSON.stringify({
+      "1": { class_type: "CustomNode", inputs: { tokenizer: "clip", token_count: 12 } },
+    }));
+    expect(report.accepted).toBe(true);
   });
 
   it("validates a queue across multiple ready runtimes in order", () => {

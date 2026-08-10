@@ -22,6 +22,9 @@ import type { BatchDraftItem } from "./batchDraft";
 import { isSafeProductionQueueRequeue } from "./productionQueuePolicy";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
+import type { ReusableGenerationDraft } from "../../types/history";
+import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
+import type { ExperimentContext } from "../experiments/experimentPlanner";
 
 interface Props {
   projectId: string;
@@ -31,6 +34,8 @@ interface Props {
   onAdmissionChanged: () => Promise<void>;
   onFocusedBatchOpened: () => void;
   onOpenTask: (taskId: string) => void;
+  experimentContexts?: Record<string, ExperimentContext>;
+  onPromoteWinner?: (draft: ReusableGenerationDraft, source: { batchName: string; taskId: string }) => Promise<void>;
 }
 
 export function ProductionQueuePanel({
@@ -41,6 +46,8 @@ export function ProductionQueuePanel({
   onAdmissionChanged,
   onFocusedBatchOpened,
   onOpenTask,
+  experimentContexts,
+  onPromoteWinner,
 }: Props) {
   const [name, setName] = useState("");
   const [continueOnFailure, setContinueOnFailure] = useState(false);
@@ -278,7 +285,7 @@ export function ProductionQueuePanel({
       <div className="production-queue-heading">
         <div>
           <span className="section-label">生产队列</span>
-          <p>管理 Kera2 和 MiniMax H3 的持久化生产任务，任务事件会自动刷新此页面。</p>
+          <p>管理持久化生产任务，任务事件会自动刷新此页面。</p>
         </div>
         <button type="button" className="quiet-button" disabled={busy} onClick={() => void refreshQueues(true)}>
           刷新
@@ -437,6 +444,15 @@ export function ProductionQueuePanel({
               );
             })}
           </ol>
+          {detail.name.startsWith("实验 ·") && onPromoteWinner && (
+            <ExperimentResultGrid
+              projectId={projectId}
+              batch={detail}
+              recipe={experimentContexts?.[detail.id]?.recipe}
+              baseValues={experimentContexts?.[detail.id]?.baseValues}
+              onPromoteWinner={onPromoteWinner}
+            />
+          )}
         </div>
       )}
       {notice && <p className="disabled-note">{notice}</p>}

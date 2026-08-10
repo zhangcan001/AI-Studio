@@ -21,7 +21,11 @@ import type {
   ProjectBackupPreview,
   ProjectView,
 } from "../types/project";
-import type { ComfyEndpointTest, ComfySettingsView } from "../types/settings";
+import type {
+  ComfyEndpointTest,
+  ComfySettingsView,
+  RuntimeParameterProfile,
+} from "../types/settings";
 import type { PresetView } from "../types/preset";
 import type {
   ProductionBatchCreateItem,
@@ -495,4 +499,16 @@ export function updatePreset(request: {
 
 export function deletePreset(projectId: string, presetId: string): Promise<void> {
   return invoke<void>("preset_delete", { projectId, presetId });
+}
+
+export function listRuntimeProfiles(): Promise<RuntimeParameterProfile[]> {
+  return invoke<RuntimeParameterProfile[]>("runtime_profiles_list");
+}
+
+export function saveRuntimeProfile(profile: RuntimeParameterProfile): Promise<RuntimeParameterProfile> {
+  return invoke<RuntimeParameterProfile>("runtime_profiles_save", { profile });
+}
+
+export function deleteRuntimeProfile(profileId: string): Promise<void> {
+  return invoke<void>("runtime_profiles_delete", { profileId });
 }

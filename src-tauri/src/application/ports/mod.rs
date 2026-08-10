@@ -54,7 +54,9 @@ pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepos
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use repository_error::RepositoryError;
-pub use settings_store::{AppSettings, ComfySettings, LoadedSettings, SettingsStore};
+pub use settings_store::{
+    AppSettings, ComfySettings, LoadedSettings, RuntimeParameterProfile, SettingsStore,
+};
 pub use task_history_repository::{
     TaskHistoryFilter, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,
     TaskHistoryTimeFilter, TaskHistoryWorkflowOption,

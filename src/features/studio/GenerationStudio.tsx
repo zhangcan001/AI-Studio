@@ -4,17 +4,20 @@ import {
   createPreset,
   createGeneration,
   createGenerationBatch,
+  createProductionQueue,
   createProjectTemplate,
   deletePreset,
   getPreferredPreset,
   listPresets,
   refreshWorkflowLibrary,
+  startProductionQueue,
   updatePreset,
   setPreferredPreset,
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeField, RecipeViewModel } from "../../types/generation";
+import type { ReusableGenerationDraft } from "../../types/history";
 import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -33,6 +36,8 @@ import { NoWorkflowGuide } from "./NoWorkflowGuide";
 import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
 import { CreationModeHint } from "../runtime/CreationModeHint";
 import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfilePanel";
+import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
+import { type ExperimentContext, type ExperimentPlan } from "../experiments/experimentPlanner";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -111,6 +116,8 @@ export function GenerationStudio({
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchNotice, setBatchNotice] = useState<string>();
   const [studioMode, setStudioMode] = useState<StudioMode>("single");
+  const [experimentFocusBatchId, setExperimentFocusBatchId] = useState<string>();
+  const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
   const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
@@ -146,6 +153,8 @@ export function GenerationStudio({
     setBatchSubmitting(false);
     setBatchNotice(undefined);
     setStudioMode("single");
+    setExperimentFocusBatchId(undefined);
+    setExperimentContexts({});
     setPresetEditorOpen(false);
     setTemplateEditorOpen(false);
   }, [projectId]);
@@ -244,6 +253,12 @@ export function GenerationStudio({
   );
   const canAddToBatch = Boolean(
     selectedWorkflow && !hasUnsupportedField && missingAssetFields.size === 0 && Object.keys(errors).length === 0,
+  );
+  const canExperimentBase = Boolean(
+    canAddToBatch &&
+      comfyConnected &&
+      taskEventsReady &&
+      productionPolicy.canSubmitLocalBatch,
   );
   const blockedReason = generationBlockedReason({
     productionBusy: productionAdmission.busy,
@@ -527,6 +542,80 @@ export function GenerationStudio({
     }
   }
 
+  async function submitExperimentPlan(plan: ExperimentPlan) {
+    if (!selectedWorkflow) return;
+    if (!canExperimentBase) {
+      setNotice(blockedReason ?? "当前基础 Draft 尚未满足实验队列提交条件。");
+      return;
+    }
+    setNotice(null);
+    try {
+      const created = await createProductionQueue({
+        projectId,
+        name: `实验 · ${workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name)} · ${formatDateTime(new Date().toISOString())}`,
+        continueOnFailure: true,
+        items: plan.items.map((item) => ({
+          workflowVersionId: plan.workflowVersionId,
+          recipeId: plan.recipeId,
+          values: cloneGenerationValues(item.values),
+        })),
+      });
+      setExperimentContexts((current) => ({
+        ...current,
+        [created.id]: {
+          recipe: selectedWorkflow,
+          baseValues: cloneGenerationValues(plan.baseValues),
+        },
+      }));
+      setExperimentFocusBatchId(created.id);
+      setStudioMode("batch");
+      try {
+        await onProductionAdmissionChanged();
+      } catch {
+        // The queue is already persisted; a status refresh failure must not
+        // prevent the normal queue runner from being started.
+      }
+      try {
+        await startProductionQueue(projectId, created.id);
+        setNotice(`实验队列已加入并开始执行，共 ${created.total} 项；任务将严格按顺序运行。`);
+      } catch (startError: unknown) {
+        setNotice(`实验队列已保存，共 ${created.total} 项；开始执行失败：${toUserMessage(startError)}。可在生产队列中手动开始。`);
+      }
+    } catch (error: unknown) {
+      setNotice(toUserMessage(error));
+    }
+  }
+
+  async function promoteExperimentWinner(
+    draft: ReusableGenerationDraft,
+    source: { batchName: string; taskId: string },
+  ) {
+    if (draft.projectId !== projectId) {
+      setNotice("实验结果属于其他项目，无法加载到当前创作。");
+      return;
+    }
+    const workflow = catalog.find(
+      (recipe) => recipe.workflowVersionId === draft.workflowVersionId && recipe.recipeId === draft.recipeId,
+    );
+    if (!workflow) {
+      setNotice("实验结果对应的工作流版本已不在运行目录中，请先刷新工作流列表。");
+      return;
+    }
+    useStudioStore.getState().loadDraft(workflow, cloneGenerationValues(draft.values));
+    useStudioStore.getState().setReuseProvenance({
+      workflowName: draft.workflowName,
+      createdAt: draft.createdAt,
+      sourceBatchName: source.batchName,
+      sourceTaskId: source.taskId,
+    });
+    setMissingAssetFields(new Set());
+    setStudioMode("single");
+    setNotice(draft.missingAssetIds.length
+      ? "已将实验结果加载到 Studio，但部分素材缺失，请替换后再生成；未自动提交任务。"
+      : "已将实验结果作为下一轮起点加载到 Studio，未自动提交生成任务。",
+    );
+  }
+
   async function cancelCurrentTask() {
     if (!currentTask) return;
     setCancelling(true);
@@ -587,8 +676,12 @@ export function GenerationStudio({
             <CreationModeHint recipe={selectedWorkflow} />
             {reuseProvenance && (
               <div className="studio-provenance" role="status">
-                <strong>已加载历史任务参数</strong>
-                <span>{reuseProvenance.workflowName} · {formatDateTime(reuseProvenance.createdAt)}</span>
+                <strong>{reuseProvenance.sourceBatchName ? "已从实验结果加载" : "已加载历史任务参数"}</strong>
+                <span>
+                  {reuseProvenance.sourceBatchName
+                    ? `${reuseProvenance.sourceBatchName} · 任务 ${reuseProvenance.sourceTaskId ?? "未知"} · ${formatDateTime(reuseProvenance.createdAt)}`
+                    : `${reuseProvenance.workflowName} · ${formatDateTime(reuseProvenance.createdAt)}`}
+                </span>
               </div>
             )}
             {assetIntentTargets.length > 1 && pendingAssetIntent && (
@@ -687,15 +780,26 @@ export function GenerationStudio({
               projectId={projectId}
               onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
             />
-            <GenerationActionBar
-              creating={creating}
-              canGenerate={canGenerate}
-              canAddToBatch={canAddToBatch}
-              blockedReason={blockedReason}
-              batchCount={batchItems.length}
-              onGenerate={() => void generate()}
-              onAddToBatch={addCurrentToBatch}
-            />
+            {studioMode === "experiment" && (
+              <ExperimentPlannerPanel
+                recipe={selectedWorkflow}
+                baseValues={values}
+                baseReady={canExperimentBase}
+                blockedReason={blockedReason}
+                onSubmit={submitExperimentPlan}
+              />
+            )}
+            {studioMode !== "experiment" && (
+              <GenerationActionBar
+                creating={creating}
+                canGenerate={canGenerate}
+                canAddToBatch={canAddToBatch}
+                blockedReason={blockedReason}
+                batchCount={batchItems.length}
+                onGenerate={() => void generate()}
+                onAddToBatch={addCurrentToBatch}
+              />
+            )}
             {studioMode === "batch" && <section className="batch-production-view" aria-label="批量生产">
               <section className="batch-panel" aria-label="临时批量任务">
                 <div className="batch-panel-header">
@@ -772,10 +876,15 @@ export function GenerationStudio({
                 projectId={projectId}
                 batchItems={batchItems}
                 comfyConnected={comfyConnected}
-                focusBatchId={focusProductionBatchId}
+                focusBatchId={experimentFocusBatchId ?? focusProductionBatchId}
                 onAdmissionChanged={onProductionAdmissionChanged}
-                onFocusedBatchOpened={onProductionBatchFocused}
+                onFocusedBatchOpened={() => {
+                  setExperimentFocusBatchId(undefined);
+                  onProductionBatchFocused();
+                }}
                 onOpenTask={onOpenTask}
+                experimentContexts={experimentContexts}
+                onPromoteWinner={promoteExperimentWinner}
               />
             </section>}
           </>
