@@ -76,7 +76,7 @@ export function ProductionQueuePanel({
   const [resultCompareAssets, setResultCompareAssets] = useState<AssetView[]>([]);
   const [resultCompareOpen, setResultCompareOpen] = useState(false);
   const [resultAssetsByItem, setResultAssetsByItem] = useState<Record<string, AssetView[]>>({});
-  const [showInlineItems, setShowInlineItems] = useState(false);
+  const [expandedInlineItemId, setExpandedInlineItemId] = useState<string>();
   const selectedIdRef = useRef<string | undefined>(undefined);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
@@ -125,7 +125,7 @@ export function ProductionQueuePanel({
     setShowArchived(false);
     setNotice(undefined);
     setResultAssetsByItem({});
-    setShowInlineItems(false);
+    setExpandedInlineItemId(undefined);
     void refreshQueues(false);
     void listProductionQueueNamePresets().then(setNamePresets).catch(() => setNamePresets([]));
   }, [projectId, refreshQueues, setQueueDetail]);
@@ -196,7 +196,7 @@ export function ProductionQueuePanel({
   }, [detail, projectId]);
 
   useEffect(() => {
-    setShowInlineItems(false);
+    setExpandedInlineItemId(undefined);
   }, [detail?.id]);
 
   const visibleQueues = useMemo(
@@ -391,11 +391,7 @@ export function ProductionQueuePanel({
     ? Math.round((processedCount / detail.total) * 100)
     : 0;
   const activeItem = detail?.items.find((item) => item.status === "DISPATCHING" || item.status === "DISPATCHED");
-  const renderedItems = detail
-    ? inline && !showInlineItems
-      ? compactProductionItems(detail.items)
-      : detail.items
-    : [];
+  const renderedItems = detail?.items ?? [];
 
   return (
     <section className={`production-queue-panel${inline ? " production-queue-panel-inline" : ""}`} aria-label={inline ? "批次进度" : "生产队列"}>
@@ -566,15 +562,21 @@ export function ProductionQueuePanel({
             <span>已取消 <strong>{detail.cancelled}</strong></span>
             <span>已跳过 <strong>{detail.skipped}</strong></span>
           </div>
-          <ol className="production-queue-items">
+          {inline && <div className="production-inline-queue-label">
+            <span className="section-label">项目列表</span>
+            <span>点击一项查看生成图和操作</span>
+          </div>}
+          <ol className={`production-queue-items${inline ? " production-inline-queue-list" : ""}`} aria-label={inline ? "批次项目列表" : undefined}>
             {renderedItems.map((item) => {
               const canSkip = detailEditable && (item.status === "FAILED" || item.status === "CANCELLED");
               const canRequeue = detailEditable && isSafeProductionQueueRequeue(item);
               const reviewRequired =
                 detailEditable && item.status === "FAILED" && !canRequeue && item.errorCode !== undefined;
               const resultAssets = resultAssetsByItem[item.id] ?? [];
-              return (
-                <li key={item.id}>
+              const expanded = expandedInlineItemId === item.id;
+              const itemLabel = item.promptText?.trim() || item.taskId || `第 ${item.ordinal + 1} 项`;
+              const itemBody = (
+                <>
                   <span>#{item.ordinal + 1}</span>
                   <strong>{productionItemStatusLabel(item.status)}</strong>
                   <div className="production-item-identity">
@@ -625,20 +627,37 @@ export function ProductionQueuePanel({
                       ))}
                     </div>
                   )}
+                </>
+              );
+              return (
+                <li key={item.id} className={inline ? "production-inline-queue-item" : undefined}>
+                  {inline ? (
+                    <>
+                      <button
+                        type="button"
+                        className={`production-inline-item-toggle${expanded ? " is-expanded" : ""}`}
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? "收起" : "查看"}第 ${item.ordinal + 1} 项${item.status === "SUCCEEDED" ? "生成图" : "详情"}`}
+                        onClick={() => setExpandedInlineItemId((current) => current === item.id ? undefined : item.id)}
+                      >
+                        <span className="production-inline-item-index">#{item.ordinal + 1}</span>
+                        <strong className="production-inline-item-status">{productionItemStatusLabel(item.status)}</strong>
+                        <span className="production-inline-item-copy">
+                          <strong title={itemLabel}>{itemLabel}</strong>
+                          <small>{item.taskId ?? "尚未提交"}</small>
+                        </span>
+                        <span className="production-inline-item-result">
+                          {item.status === "SUCCEEDED" ? (resultAssets.length ? `${resultAssets.length} 张生成图` : "查看生成图") : item.errorCode ?? productionItemStatusLabel(item.status)}
+                        </span>
+                        <span className="production-inline-item-chevron" aria-hidden="true">{expanded ? "收起" : "查看"}</span>
+                      </button>
+                      {expanded && <div className="production-inline-item-detail">{itemBody}</div>}
+                    </>
+                  ) : itemBody}
                 </li>
               );
             })}
           </ol>
-          {inline && detail.items.length > renderedItems.length && (
-            <button type="button" className="quiet-button production-inline-more" onClick={() => setShowInlineItems(true)}>
-              展开全部 {detail.items.length} 项
-            </button>
-          )}
-          {inline && showInlineItems && detail.items.length > 6 && (
-            <button type="button" className="quiet-button production-inline-more" onClick={() => setShowInlineItems(false)}>
-              收起明细
-            </button>
-          )}
           {detail.name.startsWith("实验 ·") && onPromoteWinner && (
             <ExperimentResultGrid
               projectId={projectId}
@@ -662,18 +681,6 @@ export function ProductionQueuePanel({
       )}
     </section>
   );
-}
-
-function compactProductionItems(items: ProductionBatchDetail["items"]): ProductionBatchDetail["items"] {
-  if (items.length <= 6) return items;
-  const visibleIds = new Set(items.slice(0, 4).map((item) => item.id));
-  const active = items.find((item) => item.status === "DISPATCHING" || item.status === "DISPATCHED");
-  if (active) visibleIds.add(active.id);
-  const latestTerminal = [...items]
-    .reverse()
-    .find((item) => ["SUCCEEDED", "FAILED", "CANCELLED", "SKIPPED"].includes(item.status));
-  if (latestTerminal) visibleIds.add(latestTerminal.id);
-  return items.filter((item) => visibleIds.has(item.id));
 }
 
 function OverviewStat({ label, value }: { label: string; value: number }) {
