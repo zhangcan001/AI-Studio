@@ -12,6 +12,7 @@ pub mod preset_repository;
 pub mod production_queue_repository;
 pub mod project_directory_store;
 pub mod project_repository;
+pub mod prompt_library_repository;
 pub mod repository_error;
 pub mod settings_store;
 pub mod task_history_repository;
@@ -53,6 +54,9 @@ pub use preset_repository::PresetRepository;
 pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepository};
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
+pub use prompt_library_repository::{
+    PromptEntryRecord, PromptLibraryRepository, PromptVersionRecord,
+};
 pub use repository_error::RepositoryError;
 pub use settings_store::{
     AppSettings, ComfySettings, LoadedSettings, RuntimeParameterProfile, SettingsStore,

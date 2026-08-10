@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import {
   buildExperimentPlan,
@@ -15,6 +15,7 @@ interface Props {
   baseValues: GenerationValues;
   baseReady: boolean;
   blockedReason?: string;
+  initialDimensions?: ExperimentDimension[];
   onSubmit: (plan: ExperimentPlan) => Promise<void>;
 }
 
@@ -30,13 +31,26 @@ function newDimension(id: string, fieldKey: string): DimensionDraft {
   return { id, fieldKey, seedMode: "fixed", rawValues: "", randomCount: "2" };
 }
 
-export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedReason, onSubmit }: Props) {
+export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedReason, initialDimensions, onSubmit }: Props) {
   const fields = useMemo(() => experimentVariantFields(recipe), [recipe]);
   const fieldMap = useMemo(() => new Map(fields.map((field) => [field.key, field])), [fields]);
   const [dimensions, setDimensions] = useState<DimensionDraft[]>([]);
   const [plan, setPlan] = useState<ExperimentPlan>();
   const [issues, setIssues] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!initialDimensions?.length) return;
+    setDimensions(initialDimensions.slice(0, 2).map((dimension, index) => ({
+      id: `prefilled-${dimension.fieldKey}-${index}`,
+      fieldKey: dimension.fieldKey,
+      seedMode: "fixed",
+      rawValues: dimension.values.map((value) => value.type === "string" || value.type === "integer" || value.type === "seed_fixed" ? String("value" in value ? value.value : "") : "").join("\n"),
+      randomCount: "2",
+    })));
+    setPlan(undefined);
+    setIssues([]);
+  }, [initialDimensions]);
 
   function changeDimension(id: string, patch: Partial<DimensionDraft>) {
     setDimensions((current) => current.map((dimension) => dimension.id === id ? { ...dimension, ...patch } : dimension));
@@ -122,7 +136,7 @@ export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedR
         <div>
           <span className="section-label">实验计划</span>
           <h3>从当前创作生成参数变体</h3>
-          <p>只组合当前 Recipe 的文字、整数和 Seed 字段；图片、视频、音频素材继续复用基础 Draft。</p>
+          <p>{initialDimensions?.length ? "已从 Prompt Library 预填版本；仍需预览并明确加入队列。" : "只组合当前 Recipe 的文字、整数和 Seed 字段；图片、视频、音频素材继续复用基础 Draft。"}</p>
         </div>
         <span className="experiment-dimension-count">{dimensions.length} / 2 个维度</span>
       </div>

@@ -15,8 +15,8 @@ pub use application::ports::{
 pub use infrastructure::database::{
     SqliteAssetRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
-    SqliteProductionQueueRepository, SqliteProjectRepository, SqliteTaskRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteProductionQueueRepository, SqliteProjectRepository, SqlitePromptLibraryRepository,
+    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -36,6 +36,7 @@ use application::{
     project_bootstrap::DefaultProjectBootstrap,
     project_service::ProjectService,
     project_template_service::ProjectTemplateService,
+    prompt_library_service::PromptLibraryService,
     settings_service::SettingsService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
@@ -208,6 +209,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
             let preset_repository: Arc<dyn application::ports::PresetRepository> = Arc::new(
                 infrastructure::database::SqlitePresetRepository::new(database_pool.clone()),
+            );
+            let prompt_library_repository: Arc<dyn application::ports::PromptLibraryRepository> = Arc::new(
+                infrastructure::database::SqlitePromptLibraryRepository::new(database_pool.clone()),
             );
             let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> = Arc::new(
                 infrastructure::database::SqliteProductionQueueRepository::new(database_pool.clone()),
@@ -425,6 +429,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 preset_repository,
                 definition_repository,
                 asset_repository.clone(),
+                clock.clone(),
+            ));
+            let prompt_library_service = Arc::new(PromptLibraryService::new(
+                prompt_library_repository,
                 clock,
             ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
@@ -454,6 +462,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_service,
                 project_backup_service,
                 preset_service,
+                prompt_library_service,
                 organization_service,
                 project_template_service,
                 production_queue_service,
@@ -629,6 +638,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_backup_export,
             commands::project::project_backup_inspect,
             commands::project::project_backup_restore,
+            commands::prompt_library::prompt_library_list,
+            commands::prompt_library::prompt_library_get,
+            commands::prompt_library::prompt_library_create,
+            commands::prompt_library::prompt_library_add_version,
+            commands::prompt_library::prompt_library_update_metadata,
+            commands::prompt_library::prompt_library_delete,
             commands::organization::project_template_list,
             commands::organization::project_template_create,
             commands::organization::project_template_update,

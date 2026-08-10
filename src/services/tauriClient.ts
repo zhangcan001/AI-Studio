@@ -28,6 +28,13 @@ import type {
 } from "../types/settings";
 import type { PresetView } from "../types/preset";
 import type {
+  PromptEntryView,
+  PromptKind,
+  PromptLibraryCreateRequest,
+  PromptLibraryMetadataRequest,
+  PromptVersionView,
+} from "../types/prompt";
+import type {
   ProductionBatchCreateItem,
   ProductionBatchDetail,
   ProductionBatchSummary,
@@ -56,6 +63,44 @@ export function ping(): Promise<string> {
 
 export function getAppStatus(): Promise<AppStatus> {
   return invoke<AppStatus>("get_app_status");
+}
+
+export function listPromptLibrary(
+  projectId: string,
+  filters: { kind?: PromptKind; keyword?: string; tag?: string } = {},
+): Promise<PromptEntryView[]> {
+  return invoke<PromptEntryView[]>("prompt_library_list", {
+    projectId,
+    kind: filters.kind,
+    keyword: filters.keyword,
+    tag: filters.tag,
+  });
+}
+
+export function getPromptLibraryEntry(projectId: string, promptId: string): Promise<PromptEntryView> {
+  return invoke<PromptEntryView>("prompt_library_get", { projectId, promptId });
+}
+
+export function createPromptLibraryEntry(request: PromptLibraryCreateRequest): Promise<PromptEntryView> {
+  return invoke<PromptEntryView>("prompt_library_create", { request });
+}
+
+export function addPromptLibraryVersion(
+  projectId: string,
+  promptId: string,
+  text: string,
+): Promise<PromptVersionView> {
+  return invoke<PromptVersionView>("prompt_library_add_version", {
+    request: { projectId, promptId, text },
+  });
+}
+
+export function updatePromptLibraryMetadata(request: PromptLibraryMetadataRequest): Promise<PromptEntryView> {
+  return invoke<PromptEntryView>("prompt_library_update_metadata", { request });
+}
+
+export function deletePromptLibraryEntry(projectId: string, promptId: string): Promise<void> {
+  return invoke<void>("prompt_library_delete", { projectId, promptId });
 }
 
 export function getComfyStatus(): Promise<ComfyStatus> {

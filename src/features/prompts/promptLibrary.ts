@@ -30,6 +30,24 @@ export interface PromptStudioApplyResult {
   issue?: string;
 }
 
+export type PromptSnippetMode = "prepend" | "append" | "replace";
+
+export function selectPromptTargetField(
+  recipe: RecipeViewModel,
+  requestedFieldKey?: string,
+): { fieldKey?: string; issue?: string } {
+  const fields = recipe.fields.filter((field) => field.type === "textarea");
+  if (!fields.length) return { issue: "当前 Recipe 没有文字输入字段。" };
+  if (requestedFieldKey) {
+    return fields.some((field) => field.key === requestedFieldKey)
+      ? { fieldKey: requestedFieldKey }
+      : { issue: "所选文字输入字段不属于当前 Recipe。" };
+  }
+  return fields.length === 1
+    ? { fieldKey: fields[0].key }
+    : { issue: "当前 Recipe 有多个文字输入字段，请明确选择目标字段。" };
+}
+
 export function normalizePromptText(text: string): string {
   return text.replace(/\r\n?/g, "\n").trim();
 }
@@ -87,6 +105,30 @@ export function applyPromptVersionToStudio(
     values: {
       ...cloneValues(values),
       [field.key]: { type: "string", value: version.text },
+    },
+  };
+}
+
+export function applyPromptSnippetToStudio(
+  recipe: RecipeViewModel,
+  values: GenerationValues,
+  fieldKey: string,
+  text: string,
+  mode: PromptSnippetMode,
+): PromptStudioApplyResult {
+  const field = recipe.fields.find((candidate) => candidate.key === fieldKey);
+  if (!field || field.type !== "textarea") return { issue: "请选择当前 Recipe 的文字输入字段。" };
+  const currentValue = values[field.key];
+  const current = currentValue?.type === "string" ? currentValue.value : "";
+  const next = mode === "replace"
+    ? text
+    : mode === "prepend"
+      ? current ? `${text}\n${current}` : text
+      : current ? `${current}\n${text}` : text;
+  return {
+    values: {
+      ...cloneValues(values),
+      [field.key]: { type: "string", value: next },
     },
   };
 }

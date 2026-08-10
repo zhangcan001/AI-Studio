@@ -37,7 +37,9 @@ import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
 import { CreationModeHint } from "../runtime/CreationModeHint";
 import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfilePanel";
 import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
-import { type ExperimentContext, type ExperimentPlan } from "../experiments/experimentPlanner";
+import { type ExperimentContext, type ExperimentDimension, type ExperimentPlan } from "../experiments/experimentPlanner";
+import { PromptLibraryPanel } from "../prompts/PromptLibraryPanel";
+import type { PromptVersionView } from "../../types/prompt";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -118,6 +120,7 @@ export function GenerationStudio({
   const [studioMode, setStudioMode] = useState<StudioMode>("single");
   const [experimentFocusBatchId, setExperimentFocusBatchId] = useState<string>();
   const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
+  const [promptExperimentDimensions, setPromptExperimentDimensions] = useState<ExperimentDimension[]>([]);
   const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
@@ -155,6 +158,7 @@ export function GenerationStudio({
     setStudioMode("single");
     setExperimentFocusBatchId(undefined);
     setExperimentContexts({});
+    setPromptExperimentDimensions([]);
     setPresetEditorOpen(false);
     setTemplateEditorOpen(false);
   }, [projectId]);
@@ -636,6 +640,14 @@ export function GenerationStudio({
     setMissingAssetFields(new Set());
   }
 
+  function usePromptVersionsForExperiment(fieldKey: string, versions: PromptVersionView[]) {
+    setPromptExperimentDimensions([{
+      fieldKey,
+      values: versions.map((version) => ({ type: "string", value: version.text })),
+    }]);
+    setStudioMode("experiment");
+  }
+
   if (!catalog.length) {
     return (
       <NoWorkflowGuide
@@ -660,6 +672,7 @@ export function GenerationStudio({
             setAssetIntentTargets([]);
             setMissingAssetFields(new Set());
             setPresetEditorOpen(false);
+            setPromptExperimentDimensions([]);
           }}
         />
         {selectedWorkflow && (
@@ -764,6 +777,16 @@ export function GenerationStudio({
               </section>
             )}
             <RuntimeParameterProfilePanel recipe={selectedWorkflow} values={values} onApply={applyRuntimeProfile} />
+            <PromptLibraryPanel
+              projectId={projectId}
+              recipe={selectedWorkflow}
+              values={values}
+              onApplyValues={(nextValues) => {
+                useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
+                setMissingAssetFields(new Set());
+              }}
+              onUseForExperiment={usePromptVersionsForExperiment}
+            />
             {selectedWorkflow.workflowId === "wfl_minimax_h3_reference_video" && (
               <details className="h3-safety-note">
                 <summary>✓ 16GB 安全配置</summary>
@@ -786,6 +809,7 @@ export function GenerationStudio({
                 baseValues={values}
                 baseReady={canExperimentBase}
                 blockedReason={blockedReason}
+                initialDimensions={promptExperimentDimensions}
                 onSubmit={submitExperimentPlan}
               />
             )}

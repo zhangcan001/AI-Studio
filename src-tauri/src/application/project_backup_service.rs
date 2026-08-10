@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 2;
+const BACKUP_VERSION: u32 = 3;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -59,6 +59,7 @@ pub struct ProjectBackupPreviewView {
     pub history_tasks: usize,
     pub presets: usize,
     pub production_queues: usize,
+    pub prompt_entries: usize,
     pub missing_workflows: Vec<String>,
     pub active_tasks_excluded: usize,
     pub warning: String,
@@ -183,6 +184,7 @@ impl ProjectBackupService {
             history_tasks: document.tasks.len(),
             presets: document.presets.len(),
             production_queues: document.batches.len(),
+            prompt_entries: document.prompt_entries.len(),
             missing_workflows,
             active_tasks_excluded: document.active_tasks_excluded,
             warning: "项目备份包含项目历史、提示词和素材，请妥善保存。".to_owned(),
@@ -243,6 +245,14 @@ impl ProjectBackupService {
         for preset in &document.presets {
             preset_ids.insert(preset.id.clone(), format!("pst_{}", Uuid::new_v4()));
         }
+        let mut prompt_ids = HashMap::new();
+        for entry in &document.prompt_entries {
+            prompt_ids.insert(entry.id.clone(), format!("prm_{}", Uuid::new_v4()));
+        }
+        let mut prompt_version_ids = HashMap::new();
+        for version in &document.prompt_versions {
+            prompt_version_ids.insert(version.id.clone(), format!("prv_{}", Uuid::new_v4()));
+        }
         let mut batch_ids = HashMap::new();
         for batch in &document.batches {
             batch_ids.insert(batch.id.clone(), format!("pbt_{}", Uuid::new_v4().simple()));
@@ -285,6 +295,8 @@ impl ProjectBackupService {
                 &asset_ids,
                 &snapshot_ids,
                 &preset_ids,
+                &prompt_ids,
+                &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
                 &tag_ids,
@@ -394,6 +406,8 @@ impl ProjectBackupService {
         let snapshots = query_snapshots(&mut transaction, &included_task_ids).await?;
         let mappings = query_mappings(&mut transaction, &included_task_ids).await?;
         let presets = query_presets(&mut transaction, project_id).await?;
+        let prompt_entries = query_prompt_entries(&mut transaction, project_id).await?;
+        let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
         let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
@@ -519,6 +533,8 @@ impl ProjectBackupService {
             mappings,
             snapshots,
             presets,
+            prompt_entries,
+            prompt_versions,
             batches,
             items,
             workflow_refs,
@@ -537,6 +553,8 @@ impl ProjectBackupService {
         asset_ids: &HashMap<String, String>,
         snapshot_ids: &HashMap<String, String>,
         preset_ids: &HashMap<String, String>,
+        prompt_ids: &HashMap<String, String>,
+        prompt_version_ids: &HashMap<String, String>,
         batch_ids: &HashMap<String, String>,
         item_ids: &HashMap<String, String>,
         tag_ids: &HashMap<String, String>,
@@ -556,6 +574,8 @@ impl ProjectBackupService {
             asset_ids,
             snapshot_ids,
             preset_ids,
+            prompt_ids,
+            prompt_version_ids,
             batch_ids,
             item_ids,
             tag_ids,
@@ -605,6 +625,10 @@ struct BackupDocument {
     mappings: Vec<BackupMapping>,
     snapshots: Vec<BackupSnapshot>,
     presets: Vec<BackupPreset>,
+    #[serde(default)]
+    prompt_entries: Vec<BackupPromptEntry>,
+    #[serde(default)]
+    prompt_versions: Vec<BackupPromptVersion>,
     batches: Vec<BackupBatch>,
     items: Vec<BackupBatchItem>,
     workflow_refs: Vec<WorkflowReference>,
@@ -614,6 +638,30 @@ struct BackupDocument {
     asset_tag_links: Vec<BackupAssetTagLink>,
     #[serde(default)]
     asset_favorites: Vec<BackupAssetFavorite>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupPromptEntry {
+    id: String,
+    project_id: String,
+    kind: String,
+    name: String,
+    normalized_name: String,
+    tags: Vec<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupPromptVersion {
+    id: String,
+    project_id: String,
+    prompt_id: String,
+    version: i64,
+    text: String,
+    created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
@@ -885,6 +933,27 @@ struct DbPreset {
 }
 
 #[derive(FromRow)]
+struct DbPromptEntry {
+    id: String,
+    project_id: String,
+    kind: String,
+    name: String,
+    normalized_name: String,
+    tags_json: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbPromptVersion {
+    id: String,
+    prompt_id: String,
+    version: i64,
+    text: String,
+    created_at: String,
+}
+
+#[derive(FromRow)]
 struct DbBatch {
     id: String,
     name: String,
@@ -1118,6 +1187,63 @@ async fn query_presets(
             })
         })
         .collect()
+}
+
+async fn query_prompt_entries(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupPromptEntry>, AppError> {
+    let rows = sqlx::query_as::<_, DbPromptEntry>(
+        "SELECT id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at
+         FROM prompt_entries WHERE project_id = ? ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    rows.into_iter()
+        .map(|row| {
+            let tags = serde_json::from_str::<Vec<String>>(&row.tags_json)
+                .map_err(|error| AppError::database(format!("提示词标签 JSON 无效：{error}")))?;
+            Ok(BackupPromptEntry {
+                id: row.id,
+                project_id: row.project_id,
+                kind: row.kind,
+                name: row.name,
+                normalized_name: row.normalized_name,
+                tags,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            })
+        })
+        .collect()
+}
+
+async fn query_prompt_versions(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupPromptVersion>, AppError> {
+    let rows = sqlx::query_as::<_, DbPromptVersion>(
+        "SELECT v.id, v.prompt_id, v.version, v.text, v.created_at
+         FROM prompt_versions v
+         JOIN prompt_entries e ON e.id = v.prompt_id
+         WHERE e.project_id = ? ORDER BY v.prompt_id, v.version",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupPromptVersion {
+            id: row.id,
+            project_id: project_id.to_owned(),
+            prompt_id: row.prompt_id,
+            version: row.version,
+            text: row.text,
+            created_at: row.created_at,
+        })
+        .collect())
 }
 
 async fn query_batches(
@@ -1398,7 +1524,7 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2) {
+    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3) {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -1440,6 +1566,63 @@ fn validate_document_entries(
         }
     }
     validate_organization_document(document)?;
+    validate_prompt_document(document)?;
+    Ok(())
+}
+
+fn validate_prompt_document(document: &BackupDocument) -> Result<(), AppError> {
+    use crate::application::prompt_library_service::{
+        canonical_prompt_name, canonical_prompt_tags, canonical_prompt_text,
+    };
+
+    let mut entry_ids = HashSet::new();
+    let mut names = HashSet::new();
+    for entry in &document.prompt_entries {
+        if entry.id.trim().is_empty() || !entry_ids.insert(entry.id.as_str()) {
+            return Err(AppError::backup_invalid("备份包含重复或空提示词 ID"));
+        }
+        if entry.project_id != document.project.id {
+            return Err(AppError::backup_invalid("备份提示词项目归属不一致"));
+        }
+        if !matches!(entry.kind.as_str(), "prompt" | "snippet") {
+            return Err(AppError::backup_invalid("备份提示词类型无效"));
+        }
+        let (name, normalized_name) = canonical_prompt_name(&entry.name)
+            .map_err(|error| AppError::backup_invalid(format!("提示词名称无效：{error}")))?;
+        if name != entry.name || normalized_name != entry.normalized_name {
+            return Err(AppError::backup_invalid("备份提示词名称规范化字段不匹配"));
+        }
+        let tags = canonical_prompt_tags(&entry.tags)
+            .map_err(|error| AppError::backup_invalid(format!("提示词标签无效：{error}")))?;
+        if tags != entry.tags {
+            return Err(AppError::backup_invalid("备份提示词标签不是规范数组"));
+        }
+        if !names.insert((entry.kind.as_str(), entry.normalized_name.as_str())) {
+            return Err(AppError::backup_invalid("备份包含重复提示词名称"));
+        }
+    }
+
+    let mut version_ids = HashSet::new();
+    let mut version_numbers = HashSet::new();
+    for version in &document.prompt_versions {
+        if version.id.trim().is_empty() || !version_ids.insert(version.id.as_str()) {
+            return Err(AppError::backup_invalid("备份包含重复或空提示词版本 ID"));
+        }
+        if version.project_id != document.project.id {
+            return Err(AppError::backup_invalid("备份提示词版本项目归属不一致"));
+        }
+        if !entry_ids.contains(version.prompt_id.as_str()) || version.version <= 0 {
+            return Err(AppError::backup_invalid("备份提示词版本引用或编号无效"));
+        }
+        if !version_numbers.insert((version.prompt_id.as_str(), version.version)) {
+            return Err(AppError::backup_invalid("备份包含重复提示词版本编号"));
+        }
+        let text = canonical_prompt_text(&version.text)
+            .map_err(|error| AppError::backup_invalid(format!("提示词版本正文无效：{error}")))?;
+        if text != version.text {
+            return Err(AppError::backup_invalid("备份提示词版本正文不是规范文本"));
+        }
+    }
     Ok(())
 }
 
@@ -1752,6 +1935,8 @@ async fn restore_rows_in_transaction(
     asset_ids: &HashMap<String, String>,
     snapshot_ids: &HashMap<String, String>,
     preset_ids: &HashMap<String, String>,
+    prompt_ids: &HashMap<String, String>,
+    prompt_version_ids: &HashMap<String, String>,
     batch_ids: &HashMap<String, String>,
     item_ids: &HashMap<String, String>,
     tag_ids: &HashMap<String, String>,
@@ -1770,6 +1955,50 @@ async fn restore_rows_in_transaction(
     .execute(&mut **transaction)
     .await
     .map_err(|error| AppError::database(error.to_string()))?;
+
+    for entry in &document.prompt_entries {
+        let prompt_id = prompt_ids
+            .get(&entry.id)
+            .ok_or_else(|| AppError::backup_invalid("提示词 ID 映射缺失"))?;
+        let tags_json = serde_json::to_string(&entry.tags)
+            .map_err(|error| AppError::backup_invalid(format!("提示词标签序列化失败：{error}")))?;
+        sqlx::query(
+            "INSERT INTO prompt_entries
+             (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(prompt_id)
+        .bind(&project.id)
+        .bind(&entry.kind)
+        .bind(&entry.name)
+        .bind(&entry.normalized_name)
+        .bind(tags_json)
+        .bind(&entry.created_at)
+        .bind(&entry.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for version in &document.prompt_versions {
+        let version_id = prompt_version_ids
+            .get(&version.id)
+            .ok_or_else(|| AppError::backup_invalid("提示词版本 ID 映射缺失"))?;
+        let prompt_id = prompt_ids
+            .get(&version.prompt_id)
+            .ok_or_else(|| AppError::backup_invalid("提示词版本引用缺少提示词映射"))?;
+        sqlx::query(
+            "INSERT INTO prompt_versions (id, prompt_id, version, text, created_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(version_id)
+        .bind(prompt_id)
+        .bind(version.version)
+        .bind(&version.text)
+        .bind(&version.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
 
     for reference in &document.workflow_refs {
         ensure_workflow_dependency(transaction, reference).await?;
@@ -2114,9 +2343,9 @@ async fn ensure_version_recipe_dependency(
 mod tests {
     use super::{
         collect_exact_asset_id_references, inspect_archive, remap_snapshot_asset_references,
-        restored_name, safe_zip_path, validate_organization_document, BackupAsset, BackupAssetTag,
-        BackupAssetTagLink, BackupDocument, BackupProject, BackupSnapshot, BackupTask,
-        ProjectBackupService,
+        restored_name, safe_zip_path, validate_organization_document, validate_prompt_document,
+        BackupAsset, BackupAssetTag, BackupAssetTagLink, BackupDocument, BackupProject,
+        BackupPromptEntry, BackupPromptVersion, BackupSnapshot, BackupTask, ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
@@ -2300,6 +2529,8 @@ mod tests {
             mappings: Vec::new(),
             snapshots: Vec::new(),
             presets: Vec::new(),
+            prompt_entries: Vec::new(),
+            prompt_versions: Vec::new(),
             batches: Vec::new(),
             items: Vec::new(),
             workflow_refs: Vec::new(),
@@ -2397,6 +2628,55 @@ mod tests {
             .expect("organization limits are inclusive");
     }
 
+    fn prompt_document() -> BackupDocument {
+        let mut document = organization_document(Vec::new(), Vec::new());
+        document.prompt_entries = vec![BackupPromptEntry {
+            id: "prm_1".to_owned(),
+            project_id: document.project.id.clone(),
+            kind: "prompt".to_owned(),
+            name: "中文起点".to_owned(),
+            normalized_name: "中文起点".to_owned(),
+            tags: vec!["人物".to_owned(), "Kera2".to_owned()],
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.prompt_versions = vec![BackupPromptVersion {
+            id: "prv_1".to_owned(),
+            project_id: document.project.id.clone(),
+            prompt_id: "prm_1".to_owned(),
+            version: 1,
+            text: "人物，柔光".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document
+    }
+
+    #[test]
+    fn backup_prompt_validation_rejects_duplicates_ownership_and_invalid_text() {
+        let valid = prompt_document();
+        validate_prompt_document(&valid).expect("valid prompt backup should pass");
+
+        let mut duplicate_entry = valid.clone();
+        duplicate_entry
+            .prompt_entries
+            .push(duplicate_entry.prompt_entries[0].clone());
+        assert!(validate_prompt_document(&duplicate_entry).is_err());
+
+        let mut wrong_project = valid.clone();
+        wrong_project.prompt_entries[0].project_id = "other-project".to_owned();
+        assert!(validate_prompt_document(&wrong_project).is_err());
+
+        let mut duplicate_version = valid.clone();
+        duplicate_version
+            .prompt_versions
+            .push(duplicate_version.prompt_versions[0].clone());
+        assert!(validate_prompt_document(&duplicate_version).is_err());
+
+        let mut invalid_text = valid;
+        invalid_text.prompt_versions[0].text = format!(" x{}", "x".repeat(64 * 1024));
+        assert!(validate_prompt_document(&invalid_text).is_err());
+    }
+
     #[tokio::test]
     async fn backup_round_trip_creates_new_project_and_keeps_asset_bytes() {
         let directory = tempdir().unwrap();
@@ -2413,6 +2693,35 @@ mod tests {
             .bind(project_root.to_string_lossy().to_string())
             .bind("2026-01-01T00:00:00Z")
             .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO prompt_entries (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at) VALUES (?, ?, 'prompt', ?, ?, ?, ?, ?)")
+            .bind("prm_backup")
+            .bind("project-backup")
+            .bind("中文起点")
+            .bind("中文起点")
+            .bind(r#"["人物","Kera2"]"#)
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO prompt_versions (id, prompt_id, version, text, created_at) VALUES (?, ?, ?, ?, ?)")
+            .bind("prv_backup_1")
+            .bind("prm_backup")
+            .bind(1_i64)
+            .bind("人物，柔光")
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO prompt_versions (id, prompt_id, version, text, created_at) VALUES (?, ?, ?, ?, ?)")
+            .bind("prv_backup_2")
+            .bind("prm_backup")
+            .bind(2_i64)
+            .bind("人物，硬光")
+            .bind("2026-01-01T00:00:30Z")
             .execute(&pool)
             .await
             .unwrap();
@@ -2491,7 +2800,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 2);
+        assert_eq!(manifest.version, 3);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -2591,6 +2900,20 @@ mod tests {
             template_count, 1,
             "restoring a project must not duplicate global project templates"
         );
+        let restored_prompt_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM prompt_entries WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let restored_version_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM prompt_versions v JOIN prompt_entries e ON e.id = v.prompt_id WHERE e.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((restored_prompt_count, restored_version_count), (1, 2));
     }
 
     #[tokio::test]
@@ -2637,6 +2960,52 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!((tags, favorites), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn fixed_v2_fixture_restores_with_empty_prompt_library() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let archive_path = directory.path().join("legacy-v2.zip");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({"format":"ai-studio-project-backup","version":2,"createdBy":"0.2.0","project":{"id":"legacy-v2-project","name":"旧项目 v2"}});
+        let project = json!({
+            "project":{"id":"legacy-v2-project","name":"旧项目 v2"},"description":null,
+            "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z",
+            "activeTasksExcluded":0,"incompleteTasksExcluded":0,"tasks":[],"taskEvents":[],"assets":[],
+            "mappings":[],"snapshots":[],"presets":[],"batches":[],"items":[],"workflowRefs":[],
+            "assetTags":[],"assetTagLinks":[],"assetFavorites":[]
+        });
+        writer.start_file("manifest.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+            .unwrap();
+        writer.start_file("project.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&project).unwrap().as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let preview = service.inspect(archive_path).await.unwrap();
+        assert_eq!(preview.prompt_entries, 0);
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM prompt_entries WHERE project_id = ?",
+            )
+            .bind(restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
     }
 
     #[tokio::test]
@@ -2724,6 +3093,24 @@ mod tests {
                 created_at: now.to_rfc3339(),
             }],
             presets: Vec::new(),
+            prompt_entries: vec![BackupPromptEntry {
+                id: "prm_atomic".to_owned(),
+                project_id: "project-original".to_owned(),
+                kind: "prompt".to_owned(),
+                name: "原子提示词".to_owned(),
+                normalized_name: "原子提示词".to_owned(),
+                tags: Vec::new(),
+                created_at: now.to_rfc3339(),
+                updated_at: now.to_rfc3339(),
+            }],
+            prompt_versions: vec![BackupPromptVersion {
+                id: "prv_atomic".to_owned(),
+                project_id: "project-original".to_owned(),
+                prompt_id: "prm_atomic".to_owned(),
+                version: 1,
+                text: "原子版本".to_owned(),
+                created_at: now.to_rfc3339(),
+            }],
             batches: Vec::new(),
             items: Vec::new(),
             workflow_refs: Vec::new(),
@@ -2743,6 +3130,9 @@ mod tests {
         let asset_ids = HashMap::new();
         let snapshot_ids = HashMap::from([(snapshot_id, "snp_restored".to_owned())]);
         let preset_ids = HashMap::new();
+        let prompt_ids = HashMap::from([("prm_atomic".to_owned(), "prm_restored".to_owned())]);
+        let prompt_version_ids =
+            HashMap::from([("prv_atomic".to_owned(), "prv_restored".to_owned())]);
         let batch_ids = HashMap::new();
         let item_ids = HashMap::new();
 
@@ -2754,6 +3144,8 @@ mod tests {
                 &asset_ids,
                 &snapshot_ids,
                 &preset_ids,
+                &prompt_ids,
+                &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
                 &HashMap::new(),
@@ -2790,6 +3182,13 @@ mod tests {
         assert_eq!(task_count, 0);
         assert_eq!(snapshot_count, 0);
         assert_eq!(asset_count, 0);
+        let prompt_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM prompt_entries WHERE project_id = ?")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(prompt_count, 0);
     }
 
     #[test]
@@ -2830,6 +3229,8 @@ mod tests {
             mappings: Vec::new(),
             snapshots: Vec::new(),
             presets: Vec::new(),
+            prompt_entries: Vec::new(),
+            prompt_versions: Vec::new(),
             batches: Vec::new(),
             items: Vec::new(),
             workflow_refs: Vec::new(),

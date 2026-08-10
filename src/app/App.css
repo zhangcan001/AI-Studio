@@ -1110,6 +1110,113 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   width: 100%;
 }
 
+.prompt-library-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--ux-border);
+  border-radius: 10px;
+  background: var(--ux-surface-1);
+}
+
+.prompt-library-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.prompt-library-panel > summary::-webkit-details-marker { display: none; }
+.prompt-library-panel > summary > span { display: grid; gap: 3px; }
+.prompt-library-panel > summary strong { color: var(--ux-text); }
+.prompt-library-panel > summary small { color: var(--ux-muted); }
+
+.prompt-library-toolbar,
+.prompt-library-form-row {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.prompt-library-toolbar label {
+  display: grid;
+  min-width: 130px;
+  flex: 1 1 150px;
+  gap: 5px;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
+.prompt-library-layout {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.65fr) minmax(0, 1.35fr);
+  gap: 10px;
+}
+
+.prompt-library-list,
+.prompt-library-detail,
+.prompt-library-save-current,
+.prompt-library-compare,
+.prompt-library-experiment {
+  display: grid;
+  gap: 8px;
+}
+
+.prompt-library-list {
+  align-content: start;
+  max-height: 390px;
+  overflow: auto;
+}
+
+.prompt-library-list-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 9px;
+  border: 1px solid var(--ux-border);
+  border-radius: 8px;
+  color: var(--ux-muted);
+  background: var(--ux-surface-0);
+  text-align: left;
+}
+
+.prompt-library-list-item strong { color: var(--ux-text); }
+.prompt-library-list-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-library-list-item.active { border-color: var(--ux-accent); background: var(--ux-surface-2); }
+
+.prompt-library-detail {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ux-border);
+  border-radius: 8px;
+  background: var(--ux-surface-0);
+}
+
+.prompt-library-save-current { padding-bottom: 9px; border-bottom: 1px solid var(--ux-border); }
+.prompt-library-form-row > input,
+.prompt-library-form-row > select { min-width: 0; flex: 1 1 140px; }
+.prompt-library-form-row > button { flex: 0 0 auto; }
+.prompt-library-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prompt-library-detail-heading > div { display: grid; gap: 3px; }
+.prompt-library-detail-heading span { color: var(--ux-muted); font-size: 0.76rem; }
+
+.prompt-library-versions { display: grid; gap: 8px; grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1fr); }
+.prompt-library-version-list { display: grid; align-content: start; gap: 4px; }
+.prompt-library-version-list button { display: grid; gap: 2px; padding: 7px; border: 1px solid var(--ux-border); border-radius: 6px; color: var(--ux-muted); background: var(--ux-surface-1); text-align: left; }
+.prompt-library-version-list button.active { border-color: var(--ux-accent); color: var(--ux-text); }
+.prompt-library-version-list small { font-size: 0.68rem; }
+.prompt-library-version-actions { display: flex; align-items: start; gap: 6px; flex-wrap: wrap; }
+.prompt-library-version-text { max-height: 145px; margin: 0; padding: 9px; overflow: auto; border-radius: 6px; color: var(--ux-text); background: var(--ux-surface-2); white-space: pre-wrap; font: inherit; font-size: 0.78rem; }
+.prompt-library-diff { display: grid; gap: 4px; color: var(--ux-muted); font-size: 0.76rem; }
+.prompt-library-diff span:first-child { color: var(--ux-danger); }
+.prompt-library-diff span:last-child { color: var(--ux-success); }
+.prompt-library-version-checks { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--ux-muted); font-size: 0.76rem; }
+.prompt-library-version-checks label { display: inline-flex; align-items: center; gap: 4px; }
+
 .studio-input-heading p,
 .creation-result-heading p {
   margin: 4px 0 0;
@@ -2517,6 +2624,16 @@ summary:focus-visible {
 
   .experiment-dimension-form {
     grid-template-columns: 1fr;
+  }
+
+  .prompt-library-layout,
+  .prompt-library-versions {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-library-panel > summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .asset-compare-workspace {

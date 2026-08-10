@@ -22,6 +22,7 @@ export interface ProjectBackupPreview {
   historyTasks: number;
   presets: number;
   productionQueues: number;
+  promptEntries: number;
   missingWorkflows: string[];
   activeTasksExcluded: number;
   warning: string;

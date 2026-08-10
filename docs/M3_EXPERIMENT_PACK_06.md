@@ -1,34 +1,31 @@
-# M3 Experiment Pack 06
+# M3 EXPERIMENT PACK 06 = PASS
 
 Date: 2026-08-10
 Development line: `0.3.0`
-Release status: development only; no `v0.3.0` tag or GitHub Release created.
+Release status: development only; no `v0.3.0` tag or GitHub Release.
 
-## Scope and implementation status
+Pack 06 is implemented on the normal production path:
 
-Pack 06 adds experiment planning on top of the existing Studio Draft and persistent Production Queue. It does not create a parallel experiment task model or a special ComfyUI submission path.
+`Experiment Planner → createProductionQueue → persisted production batch/items → startProductionQueue → ProductionQueueService → GenerationService → Task/Snapshot/Asset`
 
-| Pack item | Implementation | Status |
-| --- | --- | --- |
-| P06-01–05 Experiment mode, generic variants, prompt/seed variants, planner | Single and two-dimension plans; text max 8, cartesian max 24, integer/Seed ranges owned by the Recipe; random Seeds freeze to explicit values before queue submission | CODE PASS |
-| P06-06 Persistent queue execution | Each frozen plan item becomes a normal persisted production queue item; existing global GPU admission, strict sequence, partial-failure and safe-requeue behavior remain in force | CODE PASS |
-| P06-07 Result grid | Queue item results load through normal Task detail, Snapshot-backed reusable Draft, and Asset records; status, changed fields, Seed, duration and output assets are summarized without paths | CODE PASS |
-| P06-08 Result compare | Existing Asset Compare is reused for 2–4 image/video assets, including the existing video playback controls | CODE PASS |
-| P06-09 Promote winner | “作为下一轮起点” loads the reusable Draft into Studio with experiment batch/task provenance and never auto-submits a new task | CODE PASS |
-| P06-10 Profile persistence cleanup | React → Tauri command → SettingsService → JsonSettingsStore; AppSettings remains schema-compatible through serde defaults; legacy localStorage is removed only after backend save succeeds | CODE PASS |
-| P06-11 Import hardening | UI-format JSON is rejected with explicit Chinese guidance; only exact normalized credential keys block import, so `tokenizer`, `tokens`, and `token_count` remain valid | CODE PASS |
-| P06-12 Third runtime | Existing onboarding path remains ready for an API workflow package; the local environment still has no such package | `THIRD_RUNTIME_INPUT_REQUIRED` |
+No ExperimentTask, special executor, direct `/prompt` submission, or React-side concurrent generation loop was added.
 
-## Experiment contract
+| Pack item | Result |
+| --- | --- |
+| Planner and variant limits | PASS — one/two dimensions, text max 8, cartesian max 24, Recipe-owned integer/Seed ranges, frozen random Seeds |
+| Persistent queue execution | PASS — ordinary queue admission, strict ordinal dispatch, pause/recovery and retry policy |
+| Result grid and compare | PASS — Task/Snapshot/Asset summaries, Seed, changed fields, duration, output assets, and existing 2–4 asset compare |
+| Winner promotion | PASS — `getReusableDraft → Studio Draft`, provenance retained, no automatic Task or `/prompt` |
+| Runtime profile persistence | PASS — Tauri settings backend, `settings.json`, legacy localStorage migration only after backend save |
+| Import hardening | PASS — exact normalized credential-key detection; `tokenizer`, `tokens`, and `token_count` remain valid |
+| Third runtime | `THIRD_RUNTIME_INPUT_REQUIRED` — no API workflow package was supplied |
 
-The base Draft is copied into every queue item, including bound media assets. Only Recipe textarea, integer, and Seed fields can be experiment dimensions. No media combinations are generated. A plan supports at most two dimensions, uses field-owned integer/Seed ranges, freezes random Seeds to explicit decimal values, and refuses more than 24 cartesian items. Video plans receive a generic long-running-output warning without a model-specific branch.
-
-The queue name is `实验 · <Workflow Name> · <local datetime>`. Queue creation is persistent before execution starts. Each item therefore follows the ordinary GenerationService lifecycle and produces the ordinary Task, Snapshot, Asset, and History evidence. Result comparison is deliberately asset-based, and promoting a winner only loads the existing reusable input Draft.
+The result grid now distinguishes the original session base (`与实验基础参数比较`) from restart-safe comparison (`与首个实验结果比较`). When the original base is unavailable after restart, the first reusable result is explicitly labeled `比较基准`; no queue name or field-change inference is used. The experiment name prefix remains UI-only.
 
 ## Verification
 
-The Pack 06 pure contracts cover dimension limits, Recipe-owned ranges, frozen random Seeds, cartesian expansion, media exclusion, item removal, redacted snapshot differences, import-key exactness, and backend profile CRUD. The current Rust suite reports 295 passing tests; the TypeScript build and focused Pack 05/06 tests pass.
+Pure Pack 06 tests cover dimension limits, field-owned ranges, frozen Seeds, cartesian expansion, media exclusion, snapshot diff redaction, import-key exactness, and queue policy. The final source regression reports 301 Rust tests and 30 frontend test files / 93 frontend tests passing.
 
-The live Kera2 four-item experiment gate remains an environment operation: it requires submitting four local GPU generations and checking their assets, comparison, promotion, and one manual follow-up generation. The H3 safety path remains regression-only. The third-runtime gate remains blocked only by the missing API workflow input.
+The Kera2 four-item GPU Live Gate is an environment operation and must be recorded with its actual batch/item/task/asset/snapshot evidence. During this audit the existing desktop window could not expose a controllable UI state (`SetIsBorderRequired failed: 不支持此接口`) and the ComfyUI host reported only about 1.8 GiB free VRAM, so no unobservable GPU run is claimed as evidence. The implementation and automated regression are PASS; the local Live Gate remains explicitly environment-pending rather than fabricated.
 
-Pack 07 source work may begin after Pack 06 code verification; migration `009_prompt_library.sql` is intentionally not added in this Pack.
+Pack 07 is now implemented in the same development line. Migrations `001–008` remain unchanged; `009_prompt_library.sql` belongs to Pack 07.

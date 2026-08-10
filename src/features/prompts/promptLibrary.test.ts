@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import {
+  applyPromptSnippetToStudio,
   applyPromptVersionToStudio,
   comparePromptVersions,
   createPromptVersion,
   normalizePromptText,
   promptVersionValues,
+  selectPromptTargetField,
 } from "./promptLibrary";
 
 const recipe: RecipeViewModel = {
@@ -44,5 +46,30 @@ describe("Pack 07 prompt library source contracts", () => {
     expect(applied.values?.prompt).toEqual({ type: "string", value: "新的提示词" });
     expect(applyPromptVersionToStudio(recipe, values, "steps", version).issue).toBeTruthy();
     expect(promptVersionValues([version])).toEqual([{ type: "string", value: "新的提示词" }]);
+  });
+
+  it("applies snippets with explicit prepend, append, and replace semantics", () => {
+    const values: GenerationValues = {
+      prompt: { type: "string", value: "base" },
+    };
+    expect(applyPromptSnippetToStudio(recipe, values, "prompt", "head", "prepend").values?.prompt)
+      .toEqual({ type: "string", value: "head\nbase" });
+    expect(applyPromptSnippetToStudio(recipe, values, "prompt", "tail", "append").values?.prompt)
+      .toEqual({ type: "string", value: "base\ntail" });
+    expect(applyPromptSnippetToStudio(recipe, values, "prompt", "new", "replace").values?.prompt)
+      .toEqual({ type: "string", value: "new" });
+  });
+
+  it("requires an explicit target when a Recipe has multiple textareas", () => {
+    const multiTextareaRecipe = {
+      ...recipe,
+      fields: [
+        ...recipe.fields,
+        { key: "negative", type: "textarea" as const, label: "反向提示词", required: false, default: "" },
+      ],
+    };
+    expect(selectPromptTargetField(multiTextareaRecipe).issue).toContain("多个文字输入字段");
+    expect(selectPromptTargetField(multiTextareaRecipe, "missing").issue).toContain("不属于当前 Recipe");
+    expect(selectPromptTargetField(multiTextareaRecipe, "negative").fieldKey).toBe("negative");
   });
 });

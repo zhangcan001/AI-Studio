@@ -71,7 +71,10 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
     };
   }, [batch.items, projectId]);
 
-  const firstDraft = baseValues ?? records.find((record) => record.draft)?.draft?.values;
+  const firstReusableRecord = records.find((record) => record.draft);
+  const firstReusableItemId = firstReusableRecord?.itemId;
+  const comparisonBase = baseValues ?? firstReusableRecord?.draft?.values;
+  const comparisonLabel = baseValues ? "与实验基础参数比较" : "与首个实验结果比较";
 
   function addToCompare(asset: AssetView) {
     const result = toggleCompareSelection(compareAssets, asset);
@@ -85,7 +88,7 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
         <div>
           <span className="section-label">实验结果</span>
           <h3>结果择优</h3>
-          <p>结果仍来自普通 Task、Snapshot 和 Asset；这里只显示摘要差异，不暴露完整快照。</p>
+          <p>{comparisonLabel}。结果仍来自普通 Task、Snapshot 和 Asset；这里只显示摘要差异，不暴露完整快照。</p>
         </div>
         <div className="experiment-compare-toolbar">
           <span>已选 {compareAssets.length} / 4 个结果</span>
@@ -96,8 +99,16 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
       <div className="experiment-result-cards">
         {batch.items.map((item) => {
           const record = records.find((candidate) => candidate.itemId === item.id);
-          const diffBase = firstDraft;
+          const diffBase = comparisonBase;
           const diff = record?.draft && diffBase ? snapshotDiff(diffBase, record.draft.values, fieldLabels) : [];
+          const isComparisonBaseline = !baseValues && item.id === firstReusableItemId;
+          const emptyDiffLabel = baseValues
+            ? "与实验基础参数相同"
+            : isComparisonBaseline
+              ? "比较基准"
+              : record?.draft
+                ? "与首个实验结果相同"
+                : "等待可复用快照";
           const duration = experimentTaskDurationMs(record?.task?.createdAt, record?.task?.finishedAt, record?.task?.startedAt);
           const seed = record?.draft?.values && Object.values(record.draft.values).find((value) => value.type === "seed_fixed");
           return (
@@ -107,7 +118,7 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
                 <span className={`status-pill task-${(record?.task?.status ?? item.status).toLowerCase()}`}>{record?.task ? taskStatusLabel(record.task.status) : item.status}</span>
               </div>
               <dl className="experiment-result-facts">
-                <div><dt>变化字段</dt><dd>{diff.length ? diff.map((entry) => `${entry.fieldKey}：${entry.after}`).join(" · ") : "基准或等待快照"}</dd></div>
+                <div><dt>变化字段</dt><dd>{diff.length ? diff.map((entry) => `${entry.fieldKey}：${entry.after}`).join(" · ") : emptyDiffLabel}</dd></div>
                 <div><dt>Seed</dt><dd>{seed ? displayVariantValue(seed) : "—"}</dd></div>
                 <div><dt>任务用时</dt><dd>{duration === undefined ? "—" : formatDuration(duration)}</dd></div>
               </dl>

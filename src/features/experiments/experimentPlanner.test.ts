@@ -98,4 +98,16 @@ describe("experiment planner", () => {
       { fieldKey: "参考素材", before: "素材已绑定", after: "素材已绑定" },
     ]);
   });
+
+  it("accepts Prompt Library experiment inputs at 2 and 8 versions, but blocks 9", () => {
+    const versions = (count: number) => Array.from({ length: count }, (_, index) => ({
+      type: "string" as const,
+      value: `prompt-v${index + 1}`,
+    }));
+    expect(buildExperimentPlan({ recipe, baseValues, dimensions: [{ fieldKey: "prompt", values: versions(2) }] }).plan?.items).toHaveLength(2);
+    expect(buildExperimentPlan({ recipe, baseValues, dimensions: [{ fieldKey: "prompt", values: versions(8) }] }).plan?.items).toHaveLength(8);
+    const blocked = buildExperimentPlan({ recipe, baseValues, dimensions: [{ fieldKey: "prompt", values: versions(9) }] });
+    expect(blocked.plan).toBeUndefined();
+    expect(blocked.issues).toContain("文本字段“提示词”最多支持 8 个变体。");
+  });
 });
