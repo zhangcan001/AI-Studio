@@ -289,6 +289,20 @@ pub async fn production_queue_requeue_item(
         .map_err(map_queue_error)
 }
 
+#[tauri::command]
+pub async fn production_queue_requeue_item_by_item(
+    state: State<'_, AppState>,
+    project_id: String,
+    item_id: String,
+) -> Result<ProductionBatchDetailView, AppError> {
+    state
+        .production_queue_service
+        .requeue_item_by_item(&project_id, &item_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
 impl From<ProductionBatch> for ProductionBatchSummaryView {
     fn from(batch: ProductionBatch) -> Self {
         Self {

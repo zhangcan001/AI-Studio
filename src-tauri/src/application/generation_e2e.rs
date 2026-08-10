@@ -8,8 +8,8 @@ mod tests {
         AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError,
         ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyImageUpload,
         ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyUploadedImage,
-        GenerationSnapshotRepository, PromptSubmission, SystemStats, TaskRepository,
-        TaskUpdateSink,
+        GenerationSnapshotRepository, PromptSubmission, RepositoryError, SystemStats,
+        TaskRepository, TaskUpdateSink,
     };
     use crate::domain::{Asset, AssetId, SeedValue, Task, TaskEventType, TaskStatus};
     use crate::infrastructure::database::{
@@ -678,6 +678,103 @@ outputs:
             outcome,
         };
         (run, actions, upload_names)
+    }
+
+    #[tokio::test]
+    async fn task_hook_failure_fails_task_before_any_comfy_submission() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path().join("project");
+        std::fs::create_dir_all(&root).expect("project root");
+        let pool = initialize(&directory.path().join("app.db"))
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET root_path = ? WHERE id = 'project-1'")
+            .bind(root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("project root should update");
+        sqlx::query(
+            "UPDATE workflow_versions SET api_workflow_json = ? WHERE id = 'workflow-version-1'",
+        )
+        .bind(WORKFLOW_JSON)
+        .execute(&pool)
+        .await
+        .expect("workflow should update");
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+            .bind(RECIPE_YAML)
+            .execute(&pool)
+            .await
+            .expect("recipe should update");
+
+        let actions = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(FakeComfyAdapter {
+            mode: FakeMode::Success { image_count: 1 },
+            events: Arc::new(Mutex::new(VecDeque::new())),
+            prompt_id: Arc::new(Mutex::new(None)),
+            image_bytes: png_bytes(),
+            actions: actions.clone(),
+            upload_names: Arc::new(Mutex::new(Vec::new())),
+        });
+        let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
+        let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
+        let definition_repository =
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
+        let project_repository = Arc::new(SqliteProjectRepository::new(pool.clone()));
+        let asset_repository = Arc::new(SqliteAssetRepository::new(pool.clone()));
+        let service = Arc::new(GenerationService::new(
+            task_repository.clone(),
+            snapshot_repository,
+            definition_repository,
+            adapter,
+            project_repository,
+            Arc::new(FileSystemAssetStore::new()),
+            asset_repository,
+            Arc::new(FakeClock::new(clock_values())),
+        ));
+        let result = service
+            .start_generation_with_task_hook(
+                CreateGenerationRequest {
+                    project_id: "project-1".to_owned(),
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    values: BTreeMap::from([
+                        (
+                            "prompt".to_owned(),
+                            GenerationInputValue::Text("hook test".to_owned()),
+                        ),
+                        ("steps".to_owned(), GenerationInputValue::Integer(20)),
+                        (
+                            "seed".to_owned(),
+                            GenerationInputValue::Seed(SeedValue::Fixed(123)),
+                        ),
+                    ]),
+                },
+                |_task| async { Err(RepositoryError::integrity("simulated Shot binding failure")) },
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(GenerationServiceError::TaskCreatedHook { .. })
+        ));
+        let task = task_repository
+            .list_recent("project-1", 1)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(task.status, TaskStatus::Failed);
+        assert_eq!(
+            task.error.as_ref().map(|error| error.code.as_str()),
+            Some("TASK_HOOK_FAILED")
+        );
+        assert!(actions.lock().unwrap().is_empty());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM generation_snapshots")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
     }
 
     #[tokio::test]

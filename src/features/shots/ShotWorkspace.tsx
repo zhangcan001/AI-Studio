@@ -10,10 +10,12 @@ import {
   listShots,
   readAssetImage,
   readAssetThumbnail,
+  requeueProductionQueueItemByItem,
   replaceShotReferences,
   reorderShots,
   selectShotResult,
   setShotStageConfig,
+  startProductionQueue,
   updateShot,
 } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
@@ -22,13 +24,17 @@ import type { PromptEntryView } from "../../types/prompt";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
-import { deriveShotStatus, shotStatusLabels } from "./shotDomain";
+import { deriveShotStatus, recentShotFailure, shotStatusLabels } from "./shotDomain";
+import { ShotBatchPlanner } from "./ShotBatchPlanner";
+import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
+import { ShotProgressDashboard } from "./ShotProgressDashboard";
 import "./ShotWorkspace.css";
 
 interface Props {
   projectId: string;
   catalog: RecipeViewModel[];
   onOpenInStudio: (shot: ShotView, stage: ShotStage, recipe: RecipeViewModel) => void;
+  onOpenTask?: (taskId: string) => void;
 }
 
 type StageDraft = {
@@ -39,7 +45,7 @@ type StageDraft = {
 
 const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
-export function ShotWorkspace({ projectId, catalog, onOpenInStudio }: Props) {
+export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string>();
   const [stage, setStage] = useState<ShotStage>("image");
@@ -273,6 +279,40 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio }: Props) {
     finally { setBusy(false); }
   }
 
+  async function selectBatchResult(shotId: string, resultStage: ShotStage, assetId: string, fromLinkedTask: boolean) {
+    setBusy(true); setError(undefined);
+    try {
+      applyShot(await selectShotResult({ projectId, shotId, stage: resultStage, assetId, fromLinkedTask }));
+      setNotice(`${resultStage === "image" ? "关键帧" : "最终视频"}已确认；不会自动提交下一阶段。`);
+    } catch (selectError: unknown) {
+      setError(toUserMessage(selectError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryShot(shotId: string, retryStage: ShotStage) {
+    const shot = shots.find((item) => item.id === shotId);
+    const failedLink = shot?.generationLinks.find((link) => link.stage === retryStage && link.task?.status === "FAILED");
+    if (!shot || !failedLink) return;
+    setBusy(true); setError(undefined);
+    try {
+      if (failedLink.productionBatchItemId) {
+        const detail = await requeueProductionQueueItemByItem(projectId, failedLink.productionBatchItemId);
+        await startProductionQueue(projectId, detail.id);
+        setNotice("已创建新的普通队列项并开始处理；原失败任务和关联记录已保留。新队列仍按阶段严格串行。 ");
+      } else {
+        const task = await generateShot({ projectId, shotId, stage: retryStage });
+        setNotice(`已创建新的普通任务 ${task.id}；原失败任务仍保留。`);
+      }
+      await reload();
+    } catch (retryError: unknown) {
+      setError(toUserMessage(retryError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function loadPrompt() {
     const entry = promptEntries.find((item) => item.id === selectedPromptId);
     const version = entry?.versions[entry.versions.length - 1];
@@ -286,6 +326,8 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio }: Props) {
   const stageCandidateIds = new Set(stageLinks.flatMap((link) => link.task?.outputAssetIds ?? []));
   const stageCandidates = assets.filter((asset) => stageCandidateIds.has(asset.id) && (stage === "image" ? isImageAsset(asset) : isVideoAsset(asset)));
   const manualAssets = stage === "image" ? imageAssets : videoAssets;
+  const hasFrozenQueueLink = Boolean(selectedShot?.generationLinks.some((link) => link.productionBatchItemId));
+  const recentFailure = selectedShot ? recentShotFailure(selectedShot, stage) : undefined;
 
   if (loading) return <section className="workspace-panel shot-workspace"><p className="project-loading">正在加载镜头制作...</p></section>;
 
@@ -302,6 +344,14 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio }: Props) {
           <button type="button" className="quiet-button" onClick={() => void reload()} disabled={busy}>刷新</button>
         </div>
       </div>
+      <ShotProgressDashboard shots={shots} />
+      <ShotBatchPlanner
+        projectId={projectId}
+        shots={shots}
+        onRefresh={reload}
+        onNotice={(message) => setNotice(message)}
+        onError={(message) => setError(message)}
+      />
       <div className="shot-workspace-grid">
         <aside className="shot-list-pane" aria-label="镜头列表">
           <div className="shot-pane-heading"><strong>镜头列表</strong><span>{shots.length}</span></div>
@@ -343,6 +393,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio }: Props) {
                   <button type="button" className={stage === "image" ? "active" : ""} onClick={() => setStage("image")}>关键帧图片</button>
                   <button type="button" className={stage === "video" ? "active" : ""} onClick={() => setStage("video")}>参考图生视频</button>
                 </div>
+                {hasFrozenQueueLink && <p className="shot-frozen-config-warning"><strong>已有生产队列快照</strong>：本次配置编辑只影响后续新批次，已入队的任务继续使用冻结配置。</p>}
                 <label><span>{stage === "image" ? "图片阶段 Recipe" : "视频阶段 Recipe"}</span><select value={currentDraft?.recipeId ?? ""} onChange={(event) => changeStageRecipe(event.target.value)}><option value="">选择兼容输出</option>{stageRecipes.map((recipe) => <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={recipe.recipeId}>{recipe.name} · {recipe.mode}</option>)}</select></label>
                 {currentRecipe && <p className="shot-recipe-hint">按输出能力筛选；Shot 不根据模型名称分支。视频阶段只在配置了视频 Recipe 且已选择关键帧后可生成。</p>}
                 {currentRecipe?.fields.filter(isScalarField).map((field) => <ScalarControl key={field.key} field={field} value={currentDraft?.values[field.key]} onChange={(value) => changeScalar(field, value)} />)}
@@ -353,13 +404,23 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio }: Props) {
               <div className="shot-results-column">
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Reference</span><h4>参考素材关系</h4></div><button type="button" className="quiet-button" onClick={() => void replaceReferences()} disabled={busy}>保存关系</button></div><p className="shot-inline-note">仅保存当前项目素材 ID，不复制文件。图片阶段可选多个；视频阶段由关键帧自动映射。</p><div className="shot-asset-checklist">{(stage === "image" ? imageAssets : imageAssets).slice(0, 24).map((asset) => <label key={asset.id}><input type="checkbox" checked={currentReferences.has(asset.id)} onChange={() => setReferences((current) => { const next = new Set(current[stage]); if (next.has(asset.id)) next.delete(asset.id); else next.add(asset.id); return { ...current, [stage]: next }; })} /><AssetThumb projectId={projectId} asset={asset} /><span>{asset.name}</span></label>)}{imageAssets.length === 0 && <span className="empty-state">当前项目暂无图片素材。</span>}</div></section>
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Candidates</span><h4>{stage === "image" ? "图片候选" : "视频候选"}</h4></div></div><div className="shot-candidate-grid">{stageCandidates.map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, true)} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}{stageCandidates.length === 0 && <p className="empty-state">暂无该阶段任务候选；生成后结果会出现在这里。</p>}</div></section>
-                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">History</span><h4>生成历史</h4></div></div><div className="shot-history-list">{stageLinks.slice(0, 8).map((link) => <div key={link.id} className="shot-history-item"><span>{formatDateTime(link.createdAt)}</span><strong>{link.task?.status ?? "关联中"}</strong><small>{link.task?.id ?? link.id}</small></div>)}{stageLinks.length === 0 && <p className="empty-state">尚无生成任务。</p>}</div></section>
+                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">History</span><h4>生成历史</h4></div></div>{recentFailure && <div className="shot-recent-failure"><strong>最近失败记录（辅助信息）</strong><span>{recentFailure.error?.message ?? "任务失败"}</span>{onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(recentFailure.id)}>查看任务详情</button>}</div>}<div className="shot-history-list">{stageLinks.slice(0, 8).map((link) => <div key={link.id} className="shot-history-item"><span>{formatDateTime(link.createdAt)}</span><strong>{link.task?.status ?? "关联中"}</strong><small>{link.task?.id ?? link.id}</small></div>)}{stageLinks.length === 0 && <p className="empty-state">尚无生成任务。</p>}</div></section>
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Project assets</span><h4>当前项目素材</h4></div></div><div className="shot-manual-assets">{manualAssets.slice(0, 12).map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, false)} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}</div></section>
               </div>
             </div>
           </div>
         )}
       </div>
+      <ShotBatchReviewBoard
+        projectId={projectId}
+        shots={shots}
+        assets={assets}
+        stage={stage}
+        onAssetsLoaded={(loaded) => setAssets((current) => [...current, ...loaded.filter((asset) => !current.some((item) => item.id === asset.id))])}
+        onSelect={(shotId, reviewStage, assetId, fromLinkedTask) => void selectBatchResult(shotId, reviewStage, assetId, fromLinkedTask)}
+        onRetry={(shotId, reviewStage) => void retryShot(shotId, reviewStage)}
+        onOpenTask={onOpenTask}
+      />
       {notice && <p className="studio-notice">{notice}</p>}
       {error && <p className="error-message">{error}</p>}
     </section>

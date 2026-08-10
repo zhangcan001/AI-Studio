@@ -43,12 +43,19 @@ export function deriveStageStatus(
   if (latestTask && ACTIVE_TASK_STATUSES.has(latestTask.status)) {
     return stage === "image" ? "GENERATING_IMAGE" : "GENERATING_VIDEO";
   }
+  if (selected) return stage === "image" ? "IMAGE_SELECTED" : "COMPLETED";
   if (latestTask?.status === "FAILED") return "FAILED";
-  if (latestTask?.status === "SUCCEEDED" && !selected) {
+  if (latestTask?.status === "SUCCEEDED") {
     return stage === "image" ? "IMAGE_REVIEW" : "VIDEO_REVIEW";
   }
-  if (selected) return stage === "image" ? "IMAGE_SELECTED" : "COMPLETED";
   return shot.stageConfigs.some((config) => config.stage === stage) ? "READY" : "DRAFT";
+}
+
+export function recentShotFailure(shot: ShotView, stage: ShotStage) {
+  return shot.generationLinks
+    .filter((link) => link.stage === stage)
+    .map((link) => link.task)
+    .find((task) => task?.status === "FAILED");
 }
 
 export function deriveShotStatus(shot: ShotView): ShotStatus {

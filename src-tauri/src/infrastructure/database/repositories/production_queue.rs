@@ -2,14 +2,17 @@ use super::{
     format_datetime, i64_to_u64, map_domain_error, map_sqlx_error, parse_datetime, parse_json,
     parse_optional_datetime, serialize_json,
 };
-use crate::application::ports::{ActiveProductionItem, ProductionQueueRepository, RepositoryError};
+use crate::application::ports::{
+    ActiveProductionItem, ProductionQueueRepository, RepositoryError, ShotBatchBinding,
+    ShotBatchRepository,
+};
 use crate::domain::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
-    ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
+    ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, ShotStage,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 #[derive(Clone)]
 pub struct SqliteProductionQueueRepository {
@@ -30,53 +33,7 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         items: &[ProductionBatchItem],
     ) -> Result<(), RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
-        sqlx::query(
-            "INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(batch.id.as_str())
-        .bind(&batch.project_id)
-        .bind(&batch.name)
-        .bind(batch.status.as_str())
-        .bind(if batch.continue_on_failure { 1_i64 } else { 0_i64 })
-        .bind(batch.archived_at.as_ref().map(|value| format_datetime(value.to_owned())))
-        .bind(format_datetime(batch.created_at))
-        .bind(format_datetime(batch.updated_at))
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        for item in items {
-            let values_json =
-                serialize_json("production batch item values", Some(&item.values_json))?
-                    .ok_or_else(|| {
-                        RepositoryError::serialization(
-                            "production batch item values",
-                            "missing value",
-                        )
-                    })?;
-            sqlx::query(
-                "INSERT INTO production_batch_items
-                 (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(item.id.as_str())
-            .bind(item.batch_id.as_str())
-            .bind(i64::from(item.ordinal))
-            .bind(&item.workflow_version_id)
-            .bind(&item.recipe_id)
-            .bind(values_json)
-            .bind(item.status.as_str())
-            .bind(&item.task_id)
-            .bind(&item.retry_of_item_id)
-            .bind(&item.error_code)
-            .bind(&item.error_message)
-            .bind(format_datetime(item.created_at))
-            .bind(format_datetime(item.updated_at))
-            .execute(&mut *transaction)
-            .await
-            .map_err(map_sqlx_error)?;
-        }
+        insert_batch_records(&mut transaction, batch, items).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
@@ -385,6 +342,321 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
     }
 }
 
+#[async_trait]
+impl ShotBatchRepository for SqliteProductionQueueRepository {
+    async fn insert_batch_with_bindings(
+        &self,
+        batch: &ProductionBatch,
+        items: &[ProductionBatchItem],
+        bindings: &[ShotBatchBinding],
+    ) -> Result<(), RepositoryError> {
+        if bindings.len() != items.len() {
+            return Err(RepositoryError::integrity(
+                "Shot batch must provide exactly one binding for every production item",
+            ));
+        }
+        if items.iter().any(|item| item.batch_id != batch.id) {
+            return Err(RepositoryError::integrity(
+                "every Shot batch item must belong to the inserted production batch",
+            ));
+        }
+        let item_ids = items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let mut bound_items = std::collections::HashSet::new();
+        for binding in bindings {
+            if !item_ids.contains(binding.production_batch_item_id.as_str())
+                || !bound_items.insert(binding.production_batch_item_id.as_str())
+            {
+                return Err(RepositoryError::integrity(
+                    "each Shot batch item must be bound exactly once",
+                ));
+            }
+            if !matches!(binding.stage, ShotStage::Image | ShotStage::Video) {
+                return Err(RepositoryError::integrity("invalid Shot batch stage"));
+            }
+        }
+
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        for binding in bindings {
+            let shot_project =
+                sqlx::query_scalar::<_, String>("SELECT project_id FROM shots WHERE id = ?")
+                    .bind(&binding.shot_id)
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(map_sqlx_error)?
+                    .ok_or_else(|| RepositoryError::not_found("shot", &binding.shot_id))?;
+            if shot_project != batch.project_id {
+                return Err(RepositoryError::integrity(
+                    "Shot batch cannot bind a Shot from another project",
+                ));
+            }
+            let item_batch_project = sqlx::query_as::<_, (String, String, String)>(
+                "SELECT b.project_id, i.batch_id, i.status
+                 FROM production_batch_items i
+                 JOIN production_batches b ON b.id = i.batch_id
+                 WHERE i.id = ?",
+            )
+            .bind(&binding.production_batch_item_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if item_batch_project.is_some() {
+                return Err(RepositoryError::integrity(
+                    "production batch item already exists before Shot batch insertion",
+                ));
+            }
+        }
+        insert_batch_records(&mut transaction, batch, items).await?;
+        for binding in bindings {
+            let existing = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id = ?",
+            )
+            .bind(&binding.production_batch_item_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if existing != 0 {
+                return Err(RepositoryError::integrity(
+                    "production batch item already has a Shot generation link",
+                ));
+            }
+            sqlx::query(
+                "INSERT INTO shot_generation_links
+                 (id, shot_id, stage, task_id, production_batch_item_id, created_at)
+                 VALUES (?, ?, ?, NULL, ?, ?)",
+            )
+            .bind(format!("sgl_{}", uuid::Uuid::new_v4()))
+            .bind(&binding.shot_id)
+            .bind(binding.stage.as_str())
+            .bind(&binding.production_batch_item_id)
+            .bind(format_datetime(batch.created_at))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn bind_shot_item_task(
+        &self,
+        item_id: &str,
+        task_id: &str,
+        updated_at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let links = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT id, task_id FROM shot_generation_links
+             WHERE production_batch_item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if links.is_empty() {
+            transaction.rollback().await.map_err(map_sqlx_error)?;
+            return Ok(false);
+        }
+        if links.len() != 1 {
+            return Err(RepositoryError::integrity(
+                "production batch item has multiple Shot generation links",
+            ));
+        }
+        if links[0].1.is_some() {
+            return Err(RepositoryError::integrity(
+                "Shot generation link is already bound to a task",
+            ));
+        }
+        let item_updated = sqlx::query(
+            "UPDATE production_batch_items
+             SET status = 'DISPATCHED', task_id = ?, updated_at = ?
+             WHERE id = ? AND status = 'DISPATCHING' AND task_id IS NULL",
+        )
+        .bind(task_id)
+        .bind(format_datetime(updated_at))
+        .bind(item_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if item_updated.rows_affected() != 1 {
+            return Err(RepositoryError::integrity(
+                "Shot batch item is no longer in the dispatching state",
+            ));
+        }
+        let link_updated = sqlx::query(
+            "UPDATE shot_generation_links SET task_id = ?
+             WHERE production_batch_item_id = ? AND task_id IS NULL",
+        )
+        .bind(task_id)
+        .bind(item_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if link_updated.rows_affected() != 1 {
+            return Err(RepositoryError::integrity(
+                "Shot generation link could not be bound to the task",
+            ));
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(true)
+    }
+
+    async fn append_requeue_item_with_binding(
+        &self,
+        item: &ProductionBatchItem,
+        source_item_id: &str,
+        updated_at: DateTime<Utc>,
+    ) -> Result<bool, RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let link = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id, shot_id, stage FROM shot_generation_links
+             WHERE production_batch_item_id = ?",
+        )
+        .bind(source_item_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if link.is_empty() {
+            transaction.rollback().await.map_err(map_sqlx_error)?;
+            return Ok(false);
+        }
+        if link.len() != 1 {
+            return Err(RepositoryError::integrity(
+                "production batch item has multiple Shot generation links",
+            ));
+        }
+        let (_, shot_id, stage) = &link[0];
+        let stage = ShotStage::try_from_str(stage)
+            .map_err(|error| map_domain_error("Shot generation stage", error))?;
+        insert_requeue_item_record(&mut transaction, item).await?;
+        sqlx::query(
+            "INSERT INTO shot_generation_links
+             (id, shot_id, stage, task_id, production_batch_item_id, created_at)
+             VALUES (?, ?, ?, NULL, ?, ?)",
+        )
+        .bind(format!("sgl_{}", uuid::Uuid::new_v4()))
+        .bind(shot_id)
+        .bind(stage.as_str())
+        .bind(item.id.as_str())
+        .bind(format_datetime(item.created_at))
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "UPDATE production_batches SET status = 'PAUSED', archived_at = NULL, updated_at = ? WHERE id = ?",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(item.batch_id.as_str())
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(true)
+    }
+
+    async fn has_active_shot_binding(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+    ) -> Result<bool, RepositoryError> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM shot_generation_links l
+             JOIN production_batch_items i ON i.id = l.production_batch_item_id
+             JOIN production_batches b ON b.id = i.batch_id
+             WHERE l.shot_id = ? AND b.project_id = ?
+               AND i.status IN ('PENDING', 'DISPATCHING', 'DISPATCHED')",
+        )
+        .bind(shot_id)
+        .bind(project_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(count > 0)
+    }
+}
+
+async fn insert_batch_records(
+    transaction: &mut Transaction<'_, Sqlite>,
+    batch: &ProductionBatch,
+    items: &[ProductionBatchItem],
+) -> Result<(), RepositoryError> {
+    sqlx::query(
+        "INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(batch.id.as_str())
+    .bind(&batch.project_id)
+    .bind(&batch.name)
+    .bind(batch.status.as_str())
+    .bind(if batch.continue_on_failure { 1_i64 } else { 0_i64 })
+    .bind(batch.archived_at.as_ref().map(|value| format_datetime(value.to_owned())))
+    .bind(format_datetime(batch.created_at))
+    .bind(format_datetime(batch.updated_at))
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    for item in items {
+        let values_json = serialize_json("production batch item values", Some(&item.values_json))?
+            .ok_or_else(|| {
+                RepositoryError::serialization("production batch item values", "missing value")
+            })?;
+        sqlx::query(
+            "INSERT INTO production_batch_items
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(item.id.as_str())
+        .bind(item.batch_id.as_str())
+        .bind(i64::from(item.ordinal))
+        .bind(&item.workflow_version_id)
+        .bind(&item.recipe_id)
+        .bind(values_json)
+        .bind(item.status.as_str())
+        .bind(&item.task_id)
+        .bind(&item.retry_of_item_id)
+        .bind(&item.error_code)
+        .bind(&item.error_message)
+        .bind(format_datetime(item.created_at))
+        .bind(format_datetime(item.updated_at))
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+    }
+    Ok(())
+}
+
+async fn insert_requeue_item_record(
+    transaction: &mut Transaction<'_, Sqlite>,
+    item: &ProductionBatchItem,
+) -> Result<(), RepositoryError> {
+    let values_json = serialize_json("production batch item values", Some(&item.values_json))?
+        .ok_or_else(|| {
+            RepositoryError::serialization("production batch item values", "missing value")
+        })?;
+    sqlx::query(
+        "INSERT INTO production_batch_items
+         (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, ?, NULL, NULL, ?, ?)",
+    )
+    .bind(item.id.as_str())
+    .bind(item.batch_id.as_str())
+    .bind(i64::from(item.ordinal))
+    .bind(&item.workflow_version_id)
+    .bind(&item.recipe_id)
+    .bind(values_json)
+    .bind(&item.retry_of_item_id)
+    .bind(format_datetime(item.created_at))
+    .bind(format_datetime(item.updated_at))
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
 #[derive(sqlx::FromRow)]
 struct BatchRow {
     id: String,
@@ -525,10 +797,12 @@ impl ItemRow {
 #[cfg(test)]
 mod tests {
     use super::SqliteProductionQueueRepository;
-    use crate::application::ports::ProductionQueueRepository;
+    use crate::application::ports::{
+        ProductionQueueRepository, ShotBatchBinding, ShotBatchRepository,
+    };
     use crate::domain::{
         ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
-        ProductionBatchItemStatus, ProductionBatchStatus,
+        ProductionBatchItemStatus, ProductionBatchStatus, ShotStage,
     };
     use crate::infrastructure::database::{
         pool::initialize, repositories::test_support::seed_task_dependencies,
@@ -759,6 +1033,171 @@ mod tests {
         assert_eq!(
             active[0].item.status,
             ProductionBatchItemStatus::Dispatching
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn shot_batch_insert_is_atomic_and_concurrent_task_binding_has_one_winner() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("shot-batch.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        sqlx::query(
+            "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, created_at, updated_at)
+             VALUES ('sht_batch', 'project-1', 0, '批量镜头', '一只猫', ?, ?)",
+        )
+        .bind("2026-08-08T14:00:00Z")
+        .bind("2026-08-08T14:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        for task_id in ["tsk_batch_a", "tsk_batch_b"] {
+            sqlx::query(
+                "INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id, status, progress_mode, created_at)
+                 VALUES (?, 'project-1', 'workflow-1', 'workflow-version-1', 'recipe-1', 'CREATED', 'indeterminate', '2026-08-08T14:00:00Z')",
+            )
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 8, 14, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let item_id = ProductionBatchItemId::new();
+        let batch = ProductionBatch {
+            id: batch_id.clone(),
+            project_id: "project-1".to_owned(),
+            name: "Shot batch".to_owned(),
+            status: ProductionBatchStatus::Ready,
+            continue_on_failure: true,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let item = ProductionBatchItem {
+            id: item_id.clone(),
+            batch_id: batch_id.clone(),
+            ordinal: 0,
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values_json: json!({"prompt": {"type": "string", "value": "一只猫"}}),
+            status: ProductionBatchItemStatus::Pending,
+            task_id: None,
+            retry_of_item_id: None,
+            error_code: None,
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        };
+        repository
+            .insert_batch_with_bindings(
+                &batch,
+                std::slice::from_ref(&item),
+                &[ShotBatchBinding {
+                    shot_id: "sht_batch".to_owned(),
+                    stage: ShotStage::Image,
+                    production_batch_item_id: item_id.as_str().to_owned(),
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id = ?"
+            )
+            .bind(item_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert!(repository
+            .set_item_dispatching(&item_id, now)
+            .await
+            .unwrap());
+        let left = repository.clone();
+        let right = repository.clone();
+        let (first, second) = tokio::join!(
+            left.bind_shot_item_task(item_id.as_str(), "tsk_batch_a", now),
+            right.bind_shot_item_task(item_id.as_str(), "tsk_batch_b", now),
+        );
+        let wins = [first, second]
+            .into_iter()
+            .filter(|result| matches!(result, Ok(true)))
+            .count();
+        assert_eq!(wins, 1, "the item must have exactly one task binding");
+        let stored: (String, String) = sqlx::query_as(
+            "SELECT i.task_id, l.task_id
+             FROM production_batch_items i
+             JOIN shot_generation_links l ON l.production_batch_item_id = i.id
+             WHERE i.id = ?",
+        )
+        .bind(item_id.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored.0, stored.1);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn shot_batch_insert_rejects_invalid_binding_without_writing_batch() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("shot-batch-atomic.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 8, 15, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let item_id = ProductionBatchItemId::new();
+        let batch = ProductionBatch {
+            id: batch_id.clone(),
+            project_id: "project-1".to_owned(),
+            name: "Atomic Shot batch".to_owned(),
+            status: ProductionBatchStatus::Ready,
+            continue_on_failure: false,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let item = ProductionBatchItem {
+            id: item_id.clone(),
+            batch_id,
+            ordinal: 0,
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values_json: json!({}),
+            status: ProductionBatchItemStatus::Pending,
+            task_id: None,
+            retry_of_item_id: None,
+            error_code: None,
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(repository
+            .insert_batch_with_bindings(
+                &batch,
+                std::slice::from_ref(&item),
+                &[ShotBatchBinding {
+                    shot_id: "sht_missing".to_owned(),
+                    stage: ShotStage::Video,
+                    production_batch_item_id: item_id.as_str().to_owned(),
+                }],
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches WHERE id = ?")
+                .bind(batch.id.as_str())
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
         );
         pool.close().await;
     }

@@ -131,6 +131,15 @@ pub fn derive_stage_status(
                 ShotStage::Video => ShotViewStatus::GeneratingVideo,
             };
         }
+        // A selected result is durable user intent. A later retry/failure is
+        // auxiliary history and must not hide that selection from the Shot
+        // workflow state.
+        if selected {
+            return match stage {
+                ShotStage::Image => ShotViewStatus::ImageSelected,
+                ShotStage::Video => ShotViewStatus::Completed,
+            };
+        }
         if status == TaskStatus::Failed {
             return ShotViewStatus::Failed;
         }
@@ -209,6 +218,14 @@ mod tests {
         assert_eq!(
             derive_stage_status(ShotStage::Video, true, true, Some(TaskStatus::Succeeded)),
             ShotViewStatus::Completed
+        );
+        assert_eq!(
+            derive_stage_status(ShotStage::Image, true, true, Some(TaskStatus::Failed)),
+            ShotViewStatus::ImageSelected
+        );
+        assert_eq!(
+            derive_stage_status(ShotStage::Image, true, false, Some(TaskStatus::Failed)),
+            ShotViewStatus::Failed
         );
     }
 }

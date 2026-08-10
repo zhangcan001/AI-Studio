@@ -40,4 +40,15 @@ describe("Pack 09 shot status derivation", () => {
     expect(isExecutionTruthStatus("COMPLETED")).toBe(false);
     expect(deriveShotStatus(shot({ selectedImageAssetId: "ast-image" }))).toBe("COMPLETED");
   });
+
+  it("keeps a selected result as the primary state after a later failed retry", () => {
+    const selected = shot({
+      selectedImageAssetId: "ast-image",
+      stageConfigs: [{ stage: "image", workflowVersionId: "wfv-1", recipeId: "img", scalarValues: {}, updatedAt: "2026-01-01T00:00:00Z" }],
+      generationLinks: [{ id: "lnk-failed", stage: "image", taskId: "tsk-failed", createdAt: "2026-01-02T00:00:00Z", task: {
+        id: "tsk-failed", projectId: "project-1", status: "FAILED", progress: { mode: "indeterminate" }, createdAt: "2026-01-02T00:00:00Z", outputAssetIds: [],
+      } }],
+    });
+    expect(deriveStageStatus(selected, "image")).toBe("IMAGE_SELECTED");
+  });
 });

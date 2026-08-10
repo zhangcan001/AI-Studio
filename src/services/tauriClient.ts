@@ -9,7 +9,7 @@ import type {
 import type { AssetLibraryPage, AssetLibraryQuery, AssetView } from "../types/asset";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
-import type { ShotInputValues, ShotStage, ShotView } from "../types/shot";
+import type { ShotBatchPlan, ShotInputValues, ShotStage, ShotView } from "../types/shot";
 import type {
   ReusableGenerationDraft,
   TaskDetail,
@@ -335,6 +335,18 @@ export function generateShot(request: {
   return invoke<TaskView>("shot_generate", { request });
 }
 
+export function planShotBatch(projectId: string, stage: ShotStage): Promise<ShotBatchPlan> {
+  return invoke<ShotBatchPlan>("shot_batch_plan", { projectId, stage });
+}
+
+export function createShotBatch(request: {
+  projectId: string;
+  stage: ShotStage;
+  shotIds: string[];
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("shot_batch_create", { request });
+}
+
 export interface GenerationBatchItemRequest {
   workflowVersionId: string;
   recipeId: string;
@@ -412,6 +424,10 @@ export function requeueProductionQueueItem(
   itemId: string,
 ): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_requeue_item", { projectId, batchId, itemId });
+}
+
+export function requeueProductionQueueItemByItem(projectId: string, itemId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_requeue_item_by_item", { projectId, itemId });
 }
 
 export function listProjects(): Promise<ProjectView[]> {

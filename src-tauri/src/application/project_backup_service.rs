@@ -1992,6 +1992,7 @@ fn validate_shot_document(document: &BackupDocument) -> Result<(), AppError> {
         .collect::<HashSet<_>>();
     let mut link_ids = HashSet::new();
     let mut linked_tasks = HashSet::new();
+    let mut linked_batch_items = HashSet::new();
     for link in &document.shot_generation_links {
         if !shot_ids.contains(link.shot_id.as_str())
             || ShotStage::try_from_str(&link.stage).is_err()
@@ -2004,6 +2005,10 @@ fn validate_shot_document(document: &BackupDocument) -> Result<(), AppError> {
                 .production_batch_item_id
                 .as_ref()
                 .is_some_and(|item_id| !item_ids.contains(item_id.as_str()))
+            || link
+                .production_batch_item_id
+                .as_ref()
+                .is_some_and(|item_id| !linked_batch_items.insert(item_id.as_str()))
         {
             return Err(AppError::backup_invalid(
                 "备份镜头生成关联无效或引用未知任务",
@@ -3381,7 +3386,15 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO shot_generation_links (id, shot_id, stage, task_id, created_at) VALUES ('sgl_backup', 'sht_backup', 'image', 'tsk_backup', '2026-01-01T00:03:00Z')")
+        sqlx::query("INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at) VALUES ('pbt_backup', 'project-backup', '关键帧批次', 'COMPLETED', 0, NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at) VALUES ('pbi_backup', 'pbt_backup', 0, 'workflow-version-1', 'recipe-1', '{}', 'SUCCEEDED', 'tsk_backup', NULL, NULL, NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO shot_generation_links (id, shot_id, stage, task_id, production_batch_item_id, created_at) VALUES ('sgl_backup', 'sht_backup', 'image', 'tsk_backup', 'pbi_backup', '2026-01-01T00:03:00Z')")
             .execute(&pool)
             .await
             .unwrap();
@@ -3545,6 +3558,23 @@ mod tests {
             .await
             .unwrap(),
             1
+        );
+        let restored_batch_item: (String, String, Option<String>) = sqlx::query_as(
+            "SELECT i.id, i.batch_id, l.production_batch_item_id
+             FROM production_batch_items i
+             JOIN shot_generation_links l ON l.production_batch_item_id = i.id
+             JOIN production_batches b ON b.id = i.batch_id
+             WHERE b.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_batch_item.0, "pbi_backup");
+        assert_ne!(restored_batch_item.1, "pbt_backup");
+        assert_eq!(
+            restored_batch_item.2.as_deref(),
+            Some(restored_batch_item.0.as_str())
         );
     }
 

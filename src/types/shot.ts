@@ -67,3 +67,26 @@ export interface ShotCandidate {
 }
 
 export type ShotInputValues = Record<string, DraftValue>;
+
+export interface ShotBatchPlanRow {
+  shotId: string;
+  ordinal: number;
+  name: string;
+  stage: ShotStage;
+  workflowVersionId?: string;
+  recipeId?: string;
+  recipeName?: string;
+  currentStatus: string;
+  selectedImageAssetId?: string;
+  selectedVideoAssetId?: string;
+  eligible: boolean;
+  blockingReasons: string[];
+}
+
+export interface ShotBatchPlan {
+  projectId: string;
+  stage: ShotStage;
+  maxItems: number;
+  eligibleCount: number;
+  rows: ShotBatchPlanRow[];
+}

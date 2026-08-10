@@ -519,6 +519,10 @@ function App() {
           projectId={activeProject.id}
           catalog={catalog}
           onOpenInStudio={openShotInStudio}
+          onOpenTask={(taskId) => {
+            setFocusedTaskId(taskId);
+            setWorkspace("tasks");
+          }}
         />
       )}
       {activeProject && workspace === "assets" && (

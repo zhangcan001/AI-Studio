@@ -3,7 +3,8 @@ use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError,
 };
 use crate::application::ports::{
-    ActiveProductionItem, Clock, ProductionQueueRepository, RepositoryError, TaskRepository,
+    ActiveProductionItem, Clock, ProductionQueueRepository, RepositoryError, ShotBatchRepository,
+    TaskRepository,
 };
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::domain::{
@@ -67,6 +68,7 @@ pub struct ProductionQueueService {
     repository: Arc<dyn ProductionQueueRepository>,
     task_repository: Arc<dyn TaskRepository>,
     generation_service: Arc<GenerationService>,
+    shot_batch_repository: Arc<dyn ShotBatchRepository>,
     task_recovery_service: Arc<TaskRecoveryService>,
     clock: Arc<dyn Clock>,
     running_batches: Arc<Mutex<HashSet<String>>>,
@@ -79,6 +81,7 @@ impl ProductionQueueService {
         repository: Arc<dyn ProductionQueueRepository>,
         task_repository: Arc<dyn TaskRepository>,
         generation_service: Arc<GenerationService>,
+        shot_batch_repository: Arc<dyn ShotBatchRepository>,
         task_recovery_service: Arc<TaskRecoveryService>,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -86,6 +89,7 @@ impl ProductionQueueService {
             repository,
             task_repository,
             generation_service,
+            shot_batch_repository,
             task_recovery_service,
             clock,
             running_batches: Arc::new(Mutex::new(HashSet::new())),
@@ -484,8 +488,33 @@ impl ProductionQueueService {
             created_at: now,
             updated_at: now,
         };
-        self.repository.append_requeue_item(&retry, now).await?;
+        if !self
+            .shot_batch_repository
+            .append_requeue_item_with_binding(&retry, source.id.as_str(), now)
+            .await?
+        {
+            self.repository.append_requeue_item(&retry, now).await?;
+        }
         self.get(project_id, batch_id.as_str()).await
+    }
+
+    pub async fn requeue_item_by_item(
+        &self,
+        project_id: &str,
+        item_id: &str,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let batches = self.list(project_id).await?;
+        for batch in batches {
+            let Some(detail) = self.repository.find_detail(project_id, &batch.id).await? else {
+                continue;
+            };
+            if detail.items.iter().any(|item| item.id.as_str() == item_id) {
+                return self
+                    .requeue_item(project_id, batch.id.as_str(), item_id)
+                    .await;
+            }
+        }
+        Err(ProductionQueueError::NotFound(item_id.to_owned()))
     }
 
     pub async fn recover_and_resume(self: &Arc<Self>) -> Result<(), ProductionQueueError> {
@@ -782,14 +811,51 @@ impl ProductionQueueService {
                         continue;
                     }
                 };
+                let item_id = next.id.as_str().to_owned();
+                let shot_batch_repository = Arc::clone(&self.shot_batch_repository);
+                let queue_repository = Arc::clone(&self.repository);
+                let clock = Arc::clone(&self.clock);
                 let task = match self
                     .generation_service
-                    .start_generation(CreateGenerationRequest {
-                        project_id: project_id.to_owned(),
-                        workflow_version_id: next.workflow_version_id.clone(),
-                        recipe_id: next.recipe_id.clone(),
-                        values,
-                    })
+                    .start_generation_with_task_hook(
+                        CreateGenerationRequest {
+                            project_id: project_id.to_owned(),
+                            workflow_version_id: next.workflow_version_id.clone(),
+                            recipe_id: next.recipe_id.clone(),
+                            values,
+                        },
+                        move |task| {
+                            let item_id = item_id.clone();
+                            let shot_batch_repository = Arc::clone(&shot_batch_repository);
+                            let queue_repository = Arc::clone(&queue_repository);
+                            let clock = Arc::clone(&clock);
+                            let task_id = task.id.as_str().to_owned();
+                            async move {
+                                if shot_batch_repository
+                                    .bind_shot_item_task(&item_id, &task_id, clock.now())
+                                    .await?
+                                {
+                                    return Ok(());
+                                }
+                                if queue_repository
+                                    .link_item_task(
+                                        &ProductionBatchItemId::parse(item_id.clone()).map_err(
+                                            |error| RepositoryError::integrity(error.to_string()),
+                                        )?,
+                                        &task_id,
+                                        clock.now(),
+                                    )
+                                    .await?
+                                {
+                                    Ok(())
+                                } else {
+                                    Err(RepositoryError::integrity(
+                                        "production item task linkage was not persisted",
+                                    ))
+                                }
+                            }
+                        },
+                    )
                     .await
                 {
                     Ok(task) => task,
@@ -819,24 +885,7 @@ impl ProductionQueueService {
                         continue;
                     }
                 };
-                if !self
-                    .repository
-                    .link_item_task(&next.id, task.id.as_str(), self.clock.now())
-                    .await?
-                {
-                    self.repository
-                        .set_batch_status(
-                            project_id,
-                            batch_id,
-                            ProductionBatchStatus::Paused,
-                            self.clock.now(),
-                        )
-                        .await?;
-                    return Err(ProductionQueueError::InvalidState(
-                        "task was created but production item linkage was not persisted; batch paused to avoid duplicate dispatch"
-                            .to_owned(),
-                    ));
-                }
+                debug_assert!(!task.id.as_str().is_empty());
                 continue;
             }
 
@@ -982,7 +1031,7 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
     }
 }
 
-fn generation_values_to_json(values: &BTreeMap<String, GenerationInputValue>) -> Value {
+pub(crate) fn generation_values_to_json(values: &BTreeMap<String, GenerationInputValue>) -> Value {
     let mut object = Map::new();
     for (key, value) in values {
         let value = match value {

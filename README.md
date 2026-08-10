@@ -3,7 +3,7 @@
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
 Released: `0.2.0` (M2 Foundation Pack 01–04 verified; immutable release).
-Development: `0.3.0` (M3 Shot Production Pack 09; Pack 10 source follows).
+Development: `0.3.0` (M3 Shot Production Pack 09–10; code pass, live pending).
 The released `0.1.0` baseline remains available in the Git history and GitHub
 Release; this development cycle does not modify its tag or release assets.
 
@@ -150,9 +150,11 @@ execution. Evidence and operating limits are recorded in
 
 Kera2 image generation and MiniMax H3 reference-to-video remain the only
 production runtimes in the frozen 0.3.0 scope. Pack 09 adds a project-scoped
-Shot production pipeline on the existing GenerationService → Task → Snapshot →
-Asset chain; it does not create a second Task system or auto-submit another
-runtime.
+Shot production pipeline and Pack 10 adds persistent Shot batch planning,
+atomic Shot-to-queue binding, human review gates, sequential H3 production, and
+derived production progress on the existing GenerationService → Task →
+Snapshot → Asset chain. These packs do not create a second Task system or
+auto-submit another runtime.
 
 **AI Studio 0.1.0 Final Release Gate = PASS.** NSIS is the primary Windows
 installer; the final release evidence, artifact hashes, clean install/data
@@ -172,8 +174,9 @@ The v0.2.0 post-release integrity audit is recorded in
 new work is development-only on the 0.3.0 line.
 
 The current M3 scope and evidence are recorded in
-`docs/M3_SHOT_PRODUCTION_PACK_09.md`. Pack 05–08 remain historical milestone
-records; Pack 10 source direction is recorded in
+`docs/M3_SHOT_PRODUCTION_PACK_09.md` and
+`docs/M3_SHOT_BATCH_PACK_10.md`. Pack 05–08 remain historical milestone
+records; the Pack 10 source direction is preserved in
 `docs/M3_SHOT_BATCH_PACK_10_SOURCE.md`.
 
 Runtime Workflow Packages are loaded only from

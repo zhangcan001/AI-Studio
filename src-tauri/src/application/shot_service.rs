@@ -4,8 +4,8 @@ use crate::application::generation_service::{
 };
 use crate::application::ports::{
     AssetRepository, Clock, GenerationDefinitionRepository, PromptLibraryRepository,
-    RepositoryError, ShotData, ShotRecord, ShotRepository, ShotStageConfigRecord, TaskRepository,
-    TaskUpdatePayload,
+    RepositoryError, ShotBatchRepository, ShotData, ShotRecord, ShotRepository,
+    ShotStageConfigRecord, TaskRepository, TaskUpdatePayload,
 };
 use crate::application::prompt_library_service::canonical_prompt_text;
 use crate::application::task_query_service::TaskQueryService;
@@ -113,6 +113,7 @@ pub struct ShotService {
     prompt_repository: Arc<dyn PromptLibraryRepository>,
     task_query_service: Arc<TaskQueryService>,
     generation_service: Arc<GenerationService>,
+    shot_batch_repository: Arc<dyn ShotBatchRepository>,
     clock: Arc<dyn Clock>,
 }
 
@@ -126,6 +127,7 @@ impl ShotService {
         prompt_repository: Arc<dyn PromptLibraryRepository>,
         task_query_service: Arc<TaskQueryService>,
         generation_service: Arc<GenerationService>,
+        shot_batch_repository: Arc<dyn ShotBatchRepository>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
@@ -136,6 +138,7 @@ impl ShotService {
             prompt_repository,
             task_query_service,
             generation_service,
+            shot_batch_repository,
             clock,
         }
     }
@@ -207,6 +210,15 @@ impl ShotService {
 
     pub async fn delete(&self, project_id: &str, shot_id: &str) -> Result<(), ShotServiceError> {
         validate_project(project_id)?;
+        if self
+            .shot_batch_repository
+            .has_active_shot_binding(project_id, shot_id)
+            .await?
+        {
+            return Err(ShotServiceError::InvalidInput(
+                "该镜头已绑定待处理或运行中的生产队列，必须等待队列项进入终态后才能删除".to_owned(),
+            ));
+        }
         if !self.repository.delete(project_id, shot_id).await? {
             return Err(ShotServiceError::NotFound(shot_id.to_owned()));
         }
@@ -735,7 +747,7 @@ fn expected_output_label(output: OutputType) -> &'static str {
     }
 }
 
-fn scalar_values_to_json(
+pub(crate) fn scalar_values_to_json(
     inputs: &std::collections::BTreeMap<String, InputDefinition>,
     values: &BTreeMap<String, GenerationInputValue>,
 ) -> Result<Value, ShotServiceError> {
@@ -772,7 +784,7 @@ fn scalar_values_to_json(
     Ok(Value::Object(result))
 }
 
-fn scalar_values_from_json(
+pub(crate) fn scalar_values_from_json(
     value: &Value,
 ) -> Result<BTreeMap<String, GenerationInputValue>, ShotServiceError> {
     let Some(values) = value.as_object() else {

@@ -25,6 +25,7 @@ pub mod project_service;
 pub mod project_template_service;
 pub mod prompt_library_service;
 pub mod settings_service;
+pub mod shot_batch_service;
 pub mod shot_service;
 pub mod source_asset_import_service;
 pub mod task_cancellation_service;

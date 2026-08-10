@@ -12,6 +12,7 @@ use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
 use crate::application::prompt_library_service::PromptLibraryService;
 use crate::application::settings_service::SettingsService;
+use crate::application::shot_batch_service::ShotBatchService;
 use crate::application::shot_service::ShotService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
 use crate::application::task_cancellation_service::TaskCancellationService;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub preset_service: Arc<PresetService>,
     pub prompt_library_service: Arc<PromptLibraryService>,
     pub shot_service: Arc<ShotService>,
+    pub shot_batch_service: Arc<ShotBatchService>,
     pub organization_service: Arc<OrganizationService>,
     pub project_template_service: Arc<ProjectTemplateService>,
     pub production_queue_service: Arc<ProductionQueueService>,
@@ -72,6 +74,7 @@ impl AppState {
         preset_service: Arc<PresetService>,
         prompt_library_service: Arc<PromptLibraryService>,
         shot_service: Arc<ShotService>,
+        shot_batch_service: Arc<ShotBatchService>,
         organization_service: Arc<OrganizationService>,
         project_template_service: Arc<ProjectTemplateService>,
         production_queue_service: Arc<ProductionQueueService>,
@@ -98,6 +101,7 @@ impl AppState {
             preset_service,
             prompt_library_service,
             shot_service,
+            shot_batch_service,
             organization_service,
             project_template_service,
             production_queue_service,

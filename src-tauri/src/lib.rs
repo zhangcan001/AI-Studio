@@ -38,6 +38,7 @@ use application::{
     project_template_service::ProjectTemplateService,
     prompt_library_service::PromptLibraryService,
     settings_service::SettingsService,
+    shot_batch_service::ShotBatchService,
     shot_service::ShotService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
@@ -217,9 +218,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let shot_repository: Arc<dyn application::ports::ShotRepository> = Arc::new(
                 infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
             );
-            let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> = Arc::new(
+            let production_queue_repository_impl = Arc::new(
                 infrastructure::database::SqliteProductionQueueRepository::new(database_pool.clone()),
             );
+            let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> =
+                production_queue_repository_impl.clone();
+            let shot_batch_repository: Arc<dyn application::ports::ShotBatchRepository> =
+                production_queue_repository_impl.clone();
             let project_directory_store: Arc<dyn application::ports::ProjectDirectoryStore> =
                 Arc::new(FileSystemProjectDirectoryStore::new(
                     data_dirs.projects.clone(),
@@ -388,6 +393,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_queue_repository,
                 task_repository.clone(),
                 generation_service.clone(),
+                shot_batch_repository.clone(),
                 task_recovery_service.clone(),
                 clock.clone(),
             ));
@@ -440,13 +446,23 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             ));
             let shot_service = Arc::new(ShotService::new(
-                shot_repository,
+                shot_repository.clone(),
                 task_repository.clone(),
                 asset_repository.clone(),
                 definition_repository.clone(),
                 prompt_library_repository,
                 task_query_service.clone(),
                 generation_service.clone(),
+                shot_batch_repository.clone(),
+                clock.clone(),
+            ));
+            let shot_batch_service = Arc::new(ShotBatchService::new(
+                shot_repository,
+                shot_batch_repository,
+                task_repository.clone(),
+                asset_repository.clone(),
+                definition_repository.clone(),
+                project_repository.clone(),
                 clock,
             ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
@@ -478,6 +494,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 preset_service,
                 prompt_library_service,
                 shot_service,
+                shot_batch_service,
                 organization_service,
                 project_template_service,
                 production_queue_service,
@@ -650,6 +667,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_delete,
             commands::production_queue::production_queue_skip_item,
             commands::production_queue::production_queue_requeue_item,
+            commands::production_queue::production_queue_requeue_item_by_item,
             commands::project::project_list,
             commands::project::project_create,
             commands::project::project_update,
@@ -672,6 +690,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::shot::shot_references_replace,
             commands::shot::shot_result_select,
             commands::shot::shot_generate,
+            commands::shot_batch::shot_batch_plan,
+            commands::shot_batch::shot_batch_create,
             commands::organization::project_template_list,
             commands::organization::project_template_create,
             commands::organization::project_template_update,
