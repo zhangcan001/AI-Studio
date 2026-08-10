@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssetView } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
-import { buildH3BatchValues, isImageAssetForVideo, splitPromptBlocks } from "./assetVideoBatch";
+import { buildH3BatchValues, h3RecipeContract, isImageAssetForVideo, splitPromptBlocks } from "./assetVideoBatch";
 
 const recipe: RecipeViewModel = {
   workflowId: "wfl_minimax_h3_reference_video",
@@ -44,13 +44,62 @@ describe("独立视频批次输入", () => {
       "second\nline",
       "third",
     ]);
+    expect(splitPromptBlocks("one\n\ntwo\n\nthree\n\nfour\n\nfive")).toHaveLength(5);
+    expect(splitPromptBlocks("  \n\n\t ")).toEqual([]);
   });
 
-  it("freezes the H3 safe profile and binds one reference image", () => {
+  it("uses the Recipe duration default and freezes each public duration selection", () => {
     const values = buildH3BatchValues(recipe, "ast-image", "  move slowly  ");
-    expect(values.duration_seconds).toEqual({ type: "integer", value: 1 });
+    expect(values.duration_seconds).toEqual({ type: "integer", value: 5 });
     expect(values.prompt).toEqual({ type: "string", value: "move slowly" });
     expect(values.reference_image).toEqual({ type: "image_asset", assetId: "ast-image" });
     expect(values.seed).toEqual({ type: "seed_random" });
+    expect(buildH3BatchValues(recipe, "ast-image", "one", 1).duration_seconds).toEqual({ type: "integer", value: 1 });
+    expect(buildH3BatchValues(recipe, "ast-image", "three", 3).duration_seconds).toEqual({ type: "integer", value: 3 });
+    expect(buildH3BatchValues(recipe, "ast-image", "five", 5).duration_seconds).toEqual({ type: "integer", value: 5 });
+    expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 0)).toThrow("1–5");
+    expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 6)).toThrow("1–5");
+  });
+
+  it("builds an independent H3 item from either source or generated image assets", () => {
+    const source = asset({ id: "ast-source", category: "source_image" });
+    const generated = asset({ id: "ast-generated", category: "generated_image" });
+    expect(isImageAssetForVideo(source)).toBe(true);
+    expect(isImageAssetForVideo(generated)).toBe(true);
+    expect(buildH3BatchValues(recipe, source.id, "source motion").reference_image).toEqual({
+      type: "image_asset",
+      assetId: "ast-source",
+    });
+    expect(buildH3BatchValues(recipe, generated.id, "generated motion").reference_image).toEqual({
+      type: "image_asset",
+      assetId: "ast-generated",
+    });
+  });
+
+  it("requires the exact H3 semantic keys and types", () => {
+    expect(h3RecipeContract(recipe)).toMatchObject({ ok: true });
+    for (const [key, type, message] of [
+      ["prompt", "integer", "prompt"],
+      ["reference_image", "textarea", "reference_image"],
+      ["duration_seconds", "textarea", "duration_seconds"],
+      ["seed", "textarea", "seed"],
+    ] as const) {
+      const invalid = {
+        ...recipe,
+        fields: recipe.fields.map((field) => field.key === key ? { ...field, type } : field),
+      } as RecipeViewModel;
+      const result = h3RecipeContract(invalid);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toContain(message);
+    }
+  });
+
+  it("rejects a Recipe range outside the public 1–5 second contract", () => {
+    const invalid = {
+      ...recipe,
+      fields: recipe.fields.map((field) => field.key === "duration_seconds" ? { ...field, min: 0, max: 6 } : field),
+    };
+    const result = h3RecipeContract(invalid);
+    expect(result).toEqual({ ok: false, reason: "H3 Recipe 的 duration_seconds 范围必须是 1–5 秒且包含默认值。" });
   });
 });

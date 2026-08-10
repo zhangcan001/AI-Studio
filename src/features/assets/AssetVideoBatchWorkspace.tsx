@@ -5,7 +5,7 @@ import type { RecipeViewModel } from "../../types/generation";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
-import { buildH3BatchValues, h3PromptField, h3ReferenceField, isImageAssetForVideo } from "./assetVideoBatch";
+import { buildH3BatchValues, h3RecipeContract, isImageAssetForVideo } from "./assetVideoBatch";
 import { ProductionQueuePanel } from "../studio/ProductionQueuePanel";
 import type { BatchDraftItem } from "../studio/batchDraft";
 
@@ -36,11 +36,16 @@ export function AssetVideoBatchWorkspace({
     () => catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video")),
     [catalog],
   );
-  const promptField = recipe ? h3PromptField(recipe) : undefined;
-  const referenceField = recipe ? h3ReferenceField(recipe) : undefined;
+  const contract = useMemo(
+    () => recipe
+      ? h3RecipeContract(recipe)
+      : { ok: false as const, reason: "运行目录中没有精确的 MiniMax H3 Recipe。" },
+    [recipe],
+  );
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initialAssets.map((asset) => asset.id)));
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [durationSeconds, setDurationSeconds] = useState<number>();
   const [createdBatchId, setCreatedBatchId] = useState<string>();
   const [createdBatchStarted, setCreatedBatchStarted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -64,24 +69,38 @@ export function AssetVideoBatchWorkspace({
     return () => { active = false; };
   }, [initialAssets, projectId]);
 
+  useEffect(() => {
+    setDurationSeconds(contract.ok ? contract.contract.durationField.default : undefined);
+  }, [contract]);
+
   const selectedAssets = initialAssets.filter((asset) => selectedIds.has(asset.id));
   const imageAssets = selectedAssets.filter(isImageAssetForVideo);
   const missingPromptAssets = imageAssets.filter((asset) => !prompts[asset.id]?.trim());
-  const runtimeReady = Boolean(recipe && referenceField && promptField && comfyConnected && taskEventsReady);
+  const oversizedPromptAssets = imageAssets.filter((asset) =>
+    new TextEncoder().encode(prompts[asset.id] ?? "").byteLength > 64 * 1024,
+  );
+  const selectedDuration = contract.ok ? durationSeconds ?? contract.contract.durationField.default : undefined;
+  const durationReady = Boolean(
+    contract.ok
+      && selectedDuration !== undefined
+      && contract.contract.durationOptions.includes(selectedDuration),
+  );
+  const runtimeReady = Boolean(contract.ok && comfyConnected && taskEventsReady && durationReady);
   const canCreate = Boolean(
     runtimeReady &&
       !productionAdmission.busy &&
       imageAssets.length > 0 &&
       missingPromptAssets.length === 0 &&
+      oversizedPromptAssets.length === 0 &&
       imageAssets.length <= 100,
   );
-  const batchItems: BatchDraftItem[] = recipe
+  const batchItems: BatchDraftItem[] = recipe && contract.ok && selectedDuration !== undefined
     ? imageAssets.map((asset) => ({
       id: asset.id,
       workflowName: recipe.name,
       workflowVersionId: recipe.workflowVersionId,
       recipeId: recipe.recipeId,
-      values: buildH3BatchValues(recipe, asset.id, prompts[asset.id] ?? ""),
+      values: buildH3BatchValues(recipe, asset.id, prompts[asset.id] ?? "", selectedDuration),
     }))
     : [];
 
@@ -118,7 +137,7 @@ export function AssetVideoBatchWorkspace({
   }
 
   async function createBatch() {
-    if (!recipe || !canCreate) return;
+    if (!recipe || !contract.ok || selectedDuration === undefined || !canCreate) return;
     setBusy(true); setNotice(undefined);
     try {
       await Promise.all(imageAssets.map((asset) => setAssetVideoPrompt(projectId, asset.id, prompts[asset.id] ?? "")));
@@ -179,7 +198,26 @@ export function AssetVideoBatchWorkspace({
       <section className="h3-safety-card" aria-label="H3 安全配置">
         <div>
           <strong>MiniMax H3 安全配置</strong>
-          <p>0.1 MP · 1 秒 · 4 步 · 一次只运行一个项目</p>
+          <p>0.1 MP · 4 步 · 单任务串行</p>
+        </div>
+        <div className="h3-duration-control">
+          <label htmlFor="h3-duration-seconds">视频时长</label>
+          <select
+            id="h3-duration-seconds"
+            value={selectedDuration ?? ""}
+            onChange={(event) => setDurationSeconds(Number(event.target.value))}
+            disabled={busy || !contract.ok}
+          >
+            <option value="" disabled>Recipe 不可用</option>
+            {contract.ok && contract.contract.durationOptions.map((option) => (
+              <option key={option} value={option}>{option} 秒</option>
+            ))}
+          </select>
+          <small>
+            {contract.ok
+              ? `Recipe 范围 ${contract.contract.durationField.min}–${contract.contract.durationField.max} 秒 · 默认 ${contract.contract.durationField.default} 秒`
+              : "H3 runtime unavailable"}
+          </small>
         </div>
         <small>{recipe ? `运行时已锁定：${MINIMAX_H3_WORKFLOW_ID}` : "运行时未就绪"}</small>
       </section>
@@ -194,7 +232,7 @@ export function AssetVideoBatchWorkspace({
         <>
           <div className="asset-video-batch-summary">
             <span>已选择 <strong>{selectedAssets.length}</strong> 项</span>
-            <span>符合条件 <strong>{imageAssets.length - missingPromptAssets.length}</strong> 项</span>
+            <span>符合条件 <strong>{imageAssets.length - missingPromptAssets.length - oversizedPromptAssets.length}</strong> 项</span>
             <span>未填写提示词 <strong>{missingPromptAssets.length}</strong> 项</span>
           </div>
           <div className="asset-video-batch-list" aria-label="视频生产素材列表">
@@ -206,13 +244,17 @@ export function AssetVideoBatchWorkspace({
                 ? "不是图片素材"
                 : !promptReady
                   ? "未填写视频提示词"
-                  : !recipe
-                    ? "H3 配方不可用"
-                    : !comfyConnected
-                      ? "ComfyUI 未连接"
-                      : !taskEventsReady
-                        ? "任务事件通道未就绪"
-                        : "符合条件";
+                  : oversizedPromptAssets.some((item) => item.id === asset.id)
+                    ? "视频提示词超过 64 KiB"
+                    : !contract.ok
+                      ? "H3 runtime unavailable"
+                      : !comfyConnected
+                        ? "ComfyUI 未连接"
+                        : !taskEventsReady
+                          ? "任务事件通道未就绪"
+                          : !durationReady
+                            ? "请选择有效时长"
+                            : "符合条件";
               return (
                 <article key={asset.id} className={`asset-video-batch-card${checked ? " asset-video-batch-card-selected" : ""}`}>
                   <label className="asset-video-select-control">
@@ -254,8 +296,9 @@ export function AssetVideoBatchWorkspace({
             </button>
             {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
           </div>
-          {!runtimeReady && <p className="error-message">H3 暂不可用：请确认 ComfyUI、任务事件通道和精确 H3 Recipe 已就绪。</p>}
+          {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : "运行时未就绪。") : contract.reason}</p>}
           {missingPromptAssets.length > 0 && <p className="disabled-note">请先为所有已选图片保存视频提示词；批次创建时会冻结当前内容。</p>}
+          {oversizedPromptAssets.length > 0 && <p className="error-message">视频提示词按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
         </>
       )}
       {notice && <p className="studio-notice" role="status">{notice}</p>}

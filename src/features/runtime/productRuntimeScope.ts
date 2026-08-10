@@ -1,4 +1,4 @@
-import type { RecipeViewModel } from "../../types/generation";
+import type { RecipeField, RecipeViewModel } from "../../types/generation";
 
 export const KERA2_WORKFLOW_ID = "wfl_kera2_t2i_local_v2" as const;
 export const MINIMAX_H3_WORKFLOW_ID = "wfl_minimax_h3_reference_video" as const;
@@ -34,4 +34,13 @@ export function isProductionRuntimeForStage(stage: ProductionShotStage, workflow
 
 export function filterProductionRuntimeCatalog(catalog: RecipeViewModel[]): RecipeViewModel[] {
   return catalog.filter((recipe) => productionRuntimeForWorkflowId(recipe.workflowId) !== undefined);
+}
+
+export function kera2PromptField(
+  recipe: RecipeViewModel,
+): Extract<RecipeField, { type: "textarea" }> | undefined {
+  if (recipe.workflowId !== KERA2_WORKFLOW_ID) return undefined;
+  return recipe.fields.find((field) => field.key === "prompt" && field.type === "textarea") as
+    | Extract<RecipeField, { type: "textarea" }>
+    | undefined;
 }

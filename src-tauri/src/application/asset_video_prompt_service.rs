@@ -164,3 +164,143 @@ impl From<RepositoryError> for AssetVideoPromptError {
         Self::Repository(error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{AssetVideoPromptError, AssetVideoPromptService, MAX_ASSET_VIDEO_PROMPT_BYTES};
+    use crate::infrastructure::database::repositories::test_support;
+    use crate::infrastructure::database::{
+        initialize, SqliteAssetRepository, SqliteAssetVideoPromptRepository,
+    };
+    use crate::infrastructure::time::SystemClock;
+    use sqlx::SqlitePool;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    const PROJECT_ID: &str = "prj_default";
+    const OTHER_PROJECT_ID: &str = "prj_00000000-0000-0000-0000-000000000002";
+
+    async fn fixture() -> (TempDir, SqlitePool, AssetVideoPromptService) {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let pool = initialize(&directory.path().join("app.db"))
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES (?, 'Default', 'C:/default', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(PROJECT_ID)
+        .execute(&pool)
+        .await
+        .expect("default project fixture should insert");
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES (?, 'Other', 'C:/other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(OTHER_PROJECT_ID)
+        .execute(&pool)
+        .await
+        .expect("second project fixture should insert");
+        sqlx::query(
+            "INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id, status, created_at, finished_at)
+             VALUES ('tsk_generated_prompt', ?, 'workflow-1', 'workflow-version-1', 'recipe-1', 'SUCCEEDED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z')",
+        )
+        .bind(PROJECT_ID)
+        .execute(&pool)
+        .await
+        .expect("generated asset task fixture should insert");
+        for (id, project_id, asset_type, category) in [
+            ("ast_source", PROJECT_ID, "image", "source_image"),
+            ("ast_generated", PROJECT_ID, "image", "generated_image"),
+            ("ast_video", PROJECT_ID, "video", "source_video"),
+            ("ast_audio", PROJECT_ID, "audio", "source_audio"),
+            ("ast_cross", OTHER_PROJECT_ID, "image", "source_image"),
+        ] {
+            sqlx::query(
+                "INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, duration_ms, file_size, metadata_json, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'sha', 'application/octet-stream', 1, 1, NULL, 1, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(id)
+            .bind(project_id)
+            .bind(asset_type)
+            .bind(category)
+            .bind(id)
+            .bind(format!("{id}.bin"))
+            .bind(format!("C:/assets/{id}.bin"))
+            .execute(&pool)
+            .await
+            .expect("asset fixture should insert");
+        }
+        sqlx::query(
+            "UPDATE assets SET source_task_id = 'tsk_generated_prompt' WHERE id = 'ast_generated'",
+        )
+        .execute(&pool)
+        .await
+        .expect("generated asset source task should be linked");
+        let service = AssetVideoPromptService::new(
+            Arc::new(SqliteAssetVideoPromptRepository::new(pool.clone())),
+            Arc::new(SqliteAssetRepository::new(pool.clone())),
+            Arc::new(SystemClock),
+        );
+        (directory, pool, service)
+    }
+
+    fn assert_invalid<T>(result: Result<T, AssetVideoPromptError>) {
+        assert!(matches!(
+            result,
+            Err(AssetVideoPromptError::InvalidInput(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn accepts_source_and_generated_images() {
+        let (_directory, pool, service) = fixture().await;
+        let source = service
+            .set(PROJECT_ID, "ast_source", "  source camera move  ")
+            .await
+            .expect("source image prompt should pass");
+        let generated = service
+            .set(PROJECT_ID, "ast_generated", "generated image motion")
+            .await
+            .expect("generated image prompt should pass");
+        assert_eq!(source.prompt_text, "source camera move");
+        assert_eq!(generated.prompt_text, "generated image motion");
+        let records = service
+            .list(
+                PROJECT_ID,
+                &["ast_source".to_owned(), "ast_generated".to_owned()],
+            )
+            .await
+            .expect("image prompts should list");
+        assert_eq!(records.len(), 2);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn rejects_video_audio_cross_project_and_empty_prompts() {
+        let (_directory, pool, service) = fixture().await;
+        assert_invalid(service.set(PROJECT_ID, "ast_video", "move").await);
+        assert_invalid(service.set(PROJECT_ID, "ast_audio", "move").await);
+        assert!(matches!(
+            service.set(PROJECT_ID, "ast_cross", "move").await,
+            Err(AssetVideoPromptError::NotFound(_))
+        ));
+        assert_invalid(service.set(PROJECT_ID, "ast_source", "").await);
+        assert_invalid(service.set(PROJECT_ID, "ast_source", " \n\t ").await);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn enforces_the_utf8_64_kib_prompt_limit_inclusive() {
+        let (_directory, pool, service) = fixture().await;
+        let accepted = "x".repeat(MAX_ASSET_VIDEO_PROMPT_BYTES);
+        service
+            .set(PROJECT_ID, "ast_source", &accepted)
+            .await
+            .expect("exactly 64 KiB should pass");
+        let rejected = format!("{accepted}x");
+        assert_invalid(service.set(PROJECT_ID, "ast_source", &rejected).await);
+        pool.close().await;
+    }
+}

@@ -3,6 +3,7 @@ import type { RecipeViewModel } from "../../types/generation";
 import {
   filterProductionRuntimeCatalog,
   isProductionRuntimeForStage,
+  kera2PromptField,
   productionRuntimeForStage,
   productionRuntimeForWorkflowId,
   PRODUCTION_WORKFLOW_IDS,
@@ -46,5 +47,19 @@ describe("0.3.0 product runtime scope", () => {
     expect(productionRuntimeForStage("video", MINIMAX_H3_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(isProductionRuntimeForStage("video", KERA2_WORKFLOW_ID)).toBe(false);
     expect(isProductionRuntimeForStage("image", MINIMAX_H3_WORKFLOW_ID)).toBe(false);
+  });
+
+  it("requires Krea2's exact prompt textarea key instead of the first textarea", () => {
+    const valid = recipe(KERA2_WORKFLOW_ID, "Krea2");
+    valid.fields = [
+      { key: "negative_prompt", type: "textarea", label: "Negative", required: false, default: "" },
+      { key: "prompt", type: "textarea", label: "Prompt", required: true, default: "" },
+    ];
+    expect(kera2PromptField(valid)?.key).toBe("prompt");
+    const missing = {
+      ...valid,
+      fields: [{ key: "text", type: "textarea" as const, label: "Text", required: true, default: "" }],
+    };
+    expect(kera2PromptField(missing)).toBeUndefined();
   });
 });

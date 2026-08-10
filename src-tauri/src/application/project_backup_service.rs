@@ -3000,8 +3000,9 @@ async fn ensure_version_recipe_dependency(
 mod tests {
     use super::{
         collect_exact_asset_id_references, inspect_archive, remap_snapshot_asset_references,
-        restored_name, safe_zip_path, validate_organization_document, validate_prompt_document,
-        BackupAsset, BackupAssetTag, BackupAssetTagLink, BackupDocument, BackupProject,
+        restored_name, safe_zip_path, validate_asset_video_prompt_document,
+        validate_organization_document, validate_prompt_document, BackupAsset, BackupAssetTag,
+        BackupAssetTagLink, BackupAssetVideoPrompt, BackupDocument, BackupProject,
         BackupPromptEntry, BackupPromptVersion, BackupSnapshot, BackupTask, ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
@@ -3339,6 +3340,48 @@ mod tests {
         assert!(validate_prompt_document(&invalid_text).is_err());
     }
 
+    #[test]
+    fn backup_asset_video_prompt_validation_rejects_malicious_entries() {
+        let valid_prompt = BackupAssetVideoPrompt {
+            asset_id: "ast_organization".to_owned(),
+            project_id: "project-organization".to_owned(),
+            prompt_text: "camera moves slowly".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        let mut valid = organization_document(Vec::new(), Vec::new());
+        valid.asset_video_prompts = vec![valid_prompt.clone()];
+        validate_asset_video_prompt_document(&valid)
+            .expect("an image-owned prompt should pass validation");
+
+        let mut video_asset = valid.clone();
+        video_asset.assets[0].asset_type = "video".to_owned();
+        assert!(validate_asset_video_prompt_document(&video_asset).is_err());
+
+        let mut unknown_asset = valid.clone();
+        unknown_asset.asset_video_prompts[0].asset_id = "asset-unknown".to_owned();
+        assert!(validate_asset_video_prompt_document(&unknown_asset).is_err());
+
+        let mut wrong_project = valid.clone();
+        wrong_project.asset_video_prompts[0].project_id = "project-other".to_owned();
+        assert!(validate_asset_video_prompt_document(&wrong_project).is_err());
+
+        let mut duplicate = valid.clone();
+        duplicate
+            .asset_video_prompts
+            .push(duplicate.asset_video_prompts[0].clone());
+        assert!(validate_asset_video_prompt_document(&duplicate).is_err());
+
+        for invalid_text in [String::new(), " \n\t ".to_owned()] {
+            let mut invalid = valid.clone();
+            invalid.asset_video_prompts[0].prompt_text = invalid_text;
+            assert!(validate_asset_video_prompt_document(&invalid).is_err());
+        }
+
+        let mut too_large = valid;
+        too_large.asset_video_prompts[0].prompt_text = "x".repeat(64 * 1024 + 1);
+        assert!(validate_asset_video_prompt_document(&too_large).is_err());
+    }
+
     #[tokio::test]
     async fn backup_round_trip_creates_new_project_and_keeps_asset_bytes() {
         let directory = tempdir().unwrap();
@@ -3420,6 +3463,34 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        let source_bytes = b"backup-source-image-bytes";
+        let source_sha = Sha256::digest(source_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let source_path = project_root.join("source.png");
+        std::fs::write(&source_path, source_bytes).unwrap();
+        sqlx::query("INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at) VALUES (?, ?, 'image', 'source_image', ?, ?, ?, ?, 'image/png', 1, 1, ?, '{}', ?, ?)")
+            .bind("ast_source_backup")
+            .bind("project-backup")
+            .bind("源图")
+            .bind("源图.png")
+            .bind(source_path.to_string_lossy().to_string())
+            .bind(source_sha)
+            .bind(source_bytes.len() as i64)
+            .bind("2026-01-01T00:01:30Z")
+            .bind("2026-01-01T00:01:30Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO asset_video_prompts (asset_id, project_id, prompt_text, updated_at)
+             VALUES ('ast_backup', 'project-backup', 'generated image camera orbit', '2026-01-01T00:02:00Z'),
+                    ('ast_source_backup', 'project-backup', 'source image camera pan', '2026-01-01T00:02:01Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query(
             "INSERT INTO generation_snapshots (id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
@@ -3499,7 +3570,7 @@ mod tests {
         assert!(!names.contains("workflow_api.json"));
         assert!(!names.contains("recipe.yaml"));
         let preview = service.inspect(archive_path).await.unwrap();
-        assert_eq!(preview.image_count, 1);
+        assert_eq!(preview.image_count, 2);
         assert_eq!(preview.shots, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, "project-backup");
@@ -3509,9 +3580,9 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(restored_count, 2);
+        assert_eq!(restored_count, 3);
         let restored_path = sqlx::query_scalar::<_, String>(
-            "SELECT storage_path FROM assets WHERE project_id = ? AND type = 'image'",
+            "SELECT storage_path FROM assets WHERE project_id = ? AND type = 'image' AND original_name = '图像.png'",
         )
         .bind(&restored.id)
         .fetch_one(&pool)
@@ -3525,7 +3596,7 @@ mod tests {
                 .await
                 .unwrap();
         let restored_asset_id: String =
-            sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ? AND type = 'image'")
+            sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ? AND type = 'image' AND original_name = '图像.png'")
                 .bind(&restored.id)
                 .fetch_one(&pool)
                 .await
@@ -3555,6 +3626,27 @@ mod tests {
             restored_asset_id.as_str()
         );
         assert_ne!(restored_asset_id, "ast_backup");
+        let restored_prompts: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT asset_id, project_id, prompt_text
+             FROM asset_video_prompts WHERE project_id = ? ORDER BY prompt_text",
+        )
+        .bind(&restored.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_prompts.len(), 2);
+        assert_eq!(
+            restored_prompts
+                .iter()
+                .map(|(_, _, prompt)| prompt.as_str())
+                .collect::<Vec<_>>(),
+            vec!["generated image camera orbit", "source image camera pan"]
+        );
+        assert!(restored_prompts.iter().all(|(asset_id, project_id, _)| {
+            project_id == &restored.id
+                && asset_id != "ast_backup"
+                && asset_id != "ast_source_backup"
+        }));
         let restored_tags: Vec<(String, String)> =
             sqlx::query_as("SELECT id, name FROM asset_tags WHERE project_id = ? ORDER BY name")
                 .bind(&restored.id)

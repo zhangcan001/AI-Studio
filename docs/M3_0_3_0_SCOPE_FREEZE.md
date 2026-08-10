@@ -1,7 +1,7 @@
 # AI Studio 0.3.0 Product Scope Realignment
 
 Date: 2026-08-10
-Release status: `PRODUCT SCOPE REALIGNMENT`
+Release status: `CODE READY / LIVE VALIDATION DEFERRED`
 
 ## Product direction
 
@@ -22,7 +22,8 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 - 普通批量视频目录只接受 `wfl_minimax_h3_reference_video`。
 - 创建队列时冻结每项的工作流版本、Recipe、输入 Asset ID、提示词、数字参数和随机 Seed；随机 Seed 在持久化前解析为固定值。
 - 队列严格串行执行，`continueOnFailure` 保留失败项并允许后续项目继续；致命执行错误仍按既有队列策略暂停。
-- H3 产品安全配置固定显示为 `0.1 MP · 1 秒 · 4 步`，不开放超出本轮范围的参数扩展。
+- H3 产品安全配置显示为 `0.1 MP · 4 步 · 单任务串行`；公开时长下拉严格来自 Recipe 的 `duration_seconds`，当前正式范围为 1–5 秒、默认 5 秒。
+- H3 Recipe 必须具备精确语义键：`prompt` textarea、`reference_image` image/images、`duration_seconds` integer、`seed` seed 和 video output；契约缺失时显示 `H3 runtime unavailable`，不静默猜字段。
 
 ## Compatibility contract
 
@@ -37,4 +38,4 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 
 ## Explicit non-goals
 
-本版本不包含第三 Runtime、第二执行引擎、Cloud/Login/Sync/Updater、时间线/NLE、Audio Mixer、Marketplace、移动端或新的外部发布渠道。当前工作完成后只进入简化 Live Gate，不创建 tag、GitHub Release 或上传二进制。
+本版本不包含第三 Runtime、第二执行引擎、Cloud/Login/Sync/Updater、时间线/NLE、Audio Mixer、Marketplace、移动端或新的外部发布渠道。GPU、Computer Use 和 Desktop Live Gate 由产品负责人暂缓；本轮只完成源码、迁移/备份安全和自动化 Code Gate，不创建 tag、GitHub Release 或上传二进制。
