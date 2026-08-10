@@ -108,7 +108,7 @@ export function CreationDashboard({
   }
 
   return (
-    <details className="creation-dashboard" open>
+    <details className="creation-dashboard">
       <summary><span><span className="section-label">Studio Dashboard</span><strong>生产概览</strong></span><small>最近使用 · 队列状态 · 不自动生成</small></summary>
       <div className="creation-dashboard-grid">
         <section className="creation-dashboard-card" aria-label="生产概览统计">

@@ -849,7 +849,7 @@ export function GenerationStudio({
 
   return (
     <>
-      <section className="studio-panel">
+      <section className={`studio-panel${studioMode === "batch" ? " studio-panel-batch" : ""}`}>
         <section className="product-ready-banner" aria-label="Krea2 产品状态">
           <div>
             <span className="section-label">Krea2 批量图片</span>
@@ -1113,8 +1113,11 @@ export function GenerationStudio({
                 projectId={projectId}
                 batchItems={batchItems}
                 comfyConnected={comfyConnected}
+                variant="inline"
                 hideCreate
-                focusBatchId={experimentFocusBatchId ?? focusProductionBatchId}
+                focusBatchId={experimentFocusBatchId
+                  ?? focusProductionBatchId
+                  ?? (productionAdmission.projectId === projectId ? productionAdmission.batchId : undefined)}
                 onAdmissionChanged={onProductionAdmissionChanged}
                 onFocusedBatchOpened={() => {
                   setExperimentFocusBatchId(undefined);

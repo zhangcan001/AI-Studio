@@ -203,7 +203,7 @@ function App() {
     if (!batchId || !projectId) return;
     setFocusedProductionBatchId(batchId);
     if (projectId !== activeProjectId) openProject(projectId);
-    else setWorkspace("studio");
+    else if (workspace !== "video") setWorkspace("studio");
   }
 
   async function reconnectComfy() {
@@ -508,7 +508,9 @@ function App() {
           comfyConnected={isConnected}
           taskEventsReady={taskEventsReady}
           productionAdmission={productionAdmission}
+          focusProductionBatchId={focusedProductionBatchId}
           onAdmissionChanged={refreshProductionAdmission}
+          onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
             setWorkspace("tasks");

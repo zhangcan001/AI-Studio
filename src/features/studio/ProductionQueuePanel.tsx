@@ -44,6 +44,7 @@ interface Props {
   onFocusedBatchOpened: () => void;
   onOpenTask: (taskId: string) => void;
   hideCreate?: boolean;
+  variant?: "full" | "inline";
   experimentContexts?: Record<string, ExperimentContext>;
   onPromoteWinner?: (draft: ReusableGenerationDraft, source: { batchName: string; taskId: string }) => Promise<void>;
 }
@@ -57,9 +58,11 @@ export function ProductionQueuePanel({
   onFocusedBatchOpened,
   onOpenTask,
   hideCreate = false,
+  variant = "full",
   experimentContexts,
   onPromoteWinner,
 }: Props) {
+  const inline = variant === "inline";
   const [name, setName] = useState("");
   const [namePresets, setNamePresets] = useState<string[]>([]);
   const [selectedNamePreset, setSelectedNamePreset] = useState("");
@@ -73,6 +76,7 @@ export function ProductionQueuePanel({
   const [resultCompareAssets, setResultCompareAssets] = useState<AssetView[]>([]);
   const [resultCompareOpen, setResultCompareOpen] = useState(false);
   const [resultAssetsByItem, setResultAssetsByItem] = useState<Record<string, AssetView[]>>({});
+  const [showInlineItems, setShowInlineItems] = useState(false);
   const selectedIdRef = useRef<string | undefined>(undefined);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
@@ -90,9 +94,16 @@ export function ProductionQueuePanel({
         setQueues(nextQueues);
         setOverview(nextOverview);
         const selectedId = selectedIdRef.current;
-        if (refreshDetail && selectedId) {
+        const autoFocusQueue = inline && !selectedId && !focusBatchId
+          ? nextQueues.find((queue) => !queue.archivedAt && queue.status === "RUNNING")
+            ?? nextQueues.find((queue) => !queue.archivedAt && queue.status === "PAUSED")
+            ?? nextQueues.find((queue) => !queue.archivedAt && queue.status === "READY")
+            ?? nextQueues.find((queue) => !queue.archivedAt)
+          : undefined;
+        const detailId = selectedId ?? autoFocusQueue?.id;
+        if (detailId && (refreshDetail || Boolean(autoFocusQueue))) {
           try {
-            setQueueDetail(await getProductionQueue(projectId, selectedId));
+            setQueueDetail(await getProductionQueue(projectId, detailId));
           } catch {
             setQueueDetail(undefined);
           }
@@ -101,7 +112,7 @@ export function ProductionQueuePanel({
         setNotice(toUserMessage(error));
       }
     },
-    [projectId, setQueueDetail],
+    [focusBatchId, inline, projectId, setQueueDetail],
   );
 
   useEffect(() => {
@@ -114,6 +125,7 @@ export function ProductionQueuePanel({
     setShowArchived(false);
     setNotice(undefined);
     setResultAssetsByItem({});
+    setShowInlineItems(false);
     void refreshQueues(false);
     void listProductionQueueNamePresets().then(setNamePresets).catch(() => setNamePresets([]));
   }, [projectId, refreshQueues, setQueueDetail]);
@@ -182,6 +194,10 @@ export function ProductionQueuePanel({
       .catch(() => undefined);
     return () => { active = false; };
   }, [detail, projectId]);
+
+  useEffect(() => {
+    setShowInlineItems(false);
+  }, [detail?.id]);
 
   const visibleQueues = useMemo(
     () => queues.filter((queue) => showArchived || !queue.archivedAt),
@@ -368,20 +384,32 @@ export function ProductionQueuePanel({
   }
 
   const detailEditable = Boolean(detail && !detail.archivedAt && detail.status !== "RUNNING");
+  const processedCount = detail
+    ? detail.succeeded + detail.failed + detail.cancelled + detail.skipped
+    : 0;
+  const progressPercent = detail && detail.total > 0
+    ? Math.round((processedCount / detail.total) * 100)
+    : 0;
+  const activeItem = detail?.items.find((item) => item.status === "DISPATCHING" || item.status === "DISPATCHED");
+  const renderedItems = detail
+    ? inline && !showInlineItems
+      ? compactProductionItems(detail.items)
+      : detail.items
+    : [];
 
   return (
-    <section className="production-queue-panel" aria-label="生产队列">
+    <section className={`production-queue-panel${inline ? " production-queue-panel-inline" : ""}`} aria-label={inline ? "批次进度" : "生产队列"}>
       <div className="production-queue-heading">
         <div>
-          <span className="section-label">生产队列</span>
-          <p>管理持久化生产任务，任务事件会自动刷新此页面。</p>
+          <span className="section-label">{inline ? "批次进度" : "生产队列"}</span>
+          <p>{inline ? "当前页实时同步，不需要切换到任务页。" : "管理持久化生产任务，任务事件会自动刷新此页面。"}</p>
         </div>
         <button type="button" className="quiet-button" disabled={busy} onClick={() => void refreshQueues(true)}>
           刷新
         </button>
       </div>
 
-      {overview && (
+      {!inline && overview && (
         <div className="production-overview" aria-label="生产队列概览">
           <OverviewStat label="队列" value={overview.totalQueues} />
           <OverviewStat label="运行中" value={overview.runningQueues} />
@@ -393,7 +421,7 @@ export function ProductionQueuePanel({
         </div>
       )}
 
-      {!hideCreate && <div className="production-queue-create">
+      {!inline && !hideCreate && <div className="production-queue-create">
         <input
           aria-label="生产队列名称"
           value={name}
@@ -425,15 +453,15 @@ export function ProductionQueuePanel({
         </button>
       </div>}
 
-      <div className="production-queue-filter">
+      {!inline && <div className="production-queue-filter">
         <label className="production-queue-checkbox">
           <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
           显示已归档（{overview?.archivedQueues ?? 0}）
         </label>
         <span>显示 {visibleQueues.length} 个队列</span>
-      </div>
+      </div>}
 
-      {visibleQueues.length ? (
+      {!inline && (visibleQueues.length ? (
         <div className="production-queue-list">
           {visibleQueues.slice(0, 12).map((queue) => (
             <div key={queue.id} className={`production-queue-row${queue.archivedAt ? " archived" : ""}`}>
@@ -483,13 +511,47 @@ export function ProductionQueuePanel({
         </div>
       ) : (
         <p className="disabled-note">当前筛选条件下没有找到队列。</p>
+      ))}
+
+      {inline && !detail && (
+        <div className="production-inline-empty" role="status">
+          <strong>创建批次后，进度会显示在这里</strong>
+          <span>任务会按顺序执行，完成、失败和等待状态都会自动更新。</span>
+        </div>
       )}
 
       {detail && (
         <div className="production-queue-detail">
+          {inline && (
+            <div className="production-inline-progress" role="status" aria-live="polite">
+              <div className="production-inline-progress-heading">
+                <div>
+                  <strong>{processedCount} / {detail.total} 已处理</strong>
+                  <span>
+                    {activeItem
+                      ? `正在执行第 ${activeItem.ordinal + 1} 项`
+                      : detail.status === "COMPLETED"
+                        ? "批次已完成"
+                        : productionStatusLabel(detail.status)}
+                  </span>
+                </div>
+                <strong>{progressPercent}%</strong>
+              </div>
+              <div
+                className="production-inline-progress-track"
+                role="progressbar"
+                aria-label="批次完成进度"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progressPercent}
+              >
+                <span style={{ width: `${progressPercent}%` }} />
+              </div>
+            </div>
+          )}
           <div className="production-queue-detail-heading">
             <div>
-              <span className="section-label">当前队列</span>
+              <span className="section-label">{inline ? "当前批次" : "当前队列"}</span>
               <strong>{detail.name}</strong>
               <span>{detail.archivedAt ? "已归档" : productionStatusLabel(detail.status)}</span>
             </div>
@@ -505,7 +567,7 @@ export function ProductionQueuePanel({
             <span>已跳过 <strong>{detail.skipped}</strong></span>
           </div>
           <ol className="production-queue-items">
-            {detail.items.map((item) => {
+            {renderedItems.map((item) => {
               const canSkip = detailEditable && (item.status === "FAILED" || item.status === "CANCELLED");
               const canRequeue = detailEditable && isSafeProductionQueueRequeue(item);
               const reviewRequired =
@@ -567,6 +629,16 @@ export function ProductionQueuePanel({
               );
             })}
           </ol>
+          {inline && detail.items.length > renderedItems.length && (
+            <button type="button" className="quiet-button production-inline-more" onClick={() => setShowInlineItems(true)}>
+              展开全部 {detail.items.length} 项
+            </button>
+          )}
+          {inline && showInlineItems && detail.items.length > 6 && (
+            <button type="button" className="quiet-button production-inline-more" onClick={() => setShowInlineItems(false)}>
+              收起明细
+            </button>
+          )}
           {detail.name.startsWith("实验 ·") && onPromoteWinner && (
             <ExperimentResultGrid
               projectId={projectId}
@@ -590,6 +662,18 @@ export function ProductionQueuePanel({
       )}
     </section>
   );
+}
+
+function compactProductionItems(items: ProductionBatchDetail["items"]): ProductionBatchDetail["items"] {
+  if (items.length <= 6) return items;
+  const visibleIds = new Set(items.slice(0, 4).map((item) => item.id));
+  const active = items.find((item) => item.status === "DISPATCHING" || item.status === "DISPATCHED");
+  if (active) visibleIds.add(active.id);
+  const latestTerminal = [...items]
+    .reverse()
+    .find((item) => ["SUCCEEDED", "FAILED", "CANCELLED", "SKIPPED"].includes(item.status));
+  if (latestTerminal) visibleIds.add(latestTerminal.id);
+  return items.filter((item) => visibleIds.has(item.id));
 }
 
 function OverviewStat({ label, value }: { label: string; value: number }) {

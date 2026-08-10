@@ -242,7 +242,7 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
   }
 
   return (
-    <details className="prompt-library-panel" open>
+    <details className="prompt-library-panel">
       <summary><span><span className="section-label">Prompt Library</span><strong>提示词库与片段</strong></span><small>版本、比较、应用、实验</small></summary>
       <div className="prompt-library-toolbar">
         <label><span>类型</span><select value={kind} onChange={(event) => setKind(event.target.value as PromptKind)}><option value="prompt">Prompt</option><option value="snippet">Snippet</option></select></label>

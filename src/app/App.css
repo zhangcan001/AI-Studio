@@ -2819,3 +2819,232 @@ summary:focus-visible {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
+/* Batch workspace hierarchy: editor on the left, live production context on the right. */
+.studio-panel-batch .batch-production-view {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+  align-items: start;
+}
+
+.studio-panel-batch .batch-production-view > * {
+  min-width: 0;
+}
+
+.batch-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.batch-editor-column {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.studio-panel-batch .batch-panel,
+.batch-workspace-grid .production-queue-panel-inline {
+  margin-top: 0;
+}
+
+.studio-panel-batch .batch-panel {
+  border-color: var(--ux-border-strong);
+  background: var(--ux-surface-1);
+}
+
+.studio-panel-batch .batch-panel-header {
+  align-items: center;
+}
+
+.batch-production-view .production-queue-panel-inline,
+.batch-workspace-grid .production-queue-panel-inline {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+.production-queue-panel-inline {
+  gap: 14px;
+  padding: 16px;
+  border-color: var(--ux-border-strong);
+  background: var(--ux-surface-1);
+}
+
+.production-queue-panel-inline .production-queue-heading {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ux-border);
+}
+
+.production-queue-panel-inline .production-queue-detail {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.production-inline-empty {
+  display: grid;
+  min-height: 164px;
+  align-content: center;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed var(--ux-border-strong);
+  border-radius: 10px;
+  color: var(--ux-muted);
+  background: var(--ux-surface-0);
+}
+
+.production-inline-empty strong {
+  color: var(--ux-text);
+}
+
+.production-inline-empty span {
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.production-inline-progress {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--ux-border-strong);
+  border-radius: 10px;
+  background: var(--ux-surface-0);
+}
+
+.production-inline-progress-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.production-inline-progress-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.production-inline-progress-heading strong:first-child {
+  color: var(--ux-text);
+  font-size: 1rem;
+}
+
+.production-inline-progress-heading span {
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
+.production-inline-progress-heading > strong:last-child {
+  flex: 0 0 auto;
+  color: var(--ux-accent);
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.production-inline-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ux-surface-2);
+}
+
+.production-inline-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ux-accent-strong), var(--ux-accent));
+  transition: width 220ms ease-out;
+}
+
+.production-queue-panel-inline .production-queue-detail-heading {
+  align-items: start;
+}
+
+.production-queue-panel-inline .production-queue-detail-heading > div {
+  display: grid;
+  align-items: start;
+  gap: 4px;
+}
+
+.production-queue-panel-inline .production-queue-detail-heading strong {
+  white-space: normal;
+}
+
+.production-queue-panel-inline .production-queue-detail-heading small {
+  display: none;
+}
+
+.production-queue-panel-inline .production-queue-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.production-queue-panel-inline .production-queue-items {
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.production-queue-panel-inline .production-queue-items li {
+  grid-template-columns: 30px minmax(64px, auto) minmax(0, 1fr);
+  align-items: start;
+}
+
+.production-queue-panel-inline .production-queue-items li > span,
+.production-queue-panel-inline .production-queue-items li > strong,
+.production-queue-panel-inline .production-item-identity span,
+.production-queue-panel-inline .production-item-error span {
+  white-space: normal;
+}
+
+.production-queue-panel-inline .production-item-identity,
+.production-queue-panel-inline .production-item-error,
+.production-queue-panel-inline .production-item-actions {
+  grid-column: 3;
+}
+
+.production-queue-panel-inline .production-item-actions {
+  justify-content: flex-start;
+}
+
+.production-queue-panel-inline .production-item-results {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.production-inline-more {
+  width: 100%;
+}
+
+@media (max-width: 960px) {
+  .studio-panel-batch .batch-production-view,
+  .batch-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .batch-production-view .production-queue-panel-inline,
+  .batch-workspace-grid .production-queue-panel-inline {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 560px) {
+  .production-queue-panel-inline .production-queue-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .production-queue-panel-inline .production-queue-items {
+    max-height: none;
+  }
+
+  .production-inline-progress-heading {
+    align-items: end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .production-inline-progress-track span {
+    transition: none;
+  }
+}

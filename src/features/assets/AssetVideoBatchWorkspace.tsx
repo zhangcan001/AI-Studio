@@ -16,7 +16,9 @@ interface Props {
   comfyConnected: boolean;
   taskEventsReady: boolean;
   productionAdmission: ProductionAdmissionStatus;
+  focusProductionBatchId?: string;
   onAdmissionChanged: () => Promise<void>;
+  onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
   onBackToAssets: () => void;
 }
@@ -28,7 +30,9 @@ export function AssetVideoBatchWorkspace({
   comfyConnected,
   taskEventsReady,
   productionAdmission,
+  focusProductionBatchId,
   onAdmissionChanged,
+  onProductionBatchFocused,
   onOpenTask,
   onBackToAssets,
 }: Props) {
@@ -229,7 +233,8 @@ export function AssetVideoBatchWorkspace({
           <button type="button" onClick={onBackToAssets}>去资产库选择</button>
         </div>
       ) : (
-        <>
+        <div className="batch-workspace-grid">
+          <div className="batch-editor-column">
           <div className="asset-video-batch-summary">
             <span>已选择 <strong>{selectedAssets.length}</strong> 项</span>
             <span>符合条件 <strong>{imageAssets.length - missingPromptAssets.length - oversizedPromptAssets.length}</strong> 项</span>
@@ -299,19 +304,25 @@ export function AssetVideoBatchWorkspace({
           {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : "运行时未就绪。") : contract.reason}</p>}
           {missingPromptAssets.length > 0 && <p className="disabled-note">请先为所有已选图片保存视频提示词；批次创建时会冻结当前内容。</p>}
           {oversizedPromptAssets.length > 0 && <p className="error-message">视频提示词按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
-        </>
+          </div>
+          <ProductionQueuePanel
+            projectId={projectId}
+            batchItems={[]}
+            comfyConnected={comfyConnected}
+            variant="inline"
+            focusBatchId={createdBatchId
+              ?? focusProductionBatchId
+              ?? (productionAdmission.projectId === projectId ? productionAdmission.batchId : undefined)}
+            onAdmissionChanged={onAdmissionChanged}
+            onFocusedBatchOpened={() => {
+              if (focusProductionBatchId) onProductionBatchFocused();
+            }}
+            onOpenTask={onOpenTask}
+            hideCreate
+          />
+        </div>
       )}
       {notice && <p className="studio-notice" role="status">{notice}</p>}
-      <ProductionQueuePanel
-        projectId={projectId}
-        batchItems={[]}
-        comfyConnected={comfyConnected}
-        focusBatchId={createdBatchId}
-        onAdmissionChanged={onAdmissionChanged}
-        onFocusedBatchOpened={() => undefined}
-        onOpenTask={onOpenTask}
-        hideCreate
-      />
     </section>
   );
 }
