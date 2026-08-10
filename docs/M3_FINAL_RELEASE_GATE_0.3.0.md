@@ -21,7 +21,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有 `1.1.2`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
 | Migration / backup safety | Fresh DB、001–010→011 保留性、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 323 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Regression | Rust 324 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Tauri installer build。 |
 
 ## Deferred live validation — batch images
 
