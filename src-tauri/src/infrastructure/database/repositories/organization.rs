@@ -260,6 +260,152 @@ impl OrganizationRepository for SqliteOrganizationRepository {
         Ok(())
     }
 
+    async fn bulk_set_favorite(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        favorite: bool,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        for asset_id in asset_ids {
+            let asset_project: Option<String> =
+                sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
+                    .bind(asset_id)
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            if asset_project.as_deref() != Some(project_id) {
+                return Err(RepositoryError::integrity(
+                    "ASSET_FAVORITE_PROJECT_MISMATCH: every asset and request must belong to the same project",
+                ));
+            }
+        }
+        for asset_id in asset_ids {
+            if favorite {
+                sqlx::query("INSERT INTO asset_favorites (asset_id, project_id, created_at) VALUES (?, ?, ?) ON CONFLICT(asset_id) DO NOTHING")
+                    .bind(asset_id).bind(project_id).bind(format_datetime(created_at)).execute(&mut *transaction).await.map_err(map_sqlx_error)?;
+            } else {
+                sqlx::query("DELETE FROM asset_favorites WHERE project_id = ? AND asset_id = ?")
+                    .bind(project_id)
+                    .bind(asset_id)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            }
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn bulk_add_tag(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        tag_id: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let tag_project: Option<String> =
+            sqlx::query_scalar("SELECT project_id FROM asset_tags WHERE id = ?")
+                .bind(tag_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(map_sqlx_error)?;
+        if tag_project.as_deref() != Some(project_id) {
+            return Err(RepositoryError::integrity(
+                "ASSET_TAG_PROJECT_MISMATCH: asset, tag and request must belong to the same project",
+            ));
+        }
+        for asset_id in asset_ids {
+            let asset_project: Option<String> =
+                sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
+                    .bind(asset_id)
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            if asset_project.as_deref() != Some(project_id) {
+                return Err(RepositoryError::integrity(
+                    "ASSET_TAG_PROJECT_MISMATCH: every asset and request must belong to the same project",
+                ));
+            }
+            let linked: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM asset_tag_links WHERE asset_id = ? AND tag_id = ?",
+            )
+            .bind(asset_id)
+            .bind(tag_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if linked == 0 {
+                let count: i64 =
+                    sqlx::query_scalar("SELECT COUNT(*) FROM asset_tag_links WHERE asset_id = ?")
+                        .bind(asset_id)
+                        .fetch_one(&mut *transaction)
+                        .await
+                        .map_err(map_sqlx_error)?;
+                if count >= 20 {
+                    return Err(RepositoryError::integrity(
+                        "ASSET_TAG_ASSET_LIMIT: an asset supports at most 20 tags",
+                    ));
+                }
+            }
+        }
+        for asset_id in asset_ids {
+            sqlx::query("INSERT OR IGNORE INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES (?, ?, ?, ?)")
+                .bind(asset_id).bind(tag_id).bind(project_id).bind(format_datetime(created_at))
+                .execute(&mut *transaction).await.map_err(map_sqlx_error)?;
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn bulk_remove_tag(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        tag_id: &str,
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let tag_project: Option<String> =
+            sqlx::query_scalar("SELECT project_id FROM asset_tags WHERE id = ?")
+                .bind(tag_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(map_sqlx_error)?;
+        if tag_project.as_deref() != Some(project_id) {
+            return Err(RepositoryError::integrity(
+                "ASSET_TAG_PROJECT_MISMATCH: asset, tag and request must belong to the same project",
+            ));
+        }
+        for asset_id in asset_ids {
+            let asset_project: Option<String> =
+                sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
+                    .bind(asset_id)
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            if asset_project.as_deref() != Some(project_id) {
+                return Err(RepositoryError::integrity(
+                    "ASSET_TAG_PROJECT_MISMATCH: every asset and request must belong to the same project",
+                ));
+            }
+        }
+        for asset_id in asset_ids {
+            sqlx::query(
+                "DELETE FROM asset_tag_links WHERE project_id = ? AND asset_id = ? AND tag_id = ?",
+            )
+            .bind(project_id)
+            .bind(asset_id)
+            .bind(tag_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
     async fn organization_for_assets(
         &self,
         project_id: &str,
@@ -527,6 +673,54 @@ mod tests {
             .set_favorite("project-1", "ast_other", true, Utc::now())
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn bulk_organization_is_transactional_and_project_scoped() {
+        let (_pool, repository) = setup().await;
+        repository
+            .create_tag(tag("tag_bulk", "project-1", "批量"))
+            .await
+            .unwrap();
+        repository
+            .bulk_set_favorite(
+                "project-1",
+                &["ast_a".to_owned(), "ast_b".to_owned()],
+                true,
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        repository
+            .bulk_add_tag(
+                "project-1",
+                &["ast_a".to_owned(), "ast_b".to_owned()],
+                "tag_bulk",
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        let organization = repository
+            .organization_for_assets("project-1", &["ast_a".to_owned(), "ast_b".to_owned()])
+            .await
+            .unwrap();
+        assert!(organization["ast_a"].is_favorite);
+        assert_eq!(organization["ast_b"].tags.len(), 1);
+
+        let rejected = repository
+            .bulk_add_tag(
+                "project-1",
+                &["ast_a".to_owned(), "ast_other".to_owned()],
+                "tag_bulk",
+                Utc::now(),
+            )
+            .await;
+        assert!(rejected.is_err());
+        let organization = repository
+            .organization_for_assets("project-1", &["ast_a".to_owned()])
+            .await
+            .unwrap();
+        assert_eq!(organization["ast_a"].tags.len(), 1);
     }
 
     #[tokio::test]

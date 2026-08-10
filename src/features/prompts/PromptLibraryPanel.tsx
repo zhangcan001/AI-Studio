@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addPromptLibraryVersion,
   createPromptLibraryEntry,
@@ -8,6 +8,7 @@ import {
   updatePromptLibraryMetadata,
 } from "../../services/tauriClient";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
+import type { PageCursor } from "../../types/asset";
 import type { PromptEntryView, PromptKind, PromptVersionView } from "../../types/prompt";
 import { toUserMessage } from "../../i18n/errorMessages";
 import {
@@ -29,9 +30,12 @@ interface Props {
 export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, onUseForExperiment }: Props) {
   const textFields = useMemo(() => recipe.fields.filter((field) => field.type === "textarea"), [recipe]);
   const [kind, setKind] = useState<PromptKind>("prompt");
+  const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [tagQuery, setTagQuery] = useState("");
   const [entries, setEntries] = useState<PromptEntryView[]>([]);
+  const [cursor, setCursor] = useState<PageCursor>();
   const [selectedId, setSelectedId] = useState<string>();
   const [detail, setDetail] = useState<PromptEntryView>();
   const [selectedVersionId, setSelectedVersionId] = useState<string>();
@@ -46,6 +50,7 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
+  const requestVersion = useRef(0);
 
   useEffect(() => {
     setTargetFieldKey(textFields.length === 1 ? textFields[0].key : "");
@@ -53,29 +58,51 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
   }, [recipe, textFields]);
 
   useEffect(() => {
-    let active = true;
+    const timer = window.setTimeout(() => {
+      setKeyword(keywordInput.trim());
+      setTagQuery(tagFilter.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [keywordInput, tagFilter]);
+
+  const loadPage = useCallback(async (requestedCursor: PageCursor | undefined, reset: boolean) => {
+    const version = ++requestVersion.current;
     setLoading(true);
     setError(undefined);
-    void listPromptLibrary(projectId, {
-      kind,
-      keyword: keyword.trim() || undefined,
-      tag: tagFilter.trim() || undefined,
-    })
-      .then((next) => {
-        if (!active) return;
-        setEntries(next);
-        if (!next.some((entry) => entry.id === selectedId)) {
-          setSelectedId(next[0]?.id);
-        }
-      })
-      .catch((value: unknown) => {
-        if (active) setError(toUserMessage(value));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+    try {
+      const page = await listPromptLibrary(projectId, {
+        kind,
+        keyword: keyword || undefined,
+        tag: tagQuery || undefined,
+        cursor: requestedCursor,
+        limit: 30,
       });
-    return () => { active = false; };
-  }, [kind, keyword, projectId, selectedId, tagFilter]);
+      if (requestVersion.current !== version) return;
+      setEntries((current) => {
+        if (reset) return page.items;
+        const byId = new Map(current.map((entry) => [entry.id, entry]));
+        page.items.forEach((entry) => byId.set(entry.id, entry));
+        return [...byId.values()];
+      });
+      setCursor(page.nextCursor);
+      if (reset) {
+        setSelectedId(page.items[0]?.id);
+        setDetail(undefined);
+      }
+    } catch (value: unknown) {
+      if (requestVersion.current === version) setError(toUserMessage(value));
+    } finally {
+      if (requestVersion.current === version) setLoading(false);
+    }
+  }, [kind, keyword, projectId, tagQuery]);
+
+  useEffect(() => {
+    setEntries([]);
+    setCursor(undefined);
+    setSelectedId(undefined);
+    void loadPage(undefined, true);
+    return () => { requestVersion.current += 1; };
+  }, [kind, keyword, projectId, tagQuery, loadPage]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -219,7 +246,7 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
       <summary><span><span className="section-label">Prompt Library</span><strong>提示词库与片段</strong></span><small>版本、比较、应用、实验</small></summary>
       <div className="prompt-library-toolbar">
         <label><span>类型</span><select value={kind} onChange={(event) => setKind(event.target.value as PromptKind)}><option value="prompt">Prompt</option><option value="snippet">Snippet</option></select></label>
-        <label><span>搜索名称/标签</span><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="中文、英文或技术词" /></label>
+        <label><span>搜索名称/标签</span><input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="中文、英文或技术词" /></label>
         <label><span>标签筛选</span><input value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} placeholder="例如：人物" /></label>
       </div>
       <div className="prompt-library-layout">
@@ -246,6 +273,7 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
           )}
         </div>
       </div>
+      {cursor && <button type="button" className="load-more-button" onClick={() => void loadPage(cursor, false)} disabled={loading}>{loading ? "正在加载..." : "加载更多（每页 30 条）"}</button>}
       {error && <p className="error-message" role="alert">提示词库：{error}</p>}
       {notice && <p className="disabled-note" role="status">提示词库：{notice}</p>}
     </details>

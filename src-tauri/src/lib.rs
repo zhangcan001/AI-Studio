@@ -596,6 +596,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::settings::runtime_profiles_list,
             commands::settings::runtime_profiles_save,
             commands::settings::runtime_profiles_delete,
+            commands::settings::production_queue_name_presets_list,
+            commands::settings::production_queue_name_preset_save,
+            commands::settings::production_queue_name_preset_delete,
             commands::workflow_library::workflow_library_refresh,
             commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
             commands::workflow_onboarding::workflow_onboarding_get,
@@ -678,6 +681,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             ,commands::organization::asset_tag_assign
             ,commands::organization::asset_tag_remove
             ,commands::organization::asset_set_favorite
+            ,commands::organization::asset_bulk_set_favorite
+            ,commands::organization::asset_bulk_add_tag
+            ,commands::organization::asset_bulk_remove_tag
         ])
         .run(tauri::generate_context!())
         .map_err(|_| AppError::initialization("Tauri runtime failed"))

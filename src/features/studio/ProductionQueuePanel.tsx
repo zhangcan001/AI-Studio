@@ -5,12 +5,17 @@ import {
   deleteProductionQueue,
   getProductionQueue,
   getProductionQueueOverview,
+  deleteProductionQueueNamePreset,
+  listProductionQueueNamePresets,
   listProductionQueues,
   pauseProductionQueue,
   requeueProductionQueueItem,
   restoreProductionQueue,
   skipProductionQueueItem,
+  saveProductionQueueNamePreset,
   startProductionQueue,
+  getReusableDraft,
+  getTaskDetail,
 } from "../../services/tauriClient";
 import { subscribeTaskUpdates } from "../../services/taskEvents";
 import type {
@@ -23,6 +28,9 @@ import { isSafeProductionQueueRequeue } from "./productionQueuePolicy";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import type { ReusableGenerationDraft } from "../../types/history";
+import type { AssetView } from "../../types/asset";
+import { toggleCompareSelection } from "../assets/assetCompare";
+import { AssetCompareWorkspace } from "../assets/AssetCompareWorkspace";
 import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
 
@@ -50,6 +58,8 @@ export function ProductionQueuePanel({
   onPromoteWinner,
 }: Props) {
   const [name, setName] = useState("");
+  const [namePresets, setNamePresets] = useState<string[]>([]);
+  const [selectedNamePreset, setSelectedNamePreset] = useState("");
   const [continueOnFailure, setContinueOnFailure] = useState(false);
   const [queues, setQueues] = useState<ProductionBatchSummary[]>([]);
   const [overview, setOverview] = useState<ProductionQueueOverview>();
@@ -57,6 +67,8 @@ export function ProductionQueuePanel({
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [resultCompareAssets, setResultCompareAssets] = useState<AssetView[]>([]);
+  const [resultCompareOpen, setResultCompareOpen] = useState(false);
   const selectedIdRef = useRef<string | undefined>(undefined);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
@@ -90,6 +102,7 @@ export function ProductionQueuePanel({
 
   useEffect(() => {
     setName("");
+    setSelectedNamePreset("");
     setContinueOnFailure(false);
     setQueues([]);
     setOverview(undefined);
@@ -97,6 +110,7 @@ export function ProductionQueuePanel({
     setShowArchived(false);
     setNotice(undefined);
     void refreshQueues(false);
+    void listProductionQueueNamePresets().then(setNamePresets).catch(() => setNamePresets([]));
   }, [projectId, refreshQueues, setQueueDetail]);
 
   useEffect(() => {
@@ -195,6 +209,33 @@ export function ProductionQueuePanel({
     }
   }
 
+  async function saveNamePreset() {
+    if (!name.trim()) {
+      setNotice("请输入队列名称后再保存模板。");
+      return;
+    }
+    try {
+      const next = await saveProductionQueueNamePreset(name);
+      setNamePresets(next);
+      setSelectedNamePreset(name.trim());
+      setNotice("队列名称模板已保存到设置。");
+    } catch (error: unknown) {
+      setNotice(toUserMessage(error));
+    }
+  }
+
+  async function removeNamePreset() {
+    if (!selectedNamePreset) return;
+    try {
+      await deleteProductionQueueNamePreset(selectedNamePreset);
+      setNamePresets((current) => current.filter((item) => item !== selectedNamePreset));
+      setSelectedNamePreset("");
+      setNotice("队列名称模板已删除。");
+    } catch (error: unknown) {
+      setNotice(toUserMessage(error));
+    }
+  }
+
   async function openQueue(batchId: string) {
     setBusy(true);
     setNotice(undefined);
@@ -266,6 +307,31 @@ export function ProductionQueuePanel({
     });
   }
 
+  async function useResultInStudio(item: ProductionBatchDetail["items"][number]) {
+    if (!detail || !item.taskId || !onPromoteWinner) return;
+    await runMutation(async () => {
+      const draft = await getReusableDraft(projectId, item.taskId!);
+      await onPromoteWinner(draft, { batchName: detail.name, taskId: item.taskId! });
+    });
+  }
+
+  async function addResultToCompare(item: ProductionBatchDetail["items"][number]) {
+    if (!item.taskId) return;
+    await runMutation(async () => {
+      const task = await getTaskDetail(projectId, item.taskId!);
+      let next = resultCompareAssets;
+      let message: string | undefined;
+      for (const asset of task.outputAssets) {
+        const result = toggleCompareSelection(next, asset);
+        next = result.assets;
+        message = result.notice ?? message;
+      }
+      setResultCompareAssets(next);
+      if (next.length >= 2) setResultCompareOpen(true);
+      setNotice(message ?? (next.length === 1 ? "已加入 1 个结果，继续选择同类型结果后可对比。" : "结果已加入对比。"));
+    });
+  }
+
   async function runMutation(operation: () => Promise<void>) {
     setBusy(true);
     setNotice(undefined);
@@ -312,6 +378,17 @@ export function ProductionQueuePanel({
           onChange={(event) => setName(event.target.value)}
           placeholder="例如：第 01 集 Kera2 + H3"
         />
+        <div className="production-queue-name-presets">
+          <label>
+            <span>名称模板</span>
+            <select value={selectedNamePreset} onChange={(event) => { const next = event.target.value; setSelectedNamePreset(next); if (next) setName(next); }} disabled={busy}>
+              <option value="">选择模板</option>
+              {namePresets.map((preset) => <option key={preset} value={preset}>{preset}</option>)}
+            </select>
+          </label>
+          <button type="button" className="quiet-button" onClick={() => void saveNamePreset()} disabled={busy || !name.trim()}>保存模板</button>
+          <button type="button" className="quiet-button" onClick={() => void removeNamePreset()} disabled={busy || !selectedNamePreset}>删除模板</button>
+        </div>
         <label className="production-queue-checkbox">
           <input
             type="checkbox"
@@ -424,9 +501,16 @@ export function ProductionQueuePanel({
                   </div>
                   <div className="production-item-actions">
                     {item.taskId && (
-                      <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>
-                        查看任务
-                      </button>
+                      <>
+                        <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>
+                          打开任务
+                        </button>
+                        {item.status === "SUCCEEDED" && <>
+                          <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>查看结果</button>
+                          {onPromoteWinner && <button type="button" className="quiet-button" onClick={() => void useResultInStudio(item)} disabled={busy}>用于创作</button>}
+                          <button type="button" className="quiet-button" onClick={() => void addResultToCompare(item)} disabled={busy}>加入对比</button>
+                        </>}
+                      </>
                     )}
                     {canSkip && (
                       <button type="button" className="quiet-button" onClick={() => void skipItem(item.id)} disabled={busy}>
@@ -456,6 +540,15 @@ export function ProductionQueuePanel({
         </div>
       )}
       {notice && <p className="disabled-note">{notice}</p>}
+      {resultCompareOpen && resultCompareAssets.length >= 2 && (
+        <AssetCompareWorkspace
+          projectId={projectId}
+          assets={resultCompareAssets}
+          onRemove={(assetId) => setResultCompareAssets((current) => current.filter((asset) => asset.id !== assetId))}
+          onClear={() => { setResultCompareAssets([]); setResultCompareOpen(false); }}
+          onClose={() => setResultCompareOpen(false)}
+        />
+      )}
     </section>
   );
 }

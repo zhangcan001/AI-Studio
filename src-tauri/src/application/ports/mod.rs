@@ -55,7 +55,7 @@ pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepos
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use prompt_library_repository::{
-    PromptEntryRecord, PromptLibraryRepository, PromptVersionRecord,
+    PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
 };
 pub use repository_error::RepositoryError;
 pub use settings_store::{

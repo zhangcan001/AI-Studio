@@ -1,4 +1,4 @@
-# M3 EXPERIMENT PACK 06 = PASS
+# M3 EXPERIMENT PACK 06 = CODE PASS / LIVE PENDING
 
 Date: 2026-08-10
 Development line: `0.3.0`
@@ -24,8 +24,8 @@ The result grid now distinguishes the original session base (`与实验基础参
 
 ## Verification
 
-Pure Pack 06 tests cover dimension limits, field-owned ranges, frozen Seeds, cartesian expansion, media exclusion, snapshot diff redaction, import-key exactness, and queue policy. The final source regression reports 301 Rust tests and 30 frontend test files / 93 frontend tests passing.
+Pure Pack 06 tests cover dimension limits, field-owned ranges, frozen Seeds, cartesian expansion, media exclusion, snapshot diff redaction, import-key exactness, and queue policy. The final source regression reports 304 Rust tests and 31 frontend test files / 96 frontend tests passing.
 
-The Kera2 four-item GPU Live Gate is an environment operation and must be recorded with its actual batch/item/task/asset/snapshot evidence. During this audit the existing desktop window could not expose a controllable UI state (`SetIsBorderRequired failed: 不支持此接口`) and the ComfyUI host reported only about 1.8 GiB free VRAM, so no unobservable GPU run is claimed as evidence. The implementation and automated regression are PASS; the local Live Gate remains explicitly environment-pending rather than fabricated.
+The Kera2 four-item GPU Live Gate is an environment operation and must be recorded with its actual batch/item/task/asset/snapshot evidence. During this audit the existing desktop window could not expose a controllable UI state (`SetIsBorderRequired failed: 不支持此接口`) and the ComfyUI host reported only about 1.8 GiB free VRAM, so no unobservable GPU run is claimed as evidence. The implementation and automated regression are code-pass; the local Live Gate remains explicitly environment-pending rather than fabricated.
 
 Pack 07 is now implemented in the same development line. Migrations `001–008` remain unchanged; `009_prompt_library.sql` belongs to Pack 07.

@@ -8,6 +8,35 @@ pub fn runtime_profiles_list(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn production_queue_name_presets_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, AppError> {
+    Ok(state.settings_service.production_queue_name_presets())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_queue_name_preset_save(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<Vec<String>, AppError> {
+    state
+        .settings_service
+        .save_production_queue_name_preset(&name)
+        .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_queue_name_preset_delete(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<(), AppError> {
+    state
+        .settings_service
+        .delete_production_queue_name_preset(&name)
+        .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn runtime_profiles_save(
     state: tauri::State<'_, AppState>,
     profile: RuntimeParameterProfile,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assetLibraryPage, getAsset, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
+import { assetLibraryPage, bulkAddAssetTag, bulkRemoveAssetTag, bulkSetAssetFavorite, getAsset, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
 import type {
   AssetCategoryFilter,
   AssetCreatedOrder,
@@ -54,6 +54,10 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
   const [compareMode, setCompareMode] = useState(false);
   const [compareAssets, setCompareAssets] = useState<AssetView[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
+  const [bulkTagId, setBulkTagId] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const requestVersion = useRef(0);
 
   useEffect(() => {
@@ -101,6 +105,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
     setAssets([]);
     setCursor(undefined);
     setSelectedAsset(undefined);
+    setSelectedAssetIds(new Set());
     setError(undefined);
     void requestPage(undefined, true);
     return () => {
@@ -124,6 +129,42 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
     setTagId("");
     setCreatedOrder("NEWEST");
     setNotice(undefined);
+  }
+
+  function toggleBulkSelection(asset: AssetView) {
+    setSelectedAssetIds((current) => {
+      const next = new Set(current);
+      if (next.has(asset.id)) next.delete(asset.id);
+      else if (next.size < 100) next.add(asset.id);
+      else setNotice("批量整理一次最多选择 100 项。");
+      return next;
+    });
+  }
+
+  async function runBulkFavorite(favorite: boolean) {
+    if (!selectedAssetIds.size) return;
+    setBulkBusy(true); setError(undefined); setNotice(undefined);
+    try {
+      await bulkSetAssetFavorite(projectId, [...selectedAssetIds], favorite);
+      setNotice(`${favorite ? "已收藏" : "已取消收藏"} ${selectedAssetIds.size} 项素材。`);
+      setSelectedAssetIds(new Set());
+      await requestPage(undefined, true);
+    } catch (value: unknown) { setError(toUserMessage(value)); }
+    finally { setBulkBusy(false); }
+  }
+
+  async function runBulkTag(add: boolean) {
+    if (!selectedAssetIds.size || !bulkTagId) return;
+    setBulkBusy(true); setError(undefined); setNotice(undefined);
+    try {
+      if (add) await bulkAddAssetTag(projectId, [...selectedAssetIds], bulkTagId);
+      else await bulkRemoveAssetTag(projectId, [...selectedAssetIds], bulkTagId);
+      setNotice(`${add ? "已添加" : "已移除"}标签，共 ${selectedAssetIds.size} 项素材。`);
+      setSelectedAssetIds(new Set());
+      setBulkTagId("");
+      await requestPage(undefined, true);
+    } catch (value: unknown) { setError(toUserMessage(value)); }
+    finally { setBulkBusy(false); }
   }
 
   async function toggleFavorite(asset: AssetView) {
@@ -163,6 +204,9 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
           <button type="button" className="quiet-button" onClick={() => setTagManagerOpen(true)}>管理标签</button>
           <button type="button" className={compareMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setCompareMode((value) => !value)}>
             {compareMode ? "结束对比选择" : "选择进行对比"}
+          </button>
+          <button type="button" className={selectionMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setSelectionMode((value) => !value)}>
+            {selectionMode ? "结束批量整理" : "批量选择"}
           </button>
           <button type="button" className="quiet-button" onClick={() => void requestPage(undefined, true)} disabled={loading}>
             {loading ? "正在刷新..." : "刷新"}
@@ -224,6 +268,20 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
           </button>
         ))}
       </div>
+      {selectionMode && (
+        <section className="asset-bulk-toolbar" aria-label="批量整理素材">
+          <strong>已选 {selectedAssetIds.size} 项</strong>
+          <button type="button" onClick={() => void runBulkFavorite(true)} disabled={bulkBusy || !selectedAssetIds.size}>收藏</button>
+          <button type="button" className="quiet-button" onClick={() => void runBulkFavorite(false)} disabled={bulkBusy || !selectedAssetIds.size}>取消收藏</button>
+          <select aria-label="批量操作标签" value={bulkTagId} onChange={(event) => setBulkTagId(event.target.value)} disabled={bulkBusy || !selectedAssetIds.size}>
+            <option value="">选择标签</option>
+            {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+          </select>
+          <button type="button" onClick={() => void runBulkTag(true)} disabled={bulkBusy || !selectedAssetIds.size || !bulkTagId}>添加标签</button>
+          <button type="button" className="quiet-button" onClick={() => void runBulkTag(false)} disabled={bulkBusy || !selectedAssetIds.size || !bulkTagId}>移除标签</button>
+          <button type="button" className="quiet-button" onClick={() => setSelectedAssetIds(new Set())} disabled={bulkBusy || !selectedAssetIds.size}>取消选择</button>
+        </section>
+      )}
       {error && <p className="error-message">资产加载失败：{error}</p>}
       {notice && <p className="studio-notice" role="status">{notice}</p>}
       <AssetGrid
@@ -235,6 +293,9 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
         compareIds={compareAssets.map((asset) => asset.id)}
         onToggleCompare={toggleCompare}
         onFavorite={(asset) => void toggleFavorite(asset)}
+        selectionMode={selectionMode}
+        selectedIds={[...selectedAssetIds]}
+        onToggleSelection={toggleBulkSelection}
       />
       {hasFilters && !loading && (
         <button type="button" className="quiet-button clear-asset-filters" onClick={clearFilters}>清除筛选</button>

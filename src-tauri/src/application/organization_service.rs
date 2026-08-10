@@ -2,6 +2,8 @@ use crate::application::ports::{AssetTag, Clock, OrganizationRepository, Reposit
 use std::{error::Error, fmt, sync::Arc};
 use uuid::Uuid;
 
+const MAX_BULK_ASSETS: usize = 100;
+
 pub struct OrganizationService {
     repository: Arc<dyn OrganizationRepository>,
     clock: Arc<dyn Clock>,
@@ -117,6 +119,67 @@ impl OrganizationService {
             .set_favorite(project_id, asset_id, favorite, self.clock.now())
             .await?)
     }
+
+    pub async fn bulk_set_favorite(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        favorite: bool,
+    ) -> Result<(), OrganizationError> {
+        validate_id(project_id, "project")?;
+        let asset_ids = normalize_asset_ids(asset_ids)?;
+        self.repository
+            .bulk_set_favorite(project_id, &asset_ids, favorite, self.clock.now())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn bulk_add_tag(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        tag_id: &str,
+    ) -> Result<(), OrganizationError> {
+        validate_id(project_id, "project")?;
+        validate_id(tag_id, "tag")?;
+        let asset_ids = normalize_asset_ids(asset_ids)?;
+        self.repository
+            .bulk_add_tag(project_id, &asset_ids, tag_id, self.clock.now())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn bulk_remove_tag(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        tag_id: &str,
+    ) -> Result<(), OrganizationError> {
+        validate_id(project_id, "project")?;
+        validate_id(tag_id, "tag")?;
+        let asset_ids = normalize_asset_ids(asset_ids)?;
+        self.repository
+            .bulk_remove_tag(project_id, &asset_ids, tag_id)
+            .await?;
+        Ok(())
+    }
+}
+
+fn normalize_asset_ids(asset_ids: &[String]) -> Result<Vec<String>, OrganizationError> {
+    let mut normalized = Vec::with_capacity(asset_ids.len());
+    for asset_id in asset_ids {
+        let asset_id = asset_id.trim();
+        validate_id(asset_id, "asset")?;
+        if !normalized.iter().any(|current| current == asset_id) {
+            normalized.push(asset_id.to_owned());
+        }
+    }
+    if normalized.is_empty() || normalized.len() > MAX_BULK_ASSETS {
+        return Err(OrganizationError::InvalidInput(format!(
+            "ASSET_BULK_LIMIT: select 1–{MAX_BULK_ASSETS} assets"
+        )));
+    }
+    Ok(normalized)
 }
 
 fn validate_three(project_id: &str, asset_id: &str, tag_id: &str) -> Result<(), OrganizationError> {

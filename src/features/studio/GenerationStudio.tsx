@@ -8,6 +8,7 @@ import {
   createProjectTemplate,
   deletePreset,
   getPreferredPreset,
+  getPromptLibraryEntry,
   listPresets,
   refreshWorkflowLibrary,
   startProductionQueue,
@@ -40,6 +41,10 @@ import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
 import { type ExperimentContext, type ExperimentDimension, type ExperimentPlan } from "../experiments/experimentPlanner";
 import { PromptLibraryPanel } from "../prompts/PromptLibraryPanel";
 import type { PromptVersionView } from "../../types/prompt";
+import type { PromptEntryView } from "../../types/prompt";
+import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
+import { CreationDashboard } from "../production/CreationDashboard";
+import type { RecentWorkflowRecord } from "../production/productionUx";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -94,6 +99,7 @@ export function GenerationStudio({
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const values = useStudioStore((state) => state.values);
+  const draftDirty = useStudioStore((state) => state.draftDirty);
   const validationErrors = useStudioStore((state) => state.validationErrors);
   const pendingAssetIntent = useStudioStore((state) => state.pendingAssetIntent);
   const reuseProvenance = useStudioStore((state) => state.reuseProvenance);
@@ -121,6 +127,7 @@ export function GenerationStudio({
   const [experimentFocusBatchId, setExperimentFocusBatchId] = useState<string>();
   const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
   const [promptExperimentDimensions, setPromptExperimentDimensions] = useState<ExperimentDimension[]>([]);
+  const [dashboardPromptTargetFieldKey, setDashboardPromptTargetFieldKey] = useState("");
   const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
@@ -159,6 +166,7 @@ export function GenerationStudio({
     setExperimentFocusBatchId(undefined);
     setExperimentContexts({});
     setPromptExperimentDimensions([]);
+    setDashboardPromptTargetFieldKey("");
     setPresetEditorOpen(false);
     setTemplateEditorOpen(false);
   }, [projectId]);
@@ -595,14 +603,14 @@ export function GenerationStudio({
     source: { batchName: string; taskId: string },
   ) {
     if (draft.projectId !== projectId) {
-      setNotice("实验结果属于其他项目，无法加载到当前创作。");
+      setNotice("生产结果属于其他项目，无法加载到当前创作。");
       return;
     }
     const workflow = catalog.find(
       (recipe) => recipe.workflowVersionId === draft.workflowVersionId && recipe.recipeId === draft.recipeId,
     );
     if (!workflow) {
-      setNotice("实验结果对应的工作流版本已不在运行目录中，请先刷新工作流列表。");
+      setNotice("生产结果对应的工作流版本已不在运行目录中，请先刷新工作流列表。");
       return;
     }
     useStudioStore.getState().loadDraft(workflow, cloneGenerationValues(draft.values));
@@ -615,8 +623,8 @@ export function GenerationStudio({
     setMissingAssetFields(new Set());
     setStudioMode("single");
     setNotice(draft.missingAssetIds.length
-      ? "已将实验结果加载到 Studio，但部分素材缺失，请替换后再生成；未自动提交任务。"
-      : "已将实验结果作为下一轮起点加载到 Studio，未自动提交生成任务。",
+      ? "已将生产结果加载到 Studio，但部分素材缺失，请替换后再生成；未自动提交任务。"
+      : "已将生产结果作为下一轮起点加载到 Studio，未自动提交生成任务。",
     );
   }
 
@@ -648,6 +656,60 @@ export function GenerationStudio({
     setStudioMode("experiment");
   }
 
+  function selectWorkflowFromUx(workflow: RecipeViewModel) {
+    if (workflow.workflowVersionId === selectedWorkflow?.workflowVersionId && workflow.recipeId === selectedWorkflow.recipeId) return;
+    if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认切换工作流吗？")) return;
+    setSelectedWorkflow(workflow);
+    setAssetIntentTargets([]);
+    setMissingAssetFields(new Set());
+    setPresetEditorOpen(false);
+    setPromptExperimentDimensions([]);
+    setDashboardPromptTargetFieldKey("");
+  }
+
+  function continueRecentWorkflow(_record: RecentWorkflowRecord, recipe?: RecipeViewModel) {
+    if (!recipe) {
+      setNotice("历史工作流当前不可用，无法创建新的创作入口。");
+      return;
+    }
+    selectWorkflowFromUx(recipe);
+  }
+
+  async function useRecentPrompt(entry: PromptEntryView, fieldKey: string) {
+    if (!selectedWorkflow || !fieldKey) {
+      setNotice("请选择提示词要填入的文字字段。");
+      return;
+    }
+    const field = selectedWorkflow.fields.find((item) => item.key === fieldKey && item.type === "textarea");
+    if (!field) {
+      setNotice("当前工作流没有这个文字字段。");
+      return;
+    }
+    try {
+      const detail = await getPromptLibraryEntry(projectId, entry.id);
+      const version = detail.versions[detail.versions.length - 1];
+      if (!version) {
+        setNotice("该提示词还没有可应用的版本。");
+        return;
+      }
+      const currentValue = values[fieldKey];
+      const currentText = currentValue?.type === "string" ? currentValue.value : "";
+      if (entry.kind === "prompt" && currentText && !window.confirm("目标文字输入已有内容，是否替换？")) return;
+      const result = entry.kind === "snippet"
+        ? applyPromptSnippetToStudio(selectedWorkflow, values, fieldKey, version.text, "append")
+        : applyPromptVersionToStudio(selectedWorkflow, values, fieldKey, version);
+      if (!result.values) {
+        setNotice(result.issue ?? "无法应用提示词。");
+        return;
+      }
+      useStudioStore.getState().loadDraft(selectedWorkflow, result.values);
+      setMissingAssetFields(new Set());
+      setNotice(`${entry.kind === "snippet" ? "片段已追加" : "提示词已应用到 Studio"}；未自动生成。`);
+    } catch (value: unknown) {
+      setNotice(toUserMessage(value));
+    }
+  }
+
   if (!catalog.length) {
     return (
       <NoWorkflowGuide
@@ -667,13 +729,7 @@ export function GenerationStudio({
         <WorkflowLauncher
           catalog={catalog}
           selectedWorkflow={selectedWorkflow}
-          onSelect={(workflow) => {
-            setSelectedWorkflow(workflow);
-            setAssetIntentTargets([]);
-            setMissingAssetFields(new Set());
-            setPresetEditorOpen(false);
-            setPromptExperimentDimensions([]);
-          }}
+          onSelect={selectWorkflowFromUx}
         />
         {selectedWorkflow && (
           <>
@@ -687,9 +743,20 @@ export function GenerationStudio({
               </button>
             </div>
             <CreationModeHint recipe={selectedWorkflow} />
+            <CreationDashboard
+              projectId={projectId}
+              catalog={catalog}
+              selectedWorkflow={selectedWorkflow}
+              promptTargetFieldKey={dashboardPromptTargetFieldKey}
+              onPromptTargetFieldChange={setDashboardPromptTargetFieldKey}
+              onUsePrompt={(entry, fieldKey) => void useRecentPrompt(entry, fieldKey)}
+              onContinueWorkflow={continueRecentWorkflow}
+              onFocusQueue={(batchId) => { setStudioMode("batch"); setExperimentFocusBatchId(batchId); }}
+              onAdmissionChanged={onProductionAdmissionChanged}
+            />
             {reuseProvenance && (
               <div className="studio-provenance" role="status">
-                <strong>{reuseProvenance.sourceBatchName ? "已从实验结果加载" : "已加载历史任务参数"}</strong>
+                <strong>{reuseProvenance.sourceBatchName ? "已从生产队列结果加载" : "已加载历史任务参数"}</strong>
                 <span>
                   {reuseProvenance.sourceBatchName
                     ? `${reuseProvenance.sourceBatchName} · 任务 ${reuseProvenance.sourceTaskId ?? "未知"} · ${formatDateTime(reuseProvenance.createdAt)}`

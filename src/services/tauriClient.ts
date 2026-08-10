@@ -32,8 +32,10 @@ import type {
   PromptKind,
   PromptLibraryCreateRequest,
   PromptLibraryMetadataRequest,
+  PromptLibraryPage,
   PromptVersionView,
 } from "../types/prompt";
+import type { PageCursor } from "../types/asset";
 import type {
   ProductionBatchCreateItem,
   ProductionBatchDetail,
@@ -67,13 +69,15 @@ export function getAppStatus(): Promise<AppStatus> {
 
 export function listPromptLibrary(
   projectId: string,
-  filters: { kind?: PromptKind; keyword?: string; tag?: string } = {},
-): Promise<PromptEntryView[]> {
-  return invoke<PromptEntryView[]>("prompt_library_list", {
+  filters: { kind?: PromptKind; keyword?: string; tag?: string; cursor?: PageCursor; limit?: number } = {},
+): Promise<PromptLibraryPage> {
+  return invoke<PromptLibraryPage>("prompt_library_list", {
     projectId,
     kind: filters.kind,
     keyword: filters.keyword,
     tag: filters.tag,
+    cursor: filters.cursor,
+    limit: filters.limit,
   });
 }
 
@@ -476,6 +480,18 @@ export function setAssetFavorite(projectId: string, assetId: string, favorite: b
   return invoke<void>("asset_set_favorite", { projectId, assetId, favorite });
 }
 
+export function bulkSetAssetFavorite(projectId: string, assetIds: string[], favorite: boolean): Promise<void> {
+  return invoke<void>("asset_bulk_set_favorite", { projectId, assetIds, favorite });
+}
+
+export function bulkAddAssetTag(projectId: string, assetIds: string[], tagId: string): Promise<void> {
+  return invoke<void>("asset_bulk_add_tag", { projectId, assetIds, tagId });
+}
+
+export function bulkRemoveAssetTag(projectId: string, assetIds: string[], tagId: string): Promise<void> {
+  return invoke<void>("asset_bulk_remove_tag", { projectId, assetIds, tagId });
+}
+
 export function listProjectTemplates(): Promise<ProjectTemplate[]> {
   return invoke<ProjectTemplate[]>("project_template_list");
 }
@@ -556,4 +572,16 @@ export function saveRuntimeProfile(profile: RuntimeParameterProfile): Promise<Ru
 
 export function deleteRuntimeProfile(profileId: string): Promise<void> {
   return invoke<void>("runtime_profiles_delete", { profileId });
+}
+
+export function listProductionQueueNamePresets(): Promise<string[]> {
+  return invoke<string[]>("production_queue_name_presets_list");
+}
+
+export function saveProductionQueueNamePreset(name: string): Promise<string[]> {
+  return invoke<string[]>("production_queue_name_preset_save", { name });
+}
+
+export function deleteProductionQueueNamePreset(name: string): Promise<void> {
+  return invoke<void>("production_queue_name_preset_delete", { name });
 }

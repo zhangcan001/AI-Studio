@@ -136,6 +136,65 @@ impl SettingsService {
             .clone()
     }
 
+    pub fn production_queue_name_presets(&self) -> Vec<String> {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .production_queue_name_presets
+            .clone()
+    }
+
+    pub async fn save_production_queue_name_preset(
+        &self,
+        name: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let name = validate_queue_name_preset(name)?;
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings
+            .production_queue_name_presets
+            .retain(|current| current.to_lowercase() != name.to_lowercase());
+        next_settings.production_queue_name_presets.insert(0, name);
+        next_settings.production_queue_name_presets.truncate(20);
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        let presets = next_settings.production_queue_name_presets.clone();
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(presets)
+    }
+
+    pub async fn delete_production_queue_name_preset(&self, name: &str) -> Result<(), AppError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::invalid_input("队列名称模板不能为空。"));
+        }
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings
+            .production_queue_name_presets
+            .retain(|current| current != name);
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(())
+    }
+
     pub async fn save_runtime_profile(
         &self,
         mut profile: RuntimeParameterProfile,
@@ -276,6 +335,12 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .runtime_profiles
             .clone();
+        let production_queue_name_presets = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .production_queue_name_presets
+            .clone();
         let next_settings = AppSettings {
             schema_version: 1,
             comfy: crate::application::ports::ComfySettings {
@@ -283,6 +348,7 @@ impl SettingsService {
             },
             preferred_presets,
             runtime_profiles,
+            production_queue_name_presets,
         };
         self.store
             .save(&next_settings)
@@ -316,6 +382,17 @@ impl SettingsService {
 fn parse_endpoint(endpoint: &str) -> Result<ComfyConnectionConfig, AppError> {
     ComfyConnectionConfig::from_endpoint(endpoint)
         .map_err(|error| AppError::comfy_endpoint_invalid(error.to_string()))
+}
+
+fn validate_queue_name_preset(value: &str) -> Result<String, AppError> {
+    let value = value.trim();
+    if value.is_empty() || value.contains(['\r', '\n']) {
+        return Err(AppError::invalid_input("队列名称模板必须是单行非空文本。"));
+    }
+    if value.chars().count() > 120 {
+        return Err(AppError::invalid_input("队列名称模板最多 120 个字符。"));
+    }
+    Ok(value.to_owned())
 }
 
 fn validate_runtime_profile(profile: &RuntimeParameterProfile) -> Result<(), AppError> {
@@ -689,5 +766,49 @@ mod tests {
             .unwrap()
             .runtime_profiles
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn production_queue_name_presets_round_trip_without_task_data() {
+        let adapter = BlockingAdapter::new();
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore::default());
+        let service = test_settings_service(activity, admission, store.clone(), adapter);
+
+        let saved = service
+            .save_production_queue_name_preset(" 第02集 图片 ")
+            .await
+            .unwrap();
+        assert_eq!(saved[0], "第02集 图片");
+        assert!(service
+            .production_queue_name_presets()
+            .contains(&"第02集 图片".to_owned()));
+        assert_eq!(
+            store
+                .saved
+                .lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .runtime_profiles
+                .len(),
+            0
+        );
+
+        service
+            .delete_production_queue_name_preset("第02集 图片")
+            .await
+            .unwrap();
+        assert!(!service
+            .production_queue_name_presets()
+            .contains(&"第02集 图片".to_owned()));
     }
 }

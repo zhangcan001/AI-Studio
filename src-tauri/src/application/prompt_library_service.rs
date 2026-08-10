@@ -1,5 +1,7 @@
+use crate::application::pagination::PageCursor;
 use crate::application::ports::{
-    Clock, PromptEntryRecord, PromptLibraryRepository, PromptVersionRecord, RepositoryError,
+    Clock, PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
+    RepositoryError,
 };
 use serde::Serialize;
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
@@ -34,6 +36,13 @@ pub struct PromptEntryView {
     pub versions: Vec<PromptVersionView>,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptLibraryPageView {
+    pub items: Vec<PromptEntryView>,
+    pub next_cursor: Option<PageCursor>,
+}
+
 pub struct PromptLibraryService {
     repository: Arc<dyn PromptLibraryRepository>,
     clock: Arc<dyn Clock>,
@@ -50,43 +59,32 @@ impl PromptLibraryService {
         kind: Option<&str>,
         keyword: Option<&str>,
         tag: Option<&str>,
-    ) -> Result<Vec<PromptEntryView>, PromptLibraryError> {
+        cursor: Option<PageCursor>,
+        limit: Option<u32>,
+    ) -> Result<PromptLibraryPageView, PromptLibraryError> {
         validate_project_id(project_id)?;
         let kind = kind.map(validate_kind).transpose()?;
         let keyword = keyword.map(normalize_keyword).transpose()?;
         let tag = tag.map(normalize_tag_query).transpose()?;
-        let records = self
+        let page = self
             .repository
-            .list(
-                project_id,
-                kind.as_deref(),
-                keyword.as_deref(),
-                tag.as_deref(),
-            )
-            .await?;
-        records
-            .into_iter()
-            .filter_map(|record| match record_to_view(record, Vec::new()) {
-                Ok(view) => {
-                    let keyword_matches = keyword
-                        .as_deref()
-                        .map(|value| {
-                            view.name.to_lowercase().contains(value)
-                                || view
-                                    .tags
-                                    .iter()
-                                    .any(|item| item.to_lowercase().contains(value))
-                        })
-                        .unwrap_or(true);
-                    let tag_matches = tag
-                        .as_deref()
-                        .map(|value| view.tags.iter().any(|item| item.to_lowercase() == value))
-                        .unwrap_or(true);
-                    (keyword_matches && tag_matches).then_some(Ok(view))
-                }
-                Err(error) => Some(Err(error)),
+            .list_page(PromptLibraryQuery {
+                project_id: project_id.trim().to_owned(),
+                kind: kind.map(str::to_owned),
+                keyword,
+                tag,
+                cursor,
+                limit: limit.unwrap_or(30).clamp(1, 100),
             })
-            .collect()
+            .await?;
+        Ok(PromptLibraryPageView {
+            items: page
+                .items
+                .into_iter()
+                .map(|record| record_to_view(record, Vec::new()))
+                .collect::<Result<Vec<_>, _>>()?,
+            next_cursor: page.next_cursor,
+        })
     }
 
     pub async fn get(
@@ -429,10 +427,13 @@ mod tests {
                     "prompt-project-1",
                     Some("prompt"),
                     Some("中文"),
-                    Some("人物")
+                    Some("人物"),
+                    None,
+                    Some(30),
                 )
                 .await
                 .unwrap()
+                .items
                 .len(),
             1
         );

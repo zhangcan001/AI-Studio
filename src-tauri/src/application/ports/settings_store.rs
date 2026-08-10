@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub preferred_presets: BTreeMap<String, String>,
     #[serde(default)]
     pub runtime_profiles: Vec<RuntimeParameterProfile>,
+    #[serde(default)]
+    pub production_queue_name_presets: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -21,6 +23,12 @@ impl Default for AppSettings {
             comfy: ComfySettings::default(),
             preferred_presets: BTreeMap::new(),
             runtime_profiles: Vec::new(),
+            production_queue_name_presets: vec![
+                "第01集 图片".to_owned(),
+                "第01集 视频".to_owned(),
+                "角色测试".to_owned(),
+                "场景实验".to_owned(),
+            ],
         }
     }
 }

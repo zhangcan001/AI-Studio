@@ -82,6 +82,26 @@ pub trait OrganizationRepository: Send + Sync {
         favorite: bool,
         created_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError>;
+    async fn bulk_set_favorite(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        favorite: bool,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError>;
+    async fn bulk_add_tag(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        tag_id: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError>;
+    async fn bulk_remove_tag(
+        &self,
+        project_id: &str,
+        asset_ids: &[String],
+        tag_id: &str,
+    ) -> Result<(), RepositoryError>;
     async fn organization_for_assets(
         &self,
         project_id: &str,

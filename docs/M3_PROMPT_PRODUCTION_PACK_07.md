@@ -1,10 +1,10 @@
-# M3 PROMPT PRODUCTION PACK 07 = PASS
+# M3 PROMPT PRODUCTION PACK 07 = CODE PASS / LIVE PENDING
 
 Date: 2026-08-10
 Development line: `0.3.0`
 Release status: development only; no `v0.3.0` tag or GitHub Release.
 
-Pack 07 is implemented as a project-scoped Prompt/Snippet Library inside Studio. The backend is the source of truth; the frontend never creates a generation task while saving, comparing, applying, or preparing prompt variants.
+Pack 07 is implemented as a project-scoped Prompt/Snippet Library inside Studio. The backend is the source of truth; the frontend never creates a generation task while saving, comparing, applying, or preparing prompt variants. Its five-action live gate remains pending in this environment.
 
 ## Delivered contract
 
@@ -20,6 +20,6 @@ Pack 07 is implemented as a project-scoped Prompt/Snippet Library inside Studio.
 
 ## Verification
 
-Automated coverage includes Chinese create/rename, sequential append, tag/search, delete cascade, project isolation, invalid ownership, 64 KiB text limit, snippet semantics, Prompt Library → Experiment 2/8 variants and Planner bounds, v1/v2/v3 backup compatibility, duplicate/reference/ownership validation, ID remapping, and atomic restore rollback. The final source regression reports 301 Rust tests and 30 frontend test files / 93 frontend tests passing.
+Automated coverage includes Chinese create/rename, sequential append, tag/search, delete cascade, project isolation, invalid ownership, 64 KiB text limit, snippet semantics, Prompt Library → Experiment 2/8 variants and Planner bounds, v1/v2/v3 backup compatibility, duplicate/reference/ownership validation, ID remapping, atomic restore rollback, and stable keyset pagination. The final source regression reports 304 Rust tests and 31 frontend test files / 96 frontend tests passing.
 
 The five-action desktop live gate (v1, v2, compare, v2 → Studio manual generation, v1+v2 → two-item Kera2 experiment) remains environment-pending in this audit because the existing desktop window did not expose a controllable state and the local ComfyUI host had low free VRAM. No live GPU result is represented as a test pass. The third-runtime boundary remains `THIRD_RUNTIME_INPUT_REQUIRED`; no model was downloaded or modified.

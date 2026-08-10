@@ -1,4 +1,5 @@
 use super::RepositoryError;
+use crate::application::pagination::{PageCursor, PageResult};
 use async_trait::async_trait;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,15 +24,22 @@ pub struct PromptVersionRecord {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptLibraryQuery {
+    pub project_id: String,
+    pub kind: Option<String>,
+    pub keyword: Option<String>,
+    pub tag: Option<String>,
+    pub cursor: Option<PageCursor>,
+    pub limit: u32,
+}
+
 #[async_trait]
 pub trait PromptLibraryRepository: Send + Sync {
-    async fn list(
+    async fn list_page(
         &self,
-        project_id: &str,
-        kind: Option<&str>,
-        keyword: Option<&str>,
-        tag: Option<&str>,
-    ) -> Result<Vec<PromptEntryRecord>, RepositoryError>;
+        query: PromptLibraryQuery,
+    ) -> Result<PageResult<PromptEntryRecord>, RepositoryError>;
 
     async fn find_by_id(
         &self,

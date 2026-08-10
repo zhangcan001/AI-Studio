@@ -105,6 +105,48 @@ pub async fn asset_set_favorite(
         .map_err(map_organization_error)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_bulk_set_favorite(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_ids: Vec<String>,
+    favorite: bool,
+) -> Result<(), AppError> {
+    state
+        .organization_service
+        .bulk_set_favorite(&project_id, &asset_ids, favorite)
+        .await
+        .map_err(map_organization_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_bulk_add_tag(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_ids: Vec<String>,
+    tag_id: String,
+) -> Result<(), AppError> {
+    state
+        .organization_service
+        .bulk_add_tag(&project_id, &asset_ids, &tag_id)
+        .await
+        .map_err(map_organization_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_bulk_remove_tag(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_ids: Vec<String>,
+    tag_id: String,
+) -> Result<(), AppError> {
+    state
+        .organization_service
+        .bulk_remove_tag(&project_id, &asset_ids, &tag_id)
+        .await
+        .map_err(map_organization_error)
+}
+
 #[tauri::command]
 pub async fn project_template_list(
     state: State<'_, AppState>,

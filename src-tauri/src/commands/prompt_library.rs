@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
+use crate::application::pagination::PageCursor;
 use crate::application::prompt_library_service::{
-    PromptEntryView, PromptLibraryError, PromptVersionView,
+    PromptEntryView, PromptLibraryError, PromptLibraryPageView, PromptVersionView,
 };
 use crate::error::AppError;
 use serde::Deserialize;
@@ -42,7 +43,9 @@ pub async fn prompt_library_list(
     kind: Option<String>,
     keyword: Option<String>,
     tag: Option<String>,
-) -> Result<Vec<PromptEntryView>, AppError> {
+    cursor: Option<PageCursor>,
+    limit: Option<u32>,
+) -> Result<PromptLibraryPageView, AppError> {
     state
         .prompt_library_service
         .list(
@@ -50,6 +53,8 @@ pub async fn prompt_library_list(
             kind.as_deref(),
             keyword.as_deref(),
             tag.as_deref(),
+            cursor,
+            limit,
         )
         .await
         .map_err(map_prompt_error)

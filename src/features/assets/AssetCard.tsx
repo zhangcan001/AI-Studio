@@ -11,9 +11,12 @@ interface Props {
   compared?: boolean;
   onToggleCompare?: (asset: AssetView) => void;
   onFavorite?: (asset: AssetView) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelection?: (asset: AssetView) => void;
 }
 
-export function AssetCard({ projectId, asset, onSelect, compareMode = false, compared = false, onToggleCompare, onFavorite }: Props) {
+export function AssetCard({ projectId, asset, onSelect, compareMode = false, compared = false, onToggleCompare, onFavorite, selectionMode = false, selected = false, onToggleSelection }: Props) {
   const cardRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>();
@@ -73,6 +76,12 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
 
   return (
     <article className={`asset-library-card${compareMode && compared ? " asset-library-card-compared" : ""}`}>
+      {selectionMode && (
+        <label className="asset-bulk-selector">
+          <input type="checkbox" checked={selected} onChange={() => onToggleSelection?.(asset)} aria-label={`选择素材${displayName}`} />
+          <span>选择</span>
+        </label>
+      )}
       <button ref={cardRef} type="button" className="asset-library-card-main" aria-pressed={compareMode ? compared : undefined} onClick={() => (compareMode && onToggleCompare ? onToggleCompare(asset) : onSelect(asset))}>
       <span className="asset-library-image">
         {previewUrl ? (

@@ -1,6 +1,8 @@
-use super::{map_sqlx_error, parse_json};
+use super::{map_sqlx_error, parse_datetime, parse_json};
+use crate::application::pagination::{PageCursor, PageResult};
 use crate::application::ports::{
-    PromptEntryRecord, PromptLibraryRepository, PromptVersionRecord, RepositoryError,
+    PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
+    RepositoryError,
 };
 use async_trait::async_trait;
 use sqlx::{FromRow, SqlitePool};
@@ -18,48 +20,75 @@ impl SqlitePromptLibraryRepository {
 
 #[async_trait]
 impl PromptLibraryRepository for SqlitePromptLibraryRepository {
-    async fn list(
+    async fn list_page(
         &self,
-        project_id: &str,
-        kind: Option<&str>,
-        keyword: Option<&str>,
-        tag: Option<&str>,
-    ) -> Result<Vec<PromptEntryRecord>, RepositoryError> {
+        request: PromptLibraryQuery,
+    ) -> Result<PageResult<PromptEntryRecord>, RepositoryError> {
         let mut sql = String::from(
             "SELECT e.id, e.project_id, e.kind, e.name, e.normalized_name, e.tags_json,
                     e.created_at, e.updated_at,
                     (SELECT COUNT(*) FROM prompt_versions v WHERE v.prompt_id = e.id) AS version_count
              FROM prompt_entries e WHERE e.project_id = ?",
         );
-        if kind.is_some() {
+        if request.kind.is_some() {
             sql.push_str(" AND e.kind = ?");
         }
-        if keyword.is_some() {
+        if request.keyword.is_some() {
             sql.push_str(
                 " AND (e.name LIKE ? COLLATE NOCASE OR e.tags_json LIKE ? COLLATE NOCASE)",
             );
         }
-        if tag.is_some() {
+        if request.tag.is_some() {
             sql.push_str(" AND e.tags_json LIKE ? COLLATE NOCASE");
         }
-        sql.push_str(" ORDER BY e.updated_at DESC, e.id ASC LIMIT 200");
+        if request.cursor.is_some() {
+            sql.push_str(" AND (e.updated_at < ? OR (e.updated_at = ? AND e.id < ?))");
+        }
+        sql.push_str(" ORDER BY e.updated_at DESC, e.id DESC LIMIT ?");
 
-        let mut query = sqlx::query_as::<_, PromptEntryRow>(&sql).bind(project_id);
-        if let Some(kind) = kind {
+        let mut query = sqlx::query_as::<_, PromptEntryRow>(&sql).bind(&request.project_id);
+        if let Some(kind) = request.kind.as_deref() {
             query = query.bind(kind);
         }
-        if let Some(keyword) = keyword {
+        if let Some(keyword) = request.keyword.as_deref() {
             let pattern = format!("%{keyword}%");
             query = query.bind(pattern.clone()).bind(pattern);
         }
-        if let Some(tag) = tag {
+        if let Some(tag) = request.tag.as_deref() {
             let pattern = format!("%{}{}{}%", '"', tag, '"');
             query = query.bind(pattern);
         }
-        let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
-        rows.into_iter()
+        if let Some(cursor) = request.cursor {
+            let updated_at = cursor.created_at.to_rfc3339();
+            query = query
+                .bind(updated_at.clone())
+                .bind(updated_at)
+                .bind(cursor.id);
+        }
+        let limit = request.limit.clamp(1, 100);
+        query = query.bind(i64::from(limit) + 1);
+        let mut rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+        let has_more = rows.len() > limit as usize;
+        if has_more {
+            rows.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            rows.last()
+                .map(|row| {
+                    Ok(PageCursor::for_item(
+                        parse_datetime("prompt updated_at", &row.updated_at)?,
+                        row.id.clone(),
+                    ))
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let items = rows
+            .into_iter()
             .map(PromptEntryRow::try_into_record)
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(PageResult { items, next_cursor })
     }
 
     async fn find_by_id(
@@ -292,5 +321,104 @@ impl PromptVersionRow {
             text: self.text,
             created_at: self.created_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SqlitePromptLibraryRepository;
+    use crate::application::pagination::PageCursor;
+    use crate::application::ports::{
+        PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
+    };
+    use crate::infrastructure::database::initialize;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn keyset_pages_are_stable_scoped_and_bounded() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prompts.db"))
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES ('prompt-page-project', '分页', 'C:/page', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'), ('prompt-page-other', '其他', 'C:/other', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let repository = SqlitePromptLibraryRepository::new(pool);
+        for index in 0..31 {
+            let id = format!("prm_page_{index:03}");
+            repository
+                .create(
+                    &PromptEntryRecord {
+                        id: id.clone(),
+                        project_id: "prompt-page-project".to_owned(),
+                        kind: "prompt".to_owned(),
+                        name: format!("分页 {index:03}"),
+                        normalized_name: format!("分页 {index:03}"),
+                        tags_json: "[\"分页\"]".to_owned(),
+                        created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+                        updated_at: "2026-01-01T00:00:00+00:00".to_owned(),
+                        version_count: 1,
+                    },
+                    &PromptVersionRecord {
+                        id: format!("prv_page_{index:03}"),
+                        prompt_id: id,
+                        version: 1,
+                        text: format!("text {index}"),
+                        created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let first = repository
+            .list_page(PromptLibraryQuery {
+                project_id: "prompt-page-project".to_owned(),
+                kind: Some("prompt".to_owned()),
+                keyword: Some("分页".to_owned()),
+                tag: Some("分页".to_owned()),
+                cursor: None,
+                limit: 30,
+            })
+            .await
+            .unwrap();
+        assert_eq!(first.items.len(), 30);
+        assert!(first.next_cursor.is_some());
+        let second = repository
+            .list_page(PromptLibraryQuery {
+                project_id: "prompt-page-project".to_owned(),
+                kind: Some("prompt".to_owned()),
+                keyword: Some("分页".to_owned()),
+                tag: Some("分页".to_owned()),
+                cursor: first.next_cursor,
+                limit: 30,
+            })
+            .await
+            .unwrap();
+        assert_eq!(second.items.len(), 1);
+        assert!(second.next_cursor.is_none());
+        assert!(first
+            .items
+            .iter()
+            .all(|left| second.items.iter().all(|right| left.id != right.id)));
+        assert_eq!(first.items[0].id, "prm_page_030");
+        assert_eq!(second.items[0].id, "prm_page_000");
+        let isolated = repository
+            .list_page(PromptLibraryQuery {
+                project_id: "prompt-page-other".to_owned(),
+                kind: None,
+                keyword: None,
+                tag: None,
+                cursor: Some(PageCursor::for_item(
+                    chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00+00:00")
+                        .unwrap()
+                        .with_timezone(&chrono::Utc),
+                    "prm_page_030",
+                )),
+                limit: 30,
+            })
+            .await
+            .unwrap();
+        assert!(isolated.items.is_empty());
     }
 }

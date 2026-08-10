@@ -217,6 +217,7 @@ mod tests {
             },
             preferred_presets: std::collections::BTreeMap::new(),
             runtime_profiles: Vec::new(),
+            production_queue_name_presets: Vec::new(),
         };
         store.save(&settings).await.unwrap();
         assert!(directory.path().join("settings.json").is_file());
@@ -236,6 +237,7 @@ mod tests {
             },
             preferred_presets: std::collections::BTreeMap::new(),
             runtime_profiles: Vec::new(),
+            production_queue_name_presets: Vec::new(),
         };
         store.save(&old).await.unwrap();
         store.save(&new).await.unwrap();

@@ -1,3 +1,5 @@
+import type { PageCursor } from "./asset";
+
 export type PromptKind = "prompt" | "snippet";
 
 export interface PromptVersionView {
@@ -33,4 +35,9 @@ export interface PromptLibraryMetadataRequest {
   promptId: string;
   name: string;
   tags: string[];
+}
+
+export interface PromptLibraryPage {
+  items: PromptEntryView[];
+  nextCursor?: PageCursor;
 }
