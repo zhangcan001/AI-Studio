@@ -34,6 +34,7 @@ import { AssetCompareWorkspace } from "../assets/AssetCompareWorkspace";
 import { AssetCard } from "../assets/AssetCard";
 import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
+import { ProductionAssetPreview } from "./ProductionAssetPreview";
 
 interface Props {
   projectId: string;
@@ -77,6 +78,7 @@ export function ProductionQueuePanel({
   const [resultCompareOpen, setResultCompareOpen] = useState(false);
   const [resultAssetsByItem, setResultAssetsByItem] = useState<Record<string, AssetView[]>>({});
   const [expandedInlineItemId, setExpandedInlineItemId] = useState<string>();
+  const [previewAsset, setPreviewAsset] = useState<AssetView>();
   const selectedIdRef = useRef<string | undefined>(undefined);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
@@ -622,7 +624,7 @@ export function ProductionQueuePanel({
                           key={asset.id}
                           projectId={projectId}
                           asset={asset}
-                          onSelect={() => onOpenTask(item.taskId!)}
+                          onSelect={(selectedAsset) => setPreviewAsset(selectedAsset)}
                         />
                       ))}
                     </div>
@@ -647,7 +649,7 @@ export function ProductionQueuePanel({
                           <small>{item.taskId ?? "尚未提交"}</small>
                         </span>
                         <span className="production-inline-item-result">
-                          {item.status === "SUCCEEDED" ? (resultAssets.length ? `${resultAssets.length} 张生成图` : "查看生成图") : item.errorCode ?? productionItemStatusLabel(item.status)}
+                          {item.status === "SUCCEEDED" ? (resultAssets.length ? `${resultAssets.length} 张图 · 打开全图` : "查看生成图") : item.errorCode ?? productionItemStatusLabel(item.status)}
                         </span>
                         <span className="production-inline-item-chevron" aria-hidden="true">{expanded ? "收起" : "查看"}</span>
                       </button>
@@ -677,6 +679,14 @@ export function ProductionQueuePanel({
           onRemove={(assetId) => setResultCompareAssets((current) => current.filter((asset) => asset.id !== assetId))}
           onClear={() => { setResultCompareAssets([]); setResultCompareOpen(false); }}
           onClose={() => setResultCompareOpen(false)}
+        />
+      )}
+      {previewAsset && (
+        <ProductionAssetPreview
+          projectId={projectId}
+          asset={previewAsset}
+          onClose={() => setPreviewAsset(undefined)}
+          onOpenTask={onOpenTask}
         />
       )}
     </section>

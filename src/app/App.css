@@ -3275,6 +3275,86 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.production-asset-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(4 7 12 / 78%);
+}
+
+.production-asset-preview-dialog {
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--ux-border-strong);
+  border-radius: 14px;
+  background: var(--ux-surface-1);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%);
+}
+
+.production-asset-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.production-asset-preview-heading > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.production-asset-preview-heading strong {
+  overflow: hidden;
+  color: var(--ux-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.production-asset-preview-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.production-asset-preview-media {
+  display: grid;
+  place-items: center;
+  min-height: min(420px, 62vh);
+  max-height: calc(100vh - 180px);
+  margin-top: 12px;
+  padding: 12px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #090c11;
+}
+
+.production-asset-preview-media img,
+.production-asset-preview-media video {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(640px, 70vh);
+  object-fit: contain;
+  object-position: center;
+}
+
+.production-asset-preview-media p {
+  color: var(--ux-muted);
+}
+
+.production-asset-preview-meta {
+  margin: 10px 0 0;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
 @media (max-width: 960px) {
   .studio-panel-batch .batch-production-view,
   .batch-workspace-grid {
@@ -3336,6 +3416,38 @@ summary:focus-visible {
 
   .production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-image {
     height: 112px;
+  }
+
+  .production-asset-preview-backdrop {
+    padding: 12px;
+  }
+
+  .production-asset-preview-dialog {
+    width: min(100%, calc(100vw - 24px));
+    padding: 12px;
+  }
+
+  .production-asset-preview-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .production-asset-preview-actions {
+    width: 100%;
+  }
+
+  .production-asset-preview-actions button {
+    flex: 1;
+  }
+
+  .production-asset-preview-media {
+    min-height: min(300px, 52vh);
+    max-height: calc(100vh - 170px);
+  }
+
+  .production-asset-preview-media img,
+  .production-asset-preview-media video {
+    max-height: 58vh;
   }
 
   .production-inline-progress-heading {
