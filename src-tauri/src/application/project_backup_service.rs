@@ -3887,6 +3887,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fixed_v4_fixture_restores_with_empty_shot_data() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let archive_path = directory.path().join("legacy-v4.zip");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({"format":"ai-studio-project-backup","version":4,"createdBy":"0.3.0","project":{"id":"legacy-v4-project","name":"旧项目 v4"}});
+        let project = json!({
+            "project":{"id":"legacy-v4-project","name":"旧项目 v4"},"description":null,
+            "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z",
+            "activeTasksExcluded":0,"incompleteTasksExcluded":0,"tasks":[],"taskEvents":[],"assets":[],
+            "mappings":[],"snapshots":[],"presets":[],"batches":[],"items":[],"workflowRefs":[],
+            "assetTags":[],"assetTagLinks":[],"assetFavorites":[]
+        });
+        writer.start_file("manifest.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+            .unwrap();
+        writer.start_file("project.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&project).unwrap().as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let preview = service.inspect(archive_path).await.unwrap();
+        assert_eq!(preview.shots, 0);
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shots WHERE project_id = ?")
+                .bind(restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
     async fn snapshot_remap_failure_rolls_back_all_restore_rows() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
