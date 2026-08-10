@@ -21,6 +21,7 @@ use std::{
 };
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio::time::{sleep, Duration};
+use uuid::Uuid;
 
 const MAX_PRODUCTION_BATCH_ITEMS: usize = 100;
 
@@ -132,20 +133,24 @@ impl ProductionQueueService {
             .items
             .into_iter()
             .enumerate()
-            .map(|(index, item)| ProductionBatchItem {
-                id: ProductionBatchItemId::new(),
-                batch_id: batch_id.clone(),
-                ordinal: u32::try_from(index).expect("production batch item index must fit u32"),
-                workflow_version_id: item.workflow_version_id,
-                recipe_id: item.recipe_id,
-                values_json: generation_values_to_json(&item.values),
-                status: ProductionBatchItemStatus::Pending,
-                task_id: None,
-                retry_of_item_id: None,
-                error_code: None,
-                error_message: None,
-                created_at: now,
-                updated_at: now,
+            .map(|(index, item)| {
+                let values = freeze_random_seed_values(item.values);
+                ProductionBatchItem {
+                    id: ProductionBatchItemId::new(),
+                    batch_id: batch_id.clone(),
+                    ordinal: u32::try_from(index)
+                        .expect("production batch item index must fit u32"),
+                    workflow_version_id: item.workflow_version_id,
+                    recipe_id: item.recipe_id,
+                    values_json: generation_values_to_json(&values),
+                    status: ProductionBatchItemStatus::Pending,
+                    task_id: None,
+                    retry_of_item_id: None,
+                    error_code: None,
+                    error_message: None,
+                    created_at: now,
+                    updated_at: now,
+                }
             })
             .collect::<Vec<_>>();
         self.repository.insert(&batch, &items).await?;
@@ -1068,6 +1073,23 @@ pub(crate) fn generation_values_to_json(values: &BTreeMap<String, GenerationInpu
     Value::Object(object)
 }
 
+fn freeze_random_seed_values(
+    values: BTreeMap<String, GenerationInputValue>,
+) -> BTreeMap<String, GenerationInputValue> {
+    values
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                GenerationInputValue::Seed(SeedValue::Random) => {
+                    GenerationInputValue::Seed(SeedValue::Fixed(Uuid::new_v4().as_u128() as u64))
+                }
+                other => other,
+            };
+            (key, value)
+        })
+        .collect()
+}
+
 fn generation_values_from_json(
     value: &Value,
 ) -> Result<BTreeMap<String, GenerationInputValue>, String> {
@@ -1200,8 +1222,9 @@ impl From<RepositoryError> for ProductionQueueError {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_admission_blocker, generation_values_from_json, generation_values_to_json,
-        is_transient_requeue_error, select_recovery, should_pause_after_terminal,
+        find_admission_blocker, freeze_random_seed_values, generation_values_from_json,
+        generation_values_to_json, is_transient_requeue_error, select_recovery,
+        should_pause_after_terminal,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::ActiveProductionItem;
@@ -1230,6 +1253,29 @@ mod tests {
         );
         let json = generation_values_to_json(&values);
         assert_eq!(generation_values_from_json(&json).unwrap(), values);
+    }
+
+    #[test]
+    fn production_queue_freezes_random_seed_before_persistence() {
+        let mut values = BTreeMap::new();
+        values.insert(
+            "seed_random".to_owned(),
+            GenerationInputValue::Seed(SeedValue::Random),
+        );
+        values.insert(
+            "seed_fixed".to_owned(),
+            GenerationInputValue::Seed(SeedValue::Fixed(42)),
+        );
+
+        let frozen = freeze_random_seed_values(values);
+        assert!(matches!(
+            frozen.get("seed_random"),
+            Some(GenerationInputValue::Seed(SeedValue::Fixed(_)))
+        ));
+        assert_eq!(
+            frozen.get("seed_fixed"),
+            Some(&GenerationInputValue::Seed(SeedValue::Fixed(42)))
+        );
     }
 
     #[test]

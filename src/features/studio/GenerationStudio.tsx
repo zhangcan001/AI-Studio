@@ -3,8 +3,6 @@ import {
   cancelTask,
   createPreset,
   createGeneration,
-  createGenerationBatch,
-  generateShot,
   createProductionQueue,
   createProjectTemplate,
   deletePreset,
@@ -18,15 +16,14 @@ import {
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
-import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
+import type { RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ReusableGenerationDraft } from "../../types/history";
 import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
-import type { ShotInputValues, ShotStage } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
-import { cloneGenerationValues, retainFailedBatchItems, type BatchDraftItem } from "./batchDraft";
+import { cloneGenerationValues, type BatchDraftItem } from "./batchDraft";
 import { parseBatchTaskList } from "./batchImport";
 import { ProductionQueuePanel } from "./ProductionQueuePanel";
 import { productionInteractionPolicy } from "./productionQueuePolicy";
@@ -47,7 +44,8 @@ import type { PromptEntryView } from "../../types/prompt";
 import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
 import { CreationDashboard } from "../production/CreationDashboard";
 import type { RecentWorkflowRecord } from "../production/productionUx";
-import { filterProductionRuntimeCatalog } from "../runtime/productRuntimeScope";
+import { KERA2_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import { splitPromptBlocks } from "../assets/assetVideoBatch";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -83,7 +81,6 @@ interface Props {
   onOpenTask: (taskId: string) => void;
   onOpenWorkflows: () => void;
   onReconnectComfy: () => void;
-  shotContext?: { shotId: string; stage: ShotStage };
 }
 
 export function GenerationStudio({
@@ -100,10 +97,12 @@ export function GenerationStudio({
   onOpenTask,
   onOpenWorkflows,
   onReconnectComfy,
-  shotContext,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
-  const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
+  const productCatalog = useMemo(
+    () => catalog.filter((recipe) => recipe.workflowId === KERA2_WORKFLOW_ID),
+    [catalog],
+  );
   const values = useStudioStore((state) => state.values);
   const draftDirty = useStudioStore((state) => state.draftDirty);
   const validationErrors = useStudioStore((state) => state.validationErrors);
@@ -129,7 +128,8 @@ export function GenerationStudio({
   const [batchItems, setBatchItems] = useState<BatchDraftItem[]>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchNotice, setBatchNotice] = useState<string>();
-  const [studioMode, setStudioMode] = useState<StudioMode>("single");
+  const [batchPasteText, setBatchPasteText] = useState("");
+  const [studioMode, setStudioMode] = useState<StudioMode>("batch");
   const [experimentFocusBatchId, setExperimentFocusBatchId] = useState<string>();
   const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
   const [promptExperimentDimensions, setPromptExperimentDimensions] = useState<ExperimentDimension[]>([]);
@@ -168,7 +168,8 @@ export function GenerationStudio({
     setBatchItems([]);
     setBatchSubmitting(false);
     setBatchNotice(undefined);
-    setStudioMode("single");
+    setBatchPasteText("");
+    setStudioMode("batch");
     setExperimentFocusBatchId(undefined);
     setExperimentContexts({});
     setPromptExperimentDimensions([]);
@@ -459,19 +460,12 @@ export function GenerationStudio({
     setCreating(true);
     setNotice(null);
     try {
-      const task = shotContext
-        ? await generateShot({
-            projectId,
-            shotId: shotContext.shotId,
-            stage: shotContext.stage,
-            values: shotScalarValues(selectedWorkflow, values),
-          })
-        : await createGeneration({
-            projectId,
-            workflowVersionId: selectedWorkflow.workflowVersionId,
-            recipeId: selectedWorkflow.recipeId,
-            values,
-          });
+      const task = await createGeneration({
+        projectId,
+        workflowVersionId: selectedWorkflow.workflowVersionId,
+        recipeId: selectedWorkflow.recipeId,
+        values,
+      });
       adoptCreatedTask(task);
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
@@ -504,6 +498,99 @@ export function GenerationStudio({
       },
     ]);
     setBatchNotice(undefined);
+  }
+
+  function promptFieldForBatch() {
+    return selectedWorkflow?.fields.find((field) => field.type === "textarea");
+  }
+
+  function setBatchPrompt(valuesToUpdate: BatchDraftItem["values"], promptText: string) {
+    const promptField = promptFieldForBatch();
+    if (!promptField) return valuesToUpdate;
+    return {
+      ...valuesToUpdate,
+      [promptField.key]: { type: "string" as const, value: promptText },
+    };
+  }
+
+  function batchPrompt(item: BatchDraftItem) {
+    const promptField = promptFieldForBatch();
+    if (!promptField) return "";
+    const value = item.values[promptField.key];
+    return value?.type === "string" ? value.value : "";
+  }
+
+  function addBlankPromptCard() {
+    if (!selectedWorkflow) return;
+    if (batchItems.length >= 100) {
+      setBatchNotice("已达到图片批次上限，最多支持 100 项。");
+      return;
+    }
+    setBatchItems((current) => [...current, {
+      id: crypto.randomUUID(),
+      workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
+      workflowVersionId: selectedWorkflow.workflowVersionId,
+      recipeId: selectedWorkflow.recipeId,
+      values: setBatchPrompt(cloneGenerationValues(values), ""),
+    }]);
+    setBatchNotice("已添加空白提示词卡片，请填写后再创建图片批次。");
+  }
+
+  function updateBatchPrompt(id: string, promptText: string) {
+    setBatchItems((current) => current.map((item) => (
+      item.id === id ? { ...item, values: setBatchPrompt(cloneGenerationValues(item.values), promptText) } : item
+    )));
+  }
+
+  function copyBatchItem(id: string) {
+    if (batchItems.length >= 100) {
+      setBatchNotice("已达到图片批次上限，最多支持 100 项。");
+      return;
+    }
+    setBatchItems((current) => {
+      const sourceIndex = current.findIndex((item) => item.id === id);
+      if (sourceIndex < 0) return current;
+      const source = current[sourceIndex];
+      const copy = { ...source, id: crypto.randomUUID(), values: cloneGenerationValues(source.values) };
+      return [...current.slice(0, sourceIndex + 1), copy, ...current.slice(sourceIndex + 1)];
+    });
+    setBatchNotice(undefined);
+  }
+
+  function moveBatchItem(id: string, direction: -1 | 1) {
+    setBatchItems((current) => {
+      const index = current.findIndex((item) => item.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
+  function splitPastedPrompts() {
+    if (!selectedWorkflow) return;
+    const parsed = splitPromptBlocks(batchPasteText);
+    if (!parsed.length) {
+      setBatchNotice("请先粘贴提示词；多个提示词之间使用空行分隔。");
+      return;
+    }
+    if (batchItems.length + parsed.length > 100) {
+      setBatchNotice(`拆分后将超过 100 项上限，还可添加 ${100 - batchItems.length} 项。`);
+      return;
+    }
+    setBatchItems((current) => [
+      ...current,
+      ...parsed.map((promptText) => ({
+        id: crypto.randomUUID(),
+        workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
+        workflowVersionId: selectedWorkflow.workflowVersionId,
+        recipeId: selectedWorkflow.recipeId,
+        values: setBatchPrompt(cloneGenerationValues(values), promptText),
+      })),
+    ]);
+    setBatchPasteText("");
+    setBatchNotice(`已按空行拆分 ${parsed.length} 张提示词卡片。`);
   }
 
   function removeBatchItem(id: string) {
@@ -543,23 +630,40 @@ export function GenerationStudio({
     setBatchSubmitting(true);
     setBatchNotice(undefined);
     try {
-      const result = await createGenerationBatch({
+      const invalidIndexes = batchItems.flatMap((item, index) => {
+        const recipe = productCatalog.find(
+          (candidate) => candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId,
+        );
+        if (!recipe || Object.keys(validateRecipeValues(recipe, item.values)).length > 0) return [index];
+        return [];
+      });
+      if (invalidIndexes.length) {
+        setBatchNotice(`第 ${invalidIndexes.map((index) => index + 1).join("、")} 项还未填写完整，请补齐提示词和必需输入。`);
+        return;
+      }
+      const created = await createProductionQueue({
         projectId,
+        name: `批量图片 · ${formatDateTime(new Date().toISOString())}`,
+        continueOnFailure: true,
         items: batchItems.map((item) => ({
           workflowVersionId: item.workflowVersionId,
           recipeId: item.recipeId,
-          values: item.values,
+          values: cloneGenerationValues(item.values),
         })),
       });
-      result.created.forEach(({ task }) => adoptCreatedTask(task));
-      const failedIndexes = result.failed.map((item) => item.index);
-      setBatchItems((current) => retainFailedBatchItems(current, failedIndexes));
-      const failureSummary = result.failed.length
-        ? ` 失败项：${result.failed.map((item) => `第 ${item.index + 1} 项（${item.code}）`).join("、")}。`
-        : "";
-      setBatchNotice(
-        `批量提交完成：成功创建 ${result.created.length} 个任务，${result.failed.length} 个任务提交失败。${failureSummary}`,
-      );
+      setExperimentFocusBatchId(created.id);
+      setBatchItems([]);
+      try {
+        await onProductionAdmissionChanged();
+      } catch {
+        // The queue is persisted even if the status refresh is temporarily unavailable.
+      }
+      try {
+        await startProductionQueue(projectId, created.id);
+        setBatchNotice(`图片批次已创建并开始执行，共 ${created.total} 项；提示词和参数已冻结，队列严格串行。`);
+      } catch (startError: unknown) {
+        setBatchNotice(`图片批次已创建，共 ${created.total} 项；开始执行失败：${toUserMessage(startError)}。可在队列中手动开始。`);
+      }
     } catch (batchError: unknown) {
       setBatchNotice(toUserMessage(batchError));
     } finally {
@@ -867,13 +971,6 @@ export function GenerationStudio({
               }}
               onUseForExperiment={usePromptVersionsForExperiment}
             />
-            {selectedWorkflow.workflowId === "wfl_minimax_h3_reference_video" && (
-              <details className="h3-safety-note">
-                <summary>✓ 16GB 安全配置</summary>
-                <p>0.1MP · 5 秒 · 4 步 · 单任务</p>
-                <small>当前配置已在本机显卡上验证，保持单任务执行可以降低显存溢出风险。</small>
-              </details>
-            )}
             <DynamicFormRenderer
               recipe={selectedWorkflow}
               values={values}
@@ -905,15 +1002,18 @@ export function GenerationStudio({
               />
             )}
             {studioMode === "batch" && <section className="batch-production-view" aria-label="批量生产">
-              <section className="batch-panel" aria-label="临时批量任务">
+              <section className="batch-panel" aria-label="批量图片提示词">
                 <div className="batch-panel-header">
                   <div>
-                    <span className="section-label">临时批量任务</span>
-                    <p>先加入任务清单，再选择普通批量提交或创建持久生产队列。</p>
-                </div>
+                    <span className="section-label">提示词列表</span>
+                    <p>每张提示词卡片都会创建一个 Krea2 图片任务；创建批次后参数会冻结。</p>
+                  </div>
                 <div className="batch-actions">
                   <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting}>
-                    添加当前任务
+                    添加当前提示词
+                  </button>
+                  <button type="button" className="quiet-button" onClick={addBlankPromptCard} disabled={batchSubmitting}>
+                    添加提示词
                   </button>
                   <label className="quiet-button batch-file-button">
                     导入 JSON
@@ -941,25 +1041,50 @@ export function GenerationStudio({
                   </button>
                 </div>
               </div>
+              <div className="batch-prompt-paste">
+                <label>
+                  <span>直接粘贴提示词</span>
+                  <textarea
+                    rows={4}
+                    value={batchPasteText}
+                    onChange={(event) => setBatchPasteText(event.target.value)}
+                    placeholder="每张提示词之间留一个空行……"
+                    disabled={batchSubmitting}
+                  />
+                </label>
+                <button type="button" onClick={splitPastedPrompts} disabled={batchSubmitting || !batchPasteText.trim()}>
+                  按空行拆分
+                </button>
+              </div>
               {batchItems.length ? (
                 <ol className="batch-list">
                   {batchItems.map((item, index) => (
-                    <li key={item.id}>
-                      <span>#{index + 1}</span>
-                      <strong>{item.workflowName}</strong>
-                      <button
-                        type="button"
-                        className="quiet-button"
-                        onClick={() => removeBatchItem(item.id)}
-                        disabled={batchSubmitting}
-                      >
-                        移除
-                      </button>
+                    <li key={item.id} className="batch-prompt-card">
+                      <div className="batch-prompt-card-header">
+                        <strong>提示词 #{index + 1}</strong>
+                        <span>{item.workflowName}</span>
+                      </div>
+                      <label>
+                        <span>提示词内容</span>
+                        <textarea
+                          rows={4}
+                          value={batchPrompt(item)}
+                          onChange={(event) => updateBatchPrompt(item.id, event.target.value)}
+                          disabled={batchSubmitting}
+                          placeholder="输入这张图片的生成提示词……"
+                        />
+                      </label>
+                      <div className="batch-prompt-card-actions">
+                        <button type="button" className="quiet-button" onClick={() => copyBatchItem(item.id)} disabled={batchSubmitting}>复制</button>
+                        <button type="button" className="quiet-button" onClick={() => moveBatchItem(item.id, -1)} disabled={batchSubmitting || index === 0}>上移</button>
+                        <button type="button" className="quiet-button" onClick={() => moveBatchItem(item.id, 1)} disabled={batchSubmitting || index === batchItems.length - 1}>下移</button>
+                        <button type="button" className="quiet-button danger-button" onClick={() => removeBatchItem(item.id)} disabled={batchSubmitting}>删除</button>
+                      </div>
                     </li>
                   ))}
                 </ol>
               ) : (
-                <p className="disabled-note">暂未添加任务。</p>
+                <p className="disabled-note">暂未添加提示词卡片。</p>
               )}
               <button
                 type="button"
@@ -972,7 +1097,7 @@ export function GenerationStudio({
                   !productionPolicy.canSubmitLocalBatch
                 }
               >
-                {batchSubmitting ? "正在提交..." : `提交批量任务（${batchItems.length}）`}
+                {batchSubmitting ? "正在创建..." : `创建图片批次（${batchItems.length}）`}
               </button>
               {batchNotice && <p className="disabled-note">{batchNotice}</p>}
               </section>
@@ -980,6 +1105,7 @@ export function GenerationStudio({
                 projectId={projectId}
                 batchItems={batchItems}
                 comfyConnected={comfyConnected}
+                hideCreate
                 focusBatchId={experimentFocusBatchId ?? focusProductionBatchId}
                 onAdmissionChanged={onProductionAdmissionChanged}
                 onFocusedBatchOpened={() => {
@@ -1004,16 +1130,4 @@ export function GenerationStudio({
       />
     </>
   );
-}
-
-function shotScalarValues(recipe: RecipeViewModel, values: Record<string, DraftValue>): ShotInputValues {
-  const result: ShotInputValues = {};
-  for (const field of recipe.fields) {
-    if (field.type !== "integer" && field.type !== "seed") continue;
-    const value = values[field.key];
-    if (value?.type === "integer" || value?.type === "seed_random" || value?.type === "seed_fixed") {
-      result[field.key] = value;
-    }
-  }
-  return result;
 }

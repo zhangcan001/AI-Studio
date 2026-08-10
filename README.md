@@ -3,7 +3,7 @@
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
 Released: `0.2.0` (M2 Foundation Pack 01–04 verified; immutable release).
-Development: `0.3.0` (M3 Shot Production Pack 09–10; code pass, live pending).
+Development: `0.3.0` (independent Krea2 image batches + MiniMax H3 video batches; simplified live gate pending).
 The released `0.1.0` baseline remains available in the Git history and GitHub
 Release; this development cycle does not modify its tag or release assets.
 
@@ -13,10 +13,11 @@ M0 = PASS.
 
 M1 progress:
 
-The shared runtime remains generic. The frozen 0.3.0 production scope is Kera2
-image generation for Shot keyframes and MiniMax H3 reference-image-to-video.
-Workflow / Recipe / Schema / Capability / onboarding / diagnostics architecture
-remains model-agnostic, while active production remains limited to these two runtimes.
+The shared runtime remains generic. The realigned 0.3.0 production scope is an
+independent Kera2 image-batch product and an independent MiniMax H3 video-batch
+product. Workflow / Recipe / Schema / Capability / onboarding / diagnostics
+architecture remains model-agnostic, while active production remains limited to
+these two exact runtimes.
 
 **M1 Release Candidate 01 = PASS.** Global single-GPU production admission,
 cross-project and interactive submission safety, deterministic restart
@@ -66,7 +67,7 @@ and Kera2/H3 live UX gates are validated. Evidence is recorded in
 - Prompt-specific ComfyUI cancellation with modern API and safe legacy queue fallback
 - Startup task recovery and manual history/queue reconciliation without automatic resubmit
 - Cancel and recovery UI driven by persisted `task://updated` events, without frontend polling
-- Workspace navigation between Studio, Shot Production, Assets, and Tasks
+- Workspace navigation between Batch Images, Batch Videos, Assets, and Tasks
 - Project-scoped task history with status filters, keyset pagination, detail views, and safe snapshot reuse
 - Project-scoped Asset Library with category filters, keyset pagination, binary previews, and Blob URL cleanup
 - Local-first historical input loading that never auto-generates a new task
@@ -173,19 +174,12 @@ The v0.2.0 post-release integrity audit is recorded in
 `docs/POST_RELEASE_AUDIT_0.2.0.md`. The v0.2.0 tag and Release remain frozen;
 new work is development-only on the 0.3.0 line.
 
-The current M3 scope and evidence are recorded in
-`docs/M3_SHOT_PRODUCTION_PACK_09.md` and
-`docs/M3_SHOT_BATCH_PACK_10.md`. Pack 05–08 remain historical milestone
-records; the Pack 10 source direction is preserved in
-`docs/M3_SHOT_BATCH_PACK_10_SOURCE.md`.
-
-The 0.3.0 scope is now frozen for release hardening. The exact frozen runtime
-IDs, no-new-feature boundary, and migration/backup compatibility contract are
-recorded in `docs/M3_0_3_0_SCOPE_FREEZE.md`. The release candidate matrix and
-honest integrated Live Gate status are recorded in
-`docs/M3_FINAL_RELEASE_GATE_0.3.0.md`; user-facing notes are in
-`docs/RELEASE_NOTES_0.3.0.md`, and local installer hashes are in
-`docs/RELEASE_SHA256_0.3.0.txt`. No `v0.3.0` tag or GitHub Release has been
+Pack 05–10 remain historical implementation records and their old Shot data
+paths remain compatible. The current product direction, exact runtime IDs,
+Backup v5 contract, and hidden legacy UI boundary are recorded in
+`docs/M3_0_3_0_SCOPE_FREEZE.md`. The two required independent live gates are
+recorded in `docs/M3_FINAL_RELEASE_GATE_0.3.0.md`; user-facing notes are in
+`docs/RELEASE_NOTES_0.3.0.md`. No `v0.3.0` tag or GitHub Release has been
 created.
 
 Runtime Workflow Packages are loaded only from

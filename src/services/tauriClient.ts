@@ -7,6 +7,7 @@ import type {
   RuntimeActivityStatus,
 } from "../types/diagnostics";
 import type { AssetLibraryPage, AssetLibraryQuery, AssetView } from "../types/asset";
+import type { AssetVideoPromptView } from "../types/assetVideoPrompt";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type { ShotBatchPlan, ShotInputValues, ShotStage, ShotView } from "../types/shot";
@@ -520,6 +521,24 @@ export function getAssetMediaUrl(
 
 export function getAsset(projectId: string, assetId: string): Promise<AssetView> {
   return invoke<AssetView>("asset_get", { projectId, assetId });
+}
+
+export function getAssetVideoPrompt(projectId: string, assetId: string): Promise<AssetVideoPromptView | null> {
+  return invoke<AssetVideoPromptView | null>("asset_video_prompt_get", { projectId, assetId });
+}
+
+export function listAssetVideoPrompts(projectId: string, assetIds: string[]): Promise<AssetVideoPromptView[]> {
+  return invoke<AssetVideoPromptView[]>("asset_video_prompt_list", { projectId, assetIds });
+}
+
+export function setAssetVideoPrompt(
+  projectId: string,
+  assetId: string,
+  promptText: string,
+): Promise<AssetVideoPromptView> {
+  return invoke<AssetVideoPromptView>("asset_video_prompt_set", {
+    request: { projectId, assetId, promptText },
+  });
 }
 
 export function taskHistoryPage(

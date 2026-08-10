@@ -18,6 +18,7 @@ import { AssetPreview } from "./AssetPreview";
 import { TagManagerDialog } from "./TagManagerDialog";
 import type { AssetTag } from "../../types/organization";
 import { replaceAssetOrganization } from "./assetOrganization";
+import { isImageAssetForVideo } from "./assetVideoBatch";
 
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "ALL", label: "全部分类" },
@@ -31,10 +32,11 @@ const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
 interface Props {
   projectId: string;
   onUseInStudio: (asset: AssetView) => void;
+  onOpenVideoBatch: (assets: AssetView[]) => void;
   onOpenTask: (taskId: string) => void;
 }
 
-export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
+export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpenTask }: Props) {
   const [category, setCategory] = useState<AssetCategoryFilter>("ALL");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -191,6 +193,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
 
   const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL" || favoriteOnly || tagId);
   const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
+  const selectedImageAssets = assets.filter((asset) => selectedAssetIds.has(asset.id) && isImageAssetForVideo(asset));
 
   return (
     <section className="workspace-panel" aria-busy={loading}>
@@ -279,6 +282,13 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenTask }: Props) {
           </select>
           <button type="button" onClick={() => void runBulkTag(true)} disabled={bulkBusy || !selectedAssetIds.size || !bulkTagId}>添加标签</button>
           <button type="button" className="quiet-button" onClick={() => void runBulkTag(false)} disabled={bulkBusy || !selectedAssetIds.size || !bulkTagId}>移除标签</button>
+          <button
+            type="button"
+            onClick={() => onOpenVideoBatch(selectedImageAssets)}
+            disabled={bulkBusy || selectedImageAssets.length < 1 || selectedImageAssets.length > 100}
+          >
+            批量生成视频（{selectedImageAssets.length}）
+          </button>
           <button type="button" className="quiet-button" onClick={() => setSelectedAssetIds(new Set())} disabled={bulkBusy || !selectedAssetIds.size}>取消选择</button>
         </section>
       )}

@@ -17,17 +17,16 @@ import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
 import { AssetLibrary } from "../features/assets/AssetLibrary";
+import { AssetVideoBatchWorkspace } from "../features/assets/AssetVideoBatchWorkspace";
 import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
-import { ShotWorkspace } from "../features/shots/ShotWorkspace";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
-import type { ShotStage, ShotView } from "../types/shot";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { toUserMessage } from "../i18n/errorMessages";
@@ -35,11 +34,11 @@ import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import "./App.css";
 
-type Workspace = "studio" | "shots" | "assets" | "tasks" | "projects" | "workflows" | "settings";
+type Workspace = "studio" | "video" | "assets" | "tasks" | "projects" | "workflows" | "settings";
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
-  const [shotContext, setShotContext] = useState<{ shotId: string; stage: ShotStage }>();
+  const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
@@ -160,12 +159,8 @@ function App() {
 
   useEffect(() => {
     setFocusedTaskId(undefined);
-    setShotContext(undefined);
+    setVideoBatchAssets([]);
   }, [activeProjectId]);
-
-  useEffect(() => {
-    if (workspace !== "studio") setShotContext(undefined);
-  }, [workspace]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -196,7 +191,7 @@ function App() {
     useTaskStore.getState().clear();
     useStudioStore.getState().resetDraft();
     useStudioStore.getState().clearPendingAssetIntent();
-    setShotContext(undefined);
+    setVideoBatchAssets([]);
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
     setError(null);
@@ -271,7 +266,6 @@ function App() {
         return;
       }
       useStudioStore.getState().setSelectedWorkflow(workflow);
-      setShotContext(undefined);
       setWorkspace("studio");
       setError(null);
     } catch (openError: unknown) {
@@ -314,7 +308,6 @@ function App() {
       workflowName: draft.workflowName,
       createdAt: draft.createdAt,
     });
-    setShotContext(undefined);
     setError(null);
     setWorkspace("studio");
   }
@@ -331,7 +324,6 @@ function App() {
       assetId: asset.id,
       assetType: assetType as StudioAssetType,
     });
-    setShotContext(undefined);
     setError(null);
     setWorkspace("studio");
   }
@@ -355,29 +347,13 @@ function App() {
       return;
     }
     useStudioStore.getState().loadDraft(workflow, result.values);
-    setShotContext(undefined);
     setWorkspace("studio");
     setError(null);
   }
 
-  function openShotInStudio(shot: ShotView, stage: ShotStage, recipe: RecipeViewModel) {
-    if (!activeProjectId || shot.projectId !== activeProjectId) return;
-    const studio = useStudioStore.getState();
-    studio.setSelectedWorkflow(recipe);
-    const current = useStudioStore.getState();
-    const config = shot.stageConfigs.find((item) => item.stage === stage);
-    Object.entries(config?.scalarValues ?? {}).forEach(([key, value]) => current.setValue(key, value));
-    const promptField = recipe.fields.find((field) => field.type === "textarea");
-    if (promptField) current.setValue(promptField.key, { type: "string", value: shot.promptText });
-    const imageField = recipe.fields.find((field) => field.type === "image" || field.type === "images");
-    const selectedImage = shot.selectedImageAssetId;
-    if (imageField && selectedImage) {
-      current.setValue(imageField.key, imageField.type === "images"
-        ? { type: "image_assets", assetIds: [selectedImage] }
-        : { type: "image_asset", assetId: selectedImage });
-    }
-    setShotContext({ shotId: shot.id, stage });
-    setWorkspace("studio");
+  function openVideoBatch(assets: AssetView[]) {
+    setVideoBatchAssets(assets);
+    setWorkspace("video");
     setError(null);
   }
 
@@ -427,8 +403,8 @@ function App() {
 
       <nav className="workspace-nav" aria-label="工作区导航">
         {([
-          ["studio", "创作"],
-          ["shots", "镜头制作"],
+          ["studio", "批量图片"],
+          ["video", "批量视频"],
           ["assets", "资产库"],
           ["tasks", "任务"],
           ["projects", "项目"],
@@ -447,7 +423,7 @@ function App() {
         ))}
       </nav>
 
-      {workspace === "studio" && productionAdmission.busy && (
+      {(workspace === "studio" || workspace === "video") && productionAdmission.busy && (
         <section className="production-admission-banner" role="status" aria-live="polite">
           <div>
             <span className="section-label">生产队列正在运行</span>
@@ -468,7 +444,7 @@ function App() {
       {projectContextLoading && activeProject && (
         <p className="project-loading" role="status">正在加载项目...</p>
       )}
-      {workspace === "studio" && (
+      {(workspace === "studio" || workspace === "video") && (
         <ComfyStatusCard
           status={comfy}
           connectionLoading={connectionLoading}
@@ -500,7 +476,6 @@ function App() {
             taskEventsReady={taskEventsReady}
             taskEventError={taskEventError}
             productionAdmission={productionAdmission}
-            shotContext={shotContext}
             focusProductionBatchId={focusedProductionBatchId}
             onCatalogChanged={reloadCatalog}
             onProductionAdmissionChanged={refreshProductionAdmission}
@@ -514,25 +489,31 @@ function App() {
           />
         </section>
       )}
-      {activeProject && workspace === "shots" && (
-        <ShotWorkspace
+      {activeProject && workspace === "assets" && (
+        <AssetLibrary
           projectId={activeProject.id}
-          catalog={catalog}
-          onOpenInStudio={openShotInStudio}
+          onUseInStudio={useAssetInStudio}
+          onOpenVideoBatch={openVideoBatch}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
             setWorkspace("tasks");
           }}
         />
       )}
-      {activeProject && workspace === "assets" && (
-        <AssetLibrary
+      {activeProject && workspace === "video" && (
+        <AssetVideoBatchWorkspace
           projectId={activeProject.id}
-          onUseInStudio={useAssetInStudio}
+          catalog={catalog}
+          initialAssets={videoBatchAssets}
+          comfyConnected={isConnected}
+          taskEventsReady={taskEventsReady}
+          productionAdmission={productionAdmission}
+          onAdmissionChanged={refreshProductionAdmission}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
             setWorkspace("tasks");
           }}
+          onBackToAssets={() => setWorkspace("assets")}
         />
       )}
       {activeProject && workspace === "tasks" && (

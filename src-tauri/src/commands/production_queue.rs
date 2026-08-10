@@ -71,6 +71,10 @@ pub struct ProductionBatchItemView {
     pub retry_of_item_id: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub prompt_text: Option<String>,
+    pub seed: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -320,6 +324,8 @@ impl From<ProductionBatch> for ProductionBatchSummaryView {
 
 impl From<ProductionBatchItem> for ProductionBatchItemView {
     fn from(item: ProductionBatchItem) -> Self {
+        let prompt_text = item_prompt_text(&item.values_json);
+        let seed = item_seed(&item.values_json);
         Self {
             id: item.id.as_str().to_owned(),
             ordinal: item.ordinal,
@@ -330,8 +336,33 @@ impl From<ProductionBatchItem> for ProductionBatchItemView {
             retry_of_item_id: item.retry_of_item_id,
             error_code: item.error_code,
             error_message: item.error_message,
+            prompt_text,
+            seed,
+            created_at: item.created_at.to_rfc3339(),
+            updated_at: item.updated_at.to_rfc3339(),
         }
     }
+}
+
+fn item_prompt_text(values: &serde_json::Value) -> Option<String> {
+    values
+        .as_object()?
+        .iter()
+        .find(|(key, value)| {
+            key.to_ascii_lowercase().contains("prompt")
+                && value.get("type").and_then(serde_json::Value::as_str) == Some("string")
+        })
+        .and_then(|(_, value)| value.get("value").and_then(serde_json::Value::as_str))
+        .map(ToOwned::to_owned)
+}
+
+fn item_seed(values: &serde_json::Value) -> Option<String> {
+    values
+        .as_object()?
+        .values()
+        .find(|value| value.get("type").and_then(serde_json::Value::as_str) == Some("seed_fixed"))
+        .and_then(|value| value.get("value").and_then(serde_json::Value::as_str))
+        .map(ToOwned::to_owned)
 }
 
 impl From<ProductionBatchDetail> for ProductionBatchDetailView {

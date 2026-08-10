@@ -3,6 +3,7 @@
 pub mod asset_browse_repository;
 pub mod asset_repository;
 pub mod asset_store;
+pub mod asset_video_prompt_repository;
 pub mod clock;
 pub mod comfy_adapter;
 pub mod generation_definition_repository;
@@ -35,6 +36,7 @@ pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
 pub use asset_store::{
     AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile,
 };
+pub use asset_video_prompt_repository::{AssetVideoPromptRecord, AssetVideoPromptRepository};
 pub use clock::{Clock, MonotonicEventClock};
 #[allow(unused_imports)]
 pub use comfy_adapter::ComfyUploadedImage;

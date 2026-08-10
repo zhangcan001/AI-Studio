@@ -1,5 +1,6 @@
 use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
+use crate::application::asset_video_prompt_service::AssetVideoPromptService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
@@ -36,6 +37,7 @@ pub struct AppState {
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
+    pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
     pub task_history_service: Arc<TaskHistoryService>,
     pub source_asset_import_service: Arc<SourceAssetImportService>,
     pub task_cancellation_service: Arc<TaskCancellationService>,
@@ -65,6 +67,7 @@ impl AppState {
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
+        asset_video_prompt_service: Arc<AssetVideoPromptService>,
         task_history_service: Arc<TaskHistoryService>,
         source_asset_import_service: Arc<SourceAssetImportService>,
         task_cancellation_service: Arc<TaskCancellationService>,
@@ -92,6 +95,7 @@ impl AppState {
             task_query_service,
             asset_query_service,
             asset_library_service,
+            asset_video_prompt_service,
             task_history_service,
             source_asset_import_service,
             task_cancellation_service,

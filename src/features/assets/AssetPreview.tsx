@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, readAssetImage, readAssetThumbnail, removeAssetTag, setAssetFavorite } from "../../services/tauriClient";
+import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, getAssetVideoPrompt, readAssetImage, readAssetThumbnail, removeAssetTag, setAssetFavorite, setAssetVideoPrompt } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 import type { AssetTag } from "../../types/organization";
 import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
@@ -21,6 +21,9 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
   const [selectedTagId, setSelectedTagId] = useState("");
   const [newTagName, setNewTagName] = useState("");
   const [organizationBusy, setOrganizationBusy] = useState(false);
+  const [videoPrompt, setVideoPrompt] = useState("");
+  const [videoPromptBusy, setVideoPromptBusy] = useState(false);
+  const [videoPromptNotice, setVideoPromptNotice] = useState<string>();
 
   useEffect(() => {
     let active = true;
@@ -64,8 +67,26 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
     };
   }, [asset.assetType, asset.category, asset.id, asset.mimeType, asset.thumbnailAvailable, projectId]);
 
+  const isImage = asset.assetType === "image" || asset.category === "source_image" || asset.category === "generated_image";
+
+  useEffect(() => {
+    let active = true;
+    setVideoPrompt("");
+    setVideoPromptNotice(undefined);
+    if (!isImage) return () => { active = false; };
+    void getAssetVideoPrompt(projectId, asset.id)
+      .then((record) => {
+        if (active) setVideoPrompt(record?.promptText ?? "");
+      })
+      .catch(() => {
+        if (active) setVideoPromptNotice("视频提示词读取失败，请稍后重试。");
+      });
+    return () => { active = false; };
+  }, [asset.id, isImage, projectId]);
+
   const isVideo = asset.assetType === "video" || asset.category === "generated_video" || asset.category === "source_video";
   const isAudio = asset.assetType === "audio" || asset.category === "source_audio";
+  const videoPromptBytes = new TextEncoder().encode(videoPrompt).byteLength;
   const displayName = assetDisplayName(asset);
   const displayOriginalName = assetDisplayName(asset, asset.originalName);
 
@@ -98,6 +119,19 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
     setOrganizationBusy(true); setError(undefined);
     try { await removeAssetTag(projectId, asset.id, tagId); await refreshOrganization(); }
     catch { setError("标签移除失败，请稍后重试。"); } finally { setOrganizationBusy(false); }
+  }
+
+  async function saveVideoPrompt() {
+    setVideoPromptBusy(true);
+    setVideoPromptNotice(undefined);
+    try {
+      await setAssetVideoPrompt(projectId, asset.id, videoPrompt);
+      setVideoPromptNotice("已配置");
+    } catch {
+      setVideoPromptNotice("保存失败：请输入非空提示词，且不超过 64 KiB。");
+    } finally {
+      setVideoPromptBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -145,6 +179,39 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
         <p className="asset-preview-meta">
           {assetTypeLabel(asset)} · {displayOriginalName} · {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatFileSize(asset.fileSize)} · {formatDateTime(asset.createdAt)}
         </p>
+        {isImage && (
+          <section className="asset-video-prompt-panel" aria-label="视频提示词">
+            <div className="asset-video-prompt-heading">
+              <div>
+                <strong>视频提示词</strong>
+                <small>资产可直接用于 MiniMax H3 批量视频；允许保留内部换行。</small>
+              </div>
+              <span className={videoPrompt.trim() ? "asset-prompt-status asset-prompt-status-ready" : "asset-prompt-status"}>
+                {videoPrompt.trim() ? "已配置" : "未配置"}
+              </span>
+            </div>
+            <textarea
+              value={videoPrompt}
+              maxLength={64 * 1024}
+              rows={4}
+              aria-label="视频提示词内容"
+              placeholder="描述这张图片要如何运动或变化……"
+              onChange={(event) => {
+                const next = event.target.value;
+                if (new TextEncoder().encode(next).byteLength <= 64 * 1024) setVideoPrompt(next);
+                else setVideoPromptNotice("提示词不能超过 64 KiB。");
+              }}
+              disabled={videoPromptBusy}
+            />
+            <div className="asset-video-prompt-actions">
+              <small>{videoPromptBytes.toLocaleString()} / 65,536 字节</small>
+              <button type="button" onClick={() => void saveVideoPrompt()} disabled={videoPromptBusy || !videoPrompt.trim() || videoPromptBytes > 64 * 1024}>
+                {videoPromptBusy ? "正在保存..." : "保存提示词"}
+              </button>
+            </div>
+            {videoPromptNotice && <p className="disabled-note" role="status">{videoPromptNotice}</p>}
+          </section>
+        )}
         <section className="asset-preview-tags" aria-label="素材标签">
           <strong>标签</strong>
           <div className="asset-preview-tag-list">

@@ -26,11 +26,12 @@ import type {
 import type { BatchDraftItem } from "./batchDraft";
 import { isSafeProductionQueueRequeue } from "./productionQueuePolicy";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
+import { formatDateTime, productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import type { ReusableGenerationDraft } from "../../types/history";
 import type { AssetView } from "../../types/asset";
 import { toggleCompareSelection } from "../assets/assetCompare";
 import { AssetCompareWorkspace } from "../assets/AssetCompareWorkspace";
+import { AssetCard } from "../assets/AssetCard";
 import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
 
@@ -42,6 +43,7 @@ interface Props {
   onAdmissionChanged: () => Promise<void>;
   onFocusedBatchOpened: () => void;
   onOpenTask: (taskId: string) => void;
+  hideCreate?: boolean;
   experimentContexts?: Record<string, ExperimentContext>;
   onPromoteWinner?: (draft: ReusableGenerationDraft, source: { batchName: string; taskId: string }) => Promise<void>;
 }
@@ -54,6 +56,7 @@ export function ProductionQueuePanel({
   onAdmissionChanged,
   onFocusedBatchOpened,
   onOpenTask,
+  hideCreate = false,
   experimentContexts,
   onPromoteWinner,
 }: Props) {
@@ -69,6 +72,7 @@ export function ProductionQueuePanel({
   const [notice, setNotice] = useState<string>();
   const [resultCompareAssets, setResultCompareAssets] = useState<AssetView[]>([]);
   const [resultCompareOpen, setResultCompareOpen] = useState(false);
+  const [resultAssetsByItem, setResultAssetsByItem] = useState<Record<string, AssetView[]>>({});
   const selectedIdRef = useRef<string | undefined>(undefined);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
@@ -109,6 +113,7 @@ export function ProductionQueuePanel({
     setQueueDetail(undefined);
     setShowArchived(false);
     setNotice(undefined);
+    setResultAssetsByItem({});
     void refreshQueues(false);
     void listProductionQueueNamePresets().then(setNamePresets).catch(() => setNamePresets([]));
   }, [projectId, refreshQueues, setQueueDetail]);
@@ -159,6 +164,24 @@ export function ProductionQueuePanel({
       active = false;
     };
   }, [focusBatchId, onFocusedBatchOpened, projectId, setQueueDetail]);
+
+  useEffect(() => {
+    let active = true;
+    const succeededItems = detail?.items.filter((item) => item.status === "SUCCEEDED" && item.taskId) ?? [];
+    if (!succeededItems.length) return () => { active = false; };
+    void Promise.all(
+      succeededItems.map(async (item) => [
+        item.id,
+        (await getTaskDetail(projectId, item.taskId!)).outputAssets,
+      ] as const),
+    )
+      .then((entries) => {
+        if (!active) return;
+        setResultAssetsByItem((current) => ({ ...current, ...Object.fromEntries(entries) }));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [detail, projectId]);
 
   const visibleQueues = useMemo(
     () => queues.filter((queue) => showArchived || !queue.archivedAt),
@@ -370,7 +393,7 @@ export function ProductionQueuePanel({
         </div>
       )}
 
-      <div className="production-queue-create">
+      {!hideCreate && <div className="production-queue-create">
         <input
           aria-label="生产队列名称"
           value={name}
@@ -400,7 +423,7 @@ export function ProductionQueuePanel({
         <button type="button" disabled={busy || !batchItems.length} onClick={() => void saveQueue()}>
           保存队列（{batchItems.length}）
         </button>
-      </div>
+      </div>}
 
       <div className="production-queue-filter">
         <label className="production-queue-checkbox">
@@ -487,6 +510,7 @@ export function ProductionQueuePanel({
               const canRequeue = detailEditable && isSafeProductionQueueRequeue(item);
               const reviewRequired =
                 detailEditable && item.status === "FAILED" && !canRequeue && item.errorCode !== undefined;
+              const resultAssets = resultAssetsByItem[item.id] ?? [];
               return (
                 <li key={item.id}>
                   <span>#{item.ordinal + 1}</span>
@@ -494,6 +518,9 @@ export function ProductionQueuePanel({
                   <div className="production-item-identity">
                     <span>{item.taskId ?? "尚未提交"}</span>
                     {item.retryOfItemId && <small>重试自 {item.retryOfItemId}</small>}
+                    {item.promptText && <small title={item.promptText}>提示词：{item.promptText}</small>}
+                    {item.seed && <small>Seed：{item.seed}</small>}
+                    {item.createdAt && <small>{formatDateTime(item.createdAt)}</small>}
                   </div>
                   <div className="production-item-error">
                     <span>{item.errorCode ?? "—"}</span>
@@ -524,6 +551,18 @@ export function ProductionQueuePanel({
                     )}
                     {reviewRequired && <span className="review-required">需要检查</span>}
                   </div>
+                  {resultAssets.length > 0 && item.taskId && (
+                    <div className="production-item-results" aria-label={`第 ${item.ordinal + 1} 项输出资产`}>
+                      {resultAssets.map((asset) => (
+                        <AssetCard
+                          key={asset.id}
+                          projectId={projectId}
+                          asset={asset}
+                          onSelect={() => onOpenTask(item.taskId!)}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </li>
               );
             })}

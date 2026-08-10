@@ -7,6 +7,7 @@ use crate::{
     application::{
         asset_library_service::{AssetLibraryError, AssetLibraryPageView},
         asset_query_service::{AssetQueryError, AssetView},
+        asset_video_prompt_service::{AssetVideoPromptError, AssetVideoPromptView},
         source_asset_import_service::{
             SourceAssetImportError, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES,
             MAX_SOURCE_VIDEO_BYTES,
@@ -206,6 +207,55 @@ pub async fn asset_get(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn asset_video_prompt_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_id: String,
+) -> Result<Option<AssetVideoPromptView>, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .asset_video_prompt_service
+        .get(&project_id, &asset_id)
+        .await
+        .map_err(map_asset_video_prompt_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_video_prompt_list(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_ids: Vec<String>,
+) -> Result<Vec<AssetVideoPromptView>, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .asset_video_prompt_service
+        .list(&project_id, &asset_ids)
+        .await
+        .map_err(map_asset_video_prompt_error)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetVideoPromptSetRequest {
+    pub project_id: String,
+    pub asset_id: String,
+    pub prompt_text: String,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_video_prompt_set(
+    state: State<'_, AppState>,
+    request: AssetVideoPromptSetRequest,
+) -> Result<AssetVideoPromptView, AppError> {
+    super::validate_project_id(&request.project_id)?;
+    state
+        .asset_video_prompt_service
+        .set(&request.project_id, &request.asset_id, &request.prompt_text)
+        .await
+        .map_err(map_asset_video_prompt_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn asset_pick_and_import_image(
     app_handle: AppHandle,
     state: State<'_, AppState>,
@@ -363,6 +413,14 @@ fn map_asset_library_error(error: AssetLibraryError) -> AppError {
             AppError::invalid_input("INVALID_PROJECT_ID: project id must not be empty")
         }
         AssetLibraryError::Repository(error) => super::map_repository_error(&error),
+    }
+}
+
+fn map_asset_video_prompt_error(error: AssetVideoPromptError) -> AppError {
+    match error {
+        AssetVideoPromptError::InvalidInput(message) => AppError::invalid_input(message),
+        AssetVideoPromptError::NotFound(asset_id) => AppError::asset_not_found(asset_id),
+        AssetVideoPromptError::Repository(error) => super::map_repository_error(&error),
     }
 }
 

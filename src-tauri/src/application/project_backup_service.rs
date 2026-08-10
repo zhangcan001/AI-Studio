@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 4;
+const BACKUP_VERSION: u32 = 5;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -435,6 +435,22 @@ impl ProjectBackupService {
         let mut asset_favorites = sqlx::query_as::<_, BackupAssetFavorite>(
             "SELECT asset_id, project_id, created_at FROM asset_favorites WHERE project_id = ? ORDER BY created_at, asset_id",
         ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
+        let mut asset_video_prompts = sqlx::query_as::<_, DbAssetVideoPrompt>(
+            "SELECT asset_id, project_id, prompt_text, updated_at
+             FROM asset_video_prompts WHERE project_id = ? ORDER BY asset_id",
+        )
+        .bind(project_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?
+        .into_iter()
+        .map(|row| BackupAssetVideoPrompt {
+            asset_id: row.asset_id,
+            project_id: row.project_id,
+            prompt_text: row.prompt_text,
+            updated_at: row.updated_at,
+        })
+        .collect::<Vec<_>>();
         let included_asset_ids = db_assets
             .iter()
             .filter(|asset| {
@@ -596,6 +612,7 @@ impl ProjectBackupService {
             .collect::<HashSet<_>>();
         asset_tag_links.retain(|link| included_asset_ids.contains(link.asset_id.as_str()));
         asset_favorites.retain(|favorite| included_asset_ids.contains(favorite.asset_id.as_str()));
+        asset_video_prompts.retain(|prompt| included_asset_ids.contains(prompt.asset_id.as_str()));
         let document = BackupDocument {
             project: BackupProject {
                 id: project.id,
@@ -620,6 +637,7 @@ impl ProjectBackupService {
             asset_tags,
             asset_tag_links,
             asset_favorites,
+            asset_video_prompts,
             shots,
             shot_stage_configs,
             shot_reference_assets,
@@ -726,6 +744,8 @@ struct BackupDocument {
     #[serde(default)]
     asset_favorites: Vec<BackupAssetFavorite>,
     #[serde(default)]
+    asset_video_prompts: Vec<BackupAssetVideoPrompt>,
+    #[serde(default)]
     shots: Vec<BackupShot>,
     #[serde(default)]
     shot_stage_configs: Vec<BackupShotStageConfig>,
@@ -785,6 +805,15 @@ struct BackupAssetFavorite {
     asset_id: String,
     project_id: String,
     created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupAssetVideoPrompt {
+    asset_id: String,
+    project_id: String,
+    prompt_text: String,
+    updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1040,6 +1069,14 @@ struct DbAsset {
     source_task_id: Option<String>,
     metadata_json: Option<String>,
     created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbAssetVideoPrompt {
+    asset_id: String,
+    project_id: String,
+    prompt_text: String,
     updated_at: String,
 }
 
@@ -1814,7 +1851,7 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4) {
+    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5) {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -1855,9 +1892,35 @@ fn validate_document_entries(
             }
         }
     }
+    validate_asset_video_prompt_document(document)?;
     validate_organization_document(document)?;
     validate_prompt_document(document)?;
     validate_shot_document(document)?;
+    Ok(())
+}
+
+fn validate_asset_video_prompt_document(document: &BackupDocument) -> Result<(), AppError> {
+    use crate::application::asset_video_prompt_service::MAX_ASSET_VIDEO_PROMPT_BYTES;
+
+    let asset_types = document
+        .assets
+        .iter()
+        .map(|asset| (asset.id.as_str(), asset.asset_type.as_str()))
+        .collect::<HashMap<_, _>>();
+    let mut asset_ids = HashSet::new();
+    for prompt in &document.asset_video_prompts {
+        if prompt.project_id != document.project.id
+            || !asset_ids.insert(prompt.asset_id.as_str())
+            || asset_types.get(prompt.asset_id.as_str()).copied() != Some("image")
+            || prompt.prompt_text.trim().is_empty()
+            || prompt.prompt_text.trim() != prompt.prompt_text
+            || prompt.prompt_text.len() > MAX_ASSET_VIDEO_PROMPT_BYTES
+        {
+            return Err(AppError::backup_invalid(
+                "备份资产视频提示词无效或项目归属不一致",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -2581,6 +2644,22 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    for prompt in &document.asset_video_prompts {
+        let Some(asset_id) = asset_ids.get(&prompt.asset_id) else {
+            continue;
+        };
+        sqlx::query(
+            "INSERT INTO asset_video_prompts (asset_id, project_id, prompt_text, updated_at)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(asset_id)
+        .bind(&project.id)
+        .bind(&prompt.prompt_text)
+        .bind(&prompt.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for tag in &document.asset_tags {
         let tag_id = tag_ids
             .get(&tag.id)
@@ -3115,6 +3194,7 @@ mod tests {
             asset_tags: tags,
             asset_tag_links: links,
             asset_favorites: Vec::new(),
+            asset_video_prompts: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -3413,7 +3493,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 4);
+        assert_eq!(manifest.version, 5);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -3823,6 +3903,7 @@ mod tests {
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
+            asset_video_prompts: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -3949,6 +4030,7 @@ mod tests {
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
+            asset_video_prompts: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),

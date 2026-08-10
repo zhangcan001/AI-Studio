@@ -31,6 +31,10 @@ export interface ProductionBatchItemView {
   retryOfItemId?: string;
   errorCode?: string;
   errorMessage?: string;
+  promptText?: string;
+  seed?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ProductionBatchDetail extends ProductionBatchSummary {

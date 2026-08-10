@@ -7,13 +7,13 @@ mod error;
 mod infrastructure;
 
 pub use application::ports::{
-    AssetRepository, AssetStore, Clock, GenerationDefinitionRepository,
+    AssetRepository, AssetStore, AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProductionQueueRepository, ProjectRepository, RepositoryError,
     TaskRepository, WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{
-    SqliteAssetRepository, SqliteGenerationDefinitionRepository,
+    SqliteAssetRepository, SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
     SqliteProductionQueueRepository, SqliteProjectRepository, SqlitePromptLibraryRepository,
     SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
@@ -23,6 +23,7 @@ use app_state::AppState;
 use application::{
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
+    asset_video_prompt_service::AssetVideoPromptService,
     comfy_service::{ComfyRuntime, ComfyService},
     diagnostics_service::DiagnosticsService,
     generation_catalog_service::GenerationCatalogService,
@@ -198,6 +199,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(SqliteProjectRepository::new(database_pool.clone()));
             let asset_repository: Arc<dyn AssetRepository> =
                 Arc::new(SqliteAssetRepository::new(database_pool.clone()));
+            let asset_video_prompt_repository: Arc<dyn application::ports::AssetVideoPromptRepository> =
+                Arc::new(SqliteAssetVideoPromptRepository::new(database_pool.clone()));
             let task_history_repository: Arc<dyn application::ports::TaskHistoryRepository> =
                 Arc::new(infrastructure::database::SqliteTaskHistoryRepository::new(
                     database_pool.clone(),
@@ -361,6 +364,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_browse_repository,
                 organization_repository.clone(),
             ));
+            let asset_video_prompt_service = Arc::new(AssetVideoPromptService::new(
+                asset_video_prompt_repository,
+                asset_repository.clone(),
+                clock.clone(),
+            ));
             let task_history_service = Arc::new(TaskHistoryService::new(
                 task_history_repository,
                 snapshot_repository.clone(),
@@ -485,6 +493,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 asset_library_service,
+                asset_video_prompt_service,
                 task_history_service,
                 source_asset_import_service,
                 task_cancellation_service,
@@ -718,17 +727,20 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::asset::asset_read_image,
             commands::asset::asset_read_thumbnail,
             commands::asset::asset_library_page,
-            commands::asset::asset_get
-            ,commands::organization::asset_tag_list
-            ,commands::organization::asset_tag_create
-            ,commands::organization::asset_tag_rename
-            ,commands::organization::asset_tag_delete
-            ,commands::organization::asset_tag_assign
-            ,commands::organization::asset_tag_remove
-            ,commands::organization::asset_set_favorite
-            ,commands::organization::asset_bulk_set_favorite
-            ,commands::organization::asset_bulk_add_tag
-            ,commands::organization::asset_bulk_remove_tag
+            commands::asset::asset_get,
+            commands::asset::asset_video_prompt_get,
+            commands::asset::asset_video_prompt_list,
+            commands::asset::asset_video_prompt_set,
+            commands::organization::asset_tag_list,
+            commands::organization::asset_tag_create,
+            commands::organization::asset_tag_rename,
+            commands::organization::asset_tag_delete,
+            commands::organization::asset_tag_assign,
+            commands::organization::asset_tag_remove,
+            commands::organization::asset_set_favorite,
+            commands::organization::asset_bulk_set_favorite,
+            commands::organization::asset_bulk_add_tag,
+            commands::organization::asset_bulk_remove_tag,
         ])
         .run(tauri::generate_context!())
         .map_err(|_| AppError::initialization("Tauri runtime failed"))

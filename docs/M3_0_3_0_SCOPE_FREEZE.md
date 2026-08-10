@@ -1,56 +1,40 @@
-# AI Studio 0.3.0 Scope Freeze
+# AI Studio 0.3.0 Product Scope Realignment
 
 Date: 2026-08-10
-Development baseline: `6ae12dc5d92fcb6735b9baf771864d71ad4753c2`
-Release status: development-only release candidate; no `v0.3.0` tag, GitHub Release, or binary upload.
+Release status: `PRODUCT SCOPE REALIGNMENT`
 
-## Frozen product scope
+## Product direction
 
-0.3.0 的产品范围冻结为以下既有能力：
+0.3.0 不再把 Shot→Krea2→H3 作为普通产品主路径。Shot 相关表、迁移、服务和历史任务继续保留，用于兼容既有数据；普通产品导航不再展示旧 Shot 入口。
 
-- Kera2 图片创作与 Shot 关键帧生产。
-- MiniMax H3 参考图生视频与 Shot 视频生产。
-- Prompt Library / Prompt Versions。
-- Experiment 变体准备、比较和显式提交。
-- Production Queue / Dashboard。
-- Asset Library 与项目级收藏、标签组织。
-- Project Templates。
-- Project Backup v4。
-- Shot 制作、人工候选确认与 Shot Batch Production。
+正式产品只有两个相互独立的批量入口：
 
-本轮不增加 Pack11 或新的产品能力；只允许修复缺陷、完成 release hardening、自动化回归、安装包构建、文档和可复核 Live Gate。
-
-## Frozen production runtime contract
-
-普通 Studio、Shot 和 Batch UI 只接受以下两个精确 `workflow_id`：
-
-| Runtime | Exact workflow ID | Production stage |
+| Product | User flow | Exact workflow ID |
 | --- | --- | --- |
-| Kera2 image | `wfl_kera2_t2i_local_v2` | `image` / keyframe |
-| MiniMax H3 video | `wfl_minimax_h3_reference_video` | `video` / reference-image-to-video |
+| 批量图片 | 提示词列表 → Krea2 图片批次 → 图片 Task / Snapshot / Asset | `wfl_kera2_t2i_local_v2` |
+| 批量视频 | 项目图片 Asset + 已保存视频提示词 → H3 视频批次 → 视频 Task / Snapshot / Asset | `wfl_minimax_h3_reference_video` |
 
-运行时范围策略位于：
+Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频从 Asset Library 选择 1–100 张图片，为每张图片保存视频提示词，然后创建独立视频队列。两个入口均复用既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链。
 
-- Rust Planner / application gate：`src-tauri/src/application/product_runtime_scope.rs`
-- Creation Launcher / Studio / Shot UI gate：`src/features/runtime/productRuntimeScope.ts`
+## Frozen runtime and queue contract
 
-两个边界 helper 都按精确 ID allowlist 判断，不能从显示名称、分类、模式或模糊字符串推断产品运行时。`WorkflowWorkspace` 和 Workflow onboarding 仍保留通用技术工作区能力，但不把新导入的通用工作流带入普通生产 UI。
+- 普通批量图片目录只接受 `wfl_kera2_t2i_local_v2`。
+- 普通批量视频目录只接受 `wfl_minimax_h3_reference_video`。
+- 创建队列时冻结每项的工作流版本、Recipe、输入 Asset ID、提示词、数字参数和随机 Seed；随机 Seed 在持久化前解析为固定值。
+- 队列严格串行执行，`continueOnFailure` 保留失败项并允许后续项目继续；致命执行错误仍按既有队列策略暂停。
+- H3 产品安全配置固定显示为 `0.1 MP · 1 秒 · 4 步`，不开放超出本轮范围的参数扩展。
 
-本轮新增的回归明确覆盖：
+## Compatibility contract
 
-- `wfl_other` + `Kera2 Test Fake` 不得进入生产范围。
-- `wfl_fake` + `MiniMax H3 Reference Video Clone` 不得进入生产范围。
-- 两个冻结 ID 在错误 Shot 阶段也不得通过。
+- 既有 `001`–`010` 迁移、Shot 表和 Shot 后端保持可读可恢复，不删除表、不重写历史数据。
+- 新增 `011_asset_video_prompt.sql`，为图片 Asset 保存项目级视频提示词；提示词会 trim、非空校验，UTF-8 最大 64 KiB。
+- Project Backup 版本升级为 v5，新增 Asset 视频提示词数据；恢复继续接受 v1–v5，并执行项目边界校验与 Asset ID remap。
+- 不创建第二 Task 模型、第二执行引擎或隐藏的 Shot 自动链路。
 
-## Frozen data and compatibility contract
+## Ordinary UI boundary
 
-- `src-tauri/migrations/001_initial.sql` 至 `010_shot_production.sql` immutable。
-- 不创建 migration `011`。
-- Backup format 保持 v4；恢复入口继续接受 v1、v2、v3、v4，并执行项目边界、素材校验和 ID remap。
-- Shot Batch 继续复用既有 `ProductionBatch` / `ProductionBatchItem`、`GenerationService`、Task、Snapshot 和 Asset 链，不创建第二执行器或第二 Task 模型。
+主导航使用“批量图片”“批量视频”“资产库”“任务”“项目”“工作流”“设置”。普通产品界面不使用旧 Shot 生产术语；通用 Workflow 技术工作区和旧兼容代码不等同于正式产品入口。
 
 ## Explicit non-goals
 
-本冻结线不包含第三 Runtime、第二执行引擎、Cloud/Login/Sync/Updater、时间线/NLE、Audio Mixer、Marketplace、移动端或新的外部发布渠道。
-
-任何超出上述范围的需求都必须进入下一版本评审，不在 0.3.0 release hardening 中顺手实现。
+本版本不包含第三 Runtime、第二执行引擎、Cloud/Login/Sync/Updater、时间线/NLE、Audio Mixer、Marketplace、移动端或新的外部发布渠道。当前工作完成后只进入简化 Live Gate，不创建 tag、GitHub Release 或上传二进制。
