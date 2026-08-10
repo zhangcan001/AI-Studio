@@ -3228,6 +3228,53 @@ summary:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* Queue result previews stay compact and preserve the complete source image. */
+.production-queue-panel-inline .production-inline-item-detail .production-item-results {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(760px, 100%);
+}
+
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-card {
+  flex: 0 1 180px;
+  width: 180px;
+  max-width: 180px;
+}
+
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-image {
+  height: 132px;
+  aspect-ratio: 4 / 3;
+  background: #090c11;
+}
+
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-image img,
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-image video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-card-copy {
+  gap: 2px;
+  padding: 6px 8px;
+}
+
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-card-copy > span,
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-card-copy > small,
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-tag-chips {
+  display: none;
+}
+
+.production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-card-copy strong {
+  overflow: hidden;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 960px) {
   .studio-panel-batch .batch-production-view,
   .batch-workspace-grid {
@@ -3279,6 +3326,16 @@ summary:focus-visible {
 
   .production-inline-item-detail {
     padding-left: 12px;
+  }
+
+  .production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-card {
+    flex-basis: min(156px, 42vw);
+    width: min(156px, 42vw);
+    max-width: min(156px, 42vw);
+  }
+
+  .production-queue-panel-inline .production-inline-item-detail .production-item-results .asset-library-image {
+    height: 112px;
   }
 
   .production-inline-progress-heading {
