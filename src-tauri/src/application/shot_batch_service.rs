@@ -6,6 +6,7 @@ use crate::application::ports::{
     ProjectRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository, ShotData,
     ShotRepository, TaskRepository,
 };
+use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::production_queue_service::generation_values_to_json;
 use crate::application::shot_service::scalar_values_from_json;
 use crate::compiler::{RecipeParser, WorkflowCompiler};
@@ -367,7 +368,7 @@ impl ShotBatchService {
         let available_definition = available_definitions
             .get(&(config.workflow_version_id.clone(), config.recipe_id.clone()));
         if let Some(available_definition) = available_definition {
-            if !is_pack10_runtime(stage, available_definition) {
+            if production_runtime_for_stage(stage, &available_definition.workflow_id).is_none() {
                 reasons.push(match stage {
                     ShotStage::Image => "批量关键帧当前只支持 Kera2 运行时".to_owned(),
                     ShotStage::Video => {
@@ -564,23 +565,6 @@ impl ShotBatchService {
     }
 }
 
-fn is_pack10_runtime(stage: ShotStage, definition: &AvailableGenerationDefinition) -> bool {
-    let identity = format!(
-        "{} {} {} {}",
-        definition.workflow_id, definition.name, definition.category, definition.mode
-    )
-    .to_lowercase();
-    match stage {
-        ShotStage::Image => identity.contains("kera2"),
-        ShotStage::Video => {
-            identity.contains("minimax")
-                && identity.contains("h3")
-                && identity.contains("video")
-                && (identity.contains("reference") || identity.contains("参考"))
-        }
-    }
-}
-
 fn validate_project(project_id: &str) -> Result<(), ShotBatchServiceError> {
     crate::domain::validate_project_id(project_id)
         .map_err(|error| ShotBatchServiceError::InvalidInput(error.to_string()))
@@ -613,8 +597,9 @@ impl From<RepositoryError> for ShotBatchServiceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_pack10_runtime, ShotBatchPlanRow, MAX_SHOT_BATCH_ITEMS};
+    use super::{ShotBatchPlanRow, MAX_SHOT_BATCH_ITEMS};
     use crate::application::ports::AvailableGenerationDefinition;
+    use crate::application::product_runtime_scope::production_runtime_for_stage;
     use crate::domain::ShotStage;
 
     #[test]
@@ -639,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn planner_scope_accepts_only_kera2_images_and_minimax_h3_reference_video() {
+    fn planner_scope_uses_exact_ids_and_ignores_display_names() {
         let definition = |workflow_id: &str, name: &str, category: &str, mode: &str| {
             AvailableGenerationDefinition {
                 workflow_id: workflow_id.to_owned(),
@@ -651,31 +636,43 @@ mod tests {
                 recipe_yaml: String::new(),
             }
         };
-        assert!(is_pack10_runtime(
+        assert!(production_runtime_for_stage(
             ShotStage::Image,
-            &definition("wfl_kera2_t2i_local_v2", "Kera2", "image", "text_to_image")
-        ));
-        assert!(is_pack10_runtime(
+            &definition(
+                "wfl_kera2_t2i_local_v2",
+                "Kera2 Test Fake Name",
+                "unrelated",
+                "not-a-mode"
+            )
+            .workflow_id
+        )
+        .is_some());
+        assert!(production_runtime_for_stage(
             ShotStage::Video,
             &definition(
                 "wfl_minimax_h3_reference_video",
-                "MiniMax H3 Reference Video",
-                "video",
-                "reference_to_video"
+                "MiniMax H3 Reference Video Clone",
+                "unrelated",
+                "not-a-mode"
             )
-        ));
-        assert!(!is_pack10_runtime(
+            .workflow_id
+        )
+        .is_some());
+        assert!(production_runtime_for_stage(
             ShotStage::Image,
-            &definition("wfl_other", "Other Image", "image", "text_to_image")
-        ));
-        assert!(!is_pack10_runtime(
+            &definition("wfl_other", "Kera2 Test Fake", "image", "text_to_image").workflow_id
+        )
+        .is_none());
+        assert!(production_runtime_for_stage(
             ShotStage::Video,
             &definition(
-                "wfl_other_video",
-                "Other Video",
+                "wfl_fake",
+                "MiniMax H3 Reference Video Clone",
                 "video",
                 "reference_to_video"
             )
-        ));
+            .workflow_id
+        )
+        .is_none());
     }
 }

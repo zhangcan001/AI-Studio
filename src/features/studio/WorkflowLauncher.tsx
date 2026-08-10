@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { RecipeViewModel } from "../../types/generation";
 import { workflowDescription, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
 import { filterRuntimeCatalog, runtimeKindFor, runtimeKindLabel, type RuntimeFilter } from "../runtime/pack05";
+import { filterProductionRuntimeCatalog } from "../runtime/productRuntimeScope";
 
 interface Props {
   catalog: RecipeViewModel[];
@@ -12,7 +13,8 @@ interface Props {
 export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props) {
   const [filter, setFilter] = useState<RuntimeFilter>("all");
   const [search, setSearch] = useState("");
-  const visibleCatalog = useMemo(() => filterRuntimeCatalog(catalog, filter, search), [catalog, filter, search]);
+  const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
+  const visibleCatalog = useMemo(() => filterRuntimeCatalog(productCatalog, filter, search), [productCatalog, filter, search]);
 
   return (
     <section className="workflow-launcher" aria-labelledby="workflow-launcher-title">
@@ -22,7 +24,7 @@ export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props)
           <h2 id="workflow-launcher-title">选择创作类型</h2>
           <p className="section-description">先选一个工作流，再填写输入参数。</p>
         </div>
-        <span className="workflow-launcher-count">{visibleCatalog.length} / {catalog.length} 个工作流</span>
+        <span className="workflow-launcher-count">{visibleCatalog.length} / {productCatalog.length} 个工作流</span>
       </div>
       <div className="workflow-launcher-controls">
         <label>

@@ -179,6 +179,15 @@ The current M3 scope and evidence are recorded in
 records; the Pack 10 source direction is preserved in
 `docs/M3_SHOT_BATCH_PACK_10_SOURCE.md`.
 
+The 0.3.0 scope is now frozen for release hardening. The exact frozen runtime
+IDs, no-new-feature boundary, and migration/backup compatibility contract are
+recorded in `docs/M3_0_3_0_SCOPE_FREEZE.md`. The release candidate matrix and
+honest integrated Live Gate status are recorded in
+`docs/M3_FINAL_RELEASE_GATE_0.3.0.md`; user-facing notes are in
+`docs/RELEASE_NOTES_0.3.0.md`, and local installer hashes are in
+`docs/RELEASE_SHA256_0.3.0.txt`. No `v0.3.0` tag or GitHub Release has been
+created.
+
 Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
 installed as runtime packages, and no model files are bundled or modified.

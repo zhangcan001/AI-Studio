@@ -28,6 +28,7 @@ import { deriveShotStatus, recentShotFailure, shotStatusLabels } from "./shotDom
 import { ShotBatchPlanner } from "./ShotBatchPlanner";
 import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ShotProgressDashboard } from "./ShotProgressDashboard";
+import { filterProductionRuntimeCatalog, isProductionRuntimeForStage } from "../runtime/productRuntimeScope";
 import "./ShotWorkspace.css";
 
 interface Props {
@@ -65,12 +66,18 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const currentDraft = stageDrafts[stage];
+  const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
   const stageRecipes = useMemo(
-    () => catalog.filter((recipe) => recipe.outputTypes?.includes(stage) ?? false),
-    [catalog, stage],
+    () => productCatalog.filter((recipe) =>
+      isProductionRuntimeForStage(stage, recipe.workflowId) && (recipe.outputTypes?.includes(stage) ?? false),
+    ),
+    [productCatalog, stage],
   );
-  const currentRecipe = catalog.find(
-    (recipe) => recipe.workflowVersionId === currentDraft?.workflowVersionId && recipe.recipeId === currentDraft?.recipeId,
+  const currentRecipe = productCatalog.find(
+    (recipe) =>
+      recipe.workflowVersionId === currentDraft?.workflowVersionId &&
+      recipe.recipeId === currentDraft?.recipeId &&
+      isProductionRuntimeForStage(stage, recipe.workflowId),
   );
   const currentReferences = references[stage] ?? new Set<string>();
   const imageAssets = assets.filter(isImageAsset);
@@ -122,8 +129,14 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
     for (const nextStage of ["image", "video"] as const) {
       const config = selectedShot.stageConfigs.find((item) => item.stage === nextStage);
       const recipe = config
-        ? catalog.find((item) => item.workflowVersionId === config.workflowVersionId && item.recipeId === config.recipeId)
-        : catalog.find((item) => item.outputTypes?.includes(nextStage));
+        ? productCatalog.find((item) =>
+          item.workflowVersionId === config.workflowVersionId &&
+          item.recipeId === config.recipeId &&
+          isProductionRuntimeForStage(nextStage, item.workflowId),
+        )
+        : productCatalog.find((item) =>
+          isProductionRuntimeForStage(nextStage, item.workflowId) && (item.outputTypes?.includes(nextStage) ?? false),
+        );
       if (config && recipe) {
         nextDrafts[nextStage] = {
           workflowVersionId: config.workflowVersionId,
@@ -144,7 +157,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
       image: new Set(selectedShot.referenceAssets.filter((item) => item.stage === "image").map((item) => item.assetId)),
       video: new Set(selectedShot.referenceAssets.filter((item) => item.stage === "video").map((item) => item.assetId)),
     });
-  }, [catalog, selectedShot]);
+  }, [productCatalog, selectedShot]);
 
   useEffect(() => {
     const linkedIds = selectedShot?.generationLinks.flatMap((link) => link.task?.outputAssetIds ?? []) ?? [];
@@ -395,7 +408,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
                 </div>
                 {hasFrozenQueueLink && <p className="shot-frozen-config-warning"><strong>已有生产队列快照</strong>：本次配置编辑只影响后续新批次，已入队的任务继续使用冻结配置。</p>}
                 <label><span>{stage === "image" ? "图片阶段 Recipe" : "视频阶段 Recipe"}</span><select value={currentDraft?.recipeId ?? ""} onChange={(event) => changeStageRecipe(event.target.value)}><option value="">选择兼容输出</option>{stageRecipes.map((recipe) => <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={recipe.recipeId}>{recipe.name} · {recipe.mode}</option>)}</select></label>
-                {currentRecipe && <p className="shot-recipe-hint">按输出能力筛选；Shot 不根据模型名称分支。视频阶段只在配置了视频 Recipe 且已选择关键帧后可生成。</p>}
+                {currentRecipe && <p className="shot-recipe-hint">按精确产品运行时和输出能力筛选；不会根据显示名称判断运行时。视频阶段只在配置了视频 Recipe 且已选择关键帧后可生成。</p>}
                 {currentRecipe?.fields.filter(isScalarField).map((field) => <ScalarControl key={field.key} field={field} value={currentDraft?.values[field.key]} onChange={(value) => changeScalar(field, value)} />)}
                 <button type="button" className="shot-primary-action" onClick={() => void generate()} disabled={busy || !currentDraft || (stage === "video" && !selectedShot.selectedImageAssetId)}>{stage === "image" ? "生成关键帧" : "生成视频"}</button>
                 <button type="button" className="quiet-button" onClick={() => currentRecipe && onOpenInStudio(selectedShot, stage, currentRecipe)}>在创作中打开</button>

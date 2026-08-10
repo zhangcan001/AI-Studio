@@ -47,6 +47,7 @@ import type { PromptEntryView } from "../../types/prompt";
 import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
 import { CreationDashboard } from "../production/CreationDashboard";
 import type { RecentWorkflowRecord } from "../production/productionUx";
+import { filterProductionRuntimeCatalog } from "../runtime/productRuntimeScope";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -102,6 +103,7 @@ export function GenerationStudio({
   shotContext,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
+  const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
   const values = useStudioStore((state) => state.values);
   const draftDirty = useStudioStore((state) => state.draftDirty);
   const validationErrors = useStudioStore((state) => state.validationErrors);
@@ -187,12 +189,12 @@ export function GenerationStudio({
 
   useEffect(() => {
     const next = selectedWorkflow
-      ? catalog.find(
+      ? productCatalog.find(
           (recipe) =>
             recipe.workflowVersionId === selectedWorkflow.workflowVersionId &&
             recipe.recipeId === selectedWorkflow.recipeId,
         )
-      : catalog[0];
+      : productCatalog[0];
     if (
       next?.workflowVersionId !== selectedWorkflow?.workflowVersionId ||
       next?.recipeId !== selectedWorkflow?.recipeId
@@ -200,7 +202,7 @@ export function GenerationStudio({
       setSelectedWorkflow(next);
       setMissingAssetFields(new Set());
     }
-  }, [catalog, selectedWorkflow, setSelectedWorkflow]);
+  }, [productCatalog, selectedWorkflow, setSelectedWorkflow]);
 
   function applyPendingAsset(field: RecipeField, replaceSingle: boolean) {
     if (!selectedWorkflow || !pendingAssetIntent) return;
@@ -512,7 +514,7 @@ export function GenerationStudio({
   async function importBatchTaskList(file?: File) {
     if (!file) return;
     try {
-      const imported = parseBatchTaskList(await file.text(), catalog);
+      const imported = parseBatchTaskList(await file.text(), productCatalog);
       if (batchItems.length + imported.length > 100) {
         setBatchNotice("导入后将超过 100 项批量任务上限。");
         return;
@@ -617,7 +619,7 @@ export function GenerationStudio({
       setNotice("生产结果属于其他项目，无法加载到当前创作。");
       return;
     }
-    const workflow = catalog.find(
+    const workflow = productCatalog.find(
       (recipe) => recipe.workflowVersionId === draft.workflowVersionId && recipe.recipeId === draft.recipeId,
     );
     if (!workflow) {
@@ -721,7 +723,7 @@ export function GenerationStudio({
     }
   }
 
-  if (!catalog.length) {
+  if (!productCatalog.length) {
     return (
       <NoWorkflowGuide
         refreshing={refreshing}
@@ -738,7 +740,7 @@ export function GenerationStudio({
       <section className="studio-panel">
         <StudioModeTabs mode={studioMode} onChange={setStudioMode} />
         <WorkflowLauncher
-          catalog={catalog}
+          catalog={productCatalog}
           selectedWorkflow={selectedWorkflow}
           onSelect={selectWorkflowFromUx}
         />
@@ -756,7 +758,7 @@ export function GenerationStudio({
             <CreationModeHint recipe={selectedWorkflow} />
             <CreationDashboard
               projectId={projectId}
-              catalog={catalog}
+              catalog={productCatalog}
               selectedWorkflow={selectedWorkflow}
               promptTargetFieldKey={dashboardPromptTargetFieldKey}
               onPromptTargetFieldChange={setDashboardPromptTargetFieldKey}

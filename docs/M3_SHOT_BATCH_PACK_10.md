@@ -64,8 +64,7 @@ The final automated gate is:
 
 - `cargo fmt --all -- --check` — PASS
 - `cargo check` — PASS
-- `cargo test -- --test-threads=1` — PASS, 314 tests
-- `pnpm test --run` — PASS, 32 test files / 98 tests
+- Pack10 baseline checks were PASS at 314 Rust tests / 32 frontend test files / 98 tests; the 0.3.0 release-hardening line now passes 316 Rust tests / 33 frontend test files / 101 tests after adding the exact Runtime scope contract.
 - `pnpm build` — PASS
 - `git diff --check` — PASS
 - `pnpm tauri build` — PASS, MSI + NSIS bundles

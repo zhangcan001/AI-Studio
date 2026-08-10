@@ -18,6 +18,7 @@ pub mod output_collector;
 pub mod pagination;
 pub mod ports;
 pub mod preset_service;
+pub mod product_runtime_scope;
 pub mod production_queue_service;
 pub mod project_backup_service;
 pub mod project_bootstrap;
