@@ -45,7 +45,7 @@ Scope: 0.3.0 final hardening only; no new feature pack.
 5. 执行 Pack06/07 低成本链：Prompt v1/v2、比较、v2 → Studio 手动生成、v1/v2 二项 Kera2 Experiment；保存/比较/加载均不自动生成。
 6. 执行 Backup v4 UI export → inspect → restore roundtrip，核对 Shot、Prompt、Experiment/Queue、Task、Snapshot、Asset 和项目边界，确认 ID remap 后关系仍正确。
 
-当前实机边界：本地 `http://127.0.0.1:8188/system_stats` 可达，但现有 AI Studio 窗口无法提供可控 WebView 截图/交互；桌面抓取返回 `SetIsBorderRequired failed: 不支持此接口 (0x80004002)`。因此以上集成步骤保持 `LIVE PENDING`，没有编造 Task/Asset/Playback 数量或成功结果。
+当前实机边界：本轮已启动正式 release executable，ComfyUI `http://127.0.0.1:8188/system_stats` 返回 HTTP 200，当前数据库只读核验无活动 Task 且 migration 仍为 1–10；但 Computer Use 的 `launch_app` 两次返回 `node_repl exec context not found`，重新枚举到真实窗口后再次捕获/激活仍返回同一错误。因此无法操作项目、表单、批次或媒体控件，以上集成步骤保持 `LIVE PENDING`，没有编造 Task/Asset/Playback 数量或成功结果。
 
 ## Regression commands
 
