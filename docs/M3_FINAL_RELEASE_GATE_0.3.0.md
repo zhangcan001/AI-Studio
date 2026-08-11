@@ -1,6 +1,6 @@
 # AI Studio 0.3.0 Simplified Final Live Gate
 
-Date: 2026-08-10
+Date: 2026-08-11
 Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他产品能力。
 
 ## Current status
@@ -43,6 +43,20 @@ The historical `1.1.2` package and its validated workflow bytes remain
 preserved and were not modified. The local package audit used no user absolute
 paths in this document.
 
+## Final candidate artifacts
+
+The final `pnpm tauri build` completed successfully for the current HEAD. These
+candidate artifacts are local only; no upload, tag, or GitHub Release was made.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `src-tauri/target/release/ai-studio.exe` | 29573632 | `2fdc0dfa72f4dbf76c2156c540d21540bbd8161af2c426d9485d89e093543707` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7081927 | `ce2e44e38fe31bd958c02c63250f41648e016e63b8a4f3ba6102d972e70f69a8` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10321920 | `8cb2ab6d6473f9782eedfc5a17c53c3474af68e74eed76476b38d477203ba6d3` |
+
+The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
+generation date `2026-08-11`.
+
 ## Deferred live validation — batch images
 
 后续产品负责人批准真实验证后，在一个真实项目中：
@@ -71,4 +85,4 @@ git diff --check
 pnpm tauri build
 ```
 
-上述 Live Gate 当前不执行，不计为失败；待产品负责人批准后再补充真实 Task、Asset、Playback 或重启证据。完成本轮 Code Gate 后，状态保持 `CODE READY / LIVE VALIDATION DEFERRED`。
+上述 Live Gate 当前不执行，不计为失败；待产品负责人批准后再补充真实 Task、Asset、Playback 或重启证据。v0.3.0 tag 与 GitHub Release 均保持 ABSENT。完成本轮 Code Gate 后，状态保持 `CODE READY / LIVE VALIDATION DEFERRED`。
