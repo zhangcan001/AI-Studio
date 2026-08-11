@@ -18,6 +18,7 @@ import type {
   H3LocalImportInspection,
   H3LocalImportMode,
   H3LocalImportResult,
+  H3ProjectSegmentDraft,
 } from "../types/h3LocalImport";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
@@ -593,8 +594,18 @@ export function commitH3LocalImport(request: {
   seed?: string;
   autoStart: boolean;
   generationMode?: string;
+  fl2vaWorkflowVersionId?: string;
+  fl2vaRecipeId?: string;
+  ref2vaWorkflowVersionId?: string;
+  ref2vaRecipeId?: string;
 }): Promise<H3LocalImportResult> {
   return invoke<H3LocalImportResult>("h3_local_import_commit", { request });
+}
+
+export function updateH3ProjectSegmentDraft(
+  request: H3ProjectSegmentDraft,
+): Promise<H3LocalImportInspection> {
+  return invoke<H3LocalImportInspection>("h3_local_import_update_project_segment_draft", { request });
 }
 
 export function taskHistoryPage(

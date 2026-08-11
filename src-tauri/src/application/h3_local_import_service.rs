@@ -1,11 +1,13 @@
 use crate::application::asset_video_prompt_service::AssetVideoPromptService;
 use crate::application::generation_input_preparer::GenerationInputValue;
+use crate::application::media_probe::{CommandMediaProbe, MediaProbe};
 use crate::application::ports::Clock;
 use crate::application::production_queue_service::{
     CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueService,
 };
 use crate::application::source_asset_import_service::{
-    SourceAssetImportService, MAX_SOURCE_IMAGE_BYTES,
+    SourceAssetImportService, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES,
+    MAX_SOURCE_VIDEO_BYTES,
 };
 use crate::domain::{Asset, SeedValue};
 use chrono::{DateTime, Duration, Utc};
@@ -19,6 +21,7 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::Arc,
 };
+use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -34,6 +37,259 @@ pub enum H3LocalImportMode {
     Text,
     FirstLast,
     OmniManifest,
+    ProjectFolder,
+}
+
+const MAX_PROJECT_SEGMENTS: usize = 100;
+const PROJECT_DEFAULT_DURATION_SECONDS: i64 = 5;
+const PROJECT_DEFAULT_WIDTH: i64 = 1344;
+const PROJECT_DEFAULT_HEIGHT: i64 = 768;
+const PROJECT_MIN_RESOLUTION: i64 = 32;
+const PROJECT_MAX_RESOLUTION: i64 = 2048;
+const PROJECT_RESOLUTION_STEP: i64 = 32;
+const PROJECT_IMAGE_MAX_ITEMS: usize = 9;
+const PROJECT_VIDEO_MAX_ITEMS: usize = 3;
+const PROJECT_AUDIO_MAX_ITEMS: usize = 3;
+
+#[derive(Clone, Debug, Default)]
+struct ProjectFrontMatter {
+    mode: Option<String>,
+    duration_seconds: Option<i64>,
+    resolution: Option<(i64, i64)>,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ProjectPromptData {
+    text: String,
+    bytes: usize,
+    front_matter: ProjectFrontMatter,
+}
+
+async fn inspect_project_folder(
+    root_path: &Path,
+    display_root_name: String,
+) -> Result<H3LocalImportInspection, H3LocalImportError> {
+    let directories = scan_project_segment_directories(root_path)?;
+    let segment_count = directories.len();
+    let mut segments = Vec::with_capacity(segment_count);
+    for (ordinal, (folder_name, segment_path)) in directories.into_iter().enumerate() {
+        segments.push(
+            inspect_project_segment(ordinal + 1, folder_name, segment_path, root_path).await?,
+        );
+    }
+
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    if segment_count == 0 {
+        errors.push("未找到一级 Segment 文件夹。".to_owned());
+    }
+    if segment_count > MAX_PROJECT_SEGMENTS {
+        errors.push("单次最多生成100段，请拆分项目文件夹或分批导入。".to_owned());
+    }
+    for segment in &segments {
+        warnings.extend(segment.warnings.iter().cloned());
+        if segment.status != "READY" {
+            errors.push(format!(
+                "第 {} 段 {}：{}",
+                segment.ordinal,
+                segment.folder_name,
+                if segment.errors.is_empty() {
+                    "Segment 检查未通过".to_owned()
+                } else {
+                    segment.errors.join("；")
+                }
+            ));
+        }
+    }
+
+    let ready_count = segments
+        .iter()
+        .filter(|segment| segment.status == "READY")
+        .count();
+    let project = H3ProjectFolderInspection {
+        display_root_name: display_root_name.clone(),
+        segment_count,
+        ready_count,
+        error_count: errors.len(),
+        segments,
+        errors: errors.clone(),
+        warnings: warnings.clone(),
+    };
+    let image_count = project
+        .segments
+        .iter()
+        .flat_map(|segment| segment.all_media.iter())
+        .filter(|media| media.kind == H3ProjectMediaKind::Image)
+        .count();
+    let prompt_count = project
+        .segments
+        .iter()
+        .filter(|segment| segment.prompt_path.is_some())
+        .count();
+    Ok(H3LocalImportInspection {
+        display_root_name,
+        mode: H3LocalImportMode::ProjectFolder,
+        detected_manifest: false,
+        image_count,
+        prompt_count,
+        ready_count,
+        error_count: errors.len(),
+        pairs: Vec::new(),
+        project_folder: Some(project),
+        errors,
+        warnings,
+    })
+}
+
+fn scan_project_segment_directories(
+    root_path: &Path,
+) -> Result<Vec<(String, PathBuf)>, H3LocalImportError> {
+    let mut directories = Vec::new();
+    let entries = fs::read_dir(root_path)
+        .map_err(|_| H3LocalImportError::Filesystem("项目文件夹无法读取".to_owned()))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|_| H3LocalImportError::Filesystem("项目文件夹内容无法读取".to_owned()))?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|_| H3LocalImportError::Filesystem("项目文件夹内容无法读取".to_owned()))?;
+        if metadata.file_type().is_symlink() {
+            let canonical = fs::canonicalize(&path).map_err(|_| {
+                H3LocalImportError::FilesystemBoundary("Segment 链接无法解析".to_owned())
+            })?;
+            if !canonical.starts_with(root_path) {
+                return Err(H3LocalImportError::FilesystemBoundary(
+                    "Segment 链接越过项目文件夹边界".to_owned(),
+                ));
+            }
+            return Err(H3LocalImportError::Inspection(
+                "PROJECT_FOLDER 不接受符号链接或目录链接".to_owned(),
+            ));
+        }
+        if !metadata.is_dir() {
+            // ProjectRoot 下的普通文件是说明文件或用户杂项，按约定忽略。
+            continue;
+        }
+        let canonical = fs::canonicalize(&path)
+            .map_err(|_| H3LocalImportError::Filesystem("Segment 目录无法读取".to_owned()))?;
+        if !canonical.starts_with(root_path) {
+            return Err(H3LocalImportError::FilesystemBoundary(
+                "Segment 目录越过项目文件夹边界".to_owned(),
+            ));
+        }
+        let folder_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| H3LocalImportError::Inspection("Segment 文件夹名称无法识别".to_owned()))?
+            .to_owned();
+        directories.push((folder_name, canonical));
+    }
+    directories.sort_by(|left, right| natural_cmp(&left.0, &right.0));
+    Ok(directories)
+}
+
+async fn inspect_project_segment(
+    ordinal: usize,
+    folder_name: String,
+    segment_path: PathBuf,
+    _root_path: &Path,
+) -> Result<H3ProjectSegmentInspection, H3LocalImportError> {
+    let segment_id = project_segment_id(&folder_name);
+    let mut segment = empty_project_segment(ordinal, segment_id, folder_name, segment_path);
+    let scanned_files = match scan_files(&segment.segment_path) {
+        Ok(files) => files,
+        Err(error) => {
+            segment.errors.push(error.to_string());
+            segment.status = "BLOCKED".to_owned();
+            return Ok(segment);
+        }
+    };
+    let prompt_files = scanned_files
+        .iter()
+        .filter(|file| is_prompt_extension(&file.extension))
+        .cloned()
+        .collect::<Vec<_>>();
+    let prompt_file = select_project_prompt_file(&prompt_files);
+    if prompt_files.len() > 1 && prompt_file.is_none() {
+        segment.errors.push("AMBIGUOUS_PROMPT：Segment 内存在多个普通 Prompt 文件，请保留一个或命名为 prompt.txt / prompt.md。".to_owned());
+    }
+    if let Some(prompt_file) = prompt_file {
+        segment.prompt_display_name = Some(prompt_file.relative_name.clone());
+        segment.prompt_path = Some(prompt_file.path.clone());
+        match fs::read(&prompt_file.path) {
+            Ok(bytes) => match parse_project_prompt_bytes(&bytes) {
+                Ok(prompt) => {
+                    segment.prompt = Some(prompt.text);
+                    segment.prompt_bytes = Some(prompt.bytes);
+                    segment.prompt_sha256 = Some(hash_bytes(&bytes));
+                    segment
+                        .warnings
+                        .extend(prompt.front_matter.warnings.clone());
+                    segment.front_matter = Some(prompt.front_matter);
+                }
+                Err(error) => segment.errors.push(error),
+            },
+            Err(_) => segment.errors.push("Prompt 文件无法读取".to_owned()),
+        }
+    } else if prompt_files.is_empty() {
+        segment
+            .errors
+            .push("MISSING_PROMPT：Segment 缺少 Prompt 文件。".to_owned());
+    }
+
+    for file in scanned_files
+        .iter()
+        .filter(|file| is_media_extension(&file.extension))
+    {
+        match inspect_project_media(file, &segment.segment_path).await {
+            Ok(media) => segment.all_media.push(media),
+            Err(error) => segment.errors.push(error),
+        }
+    }
+    sort_project_media(&mut segment.all_media);
+    initialize_project_segment_inputs(&mut segment, _root_path);
+    recompute_project_segment_status(&mut segment);
+    Ok(segment)
+}
+
+fn empty_project_segment(
+    ordinal: usize,
+    segment_id: String,
+    folder_name: String,
+    segment_path: PathBuf,
+) -> H3ProjectSegmentInspection {
+    H3ProjectSegmentInspection {
+        ordinal,
+        segment_id,
+        folder_name,
+        generation_mode: "FL2VA_TEXT_TO_VIDEO".to_owned(),
+        inferred_mode: "FL2VA_TEXT_TO_VIDEO".to_owned(),
+        mode_source: "AUTO_INFERENCE".to_owned(),
+        prompt: None,
+        prompt_display_name: None,
+        prompt_bytes: None,
+        width: PROJECT_DEFAULT_WIDTH,
+        height: PROJECT_DEFAULT_HEIGHT,
+        resolution_source: "RECIPE_DEFAULT".to_owned(),
+        duration_seconds: PROJECT_DEFAULT_DURATION_SECONDS,
+        duration_source: "RECIPE_DEFAULT".to_owned(),
+        first_frame: None,
+        last_frame: None,
+        reference_images: Vec::new(),
+        reference_audios: Vec::new(),
+        reference_videos: Vec::new(),
+        status: "BLOCKED".to_owned(),
+        errors: Vec::new(),
+        warnings: Vec::new(),
+        segment_path,
+        prompt_path: None,
+        prompt_sha256: None,
+        all_media: Vec::new(),
+        front_matter: None,
+        base_errors: Vec::new(),
+        base_warnings: Vec::new(),
+    }
 }
 
 impl H3LocalImportMode {
@@ -44,6 +300,7 @@ impl H3LocalImportMode {
             "TEXT" | "text" => Ok(Self::Text),
             "FIRST_LAST" | "first_last" => Ok(Self::FirstLast),
             "OMNI_MANIFEST" | "omni_manifest" => Ok(Self::OmniManifest),
+            "PROJECT_FOLDER" | "project_folder" => Ok(Self::ProjectFolder),
             _ => Err(H3LocalImportError::InvalidInput(
                 "本地批量导入模式无效".to_owned(),
             )),
@@ -57,6 +314,7 @@ impl H3LocalImportMode {
             Self::Text => "TEXT",
             Self::FirstLast => "FIRST_LAST",
             Self::OmniManifest => "OMNI_MANIFEST",
+            Self::ProjectFolder => "PROJECT_FOLDER",
         }
     }
 }
@@ -135,8 +393,99 @@ pub struct H3LocalImportInspection {
     pub ready_count: usize,
     pub error_count: usize,
     pub pairs: Vec<H3LocalImportPair>,
+    pub project_folder: Option<H3ProjectFolderInspection>,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum H3ProjectMediaKind {
+    Image,
+    Audio,
+    Video,
+}
+
+impl H3ProjectMediaKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Audio => "audio",
+            Self::Video => "video",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct H3ProjectMedia {
+    pub id: String,
+    pub display_name: String,
+    pub kind: H3ProjectMediaKind,
+    pub path: PathBuf,
+    pub sha256: String,
+    pub size_bytes: u64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct H3ProjectSegmentInspection {
+    pub ordinal: usize,
+    pub segment_id: String,
+    pub folder_name: String,
+    pub generation_mode: String,
+    pub inferred_mode: String,
+    pub mode_source: String,
+    pub prompt: Option<String>,
+    pub prompt_display_name: Option<String>,
+    pub prompt_bytes: Option<usize>,
+    pub width: i64,
+    pub height: i64,
+    pub resolution_source: String,
+    pub duration_seconds: i64,
+    pub duration_source: String,
+    pub first_frame: Option<H3ProjectMedia>,
+    pub last_frame: Option<H3ProjectMedia>,
+    pub reference_images: Vec<H3ProjectMedia>,
+    pub reference_audios: Vec<H3ProjectMedia>,
+    pub reference_videos: Vec<H3ProjectMedia>,
+    pub status: String,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub(crate) segment_path: PathBuf,
+    pub(crate) prompt_path: Option<PathBuf>,
+    pub(crate) prompt_sha256: Option<String>,
+    pub(crate) all_media: Vec<H3ProjectMedia>,
+    front_matter: Option<ProjectFrontMatter>,
+    base_errors: Vec<String>,
+    base_warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct H3ProjectFolderInspection {
+    pub display_root_name: String,
+    pub segment_count: usize,
+    pub ready_count: usize,
+    pub error_count: usize,
+    pub segments: Vec<H3ProjectSegmentInspection>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct H3ProjectSegmentDraft {
+    pub segment_id: String,
+    pub mode: Option<String>,
+    pub prompt: Option<String>,
+    pub duration_seconds: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub reference_image_ids: Option<Vec<String>>,
+    pub reference_audio_ids: Option<Vec<String>>,
+    pub reference_video_ids: Option<Vec<String>>,
+    pub first_frame_id: Option<String>,
+    pub last_frame_id: Option<String>,
+    pub reset_auto_detection: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +499,10 @@ pub struct H3LocalImportCommitRequest {
     pub seed: Option<SeedValue>,
     pub auto_start: bool,
     pub generation_mode: Option<String>,
+    pub fl2va_workflow_version_id: Option<String>,
+    pub fl2va_recipe_id: Option<String>,
+    pub ref2va_workflow_version_id: Option<String>,
+    pub ref2va_recipe_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -241,6 +594,26 @@ impl H3CommitGenerationMode {
         }
     }
 
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyReferenceImage => "REF2VA_IMAGE",
+            Self::Fl2vaTextToVideo => "FL2VA_TEXT_TO_VIDEO",
+            Self::Fl2vaImageToVideo => "FL2VA_IMAGE_TO_VIDEO",
+            Self::Fl2vaFirstLast => "FL2VA_FIRST_LAST",
+            Self::Ref2vaImage => "REF2VA_IMAGE",
+            Self::Ref2vaAudio => "REF2VA_AUDIO",
+            Self::Ref2vaImageAudio => "REF2VA_IMAGE_AUDIO",
+            Self::Ref2vaVideoImage => "REF2VA_VIDEO_IMAGE",
+        }
+    }
+
+    fn is_fl2va(self) -> bool {
+        matches!(
+            self,
+            Self::Fl2vaTextToVideo | Self::Fl2vaImageToVideo | Self::Fl2vaFirstLast
+        )
+    }
+
     fn uses_first_frame(self) -> bool {
         matches!(self, Self::Fl2vaImageToVideo | Self::Fl2vaFirstLast)
     }
@@ -272,6 +645,7 @@ struct LocalImportSession {
     project_id: String,
     root_path: PathBuf,
     inspection: H3LocalImportInspection,
+    project_drafts: HashMap<String, H3ProjectSegmentDraft>,
     expires_at: DateTime<Utc>,
 }
 
@@ -323,6 +697,7 @@ impl H3LocalImportService {
             project_id: project_id.to_owned(),
             root_path,
             inspection: inspection.clone(),
+            project_drafts: HashMap::new(),
             expires_at: self.clock.now() + SESSION_TTL,
         };
         self.sessions
@@ -338,7 +713,7 @@ impl H3LocalImportService {
         mode: H3LocalImportMode,
     ) -> Result<H3LocalImportInspection, H3LocalImportError> {
         self.cleanup_expired_sessions(Some(session_id)).await;
-        let root_path = {
+        let (root_path, project_drafts) = {
             let sessions = self.sessions.lock().await;
             let session = sessions
                 .get(session_id)
@@ -346,9 +721,12 @@ impl H3LocalImportService {
             if session.expires_at <= self.clock.now() {
                 return Err(H3LocalImportError::SessionExpired);
             }
-            session.root_path.clone()
+            (session.root_path.clone(), session.project_drafts.clone())
         };
-        let inspection = inspect_directory(&root_path, mode).await?;
+        let mut inspection = inspect_directory(&root_path, mode).await?;
+        if mode == H3LocalImportMode::ProjectFolder {
+            apply_project_drafts(&mut inspection, &project_drafts)?;
+        }
         let mut sessions = self.sessions.lock().await;
         let session = sessions
             .get_mut(session_id)
@@ -357,6 +735,53 @@ impl H3LocalImportService {
             sessions.remove(session_id);
             return Err(H3LocalImportError::SessionExpired);
         }
+        session.inspection = inspection.clone();
+        if mode != H3LocalImportMode::ProjectFolder {
+            session.project_drafts.clear();
+        }
+        Ok(inspection)
+    }
+
+    pub async fn update_h3_project_segment_draft(
+        &self,
+        session_id: &str,
+        draft: H3ProjectSegmentDraft,
+    ) -> Result<H3LocalImportInspection, H3LocalImportError> {
+        self.cleanup_expired_sessions(Some(session_id)).await;
+        let (root_path, mut drafts) = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions
+                .get(session_id)
+                .ok_or(H3LocalImportError::SessionNotFound)?;
+            if session.expires_at <= self.clock.now() {
+                return Err(H3LocalImportError::SessionExpired);
+            }
+            if session.inspection.mode != H3LocalImportMode::ProjectFolder {
+                return Err(H3LocalImportError::Inspection(
+                    "只有 PROJECT_FOLDER 导入会话支持 Segment 编辑".to_owned(),
+                ));
+            }
+            (session.root_path.clone(), session.project_drafts.clone())
+        };
+
+        if draft.reset_auto_detection {
+            drafts.remove(&draft.segment_id);
+        } else {
+            validate_project_segment_draft(&draft)?;
+            drafts.insert(draft.segment_id.clone(), draft);
+        }
+        let mut inspection =
+            inspect_directory(&root_path, H3LocalImportMode::ProjectFolder).await?;
+        apply_project_drafts(&mut inspection, &drafts)?;
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or(H3LocalImportError::SessionNotFound)?;
+        if session.expires_at <= self.clock.now() {
+            sessions.remove(session_id);
+            return Err(H3LocalImportError::SessionExpired);
+        }
+        session.project_drafts = drafts;
         session.inspection = inspection.clone();
         Ok(inspection)
     }
@@ -382,7 +807,13 @@ impl H3LocalImportService {
         // The inspection is deliberately repeated at commit time. The selected folder is
         // never handed to the frontend and all file paths remain inside this short-lived
         // backend session.
-        let inspection = inspect_directory(&session.root_path, session.inspection.mode).await?;
+        let mut inspection = inspect_directory(&session.root_path, session.inspection.mode).await?;
+        if session.inspection.mode == H3LocalImportMode::ProjectFolder {
+            apply_project_drafts(&mut inspection, &session.project_drafts)?;
+            return self
+                .commit_project_folder(session, inspection, request)
+                .await;
+        }
         if inspection.error_count > 0 || inspection.ready_count == 0 {
             return Err(H3LocalImportError::Inspection(format!(
                 "目录检查未通过：{}",
@@ -687,6 +1118,335 @@ impl H3LocalImportService {
         })
     }
 
+    async fn commit_project_folder(
+        &self,
+        session: LocalImportSession,
+        inspection: H3LocalImportInspection,
+        request: H3LocalImportCommitRequest,
+    ) -> Result<H3LocalImportResult, H3LocalImportError> {
+        let project = inspection.project_folder.as_ref().ok_or_else(|| {
+            H3LocalImportError::Inspection("PROJECT_FOLDER 扫描结果缺少 Segment 数据".to_owned())
+        })?;
+        if project.segment_count > MAX_PROJECT_SEGMENTS {
+            return Err(H3LocalImportError::Inspection(
+                "单次最多生成100段，请拆分项目文件夹或分批导入。".to_owned(),
+            ));
+        }
+        if project.error_count > 0 || project.ready_count == 0 {
+            return Err(H3LocalImportError::Inspection(format!(
+                "项目文件夹检查未通过：{}",
+                if project.errors.is_empty() {
+                    "没有可生成的 Segment".to_owned()
+                } else {
+                    project.errors.join("；")
+                }
+            )));
+        }
+
+        let seed = request.seed.clone().unwrap_or(SeedValue::Random);
+        let mut items = Vec::with_capacity(project.ready_count);
+        let mut imported_asset_count = 0usize;
+        for segment in project
+            .segments
+            .iter()
+            .filter(|item| item.status == "READY")
+        {
+            let mode = H3CommitGenerationMode::parse(Some(&segment.generation_mode))?;
+            let prompt_override = session
+                .project_drafts
+                .get(&segment.segment_id)
+                .and_then(|draft| draft.prompt.as_deref());
+            let prompt_text = self
+                .read_project_segment_prompt(&session.root_path, segment, prompt_override)
+                .await
+                .map_err(|error| {
+                    H3LocalImportError::Inspection(format!(
+                        "第 {} 段 {}：{error}",
+                        segment.ordinal, segment.folder_name
+                    ))
+                })?;
+
+            let mut reference_images = Vec::new();
+            let mut first_frame = None;
+            let mut last_frame = None;
+            let mut reference_videos = Vec::new();
+            let mut reference_audios = Vec::new();
+            let image_media = match mode {
+                H3CommitGenerationMode::Fl2vaImageToVideo => {
+                    segment.first_frame.iter().collect::<Vec<_>>()
+                }
+                H3CommitGenerationMode::Fl2vaFirstLast => segment
+                    .first_frame
+                    .iter()
+                    .chain(segment.last_frame.iter())
+                    .collect::<Vec<_>>(),
+                H3CommitGenerationMode::Ref2vaImage
+                | H3CommitGenerationMode::Ref2vaImageAudio
+                | H3CommitGenerationMode::Ref2vaVideoImage => {
+                    segment.reference_images.iter().collect::<Vec<_>>()
+                }
+                _ => Vec::new(),
+            };
+            for media in image_media {
+                self.revalidate_project_media(&session.root_path, media)
+                    .await?;
+                let asset = self
+                    .import_image_asset(
+                        &session.project_id,
+                        &session.root_path,
+                        &media.path,
+                        Some(media.sha256.as_str()),
+                        imported_asset_count,
+                        mode.imported_asset_label(),
+                    )
+                    .await?;
+                imported_asset_count += 1;
+                self.set_imported_image_prompt(
+                    &session.project_id,
+                    &asset,
+                    &prompt_text,
+                    imported_asset_count,
+                    mode.imported_asset_label(),
+                )
+                .await?;
+                if mode == H3CommitGenerationMode::Fl2vaImageToVideo {
+                    first_frame = Some(asset);
+                } else if mode == H3CommitGenerationMode::Fl2vaFirstLast && first_frame.is_none() {
+                    first_frame = Some(asset);
+                } else if mode == H3CommitGenerationMode::Fl2vaFirstLast {
+                    last_frame = Some(asset);
+                } else {
+                    reference_images.push(asset);
+                }
+            }
+            for media in &segment.reference_videos {
+                self.revalidate_project_media(&session.root_path, media)
+                    .await?;
+                let asset = self
+                    .import_media_asset(
+                        &session.project_id,
+                        &session.root_path,
+                        &media.path,
+                        true,
+                        imported_asset_count,
+                        mode.imported_asset_label(),
+                    )
+                    .await?;
+                imported_asset_count += 1;
+                reference_videos.push(asset);
+            }
+            for media in &segment.reference_audios {
+                self.revalidate_project_media(&session.root_path, media)
+                    .await?;
+                let asset = self
+                    .import_media_asset(
+                        &session.project_id,
+                        &session.root_path,
+                        &media.path,
+                        false,
+                        imported_asset_count,
+                        mode.imported_asset_label(),
+                    )
+                    .await?;
+                imported_asset_count += 1;
+                reference_audios.push(asset);
+            }
+
+            let mut values = BTreeMap::new();
+            values.insert("prompt".to_owned(), GenerationInputValue::Text(prompt_text));
+            match mode {
+                H3CommitGenerationMode::Fl2vaTextToVideo => {}
+                H3CommitGenerationMode::Fl2vaImageToVideo => {
+                    values.insert(
+                        "first_frame".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            first_frame
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "Segment 缺少首帧图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                }
+                H3CommitGenerationMode::Fl2vaFirstLast => {
+                    values.insert(
+                        "first_frame".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            first_frame
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "Segment 缺少首帧图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                    values.insert(
+                        "last_frame".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            last_frame
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "Segment 缺少末帧图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                }
+                H3CommitGenerationMode::Ref2vaImage
+                | H3CommitGenerationMode::Ref2vaImageAudio
+                | H3CommitGenerationMode::Ref2vaVideoImage => {
+                    values.insert(
+                        "reference_images".to_owned(),
+                        GenerationInputValue::ImageAssets(
+                            reference_images.into_iter().map(|asset| asset.id).collect(),
+                        ),
+                    );
+                    if matches!(mode, H3CommitGenerationMode::Ref2vaImageAudio) {
+                        values.insert(
+                            "reference_audios".to_owned(),
+                            GenerationInputValue::AudioAssets(
+                                reference_audios.into_iter().map(|asset| asset.id).collect(),
+                            ),
+                        );
+                    }
+                    if matches!(mode, H3CommitGenerationMode::Ref2vaVideoImage) {
+                        values.insert(
+                            "reference_videos".to_owned(),
+                            GenerationInputValue::VideoAssets(
+                                reference_videos.into_iter().map(|asset| asset.id).collect(),
+                            ),
+                        );
+                    }
+                }
+                H3CommitGenerationMode::Ref2vaAudio => {
+                    values.insert(
+                        "reference_audios".to_owned(),
+                        GenerationInputValue::AudioAssets(
+                            reference_audios.into_iter().map(|asset| asset.id).collect(),
+                        ),
+                    );
+                }
+                H3CommitGenerationMode::LegacyReferenceImage => unreachable!(),
+            }
+            values.insert(
+                "width".to_owned(),
+                GenerationInputValue::Integer(segment.width),
+            );
+            values.insert(
+                "height".to_owned(),
+                GenerationInputValue::Integer(segment.height),
+            );
+            values.insert(
+                "duration_seconds".to_owned(),
+                GenerationInputValue::Integer(segment.duration_seconds),
+            );
+            values.insert("seed".to_owned(), GenerationInputValue::Seed(seed.clone()));
+            let (workflow_version_id, recipe_id) = project_recipe_ids(&request, mode);
+            items.push(CreateProductionBatchItem {
+                workflow_version_id,
+                recipe_id,
+                values,
+            });
+        }
+
+        let batch_name = request
+            .batch_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "H3 项目文件夹 · {} · {}",
+                    inspection.display_root_name,
+                    self.clock.now().format("%Y-%m-%d %H:%M:%S")
+                )
+            });
+        let detail = self
+            .production_queue_service
+            .create(CreateProductionBatchRequest {
+                project_id: session.project_id.clone(),
+                name: batch_name.clone(),
+                continue_on_failure: true,
+                items,
+            })
+            .await
+            .map_err(|error| {
+                H3LocalImportError::Queue(format!(
+                    "批次创建失败（已导入 {imported_asset_count} 个素材）：{error}"
+                ))
+            })?;
+        let mut warnings = project.warnings.clone();
+        let mut auto_started = false;
+        if request.auto_start {
+            match self
+                .production_queue_service
+                .start(&session.project_id, detail.batch.id.as_str())
+                .await
+            {
+                Ok(()) => auto_started = true,
+                Err(error) => warnings.push(format!("批次已创建，但自动开始失败：{error}")),
+            }
+        }
+        Ok(H3LocalImportResult {
+            batch_id: detail.batch.id.as_str().to_owned(),
+            batch_name,
+            item_count: detail.items.len(),
+            imported_asset_count,
+            auto_started,
+            warnings,
+        })
+    }
+
+    async fn read_project_segment_prompt(
+        &self,
+        root_path: &Path,
+        segment: &H3ProjectSegmentInspection,
+        prompt_override: Option<&str>,
+    ) -> Result<String, String> {
+        let path = segment
+            .prompt_path
+            .as_ref()
+            .ok_or_else(|| "Prompt 文件不存在".to_owned())?;
+        let path = revalidate_file_path(root_path, path).map_err(|error| error.to_string())?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|_| "Prompt 文件在提交前无法读取".to_owned())?;
+        if segment.prompt_sha256.as_deref() != Some(hash_bytes(&bytes).as_str()) {
+            return Err("Segment changed：Prompt 在检查后发生变化，请重新扫描。".to_owned());
+        }
+        if let Some(prompt) = prompt_override {
+            return parse_prompt_text(prompt)
+                .map(|(text, _)| text)
+                .map_err(format_project_prompt_issue);
+        }
+        parse_project_prompt_bytes(&bytes)
+            .map(|prompt| prompt.text)
+            .map_err(|error| format!("Segment changed：{error}"))
+    }
+
+    async fn revalidate_project_media(
+        &self,
+        root_path: &Path,
+        media: &H3ProjectMedia,
+    ) -> Result<(), H3LocalImportError> {
+        let path = revalidate_file_path(root_path, &media.path)?;
+        let current_hash = hash_file(&path)
+            .await
+            .map_err(H3LocalImportError::Filesystem)?;
+        if current_hash != media.sha256 {
+            return Err(H3LocalImportError::Inspection(format!(
+                "Segment changed：{} 在检查后发生变化，请重新扫描。",
+                media.display_name
+            )));
+        }
+        Ok(())
+    }
+
     async fn read_pair_prompt(
         &self,
         root_path: &Path,
@@ -899,7 +1659,829 @@ async fn inspect_directory(
             )
             .await
         }
+        H3LocalImportMode::ProjectFolder => {
+            inspect_project_folder(root_path, display_root_name).await
+        }
     }
+}
+
+fn select_project_prompt_file<'a>(files: &'a [ScannedFile]) -> Option<&'a ScannedFile> {
+    files
+        .iter()
+        .find(|file| {
+            file.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("prompt.txt"))
+        })
+        .or_else(|| {
+            files.iter().find(|file| {
+                file.path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("prompt.md"))
+            })
+        })
+        .or_else(|| (files.len() == 1).then(|| &files[0]))
+}
+
+fn parse_project_prompt_bytes(bytes: &[u8]) -> Result<ProjectPromptData, String> {
+    if bytes.len() > crate::application::asset_video_prompt_service::MAX_ASSET_VIDEO_PROMPT_BYTES {
+        return Err("PROMPT_TOO_LARGE：Prompt 不能超过 64 KiB。".to_owned());
+    }
+    let text = String::from_utf8(bytes.to_vec())
+        .map_err(|_| "INVALID_PROMPT_ENCODING：Prompt 必须是 UTF-8 文本。".to_owned())?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let mut front_matter = ProjectFrontMatter::default();
+    let body = if first_line_is_front_matter(text) {
+        let lines = text.split_inclusive('\n').collect::<Vec<_>>();
+        let mut closing_index = None;
+        for (index, line) in lines.iter().enumerate().skip(1) {
+            if trim_line(line) == "---" {
+                closing_index = Some(index);
+                break;
+            }
+        }
+        let Some(closing_index) = closing_index else {
+            return Err("FRONT_MATTER_INVALID：Prompt front matter 缺少结束标记。".to_owned());
+        };
+        for line in lines.iter().take(closing_index).skip(1) {
+            let line = trim_line(line);
+            if line.is_empty() {
+                continue;
+            }
+            let Some((key, value)) = line.split_once(':') else {
+                return Err(format!("FRONT_MATTER_INVALID：无法解析字段「{line}」。"));
+            };
+            let key = key.trim().to_ascii_lowercase();
+            let value = value.trim();
+            match key.as_str() {
+                "mode" => {
+                    let mode = value.to_ascii_lowercase();
+                    if mode != "auto" && project_mode_from_front_matter(&mode).is_none() {
+                        return Err(format!("FRONT_MATTER_INVALID：不支持的 mode「{value}」。"));
+                    }
+                    front_matter.mode = Some(mode);
+                }
+                "duration" => {
+                    let duration = value
+                        .parse::<i64>()
+                        .map_err(|_| "FRONT_MATTER_INVALID：duration 必须是整数。".to_owned())?;
+                    front_matter.duration_seconds = Some(duration);
+                }
+                "resolution" => {
+                    let resolution = value.to_ascii_lowercase();
+                    let (width, height) = resolution.split_once('x').ok_or_else(|| {
+                        "FRONT_MATTER_INVALID：resolution 必须是 widthxheight。".to_owned()
+                    })?;
+                    let width = width
+                        .parse::<i64>()
+                        .map_err(|_| "FRONT_MATTER_INVALID：resolution 宽度无效。".to_owned())?;
+                    let height = height
+                        .parse::<i64>()
+                        .map_err(|_| "FRONT_MATTER_INVALID：resolution 高度无效。".to_owned())?;
+                    front_matter.resolution = Some((width, height));
+                }
+                _ => front_matter
+                    .warnings
+                    .push(format!("忽略未知 front matter 字段「{key}」。")),
+            }
+        }
+        lines
+            .iter()
+            .skip(closing_index + 1)
+            .copied()
+            .collect::<String>()
+    } else {
+        text.to_owned()
+    };
+    let (prompt, _) = parse_prompt_text_with_bytes(body, bytes.len())
+        .map_err(|issue| format_project_prompt_issue(issue))?;
+    Ok(ProjectPromptData {
+        text: prompt,
+        bytes: bytes.len(),
+        front_matter,
+    })
+}
+
+fn first_line_is_front_matter(text: &str) -> bool {
+    text.split_inclusive('\n')
+        .next()
+        .is_some_and(|line| trim_line(line) == "---")
+}
+
+fn trim_line(line: &str) -> &str {
+    line.trim_end_matches(['\r', '\n']).trim()
+}
+
+fn format_project_prompt_issue(issue: PromptIssue) -> String {
+    match issue {
+        PromptIssue::Empty => "EMPTY_PROMPT：Prompt 不能为空。".to_owned(),
+        PromptIssue::TooLarge => "PROMPT_TOO_LARGE：Prompt 不能超过 64 KiB。".to_owned(),
+        PromptIssue::InvalidEncoding => {
+            "INVALID_PROMPT_ENCODING：Prompt 必须是 UTF-8 文本。".to_owned()
+        }
+        PromptIssue::Read => "Prompt 文件无法读取".to_owned(),
+    }
+}
+
+fn project_mode_from_front_matter(value: &str) -> Option<H3CommitGenerationMode> {
+    match value {
+        "text" => Some(H3CommitGenerationMode::Fl2vaTextToVideo),
+        "image" => Some(H3CommitGenerationMode::Fl2vaImageToVideo),
+        "first_last" => Some(H3CommitGenerationMode::Fl2vaFirstLast),
+        "ref_image" => Some(H3CommitGenerationMode::Ref2vaImage),
+        "ref_audio" => Some(H3CommitGenerationMode::Ref2vaAudio),
+        "ref_image_audio" => Some(H3CommitGenerationMode::Ref2vaImageAudio),
+        "ref_video_image" => Some(H3CommitGenerationMode::Ref2vaVideoImage),
+        _ => None,
+    }
+}
+
+fn project_segment_id(folder_name: &str) -> String {
+    let digest = Sha256::digest(folder_name.to_ascii_lowercase().as_bytes());
+    format!("seg_{:x}", digest)[..20].to_owned()
+}
+
+fn project_media_id(kind: H3ProjectMediaKind, display_name: &str) -> String {
+    let source = format!("{}:{}", kind.as_str(), display_name.to_ascii_lowercase());
+    let digest = Sha256::digest(source.as_bytes());
+    format!("med_{:x}", digest)[..20].to_owned()
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+async fn hash_file(path: &Path) -> Result<String, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|_| "文件无法读取".to_owned())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .await
+            .map_err(|_| "文件无法读取".to_owned())?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+async fn inspect_project_media(
+    file: &ScannedFile,
+    segment_root: &Path,
+) -> Result<H3ProjectMedia, String> {
+    let canonical = fs::canonicalize(&file.path)
+        .map_err(|_| "MEDIA_UNREADABLE：媒体文件无法解析。".to_owned())?;
+    if !canonical.starts_with(segment_root) {
+        return Err("FILESYSTEM_BOUNDARY_ERROR：媒体文件越过 Segment 边界。".to_owned());
+    }
+    let metadata =
+        fs::metadata(&canonical).map_err(|_| "MEDIA_UNREADABLE：媒体文件无法读取。".to_owned())?;
+    if !metadata.is_file() {
+        return Err("MEDIA_UNREADABLE：媒体文件不再是普通文件。".to_owned());
+    }
+    let kind = if is_image_extension(&file.extension) {
+        H3ProjectMediaKind::Image
+    } else if is_audio_extension(&file.extension) {
+        H3ProjectMediaKind::Audio
+    } else {
+        H3ProjectMediaKind::Video
+    };
+    let size_bytes = metadata.len();
+    let max_bytes = match kind {
+        H3ProjectMediaKind::Image => MAX_SOURCE_IMAGE_BYTES,
+        H3ProjectMediaKind::Audio => MAX_SOURCE_AUDIO_BYTES,
+        H3ProjectMediaKind::Video => MAX_SOURCE_VIDEO_BYTES,
+    };
+    if size_bytes > max_bytes {
+        return Err(format!(
+            "MEDIA_TOO_LARGE：{} 超过允许的文件大小。",
+            file.relative_name
+        ));
+    }
+    let (sha256, width, height, duration_ms) = match kind {
+        H3ProjectMediaKind::Image => {
+            let bytes =
+                fs::read(&canonical).map_err(|_| "INVALID_IMAGE：图片无法读取。".to_owned())?;
+            let inspected = crate::application::image_inspection::inspect_bytes(&bytes)
+                .map_err(|error| format!("INVALID_IMAGE：{error}"))?;
+            (
+                inspected.sha256,
+                Some(i64::from(inspected.width)),
+                Some(i64::from(inspected.height)),
+                None,
+            )
+        }
+        H3ProjectMediaKind::Audio => (
+            hash_file(&canonical).await?,
+            None,
+            None,
+            CommandMediaProbe::default()
+                .probe_audio(&canonical)
+                .await
+                .duration_ms,
+        ),
+        H3ProjectMediaKind::Video => {
+            let metadata = CommandMediaProbe::default().probe_video(&canonical).await;
+            (
+                hash_file(&canonical).await?,
+                metadata.width.map(i64::from),
+                metadata.height.map(i64::from),
+                metadata.duration_ms,
+            )
+        }
+    };
+    Ok(H3ProjectMedia {
+        id: project_media_id(kind, &file.relative_name),
+        display_name: file.relative_name.clone(),
+        kind,
+        path: canonical,
+        sha256,
+        size_bytes,
+        width,
+        height,
+        duration_ms,
+    })
+}
+
+fn is_media_extension(extension: &str) -> bool {
+    is_image_extension(extension) || is_video_extension(extension) || is_audio_extension(extension)
+}
+
+fn sort_project_media(media: &mut [H3ProjectMedia]) {
+    media.sort_by(|left, right| {
+        let prefix = |kind: H3ProjectMediaKind, name: &str| -> (u8, String) {
+            let lower = name.to_ascii_lowercase();
+            let marker = match kind {
+                H3ProjectMediaKind::Image => 'p',
+                H3ProjectMediaKind::Audio => 'a',
+                H3ProjectMediaKind::Video => 'v',
+            };
+            let bytes = lower.as_bytes();
+            let mut digit_end = 1usize;
+            while digit_end < bytes.len() && bytes[digit_end].is_ascii_digit() {
+                digit_end += 1;
+            }
+            let is_prefixed = lower.starts_with(marker)
+                && digit_end > 1
+                && bytes.get(digit_end).is_some_and(|byte| *byte == b'_');
+            (if is_prefixed { 0 } else { 1 }, lower)
+        };
+        let left_key = prefix(left.kind, &left.display_name);
+        let right_key = prefix(right.kind, &right.display_name);
+        left_key
+            .0
+            .cmp(&right_key.0)
+            .then_with(|| natural_cmp(&left_key.1, &right_key.1))
+    });
+}
+
+fn frame_candidates(media: &[H3ProjectMedia], first: bool) -> Vec<H3ProjectMedia> {
+    media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Image)
+        .filter(|item| is_frame_name(&item.display_name, first))
+        .cloned()
+        .collect()
+}
+
+fn is_frame_name(name: &str, first: bool) -> bool {
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let tokens = stem
+        .split(|character: char| matches!(character, '_' | '-' | ' '))
+        .collect::<Vec<_>>();
+    let aliases: &[&str] = if first {
+        &[
+            "first",
+            "first_frame",
+            "start",
+            "start_frame",
+            "首帧",
+            "开始帧",
+        ]
+    } else {
+        &["last", "last_frame", "end", "end_frame", "尾帧", "结束帧"]
+    };
+    aliases.iter().any(|alias| {
+        stem == *alias
+            || stem.ends_with(&format!("_{alias}"))
+            || tokens.last().is_some_and(|token| *token == *alias)
+    })
+}
+
+fn infer_project_mode(media: &[H3ProjectMedia]) -> (H3CommitGenerationMode, Vec<String>) {
+    let images = media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Image)
+        .count();
+    let audios = media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Audio)
+        .count();
+    let videos = media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Video)
+        .count();
+    let firsts = frame_candidates(media, true);
+    let lasts = frame_candidates(media, false);
+    let mut errors = Vec::new();
+    if firsts.len() > 1 {
+        errors.push("AMBIGUOUS_FIRST_FRAME：首帧候选不唯一。".to_owned());
+    }
+    if lasts.len() > 1 {
+        errors.push("AMBIGUOUS_LAST_FRAME：末帧候选不唯一。".to_owned());
+    }
+    if firsts.len() == 1 && lasts.len() == 1 {
+        return (H3CommitGenerationMode::Fl2vaFirstLast, errors);
+    }
+    let mode = match (images, audios, videos) {
+        (0, 0, 0) => H3CommitGenerationMode::Fl2vaTextToVideo,
+        (1, 0, 0) => H3CommitGenerationMode::Fl2vaImageToVideo,
+        (2.., 0, 0) => H3CommitGenerationMode::Ref2vaImage,
+        (0, 1.., 0) => H3CommitGenerationMode::Ref2vaAudio,
+        (1.., 1.., 0) => H3CommitGenerationMode::Ref2vaImageAudio,
+        (1.., 0, 1..) => H3CommitGenerationMode::Ref2vaVideoImage,
+        _ => {
+            errors.push(
+                "AMBIGUOUS_MEDIA_COMBINATION：当前素材同时包含图片、音频和视频，请手动选择生成模式或调整素材。"
+                    .to_owned(),
+            );
+            H3CommitGenerationMode::Ref2vaVideoImage
+        }
+    };
+    (mode, errors)
+}
+
+fn initialize_project_segment_inputs(segment: &mut H3ProjectSegmentInspection, _root_path: &Path) {
+    segment.base_errors = segment.errors.clone();
+    segment.base_warnings = segment.warnings.clone();
+    let (inferred, inference_errors) = infer_project_mode(&segment.all_media);
+    segment.inferred_mode = inferred.as_str().to_owned();
+    let front_mode = segment
+        .front_matter
+        .as_ref()
+        .and_then(|matter| matter.mode.as_deref())
+        .filter(|mode| *mode != "auto")
+        .and_then(project_mode_from_front_matter);
+    let effective = front_mode.unwrap_or(inferred);
+    segment.generation_mode = effective.as_str().to_owned();
+    segment.mode_source = if front_mode.is_some() {
+        "FRONT_MATTER".to_owned()
+    } else {
+        "AUTO_INFERENCE".to_owned()
+    };
+    let firsts = frame_candidates(&segment.all_media, true);
+    let lasts = frame_candidates(&segment.all_media, false);
+    select_project_media_for_mode(segment, effective, firsts, lasts);
+    let (width, height, resolution_source) = project_resolution_for_segment(segment, effective);
+    segment.width = width;
+    segment.height = height;
+    segment.resolution_source = resolution_source;
+    let (duration, duration_source) = project_duration_for_segment(segment, effective);
+    segment.duration_seconds = duration;
+    segment.duration_source = duration_source;
+    segment.errors = segment.base_errors.clone();
+    if front_mode.is_none() {
+        segment.errors.extend(inference_errors);
+    }
+}
+
+fn select_project_media_for_mode(
+    segment: &mut H3ProjectSegmentInspection,
+    mode: H3CommitGenerationMode,
+    firsts: Vec<H3ProjectMedia>,
+    lasts: Vec<H3ProjectMedia>,
+) {
+    segment.first_frame = None;
+    segment.last_frame = None;
+    segment.reference_images.clear();
+    segment.reference_audios.clear();
+    segment.reference_videos.clear();
+    let images = segment
+        .all_media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Image)
+        .cloned()
+        .collect::<Vec<_>>();
+    let audios = segment
+        .all_media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Audio)
+        .cloned()
+        .collect::<Vec<_>>();
+    let videos = segment
+        .all_media
+        .iter()
+        .filter(|item| item.kind == H3ProjectMediaKind::Video)
+        .cloned()
+        .collect::<Vec<_>>();
+    match mode {
+        H3CommitGenerationMode::Fl2vaTextToVideo => {}
+        H3CommitGenerationMode::Fl2vaImageToVideo => {
+            segment.first_frame = images.first().cloned();
+        }
+        H3CommitGenerationMode::Fl2vaFirstLast => {
+            segment.first_frame = firsts.first().cloned();
+            segment.last_frame = lasts.first().cloned();
+        }
+        H3CommitGenerationMode::Ref2vaImage => segment.reference_images = images,
+        H3CommitGenerationMode::Ref2vaAudio => segment.reference_audios = audios,
+        H3CommitGenerationMode::Ref2vaImageAudio => {
+            segment.reference_images = images;
+            segment.reference_audios = audios;
+        }
+        H3CommitGenerationMode::Ref2vaVideoImage => {
+            segment.reference_images = images;
+            segment.reference_videos = videos;
+        }
+        H3CommitGenerationMode::LegacyReferenceImage => {
+            segment.reference_images = images.into_iter().take(1).collect();
+        }
+    }
+}
+
+fn project_resolution_for_segment(
+    segment: &H3ProjectSegmentInspection,
+    mode: H3CommitGenerationMode,
+) -> (i64, i64, String) {
+    if let Some((width, height)) = segment
+        .front_matter
+        .as_ref()
+        .and_then(|matter| matter.resolution)
+    {
+        return (width, height, "FRONT_MATTER".to_owned());
+    }
+    let source = match mode {
+        H3CommitGenerationMode::Fl2vaFirstLast => segment.first_frame.as_ref(),
+        H3CommitGenerationMode::Ref2vaVideoImage => segment.reference_videos.first(),
+        H3CommitGenerationMode::Ref2vaImage
+        | H3CommitGenerationMode::Ref2vaImageAudio
+        | H3CommitGenerationMode::Fl2vaImageToVideo => segment
+            .reference_images
+            .first()
+            .or(segment.first_frame.as_ref()),
+        _ => None,
+    };
+    source
+        .and_then(|media| media.width.zip(media.height))
+        .map(|(width, height)| {
+            let (width, height) = nearest_project_resolution(width as f64 / height as f64);
+            (width, height, "SOURCE_ASPECT".to_owned())
+        })
+        .unwrap_or((
+            PROJECT_DEFAULT_WIDTH,
+            PROJECT_DEFAULT_HEIGHT,
+            "RECIPE_DEFAULT".to_owned(),
+        ))
+}
+
+fn nearest_project_resolution(aspect: f64) -> (i64, i64) {
+    [
+        (768, 768),
+        (1024, 768),
+        (1344, 768),
+        (768, 1344),
+        (768, 1024),
+    ]
+    .into_iter()
+    .min_by(|left, right| {
+        (left.0 as f64 / left.1 as f64 - aspect)
+            .abs()
+            .partial_cmp(&(right.0 as f64 / right.1 as f64 - aspect).abs())
+            .unwrap_or(Ordering::Equal)
+    })
+    .unwrap_or((PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT))
+}
+
+fn project_duration_for_segment(
+    segment: &H3ProjectSegmentInspection,
+    mode: H3CommitGenerationMode,
+) -> (i64, String) {
+    if let Some(duration) = segment
+        .front_matter
+        .as_ref()
+        .and_then(|matter| matter.duration_seconds)
+    {
+        return (duration, "FRONT_MATTER".to_owned());
+    }
+    if mode == H3CommitGenerationMode::Ref2vaVideoImage {
+        if let Some(duration_ms) = segment
+            .reference_videos
+            .first()
+            .and_then(|media| media.duration_ms)
+        {
+            let rounded = ((duration_ms as f64 / 1000.0).round() as i64).clamp(1, 15);
+            return (rounded, "REFERENCE_VIDEO".to_owned());
+        }
+    }
+    (
+        PROJECT_DEFAULT_DURATION_SECONDS,
+        "RECIPE_DEFAULT".to_owned(),
+    )
+}
+
+fn recompute_project_segment_status(segment: &mut H3ProjectSegmentInspection) {
+    let (inferred, inference_errors) = infer_project_mode(&segment.all_media);
+    segment.inferred_mode = inferred.as_str().to_owned();
+    let mode = match H3CommitGenerationMode::parse(Some(&segment.generation_mode)) {
+        Ok(mode) => mode,
+        Err(_) => {
+            segment.errors = segment.base_errors.clone();
+            segment.errors.push("生成模式无效".to_owned());
+            segment.status = "BLOCKED".to_owned();
+            return;
+        }
+    };
+    let mut errors = segment.base_errors.clone();
+    if segment.mode_source == "AUTO_INFERENCE" {
+        errors.extend(inference_errors);
+    }
+    if segment
+        .prompt
+        .as_deref()
+        .is_none_or(|prompt| prompt.trim().is_empty())
+    {
+        errors.push("MISSING_PROMPT：Segment 缺少有效 Prompt。".to_owned());
+    }
+    if !(1..=15).contains(&segment.duration_seconds) {
+        errors.push("duration 必须在 1–15 秒范围内。".to_owned());
+    }
+    if !valid_project_resolution(segment.width, segment.height) {
+        errors.push("resolution 不符合当前 H3 Recipe 的合法范围。".to_owned());
+    }
+    if matches!(mode, H3CommitGenerationMode::Fl2vaImageToVideo) && segment.first_frame.is_none() {
+        errors.push("当前模式需要一张图片。".to_owned());
+    }
+    if matches!(mode, H3CommitGenerationMode::Fl2vaFirstLast)
+        && (segment.first_frame.is_none()
+            || segment.last_frame.is_none()
+            || segment.first_frame.as_ref().map(|item| &item.id)
+                == segment.last_frame.as_ref().map(|item| &item.id))
+    {
+        errors.push("当前模式需要唯一的首帧和末帧图片。".to_owned());
+    }
+    if matches!(
+        mode,
+        H3CommitGenerationMode::Ref2vaImage
+            | H3CommitGenerationMode::Ref2vaImageAudio
+            | H3CommitGenerationMode::Ref2vaVideoImage
+    ) && segment.reference_images.is_empty()
+    {
+        errors.push("当前模式至少需要一张参考图片。".to_owned());
+    }
+    if matches!(
+        mode,
+        H3CommitGenerationMode::Ref2vaAudio | H3CommitGenerationMode::Ref2vaImageAudio
+    ) && segment.reference_audios.is_empty()
+    {
+        errors.push("当前模式至少需要一个参考音频。".to_owned());
+    }
+    if mode == H3CommitGenerationMode::Ref2vaVideoImage && segment.reference_videos.is_empty() {
+        errors.push("当前模式至少需要一个参考视频。".to_owned());
+    }
+    if segment.reference_images.len() > PROJECT_IMAGE_MAX_ITEMS {
+        errors.push("参考图片超过当前 Recipe 上限 9 个。".to_owned());
+    }
+    if segment.reference_videos.len() > PROJECT_VIDEO_MAX_ITEMS {
+        errors.push("参考视频超过当前 Recipe 上限 3 个。".to_owned());
+    }
+    if segment.reference_audios.len() > PROJECT_AUDIO_MAX_ITEMS {
+        errors.push("参考音频超过当前 Recipe 上限 3 个。".to_owned());
+    }
+    segment.errors = errors;
+    segment.warnings = segment.base_warnings.clone();
+    let selected = selected_project_media_ids(segment);
+    for media in &segment.all_media {
+        if !selected.contains(&media.id) {
+            segment
+                .warnings
+                .push(format!("该模式不会使用 {} 文件。", media.display_name));
+        }
+    }
+    segment.status = if segment.errors.is_empty() {
+        "READY".to_owned()
+    } else {
+        "BLOCKED".to_owned()
+    };
+}
+
+fn selected_project_media_ids(segment: &H3ProjectSegmentInspection) -> HashSet<String> {
+    segment
+        .first_frame
+        .iter()
+        .chain(segment.last_frame.iter())
+        .chain(segment.reference_images.iter())
+        .chain(segment.reference_audios.iter())
+        .chain(segment.reference_videos.iter())
+        .map(|media| media.id.clone())
+        .collect()
+}
+
+fn valid_project_resolution(width: i64, height: i64) -> bool {
+    (PROJECT_MIN_RESOLUTION..=PROJECT_MAX_RESOLUTION).contains(&width)
+        && (PROJECT_MIN_RESOLUTION..=PROJECT_MAX_RESOLUTION).contains(&height)
+        && width % PROJECT_RESOLUTION_STEP == 0
+        && height % PROJECT_RESOLUTION_STEP == 0
+}
+
+fn project_mode_from_id(value: &str) -> Result<H3CommitGenerationMode, H3LocalImportError> {
+    H3CommitGenerationMode::parse(Some(value))
+}
+
+fn project_recipe_ids(
+    request: &H3LocalImportCommitRequest,
+    mode: H3CommitGenerationMode,
+) -> (String, String) {
+    if mode.is_fl2va() {
+        (
+            request
+                .fl2va_workflow_version_id
+                .clone()
+                .unwrap_or_else(|| request.workflow_version_id.clone()),
+            request
+                .fl2va_recipe_id
+                .clone()
+                .unwrap_or_else(|| request.recipe_id.clone()),
+        )
+    } else {
+        (
+            request
+                .ref2va_workflow_version_id
+                .clone()
+                .unwrap_or_else(|| request.workflow_version_id.clone()),
+            request
+                .ref2va_recipe_id
+                .clone()
+                .unwrap_or_else(|| request.recipe_id.clone()),
+        )
+    }
+}
+
+fn validate_project_segment_draft(draft: &H3ProjectSegmentDraft) -> Result<(), H3LocalImportError> {
+    if draft.segment_id.trim().is_empty() {
+        return Err(H3LocalImportError::InvalidInput(
+            "Segment 标识不能为空".to_owned(),
+        ));
+    }
+    if let Some(mode) = draft.mode.as_deref() {
+        project_mode_from_id(mode)?;
+    }
+    if let Some(prompt) = draft.prompt.as_deref() {
+        let bytes = prompt.as_bytes();
+        parse_prompt_text(prompt).map_err(|issue| {
+            H3LocalImportError::InvalidInput(format_project_prompt_issue(issue))
+        })?;
+        if bytes.len()
+            > crate::application::asset_video_prompt_service::MAX_ASSET_VIDEO_PROMPT_BYTES
+        {
+            return Err(H3LocalImportError::InvalidInput(
+                "Prompt 不能超过 64 KiB".to_owned(),
+            ));
+        }
+    }
+    if let Some(duration) = draft.duration_seconds {
+        if !(1..=15).contains(&duration) {
+            return Err(H3LocalImportError::InvalidInput(
+                "duration 必须在 1–15 秒范围内".to_owned(),
+            ));
+        }
+    }
+    if let (Some(width), Some(height)) = (draft.width, draft.height) {
+        if !valid_project_resolution(width, height) {
+            return Err(H3LocalImportError::InvalidInput(
+                "resolution 不符合当前 H3 Recipe 约束".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn apply_project_drafts(
+    inspection: &mut H3LocalImportInspection,
+    drafts: &HashMap<String, H3ProjectSegmentDraft>,
+) -> Result<(), H3LocalImportError> {
+    let Some(project) = inspection.project_folder.as_mut() else {
+        return Ok(());
+    };
+    for segment in &mut project.segments {
+        if let Some(draft) = drafts.get(&segment.segment_id) {
+            apply_project_segment_draft(segment, draft)?;
+        }
+    }
+    rebuild_project_folder_counts(inspection);
+    Ok(())
+}
+
+fn apply_project_segment_draft(
+    segment: &mut H3ProjectSegmentInspection,
+    draft: &H3ProjectSegmentDraft,
+) -> Result<(), H3LocalImportError> {
+    if let Some(mode) = draft.mode.as_deref() {
+        let mode = project_mode_from_id(mode)?;
+        segment.generation_mode = mode.as_str().to_owned();
+        segment.mode_source = "USER_OVERRIDE".to_owned();
+    }
+    if let Some(prompt) = draft.prompt.as_deref() {
+        let (prompt, _) = parse_prompt_text(prompt).map_err(|issue| {
+            H3LocalImportError::InvalidInput(format_project_prompt_issue(issue))
+        })?;
+        segment.prompt = Some(prompt);
+    }
+    if let Some(duration) = draft.duration_seconds {
+        segment.duration_seconds = duration;
+        segment.duration_source = "USER_OVERRIDE".to_owned();
+    }
+    if let (Some(width), Some(height)) = (draft.width, draft.height) {
+        segment.width = width;
+        segment.height = height;
+        segment.resolution_source = "USER_OVERRIDE".to_owned();
+    }
+    let find_media = |id: &str| {
+        segment
+            .all_media
+            .iter()
+            .find(|media| media.id == id)
+            .cloned()
+    };
+    if let Some(ids) = draft.reference_image_ids.as_ref() {
+        segment.reference_images = ids
+            .iter()
+            .filter_map(|id| find_media(id))
+            .filter(|media| media.kind == H3ProjectMediaKind::Image)
+            .collect();
+    }
+    if let Some(ids) = draft.reference_audio_ids.as_ref() {
+        segment.reference_audios = ids
+            .iter()
+            .filter_map(|id| find_media(id))
+            .filter(|media| media.kind == H3ProjectMediaKind::Audio)
+            .collect();
+    }
+    if let Some(ids) = draft.reference_video_ids.as_ref() {
+        segment.reference_videos = ids
+            .iter()
+            .filter_map(|id| find_media(id))
+            .filter(|media| media.kind == H3ProjectMediaKind::Video)
+            .collect();
+    }
+    if let Some(id) = draft.first_frame_id.as_deref() {
+        segment.first_frame =
+            find_media(id).filter(|media| media.kind == H3ProjectMediaKind::Image);
+    }
+    if let Some(id) = draft.last_frame_id.as_deref() {
+        segment.last_frame = find_media(id).filter(|media| media.kind == H3ProjectMediaKind::Image);
+    }
+    recompute_project_segment_status(segment);
+    Ok(())
+}
+
+fn rebuild_project_folder_counts(inspection: &mut H3LocalImportInspection) {
+    let Some(project) = inspection.project_folder.as_mut() else {
+        return;
+    };
+    project.ready_count = project
+        .segments
+        .iter()
+        .filter(|segment| segment.status == "READY")
+        .count();
+    project.errors = project
+        .segments
+        .iter()
+        .filter(|segment| segment.status != "READY")
+        .map(|segment| {
+            format!(
+                "第 {} 段 {}：{}",
+                segment.ordinal,
+                segment.folder_name,
+                segment.errors.join("；")
+            )
+        })
+        .collect();
+    if project.segment_count > MAX_PROJECT_SEGMENTS {
+        project
+            .errors
+            .push("单次最多生成100段，请拆分项目文件夹或分批导入。".to_owned());
+    }
+    project.warnings = project
+        .segments
+        .iter()
+        .flat_map(|segment| segment.warnings.iter().cloned())
+        .collect();
+    project.error_count = project.errors.len();
+    inspection.ready_count = project.ready_count;
+    inspection.error_count = project.error_count;
+    inspection.errors = project.errors.clone();
+    inspection.warnings = project.warnings.clone();
 }
 
 fn inspect_pairing(
@@ -1690,6 +3272,7 @@ fn build_inspection(
         ready_count,
         error_count: errors.len(),
         pairs,
+        project_folder: None,
         errors,
         warnings,
     }
@@ -2187,6 +3770,82 @@ outputs:
     required: true
 "#;
 
+    const H3_PROJECT_TEST_RECIPE: &str = r#"
+schema_version: 1
+id: h3_project_test_recipe
+name: H3 Project Folder Test
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  first_frame:
+    type: image
+    label: First frame
+    required: false
+  last_frame:
+    type: image
+    label: Last frame
+    required: false
+  reference_images:
+    type: images
+    label: Reference images
+    required: false
+    min_items: 0
+    max_items: 9
+  reference_videos:
+    type: videos
+    label: Reference videos
+    required: false
+    min_items: 0
+    max_items: 3
+  reference_audios:
+    type: audios
+    label: Reference audios
+    required: false
+    min_items: 0
+    max_items: 3
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 1344
+    min: 32
+    max: 2048
+    step: 32
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 768
+    min: 32
+    max: 2048
+    step: 32
+  duration_seconds:
+    type: integer
+    label: Duration
+    required: true
+    default: 5
+    min: 1
+    max: 15
+    step: 1
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings: []
+outputs:
+  - id: generated_video
+    type: video
+    node: "1"
+    required: true
+"#;
+
     struct TestComfyAdapter;
 
     #[async_trait]
@@ -2361,6 +4020,41 @@ outputs:
         fs::write(root.join("002.png"), png_bytes()).expect("002 image should write");
         fs::write(root.join("002.txt"), "Prompt A second line\ncontinuation")
             .expect("002 prompt should write");
+    }
+
+    fn write_project_fixture(root: &Path) {
+        let segments = [
+            ("001_text", &["prompt.txt"] as &[&str]),
+            ("002_i2v", &["prompt.txt", "P01.png"]),
+            ("003_first_last", &["prompt.txt", "first.png", "last.png"]),
+            (
+                "004_ref_image",
+                &["prompt.txt", "P10.png", "P02.png", "P01.png"],
+            ),
+            ("005_ref_audio", &["prompt.txt", "A01.wav"]),
+            ("006_ref_image_audio", &["prompt.txt", "P01.png", "A01.wav"]),
+            ("007_ref_video_image", &["prompt.txt", "P01.png", "V01.mp4"]),
+        ];
+        for (folder, files) in segments {
+            let directory = root.join(folder);
+            fs::create_dir_all(&directory).expect("project segment should exist");
+            fs::write(
+                directory.join("prompt.txt"),
+                format!("{folder} prompt\nsecond line"),
+            )
+            .expect("project prompt should write");
+            for file in files.iter().copied().filter(|file| *file != "prompt.txt") {
+                let bytes = if file.ends_with(".png") {
+                    png_bytes()
+                } else if file.ends_with(".wav") {
+                    b"RIFF audio placeholder".to_vec()
+                } else {
+                    b"video placeholder".to_vec()
+                };
+                fs::write(directory.join(file), bytes).expect("project media should write");
+            }
+        }
+        fs::write(root.join("README.txt"), "ignored root file").expect("root file should write");
     }
 
     async fn count_rows(pool: &SqlitePool, table: &str) -> i64 {
@@ -2604,6 +4298,10 @@ outputs:
                     seed: Some(SeedValue::Fixed(123)),
                     auto_start: false,
                     generation_mode: None,
+                    fl2va_workflow_version_id: None,
+                    fl2va_recipe_id: None,
+                    ref2va_workflow_version_id: None,
+                    ref2va_recipe_id: None,
                 },
             )
             .await
@@ -2802,6 +4500,10 @@ outputs:
                     seed: Some(SeedValue::Fixed(123)),
                     auto_start: false,
                     generation_mode: None,
+                    fl2va_workflow_version_id: None,
+                    fl2va_recipe_id: None,
+                    ref2va_workflow_version_id: None,
+                    ref2va_recipe_id: None,
                 },
             )
             .await
@@ -2851,5 +4553,296 @@ outputs:
         let sessions = harness.local.sessions.lock().await;
         assert!(!sessions.contains_key(&expired_session_id));
         assert!(sessions.contains_key(&active_session_id));
+    }
+
+    #[tokio::test]
+    async fn project_folder_inspection_infers_all_h3_modes_without_db_writes() {
+        let directory = tempdir().expect("project inspection directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("ProjectRoot");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        write_project_fixture(&fixture_root);
+        let harness = build_harness(&directory.path().join("app.db"), &project_root, true).await;
+        let before = (
+            count_rows(&harness.pool, "assets").await,
+            count_rows(&harness.pool, "asset_video_prompts").await,
+            count_rows(&harness.pool, "production_batches").await,
+        );
+        let (_, inspection) = harness
+            .local
+            .pick(PROJECT_ID, fixture_root, H3LocalImportMode::ProjectFolder)
+            .await
+            .expect("project folder inspection should succeed");
+        let project = inspection
+            .project_folder
+            .expect("project folder data should be returned");
+        assert_eq!(project.segment_count, 7);
+        assert_eq!(project.segments[0].folder_name, "001_text");
+        assert_eq!(project.segments[0].generation_mode, "FL2VA_TEXT_TO_VIDEO");
+        assert_eq!(project.segments[1].generation_mode, "FL2VA_IMAGE_TO_VIDEO");
+        assert_eq!(project.segments[2].generation_mode, "FL2VA_FIRST_LAST");
+        assert_eq!(project.segments[3].generation_mode, "REF2VA_IMAGE");
+        assert_eq!(project.segments[4].generation_mode, "REF2VA_AUDIO");
+        assert_eq!(project.segments[5].generation_mode, "REF2VA_IMAGE_AUDIO");
+        assert_eq!(project.segments[6].generation_mode, "REF2VA_VIDEO_IMAGE");
+        assert_eq!(
+            project.segments[3]
+                .reference_images
+                .iter()
+                .map(|media| media.display_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["P01.png", "P02.png", "P10.png"]
+        );
+        assert_eq!(
+            project.segments[2]
+                .first_frame
+                .as_ref()
+                .map(|media| media.display_name.as_str()),
+            Some("first.png")
+        );
+        assert_eq!(
+            project.segments[2]
+                .last_frame
+                .as_ref()
+                .map(|media| media.display_name.as_str()),
+            Some("last.png")
+        );
+        assert!(
+            project.errors.is_empty(),
+            "unexpected project errors: {:?}",
+            project.errors
+        );
+        assert_eq!(
+            before,
+            (
+                count_rows(&harness.pool, "assets").await,
+                count_rows(&harness.pool, "asset_video_prompts").await,
+                count_rows(&harness.pool, "production_batches").await,
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn project_folder_front_matter_and_ambiguous_segments_are_explicitly_blocked() {
+        let directory = tempdir().expect("front matter directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("ProjectRoot");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        let front_matter_segment = fixture_root.join("001_front_matter");
+        fs::create_dir_all(&front_matter_segment).expect("front matter segment should exist");
+        fs::write(
+            front_matter_segment.join("prompt.txt"),
+            "---\nmode: text\nduration: 8\nresolution: 768x1344\n---\nline one\nline two",
+        )
+        .expect("front matter prompt should write");
+        let invalid_segment = fixture_root.join("002_invalid_resolution");
+        fs::create_dir_all(&invalid_segment).expect("invalid segment should exist");
+        fs::write(
+            invalid_segment.join("prompt.txt"),
+            "---\nresolution: 777x999\n---\ninvalid resolution",
+        )
+        .expect("invalid prompt should write");
+        let ambiguous_prompt_segment = fixture_root.join("003_ambiguous_prompt");
+        fs::create_dir_all(&ambiguous_prompt_segment)
+            .expect("ambiguous prompt segment should exist");
+        fs::write(ambiguous_prompt_segment.join("a.txt"), "a").expect("prompt should write");
+        fs::write(ambiguous_prompt_segment.join("b.md"), "b").expect("prompt should write");
+        let ambiguous_media_segment = fixture_root.join("004_ambiguous_media");
+        fs::create_dir_all(&ambiguous_media_segment).expect("ambiguous media segment should exist");
+        fs::write(ambiguous_media_segment.join("prompt.txt"), "ambiguous")
+            .expect("prompt should write");
+        fs::write(ambiguous_media_segment.join("P01.png"), png_bytes())
+            .expect("image should write");
+        fs::write(ambiguous_media_segment.join("A01.wav"), b"audio").expect("audio should write");
+        fs::write(ambiguous_media_segment.join("V01.mp4"), b"video").expect("video should write");
+        let harness = build_harness(&directory.path().join("app.db"), &project_root, true).await;
+        let (_, inspection) = harness
+            .local
+            .pick(PROJECT_ID, fixture_root, H3LocalImportMode::ProjectFolder)
+            .await
+            .expect("front matter inspection should succeed");
+        let project = inspection.project_folder.unwrap();
+        let front = &project.segments[0];
+        assert_eq!(front.generation_mode, "FL2VA_TEXT_TO_VIDEO");
+        assert_eq!(front.duration_seconds, 8);
+        assert_eq!((front.width, front.height), (768, 1344));
+        assert_eq!(front.prompt.as_deref(), Some("line one\nline two"));
+        assert_eq!(front.mode_source, "FRONT_MATTER");
+        assert!(project.segments[1]
+            .errors
+            .iter()
+            .any(|error| error.contains("resolution")));
+        assert!(project.segments[2]
+            .errors
+            .iter()
+            .any(|error| error.contains("AMBIGUOUS_PROMPT")));
+        assert!(project.segments[3]
+            .errors
+            .iter()
+            .any(|error| error.contains("AMBIGUOUS_MEDIA_COMBINATION")));
+        assert!(project.error_count >= 3);
+    }
+
+    #[tokio::test]
+    async fn project_folder_commit_freezes_independent_segment_values_and_survives_source_delete() {
+        let directory = tempdir().expect("project commit directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("ProjectRoot");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        for (folder, image, prompt) in [
+            ("001_text", None, "Prompt A\nline two"),
+            ("002_i2v", Some("P01.png"), "Prompt B\nline two"),
+        ] {
+            let segment = fixture_root.join(folder);
+            fs::create_dir_all(&segment).expect("segment should exist");
+            fs::write(segment.join("prompt.txt"), prompt).expect("prompt should write");
+            if let Some(image) = image {
+                fs::write(segment.join(image), png_bytes()).expect("image should write");
+            }
+        }
+        let db_path = directory.path().join("app.db");
+        let harness = build_harness(&db_path, &project_root, true).await;
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+            .bind(H3_PROJECT_TEST_RECIPE)
+            .execute(&harness.pool)
+            .await
+            .expect("project Recipe should persist");
+        let before = (
+            count_rows(&harness.pool, "assets").await,
+            count_rows(&harness.pool, "asset_video_prompts").await,
+            count_rows(&harness.pool, "production_batches").await,
+        );
+        let (session_id, inspection) = harness
+            .local
+            .pick(
+                PROJECT_ID,
+                fixture_root.clone(),
+                H3LocalImportMode::ProjectFolder,
+            )
+            .await
+            .expect("project inspection should succeed");
+        assert_eq!(
+            before,
+            (
+                count_rows(&harness.pool, "assets").await,
+                count_rows(&harness.pool, "asset_video_prompts").await,
+                count_rows(&harness.pool, "production_batches").await,
+            )
+        );
+        let segments = inspection
+            .project_folder
+            .as_ref()
+            .expect("project inspection should exist")
+            .segments
+            .clone();
+        let first = harness
+            .local
+            .update_h3_project_segment_draft(
+                &session_id,
+                H3ProjectSegmentDraft {
+                    segment_id: segments[0].segment_id.clone(),
+                    mode: Some("FL2VA_TEXT_TO_VIDEO".to_owned()),
+                    prompt: Some("Prompt A\nline two".to_owned()),
+                    duration_seconds: Some(5),
+                    width: Some(1344),
+                    height: Some(768),
+                    reference_image_ids: Some(Vec::new()),
+                    reference_audio_ids: Some(Vec::new()),
+                    reference_video_ids: Some(Vec::new()),
+                    first_frame_id: None,
+                    last_frame_id: None,
+                    reset_auto_detection: false,
+                },
+            )
+            .await
+            .expect("first Segment draft should save");
+        assert_eq!(first.ready_count, 2);
+        let second_segment = first
+            .project_folder
+            .as_ref()
+            .unwrap()
+            .segments
+            .iter()
+            .find(|segment| segment.folder_name == "002_i2v")
+            .unwrap()
+            .clone();
+        let second = harness
+            .local
+            .update_h3_project_segment_draft(
+                &session_id,
+                H3ProjectSegmentDraft {
+                    segment_id: second_segment.segment_id.clone(),
+                    mode: Some("FL2VA_IMAGE_TO_VIDEO".to_owned()),
+                    prompt: Some("Prompt B\nline two".to_owned()),
+                    duration_seconds: Some(8),
+                    width: Some(768),
+                    height: Some(1344),
+                    reference_image_ids: Some(Vec::new()),
+                    reference_audio_ids: Some(Vec::new()),
+                    reference_video_ids: Some(Vec::new()),
+                    first_frame_id: second_segment
+                        .all_media
+                        .iter()
+                        .find(|media| media.kind == H3ProjectMediaKind::Image)
+                        .map(|media| media.id.clone()),
+                    last_frame_id: None,
+                    reset_auto_detection: false,
+                },
+            )
+            .await
+            .expect("second Segment draft should save");
+        assert_eq!(second.error_count, 0);
+        let result = harness
+            .local
+            .commit(
+                &session_id,
+                H3LocalImportCommitRequest {
+                    batch_name: Some("H3 project folder integration".to_owned()),
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    width: 1344,
+                    height: 768,
+                    duration_seconds: 5,
+                    seed: None,
+                    auto_start: false,
+                    generation_mode: Some("FL2VA_TEXT_TO_VIDEO".to_owned()),
+                    fl2va_workflow_version_id: None,
+                    fl2va_recipe_id: None,
+                    ref2va_workflow_version_id: None,
+                    ref2va_recipe_id: None,
+                },
+            )
+            .await
+            .expect("project commit should succeed");
+        assert_eq!(result.imported_asset_count, 1);
+        assert_eq!(result.item_count, 2);
+        let detail = harness
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("project batch should be readable");
+        assert_eq!(detail.items[0].values_json["duration_seconds"]["value"], 5);
+        assert_eq!(detail.items[0].values_json["width"]["value"], 1344);
+        assert_eq!(detail.items[1].values_json["duration_seconds"]["value"], 8);
+        assert_eq!(detail.items[1].values_json["width"]["value"], 768);
+        assert_eq!(detail.items[1].values_json["height"]["value"], 1344);
+        assert_eq!(
+            detail.items[1].values_json["first_frame"]["type"],
+            "image_asset"
+        );
+        let values_text = detail
+            .items
+            .iter()
+            .map(|item| {
+                serde_json::to_string(&item.values_json).expect("queue values should serialize")
+            })
+            .collect::<String>();
+        assert!(!values_text.contains(&fixture_root.to_string_lossy().to_string()));
+        fs::remove_dir_all(&fixture_root).expect("source project should be removable");
+        harness
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("batch should survive source deletion");
     }
 }

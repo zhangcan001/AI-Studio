@@ -700,6 +700,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::h3_local_import::h3_local_import_pick_directory,
             commands::h3_local_import::h3_local_import_rescan,
             commands::h3_local_import::h3_local_import_commit,
+            commands::h3_local_import::h3_local_import_update_project_segment_draft,
             commands::production_queue::production_queue_create,
             commands::production_queue::production_queue_list,
             commands::production_queue::production_queue_overview,

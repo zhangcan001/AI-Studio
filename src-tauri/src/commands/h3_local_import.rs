@@ -2,7 +2,8 @@ use crate::{
     app_state::AppState,
     application::h3_local_import_service::{
         H3LocalImportCommitRequest, H3LocalImportError, H3LocalImportInspection, H3LocalImportMode,
-        H3LocalImportPair, H3LocalImportResult,
+        H3LocalImportPair, H3LocalImportResult, H3ProjectFolderInspection, H3ProjectMedia,
+        H3ProjectSegmentDraft, H3ProjectSegmentInspection,
     },
     domain::SeedValue,
     error::AppError,
@@ -37,6 +38,59 @@ pub struct H3LocalImportInspectionView {
     pub ready_count: usize,
     pub error_count: usize,
     pub pairs: Vec<H3LocalImportPairView>,
+    pub project_folder: Option<H3ProjectFolderInspectionView>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct H3ProjectMediaView {
+    pub id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub size_bytes: u64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct H3ProjectSegmentView {
+    pub ordinal: usize,
+    pub segment_id: String,
+    pub folder_name: String,
+    pub generation_mode: String,
+    pub inferred_mode: String,
+    pub mode_source: String,
+    pub prompt: Option<String>,
+    pub prompt_display_name: Option<String>,
+    pub prompt_bytes: Option<usize>,
+    pub width: i64,
+    pub height: i64,
+    pub resolution_source: String,
+    pub duration_seconds: i64,
+    pub duration_source: String,
+    pub first_frame: Option<H3ProjectMediaView>,
+    pub last_frame: Option<H3ProjectMediaView>,
+    pub reference_images: Vec<H3ProjectMediaView>,
+    pub reference_audios: Vec<H3ProjectMediaView>,
+    pub reference_videos: Vec<H3ProjectMediaView>,
+    pub media: Vec<H3ProjectMediaView>,
+    pub status: String,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct H3ProjectFolderInspectionView {
+    pub display_root_name: String,
+    pub segment_count: usize,
+    pub ready_count: usize,
+    pub error_count: usize,
+    pub segments: Vec<H3ProjectSegmentView>,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
 }
@@ -54,6 +108,28 @@ pub struct H3LocalImportCommitRequestDto {
     pub seed: Option<String>,
     pub auto_start: bool,
     pub generation_mode: Option<String>,
+    pub fl2va_workflow_version_id: Option<String>,
+    pub fl2va_recipe_id: Option<String>,
+    pub ref2va_workflow_version_id: Option<String>,
+    pub ref2va_recipe_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct H3ProjectSegmentDraftDto {
+    pub session_id: String,
+    pub segment_id: String,
+    pub mode: Option<String>,
+    pub prompt: Option<String>,
+    pub duration_seconds: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub reference_image_ids: Option<Vec<String>>,
+    pub reference_audio_ids: Option<Vec<String>>,
+    pub reference_video_ids: Option<Vec<String>>,
+    pub first_frame_id: Option<String>,
+    pub last_frame_id: Option<String>,
+    pub reset_auto_detection: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -133,11 +209,44 @@ pub async fn h3_local_import_commit(
                 seed,
                 auto_start: request.auto_start,
                 generation_mode: request.generation_mode,
+                fl2va_workflow_version_id: request.fl2va_workflow_version_id,
+                fl2va_recipe_id: request.fl2va_recipe_id,
+                ref2va_workflow_version_id: request.ref2va_workflow_version_id,
+                ref2va_recipe_id: request.ref2va_recipe_id,
             },
         )
         .await
         .map_err(map_local_import_error)?;
     Ok(result_view(result))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn h3_local_import_update_project_segment_draft(
+    state: State<'_, AppState>,
+    request: H3ProjectSegmentDraftDto,
+) -> Result<H3LocalImportInspectionView, AppError> {
+    let inspection = state
+        .h3_local_import_service
+        .update_h3_project_segment_draft(
+            &request.session_id,
+            H3ProjectSegmentDraft {
+                segment_id: request.segment_id,
+                mode: request.mode,
+                prompt: request.prompt,
+                duration_seconds: request.duration_seconds,
+                width: request.width,
+                height: request.height,
+                reference_image_ids: request.reference_image_ids,
+                reference_audio_ids: request.reference_audio_ids,
+                reference_video_ids: request.reference_video_ids,
+                first_frame_id: request.first_frame_id,
+                last_frame_id: request.last_frame_id,
+                reset_auto_detection: request.reset_auto_detection,
+            },
+        )
+        .await
+        .map_err(map_local_import_error)?;
+    Ok(inspection_view(&request.session_id, &inspection))
 }
 
 fn inspection_view(
@@ -154,8 +263,61 @@ fn inspection_view(
         ready_count: inspection.ready_count,
         error_count: inspection.error_count,
         pairs: inspection.pairs.iter().map(pair_view).collect(),
+        project_folder: inspection.project_folder.as_ref().map(project_folder_view),
         errors: inspection.errors.clone(),
         warnings: inspection.warnings.clone(),
+    }
+}
+
+fn project_folder_view(project: &H3ProjectFolderInspection) -> H3ProjectFolderInspectionView {
+    H3ProjectFolderInspectionView {
+        display_root_name: project.display_root_name.clone(),
+        segment_count: project.segment_count,
+        ready_count: project.ready_count,
+        error_count: project.error_count,
+        segments: project.segments.iter().map(project_segment_view).collect(),
+        errors: project.errors.clone(),
+        warnings: project.warnings.clone(),
+    }
+}
+
+fn project_segment_view(segment: &H3ProjectSegmentInspection) -> H3ProjectSegmentView {
+    H3ProjectSegmentView {
+        ordinal: segment.ordinal,
+        segment_id: segment.segment_id.clone(),
+        folder_name: segment.folder_name.clone(),
+        generation_mode: segment.generation_mode.clone(),
+        inferred_mode: segment.inferred_mode.clone(),
+        mode_source: segment.mode_source.clone(),
+        prompt: segment.prompt.clone(),
+        prompt_display_name: segment.prompt_display_name.clone(),
+        prompt_bytes: segment.prompt_bytes,
+        width: segment.width,
+        height: segment.height,
+        resolution_source: segment.resolution_source.clone(),
+        duration_seconds: segment.duration_seconds,
+        duration_source: segment.duration_source.clone(),
+        first_frame: segment.first_frame.as_ref().map(media_view),
+        last_frame: segment.last_frame.as_ref().map(media_view),
+        reference_images: segment.reference_images.iter().map(media_view).collect(),
+        reference_audios: segment.reference_audios.iter().map(media_view).collect(),
+        reference_videos: segment.reference_videos.iter().map(media_view).collect(),
+        media: segment.all_media.iter().map(media_view).collect(),
+        status: segment.status.clone(),
+        errors: segment.errors.clone(),
+        warnings: segment.warnings.clone(),
+    }
+}
+
+fn media_view(media: &H3ProjectMedia) -> H3ProjectMediaView {
+    H3ProjectMediaView {
+        id: media.id.clone(),
+        display_name: media.display_name.clone(),
+        kind: media.kind.as_str().to_owned(),
+        size_bytes: media.size_bytes,
+        width: media.width,
+        height: media.height,
+        duration_ms: media.duration_ms,
     }
 }
 

@@ -7,6 +7,7 @@ export function localImportModeLabel(mode: H3LocalImportMode): string {
     case "TEXT": return "Prompt 文生视频";
     case "FIRST_LAST": return "首尾帧配对";
     case "OMNI_MANIFEST": return "Omni 全能参考清单";
+    case "PROJECT_FOLDER": return "项目文件夹 · Segment 自动导入";
   }
 }
 

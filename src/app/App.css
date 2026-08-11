@@ -517,12 +517,42 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .h3-local-import-options input[type="text"], .h3-local-import-options input:not([type]) { min-height: 44px; }
 .h3-local-import-checkbox { display: inline-flex !important; align-items: center; grid-template-columns: auto 1fr; min-height: 44px; min-width: 0 !important; color: var(--ux-text) !important; }
 .h3-local-import-checkbox input { width: 18px; height: 18px; }
+.h3-project-segment-list { display: grid; gap: 8px; }
+.h3-project-segment-heading { display: flex; justify-content: space-between; gap: 12px; padding: 0 4px; color: var(--ux-muted); font-size: 0.76rem; font-weight: 700; }
+.h3-project-segment-card { display: grid; gap: 8px; padding: 12px; border: 1px solid #35435b; border-radius: 9px; background: #111720; }
+.h3-project-segment-ready { border-color: #2e5d48; }
+.h3-project-segment-blocked { border-color: #5e3944; }
+.h3-project-segment-summary { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; }
+.h3-project-segment-main { display: grid; gap: 3px; min-width: 0; }
+.h3-project-segment-main strong, .h3-project-segment-main span, .h3-project-segment-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-project-segment-main span { color: #b9c8df; font-size: 0.75rem; }
+.h3-project-segment-main small { color: var(--ux-muted); font-size: 0.72rem; }
+.h3-project-segment-counts { display: flex; gap: 7px; color: var(--ux-muted); font-size: 0.7rem; white-space: nowrap; }
+.h3-project-segment-errors { display: grid; gap: 3px; padding: 8px 10px; border-radius: 7px; color: #ffc5c5; background: #28191d; font-size: 0.75rem; line-height: 1.4; }
+.h3-project-segment-editor { display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid #2c3547; }
+.h3-project-segment-fields, .h3-project-frame-editor { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.h3-project-segment-fields label, .h3-project-frame-editor label, .h3-project-prompt-editor { display: grid; gap: 5px; color: var(--ux-muted); font-size: 0.74rem; font-weight: 600; }
+.h3-project-prompt-editor textarea { min-height: 96px; resize: vertical; }
+.h3-project-media-editor { display: grid; gap: 7px; color: var(--ux-muted); font-size: 0.74rem; }
+.h3-project-media-selected { display: grid; gap: 5px; }
+.h3-project-media-chip { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 5px; align-items: center; padding: 5px 7px; border: 1px solid #35435b; border-radius: 6px; color: var(--ux-text); background: #0d131d; }
+.h3-project-media-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-project-media-chip .quiet-button { min-height: 28px; padding: 3px 7px; }
+.h3-project-media-empty { color: var(--ux-muted); }
+.h3-project-media-available { display: flex; flex-wrap: wrap; gap: 6px; }
+.h3-project-media-available .quiet-button { min-height: 30px; padding: 4px 8px; }
+.h3-project-segment-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.h3-project-segment-actions span { color: var(--ux-muted); font-size: 0.7rem; }
 @media (max-width: 1040px) {
   .h3-local-import-layout { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
   .h3-local-import-list { margin-right: -4px; }
   .h3-local-import-row { grid-template-columns: 44px minmax(110px, 0.8fr) minmax(190px, 1.6fr) 70px 88px; }
+  .h3-project-segment-summary { grid-template-columns: 36px minmax(0, 1fr) auto; }
+  .h3-project-segment-counts, .h3-project-segment-summary > .h3-local-import-status { grid-column: 2; }
+  .h3-project-segment-summary > button { grid-column: 3; grid-row: 1 / span 2; }
+  .h3-project-segment-fields, .h3-project-frame-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .h3-mode-selector-heading { flex-direction: column; }
