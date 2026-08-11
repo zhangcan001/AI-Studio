@@ -1,4 +1,4 @@
-import type { ProductionBatchItemView } from "../../types/productionQueue";
+import type { ProductionBatchDetail, ProductionBatchItemView } from "../../types/productionQueue";
 
 const TRANSIENT_REQUEUE_ERRORS = new Set([
   "COMFY_OFFLINE",
@@ -13,6 +13,17 @@ export function isSafeProductionQueueRequeue(item: ProductionBatchItemView): boo
   if (item.status === "CANCELLED") return true;
   if (item.status !== "FAILED" && item.status !== "SKIPPED") return false;
   return Boolean(item.errorCode && TRANSIENT_REQUEUE_ERRORS.has(item.errorCode));
+}
+
+export function canCancelPendingProductionQueue(
+  detail: Pick<ProductionBatchDetail, "status" | "archivedAt" | "pending" | "running">,
+): boolean {
+  return (
+    !detail.archivedAt &&
+    (detail.status === "READY" || detail.status === "PAUSED") &&
+    detail.pending > 0 &&
+    detail.running === 0
+  );
 }
 
 export interface ProductionInteractionPolicy {

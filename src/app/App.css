@@ -681,7 +681,8 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .danger-button:hover:not(:disabled) { color: #fff3ed; border-color: #d07c68; background: #4a2927; }
 .production-queue-detail { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid #2c3547; }
 .production-queue-detail-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; }
-.production-queue-detail-heading > div { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.production-queue-detail-heading > div:first-child { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.production-queue-detail-heading-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 .production-queue-detail-heading strong { overflow: hidden; color: #d5deec; text-overflow: ellipsis; white-space: nowrap; }
 .production-queue-detail-heading > div > span:last-child, .production-queue-detail-heading small { color: #8997ad; font-size: 0.75rem; }
 .production-queue-stats { display: grid; grid-template-columns: repeat(7, minmax(78px, 1fr)); gap: 6px; }
@@ -770,7 +771,8 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .production-queue-name-presets { align-items: stretch; flex-direction: column; }
   .production-queue-name-presets select { width: 100%; }
   .production-queue-heading, .production-queue-filter, .production-queue-detail-heading { align-items: stretch; flex-direction: column; }
-  .production-queue-detail-heading > div { align-items: flex-start; flex-direction: column; }
+  .production-queue-detail-heading > div:first-child { align-items: flex-start; flex-direction: column; }
+  .production-queue-detail-heading-actions { justify-content: flex-start; }
   .production-queue-row { grid-template-columns: 1fr; }
   .production-queue-row-actions, .production-item-actions { justify-content: flex-start; }
   .production-queue-items li { grid-template-columns: 38px 78px minmax(0, 1fr); }
@@ -3102,7 +3104,7 @@ summary:focus-visible {
   align-items: start;
 }
 
-.production-queue-panel-inline .production-queue-detail-heading > div {
+.production-queue-panel-inline .production-queue-detail-heading > div:first-child {
   display: grid;
   align-items: start;
   gap: 4px;

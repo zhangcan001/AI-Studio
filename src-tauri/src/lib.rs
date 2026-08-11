@@ -691,6 +691,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_get,
             commands::production_queue::production_queue_start,
             commands::production_queue::production_queue_pause,
+            commands::production_queue::production_queue_cancel_pending,
             commands::production_queue::production_queue_archive,
             commands::production_queue::production_queue_restore,
             commands::production_queue::production_queue_delete,

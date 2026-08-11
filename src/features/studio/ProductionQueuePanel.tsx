@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   archiveProductionQueue,
+  cancelPendingProductionQueue,
   createProductionQueue,
   deleteProductionQueue,
   getProductionQueue,
@@ -24,7 +25,7 @@ import type {
   ProductionQueueOverview,
 } from "../../types/productionQueue";
 import type { BatchDraftItem } from "./batchDraft";
-import { isSafeProductionQueueRequeue } from "./productionQueuePolicy";
+import { canCancelPendingProductionQueue, isSafeProductionQueueRequeue } from "./productionQueuePolicy";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import type { ReusableGenerationDraft } from "../../types/history";
@@ -307,6 +308,19 @@ export function ProductionQueuePanel({
     });
   }
 
+  async function cancelPendingQueue(batchId: string) {
+    if (!window.confirm("确定取消这个待开始的生产队列吗？尚未提交的项目会标记为已取消，不会启动 GPU 任务；已有任务和资产不受影响。")) return;
+    await runMutation(async () => {
+      const updated = await cancelPendingProductionQueue(projectId, batchId);
+      commitDetail(updated, "队列已取消，未提交 GPU 任务。已有任务和资产未受影响。");
+      try {
+        await onAdmissionChanged();
+      } catch {
+        // The queue state is persisted; a status refresh can retry on the next update.
+      }
+    });
+  }
+
   async function archiveQueue(batchId: string) {
     await runMutation(async () => {
       const updated = await archiveProductionQueue(projectId, batchId);
@@ -393,6 +407,7 @@ export function ProductionQueuePanel({
     ? Math.round((processedCount / detail.total) * 100)
     : 0;
   const activeItem = detail?.items.find((item) => item.status === "DISPATCHING" || item.status === "DISPATCHED");
+  const canCancelPending = detail ? canCancelPendingProductionQueue(detail) : false;
   const renderedItems = detail?.items ?? [];
 
   return (
@@ -553,7 +568,20 @@ export function ProductionQueuePanel({
               <strong>{detail.name}</strong>
               <span>{detail.archivedAt ? "已归档" : productionStatusLabel(detail.status)}</span>
             </div>
-            <small>{detail.id}</small>
+            <div className="production-queue-detail-heading-actions">
+              {canCancelPending && (
+                <button
+                  type="button"
+                  className="quiet-button danger-button"
+                  onClick={() => void cancelPendingQueue(detail.id)}
+                  disabled={busy}
+                  title="取消所有尚未提交的队列项目，不会启动 GPU 任务"
+                >
+                  取消待开始
+                </button>
+              )}
+              <small>{detail.id}</small>
+            </div>
           </div>
           <div className="production-queue-stats">
             <span>总数 <strong>{detail.total}</strong></span>

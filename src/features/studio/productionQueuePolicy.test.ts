@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProductionBatchItemView } from "../../types/productionQueue";
-import { isSafeProductionQueueRequeue, productionInteractionPolicy } from "./productionQueuePolicy";
+import { canCancelPendingProductionQueue, isSafeProductionQueueRequeue, productionInteractionPolicy } from "./productionQueuePolicy";
 
 function item(status: ProductionBatchItemView["status"], errorCode?: string): ProductionBatchItemView {
   return {
@@ -29,6 +29,21 @@ describe("production queue requeue policy", () => {
     expect(isSafeProductionQueueRequeue(item("FAILED", "QUEUE_COMPILE_ERROR"))).toBe(false);
     expect(isSafeProductionQueueRequeue(item("PENDING"))).toBe(false);
     expect(isSafeProductionQueueRequeue(item("SUCCEEDED"))).toBe(false);
+  });
+});
+
+describe("pending production queue cancellation policy", () => {
+  it("allows cancelling waiting items without active work", () => {
+    expect(canCancelPendingProductionQueue({ status: "READY", pending: 1, running: 0 })).toBe(true);
+    expect(canCancelPendingProductionQueue({ status: "PAUSED", pending: 2, running: 0 })).toBe(true);
+  });
+
+  it("blocks cancellation while running, completed, archived, or empty", () => {
+    expect(canCancelPendingProductionQueue({ status: "RUNNING", pending: 1, running: 0 })).toBe(false);
+    expect(canCancelPendingProductionQueue({ status: "READY", pending: 1, running: 1 })).toBe(false);
+    expect(canCancelPendingProductionQueue({ status: "COMPLETED", pending: 1, running: 0 })).toBe(false);
+    expect(canCancelPendingProductionQueue({ status: "READY", pending: 0, running: 0 })).toBe(false);
+    expect(canCancelPendingProductionQueue({ status: "READY", pending: 1, running: 0, archivedAt: "2026-08-11T00:00:00Z" })).toBe(false);
   });
 });
 

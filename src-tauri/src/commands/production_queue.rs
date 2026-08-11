@@ -223,6 +223,20 @@ pub async fn production_queue_pause(
 }
 
 #[tauri::command]
+pub async fn production_queue_cancel_pending(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+) -> Result<ProductionBatchDetailView, AppError> {
+    state
+        .production_queue_service
+        .cancel_pending(&project_id, &batch_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
 pub async fn production_queue_archive(
     state: State<'_, AppState>,
     project_id: String,

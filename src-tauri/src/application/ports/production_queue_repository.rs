@@ -51,6 +51,13 @@ pub trait ProductionQueueRepository: Send + Sync {
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError>;
 
+    async fn cancel_pending_items(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        updated_at: DateTime<Utc>,
+    ) -> Result<u64, RepositoryError>;
+
     async fn link_item_task(
         &self,
         item_id: &ProductionBatchItemId,

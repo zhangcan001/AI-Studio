@@ -184,6 +184,32 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn cancel_pending_items(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        updated_at: DateTime<Utc>,
+    ) -> Result<u64, RepositoryError> {
+        let result = sqlx::query(
+            "UPDATE production_batch_items
+             SET status = 'CANCELLED', error_code = NULL, error_message = NULL, updated_at = ?
+             WHERE batch_id = ?
+               AND status = 'PENDING'
+               AND EXISTS (
+                   SELECT 1 FROM production_batches
+                   WHERE id = ? AND project_id = ?
+               )",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(batch_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
+    }
+
     async fn link_item_task(
         &self,
         item_id: &ProductionBatchItemId,
@@ -981,6 +1007,76 @@ mod tests {
             detail.items[1].retry_of_item_id.as_deref(),
             Some(source_id.as_str())
         );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_items_is_project_scoped_and_terminal() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("cancel-pending.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 8, 13, 30, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let item_id = ProductionBatchItemId::new();
+        repository
+            .insert(
+                &ProductionBatch {
+                    id: batch_id.clone(),
+                    project_id: "project-1".to_owned(),
+                    name: "Cancel pending test".to_owned(),
+                    status: ProductionBatchStatus::Ready,
+                    continue_on_failure: false,
+                    archived_at: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                &[ProductionBatchItem {
+                    id: item_id.clone(),
+                    batch_id: batch_id.clone(),
+                    ordinal: 0,
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    values_json: json!({"prompt": {"type": "string", "value": "cancel me"}}),
+                    status: ProductionBatchItemStatus::Pending,
+                    task_id: None,
+                    retry_of_item_id: None,
+                    error_code: None,
+                    error_message: None,
+                    created_at: now,
+                    updated_at: now,
+                }],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .cancel_pending_items("project-2", &batch_id, now)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            repository
+                .cancel_pending_items("project-1", &batch_id, now)
+                .await
+                .unwrap(),
+            1
+        );
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Cancelled);
+        assert!(repository
+            .list_non_terminal_items()
+            .await
+            .unwrap()
+            .is_empty());
         pool.close().await;
     }
 

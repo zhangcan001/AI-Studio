@@ -368,6 +368,60 @@ impl ProductionQueueService {
         Ok(())
     }
 
+    pub async fn cancel_pending(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
+        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
+        let detail = self
+            .repository
+            .find_detail(project_id, &batch_id)
+            .await?
+            .ok_or_else(|| ProductionQueueError::NotFound(batch_id.as_str().to_owned()))?;
+        if detail.batch.archived_at.is_some() {
+            return Err(ProductionQueueError::InvalidState(
+                "archived production batches must be restored before cancellation".to_owned(),
+            ));
+        }
+        if detail.batch.status == ProductionBatchStatus::Running
+            || detail.items.iter().any(|item| {
+                matches!(
+                    item.status,
+                    ProductionBatchItemStatus::Dispatching | ProductionBatchItemStatus::Dispatched
+                )
+            })
+        {
+            return Err(ProductionQueueError::InvalidState(
+                "production batches with active work cannot be cancelled; pause and wait for the active task to finish".to_owned(),
+            ));
+        }
+        if detail.batch.status == ProductionBatchStatus::Completed {
+            return Err(ProductionQueueError::InvalidState(
+                "completed production batches cannot be cancelled".to_owned(),
+            ));
+        }
+        let cancelled = self
+            .repository
+            .cancel_pending_items(project_id, &batch_id, self.clock.now())
+            .await?;
+        if cancelled == 0 {
+            return Err(ProductionQueueError::InvalidState(
+                "当前没有可取消的待开始队列项目。".to_owned(),
+            ));
+        }
+        self.repository
+            .set_batch_status(
+                project_id,
+                &batch_id,
+                ProductionBatchStatus::Completed,
+                self.clock.now(),
+            )
+            .await?;
+        self.get(project_id, batch_id.as_str()).await
+    }
+
     pub async fn archive(
         &self,
         project_id: &str,

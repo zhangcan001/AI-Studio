@@ -409,6 +409,10 @@ export function pauseProductionQueue(projectId: string, batchId: string): Promis
   return invoke<ProductionBatchDetail>("production_queue_pause", { projectId, batchId });
 }
 
+export function cancelPendingProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("production_queue_cancel_pending", { projectId, batchId });
+}
+
 export function archiveProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_archive", { projectId, batchId });
 }
