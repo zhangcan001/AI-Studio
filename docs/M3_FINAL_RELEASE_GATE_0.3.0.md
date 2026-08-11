@@ -18,14 +18,14 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
 | H3 input sources | MiniMax H3 支持 Asset Library 与 Local Batch Import；Local Import 支持 Prompt-only、同名图片/Prompt、首尾帧配对、`h3-batch.json`、`h3-omni-batch.json` 与 `PROJECT_FOLDER` Segment 自动导入。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
-| Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
+| Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；H3 提供图片规格中的 14 档 16:9 输出梯度（0.2–2.0 MP）；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
 | H3 Recipe contract | 只接受经本机 `/object_info` 与 graph 审计的精确语义键；FL2VA 支持 `prompt` / optional `first_frame` / optional `last_frame`，REF2VA 支持 plural `reference_images` / `reference_videos` / `reference_audios`；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
 | H3 Recipe selection audit | 默认/推荐 profile 为 QUALITY（四个不可变 `2.0.0` mode-specific 包、20 步）；FAST 保留旧 FL2VA `1.0.0` / Omni REF2VA `1.3.0` 的 4 步 Turbo 图且未修改。Project Folder 按 mode + profile 选择并冻结 workflow/Recipe；多 Recipe Registry 仍是已记录、非阻塞技术债。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 369 tests / 0 failed；frontend 39 files / 128 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
+| Regression | Rust 370 tests / 0 failed；frontend 39 files / 128 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
 
 ## H3 Production Quality / FAST Package Audit
 
@@ -39,7 +39,7 @@ QUALITY 是默认/推荐档案，FAST 是保留的低成本预览档案。两者
 | QUALITY Omni REF2VA | `wfl_minimax_h3_reference_video_quality` / `2.0.0` | `MiniMaxH3ReferenceToVideo`；REF2VA INT8 ConvRot、20 steps、SageAttention、HyperStep Middle-36，保留 plural reference image/video/audio slots、无 Turbo LoRA |
 | FAST legacy | `wfl_minimax_h3_fl2va` / `1.0.0`; `wfl_minimax_h3_reference_video` / `1.3.0` | 原有 4-step Turbo 图，保持不变 |
 
-QUALITY 与 FAST 都使用 duration `1–15`、step `1`、default `5`；QUALITY 默认分辨率为 `960×544`，并提供 `544×960`、`736×736`、`736×544`、`544×736` 合法预设。Project Folder 在提交时按每个 Segment 的 mode + profile 选择具体 workflow/Recipe，并冻结到 ProductionBatchItem。
+QUALITY 与 FAST 都使用 duration `1–15`、step `1`、default `5`；H3 输出预设严格采用 `608×352` 至 `1920×1088` 的 14 档 16:9 MP 梯度，QUALITY 默认 `960×544`。Project Folder 自动导入使用该默认档，手动 front matter/自定义值仍按 Recipe 约束校验；提交时按每个 Segment 的 mode + profile 选择具体 workflow/Recipe，并冻结到 ProductionBatchItem。
 
 The compiler removes only the audited optional graph links when a mode does not supply
 that media family. It never writes placeholder file paths to persisted Queue values.
@@ -107,9 +107,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 31228416 | `c53ec9fc499f6861bb81cf7677650744f735cbaf36549cd7f2b0d2df3ff1e52d` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7390143 | `e6214bf3efadac1ce8e0119e6a8d2c24372e29d03ff297e61c330242c06f341b` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10817536 | `cd2986e45cb1d5cb5db70c6cd260dba09fb269c816b7030437b92dcc67bdf324` |
+| `src-tauri/target/release/ai-studio.exe` | 31232000 | `d686a59bad0a80ab180b2b24d9b49304fd15c64c440c0535e3fb8b5af6d929df` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7394369 | `1a2b647174d8dbfd1fef9d47d981eca67f2f765afa4743dd2dd2ac2040e3a4d6` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10817536 | `25434906de23c9510b829b2ece3b188c8b13381d95764a747616c1155e717730` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.

@@ -32,22 +32,25 @@ export const KREA2_RESOLUTION_PRESETS: ResolutionPreset[] = [
 ];
 
 export const MINIMAX_H3_RESOLUTION_PRESETS: ResolutionPreset[] = [
-  { id: "h3-quality-0-5mp-16x9", label: "质量 0.5MP · 16:9", width: 960, height: 544, ratio: "16:9", tier: "768p" },
-  { id: "h3-quality-0-5mp-9x16", label: "质量 0.5MP · 9:16", width: 544, height: 960, ratio: "9:16", tier: "768p" },
-  { id: "h3-quality-0-5mp-1x1", label: "质量 0.5MP · 1:1", width: 736, height: 736, ratio: "1:1", tier: "768p" },
-  { id: "h3-quality-0-4mp-4x3", label: "质量 0.4MP · 4:3", width: 736, height: 544, ratio: "4:3", tier: "768p" },
-  { id: "h3-quality-0-4mp-3x4", label: "质量 0.4MP · 3:4", width: 544, height: 736, ratio: "3:4", tier: "768p" },
-  { id: "h3-768p-1x1", label: "1:1", width: 768, height: 768, ratio: "1:1", tier: "768p" },
-  { id: "h3-768p-4x3", label: "4:3", width: 1024, height: 768, ratio: "4:3", tier: "768p" },
-  { id: "h3-768p-16x9", label: "16:9", width: 1344, height: 768, ratio: "16:9", tier: "768p" },
-  { id: "h3-768p-9x16", label: "9:16", width: 768, height: 1344, ratio: "9:16", tier: "768p" },
-  { id: "h3-768p-3x4", label: "3:4", width: 768, height: 1024, ratio: "3:4", tier: "768p" },
-  { id: "h3-2k-1x1", label: "1:1", width: 2048, height: 2048, ratio: "1:1", tier: "2k" },
-  { id: "h3-2k-4x3", label: "4:3", width: 2048, height: 1536, ratio: "4:3", tier: "2k" },
-  { id: "h3-2k-16x9", label: "16:9", width: 2048, height: 1152, ratio: "16:9", tier: "2k" },
-  { id: "h3-2k-9x16", label: "9:16", width: 1152, height: 2048, ratio: "9:16", tier: "2k" },
-  { id: "h3-2k-3x4", label: "3:4", width: 1536, height: 2048, ratio: "3:4", tier: "2k" },
+  { id: "h3-0-2mp-16x9", label: "0.2 MP · 16:9", width: 608, height: 352, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-3mp-16x9", label: "0.3 MP · 16:9", width: 736, height: 416, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-4mp-16x9", label: "0.4 MP · 16:9", width: 864, height: 480, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-5mp-16x9", label: "0.5 MP · 16:9", width: 960, height: 544, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-6mp-16x9", label: "0.6 MP · 16:9", width: 1056, height: 608, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-7mp-16x9", label: "0.7 MP · 16:9", width: 1152, height: 640, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-8mp-16x9", label: "0.8 MP · 16:9", width: 1216, height: 672, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-9mp-16x9", label: "0.9 MP · 16:9", width: 1280, height: 736, ratio: "16:9", tier: "768p" },
+  { id: "h3-0-98mp-16x9", label: "0.98 MP · 16:9", width: 1344, height: 768, ratio: "16:9", tier: "768p" },
+  { id: "h3-1-0mp-16x9", label: "1.0 MP · 16:9", width: 1376, height: 768, ratio: "16:9", tier: "768p" },
+  { id: "h3-1-2mp-16x9", label: "1.2 MP · 16:9", width: 1504, height: 832, ratio: "16:9", tier: "768p" },
+  { id: "h3-1-5mp-16x9", label: "1.5 MP · 16:9", width: 1664, height: 928, ratio: "16:9", tier: "768p" },
+  { id: "h3-1-8mp-16x9", label: "1.8 MP · 16:9", width: 1824, height: 1024, ratio: "16:9", tier: "768p" },
+  { id: "h3-2-0mp-16x9", label: "2.0 MP · 16:9", width: 1920, height: 1088, ratio: "16:9", tier: "768p" },
 ];
+
+export function isMinimaxH3OutputResolution(width: number, height: number): boolean {
+  return MINIMAX_H3_RESOLUTION_PRESETS.some((preset) => preset.width === width && preset.height === height);
+}
 
 export function resolutionPresetsForRecipe(
   recipe: RecipeViewModel,

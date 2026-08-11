@@ -2,6 +2,7 @@ import type { AssetView } from "../../types/asset";
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
 import { h3FamilyForWorkflowId } from "../runtime/productRuntimeScope";
 import { validateResolution } from "../runtime/resolution";
+import { isMinimaxH3OutputResolution } from "../runtime/resolutionPresets";
 import type { BatchDraftItem } from "../studio/batchDraft";
 
 export const H3_PROMPT_KEY = "prompt" as const;
@@ -251,8 +252,8 @@ export function buildH3BatchValues(
   }
   const selectedWidth = width ?? result.contract.widthField.default ?? result.contract.widthField.min;
   const selectedHeight = height ?? result.contract.heightField.default ?? result.contract.heightField.min;
-  if (!validateResolution(recipe, selectedWidth, selectedHeight).ok) {
-    throw new Error("H3 输出分辨率不符合当前 Recipe 约束。");
+  if (!isMinimaxH3OutputResolution(selectedWidth!, selectedHeight!) || !validateResolution(recipe, selectedWidth, selectedHeight).ok) {
+    throw new Error("H3 输出分辨率必须选择图片规格中的 14 档 16:9 分辨率。");
   }
 
   const values: GenerationValues = {};
@@ -296,8 +297,8 @@ export function buildH3ModeBatchValues(
   }
   const selectedWidth = width ?? contract.widthField.default ?? contract.widthField.min;
   const selectedHeight = height ?? contract.heightField.default ?? contract.heightField.min;
-  if (!validateResolution(recipe, selectedWidth, selectedHeight).ok) {
-    throw new Error("H3 输出分辨率不符合当前 Recipe 约束。");
+  if (!isMinimaxH3OutputResolution(selectedWidth!, selectedHeight!) || !validateResolution(recipe, selectedWidth, selectedHeight).ok) {
+    throw new Error("H3 输出分辨率必须选择图片规格中的 14 档 16:9 分辨率。");
   }
   if (!h3ModeSupported(contract, mode)) {
     throw new Error(`当前 H3 Recipe 不支持模式 ${mode}。`);

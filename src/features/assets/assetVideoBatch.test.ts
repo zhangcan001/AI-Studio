@@ -114,11 +114,13 @@ describe("独立视频批次输入", () => {
     expect(buildH3BatchValues(recipe, "ast-image", "fifteen", 15).duration_seconds).toEqual({ type: "integer", value: 15 });
     expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 0)).toThrow("1–15");
     expect(() => buildH3BatchValues(recipe, "ast-image", "invalid", 16)).toThrow("1–15");
-    expect(buildH3BatchValues(recipe, "ast-image", "portrait", 15, 1152, 2048)).toMatchObject({
-      width: { type: "integer", value: 1152 },
-      height: { type: "integer", value: 2048 },
+    expect(buildH3BatchValues(recipe, "ast-image", "high quality", 15, 1920, 1088)).toMatchObject({
+      width: { type: "integer", value: 1920 },
+      height: { type: "integer", value: 1088 },
       duration_seconds: { type: "integer", value: 15 },
     });
+    expect(() => buildH3BatchValues(recipe, "ast-image", "unsupported", 5, 1024, 576))
+      .toThrow("14 档 16:9");
   });
 
   it("builds an independent H3 item from either source or generated image assets", () => {

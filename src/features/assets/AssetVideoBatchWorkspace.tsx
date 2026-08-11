@@ -28,7 +28,11 @@ import {
   type H3QualityProfile,
 } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
-import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
+import {
+  isMinimaxH3OutputResolution,
+  MINIMAX_H3_RESOLUTION_PRESETS,
+  resolutionPresetsForRecipe,
+} from "../runtime/resolutionPresets";
 import { validateResolution } from "../runtime/resolution";
 import {
   buildH3BatchDraft,
@@ -200,8 +204,28 @@ function ProjectFolderSegmentEditor({
                 <div className="h3-project-segment-fields">
                   <label><span>生成模式</span><select value={form.mode} onChange={(event) => onChange(segment.segmentId, { mode: event.target.value as H3ProjectGenerationMode })} disabled={busy}>{H3_MODE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
                   <label><span>时长（秒）</span><input type="number" min={1} max={15} step={1} value={form.durationSeconds} onChange={(event) => onChange(segment.segmentId, { durationSeconds: Number(event.target.value) })} disabled={busy} /></label>
-                  <label><span>宽度</span><input type="number" min={32} max={2048} step={32} value={form.width} onChange={(event) => onChange(segment.segmentId, { width: Number(event.target.value) })} disabled={busy} /></label>
-                  <label><span>高度</span><input type="number" min={32} max={2048} step={32} value={form.height} onChange={(event) => onChange(segment.segmentId, { height: Number(event.target.value) })} disabled={busy} /></label>
+                  <label>
+                    <span>输出分辨率</span>
+                    <select
+                      value={`${form.width}x${form.height}`}
+                      onChange={(event) => {
+                        const [width, height] = event.target.value.split("x").map(Number);
+                        onChange(segment.segmentId, { width, height });
+                      }}
+                      disabled={busy}
+                    >
+                      {!isMinimaxH3OutputResolution(form.width, form.height) && (
+                        <option value={`${form.width}x${form.height}`} disabled>
+                          当前值不支持：{form.width} × {form.height}
+                        </option>
+                      )}
+                      {MINIMAX_H3_RESOLUTION_PRESETS.map((preset) => (
+                        <option key={preset.id} value={`${preset.width}x${preset.height}`}>
+                          {preset.label} · {preset.width} × {preset.height}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <label className="h3-project-prompt-editor"><span>Prompt（只保存到本次 Session Draft）</span><textarea rows={4} maxLength={64 * 1024} value={form.prompt} onChange={(event) => onChange(segment.segmentId, { prompt: event.target.value })} disabled={busy} /></label>
                 {(form.mode === "FL2VA_IMAGE_TO_VIDEO" || form.mode === "FL2VA_FIRST_LAST") && (
@@ -327,7 +351,12 @@ export function AssetVideoBatchWorkspace({
   const resolutionValidation = recipe && contract.ok
     ? validateResolution(recipe, selectedWidth, selectedHeight)
     : undefined;
-  const resolutionReady = Boolean(resolutionValidation?.ok);
+  const resolutionReady = Boolean(
+    resolutionValidation?.ok
+      && selectedWidth !== undefined
+      && selectedHeight !== undefined
+      && isMinimaxH3OutputResolution(selectedWidth, selectedHeight),
+  );
   const runtimeReady = Boolean(contract.ok && comfyConnected && taskEventsReady && durationReady && resolutionReady);
   const resolutionPresets = contract.ok && recipe
     ? resolutionPresetsForRecipe(recipe, MINIMAX_H3_RESOLUTION_PRESETS)
@@ -803,6 +832,7 @@ export function AssetVideoBatchWorkspace({
             width={selectedWidth}
             height={selectedHeight}
             presets={resolutionPresets}
+            presetsOnly
             disabled={busy}
             onChange={(next) => {
               setWidth(next.width);
@@ -952,7 +982,7 @@ export function AssetVideoBatchWorkspace({
                   </button>
                   {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
                 </div>
-                {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择符合 Recipe 约束的输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
+                {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择图片规格中的 16:9 输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
               </>
             )}
           </section>
@@ -1059,7 +1089,7 @@ export function AssetVideoBatchWorkspace({
             </button>
             {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
           </div>
-          {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择符合 Recipe 约束的输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
+          {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择图片规格中的 16:9 输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
           {batchDraft.error && <p className="error-message" role="alert">视频批次预览失败：{batchDraft.error}</p>}
           {generationMode.startsWith("FL2VA") && missingPromptAssets.length > 0 && !batchPrompt.trim() && <p className="disabled-note">请填写批次 Prompt，或为首帧图片保存视频提示词。</p>}
           {modePromptTooLong && <p className="error-message">视频 Prompt 按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}

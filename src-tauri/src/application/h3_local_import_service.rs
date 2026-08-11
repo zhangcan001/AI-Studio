@@ -44,9 +44,22 @@ const MAX_PROJECT_SEGMENTS: usize = 100;
 const PROJECT_DEFAULT_DURATION_SECONDS: i64 = 5;
 const PROJECT_DEFAULT_WIDTH: i64 = 960;
 const PROJECT_DEFAULT_HEIGHT: i64 = 544;
-const PROJECT_MIN_RESOLUTION: i64 = 32;
-const PROJECT_MAX_RESOLUTION: i64 = 2048;
-const PROJECT_RESOLUTION_STEP: i64 = 32;
+const H3_OUTPUT_RESOLUTIONS: [(i64, i64); 14] = [
+    (608, 352),
+    (736, 416),
+    (864, 480),
+    (960, 544),
+    (1056, 608),
+    (1152, 640),
+    (1216, 672),
+    (1280, 736),
+    (1344, 768),
+    (1376, 768),
+    (1504, 832),
+    (1664, 928),
+    (1824, 1024),
+    (1920, 1088),
+];
 const PROJECT_IMAGE_MAX_ITEMS: usize = 9;
 const PROJECT_VIDEO_MAX_ITEMS: usize = 3;
 const PROJECT_AUDIO_MAX_ITEMS: usize = 3;
@@ -2154,16 +2167,11 @@ fn project_resolution_for_segment(
         ))
 }
 
-fn nearest_project_resolution(aspect: f64) -> (i64, i64) {
-    [(736, 736), (736, 544), (960, 544), (544, 960), (544, 736)]
-        .into_iter()
-        .min_by(|left, right| {
-            (left.0 as f64 / left.1 as f64 - aspect)
-                .abs()
-                .partial_cmp(&(right.0 as f64 / right.1 as f64 - aspect).abs())
-                .unwrap_or(Ordering::Equal)
-        })
-        .unwrap_or((PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT))
+fn nearest_project_resolution(_aspect: f64) -> (i64, i64) {
+    // The official H3 output ladder is 16:9 only. Auto-import stays on the
+    // low-cost default instead of silently selecting a larger tier because a
+    // source image has a slightly different aspect ratio.
+    (PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT)
 }
 
 fn project_duration_for_segment(
@@ -2290,11 +2298,12 @@ fn selected_project_media_ids(segment: &H3ProjectSegmentInspection) -> HashSet<S
         .collect()
 }
 
+fn is_h3_output_resolution(width: i64, height: i64) -> bool {
+    H3_OUTPUT_RESOLUTIONS.contains(&(width, height))
+}
+
 fn valid_project_resolution(width: i64, height: i64) -> bool {
-    (PROJECT_MIN_RESOLUTION..=PROJECT_MAX_RESOLUTION).contains(&width)
-        && (PROJECT_MIN_RESOLUTION..=PROJECT_MAX_RESOLUTION).contains(&height)
-        && width % PROJECT_RESOLUTION_STEP == 0
-        && height % PROJECT_RESOLUTION_STEP == 0
+    is_h3_output_resolution(width, height)
 }
 
 fn project_mode_from_id(value: &str) -> Result<H3CommitGenerationMode, H3LocalImportError> {
@@ -3407,13 +3416,9 @@ fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H
             "H3 Recipe 标识不能为空".to_owned(),
         ));
     }
-    if request.width <= 0
-        || request.height <= 0
-        || request.width > 16_384
-        || request.height > 16_384
-    {
+    if !is_h3_output_resolution(request.width, request.height) {
         return Err(H3LocalImportError::InvalidInput(
-            "输出分辨率不合法".to_owned(),
+            "输出视频分辨率必须选择图片规格中的 14 档 16:9 分辨率".to_owned(),
         ));
     }
     if !(1..=15).contains(&request.duration_seconds) {
@@ -3776,6 +3781,11 @@ mod tests {
                 "quality-ref-recipe".to_owned()
             )
         );
+    }
+
+    #[test]
+    fn project_folder_auto_resolution_uses_the_h3_default_ladder_entry() {
+        assert_eq!(nearest_project_resolution(16.0 / 9.0), (960, 544));
     }
 
     use crate::application::asset_video_prompt_service::AssetVideoPromptService;
@@ -4381,8 +4391,8 @@ outputs:
                     batch_name: Some("H3 local integration".to_owned()),
                     workflow_version_id: "workflow-version-1".to_owned(),
                     recipe_id: "recipe-1".to_owned(),
-                    width: 640,
-                    height: 360,
+                    width: 960,
+                    height: 544,
                     duration_seconds: 5,
                     seed: Some(SeedValue::Fixed(123)),
                     auto_start: false,
@@ -4430,8 +4440,8 @@ outputs:
                 .expect("queue item should contain an asset id")
                 .to_owned();
             asset_ids.push(asset_id.clone());
-            assert_eq!(item.values_json["width"]["value"], 640);
-            assert_eq!(item.values_json["height"]["value"], 360);
+            assert_eq!(item.values_json["width"]["value"], 960);
+            assert_eq!(item.values_json["height"]["value"], 544);
             assert_eq!(item.values_json["duration_seconds"]["value"], 5);
             assert_eq!(item.values_json["seed"]["type"], "seed_fixed");
             assert_eq!(item.values_json["seed"]["value"], "123");
@@ -4585,8 +4595,8 @@ outputs:
                     batch_name: Some("partial failure".to_owned()),
                     workflow_version_id: "workflow-version-1".to_owned(),
                     recipe_id: "recipe-1".to_owned(),
-                    width: 640,
-                    height: 360,
+                    width: 960,
+                    height: 544,
                     duration_seconds: 5,
                     seed: Some(SeedValue::Fixed(123)),
                     auto_start: false,
@@ -4725,7 +4735,7 @@ outputs:
         fs::create_dir_all(&front_matter_segment).expect("front matter segment should exist");
         fs::write(
             front_matter_segment.join("prompt.txt"),
-            "---\nmode: text\nduration: 8\nresolution: 768x1344\n---\nline one\nline two",
+            "---\nmode: text\nduration: 8\nresolution: 1376x768\n---\nline one\nline two",
         )
         .expect("front matter prompt should write");
         let invalid_segment = fixture_root.join("002_invalid_resolution");
@@ -4758,7 +4768,7 @@ outputs:
         let front = &project.segments[0];
         assert_eq!(front.generation_mode, "FL2VA_TEXT_TO_VIDEO");
         assert_eq!(front.duration_seconds, 8);
-        assert_eq!((front.width, front.height), (768, 1344));
+        assert_eq!((front.width, front.height), (1376, 768));
         assert_eq!(front.prompt.as_deref(), Some("line one\nline two"));
         assert_eq!(front.mode_source, "FRONT_MATTER");
         assert!(project.segments[1]
@@ -4868,8 +4878,8 @@ outputs:
                     mode: Some("FL2VA_IMAGE_TO_VIDEO".to_owned()),
                     prompt: Some("Prompt B\nline two".to_owned()),
                     duration_seconds: Some(8),
-                    width: Some(768),
-                    height: Some(1344),
+                    width: Some(1376),
+                    height: Some(768),
                     reference_image_ids: Some(Vec::new()),
                     reference_audio_ids: Some(Vec::new()),
                     reference_video_ids: Some(Vec::new()),
@@ -4919,8 +4929,8 @@ outputs:
         assert_eq!(detail.items[0].values_json["duration_seconds"]["value"], 5);
         assert_eq!(detail.items[0].values_json["width"]["value"], 1344);
         assert_eq!(detail.items[1].values_json["duration_seconds"]["value"], 8);
-        assert_eq!(detail.items[1].values_json["width"]["value"], 768);
-        assert_eq!(detail.items[1].values_json["height"]["value"], 1344);
+        assert_eq!(detail.items[1].values_json["width"]["value"], 1376);
+        assert_eq!(detail.items[1].values_json["height"]["value"], 768);
         assert_eq!(
             detail.items[1].values_json["first_frame"]["type"],
             "image_asset"
