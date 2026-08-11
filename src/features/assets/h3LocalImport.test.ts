@@ -23,6 +23,9 @@ describe("H3 local import UI policy", () => {
   it("labels both source modes and pair statuses", () => {
     expect(localImportModeLabel("PAIRING")).toBe("自动同名配对");
     expect(localImportModeLabel("MANIFEST")).toBe("JSON 批量清单");
+    expect(localImportModeLabel("TEXT")).toBe("Prompt 文生视频");
+    expect(localImportModeLabel("FIRST_LAST")).toBe("首尾帧配对");
+    expect(localImportModeLabel("OMNI_MANIFEST")).toBe("Omni 全能参考清单");
     expect(localImportStatusLabel("READY")).toBe("可生成");
     expect(localImportStatusLabel("MISSING_PROMPT")).toBe("缺少 Prompt");
     expect(localImportStatusLabel("INVALID_PATH")).toBe("路径不安全");

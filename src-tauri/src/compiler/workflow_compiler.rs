@@ -423,8 +423,7 @@ fn apply_bindings(
 ) -> Result<(), CompileError> {
     for binding in &recipe.bindings {
         let Some(value) = resolved_inputs.get(&binding.source) else {
-            // Optional inputs without a user value or recipe default preserve
-            // the original Workflow value, as required by the precedence rule.
+            clear_binding_targets(workflow, binding)?;
             continue;
         };
 
@@ -440,16 +439,13 @@ fn apply_bindings(
         let target_value = match (binding.item_index, value) {
             (Some(index), ResolvedInputValue::Images(values))
             | (Some(index), ResolvedInputValue::Videos(values))
-            | (Some(index), ResolvedInputValue::Audios(values)) => values
-                .get(index)
-                .cloned()
-                .map(Value::String)
-                .ok_or_else(|| CompileError::Internal {
-                    message: format!(
-                        "validated media binding item {} became unavailable for {}",
-                        index, binding.source
-                    ),
-                })?,
+            | (Some(index), ResolvedInputValue::Audios(values)) => {
+                let Some(value) = values.get(index).cloned() else {
+                    clear_binding_targets(workflow, binding)?;
+                    continue;
+                };
+                Value::String(value)
+            }
             (Some(_), _) => {
                 return Err(CompileError::Internal {
                     message: format!(
@@ -463,6 +459,24 @@ fn apply_bindings(
         inputs.insert(binding.target.input.clone(), target_value);
     }
 
+    Ok(())
+}
+
+fn clear_binding_targets(
+    workflow: &mut WorkflowDocument,
+    binding: &crate::domain::Binding,
+) -> Result<(), CompileError> {
+    for target in &binding.clear_targets {
+        let Some(inputs) = workflow.inputs_mut(&target.node) else {
+            return Err(CompileError::Internal {
+                message: format!(
+                    "validated clear target node \"{}\" became inaccessible",
+                    target.node
+                ),
+            });
+        };
+        inputs.remove(&target.input);
+    }
     Ok(())
 }
 
@@ -767,6 +781,90 @@ outputs:
                 "first.png".to_owned(),
                 "second.png".to_owned()
             ]))
+        );
+    }
+
+    #[test]
+    fn optional_media_links_are_cleared_when_mode_does_not_supply_media() {
+        let recipe = RecipeParser::parse(
+            r#"
+schema_version: 1
+id: optional_frame
+name: Optional Frame
+workflow:
+  file: workflow.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+  first_frame:
+    type: image
+    label: First Frame
+    required: false
+bindings:
+  - source: prompt
+    target:
+      node: "14"
+      input: prompt
+  - source: first_frame
+    target:
+      node: "24"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: first_frame
+outputs: []
+"#,
+        )
+        .expect("optional frame recipe should parse");
+        let workflow = WorkflowDocument::parse(serde_json::json!({
+            "14": {"inputs": {"prompt": "", "first_frame": ["24", 0]}, "class_type": "MiniMaxH3ImageToVideo"},
+            "24": {"inputs": {"image": "__optional__.png"}, "class_type": "LoadImage"}
+        }))
+        .expect("workflow should parse");
+
+        let without_frame = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([(
+                    "prompt".to_owned(),
+                    InputValue::String("text only".to_owned()),
+                )])),
+            )
+            .expect("text-only compile should succeed");
+        assert!(without_frame.workflow["14"]["inputs"]
+            .get("first_frame")
+            .is_none());
+        assert_eq!(
+            without_frame.workflow["24"]["inputs"]["image"],
+            "__optional__.png"
+        );
+
+        let with_frame = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([
+                    (
+                        "prompt".to_owned(),
+                        InputValue::String("image motion".to_owned()),
+                    ),
+                    (
+                        "first_frame".to_owned(),
+                        InputValue::Image("asset_image_1".to_owned()),
+                    ),
+                ])),
+            )
+            .expect("image compile should succeed");
+        assert_eq!(
+            with_frame.workflow["14"]["inputs"]["first_frame"],
+            serde_json::json!(["24", 0])
+        );
+        assert_eq!(
+            with_frame.workflow["24"]["inputs"]["image"],
+            "asset_image_1"
         );
     }
 

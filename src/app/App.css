@@ -453,6 +453,27 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-video-source-tab { min-height: 44px; padding: 9px 15px; border: 1px solid transparent; border-radius: 7px; color: var(--ux-muted); background: transparent; font-weight: 700; }
 .asset-video-source-tab:hover:not(:disabled) { color: var(--ux-text); background: var(--ux-surface-2); }
 .asset-video-source-tab-active { border-color: var(--ux-border-strong); color: var(--ux-text); background: var(--ux-surface-2); }
+.h3-mode-selector { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--ux-border); border-radius: 12px; background: var(--ux-surface-1); }
+.h3-mode-selector-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.h3-mode-selector-heading h3 { margin: 3px 0 0; font-size: 1.05rem; }
+.h3-mode-contract-badge { padding: 6px 9px; border: 1px solid #3e577e; border-radius: 999px; color: #b9c8df; background: #111a29; font-size: 0.72rem; white-space: nowrap; }
+.h3-mode-family-tabs, .h3-mode-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.h3-mode-family-tab, .h3-mode-option { min-height: 44px; padding: 9px 13px; border: 1px solid var(--ux-border); border-radius: 9px; color: var(--ux-muted); background: var(--ux-surface-0); text-align: left; }
+.h3-mode-family-tab { font-weight: 700; }
+.h3-mode-family-tab:hover:not(:disabled), .h3-mode-option:hover:not(:disabled) { border-color: var(--ux-accent); color: var(--ux-text); }
+.h3-mode-family-tab-active, .h3-mode-option-active { border-color: var(--ux-accent); color: var(--ux-text); background: #182337; box-shadow: 0 0 0 1px rgb(117 161 233 / 18%); }
+.h3-mode-option { display: grid; min-width: 150px; gap: 3px; }
+.h3-mode-option strong { color: inherit; font-size: 0.82rem; }
+.h3-mode-option span { color: #8997ad; font-size: 0.72rem; line-height: 1.35; }
+.h3-mode-option:disabled { opacity: 0.58; cursor: not-allowed; }
+.h3-mode-disabled-note { margin: 0; padding: 9px 11px; border: 1px solid #8b6b3e; border-radius: 8px; color: #ffdcaa; background: #2b2418; font-size: 0.8rem; }
+.h3-batch-prompt-panel { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--ux-border); border-radius: 10px; background: var(--ux-surface-0); }
+.h3-batch-prompt-panel label { display: grid; gap: 6px; color: var(--ux-text); font-size: 0.8rem; font-weight: 700; }
+.h3-batch-prompt-panel textarea { min-height: 118px; resize: vertical; }
+.h3-batch-prompt-panel small { color: var(--ux-muted); font-size: 0.72rem; }
+.h3-mode-selector + .h3-safety-card { margin-top: 0; }
+.asset-video-frame-role-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.asset-role-active { border-color: var(--ux-accent); color: var(--ux-text); background: #182337; }
 .h3-local-import-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(360px, 0.7fr); gap: 16px; align-items: start; }
 .h3-local-import-panel { display: grid; gap: 14px; min-width: 0; padding: 16px; border: 1px solid var(--ux-border); border-radius: 10px; background: var(--ux-surface-1); }
 .h3-local-import-panel .section-heading { align-items: center; }
@@ -479,7 +500,9 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .h3-local-import-row-ready { border-color: #2e5d48; }
 .h3-local-import-row-error { border-color: #5e3944; }
 .h3-local-import-ordinal, .h3-local-import-bytes { color: var(--ux-muted); white-space: nowrap; }
-.h3-local-import-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-local-import-file { display: grid; gap: 2px; min-width: 0; overflow: hidden; }
+.h3-local-import-file > span, .h3-local-import-file > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-local-import-file small { color: var(--ux-muted); font-size: 0.7rem; }
 .h3-local-import-prompt { display: grid; gap: 4px; min-width: 0; }
 .h3-local-import-prompt-preview { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .h3-local-import-prompt-toggle { justify-self: start; min-height: 32px; padding: 5px 8px; font-size: 0.72rem; }
@@ -495,6 +518,11 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 @media (max-width: 720px) {
   .h3-local-import-list { margin-right: -4px; }
   .h3-local-import-row { grid-template-columns: 44px minmax(110px, 0.8fr) minmax(190px, 1.6fr) 70px 88px; }
+}
+@media (max-width: 700px) {
+  .h3-mode-selector-heading { flex-direction: column; }
+  .h3-mode-contract-badge { white-space: normal; }
+  .h3-mode-option { flex: 1 1 140px; }
 }
 .h3-safety-card {
   display: flex;

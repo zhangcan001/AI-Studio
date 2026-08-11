@@ -12,9 +12,9 @@ Release status: `CODE READY / LIVE VALIDATION DEFERRED`
 | Product | User flow | Exact workflow ID |
 | --- | --- | --- |
 | 批量图片 | 提示词列表 → Krea2 图片批次 → 图片 Task / Snapshot / Asset | `wfl_kera2_t2i_local_v2` |
-| 批量视频 | 项目图片 Asset + 已保存视频提示词 → H3 视频批次 → 视频 Task / Snapshot / Asset | `wfl_minimax_h3_reference_video` |
+| 批量视频 | MiniMax H3 FL2VA / REF2VA mode-specific Asset or local import inputs → H3 视频批次 → 视频 Task / Snapshot / Asset | `wfl_minimax_h3_fl2va`, `wfl_minimax_h3_reference_video` |
 
-Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频支持两种输入来源：从 Asset Library 选择 1–100 张图片并保存视频提示词，或从本地任务目录按同名图片/Prompt 配对或 `h3-batch.json` 批量导入。后者先创建正常 source image Asset 和 Asset Video Prompt，再与前者汇合到既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链；Production Queue 永不保存本地绝对路径。
+Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频支持 FL2VA 文生视频、一张图生视频、首尾帧，以及 REF2VA 图片、音频、图片+音频、视频+图片模式；输入可来自 Asset Library 或本地任务目录（Prompt-only、同名图片/Prompt、首尾帧配对、`h3-omni-batch.json`）。本地媒体先创建正常 source Asset 和 Asset Video Prompt（图片），再与资产库输入汇合到既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链；Production Queue 永不保存本地绝对路径。
 
 ## Frozen runtime and queue contract
 
@@ -24,8 +24,8 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 - 创建队列时冻结每项的工作流版本、Recipe、输入 Asset ID、提示词、数字参数和随机 Seed；随机 Seed 在持久化前解析为固定值。
 - 队列严格串行执行，`continueOnFailure` 保留失败项并允许后续项目继续；致命执行错误仍按既有队列策略暂停。
 - H3 产品能力边界为最高 15 秒、最高 2K；当前 Runtime 仍显示 4 步、单任务串行，历史本机验证档位单独标注为 `0.1 MP · 5 秒 · RTX 5060 Ti 16GB`。
-- H3 Recipe 必须具备精确语义键：`prompt` textarea、`reference_image` image/images、`width` integer、`height` integer、`duration_seconds` integer（1–15、step 1、默认 5）、`seed` seed 和 video output；契约缺失时显示 `H3 runtime unavailable`，不静默猜字段。
-- H3 当前活动生产 Recipe 为不可变 `1.2.0`；`1.1.2` 及历史 H3 包继续保留用于兼容。技术债：普通 H3 workspace 当前假设正式 workflow ID 只有一个活动生产 Recipe；本次冻结不新增 Recipe Registry 或选择系统。
+- H3 Recipe 必须具备经过本机 `/object_info` 与 graph 审计的精确语义键：FL2VA 的 `prompt` / optional `first_frame` / optional `last_frame`，或 REF2VA 的 plural `reference_images` / `reference_videos` / `reference_audios`，以及 `width`、`height`、`duration_seconds`（1–15、step 1、默认 5）、`seed` 和 video output；契约缺失时显示 `当前本地 H3 工作流未启用该模式`，不静默猜字段。
+- H3 当前内置生产 Recipe 为 FL2VA `1.0.0` 与 Omni REF2VA `1.3.0`；历史 `1.2.0`、`1.1.2` 及更早 H3 包继续保留用于兼容。技术债：普通 H3 workspace 当前按每个正式 workflow ID 假设一个活动生产 Recipe；本次冻结不新增 Recipe Registry 或选择系统。
 
 ## Compatibility contract
 

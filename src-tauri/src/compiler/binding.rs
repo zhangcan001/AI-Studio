@@ -41,6 +41,32 @@ impl BindingValidator {
                     message: "target input does not exist in workflow".to_owned(),
                 });
             }
+
+            for target in &binding.clear_targets {
+                if workflow.node(&target.node).is_none() {
+                    return Err(CompileError::BindingInvalid {
+                        source: binding.source.clone(),
+                        node: target.node.clone(),
+                        input: target.input.clone(),
+                        message: "clear target node does not exist in workflow".to_owned(),
+                    });
+                }
+                let Some(inputs) = workflow.inputs(&target.node) else {
+                    return Err(CompileError::BindingInvalid {
+                        source: binding.source.clone(),
+                        node: target.node.clone(),
+                        input: target.input.clone(),
+                        message: "clear target node has no inputs object".to_owned(),
+                    });
+                };
+                if !inputs.contains_key(&target.input) {
+                    // A clear target may be absent in the base graph when a
+                    // package intentionally relies on an optional socket. It
+                    // is still safe to validate the node, but a target that
+                    // is present must be a real input key.
+                    continue;
+                }
+            }
         }
 
         for output in recipe.outputs.iter().filter(|output| output.required) {

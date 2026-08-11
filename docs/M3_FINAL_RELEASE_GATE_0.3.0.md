@@ -13,21 +13,35 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 
 | Gate | Current boundary |
 | --- | --- |
-| Exact runtime scope | Krea2 与 H3 只按精确 workflow ID 进入各自产品入口。 |
+| Exact runtime scope | Krea2 只按精确 workflow ID 进入批量图片；MiniMax H3 只按 `wfl_minimax_h3_fl2va` / `wfl_minimax_h3_reference_video` 进入批量视频；不创建第三 Runtime。 |
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
-| H3 input sources | MiniMax H3 支持 A：Asset Library 图片 + 视频提示词；B：Local Batch Import 同名图片/Prompt 配对或 `h3-batch.json`。本地图片先导入正常 source image Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
+| H3 input sources | MiniMax H3 支持 Asset Library 与 Local Batch Import；Local Import 支持 Prompt-only、同名图片/Prompt、首尾帧配对、`h3-batch.json` 与 `h3-omni-batch.json`。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
 | Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
-| H3 Recipe contract | 只接受精确语义键；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
-| H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有不可变 `1.2.0`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
+| H3 Recipe contract | 只接受经本机 `/object_info` 与 graph 审计的精确语义键；FL2VA 支持 `prompt` / optional `first_frame` / optional `last_frame`，REF2VA 支持 plural `reference_images` / `reference_videos` / `reference_audios`；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
+| H3 Recipe selection audit | 当前内置生产包为 FL2VA `1.0.0` 与 Omni REF2VA `1.3.0`；历史 `1.2.0` / `1.1.2` 包继续保留兼容。每个精确 H3 workflow ID 仍假设一个活动生产 Recipe；多 Recipe 选择仍是已记录、非阻塞技术债。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 358 tests、frontend 37 files / 120 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Regression | Rust 364 tests / 0 failed；frontend 37 files / 122 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
 
-## H3 1.2.0 Local Package Audit
+## H3 Full Mode Package Audit
+
+本轮先读取本机 ComfyUI `http://127.0.0.1:8188/object_info`，再按真实节点字段生成并验证不可变内置包；没有为缺失节点或字段猜测新的 Runtime。
+
+| Package | Workflow ID / version | Audited graph contract |
+| --- | --- | --- |
+| FL2VA | `wfl_minimax_h3_fl2va` / `1.0.0` | `MiniMaxH3ImageToVideo`；Prompt-only、optional `first_frame`、optional `last_frame` |
+| Omni REF2VA | `wfl_minimax_h3_reference_video` / `1.3.0` | `MiniMaxH3ReferenceToVideo`；0–9 images、0–3 video frame/audio pairs、0–3 independent audio |
+
+The compiler removes only the audited optional graph links when a mode does not supply
+that media family. It never writes placeholder file paths to persisted Queue values.
+All seven UI modes use the existing `ProductionBatch → ProductionBatchItem →
+ProductionQueueService → GenerationService → Task → Snapshot → Asset` chain.
+
+## Historical H3 1.2.0 Local Package Audit
 
 | Item | Result |
 | --- | --- |
@@ -42,6 +56,13 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Compile | 1s PASS · 5s PASS · 10s PASS · 15s PASS · 768-class PASS · 2K-class PASS · Custom PASS |
 | GPU | NOT RUN · `DEFERRED BY PRODUCT OWNER` |
 
+The new built-in package file hashes are recorded by source package contents:
+
+| Package | workflow_api.json SHA-256 | recipe.yaml SHA-256 |
+| --- | --- | --- |
+| FL2VA `1.0.0` | `30d022667959e6ff99031ca2f6b1dcf61be0827b185ca01d365231a073d265de` | `cf1d25d6a27f329b4e9bf4e4a9c74e42b0899629633b3aa4fc82bf92756fab55` |
+| Omni REF2VA `1.3.0` | `817d0296122c275694d3adc5541e8df1b41af470c0e4e9f4a12bdb9f3962539d` | `909cdbe2e17a6bbaae3361fb7f1063979b2c2cf5856d4f6b5e1e00e070544048` |
+
 The historical `1.1.2` package and its validated workflow bytes remain
 preserved and were not modified. The local package audit used no user absolute
 paths in this document.
@@ -50,9 +71,12 @@ paths in this document.
 
 | Input | Result |
 | --- | --- |
-| A. Asset Library | PASS · existing image Asset → saved Asset Video Prompt → normal H3 ProductionBatch |
-| B. Local Batch Import | PASS · native folder dialog → read-only inspection → source image Asset import → Asset Video Prompt → normal H3 ProductionBatch |
+| A. Asset Library | PASS · selected image/video/audio Assets → mode-specific frozen values → normal H3 ProductionBatch |
+| B. Local Batch Import | PASS · native folder dialog → read-only inspection → source Image/Video/Audio Asset import → normal H3 ProductionBatch |
+| FL2VA modes | PASS · Prompt-only / one-image / first+last-frame contracts |
+| REF2VA modes | PASS · image-only / audio-only / image+audio / video+image contracts |
 | Local pairing | PASS · recursive relative-path stem pairing, natural order, PNG/JPG/JPEG/WebP with TXT/MD, UTF-8/BOM, multiline prompt preservation |
+| Local mode formats | PASS · Prompt-only `.txt`, `001_first` + `001_last` + `001.txt`, and safe relative `h3-omni-batch.json` media references |
 | JSON manifest | PASS · `h3-batch.json`, relative image paths only, maximum 100 entries, duplicate/unknown/boundary paths blocked |
 | Queue boundary | PASS · session keeps the absolute root only in Rust for 20 minutes; persisted queue values contain Asset IDs, not external paths |
 | Auto start | PASS · default ON; OFF creates a READY normal ProductionBatch |
@@ -68,9 +92,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 30322688 | `5a21bb18b90f03d2362030b181c6ac80587dffa1a16e2bbb216146c3153b302d` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7213369 | `4be92018e692a67857e0a28a62e6f55ed29810ee6bc990ea257aa8b9bb9aca70` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10543104 | `d781c30551dd9e322249499cc436708a3dbb0de60b6505e922af26e96921bf1c` |
+| `src-tauri/target/release/ai-studio.exe` | 30788608 | `aa63ff2c6574e144a92e28db3b45ebef2e56aabe0ba8de45924895261acd903e` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7291294 | `96413bb3bab58aaa4ed0bd8c27091d2854f76bed06b4b17b499729067f1710e5` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10674176 | `5ebf425dd6a4a138e11dca2a04efe9b1920f5575aa1a38ec761e303dcd402bd1` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.

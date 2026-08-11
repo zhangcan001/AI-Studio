@@ -1,7 +1,13 @@
 import type { H3LocalImportInspection, H3LocalImportMode, H3LocalPairStatus } from "../../types/h3LocalImport";
 
 export function localImportModeLabel(mode: H3LocalImportMode): string {
-  return mode === "PAIRING" ? "自动同名配对" : "JSON 批量清单";
+  switch (mode) {
+    case "PAIRING": return "自动同名配对";
+    case "MANIFEST": return "JSON 批量清单";
+    case "TEXT": return "Prompt 文生视频";
+    case "FIRST_LAST": return "首尾帧配对";
+    case "OMNI_MANIFEST": return "Omni 全能参考清单";
+  }
 }
 
 export function localImportStatusLabel(status: H3LocalPairStatus): string {

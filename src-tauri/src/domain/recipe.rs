@@ -140,6 +140,12 @@ pub struct Binding {
     pub source: String,
     pub item_index: Option<usize>,
     pub target: BindingTarget,
+    /// Optional workflow inputs to remove when the source value is absent (or
+    /// when an optional plural slot is not populated). This is intentionally
+    /// explicit: runtime packages can keep a real ComfyUI loader link in the
+    /// graph while allowing the product to select a verified mode at compile
+    /// time without guessing node fields.
+    pub clear_targets: Vec<BindingTarget>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

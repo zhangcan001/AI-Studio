@@ -13,16 +13,20 @@ import type { RecipeViewModel } from "../../types/generation";
 import type { H3LocalImportInspection, H3LocalImportMode } from "../../types/h3LocalImport";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import { MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
 import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { validateResolution } from "../runtime/resolution";
 import {
-  buildH3BatchValues,
-  canCreateH3Batch,
+  buildH3ModeBatchValues,
+  H3_MODE_OPTIONS,
+  h3ModeSupported,
+  type H3GenerationMode,
   h3AssetQualification,
   h3RecipeContract,
+  isAudioAssetForH3,
   isImageAssetForVideo,
+  isVideoAssetForH3,
 } from "./assetVideoBatch";
 import { ProductionQueuePanel } from "../studio/ProductionQueuePanel";
 import type { BatchDraftItem } from "../studio/batchDraft";
@@ -40,6 +44,17 @@ interface Props {
   onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
   onBackToAssets: () => void;
+}
+
+function localImportModeForGeneration(mode: H3GenerationMode): H3LocalImportMode {
+  switch (mode) {
+    case "FL2VA_TEXT_TO_VIDEO": return "TEXT";
+    case "FL2VA_FIRST_LAST": return "FIRST_LAST";
+    case "REF2VA_AUDIO":
+    case "REF2VA_IMAGE_AUDIO":
+    case "REF2VA_VIDEO_IMAGE": return "OMNI_MANIFEST";
+    default: return "PAIRING";
+  }
 }
 
 export function AssetVideoBatchWorkspace({
@@ -61,9 +76,21 @@ export function AssetVideoBatchWorkspace({
   const [localBatchName, setLocalBatchName] = useState("");
   const [localAutoStart, setLocalAutoStart] = useState(true);
   const [expandedLocalOrdinal, setExpandedLocalOrdinal] = useState<number>();
+  const [generationMode, setGenerationMode] = useState<H3GenerationMode>("REF2VA_IMAGE");
+  const [batchPrompt, setBatchPrompt] = useState("");
+  const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
+  const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
   const recipe = useMemo(
-    () => catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video")),
-    [catalog],
+    () => {
+      const workflowId = generationMode.startsWith("FL2VA")
+        ? MINIMAX_H3_FL2VA_WORKFLOW_ID
+        : MINIMAX_H3_WORKFLOW_ID;
+      return catalog.find((item) => item.workflowId === workflowId && item.outputTypes?.includes("video"))
+        ?? (workflowId === MINIMAX_H3_WORKFLOW_ID
+          ? catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video"))
+          : undefined);
+    },
+    [catalog, generationMode],
   );
   const contract = useMemo(
     () => recipe
@@ -106,12 +133,23 @@ export function AssetVideoBatchWorkspace({
     setHeight(contract.ok ? contract.contract.heightField.default : undefined);
   }, [contract]);
 
+  useEffect(() => {
+    const first = initialAssets.find((asset) => isImageAssetForVideo(asset));
+    setFirstFrameAssetId((current) => current && initialAssets.some((asset) => asset.id === current) ? current : first?.id);
+    setLastFrameAssetId((current) => current && initialAssets.some((asset) => asset.id === current) ? current : undefined);
+  }, [initialAssets]);
+
+  useEffect(() => {
+    setLocalMode(localImportModeForGeneration(generationMode));
+    setLocalInspection(undefined);
+    setExpandedLocalOrdinal(undefined);
+  }, [generationMode]);
+
   const selectedAssets = initialAssets.filter((asset) => selectedIds.has(asset.id));
   const imageAssets = selectedAssets.filter(isImageAssetForVideo);
+  const videoAssets = selectedAssets.filter(isVideoAssetForH3);
+  const audioAssets = selectedAssets.filter(isAudioAssetForH3);
   const missingPromptAssets = imageAssets.filter((asset) => !prompts[asset.id]?.trim());
-  const oversizedPromptAssets = imageAssets.filter((asset) =>
-    new TextEncoder().encode(prompts[asset.id] ?? "").byteLength > 64 * 1024,
-  );
   const selectedDuration = contract.ok ? durationSeconds ?? contract.contract.durationField.default : undefined;
   const selectedWidth = contract.ok ? width ?? contract.contract.widthField.default : undefined;
   const selectedHeight = contract.ok ? height ?? contract.contract.heightField.default : undefined;
@@ -134,27 +172,64 @@ export function AssetVideoBatchWorkspace({
       && selectedHeight !== undefined
       && (selectedDuration > 5 || selectedWidth * selectedHeight > 100_000),
   );
-  const canCreate = canCreateH3Batch({
-    runtimeReady,
-    admissionBusy: productionAdmission.busy,
-    imageCount: imageAssets.length,
-    missingPromptCount: missingPromptAssets.length,
-    oversizedPromptCount: oversizedPromptAssets.length,
-  });
+  const modeSupported = Boolean(contract.ok && h3ModeSupported(contract.contract, generationMode));
+  const modePrompt = batchPrompt.trim() || prompts[firstFrameAssetId ?? imageAssets[0]?.id] || "";
+  const modePromptTooLong = new TextEncoder().encode(modePrompt).byteLength > 64 * 1024;
+  const modeAssetReady = (() => {
+    switch (generationMode) {
+      case "FL2VA_TEXT_TO_VIDEO": return true;
+      case "FL2VA_IMAGE_TO_VIDEO": return Boolean(firstFrameAssetId && imageAssets.some((asset) => asset.id === firstFrameAssetId));
+      case "FL2VA_FIRST_LAST": return Boolean(
+        firstFrameAssetId
+          && lastFrameAssetId
+          && firstFrameAssetId !== lastFrameAssetId
+          && imageAssets.some((asset) => asset.id === firstFrameAssetId)
+          && imageAssets.some((asset) => asset.id === lastFrameAssetId),
+      );
+      case "REF2VA_IMAGE": return imageAssets.length > 0;
+      case "REF2VA_AUDIO": return audioAssets.length > 0;
+      case "REF2VA_IMAGE_AUDIO": return imageAssets.length > 0 && audioAssets.length > 0;
+      case "REF2VA_VIDEO_IMAGE": return videoAssets.length > 0 && imageAssets.length > 0;
+    }
+  })();
+  const canCreate = runtimeReady
+    && !productionAdmission.busy
+    && modeSupported
+    && modeAssetReady
+    && modePrompt.length > 0
+    && !modePromptTooLong
+    && (generationMode.startsWith("FL2VA") ? selectedAssets.length <= 100 : selectedAssets.length <= 100);
   const localCanCreate = localImportCanCommit(
     localInspection,
     runtimeReady,
     productionAdmission.busy,
   );
-  const batchItems: BatchDraftItem[] = recipe && contract.ok && selectedDuration !== undefined && selectedWidth !== undefined && selectedHeight !== undefined
-    ? imageAssets.map((asset) => ({
-      id: asset.id,
+  const batchItems: BatchDraftItem[] = (() => {
+    if (!recipe || !contract.ok || selectedDuration === undefined || selectedWidth === undefined || selectedHeight === undefined || !modeSupported) return [];
+    const build = (id: string, assets: Parameters<typeof buildH3ModeBatchValues>[3]): BatchDraftItem => ({
+      id,
       workflowName: recipe.name,
       workflowVersionId: recipe.workflowVersionId,
       recipeId: recipe.recipeId,
-      values: buildH3BatchValues(recipe, asset.id, prompts[asset.id] ?? "", selectedDuration, selectedWidth, selectedHeight),
-    }))
-    : [];
+      values: buildH3ModeBatchValues(recipe, generationMode, modePrompt, assets, selectedDuration, selectedWidth, selectedHeight),
+    });
+    switch (generationMode) {
+      case "FL2VA_IMAGE_TO_VIDEO":
+        return firstFrameAssetId ? [build(firstFrameAssetId, { firstFrameAssetId })] : [];
+      case "FL2VA_FIRST_LAST":
+        return firstFrameAssetId && lastFrameAssetId ? [build(`${firstFrameAssetId}:${lastFrameAssetId}`, { firstFrameAssetId, lastFrameAssetId })] : [];
+      case "REF2VA_IMAGE":
+        return [build("reference-images", { imageAssetIds: imageAssets.map((asset) => asset.id) })];
+      case "REF2VA_AUDIO":
+        return [build("reference-audios", { audioAssetIds: audioAssets.map((asset) => asset.id) })];
+      case "REF2VA_IMAGE_AUDIO":
+        return [build("reference-images-audios", { imageAssetIds: imageAssets.map((asset) => asset.id), audioAssetIds: audioAssets.map((asset) => asset.id) })];
+      case "REF2VA_VIDEO_IMAGE":
+        return [build("reference-videos-images", { imageAssetIds: imageAssets.map((asset) => asset.id), videoAssetIds: videoAssets.map((asset) => asset.id) })];
+      case "FL2VA_TEXT_TO_VIDEO":
+        return [build("text-to-video", {})];
+    }
+  })();
 
   function toggleAsset(assetId: string) {
     setSelectedIds((current) => {
@@ -163,6 +238,21 @@ export function AssetVideoBatchWorkspace({
       else if (next.size < 100) next.add(assetId);
       return next;
     });
+  }
+
+  function isSelectableForMode(asset: AssetView): boolean {
+    switch (generationMode) {
+      case "FL2VA_TEXT_TO_VIDEO": return false;
+      case "FL2VA_IMAGE_TO_VIDEO":
+      case "FL2VA_FIRST_LAST":
+      case "REF2VA_IMAGE":
+        return isImageAssetForVideo(asset);
+      case "REF2VA_IMAGE_AUDIO":
+        return isImageAssetForVideo(asset) || isAudioAssetForH3(asset);
+      case "REF2VA_VIDEO_IMAGE":
+        return isImageAssetForVideo(asset) || isVideoAssetForH3(asset);
+      case "REF2VA_AUDIO": return isAudioAssetForH3(asset);
+    }
   }
 
   function updatePrompt(assetId: string, value: string) {
@@ -192,8 +282,11 @@ export function AssetVideoBatchWorkspace({
     if (!recipe || !contract.ok || selectedDuration === undefined || !canCreate) return;
     setBusy(true); setNotice(undefined);
     try {
-      await Promise.all(imageAssets.map((asset) => setAssetVideoPrompt(projectId, asset.id, prompts[asset.id] ?? "")));
-      setSavedIds(new Set(imageAssets.map((asset) => asset.id)));
+      if (generationMode.startsWith("FL2VA")) {
+        const promptAssets = imageAssets.filter((asset) => prompts[asset.id]?.trim());
+        await Promise.all(promptAssets.map((asset) => setAssetVideoPrompt(projectId, asset.id, prompts[asset.id] ?? "")));
+        setSavedIds(new Set(promptAssets.map((asset) => asset.id)));
+      }
       const created = await createProductionQueue({
         projectId,
         name: `批量视频 · ${new Date().toLocaleString()}`,
@@ -302,6 +395,7 @@ export function AssetVideoBatchWorkspace({
         height: selectedHeight,
         durationSeconds: selectedDuration,
         autoStart: localAutoStart,
+        generationMode,
       });
       setCreatedBatchId(result.batchId);
       setCreatedBatchStarted(result.autoStarted);
@@ -309,7 +403,7 @@ export function AssetVideoBatchWorkspace({
       setExpandedLocalOrdinal(undefined);
       await onAdmissionChanged();
       setNotice(
-        `本地任务已导入，共${result.itemCount}项。${result.autoStarted ? "已开始生成；" : "已创建批次；"}图片已进入资产库。${result.warnings.length ? ` ${result.warnings.join("；")}` : ""}`,
+        `本地任务已导入，共${result.itemCount}项。${result.autoStarted ? "已开始生成；" : "已创建批次；"}素材已进入资产库。${result.warnings.length ? ` ${result.warnings.join("；")}` : ""}`,
       );
     } catch (error: unknown) {
       setLocalInspection(undefined);
@@ -354,6 +448,61 @@ export function AssetVideoBatchWorkspace({
         </button>
       </div>
 
+      <section className="h3-mode-selector" aria-label="MiniMax H3 生成模式">
+        <div className="h3-mode-selector-heading">
+          <div>
+            <span className="section-label">H3 Full Mode</span>
+            <h3>选择生成类型</h3>
+            <p className="section-description">只显示本机已安装并通过节点契约审计的模式；未满足 graph 条件的模式会明确禁用。</p>
+          </div>
+          <span className="h3-mode-contract-badge">{recipe ? `${recipe.name} · ${recipe.mode}` : "未找到可用 Recipe"}</span>
+        </div>
+        <div className="h3-mode-family-tabs" role="tablist" aria-label="H3 模式家族">
+          {(["FL2VA", "REF2VA"] as const).map((family) => {
+            const familyMode = H3_MODE_OPTIONS.find((option) => option.family === family)?.id;
+            const active = generationMode.startsWith(family);
+            const available = catalog.some((item) => item.workflowId === (family === "FL2VA" ? MINIMAX_H3_FL2VA_WORKFLOW_ID : MINIMAX_H3_WORKFLOW_ID) && item.outputTypes?.includes("video"));
+            return (
+              <button
+                key={family}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={active ? "h3-mode-family-tab h3-mode-family-tab-active" : "h3-mode-family-tab"}
+                onClick={() => familyMode && setGenerationMode(familyMode)}
+                disabled={busy || !available}
+                title={!available ? "当前本地 H3 工作流未启用该模式" : undefined}
+              >
+                {family === "FL2VA" ? "文生 / 图生视频" : "全能参考"}
+              </button>
+            );
+          })}
+        </div>
+        <div className="h3-mode-options" role="listbox" aria-label="H3 具体模式">
+          {H3_MODE_OPTIONS.filter((option) => option.family === (generationMode.startsWith("FL2VA") ? "FL2VA" : "REF2VA")).map((option) => {
+            const optionRecipe = catalog.find((item) => item.workflowId === (option.family === "FL2VA" ? MINIMAX_H3_FL2VA_WORKFLOW_ID : MINIMAX_H3_WORKFLOW_ID) && item.outputTypes?.includes("video"));
+            const optionContract = optionRecipe ? h3RecipeContract(optionRecipe) : undefined;
+            const available = Boolean(optionContract?.ok && h3ModeSupported(optionContract.contract, option.id));
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="option"
+                aria-selected={generationMode === option.id}
+                className={generationMode === option.id ? "h3-mode-option h3-mode-option-active" : "h3-mode-option"}
+                onClick={() => setGenerationMode(option.id)}
+                disabled={busy || !available}
+                title={!available ? "当前本地 H3 工作流未启用该模式" : option.description}
+              >
+                <strong>{option.label}</strong>
+                <span>{available ? option.description : "当前本地 H3 工作流未启用该模式"}</span>
+              </button>
+            );
+          })}
+        </div>
+        {!modeSupported && <p className="h3-mode-disabled-note" role="status">当前本地 H3 工作流未启用该模式。请先安装/启用经过本机 `/object_info` 与 graph 审计的 Recipe。</p>}
+      </section>
+
       <section className="h3-safety-card" aria-label="H3 安全配置">
         <div>
           <strong>MiniMax H3</strong>
@@ -394,7 +543,7 @@ export function AssetVideoBatchWorkspace({
               : "H3 runtime unavailable"}
           </small>
         </div>
-        <small>{recipe ? `运行时已锁定：${MINIMAX_H3_WORKFLOW_ID}` : "运行时未就绪"}</small>
+        <small>{recipe ? `运行时已锁定：${recipe.workflowId}` : "运行时未就绪"}</small>
       </section>
       {exceedsHistoricalProfile && (
         <p className="h3-profile-warning" role="status">
@@ -422,6 +571,9 @@ export function AssetVideoBatchWorkspace({
                 <select value={localMode} onChange={(event) => void changeLocalMode(event.target.value as H3LocalImportMode)} disabled={busy}>
                   <option value="PAIRING">{localImportModeLabel("PAIRING")}</option>
                   <option value="MANIFEST">{localImportModeLabel("MANIFEST")}</option>
+                  <option value="TEXT">{localImportModeLabel("TEXT")}</option>
+                  <option value="FIRST_LAST">{localImportModeLabel("FIRST_LAST")}</option>
+                  <option value="OMNI_MANIFEST">{localImportModeLabel("OMNI_MANIFEST")}</option>
                 </select>
               </label>
               {localInspection && (
@@ -468,7 +620,12 @@ export function AssetVideoBatchWorkspace({
                     return (
                       <div className={`h3-local-import-row${pair.status === "READY" ? " h3-local-import-row-ready" : " h3-local-import-row-error"}`} role="row" key={`${pair.ordinal}-${pair.imageDisplayName}`}>
                         <span className="h3-local-import-ordinal">#{pair.ordinal}</span>
-                        <span className="h3-local-import-file" title={pair.imageDisplayName}>{pair.imageDisplayName}</span>
+                        <span className="h3-local-import-file" title={pair.imageDisplayName}>
+                          <span>{pair.imageDisplayName}</span>
+                          {pair.lastImageDisplayName && <small>末帧：{pair.lastImageDisplayName}</small>}
+                          {pair.videoDisplayNames?.map((name) => <small key={name}>视频：{name}</small>)}
+                          {pair.audioDisplayNames?.map((name) => <small key={name}>音频：{name}</small>)}
+                        </span>
                         <span className="h3-local-import-prompt">
                           <span className={expanded ? "" : "h3-local-import-prompt-preview"}>{pair.promptPreview ?? pair.promptDisplayName}</span>
                           {pair.promptPreview && <button type="button" className="quiet-button h3-local-import-prompt-toggle" onClick={() => setExpandedLocalOrdinal(expanded ? undefined : pair.ordinal)}>{expanded ? "收起" : "查看 Prompt"}</button>}
@@ -515,40 +672,52 @@ export function AssetVideoBatchWorkspace({
             hideCreate
           />
         </div>
-      ) : !initialAssets.length ? (
+      ) : generationMode !== "FL2VA_TEXT_TO_VIDEO" && !initialAssets.length ? (
         <div className="asset-video-empty-state">
-          <strong>还没有选择图片资产</strong>
-          <p>回到资产库，勾选 1–100 张图片后点击“批量生成视频”。</p>
+          <strong>还没有选择素材</strong>
+          <p>回到资产库，勾选当前模式需要的图片、视频或音频素材。</p>
           <button type="button" onClick={onBackToAssets}>去资产库选择</button>
         </div>
       ) : (
         <div className="batch-workspace-grid">
           <div className="batch-editor-column">
+          <section className="h3-batch-prompt-panel" aria-label="H3 批次提示词">
+            <label htmlFor="h3-batch-prompt"><span>视频 Prompt</span><textarea id="h3-batch-prompt" value={batchPrompt} onChange={(event) => setBatchPrompt(event.target.value)} rows={5} maxLength={64 * 1024} disabled={busy || !modeSupported} placeholder="描述运动、镜头、声音和连续性；可使用 <Picture 1>、<Audio 1>、<Video 1>。" /></label>
+            <small>{modePromptTooLong ? "Prompt 超过 64 KiB" : "该 Prompt 会随本次队列创建冻结。"}</small>
+          </section>
           <div className="asset-video-batch-summary">
+            <span>模式 <strong>{H3_MODE_OPTIONS.find((option) => option.id === generationMode)?.label}</strong></span>
             <span>已选择 <strong>{selectedAssets.length}</strong> 项</span>
-            <span>符合条件 <strong>{imageAssets.length - missingPromptAssets.length - oversizedPromptAssets.length}</strong> 项</span>
-            <span>未填写提示词 <strong>{missingPromptAssets.length}</strong> 项</span>
+            <span>图片 {imageAssets.length} · 视频 {videoAssets.length} · 音频 {audioAssets.length}</span>
+            <span>队列项 <strong>{batchItems.length}</strong></span>
           </div>
           <div className="asset-video-batch-list" aria-label="视频生产素材列表">
             {initialAssets.map((asset, index) => {
               const isImage = isImageAssetForVideo(asset);
+              const isSelectable = isSelectableForMode(asset);
               const promptReady = Boolean(prompts[asset.id]?.trim());
               const checked = selectedIds.has(asset.id);
-              const qualification = h3AssetQualification({
-                isImage,
-                promptReady,
-                promptTooLong: oversizedPromptAssets.some((item) => item.id === asset.id),
-                h3RuntimeReady: contract.ok,
-                comfyConnected,
-                taskEventsReady,
-                durationReady,
-                resolutionReady,
-                resolutionError: resolutionValidation?.errors.width ?? resolutionValidation?.errors.height,
-              });
+              const qualification = !isSelectable
+                ? "该模式不使用此素材"
+                : (generationMode === "REF2VA_AUDIO" || (generationMode === "REF2VA_IMAGE_AUDIO" && isAudioAssetForH3(asset)))
+                  ? "可作为音频参考"
+                  : generationMode === "REF2VA_VIDEO_IMAGE" && isVideoAssetForH3(asset)
+                    ? "可作为视频参考"
+                    : h3AssetQualification({
+                      isImage,
+                      promptReady: generationMode.startsWith("FL2VA") ? Boolean(modePrompt) : true,
+                      promptTooLong: modePromptTooLong,
+                      h3RuntimeReady: contract.ok,
+                      comfyConnected,
+                      taskEventsReady,
+                      durationReady,
+                      resolutionReady,
+                      resolutionError: resolutionValidation?.errors.width ?? resolutionValidation?.errors.height,
+                    });
               return (
                 <article key={asset.id} className={`asset-video-batch-card${checked ? " asset-video-batch-card-selected" : ""}`}>
                   <label className="asset-video-select-control">
-                    <input type="checkbox" checked={checked} onChange={() => toggleAsset(asset.id)} disabled={busy || !isImage} />
+                    <input type="checkbox" checked={checked} onChange={() => toggleAsset(asset.id)} disabled={busy || !isSelectable} />
                     <span>#{index + 1}</span>
                   </label>
                   <div className="asset-video-batch-card-body">
@@ -558,9 +727,9 @@ export function AssetVideoBatchWorkspace({
                         {qualification}
                       </span>
                     </div>
-                    <label className="asset-video-prompt-input">
-                      <span>视频提示词</span>
-                      <textarea
+                      {isImage && generationMode.startsWith("FL2VA") && <label className="asset-video-prompt-input">
+                        <span>视频提示词</span>
+                        <textarea
                         rows={3}
                         maxLength={64 * 1024}
                         value={prompts[asset.id] ?? ""}
@@ -568,13 +737,17 @@ export function AssetVideoBatchWorkspace({
                         disabled={busy || !isImage}
                         placeholder="描述运动、方向或变化……"
                       />
-                    </label>
-                    <div className="asset-video-batch-card-actions">
+                      </label>}
+                    {isImage && generationMode.startsWith("FL2VA") && <div className="asset-video-batch-card-actions">
                       <small>{savedIds.has(asset.id) && !promptReady ? "" : savedIds.has(asset.id) ? "提示词已保存" : "修改后请保存"}</small>
                       <button type="button" className="quiet-button" onClick={() => void savePrompt(asset)} disabled={busy || !isImage || !promptReady || savedIds.has(asset.id)}>
                         保存提示词
                       </button>
-                    </div>
+                    </div>}
+                    {generationMode === "FL2VA_FIRST_LAST" && isImage && <div className="asset-video-frame-role-actions">
+                      <button type="button" className={firstFrameAssetId === asset.id ? "quiet-button asset-role-active" : "quiet-button"} onClick={() => setFirstFrameAssetId(asset.id)} disabled={busy}>设为首帧</button>
+                      <button type="button" className={lastFrameAssetId === asset.id ? "quiet-button asset-role-active" : "quiet-button"} onClick={() => setLastFrameAssetId(asset.id)} disabled={busy}>设为末帧</button>
+                    </div>}
                   </div>
                 </article>
               );
@@ -582,13 +755,14 @@ export function AssetVideoBatchWorkspace({
           </div>
           <div className="asset-video-batch-actions">
             <button type="button" onClick={() => void createBatch()} disabled={busy || !canCreate}>
-              {busy ? "正在处理..." : `创建视频批次（${imageAssets.length}）`}
+              {busy ? "正在处理..." : `创建视频批次（${batchItems.length}）`}
             </button>
             {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
           </div>
           {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择符合 Recipe 约束的输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
-          {missingPromptAssets.length > 0 && <p className="disabled-note">请先为所有已选图片保存视频提示词；批次创建时会冻结当前内容。</p>}
-          {oversizedPromptAssets.length > 0 && <p className="error-message">视频提示词按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
+          {generationMode.startsWith("FL2VA") && missingPromptAssets.length > 0 && !batchPrompt.trim() && <p className="disabled-note">请填写批次 Prompt，或为首帧图片保存视频提示词。</p>}
+          {modePromptTooLong && <p className="error-message">视频 Prompt 按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
+          {!modeAssetReady && modeSupported && <p className="disabled-note">请先选择当前模式需要的素材并设置首帧/末帧角色。</p>}
           </div>
           <ProductionQueuePanel
             projectId={projectId}

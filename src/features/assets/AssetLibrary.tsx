@@ -19,7 +19,6 @@ import { AssetDeleteDialog } from "./AssetDeleteDialog";
 import { TagManagerDialog } from "./TagManagerDialog";
 import type { AssetTag } from "../../types/organization";
 import { replaceAssetOrganization } from "./assetOrganization";
-import { isImageAssetForVideo } from "./assetVideoBatch";
 
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "ALL", label: "全部分类" },
@@ -195,7 +194,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
 
   const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL" || favoriteOnly || tagId);
   const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
-  const selectedImageAssets = assets.filter((asset) => selectedAssetIds.has(asset.id) && isImageAssetForVideo(asset));
+  const selectedVideoAssets = assets.filter((asset) => selectedAssetIds.has(asset.id));
 
   function requestDeleteSelection() {
     const selected = assets.filter((asset) => selectedAssetIds.has(asset.id));
@@ -304,10 +303,10 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
           <button type="button" className="danger-button" onClick={requestDeleteSelection} disabled={bulkBusy || !selectedAssetIds.size}>删除（{selectedAssetIds.size}）</button>
           <button
             type="button"
-            onClick={() => onOpenVideoBatch(selectedImageAssets)}
-            disabled={bulkBusy || selectedImageAssets.length < 1 || selectedImageAssets.length > 100}
+            onClick={() => onOpenVideoBatch(selectedVideoAssets)}
+            disabled={bulkBusy || selectedVideoAssets.length < 1 || selectedVideoAssets.length > 100}
           >
-            批量生成视频（{selectedImageAssets.length}）
+            批量生成视频（{selectedVideoAssets.length}）
           </button>
           <button type="button" className="quiet-button" onClick={() => setSelectedAssetIds(new Set())} disabled={bulkBusy || !selectedAssetIds.size}>取消选择</button>
         </section>

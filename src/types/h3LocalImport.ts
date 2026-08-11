@@ -1,4 +1,4 @@
-export type H3LocalImportMode = "PAIRING" | "MANIFEST";
+export type H3LocalImportMode = "PAIRING" | "MANIFEST" | "TEXT" | "FIRST_LAST" | "OMNI_MANIFEST";
 
 export type H3LocalPairStatus =
   | "READY"
@@ -22,6 +22,9 @@ export interface H3LocalImportPair {
   promptPreview?: string;
   promptBytes?: number;
   status: H3LocalPairStatus;
+  lastImageDisplayName?: string;
+  videoDisplayNames?: string[];
+  audioDisplayNames?: string[];
 }
 
 export interface H3LocalImportInspection {

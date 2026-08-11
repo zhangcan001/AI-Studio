@@ -2,6 +2,7 @@ use crate::domain::ShotStage;
 
 pub const KERA2_WORKFLOW_ID: &str = "wfl_kera2_t2i_local_v2";
 pub const MINIMAX_H3_WORKFLOW_ID: &str = "wfl_minimax_h3_reference_video";
+pub const MINIMAX_H3_FL2VA_WORKFLOW_ID: &str = "wfl_minimax_h3_fl2va";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductionRuntimeKind {
@@ -12,7 +13,9 @@ pub enum ProductionRuntimeKind {
 pub fn production_runtime_for_workflow_id(workflow_id: &str) -> Option<ProductionRuntimeKind> {
     match workflow_id {
         KERA2_WORKFLOW_ID => Some(ProductionRuntimeKind::Kera2Image),
-        MINIMAX_H3_WORKFLOW_ID => Some(ProductionRuntimeKind::MiniMaxH3Video),
+        MINIMAX_H3_WORKFLOW_ID | MINIMAX_H3_FL2VA_WORKFLOW_ID => {
+            Some(ProductionRuntimeKind::MiniMaxH3Video)
+        }
         _ => None,
     }
 }
@@ -36,7 +39,7 @@ pub fn production_runtime_for_stage(
 mod tests {
     use super::{
         production_runtime_for_stage, production_runtime_for_workflow_id, ProductionRuntimeKind,
-        KERA2_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID,
+        KERA2_WORKFLOW_ID, MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID,
     };
     use crate::domain::ShotStage;
 
@@ -48,6 +51,10 @@ mod tests {
         );
         assert_eq!(
             production_runtime_for_workflow_id(MINIMAX_H3_WORKFLOW_ID),
+            Some(ProductionRuntimeKind::MiniMaxH3Video)
+        );
+        assert_eq!(
+            production_runtime_for_workflow_id(MINIMAX_H3_FL2VA_WORKFLOW_ID),
             Some(ProductionRuntimeKind::MiniMaxH3Video)
         );
         assert_eq!(production_runtime_for_workflow_id("wfl_other"), None);

@@ -134,22 +134,10 @@ impl RecipeValidator {
                         binding.source
                     )));
                 };
-                let (min_items, max_items, kind) = match definition {
-                    InputDefinition::Images {
-                        min_items,
-                        max_items,
-                        ..
-                    } => (*min_items, *max_items, "images"),
-                    InputDefinition::Videos {
-                        min_items,
-                        max_items,
-                        ..
-                    } => (*min_items, *max_items, "videos"),
-                    InputDefinition::Audios {
-                        min_items,
-                        max_items,
-                        ..
-                    } => (*min_items, *max_items, "audios"),
+                let (max_items, kind) = match definition {
+                    InputDefinition::Images { max_items, .. } => (*max_items, "images"),
+                    InputDefinition::Videos { max_items, .. } => (*max_items, "videos"),
+                    InputDefinition::Audios { max_items, .. } => (*max_items, "audios"),
                     _ => {
                         return Err(RecipeError::invalid(format!(
                             "binding \"{}\" item requires a plural media input",
@@ -157,9 +145,9 @@ impl RecipeValidator {
                         )))
                     }
                 };
-                if item_index >= max_items || item_index >= min_items {
+                if item_index >= max_items {
                     return Err(RecipeError::invalid(format!(
-                        "binding \"{}\" item {} must be within the declared minimum and maximum {kind} slots",
+                        "binding \"{}\" item {} must be within the declared maximum {kind} slots",
                         binding.source, item_index,
                     )));
                 }
@@ -175,6 +163,20 @@ impl RecipeValidator {
                     "binding \"{}\" target input must not be empty",
                     binding.source
                 )));
+            }
+            for target in &binding.clear_targets {
+                if target.node.trim().is_empty() {
+                    return Err(RecipeError::invalid(format!(
+                        "binding \"{}\" clear target node must not be empty",
+                        binding.source
+                    )));
+                }
+                if target.input.trim().is_empty() {
+                    return Err(RecipeError::invalid(format!(
+                        "binding \"{}\" clear target input must not be empty",
+                        binding.source
+                    )));
+                }
             }
         }
 
@@ -401,6 +403,36 @@ outputs: []
         let recipe = RecipeParser::parse(RECIPE_WITH_SEED_RANGE).expect("recipe should parse");
 
         RecipeValidator::validate(&recipe).expect("seed range should be valid");
+    }
+
+    #[test]
+    fn accepts_item_binding_for_optional_plural_slot() {
+        let recipe = RecipeParser::parse(
+            r#"
+schema_version: 1
+id: optional_media
+name: Optional Media
+workflow:
+  file: workflow.json
+inputs:
+  reference_images:
+    type: images
+    label: Reference Images
+    required: false
+    min_items: 0
+    max_items: 9
+bindings:
+  - source: reference_images
+    item: 0
+    target:
+      node: "14"
+      input: image
+outputs: []
+"#,
+        )
+        .expect("optional plural recipe should parse");
+
+        RecipeValidator::validate(&recipe).expect("optional item slot should be valid");
     }
 
     #[test]

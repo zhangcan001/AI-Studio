@@ -254,6 +254,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let workflow_library_source: Arc<dyn WorkflowLibrarySource> = Arc::new(
                 FileSystemWorkflowLibrarySource::new(data_dirs.workflow_library.clone()),
             );
+            if let Err(error) = application::builtin_runtime_packages::ensure_installed(
+                &data_dirs.workflow_library,
+            ) {
+                tracing::warn!(error_type = "builtin_runtime_package_install", %error, "builtin H3 runtime package installation skipped");
+            }
             let workflow_library_service = Arc::new(WorkflowLibraryService::new(
                 workflow_library_source.clone(),
                 workflow_library_repository,

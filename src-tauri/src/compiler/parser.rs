@@ -132,6 +132,8 @@ struct BindingDto {
     #[serde(default, rename = "item")]
     item_index: Option<usize>,
     target: BindingTargetDto,
+    #[serde(default, rename = "clear_targets")]
+    clear_targets: Vec<BindingTargetDto>,
 }
 
 fn default_max_items() -> usize {
@@ -185,6 +187,14 @@ impl RecipeFileDto {
                     node: binding.target.node,
                     input: binding.target.input,
                 },
+                clear_targets: binding
+                    .clear_targets
+                    .into_iter()
+                    .map(|target| BindingTarget {
+                        node: target.node,
+                        input: target.input,
+                    })
+                    .collect(),
             })
             .collect();
 
@@ -522,6 +532,18 @@ outputs: []
             })
         ));
         assert_eq!(recipe.bindings[0].item_index, Some(0));
+    }
+
+    #[test]
+    fn parses_optional_binding_clear_targets() {
+        let yaml = VALID_RECIPE.replace(
+            "  - source: prompt\n    target:\n      node: \"6\"\n      input: text",
+            "  - source: prompt\n    target:\n      node: \"6\"\n      input: text\n    clear_targets:\n      - node: \"14\"\n        input: first_frame",
+        );
+        let recipe = RecipeParser::parse(&yaml).expect("recipe with clear targets should parse");
+        assert_eq!(recipe.bindings[0].clear_targets.len(), 1);
+        assert_eq!(recipe.bindings[0].clear_targets[0].node, "14");
+        assert_eq!(recipe.bindings[0].clear_targets[0].input, "first_frame");
     }
 
     #[test]

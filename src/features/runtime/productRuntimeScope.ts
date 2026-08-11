@@ -2,7 +2,9 @@ import type { RecipeField, RecipeViewModel } from "../../types/generation";
 
 export const KERA2_WORKFLOW_ID = "wfl_kera2_t2i_local_v2" as const;
 export const MINIMAX_H3_WORKFLOW_ID = "wfl_minimax_h3_reference_video" as const;
-export const PRODUCTION_WORKFLOW_IDS = [KERA2_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID] as const;
+export const MINIMAX_H3_FL2VA_WORKFLOW_ID = "wfl_minimax_h3_fl2va" as const;
+export const MINIMAX_H3_WORKFLOW_IDS = [MINIMAX_H3_WORKFLOW_ID, MINIMAX_H3_FL2VA_WORKFLOW_ID] as const;
+export const PRODUCTION_WORKFLOW_IDS = [KERA2_WORKFLOW_ID, ...MINIMAX_H3_WORKFLOW_IDS] as const;
 
 export type ProductionRuntimeKind = "kera2Image" | "minimaxH3Video";
 export type ProductionShotStage = "image" | "video";
@@ -12,6 +14,7 @@ export function productionRuntimeForWorkflowId(workflowId: string): ProductionRu
     case KERA2_WORKFLOW_ID:
       return "kera2Image";
     case MINIMAX_H3_WORKFLOW_ID:
+    case MINIMAX_H3_FL2VA_WORKFLOW_ID:
       return "minimaxH3Video";
     default:
       return undefined;

@@ -1,0 +1,7 @@
+schema_version: 1
+id: wfl_minimax_h3_fl2va
+name: MiniMax H3 FL2VA
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: video
+mode: fl2va

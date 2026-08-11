@@ -592,6 +592,7 @@ export function commitH3LocalImport(request: {
   durationSeconds: number;
   seed?: string;
   autoStart: boolean;
+  generationMode?: string;
 }): Promise<H3LocalImportResult> {
   return invoke<H3LocalImportResult>("h3_local_import_commit", { request });
 }

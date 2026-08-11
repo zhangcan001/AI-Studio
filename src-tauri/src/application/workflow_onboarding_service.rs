@@ -1527,6 +1527,7 @@ fn build_recipe(draft: &WorkflowOnboardingDraft) -> Result<Recipe, WorkflowOnboa
                 node: mapping.target_node.clone(),
                 input: mapping.target_input.clone(),
             },
+            clear_targets: Vec::new(),
         });
     }
     Ok(Recipe {
@@ -1643,6 +1644,23 @@ impl RecipeYamlWriter {
                     item.insert("item".to_owned(), json!(item_index));
                 }
                 item.insert("target".to_owned(), Value::Object(target));
+                if !binding.clear_targets.is_empty() {
+                    item.insert(
+                        "clear_targets".to_owned(),
+                        Value::Array(
+                            binding
+                                .clear_targets
+                                .iter()
+                                .map(|target| {
+                                    json!({
+                                        "node": target.node,
+                                        "input": target.input,
+                                    })
+                                })
+                                .collect(),
+                        ),
+                    );
+                }
                 Value::Object(item)
             })
             .collect::<Vec<_>>();

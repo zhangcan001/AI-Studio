@@ -7,7 +7,7 @@ use crate::application::production_queue_service::{
 use crate::application::source_asset_import_service::{
     SourceAssetImportService, MAX_SOURCE_IMAGE_BYTES,
 };
-use crate::domain::SeedValue;
+use crate::domain::{Asset, SeedValue};
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -31,6 +31,9 @@ const SESSION_TTL: Duration = Duration::minutes(MAX_LOCAL_IMPORT_SESSION_MINUTES
 pub enum H3LocalImportMode {
     Pairing,
     Manifest,
+    Text,
+    FirstLast,
+    OmniManifest,
 }
 
 impl H3LocalImportMode {
@@ -38,6 +41,9 @@ impl H3LocalImportMode {
         match value.trim() {
             "PAIRING" | "pairing" => Ok(Self::Pairing),
             "MANIFEST" | "manifest" => Ok(Self::Manifest),
+            "TEXT" | "text" => Ok(Self::Text),
+            "FIRST_LAST" | "first_last" => Ok(Self::FirstLast),
+            "OMNI_MANIFEST" | "omni_manifest" => Ok(Self::OmniManifest),
             _ => Err(H3LocalImportError::InvalidInput(
                 "本地批量导入模式无效".to_owned(),
             )),
@@ -48,6 +54,9 @@ impl H3LocalImportMode {
         match self {
             Self::Pairing => "PAIRING",
             Self::Manifest => "MANIFEST",
+            Self::Text => "TEXT",
+            Self::FirstLast => "FIRST_LAST",
+            Self::OmniManifest => "OMNI_MANIFEST",
         }
     }
 }
@@ -105,6 +114,15 @@ pub struct H3LocalImportPair {
     pub image_path: Option<PathBuf>,
     pub prompt_path: Option<PathBuf>,
     pub image_sha256: Option<String>,
+    pub image_paths: Vec<PathBuf>,
+    pub image_sha256s: Vec<String>,
+    pub last_image_display_name: Option<String>,
+    pub last_image_path: Option<PathBuf>,
+    pub last_image_sha256: Option<String>,
+    pub video_display_names: Vec<String>,
+    pub video_paths: Vec<PathBuf>,
+    pub audio_display_names: Vec<String>,
+    pub audio_paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -131,6 +149,7 @@ pub struct H3LocalImportCommitRequest {
     pub duration_seconds: i64,
     pub seed: Option<SeedValue>,
     pub auto_start: bool,
+    pub generation_mode: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -184,6 +203,70 @@ impl fmt::Display for H3LocalImportError {
 }
 
 impl Error for H3LocalImportError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum H3CommitGenerationMode {
+    LegacyReferenceImage,
+    Fl2vaTextToVideo,
+    Fl2vaImageToVideo,
+    Fl2vaFirstLast,
+    Ref2vaImage,
+    Ref2vaAudio,
+    Ref2vaImageAudio,
+    Ref2vaVideoImage,
+}
+
+impl H3CommitGenerationMode {
+    fn parse(value: Option<&str>) -> Result<Self, H3LocalImportError> {
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => Ok(Self::LegacyReferenceImage),
+            Some("FL2VA_TEXT_TO_VIDEO") => Ok(Self::Fl2vaTextToVideo),
+            Some("FL2VA_IMAGE_TO_VIDEO") => Ok(Self::Fl2vaImageToVideo),
+            Some("FL2VA_FIRST_LAST") => Ok(Self::Fl2vaFirstLast),
+            Some("REF2VA_IMAGE") => Ok(Self::Ref2vaImage),
+            Some("REF2VA_AUDIO") => Ok(Self::Ref2vaAudio),
+            Some("REF2VA_IMAGE_AUDIO") => Ok(Self::Ref2vaImageAudio),
+            Some("REF2VA_VIDEO_IMAGE") => Ok(Self::Ref2vaVideoImage),
+            Some(_) => Err(H3LocalImportError::InvalidInput(
+                "H3 生成模式无效".to_owned(),
+            )),
+        }
+    }
+
+    fn imported_asset_label(self) -> &'static str {
+        if matches!(self, Self::LegacyReferenceImage) {
+            "图片素材"
+        } else {
+            "素材"
+        }
+    }
+
+    fn uses_first_frame(self) -> bool {
+        matches!(self, Self::Fl2vaImageToVideo | Self::Fl2vaFirstLast)
+    }
+
+    fn uses_last_frame(self) -> bool {
+        matches!(self, Self::Fl2vaFirstLast)
+    }
+
+    fn uses_reference_images(self) -> bool {
+        matches!(
+            self,
+            Self::LegacyReferenceImage
+                | Self::Ref2vaImage
+                | Self::Ref2vaImageAudio
+                | Self::Ref2vaVideoImage
+        )
+    }
+
+    fn uses_reference_videos(self) -> bool {
+        matches!(self, Self::Ref2vaVideoImage)
+    }
+
+    fn uses_reference_audios(self) -> bool {
+        matches!(self, Self::Ref2vaAudio | Self::Ref2vaImageAudio)
+    }
+}
 
 struct LocalImportSession {
     project_id: String,
@@ -316,86 +399,223 @@ impl H3LocalImportService {
             )));
         }
 
-        let seed = request.seed.clone().unwrap_or(SeedValue::Random);
-        let mut items = Vec::with_capacity(inspection.ready_count);
-        let mut imported_asset_count = 0usize;
+        let generation_mode = H3CommitGenerationMode::parse(request.generation_mode.as_deref())?;
+        validate_local_import_mode(generation_mode, inspection.mode)?;
         for pair in inspection
             .pairs
             .iter()
             .filter(|pair| pair.status.is_ready())
         {
-            let image_path = pair
-                .image_path
-                .as_ref()
-                .ok_or_else(|| H3LocalImportError::Inspection("有效配对缺少图片路径".to_owned()))?;
-            let prompt_path = pair.prompt_path.as_ref();
-            let image_path = revalidate_file_path(&session.root_path, image_path)?;
-            let image_bytes = tokio::fs::read(&image_path)
-                .await
-                .map_err(|_| H3LocalImportError::Filesystem("图片在导入前无法读取".to_owned()))?;
-            let inspected_image = crate::application::image_inspection::inspect_bytes(&image_bytes)
-                .map_err(|error| {
-                    H3LocalImportError::Inspection(format!("图片校验失败：{error}"))
-                })?;
-            if let Some(expected_sha256) = pair.image_sha256.as_deref() {
-                let actual_sha256 = format!("{:x}", Sha256::digest(&image_bytes));
-                if actual_sha256 != expected_sha256 {
-                    return Err(H3LocalImportError::Inspection(
-                        "目录内容在提交前发生变化，请重新扫描".to_owned(),
-                    ));
+            validate_pair_media(pair, generation_mode)?;
+        }
+
+        let seed = request.seed.clone().unwrap_or(SeedValue::Random);
+        let mut items = Vec::with_capacity(inspection.ready_count);
+        let mut imported_asset_count = 0usize;
+        let imported_label = generation_mode.imported_asset_label();
+        for pair in inspection
+            .pairs
+            .iter()
+            .filter(|pair| pair.status.is_ready())
+        {
+            let prompt_text = self.read_pair_prompt(&session.root_path, pair).await?;
+            let mut reference_images = Vec::new();
+            let mut first_frame = None;
+            let mut last_frame = None;
+            let mut reference_videos = Vec::new();
+            let mut reference_audios = Vec::new();
+
+            if generation_mode.uses_first_frame() || generation_mode.uses_reference_images() {
+                let image_paths = if generation_mode.uses_reference_images() {
+                    pair.image_paths.clone()
+                } else {
+                    vec![pair.image_path.clone().ok_or_else(|| {
+                        H3LocalImportError::Inspection("有效配对缺少首帧图片路径".to_owned())
+                    })?]
+                };
+                for (index, image_path) in image_paths.iter().enumerate() {
+                    let asset = self
+                        .import_image_asset(
+                            &session.project_id,
+                            &session.root_path,
+                            image_path,
+                            pair.image_sha256s.get(index).map(String::as_str),
+                            imported_asset_count,
+                            imported_label,
+                        )
+                        .await?;
+                    imported_asset_count += 1;
+                    self.set_imported_image_prompt(
+                        &session.project_id,
+                        &asset,
+                        &prompt_text,
+                        imported_asset_count,
+                        imported_label,
+                    )
+                    .await?;
+                    if generation_mode.uses_reference_images() {
+                        reference_images.push(asset);
+                    } else {
+                        first_frame = Some(asset);
+                    }
                 }
             }
-            if u64::try_from(image_bytes.len()).unwrap_or(u64::MAX) > MAX_SOURCE_IMAGE_BYTES {
-                return Err(H3LocalImportError::Inspection(
-                    "图片超过现有素材导入上限".to_owned(),
-                ));
+
+            if generation_mode.uses_last_frame() {
+                let image_path = pair.last_image_path.as_ref().ok_or_else(|| {
+                    H3LocalImportError::Inspection("有效配对缺少末帧图片路径".to_owned())
+                })?;
+                let asset = self
+                    .import_image_asset(
+                        &session.project_id,
+                        &session.root_path,
+                        image_path,
+                        pair.last_image_sha256.as_deref(),
+                        imported_asset_count,
+                        imported_label,
+                    )
+                    .await?;
+                imported_asset_count += 1;
+                self.set_imported_image_prompt(
+                    &session.project_id,
+                    &asset,
+                    &prompt_text,
+                    imported_asset_count,
+                    imported_label,
+                )
+                .await?;
+                last_frame = Some(asset);
             }
 
-            let prompt_text = if let Some(prompt_path) = prompt_path {
-                let prompt_path = revalidate_file_path(&session.root_path, prompt_path)?;
-                let prompt_bytes = tokio::fs::read(&prompt_path).await.map_err(|_| {
-                    H3LocalImportError::Filesystem("提示词文件在导入前无法读取".to_owned())
-                })?;
-                parse_prompt_bytes(&prompt_bytes)
-                    .map_err(|error| {
-                        H3LocalImportError::Inspection(format!("提示词在提交前发生变化：{error}"))
-                    })?
-                    .0
-            } else {
-                pair.prompt_text.clone().ok_or_else(|| {
-                    H3LocalImportError::Inspection("清单配对缺少提示词".to_owned())
-                })?
-            };
+            if generation_mode.uses_reference_videos() {
+                for video_path in &pair.video_paths {
+                    let asset = self
+                        .import_media_asset(
+                            &session.project_id,
+                            &session.root_path,
+                            video_path,
+                            true,
+                            imported_asset_count,
+                            imported_label,
+                        )
+                        .await?;
+                    imported_asset_count += 1;
+                    reference_videos.push(asset);
+                }
+            }
 
-            let original_name = image_path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("local-image.png");
-            let asset = self
-                .source_asset_import_service
-                .import_bytes(&session.project_id, original_name, &image_bytes)
-                .await
-                .map_err(|error| {
-                    H3LocalImportError::AssetImport(format!(
-                        "已导入 {imported_asset_count} 个图片素材后失败：{error}"
-                    ))
-                })?;
-            imported_asset_count += 1;
-            self.asset_video_prompt_service
-                .set(&session.project_id, asset.id.as_str(), &prompt_text)
-                .await
-                .map_err(|error| {
-                    H3LocalImportError::Prompt(format!(
-                        "已导入 {imported_asset_count} 个图片素材后失败：{error}"
-                    ))
-                })?;
+            if generation_mode.uses_reference_audios() {
+                for audio_path in &pair.audio_paths {
+                    let asset = self
+                        .import_media_asset(
+                            &session.project_id,
+                            &session.root_path,
+                            audio_path,
+                            false,
+                            imported_asset_count,
+                            imported_label,
+                        )
+                        .await?;
+                    imported_asset_count += 1;
+                    reference_audios.push(asset);
+                }
+            }
 
             let mut values = BTreeMap::new();
             values.insert("prompt".to_owned(), GenerationInputValue::Text(prompt_text));
-            values.insert(
-                "reference_image".to_owned(),
-                GenerationInputValue::ImageAsset(asset.id),
-            );
+            match generation_mode {
+                H3CommitGenerationMode::LegacyReferenceImage => {
+                    values.insert(
+                        "reference_image".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            reference_images
+                                .into_iter()
+                                .next()
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "有效配对缺少参考图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                }
+                H3CommitGenerationMode::Fl2vaTextToVideo => {}
+                H3CommitGenerationMode::Fl2vaImageToVideo => {
+                    values.insert(
+                        "first_frame".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            first_frame
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "有效配对缺少首帧图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                }
+                H3CommitGenerationMode::Fl2vaFirstLast => {
+                    values.insert(
+                        "first_frame".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            first_frame
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "有效配对缺少首帧图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                    values.insert(
+                        "last_frame".to_owned(),
+                        GenerationInputValue::ImageAsset(
+                            last_frame
+                                .ok_or_else(|| {
+                                    H3LocalImportError::Inspection(
+                                        "有效配对缺少末帧图片".to_owned(),
+                                    )
+                                })?
+                                .id,
+                        ),
+                    );
+                }
+                H3CommitGenerationMode::Ref2vaImage
+                | H3CommitGenerationMode::Ref2vaImageAudio
+                | H3CommitGenerationMode::Ref2vaVideoImage => {
+                    values.insert(
+                        "reference_images".to_owned(),
+                        GenerationInputValue::ImageAssets(
+                            reference_images.into_iter().map(|asset| asset.id).collect(),
+                        ),
+                    );
+                    if matches!(generation_mode, H3CommitGenerationMode::Ref2vaImageAudio) {
+                        values.insert(
+                            "reference_audios".to_owned(),
+                            GenerationInputValue::AudioAssets(
+                                reference_audios.into_iter().map(|asset| asset.id).collect(),
+                            ),
+                        );
+                    }
+                    if matches!(generation_mode, H3CommitGenerationMode::Ref2vaVideoImage) {
+                        values.insert(
+                            "reference_videos".to_owned(),
+                            GenerationInputValue::VideoAssets(
+                                reference_videos.into_iter().map(|asset| asset.id).collect(),
+                            ),
+                        );
+                    }
+                }
+                H3CommitGenerationMode::Ref2vaAudio => {
+                    values.insert(
+                        "reference_audios".to_owned(),
+                        GenerationInputValue::AudioAssets(
+                            reference_audios.into_iter().map(|asset| asset.id).collect(),
+                        ),
+                    );
+                }
+            }
             values.insert(
                 "width".to_owned(),
                 GenerationInputValue::Integer(request.width),
@@ -414,7 +634,6 @@ impl H3LocalImportService {
                 recipe_id: request.recipe_id.clone(),
                 values,
             });
-            let _ = inspected_image;
         }
 
         let batch_name = request
@@ -441,7 +660,7 @@ impl H3LocalImportService {
             .await
             .map_err(|error| {
                 H3LocalImportError::Queue(format!(
-                    "批次创建失败（已导入 {imported_asset_count} 个图片素材）：{error}"
+                    "批次创建失败（已导入 {imported_asset_count} 个{imported_label}）：{error}"
                 ))
             })?;
 
@@ -465,6 +684,114 @@ impl H3LocalImportService {
             imported_asset_count,
             auto_started,
             warnings,
+        })
+    }
+
+    async fn read_pair_prompt(
+        &self,
+        root_path: &Path,
+        pair: &H3LocalImportPair,
+    ) -> Result<String, H3LocalImportError> {
+        if let Some(prompt_path) = pair.prompt_path.as_ref() {
+            let prompt_path = revalidate_file_path(root_path, prompt_path)?;
+            let prompt_bytes = tokio::fs::read(&prompt_path)
+                .await
+                .map_err(|_| H3LocalImportError::Filesystem("提示词在导入前无法读取".to_owned()))?;
+            return parse_prompt_bytes(&prompt_bytes)
+                .map(|(text, _)| text)
+                .map_err(|error| {
+                    H3LocalImportError::Inspection(format!("提示词在提交前发生变化：{error}"))
+                });
+        }
+        pair.prompt_text
+            .clone()
+            .ok_or_else(|| H3LocalImportError::Inspection("清单配对缺少提示词".to_owned()))
+    }
+
+    async fn import_image_asset(
+        &self,
+        project_id: &str,
+        root_path: &Path,
+        path: &Path,
+        expected_sha256: Option<&str>,
+        imported_asset_count: usize,
+        imported_label: &str,
+    ) -> Result<Asset, H3LocalImportError> {
+        let image_path = revalidate_file_path(root_path, path)?;
+        let image_bytes = tokio::fs::read(&image_path)
+            .await
+            .map_err(|_| H3LocalImportError::Filesystem("图片在导入前无法读取".to_owned()))?;
+        crate::application::image_inspection::inspect_bytes(&image_bytes)
+            .map_err(|error| H3LocalImportError::Inspection(format!("图片校验失败：{error}")))?;
+        if let Some(expected_sha256) = expected_sha256 {
+            let actual_sha256 = format!("{:x}", Sha256::digest(&image_bytes));
+            if actual_sha256 != expected_sha256 {
+                return Err(H3LocalImportError::Inspection(
+                    "目录内容在提交前发生变化，请重新扫描".to_owned(),
+                ));
+            }
+        }
+        if u64::try_from(image_bytes.len()).unwrap_or(u64::MAX) > MAX_SOURCE_IMAGE_BYTES {
+            return Err(H3LocalImportError::Inspection(
+                "图片超过现有素材导入上限".to_owned(),
+            ));
+        }
+        let original_name = image_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("local-image.png");
+        self.source_asset_import_service
+            .import_bytes(project_id, original_name, &image_bytes)
+            .await
+            .map_err(|error| {
+                H3LocalImportError::AssetImport(format!(
+                    "已导入 {imported_asset_count} 个{imported_label}后失败：{error}"
+                ))
+            })
+    }
+
+    async fn set_imported_image_prompt(
+        &self,
+        project_id: &str,
+        asset: &Asset,
+        prompt_text: &str,
+        imported_asset_count: usize,
+        imported_label: &str,
+    ) -> Result<(), H3LocalImportError> {
+        self.asset_video_prompt_service
+            .set(project_id, asset.id.as_str(), prompt_text)
+            .await
+            .map(|_| ())
+            .map_err(|error| {
+                H3LocalImportError::Prompt(format!(
+                    "已导入 {imported_asset_count} 个{imported_label}后失败：{error}"
+                ))
+            })
+    }
+
+    async fn import_media_asset(
+        &self,
+        project_id: &str,
+        root_path: &Path,
+        path: &Path,
+        is_video: bool,
+        imported_asset_count: usize,
+        imported_label: &str,
+    ) -> Result<Asset, H3LocalImportError> {
+        let path = revalidate_file_path(root_path, path)?;
+        let result = if is_video {
+            self.source_asset_import_service
+                .import_video_file(project_id, &path)
+                .await
+        } else {
+            self.source_asset_import_service
+                .import_audio_file(project_id, &path)
+                .await
+        };
+        result.map_err(|error| {
+            H3LocalImportError::AssetImport(format!(
+                "已导入 {imported_asset_count} 个{imported_label}后失败：{error}"
+            ))
         })
     }
 }
@@ -522,7 +849,18 @@ async fn inspect_directory(
         .filter(|file| is_prompt_extension(&file.extension))
         .cloned()
         .collect::<Vec<_>>();
+    let video_files = scanned_files
+        .iter()
+        .filter(|file| is_video_extension(&file.extension))
+        .cloned()
+        .collect::<Vec<_>>();
+    let audio_files = scanned_files
+        .iter()
+        .filter(|file| is_audio_extension(&file.extension))
+        .cloned()
+        .collect::<Vec<_>>();
     let manifest_path = root_path.join("h3-batch.json");
+    let omni_manifest_path = root_path.join("h3-omni-batch.json");
     let detected_manifest = fs::symlink_metadata(&manifest_path)
         .map(|metadata| metadata.is_file())
         .unwrap_or(false);
@@ -542,6 +880,22 @@ async fn inspect_directory(
                 image_files,
                 prompt_files,
                 &manifest_path,
+            )
+            .await
+        }
+        H3LocalImportMode::Text => Ok(inspect_text_pairing(display_root_name, prompt_files)),
+        H3LocalImportMode::FirstLast => Ok(inspect_first_last_pairing(
+            display_root_name,
+            image_files,
+            prompt_files,
+        )),
+        H3LocalImportMode::OmniManifest => {
+            inspect_omni_manifest(
+                display_root_name,
+                image_files,
+                video_files,
+                audio_files,
+                &omni_manifest_path,
             )
             .await
         }
@@ -599,6 +953,15 @@ fn inspect_pairing(
             image_path: images.first().map(|file| file.path.clone()),
             prompt_path: prompts.first().map(|file| file.path.clone()),
             image_sha256: None,
+            image_paths: images.iter().map(|file| file.path.clone()).collect(),
+            image_sha256s: Vec::new(),
+            last_image_display_name: None,
+            last_image_path: None,
+            last_image_sha256: None,
+            video_display_names: Vec::new(),
+            video_paths: Vec::new(),
+            audio_display_names: Vec::new(),
+            audio_paths: Vec::new(),
         };
         if images.len() > 1 {
             pair.status = H3LocalPairStatus::AmbiguousImage;
@@ -616,7 +979,10 @@ fn inspect_pairing(
                     pair.status = H3LocalPairStatus::ImageTooLarge;
                 }
                 Ok(bytes) => match crate::application::image_inspection::inspect_bytes(&bytes) {
-                    Ok(inspected) => pair.image_sha256 = Some(inspected.sha256),
+                    Ok(inspected) => {
+                        pair.image_sha256 = Some(inspected.sha256.clone());
+                        pair.image_sha256s.push(inspected.sha256);
+                    }
                     Err(_) => pair.status = H3LocalPairStatus::InvalidImage,
                 },
                 Err(_) => pair.status = H3LocalPairStatus::InvalidImage,
@@ -677,6 +1043,446 @@ fn inspect_pairing(
         errors,
         warnings,
     )
+}
+
+fn empty_pair(ordinal: usize) -> H3LocalImportPair {
+    H3LocalImportPair {
+        ordinal,
+        image_display_name: "—".to_owned(),
+        prompt_display_name: "缺少提示词".to_owned(),
+        prompt_preview: None,
+        prompt_text: None,
+        prompt_bytes: None,
+        status: H3LocalPairStatus::Ready,
+        image_path: None,
+        prompt_path: None,
+        image_sha256: None,
+        image_paths: Vec::new(),
+        image_sha256s: Vec::new(),
+        last_image_display_name: None,
+        last_image_path: None,
+        last_image_sha256: None,
+        video_display_names: Vec::new(),
+        video_paths: Vec::new(),
+        audio_display_names: Vec::new(),
+        audio_paths: Vec::new(),
+    }
+}
+
+fn inspect_prompt_file(pair: &mut H3LocalImportPair, path: &Path) {
+    pair.prompt_display_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("提示词")
+        .to_owned();
+    match fs::read(path)
+        .map_err(|_| PromptIssue::Read)
+        .and_then(|bytes| parse_prompt_bytes(&bytes))
+    {
+        Ok((text, byte_count)) => {
+            pair.prompt_preview = Some(prompt_preview(&text));
+            pair.prompt_text = Some(text);
+            pair.prompt_bytes = Some(byte_count);
+        }
+        Err(PromptIssue::InvalidEncoding | PromptIssue::Read) => {
+            pair.status = H3LocalPairStatus::InvalidPromptEncoding
+        }
+        Err(PromptIssue::Empty) => pair.status = H3LocalPairStatus::EmptyPrompt,
+        Err(PromptIssue::TooLarge) => pair.status = H3LocalPairStatus::PromptTooLarge,
+    }
+}
+
+fn inspect_image_file(file: &ScannedFile) -> Result<String, H3LocalPairStatus> {
+    let bytes = fs::read(&file.path).map_err(|_| H3LocalPairStatus::InvalidImage)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SOURCE_IMAGE_BYTES {
+        return Err(H3LocalPairStatus::ImageTooLarge);
+    }
+    crate::application::image_inspection::inspect_bytes(&bytes)
+        .map(|inspected| inspected.sha256)
+        .map_err(|_| H3LocalPairStatus::InvalidImage)
+}
+
+fn inspect_text_pairing(
+    display_root_name: String,
+    prompt_files: Vec<ScannedFile>,
+) -> H3LocalImportInspection {
+    let mut prompt_map: BTreeMap<String, Vec<ScannedFile>> = BTreeMap::new();
+    for file in prompt_files.iter().cloned() {
+        prompt_map
+            .entry(stem_key(&file.relative_name))
+            .or_default()
+            .push(file);
+    }
+    let mut pairs = Vec::with_capacity(prompt_map.len());
+    let mut errors = Vec::new();
+    let mut keys = prompt_map.keys().cloned().collect::<Vec<_>>();
+    keys.sort_by(|left, right| natural_cmp(left, right));
+    for (index, key) in keys.into_iter().enumerate() {
+        let prompts = prompt_map.get(&key).cloned().unwrap_or_default();
+        let mut pair = empty_pair(index + 1);
+        pair.image_display_name = "仅 Prompt".to_owned();
+        if prompts.len() > 1 {
+            pair.status = H3LocalPairStatus::AmbiguousPrompt;
+        } else if prompts.is_empty() {
+            pair.status = H3LocalPairStatus::MissingPrompt;
+        } else {
+            pair.prompt_path = Some(prompts[0].path.clone());
+            inspect_prompt_file(&mut pair, &prompts[0].path);
+        }
+        if !pair.status.is_ready() {
+            errors.push(format!("第 {} 项：{}", pair.ordinal, pair.status.as_str()));
+        }
+        pairs.push(pair);
+    }
+    if pairs.is_empty() {
+        errors.push("未找到可用的 Prompt 文件".to_owned());
+    }
+    build_inspection(
+        display_root_name,
+        H3LocalImportMode::Text,
+        false,
+        0,
+        prompt_files.len(),
+        pairs,
+        errors,
+        Vec::new(),
+    )
+}
+
+fn inspect_first_last_pairing(
+    display_root_name: String,
+    image_files: Vec<ScannedFile>,
+    prompt_files: Vec<ScannedFile>,
+) -> H3LocalImportInspection {
+    let mut firsts: BTreeMap<String, Vec<ScannedFile>> = BTreeMap::new();
+    let mut lasts: BTreeMap<String, Vec<ScannedFile>> = BTreeMap::new();
+    let mut prompts: BTreeMap<String, Vec<ScannedFile>> = BTreeMap::new();
+    for file in image_files.iter().cloned() {
+        match frame_key(&file.relative_name) {
+            Some((key, true)) => firsts.entry(key).or_default().push(file),
+            Some((key, false)) => lasts.entry(key).or_default().push(file),
+            None => {}
+        }
+    }
+    for file in prompt_files.iter().cloned() {
+        prompts
+            .entry(stem_key(&file.relative_name))
+            .or_default()
+            .push(file);
+    }
+    let mut keys = firsts
+        .keys()
+        .chain(lasts.keys())
+        .chain(prompts.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    keys.sort_by(|left, right| natural_cmp(left, right));
+    let mut pairs = Vec::with_capacity(keys.len());
+    let mut errors = Vec::new();
+    for (index, key) in keys.into_iter().enumerate() {
+        let first = firsts.get(&key).and_then(|files| files.first());
+        let last = lasts.get(&key).and_then(|files| files.first());
+        let prompt = prompts.get(&key).and_then(|files| files.first());
+        let mut pair = empty_pair(index + 1);
+        pair.image_display_name = first
+            .map(|file| file.relative_name.clone())
+            .unwrap_or_else(|| "缺少首帧".to_owned());
+        pair.last_image_display_name = Some(
+            last.map(|file| file.relative_name.clone())
+                .unwrap_or_else(|| "缺少末帧".to_owned()),
+        );
+        if firsts.get(&key).is_some_and(|files| files.len() > 1)
+            || lasts.get(&key).is_some_and(|files| files.len() > 1)
+        {
+            pair.status = H3LocalPairStatus::AmbiguousImage;
+        } else if first.is_none() || last.is_none() {
+            pair.status = H3LocalPairStatus::MissingImage;
+        } else if prompts.get(&key).is_some_and(|files| files.len() > 1) {
+            pair.status = H3LocalPairStatus::AmbiguousPrompt;
+        } else if prompt.is_none() {
+            pair.status = H3LocalPairStatus::MissingPrompt;
+        } else {
+            pair.image_path = first.map(|file| file.path.clone());
+            pair.image_paths = first
+                .map(|file| vec![file.path.clone()])
+                .unwrap_or_default();
+            pair.last_image_path = last.map(|file| file.path.clone());
+            match inspect_image_file(first.expect("first frame exists")) {
+                Ok(hash) => {
+                    pair.image_sha256 = Some(hash.clone());
+                    pair.image_sha256s.push(hash);
+                }
+                Err(status) => pair.status = status,
+            }
+            if pair.status.is_ready() {
+                match inspect_image_file(last.expect("last frame exists")) {
+                    Ok(hash) => pair.last_image_sha256 = Some(hash),
+                    Err(status) => pair.status = status,
+                }
+            }
+            if pair.status.is_ready() {
+                pair.prompt_path = prompt.map(|file| file.path.clone());
+                inspect_prompt_file(&mut pair, prompt.expect("prompt exists").path.as_path());
+            }
+        }
+        if !pair.status.is_ready() {
+            errors.push(format!(
+                "第 {} 项 {}：{}",
+                pair.ordinal,
+                pair.image_display_name,
+                pair.status.as_str()
+            ));
+        }
+        pairs.push(pair);
+    }
+    if pairs.is_empty() {
+        errors.push("未找到首尾帧图片与 Prompt 配对".to_owned());
+    }
+    build_inspection(
+        display_root_name,
+        H3LocalImportMode::FirstLast,
+        false,
+        image_files.len(),
+        prompt_files.len(),
+        pairs,
+        errors,
+        Vec::new(),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OmniManifestEntry {
+    #[serde(default)]
+    images: Vec<String>,
+    #[serde(default)]
+    videos: Vec<String>,
+    #[serde(default)]
+    audios: Vec<String>,
+    #[serde(default)]
+    prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OmniManifestDocument(Vec<OmniManifestEntry>);
+
+async fn inspect_omni_manifest(
+    display_root_name: String,
+    image_files: Vec<ScannedFile>,
+    video_files: Vec<ScannedFile>,
+    audio_files: Vec<ScannedFile>,
+    manifest_path: &Path,
+) -> Result<H3LocalImportInspection, H3LocalImportError> {
+    let mut errors = Vec::new();
+    if !manifest_path.is_file() {
+        errors.push("未找到根目录下的 h3-omni-batch.json".to_owned());
+        return Ok(build_inspection(
+            display_root_name,
+            H3LocalImportMode::OmniManifest,
+            false,
+            image_files.len(),
+            0,
+            Vec::new(),
+            errors,
+            Vec::new(),
+        ));
+    }
+    let manifest_bytes = fs::read(manifest_path)
+        .map_err(|_| H3LocalImportError::Filesystem("h3-omni-batch.json 无法读取".to_owned()))?;
+    if u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
+        errors.push("h3-omni-batch.json 不能超过 10 MiB".to_owned());
+        return Ok(build_inspection(
+            display_root_name,
+            H3LocalImportMode::OmniManifest,
+            true,
+            image_files.len(),
+            0,
+            Vec::new(),
+            errors,
+            Vec::new(),
+        ));
+    }
+    let document = match serde_json::from_slice::<OmniManifestDocument>(&manifest_bytes) {
+        Ok(document) => document,
+        Err(_) => {
+            errors.push("h3-omni-batch.json 不是有效的 JSON 清单".to_owned());
+            return Ok(build_inspection(
+                display_root_name,
+                H3LocalImportMode::OmniManifest,
+                true,
+                image_files.len(),
+                0,
+                Vec::new(),
+                errors,
+                Vec::new(),
+            ));
+        }
+    };
+    let scanned = image_files
+        .into_iter()
+        .chain(video_files.clone())
+        .chain(audio_files.clone())
+        .map(|file| (normalize_relative(&file.relative_name), file))
+        .collect::<HashMap<_, _>>();
+    let mut pairs = Vec::new();
+    let mut seen = HashSet::new();
+    for (index, entry) in document.0.into_iter().enumerate() {
+        let mut pair = empty_pair(index + 1);
+        let mut valid_media = true;
+        pair.prompt_display_name = "清单 Prompt".to_owned();
+        let image_paths = resolve_omni_paths(
+            manifest_path,
+            &entry.images,
+            &scanned,
+            "image",
+            &mut seen,
+            &mut pair,
+            &mut errors,
+        );
+        let video_paths = resolve_omni_paths(
+            manifest_path,
+            &entry.videos,
+            &scanned,
+            "video",
+            &mut seen,
+            &mut pair,
+            &mut errors,
+        );
+        let audio_paths = resolve_omni_paths(
+            manifest_path,
+            &entry.audios,
+            &scanned,
+            "audio",
+            &mut seen,
+            &mut pair,
+            &mut errors,
+        );
+        if image_paths.is_empty() && video_paths.is_empty() && audio_paths.is_empty() {
+            pair.status = H3LocalPairStatus::MissingImage;
+            valid_media = false;
+        }
+        pair.video_paths = video_paths.iter().map(|file| file.path.clone()).collect();
+        pair.video_display_names = video_paths
+            .iter()
+            .map(|file| file.relative_name.clone())
+            .collect();
+        pair.audio_paths = audio_paths.iter().map(|file| file.path.clone()).collect();
+        pair.audio_display_names = audio_paths
+            .iter()
+            .map(|file| file.relative_name.clone())
+            .collect();
+        pair.image_paths = image_paths.iter().map(|file| file.path.clone()).collect();
+        if let Some(first) = image_paths.first() {
+            pair.image_path = Some(first.path.clone());
+            pair.image_display_name = first.relative_name.clone();
+            match inspect_image_file(first) {
+                Ok(hash) => {
+                    pair.image_sha256 = Some(hash.clone());
+                    pair.image_sha256s.push(hash);
+                }
+                Err(status) => {
+                    pair.status = status;
+                    valid_media = false;
+                }
+            }
+        }
+        for image in image_paths.iter().skip(1) {
+            match inspect_image_file(image) {
+                Ok(hash) => pair.image_sha256s.push(hash),
+                Err(status) => {
+                    pair.status = status;
+                    valid_media = false;
+                }
+            };
+        }
+        match parse_prompt_text(&entry.prompt) {
+            Ok((text, byte_count)) if valid_media && pair.status.is_ready() => {
+                pair.prompt_preview = Some(prompt_preview(&text));
+                pair.prompt_text = Some(text);
+                pair.prompt_bytes = Some(byte_count);
+            }
+            Err(PromptIssue::Empty) => pair.status = H3LocalPairStatus::EmptyPrompt,
+            Err(PromptIssue::TooLarge) => pair.status = H3LocalPairStatus::PromptTooLarge,
+            Err(_) => pair.status = H3LocalPairStatus::InvalidPromptEncoding,
+            Ok(_) => {}
+        }
+        if !pair.status.is_ready() {
+            errors.push(format!("第 {} 项：{}", pair.ordinal, pair.status.as_str()));
+        }
+        pairs.push(pair);
+    }
+    if pairs.len() > MAX_LOCAL_IMPORT_PAIRS {
+        errors.push(format!("本地批量最多支持 {MAX_LOCAL_IMPORT_PAIRS} 项"));
+    }
+    if pairs.is_empty() {
+        errors.push("JSON 清单没有条目".to_owned());
+    }
+    Ok(build_inspection(
+        display_root_name,
+        H3LocalImportMode::OmniManifest,
+        true,
+        scanned
+            .values()
+            .filter(|file| is_image_extension(&file.extension))
+            .count(),
+        0,
+        pairs,
+        errors,
+        Vec::new(),
+    ))
+}
+
+fn resolve_omni_paths<'a>(
+    manifest_path: &Path,
+    entries: &[String],
+    scanned: &'a HashMap<String, ScannedFile>,
+    kind: &str,
+    seen: &mut HashSet<String>,
+    pair: &mut H3LocalImportPair,
+    errors: &mut Vec<String>,
+) -> Vec<&'a ScannedFile> {
+    let mut resolved = Vec::new();
+    for entry in entries {
+        let relative = match validate_manifest_media_path(entry, kind) {
+            Ok(path) => path,
+            Err(status) => {
+                pair.status = status;
+                errors.push(format!("第 {} 项：{} 路径无效", pair.ordinal, kind));
+                continue;
+            }
+        };
+        let normalized = normalize_relative(&relative.to_string_lossy());
+        let Some(file) = scanned.get(&normalized) else {
+            pair.status = H3LocalPairStatus::UnknownImage;
+            errors.push(format!("第 {} 项：{} 文件不存在", pair.ordinal, kind));
+            continue;
+        };
+        let canonical = match fs::canonicalize(root_join_relative(manifest_path, &relative)) {
+            Ok(path) => path,
+            Err(_) => {
+                pair.status = H3LocalPairStatus::UnknownImage;
+                continue;
+            }
+        };
+        let root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+        if !canonical.starts_with(root) {
+            pair.status = H3LocalPairStatus::InvalidPath;
+            continue;
+        }
+        let canonical_key = canonical.to_string_lossy().to_ascii_lowercase();
+        if !seen.insert(canonical_key) {
+            pair.status = H3LocalPairStatus::DuplicateImageEntry;
+            errors.push(format!(
+                "第 {} 项：清单重复引用 {}",
+                pair.ordinal, normalized
+            ));
+            continue;
+        }
+        resolved.push(file);
+    }
+    resolved
 }
 
 async fn inspect_manifest(
@@ -754,6 +1560,15 @@ async fn inspect_manifest(
             image_path: None,
             prompt_path: None,
             image_sha256: None,
+            image_paths: Vec::new(),
+            image_sha256s: Vec::new(),
+            last_image_display_name: None,
+            last_image_path: None,
+            last_image_sha256: None,
+            video_display_names: Vec::new(),
+            video_paths: Vec::new(),
+            audio_display_names: Vec::new(),
+            audio_paths: Vec::new(),
         };
         let relative_path = match validate_manifest_relative_path(&entry.image) {
             Ok(path) => path,
@@ -803,6 +1618,7 @@ async fn inspect_manifest(
         }
         pair.image_display_name = scanned.relative_name.clone();
         pair.image_path = Some(scanned.path.clone());
+        pair.image_paths = vec![scanned.path.clone()];
         match fs::read(&scanned.path) {
             Ok(bytes)
                 if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SOURCE_IMAGE_BYTES =>
@@ -810,7 +1626,10 @@ async fn inspect_manifest(
                 pair.status = H3LocalPairStatus::ImageTooLarge;
             }
             Ok(bytes) => match crate::application::image_inspection::inspect_bytes(&bytes) {
-                Ok(inspected) => pair.image_sha256 = Some(inspected.sha256),
+                Ok(inspected) => {
+                    pair.image_sha256 = Some(inspected.sha256.clone());
+                    pair.image_sha256s.push(inspected.sha256);
+                }
                 Err(_) => pair.status = H3LocalPairStatus::InvalidImage,
             },
             Err(_) => pair.status = H3LocalPairStatus::InvalidImage,
@@ -928,7 +1747,11 @@ fn scan_files(root: &Path) -> Result<Vec<ScannedFile>, H3LocalImportError> {
                 .and_then(|value| value.to_str())
                 .map(|value| value.to_ascii_lowercase())
                 .unwrap_or_default();
-            if is_image_extension(&extension) || is_prompt_extension(&extension) {
+            if is_image_extension(&extension)
+                || is_prompt_extension(&extension)
+                || is_video_extension(&extension)
+                || is_audio_extension(&extension)
+            {
                 let relative_name = normalize_relative(relative_name);
                 files.push(ScannedFile {
                     path,
@@ -999,7 +1822,72 @@ fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H
             ));
         }
     }
+    H3CommitGenerationMode::parse(request.generation_mode.as_deref())?;
     Ok(())
+}
+
+fn validate_local_import_mode(
+    generation_mode: H3CommitGenerationMode,
+    import_mode: H3LocalImportMode,
+) -> Result<(), H3LocalImportError> {
+    let valid = match generation_mode {
+        H3CommitGenerationMode::LegacyReferenceImage => {
+            matches!(
+                import_mode,
+                H3LocalImportMode::Pairing | H3LocalImportMode::Manifest
+            )
+        }
+        H3CommitGenerationMode::Fl2vaTextToVideo => import_mode == H3LocalImportMode::Text,
+        H3CommitGenerationMode::Fl2vaFirstLast => import_mode == H3LocalImportMode::FirstLast,
+        H3CommitGenerationMode::Fl2vaImageToVideo | H3CommitGenerationMode::Ref2vaImage => {
+            matches!(
+                import_mode,
+                H3LocalImportMode::Pairing
+                    | H3LocalImportMode::Manifest
+                    | H3LocalImportMode::OmniManifest
+            )
+        }
+        H3CommitGenerationMode::Ref2vaAudio
+        | H3CommitGenerationMode::Ref2vaImageAudio
+        | H3CommitGenerationMode::Ref2vaVideoImage => {
+            import_mode == H3LocalImportMode::OmniManifest
+        }
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(H3LocalImportError::Inspection(
+            "本地导入方式与当前 H3 生成模式不匹配，请重新扫描任务目录".to_owned(),
+        ))
+    }
+}
+
+fn validate_pair_media(
+    pair: &H3LocalImportPair,
+    generation_mode: H3CommitGenerationMode,
+) -> Result<(), H3LocalImportError> {
+    let has_image = !pair.image_paths.is_empty() || pair.image_path.is_some();
+    let has_last_image = pair.last_image_path.is_some();
+    let has_video = !pair.video_paths.is_empty();
+    let has_audio = !pair.audio_paths.is_empty();
+    let valid = match generation_mode {
+        H3CommitGenerationMode::LegacyReferenceImage
+        | H3CommitGenerationMode::Fl2vaImageToVideo
+        | H3CommitGenerationMode::Ref2vaImage => has_image,
+        H3CommitGenerationMode::Fl2vaTextToVideo => true,
+        H3CommitGenerationMode::Fl2vaFirstLast => has_image && has_last_image,
+        H3CommitGenerationMode::Ref2vaAudio => has_audio,
+        H3CommitGenerationMode::Ref2vaImageAudio => has_image && has_audio,
+        H3CommitGenerationMode::Ref2vaVideoImage => has_image && has_video,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(H3LocalImportError::Inspection(format!(
+            "第 {} 项缺少当前 H3 模式需要的媒体输入",
+            pair.ordinal
+        )))
+    }
 }
 
 fn parse_prompt_bytes(bytes: &[u8]) -> Result<(String, usize), PromptIssue> {
@@ -1050,10 +1938,29 @@ fn is_prompt_extension(extension: &str) -> bool {
     matches!(extension, "txt" | "md")
 }
 
+fn is_video_extension(extension: &str) -> bool {
+    matches!(extension, "mp4" | "mov" | "webm" | "mkv")
+}
+
+fn is_audio_extension(extension: &str) -> bool {
+    matches!(extension, "wav" | "mp3" | "m4a" | "flac" | "ogg")
+}
+
 fn stem_key(relative_name: &str) -> String {
     let mut path = PathBuf::from(relative_name);
     path.set_extension("");
     normalize_relative(path.to_string_lossy().trim_end_matches('.')).to_lowercase()
+}
+
+fn frame_key(relative_name: &str) -> Option<(String, bool)> {
+    let stem = stem_key(relative_name);
+    if let Some(key) = stem.strip_suffix("_first") {
+        return Some((key.to_owned(), true));
+    }
+    if let Some(key) = stem.strip_suffix("_last") {
+        return Some((key.to_owned(), false));
+    }
+    None
 }
 
 fn normalize_relative(value: &str) -> String {
@@ -1095,6 +2002,43 @@ fn validate_manifest_relative_path(value: &str) -> Result<PathBuf, H3LocalPairSt
             .to_ascii_lowercase()
             .as_str(),
     ) {
+        return Err(H3LocalPairStatus::UnknownImage);
+    }
+    Ok(path)
+}
+
+fn validate_manifest_media_path(value: &str, kind: &str) -> Result<PathBuf, H3LocalPairStatus> {
+    if value.trim().is_empty()
+        || value.starts_with('/')
+        || value.starts_with('\\')
+        || value.contains('\\')
+        || value.contains(':')
+    {
+        return Err(H3LocalPairStatus::InvalidPath);
+    }
+    let path = PathBuf::from(value);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(H3LocalPairStatus::InvalidPath);
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let valid = match kind {
+        "image" => is_image_extension(&extension),
+        "video" => is_video_extension(&extension),
+        "audio" => is_audio_extension(&extension),
+        _ => false,
+    };
+    if !valid {
         return Err(H3LocalPairStatus::UnknownImage);
     }
     Ok(path)
@@ -1537,6 +2481,67 @@ outputs:
         assert!(inspection.error_count >= 2);
     }
 
+    #[tokio::test]
+    async fn inspections_cover_text_first_last_and_omni_media_modes() {
+        let text_directory = tempfile::tempdir().expect("text fixture directory should exist");
+        fs::write(text_directory.path().join("001.txt"), "line one\nline two")
+            .expect("text prompt should write");
+        let text = inspect_directory(text_directory.path(), H3LocalImportMode::Text)
+            .await
+            .expect("text inspection should succeed");
+        assert_eq!(text.ready_count, 1);
+        assert_eq!(text.image_count, 0);
+        assert_eq!(text.pairs[0].image_display_name, "仅 Prompt");
+        assert_eq!(
+            text.pairs[0].prompt_preview.as_deref(),
+            Some("line one\nline two")
+        );
+
+        let frame_directory = tempfile::tempdir().expect("frame fixture directory should exist");
+        fs::write(frame_directory.path().join("001_first.png"), png_bytes())
+            .expect("first frame should write");
+        fs::write(frame_directory.path().join("001_last.png"), png_bytes())
+            .expect("last frame should write");
+        fs::write(frame_directory.path().join("001.txt"), "frame motion")
+            .expect("frame prompt should write");
+        let first_last = inspect_directory(frame_directory.path(), H3LocalImportMode::FirstLast)
+            .await
+            .expect("first-last inspection should succeed");
+        assert_eq!(first_last.ready_count, 1);
+        assert_eq!(first_last.pairs[0].image_display_name, "001_first.png");
+        assert_eq!(
+            first_last.pairs[0].last_image_display_name.as_deref(),
+            Some("001_last.png")
+        );
+
+        let omni_directory = tempfile::tempdir().expect("omni fixture directory should exist");
+        fs::write(omni_directory.path().join("ref.png"), png_bytes())
+            .expect("omni image should write");
+        fs::write(omni_directory.path().join("ref.mp4"), b"video placeholder")
+            .expect("omni video should write");
+        fs::write(omni_directory.path().join("ref.wav"), b"audio placeholder")
+            .expect("omni audio should write");
+        fs::write(
+            omni_directory.path().join("h3-omni-batch.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {
+                    "images": ["ref.png"],
+                    "videos": ["ref.mp4"],
+                    "audios": ["ref.wav"],
+                    "prompt": "omni motion"
+                }
+            ]))
+            .expect("omni manifest should encode"),
+        )
+        .expect("omni manifest should write");
+        let omni = inspect_directory(omni_directory.path(), H3LocalImportMode::OmniManifest)
+            .await
+            .expect("omni inspection should succeed");
+        assert_eq!(omni.ready_count, 1);
+        assert_eq!(omni.pairs[0].video_display_names, vec!["ref.mp4"]);
+        assert_eq!(omni.pairs[0].audio_display_names, vec!["ref.wav"]);
+    }
+
     #[test]
     fn manifest_rejects_absolute_parent_and_non_image_paths() {
         assert!(!validate_manifest_relative_path_for_test("C:/outside.png"));
@@ -1598,6 +2603,7 @@ outputs:
                     duration_seconds: 5,
                     seed: Some(SeedValue::Fixed(123)),
                     auto_start: false,
+                    generation_mode: None,
                 },
             )
             .await
@@ -1795,6 +2801,7 @@ outputs:
                     duration_seconds: 5,
                     seed: Some(SeedValue::Fixed(123)),
                     auto_start: false,
+                    generation_mode: None,
                 },
             )
             .await

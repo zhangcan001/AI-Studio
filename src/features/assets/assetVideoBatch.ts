@@ -1,28 +1,77 @@
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
-import { MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import { MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
 import { validateResolution } from "../runtime/resolution";
 
 export const H3_PROMPT_KEY = "prompt" as const;
 export const H3_REFERENCE_IMAGE_KEY = "reference_image" as const;
+export const H3_REFERENCE_IMAGES_KEY = "reference_images" as const;
+export const H3_REFERENCE_VIDEOS_KEY = "reference_videos" as const;
+export const H3_REFERENCE_AUDIOS_KEY = "reference_audios" as const;
+export const H3_FIRST_FRAME_KEY = "first_frame" as const;
+export const H3_LAST_FRAME_KEY = "last_frame" as const;
 export const H3_DURATION_KEY = "duration_seconds" as const;
 export const H3_SEED_KEY = "seed" as const;
 
 type H3PromptField = Extract<RecipeField, { type: "textarea" }>;
 type H3ReferenceField = Extract<RecipeField, { type: "image" | "images" }>;
+type H3ImageField = Extract<RecipeField, { type: "image" }>;
+type H3ImagesField = Extract<RecipeField, { type: "images" }>;
+type H3VideosField = Extract<RecipeField, { type: "videos" }>;
+type H3AudiosField = Extract<RecipeField, { type: "audios" }>;
 type H3DurationField = Extract<RecipeField, { type: "integer" }>;
 type H3ResolutionField = Extract<RecipeField, { type: "integer" }>;
 type H3SeedField = Extract<RecipeField, { type: "seed" }>;
 
 export interface H3RecipeContract {
   promptField: H3PromptField;
-  referenceField: H3ReferenceField;
+  referenceField?: H3ReferenceField;
+  firstFrameField?: H3ImageField;
+  lastFrameField?: H3ImageField;
+  referenceImagesField?: H3ImagesField;
+  referenceVideosField?: H3VideosField;
+  referenceAudiosField?: H3AudiosField;
   widthField: H3ResolutionField;
   heightField: H3ResolutionField;
   durationField: H3DurationField;
   seedField: H3SeedField;
   durationOptions: number[];
+  family: "FL2VA" | "REF2VA";
 }
+
+export type H3GenerationMode =
+  | "FL2VA_TEXT_TO_VIDEO"
+  | "FL2VA_IMAGE_TO_VIDEO"
+  | "FL2VA_FIRST_LAST"
+  | "REF2VA_IMAGE"
+  | "REF2VA_AUDIO"
+  | "REF2VA_IMAGE_AUDIO"
+  | "REF2VA_VIDEO_IMAGE";
+
+export interface H3ModeAssets {
+  firstFrameAssetId?: string;
+  lastFrameAssetId?: string;
+  imageAssetIds?: string[];
+  videoAssetIds?: string[];
+  audioAssetIds?: string[];
+}
+
+export interface H3ModeOption {
+  id: H3GenerationMode;
+  label: string;
+  description: string;
+  family: "FL2VA" | "REF2VA";
+}
+
+export const H3_MODE_OPTIONS: H3ModeOption[] = [
+  { id: "FL2VA_TEXT_TO_VIDEO", label: "文生视频", description: "只用 Prompt 生成视频", family: "FL2VA" },
+  { id: "FL2VA_IMAGE_TO_VIDEO", label: "一张图生视频", description: "从首帧图片开始生成", family: "FL2VA" },
+  { id: "FL2VA_FIRST_LAST", label: "首尾帧视频", description: "锁定首帧与末帧", family: "FL2VA" },
+  { id: "REF2VA_IMAGE", label: "仅图片", description: "使用有序图片参考", family: "REF2VA" },
+  { id: "REF2VA_AUDIO", label: "仅音频", description: "使用有序音频参考", family: "REF2VA" },
+  { id: "REF2VA_IMAGE_AUDIO", label: "图片 + 音频", description: "同时使用图片和音频", family: "REF2VA" },
+  { id: "REF2VA_VIDEO_IMAGE", label: "视频 + 图片", description: "使用视频帧、原生音频和图片", family: "REF2VA" },
+];
 
 export interface H3AssetQualificationInput {
   isImage: boolean;
@@ -50,6 +99,14 @@ export type H3RecipeContractResult =
 
 export function isImageAssetForVideo(asset: AssetView): boolean {
   return asset.assetType === "image";
+}
+
+export function isVideoAssetForH3(asset: AssetView): boolean {
+  return asset.assetType === "video";
+}
+
+export function isAudioAssetForH3(asset: AssetView): boolean {
+  return asset.assetType === "audio";
 }
 
 export function h3AssetQualification(input: H3AssetQualificationInput): string {
@@ -115,8 +172,98 @@ export function buildH3BatchValues(
     values[result.contract.referenceField.key] = result.contract.referenceField.type === "images"
       ? { type: "image_assets", assetIds: [assetId] }
       : { type: "image_asset", assetId };
+  } else if (result.contract.referenceImagesField) {
+    values[result.contract.referenceImagesField.key] = { type: "image_assets", assetIds: [assetId] };
+  } else if (result.contract.firstFrameField) {
+    values[result.contract.firstFrameField.key] = { type: "image_asset", assetId };
   }
   return values;
+}
+
+export function buildH3ModeBatchValues(
+  recipe: RecipeViewModel,
+  mode: H3GenerationMode,
+  promptText: string,
+  assets: H3ModeAssets = {},
+  durationSeconds?: number,
+  width?: number,
+  height?: number,
+): GenerationValues {
+  const result = h3RecipeContract(recipe);
+  if (!result.ok) throw new Error(result.reason);
+  const { contract } = result;
+  const defaultDuration = contract.durationField.default;
+  if (defaultDuration === undefined) throw new Error("H3 Recipe 缺少 duration_seconds 默认值。");
+  const duration = durationSeconds ?? defaultDuration;
+  if (!contract.durationOptions.includes(duration)) {
+    throw new Error(`H3 视频时长必须选择 ${contract.durationField.min}–${contract.durationField.max} 秒。`);
+  }
+  const selectedWidth = width ?? contract.widthField.default ?? contract.widthField.min;
+  const selectedHeight = height ?? contract.heightField.default ?? contract.heightField.min;
+  if (!validateResolution(recipe, selectedWidth, selectedHeight).ok) {
+    throw new Error("H3 输出分辨率不符合当前 Recipe 约束。");
+  }
+  if (!h3ModeSupported(contract, mode)) {
+    throw new Error(`当前 H3 Recipe 不支持模式 ${mode}。`);
+  }
+
+  const values: GenerationValues = {};
+  for (const field of recipe.fields) {
+    const value = defaultValueForField(field);
+    if (value && field.type !== "image" && field.type !== "images" && field.type !== "video" && field.type !== "videos" && field.type !== "audio" && field.type !== "audios") {
+      values[field.key] = value;
+    }
+  }
+  values[contract.promptField.key] = { type: "string", value: promptText.trim() };
+  values[contract.widthField.key] = { type: "integer", value: selectedWidth! };
+  values[contract.heightField.key] = { type: "integer", value: selectedHeight! };
+  values[contract.durationField.key] = { type: "integer", value: duration };
+
+  switch (mode) {
+    case "FL2VA_TEXT_TO_VIDEO":
+      break;
+    case "FL2VA_IMAGE_TO_VIDEO":
+      setSingleImageValue(values, contract.firstFrameField, assets.firstFrameAssetId, "first_frame");
+      break;
+    case "FL2VA_FIRST_LAST":
+      setSingleImageValue(values, contract.firstFrameField, assets.firstFrameAssetId, "first_frame");
+      setSingleImageValue(values, contract.lastFrameField, assets.lastFrameAssetId, "last_frame");
+      break;
+    case "REF2VA_IMAGE":
+      setReferenceImagesValue(values, contract, assets.imageAssetIds ?? []);
+      break;
+    case "REF2VA_AUDIO":
+      setPluralValue(values, contract.referenceAudiosField, assets.audioAssetIds ?? [], "reference_audios");
+      break;
+    case "REF2VA_IMAGE_AUDIO":
+      setReferenceImagesValue(values, contract, assets.imageAssetIds ?? []);
+      setPluralValue(values, contract.referenceAudiosField, assets.audioAssetIds ?? [], "reference_audios");
+      break;
+    case "REF2VA_VIDEO_IMAGE":
+      setPluralValue(values, contract.referenceVideosField, assets.videoAssetIds ?? [], "reference_videos");
+      setReferenceImagesValue(values, contract, assets.imageAssetIds ?? []);
+      break;
+  }
+  return values;
+}
+
+export function h3ModeSupported(contract: H3RecipeContract, mode: H3GenerationMode): boolean {
+  switch (mode) {
+    case "FL2VA_TEXT_TO_VIDEO":
+      return contract.family === "FL2VA";
+    case "FL2VA_IMAGE_TO_VIDEO":
+      return contract.family === "FL2VA" && Boolean(contract.firstFrameField);
+    case "FL2VA_FIRST_LAST":
+      return contract.family === "FL2VA" && Boolean(contract.firstFrameField && contract.lastFrameField);
+    case "REF2VA_IMAGE":
+      return contract.family === "REF2VA" && Boolean(contract.referenceImagesField || contract.referenceField);
+    case "REF2VA_AUDIO":
+      return contract.family === "REF2VA" && Boolean(contract.referenceAudiosField);
+    case "REF2VA_IMAGE_AUDIO":
+      return contract.family === "REF2VA" && Boolean((contract.referenceImagesField || contract.referenceField) && contract.referenceAudiosField);
+    case "REF2VA_VIDEO_IMAGE":
+      return contract.family === "REF2VA" && Boolean(contract.referenceVideosField && (contract.referenceImagesField || contract.referenceField));
+  }
 }
 
 export function h3PromptField(recipe: RecipeViewModel): RecipeField | undefined {
@@ -130,7 +277,7 @@ export function h3ReferenceField(recipe: RecipeViewModel): RecipeField | undefin
 }
 
 export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResult {
-  if (recipe.workflowId !== MINIMAX_H3_WORKFLOW_ID) {
+  if (recipe.workflowId !== MINIMAX_H3_WORKFLOW_ID && recipe.workflowId !== MINIMAX_H3_FL2VA_WORKFLOW_ID) {
     return { ok: false, reason: "运行目录中的 Recipe 不是 MiniMax H3。" };
   }
   if (!recipe.outputTypes?.includes("video")) {
@@ -142,8 +289,19 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
   }
   const referenceField = exactField(recipe, H3_REFERENCE_IMAGE_KEY, "image")
     ?? exactField(recipe, H3_REFERENCE_IMAGE_KEY, "images");
-  if (!referenceField) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `reference_image` 的 image/images 字段。" };
+  const firstFrameField = exactField(recipe, H3_FIRST_FRAME_KEY, "image");
+  const lastFrameField = exactField(recipe, H3_LAST_FRAME_KEY, "image");
+  const referenceImagesField = exactField(recipe, H3_REFERENCE_IMAGES_KEY, "images");
+  const referenceVideosField = exactField(recipe, H3_REFERENCE_VIDEOS_KEY, "videos");
+  const referenceAudiosField = exactField(recipe, H3_REFERENCE_AUDIOS_KEY, "audios");
+  if (
+    recipe.workflowId === MINIMAX_H3_WORKFLOW_ID
+    && !referenceField
+    && !referenceImagesField
+    && !referenceVideosField
+    && !referenceAudiosField
+  ) {
+    return { ok: false, reason: "H3 Recipe 缺少 key 为 `reference_image` 或 Omni Reference media 字段。" };
   }
   const durationField = exactField(recipe, H3_DURATION_KEY, "integer");
   if (!durationField) {
@@ -192,6 +350,11 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
     contract: {
       promptField,
       referenceField,
+      firstFrameField,
+      lastFrameField,
+      referenceImagesField,
+      referenceVideosField,
+      referenceAudiosField,
       widthField,
       heightField,
       durationField,
@@ -200,8 +363,47 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
         { length: Math.floor((maxDuration - minDuration) / durationField.step!) + 1 },
         (_, index) => minDuration + index * durationField.step!,
       ),
+      family: recipe.workflowId === MINIMAX_H3_FL2VA_WORKFLOW_ID ? "FL2VA" : "REF2VA",
     },
   };
+}
+
+function setSingleImageValue(
+  values: GenerationValues,
+  field: H3ImageField | undefined,
+  assetId: string | undefined,
+  label: string,
+) {
+  if (!field || !assetId) throw new Error(`${label} 模式需要图片素材。`);
+  values[field.key] = { type: "image_asset", assetId };
+}
+
+function setPluralValue(
+  values: GenerationValues,
+  field: H3ImagesField | H3VideosField | H3AudiosField | undefined,
+  assetIds: string[],
+  label: string,
+) {
+  if (!field || !assetIds.length) throw new Error(`${label} 模式至少需要一个对应素材。`);
+  const type = field.type === "images" ? "image_assets" : field.type === "videos" ? "video_assets" : "audio_assets";
+  values[field.key] = { type, assetIds } as DraftValue;
+}
+
+function setReferenceImagesValue(
+  values: GenerationValues,
+  contract: H3RecipeContract,
+  assetIds: string[],
+) {
+  if (contract.referenceImagesField) {
+    setPluralValue(values, contract.referenceImagesField, assetIds, H3_REFERENCE_IMAGES_KEY);
+    return;
+  }
+  if (!contract.referenceField || !assetIds.length) {
+    throw new Error("REF2VA 图片模式至少需要一个图片素材。");
+  }
+  values[contract.referenceField.key] = contract.referenceField.type === "images"
+    ? { type: "image_assets", assetIds }
+    : { type: "image_asset", assetId: assetIds[0] };
 }
 
 function exactField<T extends RecipeField["type"]>(

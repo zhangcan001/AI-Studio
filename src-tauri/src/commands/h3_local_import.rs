@@ -20,6 +20,9 @@ pub struct H3LocalImportPairView {
     pub prompt_preview: Option<String>,
     pub prompt_bytes: Option<usize>,
     pub status: String,
+    pub last_image_display_name: Option<String>,
+    pub video_display_names: Vec<String>,
+    pub audio_display_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -50,6 +53,7 @@ pub struct H3LocalImportCommitRequestDto {
     pub duration_seconds: i64,
     pub seed: Option<String>,
     pub auto_start: bool,
+    pub generation_mode: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -128,6 +132,7 @@ pub async fn h3_local_import_commit(
                 duration_seconds: request.duration_seconds,
                 seed,
                 auto_start: request.auto_start,
+                generation_mode: request.generation_mode,
             },
         )
         .await
@@ -162,6 +167,9 @@ fn pair_view(pair: &H3LocalImportPair) -> H3LocalImportPairView {
         prompt_preview: pair.prompt_preview.clone(),
         prompt_bytes: pair.prompt_bytes,
         status: pair.status.as_str().to_owned(),
+        last_image_display_name: pair.last_image_display_name.clone(),
+        video_display_names: pair.video_display_names.clone(),
+        audio_display_names: pair.audio_display_names.clone(),
     }
 }
 
