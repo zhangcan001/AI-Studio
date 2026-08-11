@@ -1,6 +1,6 @@
 # AI Studio 0.3.0 Simplified Final Live Gate
 
-Date: 2026-08-11
+Date: 2026-08-12
 Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他产品能力。
 
 ## Current status
@@ -25,7 +25,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 370 tests / 0 failed；frontend 39 files / 128 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
+| Regression | Rust 370 tests / 0 failed；frontend 39 files / 130 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
 
 ## H3 Production Quality / FAST Package Audit
 
@@ -107,12 +107,12 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 31232000 | `d686a59bad0a80ab180b2b24d9b49304fd15c64c440c0535e3fb8b5af6d929df` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7394369 | `1a2b647174d8dbfd1fef9d47d981eca67f2f765afa4743dd2dd2ac2040e3a4d6` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10817536 | `25434906de23c9510b829b2ece3b188c8b13381d95764a747616c1155e717730` |
+| `src-tauri/target/release/ai-studio.exe` | 31236096 | `b275efd633c41e44eec0981ec3d15bf7744e3f189d5422de59e3b2b8685d2ebf` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7394996 | `7eece367b3e70c4b2028cb25f68e881352b946931e0f3aab0ef4375d79235299` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10821632 | `f63ba27fd0024a09d25eae10178e15103b7c96debdde993ab67951412ba50264` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
-generation date `2026-08-11`.
+generation date `2026-08-12`.
 
 ## Deferred live validation — batch images
 

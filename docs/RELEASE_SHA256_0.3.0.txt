@@ -1,8 +1,8 @@
 AI Studio 0.3.0 local release candidate artifacts
-Generated: 2026-08-11
+Generated: 2026-08-12
 Status: local only; no upload, tag, or GitHub Release
 
 SHA-256                                    Bytes       Artifact
-D686A59BAD0A80AB180B2B24D9B49304FD15C64C440C0535E3FB8B5AF6D929DF  31232000  src-tauri/target/release/ai-studio.exe
-1A2B647174D8DBFD1FEF9D47D981ECA67F2F765AFA4743DD2DD2AC2040E3A4D6  7394369   src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe
-25434906DE23C9510B829B2ECE3B188C8B13381D95764A747616C1155E717730  10817536  src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi
+B275EFD633C41E44EEC0981EC3D15BF7744E3F189D5422DE59E3B2B8685D2EBF  31236096  src-tauri/target/release/ai-studio.exe
+7EECE367B3E70C4B2028CB25F68E881352B946931E0F3AAB0EF4375D79235299  7394996   src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe
+F63BA27FD0024A09D25EAE10178E15103B7C96DEBDDE993AB67951412BA50264  10821632  src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi

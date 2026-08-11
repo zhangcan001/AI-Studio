@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  assetLibraryPage,
   commitH3LocalImport,
   createProductionQueue,
+  readAssetImage,
+  readAssetThumbnail,
   listAssetVideoPrompts,
   pickH3LocalImportDirectory,
   rescanH3LocalImport,
@@ -9,7 +12,7 @@ import {
   startProductionQueue,
   updateH3ProjectSegmentDraft,
 } from "../../services/tauriClient";
-import type { AssetView } from "../../types/asset";
+import type { AssetMediaTypeFilter, AssetView, PageCursor } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
 import type {
   H3LocalImportInspection,
@@ -48,6 +51,7 @@ import {
 import { ProductionQueuePanel } from "../studio/ProductionQueuePanel";
 import type { BatchDraftItem } from "../studio/batchDraft";
 import { formatPromptBytes, localImportCanCommit, localImportModeLabel, localImportStatusLabel } from "./h3LocalImport";
+import { AssetCard } from "./AssetCard";
 
 interface Props {
   projectId: string;
@@ -72,6 +76,196 @@ function localImportModeForGeneration(mode: H3GenerationMode): H3LocalImportMode
     case "REF2VA_VIDEO_IMAGE": return "OMNI_MANIFEST";
     default: return "PAIRING";
   }
+}
+
+interface H3AssetLibraryPickerProps {
+  projectId: string;
+  assets: AssetView[];
+  generationMode: H3GenerationMode;
+  selectedIds: Set<string>;
+  firstFrameAssetId?: string;
+  lastFrameAssetId?: string;
+  keyword: string;
+  mediaType: AssetMediaTypeFilter;
+  loading: boolean;
+  error?: string;
+  hasMore: boolean;
+  busy: boolean;
+  onKeywordChange: (value: string) => void;
+  onMediaTypeChange: (value: AssetMediaTypeFilter) => void;
+  onRefresh: () => void;
+  onLoadMore: () => void;
+  onToggleAsset: (asset: AssetView) => void;
+  onSetFirstFrame: (asset: AssetView) => void;
+  onSetLastFrame: (asset: AssetView) => void;
+}
+
+export function h3InitialGenerationMode(initialAssets: AssetView[]): H3GenerationMode {
+  return initialAssets.length === 1 && isImageAssetForVideo(initialAssets[0])
+    ? "FL2VA_IMAGE_TO_VIDEO"
+    : "FL2VA_TEXT_TO_VIDEO";
+}
+
+export function h3PickerAssets(assets: AssetView[], mode: H3GenerationMode): AssetView[] {
+  switch (mode) {
+    case "FL2VA_IMAGE_TO_VIDEO":
+    case "FL2VA_FIRST_LAST":
+    case "REF2VA_IMAGE":
+      return assets.filter(isImageAssetForVideo);
+    case "REF2VA_AUDIO":
+      return assets.filter(isAudioAssetForH3);
+    case "REF2VA_IMAGE_AUDIO":
+      return assets.filter((asset) => isImageAssetForVideo(asset) || isAudioAssetForH3(asset));
+    case "REF2VA_VIDEO_IMAGE":
+      return assets.filter((asset) => isImageAssetForVideo(asset) || isVideoAssetForH3(asset));
+    case "FL2VA_TEXT_TO_VIDEO":
+      return [];
+  }
+}
+
+function H3SelectedFrame({ projectId, label, asset }: { projectId: string; label: string; asset?: AssetView }) {
+  const [previewUrl, setPreviewUrl] = useState<string>();
+
+  useEffect(() => {
+    if (!asset) {
+      setPreviewUrl(undefined);
+      return () => undefined;
+    }
+    let active = true;
+    let url: string | undefined;
+    void readAssetThumbnail(projectId, asset.id)
+      .catch(() => readAssetImage(projectId, asset.id))
+      .then((bytes) => {
+        if (!active) return;
+        url = URL.createObjectURL(new Blob([bytes], { type: asset.mimeType || "image/png" }));
+        setPreviewUrl(url);
+      })
+      .catch(() => {
+        if (active) setPreviewUrl(undefined);
+      });
+    return () => {
+      active = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [asset, projectId]);
+
+  return (
+    <div className="h3-frame-selection-summary">
+      <span className="h3-frame-selection-preview">
+        {previewUrl ? <img src={previewUrl} alt={asset?.name ?? label} /> : <span>{asset ? "加载预览…" : "未选择"}</span>}
+      </span>
+      <span className="h3-frame-selection-copy">
+        <small>{label}</small>
+        <strong>{asset?.name ?? "未选择图片"}</strong>
+      </span>
+    </div>
+  );
+}
+
+function H3AssetLibraryPicker({
+  projectId,
+  assets,
+  generationMode,
+  selectedIds,
+  firstFrameAssetId,
+  lastFrameAssetId,
+  keyword,
+  mediaType,
+  loading,
+  error,
+  hasMore,
+  busy,
+  onKeywordChange,
+  onMediaTypeChange,
+  onRefresh,
+  onLoadMore,
+  onToggleAsset,
+  onSetFirstFrame,
+  onSetLastFrame,
+}: H3AssetLibraryPickerProps) {
+  const pickerAssets = h3PickerAssets(assets, generationMode);
+  const firstFrame = assets.find((asset) => asset.id === firstFrameAssetId);
+  const lastFrame = assets.find((asset) => asset.id === lastFrameAssetId);
+  const referenceMode = generationMode.startsWith("REF2VA");
+
+  return (
+    <section className="h3-asset-library-picker" aria-label="H3 资产库媒体选择">
+      <div className="h3-asset-library-picker-heading">
+        <div>
+          <span className="section-label">Asset Library</span>
+          <h3>选择输入素材</h3>
+          <p className="section-description">
+            {generationMode === "FL2VA_TEXT_TO_VIDEO"
+              ? "当前文生视频模式不需要媒体输入。"
+              : referenceMode
+                ? "从当前项目资产库选择参考媒体；选择顺序会冻结到本次批次。"
+                : "从当前项目资产库选择首帧或首尾帧图片。"}
+          </p>
+        </div>
+        <button type="button" className="quiet-button" onClick={onRefresh} disabled={busy || loading}>
+          {loading ? "正在加载…" : "刷新资产库"}
+        </button>
+      </div>
+
+      {generationMode !== "FL2VA_TEXT_TO_VIDEO" && (
+        <>
+          <div className="h3-asset-library-picker-controls">
+            <label className="h3-asset-library-search">
+              <span>搜索素材</span>
+              <input value={keyword} onChange={(event) => onKeywordChange(event.target.value)} placeholder="搜索名称或原始文件名" disabled={busy} />
+            </label>
+            <label>
+              <span>媒体类型</span>
+              <select value={mediaType} onChange={(event) => onMediaTypeChange(event.target.value as AssetMediaTypeFilter)} disabled={busy}>
+                <option value="ALL">全部</option>
+                <option value="IMAGE">图片</option>
+                <option value="VIDEO">视频</option>
+                <option value="AUDIO">音频</option>
+              </select>
+            </label>
+          </div>
+          {generationMode === "FL2VA_IMAGE_TO_VIDEO" && (
+            <div className="h3-frame-selection-strip">
+              <H3SelectedFrame projectId={projectId} label="首帧图片" asset={firstFrame} />
+            </div>
+          )}
+          {generationMode === "FL2VA_FIRST_LAST" && (
+            <div className="h3-frame-selection-strip">
+              <H3SelectedFrame projectId={projectId} label="首帧图片" asset={firstFrame} />
+              <H3SelectedFrame projectId={projectId} label="末帧图片" asset={lastFrame} />
+            </div>
+          )}
+          {error && <p className="error-message" role="alert">资产库加载失败：{error}</p>}
+          <div className="h3-asset-library-picker-grid" aria-label="可选资产">
+            {pickerAssets.map((asset) => {
+              const selected = selectedIds.has(asset.id);
+              const isImage = isImageAssetForVideo(asset);
+              return (
+                <div className={`h3-asset-picker-item${selected ? " h3-asset-picker-item-selected" : ""}`} key={asset.id}>
+                  <AssetCard
+                    projectId={projectId}
+                    asset={asset}
+                    onSelect={() => onToggleAsset(asset)}
+                    selectionMode={referenceMode}
+                    selected={selected}
+                    onToggleSelection={() => onToggleAsset(asset)}
+                  />
+                  {(generationMode === "FL2VA_IMAGE_TO_VIDEO" || generationMode === "FL2VA_FIRST_LAST") && isImage && (
+                    <div className="h3-asset-picker-role-actions">
+                      <button type="button" className={firstFrameAssetId === asset.id ? "quiet-button asset-role-active" : "quiet-button"} onClick={() => onSetFirstFrame(asset)} disabled={busy || lastFrameAssetId === asset.id}>设为首帧</button>
+                      {generationMode === "FL2VA_FIRST_LAST" && <button type="button" className={lastFrameAssetId === asset.id ? "quiet-button asset-role-active" : "quiet-button"} onClick={() => onSetLastFrame(asset)} disabled={busy || firstFrameAssetId === asset.id}>设为末帧</button>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {!loading && !pickerAssets.length && !error && <p className="empty-state">当前筛选下没有可用的媒体资产。</p>}
+          {hasMore && <button type="button" className="load-more-button quiet-button" onClick={onLoadMore} disabled={busy || loading}>加载更多</button>}
+        </>
+      )}
+    </section>
+  );
 }
 
 interface ProjectSegmentForm {
@@ -272,11 +466,18 @@ export function AssetVideoBatchWorkspace({
   const [localBatchName, setLocalBatchName] = useState("");
   const [localAutoStart, setLocalAutoStart] = useState(true);
   const [expandedLocalOrdinal, setExpandedLocalOrdinal] = useState<number>();
-  const [generationMode, setGenerationMode] = useState<H3GenerationMode>("FL2VA_TEXT_TO_VIDEO");
+  const [generationMode, setGenerationMode] = useState<H3GenerationMode>(() => h3InitialGenerationMode(initialAssets));
   const [qualityProfile, setQualityProfile] = useState<H3QualityProfile>(H3_QUALITY_PROFILE);
   const [batchPrompt, setBatchPrompt] = useState("");
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
   const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
+  const [availableAssets, setAvailableAssets] = useState<AssetView[]>(initialAssets);
+  const [assetLibraryKeywordInput, setAssetLibraryKeywordInput] = useState("");
+  const [assetLibraryKeyword, setAssetLibraryKeyword] = useState("");
+  const [assetLibraryMediaType, setAssetLibraryMediaType] = useState<AssetMediaTypeFilter>("ALL");
+  const [assetLibraryCursor, setAssetLibraryCursor] = useState<PageCursor>();
+  const [assetLibraryLoading, setAssetLibraryLoading] = useState(false);
+  const [assetLibraryError, setAssetLibraryError] = useState<string>();
   const recipe = useMemo(
     () => h3RecipeForMode(catalog, generationMode, qualityProfile),
     [catalog, generationMode, qualityProfile],
@@ -297,24 +498,125 @@ export function AssetVideoBatchWorkspace({
   const [createdBatchStarted, setCreatedBatchStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const assetLibraryRequestVersion = useRef(0);
+  const loadedPromptIds = useRef<Set<string>>(new Set());
+  const selectedIdsRef = useRef(selectedIds);
 
   useEffect(() => {
-    let active = true;
+    selectedIdsRef.current = selectedIds;
+  }, [selectedIds]);
+
+  useEffect(() => {
+    const initialIds = new Set(initialAssets.map((asset) => asset.id));
+    setAvailableAssets((current) => {
+      if ([...initialIds].every((assetId) => current.some((asset) => asset.id === assetId))) return current;
+      const byId = new Map(initialAssets.map((asset) => [asset.id, asset]));
+      current.forEach((asset) => byId.set(asset.id, asset));
+      return [...byId.values()];
+    });
+    setSelectedIds((current) => {
+      if ([...initialIds].every((assetId) => current.has(assetId))) return current;
+      const next = new Set(current);
+      initialIds.forEach((assetId) => next.add(assetId));
+      return next;
+    });
+    if (initialAssets.length === 1 && isImageAssetForVideo(initialAssets[0])) {
+      setFirstFrameAssetId((current) => current ?? initialAssets[0].id);
+    }
+  }, [initialAssets]);
+
+  useEffect(() => {
+    setAvailableAssets(initialAssets);
+    setSelectedIds(new Set(initialAssets.map((asset) => asset.id)));
+    setFirstFrameAssetId(initialAssets.length === 1 && isImageAssetForVideo(initialAssets[0]) ? initialAssets[0].id : undefined);
+    setLastFrameAssetId(undefined);
+    setGenerationMode(h3InitialGenerationMode(initialAssets));
+    setAssetLibraryCursor(undefined);
+    setAssetLibraryError(undefined);
+    setAssetLibraryKeywordInput("");
+    setAssetLibraryKeyword("");
+    setAssetLibraryMediaType("ALL");
     setPrompts({});
     setSavedIds(new Set());
-    setSelectedIds(new Set(initialAssets.map((asset) => asset.id)));
-    if (!initialAssets.length) return () => { active = false; };
-    void listAssetVideoPrompts(projectId, initialAssets.map((asset) => asset.id))
+    loadedPromptIds.current = new Set();
+  }, [projectId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAssetLibraryKeyword(assetLibraryKeywordInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [assetLibraryKeywordInput]);
+
+  const requestAssetPage = useCallback(async (requestedCursor: PageCursor | undefined, reset: boolean) => {
+    const version = ++assetLibraryRequestVersion.current;
+    setAssetLibraryLoading(true);
+    setAssetLibraryError(undefined);
+    try {
+      const page = await assetLibraryPage({
+        projectId,
+        category: "ALL",
+        keyword: assetLibraryKeyword || undefined,
+        mediaType: assetLibraryMediaType,
+        sourceKind: "ALL",
+        createdOrder: "NEWEST",
+        cursor: requestedCursor,
+        limit: 30,
+      });
+      if (assetLibraryRequestVersion.current !== version) return;
+      setAvailableAssets((current) => {
+        const base = reset
+          ? [...initialAssets, ...current.filter((asset) => selectedIdsRef.current.has(asset.id))]
+          : current;
+        const byId = new Map(base.map((asset) => [asset.id, asset]));
+        page.items.forEach((asset) => byId.set(asset.id, asset));
+        const merged = [...byId.values()];
+        return !assetLibraryKeyword && assetLibraryMediaType === "ALL" && !page.nextCursor
+          ? page.items
+          : merged;
+      });
+      setAssetLibraryCursor(page.nextCursor);
+      if (!page.nextCursor && !assetLibraryKeyword && assetLibraryMediaType === "ALL") {
+        const pageIds = new Set(page.items.map((asset) => asset.id));
+        setSelectedIds((current) => new Set([...current].filter((assetId) => pageIds.has(assetId))));
+        setFirstFrameAssetId((current) => current && pageIds.has(current) ? current : undefined);
+        setLastFrameAssetId((current) => current && pageIds.has(current) ? current : undefined);
+      }
+    } catch (error: unknown) {
+      if (assetLibraryRequestVersion.current === version) setAssetLibraryError(toUserMessage(error));
+    } finally {
+      if (assetLibraryRequestVersion.current === version) setAssetLibraryLoading(false);
+    }
+  }, [assetLibraryKeyword, assetLibraryMediaType, initialAssets, projectId]);
+
+  useEffect(() => {
+    if (sourceMode !== "ASSET_LIBRARY") return () => undefined;
+    setAssetLibraryCursor(undefined);
+    void requestAssetPage(undefined, true);
+    return () => {
+      assetLibraryRequestVersion.current += 1;
+    };
+  }, [requestAssetPage, sourceMode]);
+
+  useEffect(() => {
+    const imageIds = availableAssets.filter(isImageAssetForVideo).map((asset) => asset.id);
+    const pendingIds = imageIds.filter((assetId) => !loadedPromptIds.current.has(assetId));
+    if (!pendingIds.length) return () => undefined;
+    pendingIds.forEach((assetId) => loadedPromptIds.current.add(assetId));
+    let active = true;
+    void listAssetVideoPrompts(projectId, pendingIds)
       .then((records) => {
         if (!active) return;
-        setPrompts(Object.fromEntries(records.map((record) => [record.assetId, record.promptText])));
-        setSavedIds(new Set(records.map((record) => record.assetId)));
+        setPrompts((current) => ({
+          ...current,
+          ...Object.fromEntries(records.map((record) => [record.assetId, record.promptText])),
+        }));
+        setSavedIds((current) => new Set([...current, ...records.map((record) => record.assetId)]));
       })
       .catch((error: unknown) => {
+        pendingIds.forEach((assetId) => loadedPromptIds.current.delete(assetId));
         if (active) setNotice(toUserMessage(error));
       });
     return () => { active = false; };
-  }, [initialAssets, projectId]);
+  }, [availableAssets, projectId]);
 
   useEffect(() => {
     setDurationSeconds(contract.ok ? contract.contract.durationField.default : undefined);
@@ -323,19 +625,15 @@ export function AssetVideoBatchWorkspace({
   }, [contract]);
 
   useEffect(() => {
-    const first = initialAssets.find((asset) => isImageAssetForVideo(asset));
-    setFirstFrameAssetId((current) => current && initialAssets.some((asset) => asset.id === current) ? current : first?.id);
-    setLastFrameAssetId((current) => current && initialAssets.some((asset) => asset.id === current) ? current : undefined);
-  }, [initialAssets]);
-
-  useEffect(() => {
     setLocalMode((current) => current === "PROJECT_FOLDER" ? current : localImportModeForGeneration(generationMode));
     setLocalInspection(undefined);
     setProjectSegmentForms({});
     setExpandedLocalOrdinal(undefined);
   }, [generationMode]);
 
-  const selectedAssets = initialAssets.filter((asset) => selectedIds.has(asset.id));
+  const selectedAssets = [...selectedIds]
+    .map((assetId) => availableAssets.find((asset) => asset.id === assetId))
+    .filter((asset): asset is AssetView => Boolean(asset));
   const imageAssets = selectedAssets.filter(isImageAssetForVideo);
   const videoAssets = selectedAssets.filter(isVideoAssetForH3);
   const audioAssets = selectedAssets.filter(isAudioAssetForH3);
@@ -447,28 +745,78 @@ export function AssetVideoBatchWorkspace({
   );
   const batchItems: BatchDraftItem[] = batchDraft.items;
 
-  function toggleAsset(assetId: string) {
+  function addSelectedAsset(assetId: string) {
+    setSelectedIds((current) => {
+      if (current.has(assetId) || current.size >= 100) return current;
+      return new Set([...current, assetId]);
+    });
+  }
+
+  function setFirstFrame(asset: AssetView) {
+    if (!isImageAssetForVideo(asset)) return;
+    setFirstFrameAssetId(asset.id);
+    if (generationMode === "FL2VA_IMAGE_TO_VIDEO") setSelectedIds(new Set([asset.id]));
+    else addSelectedAsset(asset.id);
+    if (lastFrameAssetId === asset.id) setLastFrameAssetId(undefined);
+  }
+
+  function setLastFrame(asset: AssetView) {
+    if (!isImageAssetForVideo(asset) || firstFrameAssetId === asset.id) return;
+    setLastFrameAssetId(asset.id);
+    addSelectedAsset(asset.id);
+  }
+
+  function toggleAsset(asset: AssetView) {
+    if (!h3PickerAssets([asset], generationMode).length) return;
+    if (generationMode === "FL2VA_IMAGE_TO_VIDEO") {
+      setFirstFrame(asset);
+      return;
+    }
+    if (generationMode === "FL2VA_FIRST_LAST") {
+      if (!selectedIds.has(asset.id)) {
+        addSelectedAsset(asset.id);
+        if (!firstFrameAssetId) setFirstFrame(asset);
+        else if (!lastFrameAssetId && firstFrameAssetId !== asset.id) setLastFrame(asset);
+      } else {
+        setSelectedIds((current) => new Set([...current].filter((assetId) => assetId !== asset.id)));
+        if (firstFrameAssetId === asset.id) setFirstFrameAssetId(undefined);
+        if (lastFrameAssetId === asset.id) setLastFrameAssetId(undefined);
+      }
+      return;
+    }
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (next.has(assetId)) next.delete(assetId);
-      else if (next.size < 100) next.add(assetId);
+      if (next.has(asset.id)) next.delete(asset.id);
+      else if (next.size < 100) next.add(asset.id);
       return next;
     });
   }
 
-  function isSelectableForMode(asset: AssetView): boolean {
-    switch (generationMode) {
-      case "FL2VA_TEXT_TO_VIDEO": return false;
-      case "FL2VA_IMAGE_TO_VIDEO":
-      case "FL2VA_FIRST_LAST":
-      case "REF2VA_IMAGE":
-        return isImageAssetForVideo(asset);
-      case "REF2VA_IMAGE_AUDIO":
-        return isImageAssetForVideo(asset) || isAudioAssetForH3(asset);
-      case "REF2VA_VIDEO_IMAGE":
-        return isImageAssetForVideo(asset) || isVideoAssetForH3(asset);
-      case "REF2VA_AUDIO": return isAudioAssetForH3(asset);
-    }
+  function moveSelectedAsset(assetId: string, delta: number) {
+    setSelectedIds((current) => {
+      const ids = [...current];
+      const targetAsset = availableAssets.find((asset) => asset.id === assetId);
+      if (!targetAsset) return current;
+      const selected = ids
+        .map((id) => availableAssets.find((asset) => asset.id === id))
+        .filter((asset): asset is AssetView => Boolean(asset))
+        .filter((asset) => asset.assetType === targetAsset.assetType);
+      const orderedAssets = h3PickerAssets(selected, generationMode);
+      const orderedIds = orderedAssets.map((asset) => asset.id);
+      const index = orderedIds.indexOf(assetId);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= orderedIds.length) return current;
+      [orderedIds[index], orderedIds[target]] = [orderedIds[target], orderedIds[index]];
+      let orderedIndex = 0;
+      const nextIds = ids.map((id) => orderedIds.includes(id) ? orderedIds[orderedIndex++] : id);
+      return new Set(nextIds);
+    });
+  }
+
+  function removeSelectedAsset(assetId: string) {
+    setSelectedIds((current) => new Set([...current].filter((id) => id !== assetId)));
+    if (firstFrameAssetId === assetId) setFirstFrameAssetId(undefined);
+    if (lastFrameAssetId === assetId) setLastFrameAssetId(undefined);
   }
 
   function updatePrompt(assetId: string, value: string) {
@@ -1002,15 +1350,30 @@ export function AssetVideoBatchWorkspace({
             hideCreate
           />
         </div>
-      ) : generationMode !== "FL2VA_TEXT_TO_VIDEO" && !initialAssets.length ? (
-        <div className="asset-video-empty-state">
-          <strong>还没有选择素材</strong>
-          <p>回到资产库，勾选当前模式需要的图片、视频或音频素材。</p>
-          <button type="button" onClick={onBackToAssets}>去资产库选择</button>
-        </div>
       ) : (
         <div className="batch-workspace-grid">
           <div className="batch-editor-column">
+          <H3AssetLibraryPicker
+            projectId={projectId}
+            assets={availableAssets}
+            generationMode={generationMode}
+            selectedIds={selectedIds}
+            firstFrameAssetId={firstFrameAssetId}
+            lastFrameAssetId={lastFrameAssetId}
+            keyword={assetLibraryKeywordInput}
+            mediaType={assetLibraryMediaType}
+            loading={assetLibraryLoading}
+            error={assetLibraryError}
+            hasMore={Boolean(assetLibraryCursor)}
+            busy={busy}
+            onKeywordChange={setAssetLibraryKeywordInput}
+            onMediaTypeChange={setAssetLibraryMediaType}
+            onRefresh={() => void requestAssetPage(undefined, true)}
+            onLoadMore={() => void requestAssetPage(assetLibraryCursor, false)}
+            onToggleAsset={toggleAsset}
+            onSetFirstFrame={setFirstFrame}
+            onSetLastFrame={setLastFrame}
+          />
           <section className="h3-batch-prompt-panel" aria-label="H3 批次提示词">
             <label htmlFor="h3-batch-prompt"><span>视频 Prompt</span><textarea id="h3-batch-prompt" value={batchPrompt} onChange={(event) => setBatchPrompt(event.target.value)} rows={5} maxLength={64 * 1024} disabled={busy || !modeSupported} placeholder="描述运动、镜头、声音和连续性；可使用 <Picture 1>、<Audio 1>、<Video 1>。" /></label>
             <small>{modePromptTooLong ? "Prompt 超过 64 KiB" : "该 Prompt 会随本次队列创建冻结。"}</small>
@@ -1021,19 +1384,41 @@ export function AssetVideoBatchWorkspace({
             <span>图片 {imageAssets.length} · 视频 {videoAssets.length} · 音频 {audioAssets.length}</span>
             <span>队列项 <strong>{batchItems.length}</strong></span>
           </div>
+          {generationMode.startsWith("REF2VA") && (
+            <div className="h3-selected-reference-list" aria-label="已选择的参考素材">
+              <div className="h3-selected-reference-heading">
+                <strong>已选择参考素材</strong>
+                <span>按列表顺序写入批次</span>
+              </div>
+              {([
+                ["图片参考", selectedAssets.filter(isImageAssetForVideo)],
+                ["音频参考", selectedAssets.filter(isAudioAssetForH3)],
+                ["视频参考", selectedAssets.filter(isVideoAssetForH3)],
+              ] as Array<[string, AssetView[]]>).filter(([, items]) => items.length > 0).map(([label, items]) => (
+                <div className="h3-selected-reference-group" key={label}>
+                  <strong>{label}</strong>
+                  {items.map((asset, index) => (
+                    <div className="h3-selected-reference-row" key={asset.id}>
+                      <span className="h3-selected-reference-index">#{index + 1}</span>
+                      <span className="h3-selected-reference-name">{asset.name}</span>
+                      <button type="button" className="quiet-button" onClick={() => moveSelectedAsset(asset.id, -1)} disabled={busy || index === 0} aria-label={`上移${asset.name}`}>↑</button>
+                      <button type="button" className="quiet-button" onClick={() => moveSelectedAsset(asset.id, 1)} disabled={busy || index === items.length - 1} aria-label={`下移${asset.name}`}>↓</button>
+                      <button type="button" className="quiet-button" onClick={() => removeSelectedAsset(asset.id)} disabled={busy}>移除</button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {!h3PickerAssets(selectedAssets, generationMode).length && <span className="h3-project-media-empty">尚未选择参考素材</span>}
+            </div>
+          )}
           <div className="asset-video-batch-list" aria-label="视频生产素材列表">
-            {initialAssets.map((asset, index) => {
+            {h3PickerAssets(selectedAssets, generationMode).map((asset, index) => {
               const isImage = isImageAssetForVideo(asset);
-              const isSelectable = isSelectableForMode(asset);
               const promptReady = Boolean(prompts[asset.id]?.trim());
               const checked = selectedIds.has(asset.id);
-              const qualification = !isSelectable
-                ? "该模式不使用此素材"
-                : (generationMode === "REF2VA_AUDIO" || (generationMode === "REF2VA_IMAGE_AUDIO" && isAudioAssetForH3(asset)))
-                  ? "可作为音频参考"
-                  : generationMode === "REF2VA_VIDEO_IMAGE" && isVideoAssetForH3(asset)
-                    ? "可作为视频参考"
-                    : h3AssetQualification({
+              const qualification = generationMode.startsWith("REF2VA")
+                ? isAudioAssetForH3(asset) ? "可作为音频参考" : isVideoAssetForH3(asset) ? "可作为视频参考" : "可作为图片参考"
+                : h3AssetQualification({
                       isImage,
                       promptReady: generationMode.startsWith("FL2VA") ? Boolean(modePrompt) : true,
                       promptTooLong: modePromptTooLong,
@@ -1046,10 +1431,7 @@ export function AssetVideoBatchWorkspace({
                     });
               return (
                 <article key={asset.id} className={`asset-video-batch-card${checked ? " asset-video-batch-card-selected" : ""}`}>
-                  <label className="asset-video-select-control">
-                    <input type="checkbox" checked={checked} onChange={() => toggleAsset(asset.id)} disabled={busy || !isSelectable} />
-                    <span>#{index + 1}</span>
-                  </label>
+                  <span className="asset-video-select-control">#{index + 1}</span>
                   <div className="asset-video-batch-card-body">
                     <div className="asset-video-batch-card-heading">
                       <strong>{asset.name}</strong>
@@ -1057,7 +1439,7 @@ export function AssetVideoBatchWorkspace({
                         {qualification}
                       </span>
                     </div>
-                      {isImage && generationMode.startsWith("FL2VA") && <label className="asset-video-prompt-input">
+                      {isImage && generationMode !== "FL2VA_TEXT_TO_VIDEO" && generationMode.startsWith("FL2VA") && <label className="asset-video-prompt-input">
                         <span>视频提示词</span>
                         <textarea
                         rows={3}
@@ -1068,15 +1450,11 @@ export function AssetVideoBatchWorkspace({
                         placeholder="描述运动、方向或变化……"
                       />
                       </label>}
-                    {isImage && generationMode.startsWith("FL2VA") && <div className="asset-video-batch-card-actions">
+                    {isImage && generationMode !== "FL2VA_TEXT_TO_VIDEO" && generationMode.startsWith("FL2VA") && <div className="asset-video-batch-card-actions">
                       <small>{savedIds.has(asset.id) && !promptReady ? "" : savedIds.has(asset.id) ? "提示词已保存" : "修改后请保存"}</small>
                       <button type="button" className="quiet-button" onClick={() => void savePrompt(asset)} disabled={busy || !isImage || !promptReady || savedIds.has(asset.id)}>
                         保存提示词
                       </button>
-                    </div>}
-                    {generationMode === "FL2VA_FIRST_LAST" && isImage && <div className="asset-video-frame-role-actions">
-                      <button type="button" className={firstFrameAssetId === asset.id ? "quiet-button asset-role-active" : "quiet-button"} onClick={() => setFirstFrameAssetId(asset.id)} disabled={busy}>设为首帧</button>
-                      <button type="button" className={lastFrameAssetId === asset.id ? "quiet-button asset-role-active" : "quiet-button"} onClick={() => setLastFrameAssetId(asset.id)} disabled={busy}>设为末帧</button>
                     </div>}
                   </div>
                 </article>

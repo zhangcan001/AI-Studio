@@ -609,6 +609,37 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-video-batch-summary { justify-content: flex-start; color: #b9c8df; }
 .asset-video-batch-summary span { padding: 8px 10px; border-radius: 8px; background: #111720; }
 .asset-video-batch-list { display: grid; gap: 10px; }
+.h3-asset-library-picker { display: grid; gap: 12px; padding: 14px; border: 1px solid #35435b; border-radius: 12px; background: #111720; }
+.h3-asset-library-picker-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.h3-asset-library-picker-heading h3 { margin: 3px 0 0; font-size: 1rem; }
+.h3-asset-library-picker-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 220px); gap: 10px; align-items: end; }
+.h3-asset-library-picker-controls label { display: grid; gap: 5px; color: #b9c8df; font-size: 0.78rem; }
+.h3-asset-library-search input { width: 100%; }
+.h3-frame-selection-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.h3-frame-selection-summary { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; padding: 8px; border: 1px solid #35435b; border-radius: 9px; background: #0d131d; }
+.h3-frame-selection-preview { display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: 6px; color: #68758a; background: #090c11; font-size: 0.68rem; text-align: center; }
+.h3-frame-selection-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.h3-frame-selection-copy { display: grid; min-width: 0; gap: 3px; }
+.h3-frame-selection-copy small { color: #8997ad; }
+.h3-frame-selection-copy strong { overflow: hidden; color: #eef4ff; text-overflow: ellipsis; white-space: nowrap; }
+.h3-asset-library-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.h3-asset-picker-item { display: grid; min-width: 0; gap: 7px; padding: 5px; border: 1px solid transparent; border-radius: 12px; }
+.h3-asset-picker-item-selected { border-color: #75a1e9; background: #182337; }
+.h3-asset-picker-item .asset-library-card { min-width: 0; border: 0; background: transparent; }
+.h3-asset-picker-item .asset-library-image { aspect-ratio: 4 / 3; border-radius: 8px; }
+.h3-asset-picker-item .asset-library-card-copy { padding: 8px 3px 2px; }
+.h3-asset-picker-item .asset-favorite-button { display: none; }
+.h3-asset-picker-role-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.h3-asset-picker-role-actions .quiet-button { min-height: 30px; padding: 4px 8px; font-size: 0.74rem; }
+.h3-selected-reference-list { display: grid; gap: 7px; padding: 11px; border: 1px solid #35435b; border-radius: 10px; background: #111720; }
+.h3-selected-reference-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: #d5deec; }
+.h3-selected-reference-heading span { color: #8997ad; font-size: 0.75rem; }
+.h3-selected-reference-group { display: grid; gap: 5px; }
+.h3-selected-reference-group > strong { color: #8997ad; font-size: 0.75rem; }
+.h3-selected-reference-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center; padding: 6px 8px; border-radius: 7px; background: #0d131d; }
+.h3-selected-reference-index { color: #8997ad; font-size: 0.75rem; }
+.h3-selected-reference-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-selected-reference-row .quiet-button { min-height: 28px; padding: 3px 7px; }
 .asset-video-batch-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -837,6 +868,9 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   .asset-video-batch-card { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; }
   .product-ready-banner { align-items: flex-start; flex-direction: column; }
   .asset-video-batch-card { display: grid; }
+  .h3-asset-library-picker-heading { align-items: stretch; flex-direction: column; }
+  .h3-asset-library-picker-controls, .h3-frame-selection-strip { grid-template-columns: 1fr; }
+  .h3-asset-library-picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .batch-prompt-paste { grid-template-columns: 1fr; }
   .detail-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .task-history-row { grid-template-columns: auto minmax(0, 1fr); }

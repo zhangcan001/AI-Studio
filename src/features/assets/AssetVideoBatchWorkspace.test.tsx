@@ -2,7 +2,32 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
 import { MINIMAX_H3_FL2VA_WORKFLOW_ID } from "../runtime/productRuntimeScope";
-import { AssetVideoBatchWorkspace } from "./AssetVideoBatchWorkspace";
+import { AssetVideoBatchWorkspace, h3InitialGenerationMode, h3PickerAssets } from "./AssetVideoBatchWorkspace";
+import type { AssetView } from "../../types/asset";
+
+function asset(id: string, assetType: "image" | "video" | "audio", category: AssetView["category"]): AssetView {
+  return {
+    id,
+    assetType,
+    category,
+    name: id,
+    originalName: `${id}.bin`,
+    mimeType: `${assetType}/test`,
+    width: assetType === "image" ? 1344 : undefined,
+    height: assetType === "image" ? 768 : undefined,
+    durationMs: assetType === "image" ? undefined : 1000,
+    fileSize: 100,
+    createdAt: "2026-08-12T00:00:00Z",
+    thumbnailAvailable: assetType !== "audio",
+    isFavorite: false,
+    tags: [],
+  };
+}
+
+const imageA = asset("image-a", "image", "source_image");
+const imageB = asset("image-b", "image", "generated_image");
+const videoA = asset("video-a", "video", "source_video");
+const audioA = asset("audio-a", "audio", "source_audio");
 
 const fl2vaRecipe: RecipeViewModel = {
   workflowId: MINIMAX_H3_FL2VA_WORKFLOW_ID,
@@ -45,5 +70,35 @@ describe("H3 批量视频工作区渲染安全", () => {
     expect(html).toContain("视频 Prompt");
     expect(html).toMatch(/<button[^>]*disabled[^>]*>创建视频批次（0）<\/button>/);
     expect(html).not.toContain("REF2VA_IMAGE");
+  });
+
+  it("loads a single preselected image as the I2V first frame", () => {
+    const html = renderToStaticMarkup(
+      <AssetVideoBatchWorkspace
+        projectId="project-1"
+        catalog={[fl2vaRecipe]}
+        initialAssets={[imageA]}
+        comfyConnected
+        taskEventsReady
+        productionAdmission={{ busy: false }}
+        onAdmissionChanged={vi.fn().mockResolvedValue(undefined)}
+        onProductionBatchFocused={vi.fn()}
+        onOpenTask={vi.fn()}
+        onBackToAssets={vi.fn()}
+      />,
+    );
+
+    expect(h3InitialGenerationMode([imageA])).toBe("FL2VA_IMAGE_TO_VIDEO");
+    expect(html).toContain("一张图生视频");
+    expect(html).toContain("首帧图片");
+    expect(html).toContain("image-a");
+  });
+
+  it("filters source and generated media by assetType for every H3 picker mode", () => {
+    const assets = [imageA, imageB, videoA, audioA];
+    expect(h3PickerAssets(assets, "FL2VA_IMAGE_TO_VIDEO").map((item) => item.id)).toEqual(["image-a", "image-b"]);
+    expect(h3PickerAssets(assets, "REF2VA_AUDIO").map((item) => item.id)).toEqual(["audio-a"]);
+    expect(h3PickerAssets(assets, "REF2VA_IMAGE_AUDIO").map((item) => item.id)).toEqual(["image-a", "image-b", "audio-a"]);
+    expect(h3PickerAssets(assets, "REF2VA_VIDEO_IMAGE").map((item) => item.id)).toEqual(["image-a", "image-b", "video-a"]);
   });
 });

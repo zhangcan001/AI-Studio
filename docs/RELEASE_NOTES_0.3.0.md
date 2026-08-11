@@ -1,7 +1,7 @@
 # AI Studio 0.3.0 Release Notes
 
 Status: code ready / live validation deferred
-Date: 2026-08-11
+Date: 2026-08-12
 
 > 0.3.0 当前是本地开发候选线。没有创建 `v0.3.0` tag，没有创建 GitHub Release，也没有上传安装包。
 
@@ -32,7 +32,7 @@ Date: 2026-08-11
 
 ## Verification status
 
-本轮 Code Gate：Rust 370 tests / 0 failed；frontend 39 files / 128 tests / 0 failed；frontend build 与 Tauri installer build PASS。产物 SHA 以 `RELEASE_SHA256_0.3.0.txt` 为准。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
+本轮 Code Gate：Rust 370 tests / 0 failed；frontend 39 files / 130 tests / 0 failed；frontend build 与 Tauri installer build PASS。产物 SHA 以 `RELEASE_SHA256_0.3.0.txt` 为准。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
 当前候选线状态：
 
