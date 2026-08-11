@@ -56,6 +56,8 @@ enum InputDefinitionDto {
         min: Option<i64>,
         #[serde(default)]
         max: Option<i64>,
+        #[serde(default)]
+        step: Option<i64>,
     },
     #[serde(rename = "seed")]
     Seed {
@@ -232,12 +234,14 @@ impl InputDefinitionDto {
                 default,
                 min,
                 max,
+                step,
             } => Ok(InputDefinition::Integer {
                 label,
                 required,
                 default,
                 min,
                 max,
+                step,
             }),
             Self::Seed {
                 label,
@@ -369,6 +373,17 @@ outputs:
         ));
         assert_eq!(recipe.bindings.len(), 3);
         assert_eq!(recipe.outputs.len(), 1);
+    }
+
+    #[test]
+    fn parses_integer_step_into_domain_types() {
+        let yaml = VALID_RECIPE.replace("    max: 100\n", "    max: 100\n    step: 4\n");
+        let recipe = RecipeParser::parse(&yaml).expect("recipe should parse");
+
+        assert!(matches!(
+            recipe.inputs.get("steps"),
+            Some(InputDefinition::Integer { step: Some(4), .. })
+        ));
     }
 
     #[test]

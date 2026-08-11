@@ -7,6 +7,7 @@ interface Props {
     required: boolean;
     min?: number;
     max?: number;
+    step?: number;
     default?: number;
   };
   value?: DraftValue;
@@ -27,7 +28,7 @@ export function IntegerField({ field, value, error, onChange }: Props) {
         value={integer}
         min={field.min}
         max={field.max}
-        step={1}
+        step={field.step ?? 1}
         onChange={(event) => {
           if (event.target.value === "") {
             onChange(undefined);
@@ -39,7 +40,7 @@ export function IntegerField({ field, value, error, onChange }: Props) {
       />
       <small className="field-hint">
         {field.min !== undefined && field.max !== undefined
-          ? `${field.min} – ${field.max}`
+          ? `${field.min} – ${field.max}${field.step && field.step > 1 ? ` · 步长 ${field.step}` : ""}`
           : "请输入整数"}
       </small>
       {error && <small className="field-error">{error}</small>}

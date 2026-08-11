@@ -199,12 +199,17 @@ impl PresetService {
             match (definition, value) {
                 (InputDefinition::TextArea { .. }, GenerationInputValue::Text(_)) => {}
                 (
-                    InputDefinition::Integer { min, max, .. },
+                    InputDefinition::Integer { min, max, step, .. },
                     GenerationInputValue::Integer(value),
                 ) => {
                     if min.is_some_and(|min| *value < min) || max.is_some_and(|max| *value > max) {
                         return Err(PresetServiceError::ValuesInvalid(format!(
                             "input \"{key}\" is outside its recipe range"
+                        )));
+                    }
+                    if step.is_some_and(|step| *value % step != 0) {
+                        return Err(PresetServiceError::ValuesInvalid(format!(
+                            "input \"{key}\" is not aligned to its recipe step"
                         )));
                     }
                 }

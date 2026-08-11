@@ -64,6 +64,18 @@ describe("validateRecipeValues seed ranges", () => {
   });
 });
 
+describe("validateRecipeValues integer steps", () => {
+  const integerRecipe: RecipeViewModel = {
+    ...recipe,
+    fields: [{ key: "width", type: "integer", label: "宽度", required: true, min: 16, max: 2048, step: 16, default: 1024 }],
+  };
+
+  it("accepts a valid step and rejects an invalid step without rounding", () => {
+    expect(validateRecipeValues(integerRecipe, { width: { type: "integer", value: 1280 } })).toEqual({});
+    expect(validateRecipeValues(integerRecipe, { width: { type: "integer", value: 1270 } }).width).toContain("16 的倍数");
+  });
+});
+
 describe("validateRecipeValues image inputs", () => {
   const imageRecipe: RecipeViewModel = {
     ...recipe,

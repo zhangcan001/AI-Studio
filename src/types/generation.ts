@@ -14,6 +14,7 @@ export type RecipeField =
       default?: number;
       min?: number;
       max?: number;
+      step?: number;
     }
   | {
       key: string;

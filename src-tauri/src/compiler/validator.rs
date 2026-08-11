@@ -39,8 +39,17 @@ impl RecipeValidator {
 
             match definition {
                 InputDefinition::Integer {
-                    default, min, max, ..
+                    default,
+                    min,
+                    max,
+                    step,
+                    ..
                 } => {
+                    if step.is_some_and(|step| step <= 0) {
+                        return Err(RecipeError::invalid(format!(
+                            "input \"{key}\" step must be greater than zero"
+                        )));
+                    }
                     if let (Some(min), Some(max)) = (min, max) {
                         if min > max {
                             return Err(RecipeError::invalid(format!(
@@ -55,6 +64,21 @@ impl RecipeValidator {
                         {
                             return Err(RecipeError::invalid(format!(
                                 "input \"{key}\" default {default} is outside its declared range"
+                            )));
+                        }
+                        if step.is_some_and(|step| *default % step != 0) {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" default {default} is not aligned to step {}",
+                                step.expect("step checked above")
+                            )));
+                        }
+                    }
+                    if let Some(step) = step {
+                        if min.is_some_and(|min| min % step != 0)
+                            || max.is_some_and(|max| max % step != 0)
+                        {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" min/max must be aligned to step {step}"
                             )));
                         }
                     }
@@ -345,6 +369,31 @@ outputs: []
         let error = RecipeValidator::validate(&recipe).expect_err("range must be rejected");
 
         assert!(matches!(error, RecipeError::Invalid { .. }));
+    }
+
+    #[test]
+    fn rejects_invalid_integer_step_contract() {
+        for replacement in [
+            ("    step: 4\n", "    step: 0\n"),
+            ("    step: 4\n", "    step: -4\n"),
+            ("    default: 20\n", "    default: 21\n"),
+        ] {
+            let yaml = RECIPE_WITH_RANGE
+                .replace("    max: 100\n", "    max: 100\n    step: 4\n")
+                .replace(replacement.0, replacement.1);
+            let recipe = RecipeParser::parse(&yaml).expect("recipe should parse");
+            assert!(RecipeValidator::validate(&recipe).is_err());
+        }
+    }
+
+    #[test]
+    fn accepts_aligned_integer_step_contract() {
+        let yaml = RECIPE_WITH_RANGE
+            .replace("    min: 1\n", "    min: 4\n")
+            .replace("    max: 100\n", "    max: 100\n    step: 4\n");
+        let recipe = RecipeParser::parse(&yaml).expect("recipe should parse");
+
+        RecipeValidator::validate(&recipe).expect("aligned step should be valid");
     }
 
     #[test]

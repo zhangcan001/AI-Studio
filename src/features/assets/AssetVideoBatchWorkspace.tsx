@@ -5,6 +5,9 @@ import type { RecipeViewModel } from "../../types/generation";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import { ResolutionControl } from "../runtime/ResolutionControl";
+import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
+import { validateResolution } from "../runtime/resolution";
 import { buildH3BatchValues, h3RecipeContract, isImageAssetForVideo } from "./assetVideoBatch";
 import { ProductionQueuePanel } from "../studio/ProductionQueuePanel";
 import type { BatchDraftItem } from "../studio/batchDraft";
@@ -50,6 +53,8 @@ export function AssetVideoBatchWorkspace({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initialAssets.map((asset) => asset.id)));
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [durationSeconds, setDurationSeconds] = useState<number>();
+  const [width, setWidth] = useState<number>();
+  const [height, setHeight] = useState<number>();
   const [createdBatchId, setCreatedBatchId] = useState<string>();
   const [createdBatchStarted, setCreatedBatchStarted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,6 +80,8 @@ export function AssetVideoBatchWorkspace({
 
   useEffect(() => {
     setDurationSeconds(contract.ok ? contract.contract.durationField.default : undefined);
+    setWidth(contract.ok ? contract.contract.widthField.default : undefined);
+    setHeight(contract.ok ? contract.contract.heightField.default : undefined);
   }, [contract]);
 
   const selectedAssets = initialAssets.filter((asset) => selectedIds.has(asset.id));
@@ -84,12 +91,30 @@ export function AssetVideoBatchWorkspace({
     new TextEncoder().encode(prompts[asset.id] ?? "").byteLength > 64 * 1024,
   );
   const selectedDuration = contract.ok ? durationSeconds ?? contract.contract.durationField.default : undefined;
+  const selectedWidth = contract.ok ? width ?? contract.contract.widthField.default : undefined;
+  const selectedHeight = contract.ok ? height ?? contract.contract.heightField.default : undefined;
   const durationReady = Boolean(
     contract.ok
       && selectedDuration !== undefined
       && contract.contract.durationOptions.includes(selectedDuration),
   );
-  const runtimeReady = Boolean(contract.ok && comfyConnected && taskEventsReady && durationReady);
+  const resolutionReady = Boolean(
+    recipe
+      && contract.ok
+      && selectedWidth !== undefined
+      && selectedHeight !== undefined
+      && validateResolution(recipe, selectedWidth, selectedHeight).ok,
+  );
+  const runtimeReady = Boolean(contract.ok && comfyConnected && taskEventsReady && durationReady && resolutionReady);
+  const resolutionPresets = contract.ok && recipe
+    ? resolutionPresetsForRecipe(recipe, MINIMAX_H3_RESOLUTION_PRESETS)
+    : [];
+  const exceedsHistoricalProfile = Boolean(
+    selectedDuration !== undefined
+      && selectedWidth !== undefined
+      && selectedHeight !== undefined
+      && (selectedDuration > 5 || selectedWidth * selectedHeight > 100_000),
+  );
   const canCreate = Boolean(
     runtimeReady &&
       !productionAdmission.busy &&
@@ -98,13 +123,13 @@ export function AssetVideoBatchWorkspace({
       oversizedPromptAssets.length === 0 &&
       imageAssets.length <= 100,
   );
-  const batchItems: BatchDraftItem[] = recipe && contract.ok && selectedDuration !== undefined
+  const batchItems: BatchDraftItem[] = recipe && contract.ok && selectedDuration !== undefined && selectedWidth !== undefined && selectedHeight !== undefined
     ? imageAssets.map((asset) => ({
       id: asset.id,
       workflowName: recipe.name,
       workflowVersionId: recipe.workflowVersionId,
       recipeId: recipe.recipeId,
-      values: buildH3BatchValues(recipe, asset.id, prompts[asset.id] ?? "", selectedDuration),
+      values: buildH3BatchValues(recipe, asset.id, prompts[asset.id] ?? "", selectedDuration, selectedWidth, selectedHeight),
     }))
     : [];
 
@@ -201,9 +226,25 @@ export function AssetVideoBatchWorkspace({
 
       <section className="h3-safety-card" aria-label="H3 安全配置">
         <div>
-          <strong>MiniMax H3 安全配置</strong>
-          <p>0.1 MP · 4 步 · 单任务串行</p>
+          <strong>MiniMax H3</strong>
+          <p>模型产品能力：最高 15 秒 · 最高 2K</p>
+          <p>当前 Runtime：4 步 · 单任务串行</p>
+          <small>本机历史已验证：0.1 MP · 5 秒 · RTX 5060 Ti 16GB</small>
         </div>
+        {contract.ok && (
+          <ResolutionControl
+            widthField={contract.contract.widthField}
+            heightField={contract.contract.heightField}
+            width={selectedWidth}
+            height={selectedHeight}
+            presets={resolutionPresets}
+            disabled={busy}
+            onChange={(next) => {
+              setWidth(next.width);
+              setHeight(next.height);
+            }}
+          />
+        )}
         <div className="h3-duration-control">
           <label htmlFor="h3-duration-seconds">视频时长</label>
           <select
@@ -225,6 +266,11 @@ export function AssetVideoBatchWorkspace({
         </div>
         <small>{recipe ? `运行时已锁定：${MINIMAX_H3_WORKFLOW_ID}` : "运行时未就绪"}</small>
       </section>
+      {exceedsHistoricalProfile && (
+        <p className="h3-profile-warning" role="status">
+          当前配置超出本机已验证范围。模型/产品允许该配置，但 RTX 5060 Ti 16GB 的显存占用尚未验证，生成时可能出现显存不足。
+        </p>
+      )}
 
       {!initialAssets.length ? (
         <div className="asset-video-empty-state">
@@ -301,7 +347,7 @@ export function AssetVideoBatchWorkspace({
             </button>
             {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
           </div>
-          {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : "运行时未就绪。") : contract.reason}</p>}
+          {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择符合 Recipe 约束的输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
           {missingPromptAssets.length > 0 && <p className="disabled-note">请先为所有已选图片保存视频提示词；批次创建时会冻结当前内容。</p>}
           {oversizedPromptAssets.length > 0 && <p className="error-message">视频提示词按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
           </div>

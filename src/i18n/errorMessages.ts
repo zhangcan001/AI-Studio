@@ -48,6 +48,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INPUT_REQUIRED: "请先填写必填输入项。",
   INPUT_TYPE_MISMATCH: "输入值类型不符合要求。",
   INPUT_OUT_OF_RANGE: "输入值超出允许范围。",
+  INPUT_STEP_MISMATCH: "输入值不符合当前 Recipe 的步进要求。",
   INPUT_COUNT_OUT_OF_RANGE: "输入素材数量不符合要求。",
   WORKFLOW_INVALID: "工作流内容无效，请重新导入。",
   QUEUE_DISPATCH_UNCERTAIN: "上次退出时任务提交结果无法确认，为避免重复生成，队列已暂停。",

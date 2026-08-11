@@ -49,7 +49,9 @@ import type { PromptEntryView } from "../../types/prompt";
 import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
 import { CreationDashboard } from "../production/CreationDashboard";
 import type { RecentWorkflowRecord } from "../production/productionUx";
-import { KERA2_WORKFLOW_ID, kera2PromptField } from "../runtime/productRuntimeScope";
+import { KERA2_WORKFLOW_ID, kera2PromptField, kera2RecipeContract } from "../runtime/productRuntimeScope";
+import { ResolutionControl } from "../runtime/ResolutionControl";
+import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { splitPromptBlocks } from "../assets/assetVideoBatch";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
@@ -105,7 +107,10 @@ export function GenerationStudio({
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const productCatalog = useMemo(
-    () => catalog.filter((recipe) => recipe.workflowId === KERA2_WORKFLOW_ID),
+    () => catalog.filter((recipe) => {
+      if (recipe.workflowId !== KERA2_WORKFLOW_ID) return false;
+      return kera2RecipeContract(recipe).ok;
+    }),
     [catalog],
   );
   const values = useStudioStore((state) => state.values);
@@ -265,9 +270,16 @@ export function GenerationStudio({
     [selectedWorkflow],
   );
   const krea2Prompt = selectedWorkflow ? kera2PromptField(selectedWorkflow) : undefined;
-  const krea2ConfigError = selectedWorkflow && !krea2Prompt
-    ? "Krea2 Recipe 缺少 key 为 `prompt` 的 textarea 字段，无法创建图片批次。"
+  const krea2Contract = selectedWorkflow ? kera2RecipeContract(selectedWorkflow) : undefined;
+  const krea2ConfigError = selectedWorkflow && krea2Contract && !krea2Contract.ok
+    ? krea2Contract.reason
     : undefined;
+  const krea2ResolutionPresets = useMemo(
+    () => selectedWorkflow && krea2Contract?.ok
+      ? resolutionPresetsForRecipe(selectedWorkflow, KREA2_RESOLUTION_PRESETS)
+      : [],
+    [krea2Contract?.ok, selectedWorkflow],
+  );
   const productionPolicy = productionInteractionPolicy(productionAdmission.busy);
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
   const canGenerate = Boolean(
@@ -515,6 +527,13 @@ export function GenerationStudio({
       },
     ]);
     setBatchNotice(undefined);
+  }
+
+  function updateKrea2Resolution(next: { width?: number; height?: number }) {
+    if (next.width === undefined) removeValue("width");
+    else setValue("width", { type: "integer", value: next.width });
+    if (next.height === undefined) removeValue("height");
+    else setValue("height", { type: "integer", value: next.height });
   }
 
   function promptFieldForBatch() {
@@ -983,6 +1002,7 @@ export function GenerationStudio({
               recipe={selectedWorkflow}
               values={values}
               validationErrors={validationErrors}
+              hiddenFieldKeys={krea2Contract?.ok ? ["width", "height"] : []}
               onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
               onGenerate={() => void generate()}
               projectId={projectId}
@@ -990,6 +1010,17 @@ export function GenerationStudio({
             />
             </>}
             {krea2ConfigError && <p className="error-message" role="alert">{krea2ConfigError}</p>}
+            {krea2Contract?.ok && (
+              <ResolutionControl
+                widthField={krea2Contract.contract.widthField}
+                heightField={krea2Contract.contract.heightField}
+                width={values.width?.type === "integer" ? values.width.value : undefined}
+                height={values.height?.type === "integer" ? values.height.value : undefined}
+                presets={krea2ResolutionPresets}
+                disabled={creating || batchSubmitting}
+                onChange={updateKrea2Resolution}
+              />
+            )}
             {studioMode === "experiment" && (
               <ExperimentPlannerPanel
                 recipe={selectedWorkflow}
@@ -1064,7 +1095,7 @@ export function GenerationStudio({
                   recipe={selectedWorkflow}
                   values={values}
                   validationErrors={validationErrors}
-                  hiddenFieldKeys={krea2Prompt ? [krea2Prompt.key] : []}
+                  hiddenFieldKeys={krea2Contract?.ok ? [krea2Prompt?.key ?? "prompt", "width", "height"] : [krea2Prompt?.key ?? "prompt"]}
                   onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
                   onGenerate={() => void generate()}
                   projectId={projectId}

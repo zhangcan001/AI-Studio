@@ -17,16 +17,17 @@ Date: 2026-08-10
 ## Release hardening changes
 
 - 批量图片入口收敛为 Krea2 已就绪 → 公开参数 → Prompt 列表 → 持久化图片队列；支持按空行拆分、添加、复制、删除和排序。
+- Krea2 批量图片增加 Recipe-bound width/height 控件，提供 8 个官方宽高比以及按 Recipe 约束过滤的 1K/2K 预设；自定义值严格校验，不自动取整或裁剪。
 - 资产库支持为图片保存项目级视频提示词；H3 批量视频入口支持 1–100 张图片、资格状态和独立视频队列。
-- H3 只接受精确 Recipe 语义键；安全配置为 `0.1 MP · 4 步 · 单任务串行`，`duration_seconds` 公开为 Recipe 驱动的 1–5 秒下拉，默认 5 秒，非法范围阻断。
-- H3 Recipe 审计确认正式 workflow ID 当前只有一个活动生产 Recipe（`1.1.2`）；历史版本保留兼容。普通 H3 workspace 假设一个活动生产 Recipe 的选择逻辑记录为技术债，本轮不扩展 Recipe 系统。
+- H3 只接受精确 Recipe 语义键；产品能力为最高 15 秒、最高 2K，`duration_seconds` 公开为 Recipe 驱动的 1–15 秒下拉，step 1、默认 5 秒；当前 Runtime 仍显示 4 步、单任务串行，历史本机验证档位单独保留。
+- H3 新增不可变生产 Recipe `1.2.0`，包含 Recipe-bound width/height；`1.1.2` 及历史版本保留兼容。普通 H3 workspace 假设一个活动生产 Recipe 的选择逻辑记录为技术债，本轮不扩展 Recipe 系统。
 - 新增 `011_asset_video_prompt.sql`；Project Backup 升级为 v5，并保留 v1–v5 恢复兼容。
 - 创建队列时冻结输入、参数和随机 Seed；两个产品都使用严格串行队列与失败继续策略。
 - 普通导航收敛为“批量图片 / 批量视频 / 资产库 / 任务 / 项目 / 工作流 / 设置”。
 
 ## Verification status
 
-Code Gate 结果为 Rust 325 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Windows 安装包构建。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
+Code Gate 结果为 Rust 330 tests、frontend 35 files / 113 tests、frontend build、diff 检查和 Windows 安装包构建。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
 当前候选线状态：
 

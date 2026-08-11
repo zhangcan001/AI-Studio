@@ -139,18 +139,19 @@ M1 Media Input Pack validation is recorded in
 generic media upload, media-aware Recipe compilation and preparation,
 project-scoped playback, and the historical MiniMax H3 input-readiness gate.
 
-The current ComfyUI live gate passed at `http://127.0.0.1:8188` with version
-`0.30.2`, one NVIDIA GeForce RTX 5060 Ti device, and 4,485 nodes. The
-offline/restart gate also passed: port 8188 became unavailable while AI
-Studio stayed alive, and restarting ComfyUI restored the API.
+The most recent recorded ComfyUI environment probe was at
+`http://127.0.0.1:8188` with version `0.30.2`, one NVIDIA GeForce RTX 5060 Ti
+device, and 4,485 nodes. The offline/restart probe also passed. The current
+0.3.0 product owner gate remains deferred and makes no new GPU claim.
 
-The MiniMax H3 16 GB runtime gate is PASS. Immutable Workflow Package `1.1.2`
-completed a real 5.167-second reference-to-video Task on the RTX 5060 Ti,
-persisted the MP4 in Asset Library, and played it through the native Windows
-desktop media protocol. The bounded profile uses the installed pruned NVFP4
-UNet, 0.1 MP, four sampling steps, a 1–5 second Recipe range, and single-task
-execution. Evidence and operating limits are recorded in
-`docs/M1_MINIMAX_H3_RUNTIME_VALIDATION.md`.
+The historical MiniMax H3 16 GB runtime gate is PASS. Immutable Workflow
+Package `1.1.2` completed a real 5.167-second reference-to-video Task on the
+RTX 5060 Ti, persisted the MP4 in Asset Library, and played it through the
+native Windows desktop media protocol. That evidence remains historical and
+uses the validated 0.1 MP, four-step, 1–5 second profile recorded in
+`docs/M1_MINIMAX_H3_RUNTIME_VALIDATION.md`. The current code-ready H3 package
+is `1.2.0`, exposing Recipe-bound 1–15 second duration and up-to-2K
+resolution controls without claiming a new GPU validation result.
 
 Kera2 image generation and MiniMax H3 reference-to-video remain the only
 production runtimes in the frozen 0.3.0 scope. Pack 09 adds a project-scoped
@@ -190,11 +191,12 @@ Runtime Workflow Packages are loaded only from
 installed as runtime packages, and no model files are bundled or modified.
 
 The current local catalog exposes one active production Recipe for the official
-MiniMax H3 workflow ID (`wfl_minimax_h3_reference_video`), version `1.1.2`;
-historical H3 package versions remain in compatibility storage. Technical debt:
-the ordinary H3 workspace currently assumes one active production Recipe for
-the official workflow ID. The 0.3.0 code freeze does not add a Recipe registry
-or selection system.
+MiniMax H3 workflow ID (`wfl_minimax_h3_reference_video`), version `1.2.0`;
+historical H3 package versions remain in compatibility storage. The active
+Recipe exposes `duration_seconds` 1–15 with step 1, plus Recipe-bound width and
+height controls up to 2K. Technical debt: the ordinary H3 workspace currently
+assumes one active production Recipe for the official workflow ID. The 0.3.0
+code freeze does not add a Recipe registry or selection system.
 
 ## Development
 

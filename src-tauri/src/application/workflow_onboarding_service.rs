@@ -1566,6 +1566,7 @@ impl InputMapping {
                 default: parse_optional_i64(default, "default_value")?,
                 min: parse_optional_i64(self.min_value.clone(), "min_value")?,
                 max: parse_optional_i64(self.max_value.clone(), "max_value")?,
+                step: None,
             }),
             SemanticFieldType::Seed => Ok(InputDefinition::Seed {
                 label: self.label.clone(),
@@ -1689,8 +1690,9 @@ fn input_definition_json(definition: &InputDefinition) -> Value {
             default,
             min,
             max,
+            step,
         } => {
-            json!({"type":"integer","label":label,"required":required,"default":default,"min":min,"max":max})
+            json!({"type":"integer","label":label,"required":required,"default":default,"min":min,"max":max,"step":step})
         }
         InputDefinition::Seed {
             label,

@@ -53,10 +53,12 @@ impl WorkflowCompiler {
                     default,
                     min,
                     max,
+                    step,
                     ..
                 } => {
-                    let value =
-                        resolve_integer_input(input_key, *required, *default, *min, *max, request)?;
+                    let value = resolve_integer_input(
+                        input_key, *required, *default, *min, *max, *step, request,
+                    )?;
                     if let Some(value) = value {
                         resolved_inputs
                             .insert(input_key.clone(), ResolvedInputValue::Integer(value));
@@ -252,6 +254,7 @@ fn resolve_integer_input(
     default: Option<i64>,
     min: Option<i64>,
     max: Option<i64>,
+    step: Option<i64>,
     request: &CompileRequest,
 ) -> Result<Option<i64>, CompileError> {
     let value = request
@@ -279,6 +282,14 @@ fn resolve_integer_input(
             value,
             min,
             max,
+        });
+    }
+
+    if step.is_some_and(|step| value % step != 0) {
+        return Err(CompileError::InputStepMismatch {
+            input: input_key.to_owned(),
+            value,
+            step: step.expect("step checked above"),
         });
     }
 
@@ -537,6 +548,157 @@ bindings:
       node: "10"
       input: image
 outputs: []
+"#;
+
+    const KREA2_RESOLUTION_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: kera2_resolution
+name: Kera2 Resolution
+workflow:
+  file: workflow.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 1024
+    min: 16
+    max: 2048
+    step: 8
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 1024
+    min: 16
+    max: 2048
+    step: 8
+  seed:
+    type: seed
+    label: Seed
+    default: random
+bindings:
+  - source: prompt
+    target:
+      node: "13"
+      input: text
+  - source: width
+    target:
+      node: "10"
+      input: width
+  - source: height
+    target:
+      node: "10"
+      input: height
+  - source: seed
+    target:
+      node: "2"
+      input: seed
+outputs:
+  - id: generated_image
+    type: image
+    node: "11"
+    required: true
+"#;
+
+    const KREA2_RESOLUTION_WORKFLOW_JSON: &str = r#"
+{
+  "2": {"inputs": {"seed": 1}, "class_type": "Seed"},
+  "10": {"inputs": {"width": 768, "height": 1280}, "class_type": "EmptyLatentImage"},
+  "11": {"inputs": {"images": ["10", 0]}, "class_type": "SaveImage"},
+  "13": {"inputs": {"text": "original"}, "class_type": "CLIPTextEncode"}
+}
+"#;
+
+    const H3_RESOLUTION_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: minimax_h3_resolution
+name: MiniMax H3 Resolution
+workflow:
+  file: workflow.json
+inputs:
+  duration_seconds:
+    type: integer
+    label: Duration
+    required: true
+    default: 5
+    min: 1
+    max: 15
+    step: 1
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_image:
+    type: image
+    label: Reference Image
+    required: true
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 1344
+    min: 32
+    max: 2048
+    step: 32
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 768
+    min: 32
+    max: 2048
+    step: 32
+  seed:
+    type: seed
+    label: Seed
+    default: random
+bindings:
+  - source: duration_seconds
+    target:
+      node: "22"
+      input: value
+  - source: prompt
+    target:
+      node: "14"
+      input: prompt
+  - source: reference_image
+    target:
+      node: "24"
+      input: image
+  - source: width
+    target:
+      node: "14"
+      input: width
+  - source: height
+    target:
+      node: "14"
+      input: height
+  - source: seed
+    target:
+      node: "15"
+      input: noise_seed
+outputs:
+  - id: generated_video
+    type: video
+    node: "21"
+    required: true
+"#;
+
+    const H3_RESOLUTION_WORKFLOW_JSON: &str = r#"
+{
+  "14": {"inputs": {"prompt": "original", "width": 1344, "height": 768, "length": 124, "ref_image": "original"}, "class_type": "MiniMaxH3ReferenceToVideo"},
+  "15": {"inputs": {"noise_seed": 1}, "class_type": "RandomNoise"},
+  "21": {"inputs": {"images": ["14", 0]}, "class_type": "SaveVideo"},
+  "22": {"inputs": {"value": 5}, "class_type": "PrimitiveFloat"},
+  "24": {"inputs": {"image": "original"}, "class_type": "LoadImage"}
+}
 "#;
 
     fn recipe_and_workflow() -> (crate::domain::Recipe, WorkflowDocument) {
@@ -884,6 +1046,74 @@ outputs: []
                 .compile(&workflow, &recipe, &request)
                 .expect_err("out-of-range value must fail");
             assert!(matches!(error, CompileError::InputOutOfRange { .. }));
+        }
+    }
+
+    #[test]
+    fn compiles_krea2_resolution_inputs_without_rounding() {
+        let recipe =
+            RecipeParser::parse(KREA2_RESOLUTION_RECIPE_YAML).expect("recipe should parse");
+        let workflow = WorkflowDocument::parse(
+            serde_json::from_str(KREA2_RESOLUTION_WORKFLOW_JSON).expect("workflow should parse"),
+        )
+        .expect("workflow should validate");
+        let request = CompileRequest::new(BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                InputValue::String("portrait".to_owned()),
+            ),
+            ("width".to_owned(), InputValue::Integer(1280)),
+            ("height".to_owned(), InputValue::Integer(720)),
+            ("seed".to_owned(), InputValue::Seed(SeedValue::Fixed(42))),
+        ]));
+
+        let result = WorkflowCompiler
+            .compile(&workflow, &recipe, &request)
+            .expect("Krea2 resolution should compile");
+        assert_eq!(result.workflow["10"]["inputs"]["width"], 1280);
+        assert_eq!(result.workflow["10"]["inputs"]["height"], 720);
+
+        let invalid = CompileRequest::new(BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                InputValue::String("portrait".to_owned()),
+            ),
+            ("width".to_owned(), InputValue::Integer(1270)),
+            ("height".to_owned(), InputValue::Integer(720)),
+            ("seed".to_owned(), InputValue::Seed(SeedValue::Fixed(42))),
+        ]));
+        let error = WorkflowCompiler
+            .compile(&workflow, &recipe, &invalid)
+            .expect_err("misaligned Krea2 width must fail");
+        assert!(matches!(error, CompileError::InputStepMismatch { .. }));
+    }
+
+    #[test]
+    fn compiles_h3_duration_boundaries_and_resolution() {
+        let recipe = RecipeParser::parse(H3_RESOLUTION_RECIPE_YAML).expect("recipe should parse");
+        let workflow = WorkflowDocument::parse(
+            serde_json::from_str(H3_RESOLUTION_WORKFLOW_JSON).expect("workflow should parse"),
+        )
+        .expect("workflow should validate");
+
+        for duration in [1, 5, 10, 15] {
+            let request = CompileRequest::new(BTreeMap::from([
+                ("duration_seconds".to_owned(), InputValue::Integer(duration)),
+                ("prompt".to_owned(), InputValue::String("motion".to_owned())),
+                (
+                    "reference_image".to_owned(),
+                    InputValue::Image("ref.png".to_owned()),
+                ),
+                ("width".to_owned(), InputValue::Integer(1344)),
+                ("height".to_owned(), InputValue::Integer(768)),
+                ("seed".to_owned(), InputValue::Seed(SeedValue::Fixed(7))),
+            ]));
+            let result = WorkflowCompiler
+                .compile(&workflow, &recipe, &request)
+                .expect("H3 duration should compile");
+            assert_eq!(result.workflow["22"]["inputs"]["value"], duration);
+            assert_eq!(result.workflow["14"]["inputs"]["width"], 1344);
+            assert_eq!(result.workflow["14"]["inputs"]["height"], 768);
         }
     }
 

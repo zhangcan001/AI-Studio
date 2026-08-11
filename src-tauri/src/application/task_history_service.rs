@@ -527,10 +527,13 @@ fn parse_snapshot_values(
                     .ok_or("text input must be a string")?
                     .to_owned(),
             },
-            InputDefinition::Integer { min, max, .. } => {
+            InputDefinition::Integer { min, max, step, .. } => {
                 let integer = value.as_i64().ok_or("integer input must be an integer")?;
                 if min.is_some_and(|min| integer < min) || max.is_some_and(|max| integer > max) {
                     return Err("integer input is outside the current recipe range");
+                }
+                if step.is_some_and(|step| integer % step != 0) {
+                    return Err("integer input is not aligned to the current recipe step");
                 }
                 DraftValueView::Integer { value: integer }
             }

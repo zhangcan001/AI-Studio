@@ -169,6 +169,8 @@ export function validateRecipeValues(
         errors[field.key] = `数值不能小于 ${field.min}。`;
       } else if (field.max !== undefined && value.value > field.max) {
         errors[field.key] = `数值不能大于 ${field.max}。`;
+      } else if (field.step !== undefined && field.step > 0 && value.value % field.step !== 0) {
+        errors[field.key] = `数值必须是 ${field.step} 的倍数。`;
       }
     } else if (field.type === "seed" && value?.type === "seed_fixed") {
       if (!/^\d+$/.test(value.value) || value.value.length > 20) {

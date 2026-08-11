@@ -17,11 +17,12 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
-| H3 Recipe contract | 只接受精确语义键；`duration_seconds` 从 Recipe 生成 1–5 秒下拉，默认 5 秒，非法范围阻断。 |
-| H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有 `1.1.2`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
+| Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
+| H3 Recipe contract | 只接受精确语义键；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
+| H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有不可变 `1.2.0`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
-| Migration / backup safety | Fresh DB、001–010→011 保留性、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 325 tests、frontend 34 files / 108 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
+| Regression | Rust 330 tests、frontend 35 files / 113 tests、frontend build、diff 检查和 Tauri installer build。 |
 
 ## Deferred live validation — batch images
 
@@ -35,7 +36,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 ## Deferred live validation — batch videos
 
 1. 在“资产库”选择 3 张图片，进入“批量视频”。其中至少 1 张必须是手动导入的图片，以证明视频入口不依赖图片批次来源。
-2. 为 3 张图片分别填写并保存视频提示词；确认资格状态、`0.1 MP · 4 步 · 单任务串行` 安全配置、Recipe 时长下拉（1–5 秒，默认 5 秒）和精确 H3 runtime READY。
+2. 为 3 张图片分别填写并保存视频提示词；确认资格状态、`最高 15 秒 · 最高 2K` 产品能力提示、`4 步 · 单任务串行` 当前 Runtime 提示、历史验证档位提示、Recipe 时长下拉（1–15 秒，默认 5 秒）和精确 H3 runtime READY。
 3. 创建 H3 批次，确认 3 项、严格串行、3 个 Task、3 个 Snapshot 和 3 个视频 Asset；视频可以用原生播放器播放。
 4. 编辑一条提示词后重新创建或检查批次，确认队列项保留编辑后的冻结值；Krea2 批次不应被创建或自动依赖。
 

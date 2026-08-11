@@ -33,6 +33,11 @@ pub enum CompileError {
         min: Option<i64>,
         max: Option<i64>,
     },
+    InputStepMismatch {
+        input: String,
+        value: i64,
+        step: i64,
+    },
     InputCountOutOfRange {
         input: String,
         count: usize,
@@ -61,6 +66,7 @@ impl CompileError {
             Self::InputRequired { .. } => "INPUT_REQUIRED",
             Self::InputTypeMismatch { .. } => "INPUT_TYPE_MISMATCH",
             Self::InputOutOfRange { .. } => "INPUT_OUT_OF_RANGE",
+            Self::InputStepMismatch { .. } => "INPUT_STEP_MISMATCH",
             Self::InputCountOutOfRange { .. } => "INPUT_COUNT_OUT_OF_RANGE",
             Self::SeedOutOfRange { .. } => "SEED_OUT_OF_RANGE",
             Self::Internal { .. } => "COMPILE_INTERNAL",
@@ -126,6 +132,11 @@ impl fmt::Display for CompileError {
                 self.code(),
                 min.map_or_else(|| "-∞".to_owned(), |value| value.to_string()),
                 max.map_or_else(|| "∞".to_owned(), |value| value.to_string())
+            ),
+            Self::InputStepMismatch { input, value, step } => write!(
+                formatter,
+                "{}: input \"{input}\" value {value} must be a multiple of {step}",
+                self.code()
             ),
             Self::InputCountOutOfRange {
                 input,

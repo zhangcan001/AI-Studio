@@ -55,6 +55,7 @@ pub enum FieldViewModel {
         default: Option<i64>,
         min: Option<i64>,
         max: Option<i64>,
+        step: Option<i64>,
     },
     #[serde(rename = "seed")]
     Seed {
@@ -153,6 +154,7 @@ impl RecipeViewModel {
                     default,
                     min,
                     max,
+                    step,
                 } => FieldViewModel::Integer {
                     key,
                     label,
@@ -160,6 +162,7 @@ impl RecipeViewModel {
                     default,
                     min,
                     max,
+                    step,
                 },
                 InputDefinition::Seed {
                     label,
