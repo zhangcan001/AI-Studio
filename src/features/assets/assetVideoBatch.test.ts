@@ -3,6 +3,7 @@ import type { AssetView } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
 import {
   buildH3BatchValues,
+  buildH3BatchDraft,
   buildH3ModeBatchValues,
   canCreateH3Batch,
   h3AssetQualification,
@@ -191,6 +192,79 @@ describe("独立视频批次输入", () => {
       videoAssetIds: ["ast-video-1", "ast-video-2"],
     });
     expect(videoImage.reference_videos).toEqual({ type: "video_assets", assetIds: ["ast-video-1", "ast-video-2"] });
+  });
+
+  it("returns an empty draft instead of calling strict builders for missing mode assets", () => {
+    const cases = [
+      { recipe: fl2vaRecipe, mode: "FL2VA_IMAGE_TO_VIDEO" as const, modeAssetReady: false },
+      { recipe: fl2vaRecipe, mode: "FL2VA_FIRST_LAST" as const, modeAssetReady: false },
+      { recipe: recipe, mode: "REF2VA_IMAGE" as const, modeAssetReady: false },
+      { recipe: omniRecipe, mode: "REF2VA_AUDIO" as const, modeAssetReady: false },
+      { recipe: omniRecipe, mode: "REF2VA_IMAGE_AUDIO" as const, modeAssetReady: false },
+      { recipe: omniRecipe, mode: "REF2VA_VIDEO_IMAGE" as const, modeAssetReady: false },
+    ];
+
+    for (const item of cases) {
+      const contract = h3RecipeContract(item.recipe);
+      expect(contract.ok).toBe(true);
+      const draft = buildH3BatchDraft({
+        recipe: item.recipe,
+        contract,
+        mode: item.mode,
+        prompt: "motion",
+        promptTooLong: false,
+        durationSeconds: 5,
+        width: 1344,
+        height: 768,
+        durationReady: true,
+        resolutionReady: true,
+        modeSupported: true,
+        modeAssetReady: item.modeAssetReady,
+      });
+      expect(draft).toEqual({ items: [] });
+    }
+  });
+
+  it("captures a defensive strict-builder error without throwing from the draft boundary", () => {
+    const contract = h3RecipeContract(recipe);
+    const draft = buildH3BatchDraft({
+      recipe,
+      contract,
+      mode: "REF2VA_IMAGE",
+      prompt: "motion",
+      promptTooLong: false,
+      durationSeconds: 5,
+      width: 1344,
+      height: 768,
+      durationReady: true,
+      resolutionReady: true,
+      modeSupported: true,
+      modeAssetReady: true,
+    });
+    expect(draft.items).toEqual([]);
+    expect(draft.error).toContain("图片素材");
+  });
+
+  it("builds a valid mode draft only after prompt, asset, duration, and resolution checks pass", () => {
+    const contract = h3RecipeContract(recipe);
+    const draft = buildH3BatchDraft({
+      recipe,
+      contract,
+      mode: "REF2VA_IMAGE",
+      prompt: "motion",
+      promptTooLong: false,
+      durationSeconds: 5,
+      width: 1344,
+      height: 768,
+      durationReady: true,
+      resolutionReady: true,
+      modeSupported: true,
+      modeAssetReady: true,
+      imageAssetIds: ["ast-image"],
+    });
+    expect(draft.error).toBeUndefined();
+    expect(draft.items).toHaveLength(1);
+    expect(draft.items[0].values.reference_image).toEqual({ type: "image_asset", assetId: "ast-image" });
   });
 
   it("rejects a Recipe range outside the public 1–15 second contract", () => {

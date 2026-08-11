@@ -18,7 +18,7 @@ import { ResolutionControl } from "../runtime/ResolutionControl";
 import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { validateResolution } from "../runtime/resolution";
 import {
-  buildH3ModeBatchValues,
+  buildH3BatchDraft,
   H3_MODE_OPTIONS,
   h3ModeSupported,
   type H3GenerationMode,
@@ -76,7 +76,7 @@ export function AssetVideoBatchWorkspace({
   const [localBatchName, setLocalBatchName] = useState("");
   const [localAutoStart, setLocalAutoStart] = useState(true);
   const [expandedLocalOrdinal, setExpandedLocalOrdinal] = useState<number>();
-  const [generationMode, setGenerationMode] = useState<H3GenerationMode>("REF2VA_IMAGE");
+  const [generationMode, setGenerationMode] = useState<H3GenerationMode>("FL2VA_TEXT_TO_VIDEO");
   const [batchPrompt, setBatchPrompt] = useState("");
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
   const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
@@ -204,32 +204,47 @@ export function AssetVideoBatchWorkspace({
     runtimeReady,
     productionAdmission.busy,
   );
-  const batchItems: BatchDraftItem[] = (() => {
-    if (!recipe || !contract.ok || selectedDuration === undefined || selectedWidth === undefined || selectedHeight === undefined || !modeSupported) return [];
-    const build = (id: string, assets: Parameters<typeof buildH3ModeBatchValues>[3]): BatchDraftItem => ({
-      id,
-      workflowName: recipe.name,
-      workflowVersionId: recipe.workflowVersionId,
-      recipeId: recipe.recipeId,
-      values: buildH3ModeBatchValues(recipe, generationMode, modePrompt, assets, selectedDuration, selectedWidth, selectedHeight),
-    });
-    switch (generationMode) {
-      case "FL2VA_IMAGE_TO_VIDEO":
-        return firstFrameAssetId ? [build(firstFrameAssetId, { firstFrameAssetId })] : [];
-      case "FL2VA_FIRST_LAST":
-        return firstFrameAssetId && lastFrameAssetId ? [build(`${firstFrameAssetId}:${lastFrameAssetId}`, { firstFrameAssetId, lastFrameAssetId })] : [];
-      case "REF2VA_IMAGE":
-        return [build("reference-images", { imageAssetIds: imageAssets.map((asset) => asset.id) })];
-      case "REF2VA_AUDIO":
-        return [build("reference-audios", { audioAssetIds: audioAssets.map((asset) => asset.id) })];
-      case "REF2VA_IMAGE_AUDIO":
-        return [build("reference-images-audios", { imageAssetIds: imageAssets.map((asset) => asset.id), audioAssetIds: audioAssets.map((asset) => asset.id) })];
-      case "REF2VA_VIDEO_IMAGE":
-        return [build("reference-videos-images", { imageAssetIds: imageAssets.map((asset) => asset.id), videoAssetIds: videoAssets.map((asset) => asset.id) })];
-      case "FL2VA_TEXT_TO_VIDEO":
-        return [build("text-to-video", {})];
-    }
-  })();
+  const batchDraft = useMemo(
+    () => buildH3BatchDraft({
+      recipe,
+      contract,
+      mode: generationMode,
+      prompt: modePrompt,
+      promptTooLong: modePromptTooLong,
+      durationSeconds: selectedDuration,
+      width: selectedWidth,
+      height: selectedHeight,
+      durationReady,
+      resolutionReady,
+      modeSupported,
+      modeAssetReady,
+      firstFrameAssetId,
+      lastFrameAssetId,
+      imageAssetIds: imageAssets.map((asset) => asset.id),
+      videoAssetIds: videoAssets.map((asset) => asset.id),
+      audioAssetIds: audioAssets.map((asset) => asset.id),
+    }),
+    [
+      audioAssets,
+      contract,
+      durationReady,
+      firstFrameAssetId,
+      generationMode,
+      imageAssets,
+      lastFrameAssetId,
+      modeAssetReady,
+      modePrompt,
+      modePromptTooLong,
+      modeSupported,
+      recipe,
+      resolutionReady,
+      selectedDuration,
+      selectedHeight,
+      selectedWidth,
+      videoAssets,
+    ],
+  );
+  const batchItems: BatchDraftItem[] = batchDraft.items;
 
   function toggleAsset(assetId: string) {
     setSelectedIds((current) => {
@@ -760,6 +775,7 @@ export function AssetVideoBatchWorkspace({
             {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
           </div>
           {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择符合 Recipe 约束的输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
+          {batchDraft.error && <p className="error-message" role="alert">视频批次预览失败：{batchDraft.error}</p>}
           {generationMode.startsWith("FL2VA") && missingPromptAssets.length > 0 && !batchPrompt.trim() && <p className="disabled-note">请填写批次 Prompt，或为首帧图片保存视频提示词。</p>}
           {modePromptTooLong && <p className="error-message">视频 Prompt 按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
           {!modeAssetReady && modeSupported && <p className="disabled-note">请先选择当前模式需要的素材并设置首帧/末帧角色。</p>}

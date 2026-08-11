@@ -2,6 +2,7 @@ import type { AssetView } from "../../types/asset";
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
 import { MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
 import { validateResolution } from "../runtime/resolution";
+import type { BatchDraftItem } from "../studio/batchDraft";
 
 export const H3_PROMPT_KEY = "prompt" as const;
 export const H3_REFERENCE_IMAGE_KEY = "reference_image" as const;
@@ -97,6 +98,31 @@ export type H3RecipeContractResult =
   | { ok: true; contract: H3RecipeContract }
   | { ok: false; reason: string };
 
+export interface H3BatchDraftInput {
+  recipe?: RecipeViewModel;
+  contract: H3RecipeContractResult;
+  mode: H3GenerationMode;
+  prompt: string;
+  promptTooLong: boolean;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  durationReady: boolean;
+  resolutionReady: boolean;
+  modeSupported: boolean;
+  modeAssetReady: boolean;
+  firstFrameAssetId?: string;
+  lastFrameAssetId?: string;
+  imageAssetIds?: string[];
+  videoAssetIds?: string[];
+  audioAssetIds?: string[];
+}
+
+export interface H3BatchDraftResult {
+  items: BatchDraftItem[];
+  error?: string;
+}
+
 export function isImageAssetForVideo(asset: AssetView): boolean {
   return asset.assetType === "image";
 }
@@ -128,6 +154,76 @@ export function canCreateH3Batch(input: H3BatchCreationEligibilityInput): boolea
     && input.missingPromptCount === 0
     && input.oversizedPromptCount === 0
     && input.imageCount <= 100;
+}
+
+/**
+ * Builds the preview queue only after all user-facing inputs are ready.
+ * The strict builder below intentionally keeps throwing for invalid Task Truth;
+ * this boundary prevents normal incomplete form state from throwing during render.
+ */
+export function buildH3BatchDraft(input: H3BatchDraftInput): H3BatchDraftResult {
+  if (
+    !input.recipe
+    || !input.contract.ok
+    || !input.modeSupported
+    || !input.modeAssetReady
+    || input.durationSeconds === undefined
+    || input.width === undefined
+    || input.height === undefined
+    || !input.durationReady
+    || !input.resolutionReady
+    || !input.prompt.trim()
+    || input.promptTooLong
+  ) {
+    return { items: [] };
+  }
+
+  const { recipe, mode, prompt, durationSeconds, width, height } = input;
+  const build = (id: string, assets: H3ModeAssets): BatchDraftItem => ({
+    id,
+    workflowName: recipe.name,
+    workflowVersionId: recipe.workflowVersionId,
+    recipeId: recipe.recipeId,
+    values: buildH3ModeBatchValues(recipe, mode, prompt, assets, durationSeconds, width, height),
+  });
+
+  try {
+    switch (mode) {
+      case "FL2VA_IMAGE_TO_VIDEO":
+        return { items: input.firstFrameAssetId ? [build(input.firstFrameAssetId, { firstFrameAssetId: input.firstFrameAssetId })] : [] };
+      case "FL2VA_FIRST_LAST":
+        return {
+          items: input.firstFrameAssetId && input.lastFrameAssetId
+            ? [build(`${input.firstFrameAssetId}:${input.lastFrameAssetId}`, {
+              firstFrameAssetId: input.firstFrameAssetId,
+              lastFrameAssetId: input.lastFrameAssetId,
+            })]
+            : [],
+        };
+      case "REF2VA_IMAGE":
+        return { items: [build("reference-images", { imageAssetIds: input.imageAssetIds ?? [] })] };
+      case "REF2VA_AUDIO":
+        return { items: [build("reference-audios", { audioAssetIds: input.audioAssetIds ?? [] })] };
+      case "REF2VA_IMAGE_AUDIO":
+        return {
+          items: [build("reference-images-audios", {
+            imageAssetIds: input.imageAssetIds ?? [],
+            audioAssetIds: input.audioAssetIds ?? [],
+          })],
+        };
+      case "REF2VA_VIDEO_IMAGE":
+        return {
+          items: [build("reference-videos-images", {
+            imageAssetIds: input.imageAssetIds ?? [],
+            videoAssetIds: input.videoAssetIds ?? [],
+          })],
+        };
+      case "FL2VA_TEXT_TO_VIDEO":
+        return { items: [build("text-to-video", {})] };
+    }
+  } catch (error: unknown) {
+    return { items: [], error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export function splitPromptBlocks(input: string): string[] {

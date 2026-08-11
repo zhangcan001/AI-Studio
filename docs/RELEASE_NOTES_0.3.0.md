@@ -30,7 +30,7 @@ Date: 2026-08-11
 
 ## Verification status
 
-本轮 Code Gate：Rust 364 tests / 0 failed；frontend 37 files / 122 tests / 0 failed；frontend build 与 Tauri installer build PASS。产物 SHA 以 `RELEASE_SHA256_0.3.0.txt` 为准。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
+本轮 Code Gate：Rust 364 tests / 0 failed；frontend 39 files / 127 tests / 0 failed；frontend build 与 Tauri installer build PASS。产物 SHA 以 `RELEASE_SHA256_0.3.0.txt` 为准。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
 当前候选线状态：
 

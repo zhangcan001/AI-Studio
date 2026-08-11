@@ -272,6 +272,11 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   background: #171d28;
   box-shadow: 0 18px 42px rgb(0 0 0 / 16%);
 }
+.workspace-error-boundary { display: grid; gap: 10px; max-width: 720px; }
+.workspace-error-boundary h2,
+.workspace-error-boundary p { margin: 0; }
+.workspace-error-boundary p { color: #aebbd1; }
+.workspace-error-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .workspace-heading { align-items: flex-start; margin-bottom: 18px; }
 .section-description { margin: 7px 0 0; color: #8997ad; font-size: 0.86rem; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }

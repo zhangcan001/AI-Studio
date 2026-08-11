@@ -24,6 +24,7 @@ import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
+import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
@@ -501,22 +502,31 @@ function App() {
         />
       )}
       {activeProject && workspace === "video" && (
-        <AssetVideoBatchWorkspace
-          projectId={activeProject.id}
-          catalog={catalog}
-          initialAssets={videoBatchAssets}
-          comfyConnected={isConnected}
-          taskEventsReady={taskEventsReady}
-          productionAdmission={productionAdmission}
-          focusProductionBatchId={focusedProductionBatchId}
-          onAdmissionChanged={refreshProductionAdmission}
-          onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
-          onOpenTask={(taskId) => {
-            setFocusedTaskId(taskId);
-            setWorkspace("tasks");
-          }}
+        <WorkspaceErrorBoundary
+          resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
           onBackToAssets={() => setWorkspace("assets")}
-        />
+          onRetry={() => {
+            setVideoBatchAssets([]);
+            setWorkspace("video");
+          }}
+        >
+          <AssetVideoBatchWorkspace
+            projectId={activeProject.id}
+            catalog={catalog}
+            initialAssets={videoBatchAssets}
+            comfyConnected={isConnected}
+            taskEventsReady={taskEventsReady}
+            productionAdmission={productionAdmission}
+            focusProductionBatchId={focusedProductionBatchId}
+            onAdmissionChanged={refreshProductionAdmission}
+            onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
+            onOpenTask={(taskId) => {
+              setFocusedTaskId(taskId);
+              setWorkspace("tasks");
+            }}
+            onBackToAssets={() => setWorkspace("assets")}
+          />
+        </WorkspaceErrorBoundary>
       )}
       {activeProject && workspace === "tasks" && (
         <TaskHistory
