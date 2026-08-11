@@ -32,6 +32,11 @@ export const KREA2_RESOLUTION_PRESETS: ResolutionPreset[] = [
 ];
 
 export const MINIMAX_H3_RESOLUTION_PRESETS: ResolutionPreset[] = [
+  { id: "h3-quality-0-5mp-16x9", label: "质量 0.5MP · 16:9", width: 960, height: 544, ratio: "16:9", tier: "768p" },
+  { id: "h3-quality-0-5mp-9x16", label: "质量 0.5MP · 9:16", width: 544, height: 960, ratio: "9:16", tier: "768p" },
+  { id: "h3-quality-0-5mp-1x1", label: "质量 0.5MP · 1:1", width: 736, height: 736, ratio: "1:1", tier: "768p" },
+  { id: "h3-quality-0-4mp-4x3", label: "质量 0.4MP · 4:3", width: 736, height: 544, ratio: "4:3", tier: "768p" },
+  { id: "h3-quality-0-4mp-3x4", label: "质量 0.4MP · 3:4", width: 544, height: 736, ratio: "3:4", tier: "768p" },
   { id: "h3-768p-1x1", label: "1:1", width: 768, height: 768, ratio: "1:1", tier: "768p" },
   { id: "h3-768p-4x3", label: "4:3", width: 1024, height: 768, ratio: "4:3", tier: "768p" },
   { id: "h3-768p-16x9", label: "16:9", width: 1344, height: 768, ratio: "16:9", tier: "768p" },

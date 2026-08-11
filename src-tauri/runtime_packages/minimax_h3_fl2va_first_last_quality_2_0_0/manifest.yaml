@@ -1,0 +1,7 @@
+schema_version: 1
+id: wfl_minimax_h3_fl2va_first_last_quality
+name: MiniMax H3 高质量首尾帧视频
+workflow_version: 2.0.0
+recipe_version: 2.0.0
+category: video
+mode: fl2va_first_last

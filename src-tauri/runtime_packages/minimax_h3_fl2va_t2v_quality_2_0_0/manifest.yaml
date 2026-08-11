@@ -1,0 +1,7 @@
+schema_version: 1
+id: wfl_minimax_h3_fl2va_t2v_quality
+name: MiniMax H3 高质量文生视频
+workflow_version: 2.0.0
+recipe_version: 2.0.0
+category: video
+mode: fl2va_text_to_video

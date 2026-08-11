@@ -10,6 +10,11 @@ import {
   KERA2_WORKFLOW_ID,
   MINIMAX_H3_FL2VA_WORKFLOW_ID,
   MINIMAX_H3_WORKFLOW_ID,
+  MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID,
+  MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID,
+  MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
+  MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+  h3RecipeForMode,
 } from "./productRuntimeScope";
 
 function recipe(workflowId: string, name: string): RecipeViewModel {
@@ -25,11 +30,21 @@ function recipe(workflowId: string, name: string): RecipeViewModel {
 }
 
 describe("0.3.0 product runtime scope", () => {
-  it("accepts only the two exact workflow IDs", () => {
-    expect(PRODUCTION_WORKFLOW_IDS).toEqual([KERA2_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID, MINIMAX_H3_FL2VA_WORKFLOW_ID]);
+  it("accepts the frozen Krea2 runtime and both H3 runtime families", () => {
+    expect(PRODUCTION_WORKFLOW_IDS).toEqual([
+      KERA2_WORKFLOW_ID,
+      MINIMAX_H3_WORKFLOW_ID,
+      MINIMAX_H3_FL2VA_WORKFLOW_ID,
+      MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID,
+      MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID,
+      MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID,
+      MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+    ]);
     expect(productionRuntimeForWorkflowId(KERA2_WORKFLOW_ID)).toBe("kera2Image");
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(productionRuntimeForWorkflowId(MINIMAX_H3_FL2VA_WORKFLOW_ID)).toBe("minimaxH3Video");
+    expect(productionRuntimeForWorkflowId(MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID)).toBe("minimaxH3Video");
+    expect(productionRuntimeForWorkflowId(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(productionRuntimeForWorkflowId("wfl_other")).toBeUndefined();
   });
 
@@ -51,6 +66,19 @@ describe("0.3.0 product runtime scope", () => {
     expect(productionRuntimeForStage("video", MINIMAX_H3_FL2VA_WORKFLOW_ID)).toBe("minimaxH3Video");
     expect(isProductionRuntimeForStage("video", KERA2_WORKFLOW_ID)).toBe(false);
     expect(isProductionRuntimeForStage("image", MINIMAX_H3_WORKFLOW_ID)).toBe(false);
+  });
+
+  it("selects a quality recipe by mode instead of falling back to the fast family", () => {
+    const catalog = [
+      recipe(MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID, "T2V quality"),
+      recipe(MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID, "I2V quality"),
+      recipe(MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID, "First/Last quality"),
+      recipe(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID, "REF2VA quality"),
+    ].map((item) => ({ ...item, outputTypes: ["video"] }));
+    expect(h3RecipeForMode(catalog, "FL2VA_TEXT_TO_VIDEO", "QUALITY")?.workflowId).toBe(MINIMAX_H3_FL2VA_T2V_QUALITY_WORKFLOW_ID);
+    expect(h3RecipeForMode(catalog, "FL2VA_IMAGE_TO_VIDEO", "QUALITY")?.workflowId).toBe(MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID);
+    expect(h3RecipeForMode(catalog, "FL2VA_FIRST_LAST", "QUALITY")?.workflowId).toBe(MINIMAX_H3_FL2VA_FIRST_LAST_QUALITY_WORKFLOW_ID);
+    expect(h3RecipeForMode(catalog, "REF2VA_IMAGE", "QUALITY")?.workflowId).toBe(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID);
   });
 
   it("requires Krea2's exact prompt textarea key instead of the first textarea", () => {

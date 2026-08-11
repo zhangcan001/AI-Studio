@@ -3,7 +3,7 @@ use crate::{
     application::h3_local_import_service::{
         H3LocalImportCommitRequest, H3LocalImportError, H3LocalImportInspection, H3LocalImportMode,
         H3LocalImportPair, H3LocalImportResult, H3ProjectFolderInspection, H3ProjectMedia,
-        H3ProjectSegmentDraft, H3ProjectSegmentInspection,
+        H3ProjectSegmentDraft, H3ProjectSegmentInspection, H3QualityRecipeSelection,
     },
     domain::SeedValue,
     error::AppError,
@@ -112,6 +112,17 @@ pub struct H3LocalImportCommitRequestDto {
     pub fl2va_recipe_id: Option<String>,
     pub ref2va_workflow_version_id: Option<String>,
     pub ref2va_recipe_id: Option<String>,
+    pub quality_profile: Option<String>,
+    #[serde(default)]
+    pub quality_recipes: Vec<H3QualityRecipeSelectionDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct H3QualityRecipeSelectionDto {
+    pub mode: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,6 +224,16 @@ pub async fn h3_local_import_commit(
                 fl2va_recipe_id: request.fl2va_recipe_id,
                 ref2va_workflow_version_id: request.ref2va_workflow_version_id,
                 ref2va_recipe_id: request.ref2va_recipe_id,
+                quality_profile: request.quality_profile,
+                quality_recipes: request
+                    .quality_recipes
+                    .into_iter()
+                    .map(|selection| H3QualityRecipeSelection {
+                        mode: selection.mode,
+                        workflow_version_id: selection.workflow_version_id,
+                        recipe_id: selection.recipe_id,
+                    })
+                    .collect(),
             },
         )
         .await

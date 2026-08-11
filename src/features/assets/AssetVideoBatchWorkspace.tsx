@@ -20,7 +20,13 @@ import type {
 } from "../../types/h3LocalImport";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import {
+  H3_QUALITY_PROFILE,
+  h3RecipeForMode,
+  MINIMAX_H3_FL2VA_WORKFLOW_ID,
+  MINIMAX_H3_WORKFLOW_ID,
+  type H3QualityProfile,
+} from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
 import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { validateResolution } from "../runtime/resolution";
@@ -243,20 +249,13 @@ export function AssetVideoBatchWorkspace({
   const [localAutoStart, setLocalAutoStart] = useState(true);
   const [expandedLocalOrdinal, setExpandedLocalOrdinal] = useState<number>();
   const [generationMode, setGenerationMode] = useState<H3GenerationMode>("FL2VA_TEXT_TO_VIDEO");
+  const [qualityProfile, setQualityProfile] = useState<H3QualityProfile>(H3_QUALITY_PROFILE);
   const [batchPrompt, setBatchPrompt] = useState("");
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
   const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
   const recipe = useMemo(
-    () => {
-      const workflowId = generationMode.startsWith("FL2VA")
-        ? MINIMAX_H3_FL2VA_WORKFLOW_ID
-        : MINIMAX_H3_WORKFLOW_ID;
-      return catalog.find((item) => item.workflowId === workflowId && item.outputTypes?.includes("video"))
-        ?? (workflowId === MINIMAX_H3_WORKFLOW_ID
-          ? catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video"))
-          : undefined);
-    },
-    [catalog, generationMode],
+    () => h3RecipeForMode(catalog, generationMode, qualityProfile),
+    [catalog, generationMode, qualityProfile],
   );
   const contract = useMemo(
     () => recipe
@@ -366,10 +365,14 @@ export function AssetVideoBatchWorkspace({
     && modePrompt.length > 0
     && !modePromptTooLong
     && (generationMode.startsWith("FL2VA") ? selectedAssets.length <= 100 : selectedAssets.length <= 100);
+  const projectRecipesReady = Boolean(
+    localInspection?.projectFolder
+      && localInspection.projectFolder.segments.every((segment) => Boolean(h3RecipeForMode(catalog, segment.generationMode, qualityProfile))),
+  );
   const localCanCreate = localImportCanCommit(
     localInspection,
     localInspection?.mode === "PROJECT_FOLDER"
-      ? Boolean(comfyConnected && taskEventsReady && catalog.some((item) => item.workflowId === MINIMAX_H3_FL2VA_WORKFLOW_ID && item.outputTypes?.includes("video")) && catalog.some((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video")))
+      ? Boolean(comfyConnected && taskEventsReady && projectRecipesReady)
       : runtimeReady,
     productionAdmission.busy,
   );
@@ -636,6 +639,13 @@ export function AssetVideoBatchWorkspace({
     if (selectedDuration === undefined || selectedWidth === undefined || selectedHeight === undefined) return;
     setBusy(true); setNotice(undefined);
     try {
+      const qualityRecipes = H3_MODE_OPTIONS
+        .flatMap((option) => {
+          const selected = h3RecipeForMode(catalog, option.id, qualityProfile);
+          return selected
+            ? [{ mode: option.id, workflowVersionId: selected.workflowVersionId, recipeId: selected.recipeId }]
+            : [];
+        })
       const result = await commitH3LocalImport({
         sessionId: localInspection.sessionId,
         batchName: localBatchName.trim() || undefined,
@@ -650,6 +660,8 @@ export function AssetVideoBatchWorkspace({
         fl2vaRecipeId: catalog.find((item) => item.workflowId === MINIMAX_H3_FL2VA_WORKFLOW_ID && item.outputTypes?.includes("video"))?.recipeId,
         ref2vaWorkflowVersionId: catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video"))?.workflowVersionId,
         ref2vaRecipeId: catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video"))?.recipeId,
+        qualityProfile,
+        qualityRecipes,
       });
       setCreatedBatchId(result.batchId);
       setCreatedBatchStarted(result.autoStarted);
@@ -717,7 +729,7 @@ export function AssetVideoBatchWorkspace({
           {(["FL2VA", "REF2VA"] as const).map((family) => {
             const familyMode = H3_MODE_OPTIONS.find((option) => option.family === family)?.id;
             const active = generationMode.startsWith(family);
-            const available = catalog.some((item) => item.workflowId === (family === "FL2VA" ? MINIMAX_H3_FL2VA_WORKFLOW_ID : MINIMAX_H3_WORKFLOW_ID) && item.outputTypes?.includes("video"));
+            const available = Boolean(familyMode && h3RecipeForMode(catalog, familyMode, qualityProfile));
             return (
               <button
                 key={family}
@@ -736,7 +748,7 @@ export function AssetVideoBatchWorkspace({
         </div>
         <div className="h3-mode-options" role="listbox" aria-label="H3 具体模式">
           {H3_MODE_OPTIONS.filter((option) => option.family === (generationMode.startsWith("FL2VA") ? "FL2VA" : "REF2VA")).map((option) => {
-            const optionRecipe = catalog.find((item) => item.workflowId === (option.family === "FL2VA" ? MINIMAX_H3_FL2VA_WORKFLOW_ID : MINIMAX_H3_WORKFLOW_ID) && item.outputTypes?.includes("video"));
+            const optionRecipe = h3RecipeForMode(catalog, option.id, qualityProfile);
             const optionContract = optionRecipe ? h3RecipeContract(optionRecipe) : undefined;
             const available = Boolean(optionContract?.ok && h3ModeSupported(optionContract.contract, option.id));
             return (
@@ -759,12 +771,30 @@ export function AssetVideoBatchWorkspace({
         {!modeSupported && <p className="h3-mode-disabled-note" role="status">当前本地 H3 工作流未启用该模式。请先安装/启用经过本机 `/object_info` 与 graph 审计的 Recipe。</p>}
       </section>
 
+      <section className="h3-quality-profile" aria-label="H3 生成质量">
+        <label htmlFor="h3-quality-profile">生成质量</label>
+        <select
+          id="h3-quality-profile"
+          value={qualityProfile}
+          onChange={(event) => setQualityProfile(event.target.value as H3QualityProfile)}
+          disabled={busy}
+        >
+          <option value="QUALITY">高质量（推荐）</option>
+          <option value="FAST">快速预览</option>
+        </select>
+        <small>
+          {qualityProfile === "QUALITY"
+            ? "高质量：20步正式工作流，生成更慢，显存和内存占用更高。"
+            : "快速预览：4步 Turbo，速度优先，画质和参考一致性可能低于高质量模式。"}
+        </small>
+      </section>
+
       <section className="h3-safety-card" aria-label="H3 安全配置">
         <div>
           <strong>MiniMax H3</strong>
           <p>模型产品能力：最高 15 秒 · 最高 2K</p>
-          <p>当前 Runtime：4 步 · 单任务串行</p>
-          <small>本机历史已验证：0.1 MP · 5 秒 · RTX 5060 Ti 16GB</small>
+          <p>当前 Runtime：{qualityProfile === "QUALITY" ? "20 步正式工作流" : "4 步 Turbo 预览"} · 单任务串行</p>
+          <small>{qualityProfile === "QUALITY" ? "QUALITY 不会因 16GB 设备自动降级；失败按正常 Task FAILED 处理。" : "FAST 仅用于快速预览，历史包保持不变。"}</small>
         </div>
         {contract.ok && (
           <ResolutionControl

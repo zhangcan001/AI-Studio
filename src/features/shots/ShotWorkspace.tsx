@@ -28,7 +28,12 @@ import { deriveShotStatus, recentShotFailure, shotStatusLabels } from "./shotDom
 import { ShotBatchPlanner } from "./ShotBatchPlanner";
 import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ShotProgressDashboard } from "./ShotProgressDashboard";
-import { filterProductionRuntimeCatalog, isProductionRuntimeForStage } from "../runtime/productRuntimeScope";
+import {
+  filterProductionRuntimeCatalog,
+  h3QualityProfileForWorkflowId,
+  isProductionRuntimeForStage,
+  MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+} from "../runtime/productRuntimeScope";
 import "./ShotWorkspace.css";
 
 interface Props {
@@ -134,9 +139,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
           item.recipeId === config.recipeId &&
           isProductionRuntimeForStage(nextStage, item.workflowId),
         )
-        : productCatalog.find((item) =>
-          isProductionRuntimeForStage(nextStage, item.workflowId) && (item.outputTypes?.includes(nextStage) ?? false),
-        );
+        : preferredStageRecipe(productCatalog, nextStage);
       if (config && recipe) {
         nextDrafts[nextStage] = {
           workflowVersionId: config.workflowVersionId,
@@ -457,6 +460,18 @@ function defaultScalarValues(recipe: RecipeViewModel): ShotInputValues {
     if (field.type === "integer") return [field.key, field.default === undefined ? { type: "integer", value: 0 } : { type: "integer", value: field.default }];
     return [field.key, field.defaultMode === "fixed" ? { type: "seed_fixed", value: field.defaultValue ?? "0" } : { type: "seed_random" }];
   }));
+}
+
+function preferredStageRecipe(catalog: RecipeViewModel[], stage: ShotStage): RecipeViewModel | undefined {
+  const compatible = catalog.filter((item) =>
+    isProductionRuntimeForStage(stage, item.workflowId) && (item.outputTypes?.includes(stage) ?? false),
+  );
+  if (stage === "video") {
+    return compatible.find((item) => item.workflowId === MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)
+      ?? compatible.find((item) => h3QualityProfileForWorkflowId(item.workflowId) === "QUALITY")
+      ?? compatible[0];
+  }
+  return compatible[0];
 }
 
 function ScalarControl({ field, value, onChange }: { field: RecipeField & { type: "integer" | "seed" }; value?: DraftValue; onChange: (value: DraftValue) => void }) {

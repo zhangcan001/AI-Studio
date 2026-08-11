@@ -31,6 +31,54 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_reference_video_1_3_0/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_t2v_quality_2_0_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_0_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_0_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_t2v_quality_2_0_0/workflow_api.json"
+        ),
+    },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_i2v_quality_2_0_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_0_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_0_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_i2v_quality_2_0_0/workflow_api.json"
+        ),
+    },
+    BuiltinPackage {
+        directory: "minimax_h3_fl2va_first_last_quality_2_0_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_0_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_0_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_0_0/workflow_api.json"
+        ),
+    },
+    BuiltinPackage {
+        directory: "minimax_h3_reference_video_quality_2_0_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/workflow_api.json"
+        ),
+    },
 ];
 
 pub fn ensure_installed(root: &Path) -> Result<(), String> {
@@ -71,8 +119,14 @@ mod tests {
         ensure_installed(directory.path()).expect("builtin packages should install");
         let fl2va = directory.path().join("minimax_h3_fl2va_1_0_0");
         let ref2va = directory.path().join("minimax_h3_reference_video_1_3_0");
+        let quality_t2v = directory.path().join("minimax_h3_fl2va_t2v_quality_2_0_0");
+        let quality_ref = directory
+            .path()
+            .join("minimax_h3_reference_video_quality_2_0_0");
         assert!(fl2va.join("manifest.yaml").is_file());
         assert!(ref2va.join("recipe.yaml").is_file());
+        assert!(quality_t2v.join("workflow_api.json").is_file());
+        assert!(quality_ref.join("recipe.yaml").is_file());
         let sentinel = fl2va.join("sentinel.txt");
         std::fs::write(&sentinel, "keep").expect("sentinel");
         ensure_installed(directory.path()).expect("second install should be a no-op");
@@ -92,5 +146,116 @@ mod tests {
             WorkflowValidator::validate(&workflow).expect("workflow validates");
             BindingValidator::validate(&recipe, &workflow).expect("bindings validate");
         }
+    }
+
+    #[test]
+    fn quality_graphs_restore_the_formal_sampling_chain_without_touching_fast_graphs() {
+        let fast_fl2va: serde_json::Value = serde_json::from_str(
+            PACKAGES
+                .iter()
+                .find(|package| package.directory == "minimax_h3_fl2va_1_0_0")
+                .expect("fast fl2va package")
+                .workflow,
+        )
+        .unwrap();
+        let fast_ref2va: serde_json::Value = serde_json::from_str(
+            PACKAGES
+                .iter()
+                .find(|package| package.directory == "minimax_h3_reference_video_1_3_0")
+                .expect("fast ref2va package")
+                .workflow,
+        )
+        .unwrap();
+        assert_eq!(fast_fl2va["23"]["inputs"]["steps"], 4);
+        assert_eq!(fast_ref2va["23"]["inputs"]["steps"], 4);
+        assert!(fast_fl2va.get("27").is_some());
+        assert!(fast_ref2va.get("27").is_some());
+
+        for directory in [
+            "minimax_h3_fl2va_t2v_quality_2_0_0",
+            "minimax_h3_fl2va_i2v_quality_2_0_0",
+            "minimax_h3_fl2va_first_last_quality_2_0_0",
+            "minimax_h3_reference_video_quality_2_0_0",
+        ] {
+            let package = PACKAGES
+                .iter()
+                .find(|package| package.directory == directory)
+                .expect("quality package");
+            let workflow: serde_json::Value = serde_json::from_str(package.workflow).unwrap();
+            assert_eq!(workflow["23"]["inputs"]["steps"], 20);
+            assert_eq!(
+                workflow["13"]["inputs"]["unet_name"]
+                    .as_str()
+                    .unwrap()
+                    .contains("convrot"),
+                true
+            );
+            assert!(
+                workflow.get("27").is_none(),
+                "Turbo LoRA must be absent in {directory}"
+            );
+            assert_eq!(
+                workflow["16"]["class_type"],
+                "MiniMaxH3MemoryEfficientSageAttentionPatch"
+            );
+        }
+
+        let t2v: serde_json::Value = serde_json::from_str(
+            PACKAGES
+                .iter()
+                .find(|package| package.directory == "minimax_h3_fl2va_t2v_quality_2_0_0")
+                .unwrap()
+                .workflow,
+        )
+        .unwrap();
+        assert_eq!(t2v["26"]["inputs"]["mode"], "Middle-36");
+        assert_eq!(t2v["26"]["inputs"]["manual_bypass_blocks"], 36);
+
+        let i2v: serde_json::Value = serde_json::from_str(
+            PACKAGES
+                .iter()
+                .find(|package| package.directory == "minimax_h3_fl2va_i2v_quality_2_0_0")
+                .unwrap()
+                .workflow,
+        )
+        .unwrap();
+        assert_eq!(
+            i2v["13"]["inputs"]["unet_name"],
+            "minmaxh3\\minimax_h3_fl2va_int8_convrot.safetensors"
+        );
+        assert!(i2v.get("26").is_none());
+        assert!(i2v["14"]["inputs"].get("first_frame").is_some());
+        assert!(i2v["14"]["inputs"].get("last_frame").is_none());
+
+        let first_last: serde_json::Value = serde_json::from_str(
+            PACKAGES
+                .iter()
+                .find(|package| package.directory == "minimax_h3_fl2va_first_last_quality_2_0_0")
+                .unwrap()
+                .workflow,
+        )
+        .unwrap();
+        assert!(first_last["14"]["inputs"].get("first_frame").is_some());
+        assert!(first_last["14"]["inputs"].get("last_frame").is_some());
+
+        let ref2va: serde_json::Value = serde_json::from_str(
+            PACKAGES
+                .iter()
+                .find(|package| package.directory == "minimax_h3_reference_video_quality_2_0_0")
+                .unwrap()
+                .workflow,
+        )
+        .unwrap();
+        assert_eq!(
+            ref2va["13"]["inputs"]["unet_name"],
+            "minmaxh3\\minimax_h3_ref2va_int8_convrot.safetensors"
+        );
+        assert_eq!(ref2va["26"]["inputs"]["mode"], "Middle-36");
+        assert!(ref2va["14"]["inputs"]
+            .get("ref_videos.ref_video_0")
+            .is_some());
+        assert!(ref2va["14"]["inputs"]
+            .get("ref_video_audios.ref_video_audio_0")
+            .is_some());
     }
 }

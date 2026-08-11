@@ -1,6 +1,6 @@
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
-import { MINIMAX_H3_FL2VA_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
+import { h3FamilyForWorkflowId } from "../runtime/productRuntimeScope";
 import { validateResolution } from "../runtime/resolution";
 import type { BatchDraftItem } from "../studio/batchDraft";
 
@@ -373,7 +373,8 @@ export function h3ReferenceField(recipe: RecipeViewModel): RecipeField | undefin
 }
 
 export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResult {
-  if (recipe.workflowId !== MINIMAX_H3_WORKFLOW_ID && recipe.workflowId !== MINIMAX_H3_FL2VA_WORKFLOW_ID) {
+  const family = h3FamilyForWorkflowId(recipe.workflowId);
+  if (!family) {
     return { ok: false, reason: "运行目录中的 Recipe 不是 MiniMax H3。" };
   }
   if (!recipe.outputTypes?.includes("video")) {
@@ -391,7 +392,7 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
   const referenceVideosField = exactField(recipe, H3_REFERENCE_VIDEOS_KEY, "videos");
   const referenceAudiosField = exactField(recipe, H3_REFERENCE_AUDIOS_KEY, "audios");
   if (
-    recipe.workflowId === MINIMAX_H3_WORKFLOW_ID
+    family === "REF2VA"
     && !referenceField
     && !referenceImagesField
     && !referenceVideosField
@@ -459,7 +460,7 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
         { length: Math.floor((maxDuration - minDuration) / durationField.step!) + 1 },
         (_, index) => minDuration + index * durationField.step!,
       ),
-      family: recipe.workflowId === MINIMAX_H3_FL2VA_WORKFLOW_ID ? "FL2VA" : "REF2VA",
+      family,
     },
   };
 }

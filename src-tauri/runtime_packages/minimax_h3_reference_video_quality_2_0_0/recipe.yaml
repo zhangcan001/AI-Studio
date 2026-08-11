@@ -1,0 +1,211 @@
+schema_version: 1
+id: rcp_minimax_h3_reference_video_quality_2_0_0
+name: MiniMax H3 高质量全能参考
+workflow:
+  file: workflow_api.json
+inputs:
+  duration_seconds:
+    type: integer
+    label: Duration (seconds)
+    required: true
+    default: 5
+    min: 1
+    max: 15
+    step: 1
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_images:
+    type: images
+    label: Reference images
+    required: false
+    min_items: 0
+    max_items: 9
+  reference_videos:
+    type: videos
+    label: Reference videos
+    required: false
+    min_items: 0
+    max_items: 3
+  reference_audios:
+    type: audios
+    label: Reference audios
+    required: false
+    min_items: 0
+    max_items: 3
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 960
+    min: 32
+    max: 2048
+    step: 32
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 544
+    min: 32
+    max: 2048
+    step: 32
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings:
+  - source: duration_seconds
+    target:
+      node: "22"
+      input: value
+  - source: prompt
+    target:
+      node: "14"
+      input: prompt
+  - source: reference_images
+    item: 0
+    target:
+      node: "24"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_0
+  - source: reference_images
+    item: 1
+    target:
+      node: "28"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_1
+  - source: reference_images
+    item: 2
+    target:
+      node: "29"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_2
+  - source: reference_images
+    item: 3
+    target:
+      node: "30"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_3
+  - source: reference_images
+    item: 4
+    target:
+      node: "31"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_4
+  - source: reference_images
+    item: 5
+    target:
+      node: "32"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_5
+  - source: reference_images
+    item: 6
+    target:
+      node: "33"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_6
+  - source: reference_images
+    item: 7
+    target:
+      node: "34"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_7
+  - source: reference_images
+    item: 8
+    target:
+      node: "35"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: ref_images.ref_image_8
+  - source: reference_videos
+    item: 0
+    target:
+      node: "40"
+      input: file
+    clear_targets:
+      - node: "14"
+        input: ref_videos.ref_video_0
+      - node: "14"
+        input: ref_video_audios.ref_video_audio_0
+  - source: reference_videos
+    item: 1
+    target:
+      node: "42"
+      input: file
+    clear_targets:
+      - node: "14"
+        input: ref_videos.ref_video_1
+      - node: "14"
+        input: ref_video_audios.ref_video_audio_1
+  - source: reference_videos
+    item: 2
+    target:
+      node: "44"
+      input: file
+    clear_targets:
+      - node: "14"
+        input: ref_videos.ref_video_2
+      - node: "14"
+        input: ref_video_audios.ref_video_audio_2
+  - source: reference_audios
+    item: 0
+    target:
+      node: "50"
+      input: audio
+    clear_targets:
+      - node: "14"
+        input: ref_audios.ref_audio_0
+  - source: reference_audios
+    item: 1
+    target:
+      node: "51"
+      input: audio
+    clear_targets:
+      - node: "14"
+        input: ref_audios.ref_audio_1
+  - source: reference_audios
+    item: 2
+    target:
+      node: "52"
+      input: audio
+    clear_targets:
+      - node: "14"
+        input: ref_audios.ref_audio_2
+  - source: width
+    target:
+      node: "14"
+      input: width
+  - source: height
+    target:
+      node: "14"
+      input: height
+  - source: seed
+    target:
+      node: "15"
+      input: noise_seed
+outputs:
+  - id: generated_video
+    type: video
+    node: "21"
+    required: true

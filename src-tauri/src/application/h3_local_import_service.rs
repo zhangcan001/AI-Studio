@@ -42,8 +42,8 @@ pub enum H3LocalImportMode {
 
 const MAX_PROJECT_SEGMENTS: usize = 100;
 const PROJECT_DEFAULT_DURATION_SECONDS: i64 = 5;
-const PROJECT_DEFAULT_WIDTH: i64 = 1344;
-const PROJECT_DEFAULT_HEIGHT: i64 = 768;
+const PROJECT_DEFAULT_WIDTH: i64 = 960;
+const PROJECT_DEFAULT_HEIGHT: i64 = 544;
 const PROJECT_MIN_RESOLUTION: i64 = 32;
 const PROJECT_MAX_RESOLUTION: i64 = 2048;
 const PROJECT_RESOLUTION_STEP: i64 = 32;
@@ -489,6 +489,13 @@ pub struct H3ProjectSegmentDraft {
 }
 
 #[derive(Clone, Debug)]
+pub struct H3QualityRecipeSelection {
+    pub mode: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct H3LocalImportCommitRequest {
     pub batch_name: Option<String>,
     pub workflow_version_id: String,
@@ -503,6 +510,8 @@ pub struct H3LocalImportCommitRequest {
     pub fl2va_recipe_id: Option<String>,
     pub ref2va_workflow_version_id: Option<String>,
     pub ref2va_recipe_id: Option<String>,
+    pub quality_profile: Option<String>,
+    pub quality_recipes: Vec<H3QualityRecipeSelection>,
 }
 
 #[derive(Clone, Debug)]
@@ -1345,7 +1354,7 @@ impl H3LocalImportService {
                 GenerationInputValue::Integer(segment.duration_seconds),
             );
             values.insert("seed".to_owned(), GenerationInputValue::Seed(seed.clone()));
-            let (workflow_version_id, recipe_id) = project_recipe_ids(&request, mode);
+            let (workflow_version_id, recipe_id) = project_recipe_ids(&request, mode)?;
             items.push(CreateProductionBatchItem {
                 workflow_version_id,
                 recipe_id,
@@ -2146,21 +2155,15 @@ fn project_resolution_for_segment(
 }
 
 fn nearest_project_resolution(aspect: f64) -> (i64, i64) {
-    [
-        (768, 768),
-        (1024, 768),
-        (1344, 768),
-        (768, 1344),
-        (768, 1024),
-    ]
-    .into_iter()
-    .min_by(|left, right| {
-        (left.0 as f64 / left.1 as f64 - aspect)
-            .abs()
-            .partial_cmp(&(right.0 as f64 / right.1 as f64 - aspect).abs())
-            .unwrap_or(Ordering::Equal)
-    })
-    .unwrap_or((PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT))
+    [(736, 736), (736, 544), (960, 544), (544, 960), (544, 736)]
+        .into_iter()
+        .min_by(|left, right| {
+            (left.0 as f64 / left.1 as f64 - aspect)
+                .abs()
+                .partial_cmp(&(right.0 as f64 / right.1 as f64 - aspect).abs())
+                .unwrap_or(Ordering::Equal)
+        })
+        .unwrap_or((PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT))
 }
 
 fn project_duration_for_segment(
@@ -2301,9 +2304,29 @@ fn project_mode_from_id(value: &str) -> Result<H3CommitGenerationMode, H3LocalIm
 fn project_recipe_ids(
     request: &H3LocalImportCommitRequest,
     mode: H3CommitGenerationMode,
-) -> (String, String) {
+) -> Result<(String, String), H3LocalImportError> {
+    if request.quality_profile.as_deref() == Some("QUALITY") {
+        let selection = request
+            .quality_recipes
+            .iter()
+            .find(|selection| selection.mode == mode.as_str())
+            .ok_or_else(|| {
+                H3LocalImportError::Inspection(format!("QUALITY Recipe 缺失：{}", mode.as_str()))
+            })?;
+        if selection.workflow_version_id.trim().is_empty() || selection.recipe_id.trim().is_empty()
+        {
+            return Err(H3LocalImportError::Inspection(format!(
+                "QUALITY Recipe 标识无效：{}",
+                mode.as_str()
+            )));
+        }
+        return Ok((
+            selection.workflow_version_id.clone(),
+            selection.recipe_id.clone(),
+        ));
+    }
     if mode.is_fl2va() {
-        (
+        Ok((
             request
                 .fl2va_workflow_version_id
                 .clone()
@@ -2312,9 +2335,9 @@ fn project_recipe_ids(
                 .fl2va_recipe_id
                 .clone()
                 .unwrap_or_else(|| request.recipe_id.clone()),
-        )
+        ))
     } else {
-        (
+        Ok((
             request
                 .ref2va_workflow_version_id
                 .clone()
@@ -2323,7 +2346,7 @@ fn project_recipe_ids(
                 .ref2va_recipe_id
                 .clone()
                 .unwrap_or_else(|| request.recipe_id.clone()),
-        )
+        ))
     }
 }
 
@@ -3406,6 +3429,24 @@ fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H
         }
     }
     H3CommitGenerationMode::parse(request.generation_mode.as_deref())?;
+    if let Some(profile) = request.quality_profile.as_deref() {
+        if !matches!(profile, "QUALITY" | "FAST") {
+            return Err(H3LocalImportError::InvalidInput(
+                "H3 生成质量必须是 QUALITY 或 FAST".to_owned(),
+            ));
+        }
+    }
+    for selection in &request.quality_recipes {
+        if selection.mode.trim().is_empty()
+            || selection.workflow_version_id.trim().is_empty()
+            || selection.recipe_id.trim().is_empty()
+        {
+            return Err(H3LocalImportError::InvalidInput(
+                "QUALITY Recipe 选择不能包含空标识".to_owned(),
+            ));
+        }
+        H3CommitGenerationMode::parse(Some(&selection.mode))?;
+    }
     Ok(())
 }
 
@@ -3689,6 +3730,54 @@ fn validate_manifest_relative_path_for_test(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quality_profile_freezes_a_recipe_per_project_segment_mode() {
+        let request = H3LocalImportCommitRequest {
+            batch_name: None,
+            workflow_version_id: "fast-workflow".to_owned(),
+            recipe_id: "fast-recipe".to_owned(),
+            width: 960,
+            height: 544,
+            duration_seconds: 5,
+            seed: None,
+            auto_start: false,
+            generation_mode: Some("FL2VA_TEXT_TO_VIDEO".to_owned()),
+            fl2va_workflow_version_id: Some("fast-fl2va-workflow".to_owned()),
+            fl2va_recipe_id: Some("fast-fl2va-recipe".to_owned()),
+            ref2va_workflow_version_id: Some("fast-ref-workflow".to_owned()),
+            ref2va_recipe_id: Some("fast-ref-recipe".to_owned()),
+            quality_profile: Some("QUALITY".to_owned()),
+            quality_recipes: vec![
+                H3QualityRecipeSelection {
+                    mode: "FL2VA_TEXT_TO_VIDEO".to_owned(),
+                    workflow_version_id: "quality-t2v-workflow".to_owned(),
+                    recipe_id: "quality-t2v-recipe".to_owned(),
+                },
+                H3QualityRecipeSelection {
+                    mode: "REF2VA_IMAGE".to_owned(),
+                    workflow_version_id: "quality-ref-workflow".to_owned(),
+                    recipe_id: "quality-ref-recipe".to_owned(),
+                },
+            ],
+        };
+
+        assert_eq!(
+            project_recipe_ids(&request, H3CommitGenerationMode::Fl2vaTextToVideo).unwrap(),
+            (
+                "quality-t2v-workflow".to_owned(),
+                "quality-t2v-recipe".to_owned()
+            )
+        );
+        assert_eq!(
+            project_recipe_ids(&request, H3CommitGenerationMode::Ref2vaImage).unwrap(),
+            (
+                "quality-ref-workflow".to_owned(),
+                "quality-ref-recipe".to_owned()
+            )
+        );
+    }
+
     use crate::application::asset_video_prompt_service::AssetVideoPromptService;
     use crate::application::generation_service::GenerationService;
     use crate::application::ports::{
@@ -4302,6 +4391,8 @@ outputs:
                     fl2va_recipe_id: None,
                     ref2va_workflow_version_id: None,
                     ref2va_recipe_id: None,
+                    quality_profile: None,
+                    quality_recipes: Vec::new(),
                 },
             )
             .await
@@ -4504,6 +4595,8 @@ outputs:
                     fl2va_recipe_id: None,
                     ref2va_workflow_version_id: None,
                     ref2va_recipe_id: None,
+                    quality_profile: None,
+                    quality_recipes: Vec::new(),
                 },
             )
             .await
@@ -4810,6 +4903,8 @@ outputs:
                     fl2va_recipe_id: None,
                     ref2va_workflow_version_id: None,
                     ref2va_recipe_id: None,
+                    quality_profile: None,
+                    quality_recipes: Vec::new(),
                 },
             )
             .await

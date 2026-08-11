@@ -598,6 +598,12 @@ export function commitH3LocalImport(request: {
   fl2vaRecipeId?: string;
   ref2vaWorkflowVersionId?: string;
   ref2vaRecipeId?: string;
+  qualityProfile?: "QUALITY" | "FAST";
+  qualityRecipes?: Array<{
+    mode: string;
+    workflowVersionId: string;
+    recipeId: string;
+  }>;
 }): Promise<H3LocalImportResult> {
   return invoke<H3LocalImportResult>("h3_local_import_commit", { request });
 }

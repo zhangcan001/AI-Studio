@@ -598,6 +598,10 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .resolution-control .field-error { min-height: 0; margin: 0; }
 .resolution-control > .field-hint { margin: 0; color: var(--ux-muted); font-size: 0.72rem; line-height: 1.4; }
 .h3-profile-warning { margin: 0; padding: 10px 12px; border: 1px solid #8b6b3e; border-radius: 9px; color: #ffe0aa; background: #2b2418; font-size: 0.8rem; line-height: 1.5; }
+.h3-quality-profile { display: grid; grid-template-columns: auto minmax(180px, 240px) minmax(0, 1fr); align-items: center; gap: 10px; margin-top: 12px; padding: 12px 14px; border: 1px solid #49688f; border-radius: 9px; background: #142238; }
+.h3-quality-profile label { color: var(--ux-text); font-weight: 700; }
+.h3-quality-profile select { min-width: 0; }
+.h3-quality-profile small { color: #b9c8df; line-height: 1.45; }
 .h3-duration-control { display: grid; gap: 4px; min-width: 180px; }
 .h3-duration-control label { color: #ffdcaa; font-size: 0.78rem; font-weight: 600; }
 .h3-duration-control select { min-height: 36px; border-color: #8b6b3e; background: #17130e; }

@@ -13,28 +13,33 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 
 | Gate | Current boundary |
 | --- | --- |
-| Exact runtime scope | Krea2 只按精确 workflow ID 进入批量图片；MiniMax H3 只按 `wfl_minimax_h3_fl2va` / `wfl_minimax_h3_reference_video` 进入批量视频；不创建第三 Runtime。 |
+| Exact runtime scope | Krea2 只按精确 workflow ID 进入批量图片；MiniMax H3 只按 FAST 的 `wfl_minimax_h3_fl2va` / `wfl_minimax_h3_reference_video` 或 QUALITY 的四个 mode-specific workflow ID 进入批量视频；不创建第三 Runtime。 |
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
 | H3 input sources | MiniMax H3 支持 Asset Library 与 Local Batch Import；Local Import 支持 Prompt-only、同名图片/Prompt、首尾帧配对、`h3-batch.json`、`h3-omni-batch.json` 与 `PROJECT_FOLDER` Segment 自动导入。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
 | Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
 | H3 Recipe contract | 只接受经本机 `/object_info` 与 graph 审计的精确语义键；FL2VA 支持 `prompt` / optional `first_frame` / optional `last_frame`，REF2VA 支持 plural `reference_images` / `reference_videos` / `reference_audios`；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
-| H3 Recipe selection audit | 当前内置生产包为 FL2VA `1.0.0` 与 Omni REF2VA `1.3.0`；历史 `1.2.0` / `1.1.2` 包继续保留兼容。每个精确 H3 workflow ID 仍假设一个活动生产 Recipe；多 Recipe 选择仍是已记录、非阻塞技术债。 |
+| H3 Recipe selection audit | 默认/推荐 profile 为 QUALITY（四个不可变 `2.0.0` mode-specific 包、20 步）；FAST 保留旧 FL2VA `1.0.0` / Omni REF2VA `1.3.0` 的 4 步 Turbo 图且未修改。Project Folder 按 mode + profile 选择并冻结 workflow/Recipe；多 Recipe Registry 仍是已记录、非阻塞技术债。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 367 tests / 0 failed；frontend 39 files / 127 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
+| Regression | Rust 369 tests / 0 failed；frontend 39 files / 128 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
 
-## H3 Full Mode Package Audit
+## H3 Production Quality / FAST Package Audit
 
-本轮先读取本机 ComfyUI `http://127.0.0.1:8188/object_info`，再按真实节点字段生成并验证不可变内置包；没有为缺失节点或字段猜测新的 Runtime。
+QUALITY 是默认/推荐档案，FAST 是保留的低成本预览档案。两者都进入同一既有 Production Queue、Task、Snapshot、Asset 链；没有新增执行器或队列。
 
-| Package | Workflow ID / version | Audited graph contract |
+| Profile / package | Workflow ID / version | Audited graph contract |
 | --- | --- | --- |
-| FL2VA | `wfl_minimax_h3_fl2va` / `1.0.0` | `MiniMaxH3ImageToVideo`；Prompt-only、optional `first_frame`、optional `last_frame` |
-| Omni REF2VA | `wfl_minimax_h3_reference_video` / `1.3.0` | `MiniMaxH3ReferenceToVideo`；0–9 images、0–3 video frame/audio pairs、0–3 independent audio |
+| QUALITY FL2VA T2V | `wfl_minimax_h3_fl2va_t2v_quality` / `2.0.0` | `MiniMaxH3ImageToVideo`；FL2VA INT8 ConvRot、20 steps、`res_multistep`/`simple`、SageAttention、HyperStep Middle-36、无 Turbo LoRA |
+| QUALITY FL2VA I2V | `wfl_minimax_h3_fl2va_i2v_quality` / `2.0.0` | `MiniMaxH3ImageToVideo`；FL2VA INT8 ConvRot、20 steps、`res_multistep`/`simple`、SageAttention、optional `first_frame`、无 HyperStep/ Turbo LoRA |
+| QUALITY First/Last | `wfl_minimax_h3_fl2va_first_last_quality` / `2.0.0` | FL2VA INT8 ConvRot、20 steps、optional `first_frame` + `last_frame`、无 HyperStep/ Turbo LoRA |
+| QUALITY Omni REF2VA | `wfl_minimax_h3_reference_video_quality` / `2.0.0` | `MiniMaxH3ReferenceToVideo`；REF2VA INT8 ConvRot、20 steps、SageAttention、HyperStep Middle-36，保留 plural reference image/video/audio slots、无 Turbo LoRA |
+| FAST legacy | `wfl_minimax_h3_fl2va` / `1.0.0`; `wfl_minimax_h3_reference_video` / `1.3.0` | 原有 4-step Turbo 图，保持不变 |
+
+QUALITY 与 FAST 都使用 duration `1–15`、step `1`、default `5`；QUALITY 默认分辨率为 `960×544`，并提供 `544×960`、`736×736`、`736×544`、`544×736` 合法预设。Project Folder 在提交时按每个 Segment 的 mode + profile 选择具体 workflow/Recipe，并冻结到 ProductionBatchItem。
 
 The compiler removes only the audited optional graph links when a mode does not supply
 that media family. It never writes placeholder file paths to persisted Queue values.
@@ -60,8 +65,17 @@ The new built-in package file hashes are recorded by source package contents:
 
 | Package | workflow_api.json SHA-256 | recipe.yaml SHA-256 |
 | --- | --- | --- |
-| FL2VA `1.0.0` | `30d022667959e6ff99031ca2f6b1dcf61be0827b185ca01d365231a073d265de` | `cf1d25d6a27f329b4e9bf4e4a9c74e42b0899629633b3aa4fc82bf92756fab55` |
-| Omni REF2VA `1.3.0` | `817d0296122c275694d3adc5541e8df1b41af470c0e4e9f4a12bdb9f3962539d` | `909cdbe2e17a6bbaae3361fb7f1063979b2c2cf5856d4f6b5e1e00e070544048` |
+| FAST FL2VA `1.0.0` | `30d022667959e6ff99031ca2f6b1dcf61be0827b185ca01d365231a073d265de` | `cf1d25d6a27f329b4e9bf4e4a9c74e42b0899629633b3aa4fc82bf92756fab55` |
+| FAST Omni REF2VA `1.3.0` | `817d0296122c275694d3adc5541e8df1b41af470c0e4e9f4a12bdb9f3962539d` | `909cdbe2e17a6bbaae3361fb7f1063979b2c2cf5856d4f6b5e1e00e070544048` |
+
+QUALITY package source hashes:
+
+| Package | workflow_api.json SHA-256 | recipe.yaml SHA-256 |
+| --- | --- | --- |
+| QUALITY FL2VA T2V `2.0.0` | `bd5ca4f305f50ec4ced9c572ac8e304bffb4486568033f0c54ab7447a30d6423` | `49581dc2737b6bfa1222c900633bacc910217098035831bd21160306f0738494` |
+| QUALITY FL2VA I2V `2.0.0` | `7435f948c402fb2eb8ace8351bb99598d9bd102c150057f535f766fc5bd6260e` | `51aaecbbe464c58f7a529adccab8a5bc88323db5dadefe3b476faf00bdaa4431` |
+| QUALITY First/Last `2.0.0` | `96d98f74684cc3f76d028a182829a6f2a7ac3c0d37173a6182edc68b63ced992` | `761760bb34f7ffd30e448e28ebc5ea43ecaac110c6cbf5ebf932aaf5bc3636ab` |
+| QUALITY Omni REF2VA `2.0.0` | `6d4ffb57059fb3b67b70118323aac4744c0d73158a68e076802b5703cc371ac3` | `00605f2f242c93e79af7df5abfe5af26b438614988e81a3da7d87d24d4058b6e` |
 
 The historical `1.1.2` package and its validated workflow bytes remain
 preserved and were not modified. The local package audit used no user absolute
@@ -93,9 +107,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 31122432 | `f668ac918cbb9fae6936540eede3b7605f0152cf4c56a381a17abc4023910b33` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7377468 | `01eeeec5ed148f86e6f04cb5af87ec0ef7c02d05c5e8e3ec223ffd75cc3b39b6` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10792960 | `3ea636e46f230a9d9af4bacced304241d71c35e7291f6ff8c15b2fee5042f483` |
+| `src-tauri/target/release/ai-studio.exe` | 31228416 | `c53ec9fc499f6861bb81cf7677650744f735cbaf36549cd7f2b0d2df3ff1e52d` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7390143 | `e6214bf3efadac1ce8e0119e6a8d2c24372e29d03ff297e61c330242c06f341b` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10817536 | `cd2986e45cb1d5cb5db70c6cd260dba09fb269c816b7030437b92dcc67bdf324` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.
@@ -112,7 +126,7 @@ generation date `2026-08-11`.
 ## Deferred live validation — batch videos
 
 1. 在“资产库”选择 3 张图片，或在“批量视频”切换到“从本地导入”并选择一个最小任务目录。其中至少 1 张必须是手动导入的图片，以证明视频入口不依赖图片批次来源。
-2. 为 3 张图片分别填写并保存视频提示词；确认资格状态、`最高 15 秒 · 最高 2K` 产品能力提示、`4 步 · 单任务串行` 当前 Runtime 提示、历史验证档位提示、Recipe 时长下拉（1–15 秒，默认 5 秒）和精确 H3 runtime READY。
+2. 为 3 张图片分别填写并保存视频提示词；确认资格状态、`最高 15 秒 · 最高 2K` 产品能力提示、QUALITY 默认 `20 步正式工作流`（或显式选择 FAST 的 `4 步 Turbo`）、单任务串行、历史验证档位提示、Recipe 时长下拉（1–15 秒，默认 5 秒）和精确 H3 runtime READY。
 3. 创建 H3 批次，确认 3 项、严格串行、3 个 Task、3 个 Snapshot 和 3 个视频 Asset；视频可以用原生播放器播放。
 4. 编辑一条提示词后重新创建或检查批次，确认队列项保留编辑后的冻结值；Krea2 批次不应被创建或自动依赖。
 
