@@ -24,12 +24,53 @@ export interface H3RecipeContract {
   durationOptions: number[];
 }
 
+export interface H3AssetQualificationInput {
+  isImage: boolean;
+  promptReady: boolean;
+  promptTooLong: boolean;
+  h3RuntimeReady: boolean;
+  comfyConnected: boolean;
+  taskEventsReady: boolean;
+  durationReady: boolean;
+  resolutionReady: boolean;
+  resolutionError?: string;
+}
+
+export interface H3BatchCreationEligibilityInput {
+  runtimeReady: boolean;
+  admissionBusy: boolean;
+  imageCount: number;
+  missingPromptCount: number;
+  oversizedPromptCount: number;
+}
+
 export type H3RecipeContractResult =
   | { ok: true; contract: H3RecipeContract }
   | { ok: false; reason: string };
 
 export function isImageAssetForVideo(asset: AssetView): boolean {
   return asset.assetType === "image";
+}
+
+export function h3AssetQualification(input: H3AssetQualificationInput): string {
+  if (!input.isImage) return "不是图片素材";
+  if (!input.promptReady) return "未填写视频提示词";
+  if (input.promptTooLong) return "视频提示词超过 64 KiB";
+  if (!input.h3RuntimeReady) return "H3 runtime unavailable";
+  if (!input.comfyConnected) return "ComfyUI 未连接";
+  if (!input.taskEventsReady) return "任务事件通道未就绪";
+  if (!input.durationReady) return "请选择有效时长";
+  if (!input.resolutionReady) return input.resolutionError ?? "请选择有效分辨率";
+  return "符合条件";
+}
+
+export function canCreateH3Batch(input: H3BatchCreationEligibilityInput): boolean {
+  return input.runtimeReady
+    && !input.admissionBusy
+    && input.imageCount > 0
+    && input.missingPromptCount === 0
+    && input.oversizedPromptCount === 0
+    && input.imageCount <= 100;
 }
 
 export function splitPromptBlocks(input: string): string[] {

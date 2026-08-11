@@ -8,7 +8,13 @@ import { MINIMAX_H3_WORKFLOW_ID } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
 import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { validateResolution } from "../runtime/resolution";
-import { buildH3BatchValues, h3RecipeContract, isImageAssetForVideo } from "./assetVideoBatch";
+import {
+  buildH3BatchValues,
+  canCreateH3Batch,
+  h3AssetQualification,
+  h3RecipeContract,
+  isImageAssetForVideo,
+} from "./assetVideoBatch";
 import { ProductionQueuePanel } from "../studio/ProductionQueuePanel";
 import type { BatchDraftItem } from "../studio/batchDraft";
 
@@ -98,13 +104,10 @@ export function AssetVideoBatchWorkspace({
       && selectedDuration !== undefined
       && contract.contract.durationOptions.includes(selectedDuration),
   );
-  const resolutionReady = Boolean(
-    recipe
-      && contract.ok
-      && selectedWidth !== undefined
-      && selectedHeight !== undefined
-      && validateResolution(recipe, selectedWidth, selectedHeight).ok,
-  );
+  const resolutionValidation = recipe && contract.ok
+    ? validateResolution(recipe, selectedWidth, selectedHeight)
+    : undefined;
+  const resolutionReady = Boolean(resolutionValidation?.ok);
   const runtimeReady = Boolean(contract.ok && comfyConnected && taskEventsReady && durationReady && resolutionReady);
   const resolutionPresets = contract.ok && recipe
     ? resolutionPresetsForRecipe(recipe, MINIMAX_H3_RESOLUTION_PRESETS)
@@ -115,14 +118,13 @@ export function AssetVideoBatchWorkspace({
       && selectedHeight !== undefined
       && (selectedDuration > 5 || selectedWidth * selectedHeight > 100_000),
   );
-  const canCreate = Boolean(
-    runtimeReady &&
-      !productionAdmission.busy &&
-      imageAssets.length > 0 &&
-      missingPromptAssets.length === 0 &&
-      oversizedPromptAssets.length === 0 &&
-      imageAssets.length <= 100,
-  );
+  const canCreate = canCreateH3Batch({
+    runtimeReady,
+    admissionBusy: productionAdmission.busy,
+    imageCount: imageAssets.length,
+    missingPromptCount: missingPromptAssets.length,
+    oversizedPromptCount: oversizedPromptAssets.length,
+  });
   const batchItems: BatchDraftItem[] = recipe && contract.ok && selectedDuration !== undefined && selectedWidth !== undefined && selectedHeight !== undefined
     ? imageAssets.map((asset) => ({
       id: asset.id,
@@ -291,21 +293,17 @@ export function AssetVideoBatchWorkspace({
               const isImage = isImageAssetForVideo(asset);
               const promptReady = Boolean(prompts[asset.id]?.trim());
               const checked = selectedIds.has(asset.id);
-              const qualification = !isImage
-                ? "不是图片素材"
-                : !promptReady
-                  ? "未填写视频提示词"
-                  : oversizedPromptAssets.some((item) => item.id === asset.id)
-                    ? "视频提示词超过 64 KiB"
-                    : !contract.ok
-                      ? "H3 runtime unavailable"
-                      : !comfyConnected
-                        ? "ComfyUI 未连接"
-                        : !taskEventsReady
-                          ? "任务事件通道未就绪"
-                          : !durationReady
-                            ? "请选择有效时长"
-                            : "符合条件";
+              const qualification = h3AssetQualification({
+                isImage,
+                promptReady,
+                promptTooLong: oversizedPromptAssets.some((item) => item.id === asset.id),
+                h3RuntimeReady: contract.ok,
+                comfyConnected,
+                taskEventsReady,
+                durationReady,
+                resolutionReady,
+                resolutionError: resolutionValidation?.errors.width ?? resolutionValidation?.errors.height,
+              });
               return (
                 <article key={asset.id} className={`asset-video-batch-card${checked ? " asset-video-batch-card-selected" : ""}`}>
                   <label className="asset-video-select-control">

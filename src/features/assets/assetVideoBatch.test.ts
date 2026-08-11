@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { AssetView } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
-import { buildH3BatchValues, h3RecipeContract, isImageAssetForVideo, splitPromptBlocks } from "./assetVideoBatch";
+import {
+  buildH3BatchValues,
+  canCreateH3Batch,
+  h3AssetQualification,
+  h3RecipeContract,
+  isImageAssetForVideo,
+  splitPromptBlocks,
+} from "./assetVideoBatch";
+import { validateResolution } from "../runtime/resolution";
 
 const recipe: RecipeViewModel = {
   workflowId: "wfl_minimax_h3_reference_video",
@@ -114,5 +122,49 @@ describe("独立视频批次输入", () => {
     };
     const result = h3RecipeContract(invalid);
     expect(result).toEqual({ ok: false, reason: "H3 Recipe 的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" });
+  });
+
+  it("blocks asset qualification and creation eligibility for invalid custom resolution", () => {
+    const invalid = validateResolution(recipe, 1270, 768);
+    const invalidQualification = h3AssetQualification({
+      isImage: true,
+      promptReady: true,
+      promptTooLong: false,
+      h3RuntimeReady: true,
+      comfyConnected: true,
+      taskEventsReady: true,
+      durationReady: true,
+      resolutionReady: invalid.ok,
+      resolutionError: invalid.errors.width,
+    });
+    expect(invalidQualification).not.toBe("符合条件");
+    expect(invalidQualification).toContain("32");
+    expect(canCreateH3Batch({
+      runtimeReady: invalid.ok,
+      admissionBusy: false,
+      imageCount: 1,
+      missingPromptCount: 0,
+      oversizedPromptCount: 0,
+    })).toBe(false);
+
+    const valid = validateResolution(recipe, 1280, 768);
+    expect(h3AssetQualification({
+      isImage: true,
+      promptReady: true,
+      promptTooLong: false,
+      h3RuntimeReady: true,
+      comfyConnected: true,
+      taskEventsReady: true,
+      durationReady: true,
+      resolutionReady: valid.ok,
+      resolutionError: valid.errors.width,
+    })).toBe("符合条件");
+    expect(canCreateH3Batch({
+      runtimeReady: valid.ok,
+      admissionBusy: false,
+      imageCount: 1,
+      missingPromptCount: 0,
+      oversizedPromptCount: 0,
+    })).toBe(true);
   });
 });

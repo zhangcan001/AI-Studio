@@ -22,7 +22,26 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有不可变 `1.2.0`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 330 tests、frontend 35 files / 113 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Regression | Rust 330 tests、frontend 35 files / 114 tests、frontend build、diff 检查和 Tauri installer build。 |
+
+## H3 1.2.0 Local Package Audit
+
+| Item | Result |
+| --- | --- |
+| Version | `1.2.0` |
+| Workflow ID | `wfl_minimax_h3_reference_video` |
+| Workflow SHA-256 | `0385e8c53ae005444ae8d12d72145c3c24b681e6fb93f9ba896be9c675a5020a` |
+| Recipe SHA-256 | `5d31c17bea33ca1659cf30434415324d4a1af3bee313eb794e6916081b8a3699` |
+| Package files | `manifest.yaml` / `recipe.yaml` / `workflow_api.json` = PASS |
+| Duration contract | `1–15` / step `1` / default `5` = PASS |
+| Resolution contract | width `32–2048` / step `32` / default `1344`; height `32–2048` / step `32` / default `768` = PASS |
+| Bindings | prompt, reference_image, width, height, duration_seconds duration/math chain, seed = PASS |
+| Compile | 1s PASS · 5s PASS · 10s PASS · 15s PASS · 768-class PASS · 2K-class PASS · Custom PASS |
+| GPU | NOT RUN · `DEFERRED BY PRODUCT OWNER` |
+
+The historical `1.1.2` package and its validated workflow bytes remain
+preserved and were not modified. The local package audit used no user absolute
+paths in this document.
 
 ## Deferred live validation — batch images
 
