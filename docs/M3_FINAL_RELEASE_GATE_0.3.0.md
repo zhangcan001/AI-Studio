@@ -50,9 +50,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 29573632 | `2fdc0dfa72f4dbf76c2156c540d21540bbd8161af2c426d9485d89e093543707` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7081927 | `ce2e44e38fe31bd958c02c63250f41648e016e63b8a4f3ba6102d972e70f69a8` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10321920 | `8cb2ab6d6473f9782eedfc5a17c53c3474af68e74eed76476b38d477203ba6d3` |
+| `src-tauri/target/release/ai-studio.exe` | 29573632 | `b11bcd91e112a97704b4f8a55f833df2a332765b238afa819c177702df0d9f37` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7079381 | `a6a1c68f6d957b988795c5a4bb4111af58944331b40d800cf505c1abb87661b4` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10321920 | `35effe74fcaa8c038654c3a42d716cf692841588038686f90d2292531b390cd7` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.
