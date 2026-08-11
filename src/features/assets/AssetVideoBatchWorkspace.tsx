@@ -260,6 +260,8 @@ export function AssetVideoBatchWorkspace({
       setLocalInspection(inspection);
       setExpandedLocalOrdinal(undefined);
     } catch (error: unknown) {
+      setLocalInspection(undefined);
+      setExpandedLocalOrdinal(undefined);
       setNotice(toUserMessage(error));
     } finally {
       setBusy(false);
@@ -275,6 +277,8 @@ export function AssetVideoBatchWorkspace({
       setExpandedLocalOrdinal(undefined);
       setNotice(`已重新扫描，当前可生成 ${inspection.readyCount} 项。`);
     } catch (error: unknown) {
+      setLocalInspection(undefined);
+      setExpandedLocalOrdinal(undefined);
       setNotice(toUserMessage(error));
     } finally {
       setBusy(false);
@@ -301,12 +305,16 @@ export function AssetVideoBatchWorkspace({
       });
       setCreatedBatchId(result.batchId);
       setCreatedBatchStarted(result.autoStarted);
+      setLocalInspection(undefined);
+      setExpandedLocalOrdinal(undefined);
       await onAdmissionChanged();
       setNotice(
-        `${result.autoStarted ? "已导入并开始生成" : "已导入并创建批次"}，共 ${result.itemCount} 项；图片已进入资产库。${result.warnings.length ? ` ${result.warnings.join("；")}` : ""}`,
+        `本地任务已导入，共${result.itemCount}项。${result.autoStarted ? "已开始生成；" : "已创建批次；"}图片已进入资产库。${result.warnings.length ? ` ${result.warnings.join("；")}` : ""}`,
       );
     } catch (error: unknown) {
-      setNotice(toUserMessage(error));
+      setLocalInspection(undefined);
+      setExpandedLocalOrdinal(undefined);
+      setNotice(`导入未完成，请重新选择任务目录。${toUserMessage(error)}`);
     } finally {
       setBusy(false);
     }

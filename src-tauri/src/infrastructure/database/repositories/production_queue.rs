@@ -210,6 +210,57 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         Ok(result.rows_affected())
     }
 
+    async fn cancel_pending_items_and_complete(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        updated_at: DateTime<Utc>,
+    ) -> Result<u64, RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let cancelled = sqlx::query(
+            "UPDATE production_batch_items
+             SET status = 'CANCELLED', error_code = NULL, error_message = NULL, updated_at = ?
+             WHERE batch_id = ?
+               AND status = 'PENDING'
+               AND EXISTS (
+                   SELECT 1 FROM production_batches
+                   WHERE id = ? AND project_id = ?
+               )",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(batch_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(project_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected();
+
+        if cancelled == 0 {
+            transaction.commit().await.map_err(map_sqlx_error)?;
+            return Ok(0);
+        }
+
+        let batch_update = sqlx::query(
+            "UPDATE production_batches
+             SET status = 'COMPLETED', updated_at = ?
+             WHERE project_id = ? AND id = ?",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(project_id)
+        .bind(batch_id.as_str())
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if batch_update.rows_affected() == 0 {
+            return Err(RepositoryError::integrity(
+                "cancelled production items but could not complete their batch",
+            ));
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(cancelled)
+    }
+
     async fn link_item_task(
         &self,
         item_id: &ProductionBatchItemId,
@@ -1077,6 +1128,64 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_items_and_complete_commits_item_and_batch_together() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("cancel-pending-atomic.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 8, 13, 45, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        repository
+            .insert(
+                &ProductionBatch {
+                    id: batch_id.clone(),
+                    project_id: "project-1".to_owned(),
+                    name: "Atomic cancellation test".to_owned(),
+                    status: ProductionBatchStatus::Ready,
+                    continue_on_failure: true,
+                    archived_at: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                &[ProductionBatchItem {
+                    id: ProductionBatchItemId::new(),
+                    batch_id: batch_id.clone(),
+                    ordinal: 0,
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    values_json: json!({"prompt": {"type": "string", "value": "cancel atomically"}}),
+                    status: ProductionBatchItemStatus::Pending,
+                    task_id: None,
+                    retry_of_item_id: None,
+                    error_code: None,
+                    error_message: None,
+                    created_at: now,
+                    updated_at: now,
+                }],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .cancel_pending_items_and_complete("project-1", &batch_id, now)
+                .await
+                .unwrap(),
+            1
+        );
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Completed);
+        assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Cancelled);
         pool.close().await;
     }
 

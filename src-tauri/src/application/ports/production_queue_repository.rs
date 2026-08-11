@@ -58,6 +58,30 @@ pub trait ProductionQueueRepository: Send + Sync {
         updated_at: DateTime<Utc>,
     ) -> Result<u64, RepositoryError>;
 
+    /// Cancels pending items and completes their batch in one repository transaction when
+    /// supported by the concrete repository. The default keeps lightweight test repositories
+    /// source-compatible; SQLite overrides it with a real transaction.
+    async fn cancel_pending_items_and_complete(
+        &self,
+        project_id: &str,
+        batch_id: &ProductionBatchId,
+        updated_at: DateTime<Utc>,
+    ) -> Result<u64, RepositoryError> {
+        let cancelled = self
+            .cancel_pending_items(project_id, batch_id, updated_at)
+            .await?;
+        if cancelled > 0 {
+            self.set_batch_status(
+                project_id,
+                batch_id,
+                ProductionBatchStatus::Completed,
+                updated_at,
+            )
+            .await?;
+        }
+        Ok(cancelled)
+    }
+
     async fn link_item_task(
         &self,
         item_id: &ProductionBatchItemId,

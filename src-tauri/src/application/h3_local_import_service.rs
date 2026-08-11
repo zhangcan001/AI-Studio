@@ -216,12 +216,21 @@ impl H3LocalImportService {
         }
     }
 
+    async fn cleanup_expired_sessions(&self, keep_session_id: Option<&str>) {
+        let now = self.clock.now();
+        let mut sessions = self.sessions.lock().await;
+        sessions.retain(|session_id, session| {
+            keep_session_id.is_some_and(|keep| keep == session_id) || session.expires_at > now
+        });
+    }
+
     pub async fn pick(
         &self,
         project_id: &str,
         root_path: PathBuf,
         mode: H3LocalImportMode,
     ) -> Result<(String, H3LocalImportInspection), H3LocalImportError> {
+        self.cleanup_expired_sessions(None).await;
         crate::domain::validate_project_id(project_id)
             .map_err(|error| H3LocalImportError::InvalidInput(error.to_string()))?;
         let root_path = canonical_directory(&root_path)?;
@@ -245,6 +254,7 @@ impl H3LocalImportService {
         session_id: &str,
         mode: H3LocalImportMode,
     ) -> Result<H3LocalImportInspection, H3LocalImportError> {
+        self.cleanup_expired_sessions(Some(session_id)).await;
         let root_path = {
             let sessions = self.sessions.lock().await;
             let session = sessions
@@ -273,6 +283,7 @@ impl H3LocalImportService {
         session_id: &str,
         request: H3LocalImportCommitRequest,
     ) -> Result<H3LocalImportResult, H3LocalImportError> {
+        self.cleanup_expired_sessions(Some(session_id)).await;
         validate_commit_request(&request)?;
         let session = {
             let mut sessions = self.sessions.lock().await;
@@ -364,12 +375,20 @@ impl H3LocalImportService {
                 .source_asset_import_service
                 .import_bytes(&session.project_id, original_name, &image_bytes)
                 .await
-                .map_err(|error| H3LocalImportError::AssetImport(error.to_string()))?;
+                .map_err(|error| {
+                    H3LocalImportError::AssetImport(format!(
+                        "已导入 {imported_asset_count} 个图片素材后失败：{error}"
+                    ))
+                })?;
             imported_asset_count += 1;
             self.asset_video_prompt_service
                 .set(&session.project_id, asset.id.as_str(), &prompt_text)
                 .await
-                .map_err(|error| H3LocalImportError::Prompt(error.to_string()))?;
+                .map_err(|error| {
+                    H3LocalImportError::Prompt(format!(
+                        "已导入 {imported_asset_count} 个图片素材后失败：{error}"
+                    ))
+                })?;
 
             let mut values = BTreeMap::new();
             values.insert("prompt".to_owned(), GenerationInputValue::Text(prompt_text));
@@ -1143,7 +1162,278 @@ fn validate_manifest_relative_path_for_test(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::asset_video_prompt_service::AssetVideoPromptService;
+    use crate::application::generation_service::GenerationService;
+    use crate::application::ports::{
+        AssetRepository, AssetVideoPromptRepository, Clock, ComfyAdapter, ComfyAdapterError,
+        ComfyEventSubscription, ComfyHealth, ComfyHistory, ComfyOutputData, ComfyOutputFile,
+        NoopTaskUpdateSink, PromptSubmission, SystemStats,
+    };
+    use crate::application::production_queue_service::ProductionQueueService;
+    use crate::application::source_asset_import_service::SourceAssetImportService;
+    use crate::application::task_recovery_service::TaskRecoveryService;
+    use crate::domain::{AssetId, AssetType, ProductionBatchItemStatus, ProductionBatchStatus};
+    use crate::infrastructure::database::{
+        initialize, SqliteAssetRepository, SqliteAssetVideoPromptRepository,
+        SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
+        SqliteProductionQueueRepository, SqliteProjectRepository, SqliteTaskRepository,
+    };
+    use crate::infrastructure::filesystem::FileSystemAssetStore;
+    use crate::infrastructure::time::SystemClock;
+    use async_trait::async_trait;
+    use chrono::{Duration as ChronoDuration, Utc};
+    use sqlx::SqlitePool;
     use std::io::Cursor;
+    use std::path::Path;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    const PROJECT_ID: &str = "prj_default";
+    const H3_TEST_RECIPE: &str = r#"
+schema_version: 1
+id: minimax_h3_reference_video
+name: MiniMax H3 Reference Video Test
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_image:
+    type: image
+    label: Reference Image
+    required: true
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 640
+    min: 64
+    max: 2048
+    step: 1
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 360
+    min: 64
+    max: 2048
+    step: 1
+  duration_seconds:
+    type: integer
+    label: Duration
+    required: true
+    default: 5
+    min: 1
+    max: 15
+    step: 1
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings: []
+outputs:
+  - id: generated_video
+    type: video
+    node: "1"
+    required: true
+"#;
+
+    struct TestComfyAdapter;
+
+    #[async_trait]
+    impl ComfyAdapter for TestComfyAdapter {
+        async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            Ok(ComfyHealth {
+                system: SystemStats {
+                    comfyui_version: None,
+                    python_version: None,
+                    os: None,
+                    ram_total: None,
+                    ram_free: None,
+                    devices: Vec::new(),
+                },
+            })
+        }
+
+        async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
+            Ok(self.health_check().await?.system)
+        }
+
+        async fn get_object_info(&self) -> Result<serde_json::Value, ComfyAdapterError> {
+            Ok(serde_json::json!({}))
+        }
+
+        async fn get_history(&self, _prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "test adapter does not execute workflows".to_owned(),
+            ))
+        }
+
+        async fn download_output(
+            &self,
+            _file: &ComfyOutputFile,
+        ) -> Result<ComfyOutputData, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "test adapter does not download outputs".to_owned(),
+            ))
+        }
+
+        async fn submit_workflow(
+            &self,
+            _client_id: &str,
+            _prompt_id: &str,
+            _workflow: serde_json::Value,
+        ) -> Result<PromptSubmission, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "test adapter does not submit workflows".to_owned(),
+            ))
+        }
+
+        async fn subscribe_events(
+            &self,
+            _client_id: &str,
+        ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "test adapter does not subscribe to events".to_owned(),
+            ))
+        }
+    }
+
+    struct H3TestHarness {
+        pool: SqlitePool,
+        local: Arc<H3LocalImportService>,
+        queue: Arc<ProductionQueueService>,
+        assets: Arc<SqliteAssetRepository>,
+        prompts: Arc<SqliteAssetVideoPromptRepository>,
+        prompt_service: Arc<AssetVideoPromptService>,
+    }
+
+    async fn build_harness(
+        db_path: &Path,
+        project_root: &Path,
+        seed_database: bool,
+    ) -> H3TestHarness {
+        let pool = initialize(db_path)
+            .await
+            .expect("H3 integration database should initialize");
+        if seed_database {
+            crate::infrastructure::database::repositories::test_support::seed_task_dependencies(
+                &pool,
+            )
+            .await;
+            sqlx::query(
+                "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+                 VALUES (?, 'H3 Default', NULL, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(PROJECT_ID)
+            .bind(project_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("valid project fixture should insert");
+            sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+                .bind(H3_TEST_RECIPE)
+                .execute(&pool)
+                .await
+                .expect("H3 test Recipe should persist");
+        }
+
+        let asset_repository = Arc::new(SqliteAssetRepository::new(pool.clone()));
+        let prompt_repository = Arc::new(SqliteAssetVideoPromptRepository::new(pool.clone()));
+        let project_repository = Arc::new(SqliteProjectRepository::new(pool.clone()));
+        let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
+        let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
+        let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
+        let definition_repository =
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
+        let asset_store = Arc::new(FileSystemAssetStore::new());
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(TestComfyAdapter);
+        let generation_service = Arc::new(GenerationService::new(
+            task_repository.clone(),
+            snapshot_repository.clone(),
+            definition_repository.clone(),
+            comfy_adapter.clone(),
+            project_repository.clone(),
+            asset_store.clone(),
+            asset_repository.clone(),
+            clock.clone(),
+        ));
+        let task_recovery_service = Arc::new(TaskRecoveryService::new(
+            task_repository.clone(),
+            snapshot_repository,
+            asset_repository.clone(),
+            comfy_adapter,
+            project_repository.clone(),
+            asset_store.clone(),
+            clock.clone(),
+            Arc::new(NoopTaskUpdateSink),
+        ));
+        let queue = Arc::new(ProductionQueueService::new(
+            queue_repository.clone(),
+            task_repository,
+            definition_repository,
+            generation_service,
+            queue_repository,
+            task_recovery_service,
+            clock.clone(),
+        ));
+        let prompt_service = Arc::new(AssetVideoPromptService::new(
+            prompt_repository.clone(),
+            asset_repository.clone(),
+            clock.clone(),
+        ));
+        let source_asset_import_service = Arc::new(SourceAssetImportService::new(
+            project_repository,
+            asset_store,
+            asset_repository.clone(),
+            clock.clone(),
+        ));
+        let local = Arc::new(H3LocalImportService::new(
+            source_asset_import_service,
+            prompt_service.clone(),
+            queue.clone(),
+            clock,
+        ));
+        H3TestHarness {
+            pool,
+            local,
+            queue,
+            assets: asset_repository,
+            prompts: prompt_repository,
+            prompt_service,
+        }
+    }
+
+    fn write_pairing_fixture(root: &Path) {
+        fs::create_dir_all(root).expect("local fixture directory should exist");
+        fs::write(root.join("001.png"), png_bytes()).expect("001 image should write");
+        fs::write(root.join("001.txt"), "  Prompt A first line\nsecond line  ")
+            .expect("001 prompt should write");
+        fs::write(root.join("002.png"), png_bytes()).expect("002 image should write");
+        fs::write(root.join("002.txt"), "Prompt A second line\ncontinuation")
+            .expect("002 prompt should write");
+    }
+
+    async fn count_rows(pool: &SqlitePool, table: &str) -> i64 {
+        let query = match table {
+            "assets" => "SELECT COUNT(*) FROM assets WHERE project_id = ?",
+            "asset_video_prompts" => {
+                "SELECT COUNT(*) FROM asset_video_prompts WHERE project_id = ?"
+            }
+            "production_batches" => "SELECT COUNT(*) FROM production_batches WHERE project_id = ?",
+            _ => panic!("unexpected test table"),
+        };
+        sqlx::query_scalar(query)
+            .bind(PROJECT_ID)
+            .fetch_one(pool)
+            .await
+            .expect("row count should be readable")
+    }
 
     fn png_bytes() -> Vec<u8> {
         let image = image::RgbImage::from_pixel(2, 2, image::Rgb([80, 120, 180]));
@@ -1261,5 +1551,298 @@ mod tests {
         let mut values = vec!["10.png", "2.png", "1.png", "11.png"];
         values.sort_by(|left, right| natural_cmp(left, right));
         assert_eq!(values, vec!["1.png", "2.png", "10.png", "11.png"]);
+    }
+
+    #[tokio::test]
+    async fn local_import_commit_is_read_only_until_commit_and_freezes_queue_values() {
+        let directory = tempdir().expect("integration directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("local-fixture");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        write_pairing_fixture(&fixture_root);
+        let db_path = directory.path().join("app.db");
+        let harness = build_harness(&db_path, &project_root, true).await;
+
+        let before = (
+            count_rows(&harness.pool, "assets").await,
+            count_rows(&harness.pool, "asset_video_prompts").await,
+            count_rows(&harness.pool, "production_batches").await,
+        );
+        let (session_id, inspection) = harness
+            .local
+            .pick(PROJECT_ID, fixture_root.clone(), H3LocalImportMode::Pairing)
+            .await
+            .expect("inspection should succeed");
+        assert_eq!(inspection.ready_count, 2);
+        assert_eq!(
+            inspection.pairs[0].prompt_text.as_deref(),
+            Some("Prompt A first line\nsecond line")
+        );
+        let after_inspection = (
+            count_rows(&harness.pool, "assets").await,
+            count_rows(&harness.pool, "asset_video_prompts").await,
+            count_rows(&harness.pool, "production_batches").await,
+        );
+        assert_eq!(before, after_inspection, "inspection must be read-only");
+
+        let result = harness
+            .local
+            .commit(
+                &session_id,
+                H3LocalImportCommitRequest {
+                    batch_name: Some("H3 local integration".to_owned()),
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    width: 640,
+                    height: 360,
+                    duration_seconds: 5,
+                    seed: Some(SeedValue::Fixed(123)),
+                    auto_start: false,
+                },
+            )
+            .await
+            .expect("commit should succeed");
+        assert_eq!(result.imported_asset_count, 2);
+        assert_eq!(result.item_count, 2);
+        assert!(!result.auto_started);
+        assert!(harness.local.sessions.lock().await.is_empty());
+
+        let detail = harness
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("created batch should be readable");
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+        assert!(detail.batch.continue_on_failure);
+        assert_eq!(detail.items.len(), 2);
+        assert!(detail
+            .items
+            .iter()
+            .all(|item| item.status == ProductionBatchItemStatus::Pending));
+
+        let mut asset_ids = Vec::new();
+        for (index, item) in detail.items.iter().enumerate() {
+            assert_eq!(item.ordinal as usize, index);
+            let expected_prompt = match index {
+                0 => "Prompt A first line\nsecond line",
+                1 => "Prompt A second line\ncontinuation",
+                _ => unreachable!(),
+            };
+            assert_eq!(item.values_json["prompt"]["value"], expected_prompt);
+            assert_eq!(item.values_json["reference_image"]["type"], "image_asset");
+            let asset_id = item.values_json["reference_image"]["assetId"]
+                .as_str()
+                .expect("queue item should contain an asset id")
+                .to_owned();
+            asset_ids.push(asset_id.clone());
+            assert_eq!(item.values_json["width"]["value"], 640);
+            assert_eq!(item.values_json["height"]["value"], 360);
+            assert_eq!(item.values_json["duration_seconds"]["value"], 5);
+            assert_eq!(item.values_json["seed"]["type"], "seed_fixed");
+            assert_eq!(item.values_json["seed"]["value"], "123");
+            let values_text =
+                serde_json::to_string(&item.values_json).expect("queue values should serialize");
+            assert!(!values_text.contains(&fixture_root.to_string_lossy().to_string()));
+            assert!(!values_text.contains("temporary_h3_asset"));
+            assert!(!values_text.contains("local_asset"));
+
+            let asset = harness
+                .assets
+                .find_by_id(&AssetId::parse(asset_id).expect("asset id should parse"))
+                .await
+                .expect("asset query should succeed")
+                .expect("imported asset should exist");
+            assert_eq!(asset.asset_type, AssetType::Image);
+            assert_eq!(asset.category, crate::domain::SOURCE_IMAGE_CATEGORY);
+            assert!(Path::new(&asset.storage_path).is_file());
+            let prompt = harness
+                .prompts
+                .find(PROJECT_ID, asset.id.as_str())
+                .await
+                .expect("prompt query should succeed")
+                .expect("asset prompt should exist");
+            assert_eq!(prompt.prompt_text, expected_prompt);
+        }
+        assert_eq!(count_rows(&harness.pool, "assets").await, 2);
+        assert_eq!(count_rows(&harness.pool, "asset_video_prompts").await, 2);
+        assert_eq!(count_rows(&harness.pool, "production_batches").await, 1);
+
+        fs::write(
+            fixture_root.join("001.txt"),
+            "Prompt B\nchanged after commit",
+        )
+        .expect("changed prompt should write");
+        harness
+            .prompt_service
+            .set(PROJECT_ID, &asset_ids[0], "Prompt C\nasset prompt changed")
+            .await
+            .expect("asset prompt update should succeed");
+        let frozen_detail = harness
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("frozen batch should remain readable");
+        assert_eq!(
+            frozen_detail.items[0].values_json["prompt"]["value"],
+            "Prompt A first line\nsecond line"
+        );
+        assert_eq!(
+            harness
+                .prompts
+                .find(PROJECT_ID, &asset_ids[0])
+                .await
+                .unwrap()
+                .unwrap()
+                .prompt_text,
+            "Prompt C\nasset prompt changed"
+        );
+
+        fs::remove_dir_all(&fixture_root).expect("original local fixture should be removable");
+        assert!(!fixture_root.exists());
+        let deleted_folder_detail = harness
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("queue must not depend on the source folder");
+        for item in deleted_folder_detail.items {
+            let compiled = harness
+                .queue
+                .prepare_queue_values_for_test(
+                    &item.workflow_version_id,
+                    &item.recipe_id,
+                    &item.values_json,
+                )
+                .await
+                .expect("persisted Generation values should compile after folder removal");
+            assert_eq!(compiled.len(), 6);
+        }
+
+        harness.pool.close().await;
+        drop(harness);
+        let restarted = build_harness(&db_path, &project_root, false).await;
+        let persisted_assets = restarted
+            .assets
+            .list_recent(PROJECT_ID, 10)
+            .await
+            .expect("restarted asset repository should read assets");
+        assert_eq!(persisted_assets.len(), 2);
+        assert!(persisted_assets
+            .iter()
+            .all(|asset| asset.category == crate::domain::SOURCE_IMAGE_CATEGORY));
+        for asset in &persisted_assets {
+            assert!(Path::new(&asset.storage_path).is_file());
+            assert!(restarted
+                .prompts
+                .find(PROJECT_ID, asset.id.as_str())
+                .await
+                .unwrap()
+                .is_some());
+        }
+        let restarted_detail = restarted
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("batch should persist across repository restart");
+        assert_eq!(restarted_detail.items.len(), 2);
+        for item in restarted_detail.items {
+            restarted
+                .queue
+                .prepare_queue_values_for_test(
+                    &item.workflow_version_id,
+                    &item.recipe_id,
+                    &item.values_json,
+                )
+                .await
+                .expect("restarted Generation values should compile");
+        }
+    }
+
+    #[tokio::test]
+    async fn local_import_partial_failure_keeps_imported_assets_and_explains_count() {
+        let directory = tempdir().expect("partial failure directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("partial-fixture");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        write_pairing_fixture(&fixture_root);
+        let db_path = directory.path().join("app.db");
+        let harness = build_harness(&db_path, &project_root, true).await;
+        sqlx::query(
+            "CREATE TRIGGER fail_h3_second_asset
+             BEFORE INSERT ON assets
+             WHEN NEW.original_name = '002.png'
+             BEGIN SELECT RAISE(ABORT, 'forced second asset failure'); END",
+        )
+        .execute(&harness.pool)
+        .await
+        .expect("partial failure trigger should install");
+
+        let (session_id, inspection) = harness
+            .local
+            .pick(PROJECT_ID, fixture_root, H3LocalImportMode::Pairing)
+            .await
+            .expect("partial failure inspection should succeed");
+        assert_eq!(inspection.ready_count, 2);
+        let error = harness
+            .local
+            .commit(
+                &session_id,
+                H3LocalImportCommitRequest {
+                    batch_name: Some("partial failure".to_owned()),
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    width: 640,
+                    height: 360,
+                    duration_seconds: 5,
+                    seed: Some(SeedValue::Fixed(123)),
+                    auto_start: false,
+                },
+            )
+            .await
+            .expect_err("second import should fail");
+        assert!(error.to_string().contains("已导入 1 个图片素材后失败"));
+        assert_eq!(count_rows(&harness.pool, "assets").await, 1);
+        assert_eq!(count_rows(&harness.pool, "asset_video_prompts").await, 1);
+        assert_eq!(count_rows(&harness.pool, "production_batches").await, 0);
+        assert!(harness.local.sessions.lock().await.is_empty());
+        let imported_assets = harness
+            .assets
+            .list_recent(PROJECT_ID, 10)
+            .await
+            .expect("successful partial asset should remain readable");
+        assert_eq!(imported_assets.len(), 1);
+        assert_eq!(imported_assets[0].original_name, "001.png");
+    }
+
+    #[tokio::test]
+    async fn expired_local_import_sessions_are_removed_lazily() {
+        let directory = tempdir().expect("session cleanup directory should exist");
+        let project_root = directory.path().join("project");
+        let first_fixture = directory.path().join("first-fixture");
+        let second_fixture = directory.path().join("second-fixture");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        write_pairing_fixture(&first_fixture);
+        write_pairing_fixture(&second_fixture);
+        let harness = build_harness(&directory.path().join("app.db"), &project_root, true).await;
+
+        let (expired_session_id, _) = harness
+            .local
+            .pick(PROJECT_ID, first_fixture, H3LocalImportMode::Pairing)
+            .await
+            .expect("first session should be created");
+        {
+            let mut sessions = harness.local.sessions.lock().await;
+            sessions
+                .get_mut(&expired_session_id)
+                .expect("expired session should exist")
+                .expires_at = Utc::now() - ChronoDuration::seconds(1);
+        }
+        let (active_session_id, _) = harness
+            .local
+            .pick(PROJECT_ID, second_fixture, H3LocalImportMode::Pairing)
+            .await
+            .expect("second session should be created");
+        let sessions = harness.local.sessions.lock().await;
+        assert!(!sessions.contains_key(&expired_session_id));
+        assert!(sessions.contains_key(&active_session_id));
     }
 }

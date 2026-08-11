@@ -25,7 +25,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 352 tests、frontend 37 files / 120 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Regression | Rust 356 tests、frontend 37 files / 120 tests、frontend build、diff 检查和 Tauri installer build。 |
 
 ## H3 1.2.0 Local Package Audit
 
@@ -68,9 +68,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 30316544 | `f0846c0820321f756480f5d270584eba73c3264756c7760cb98a89cbdf179ee7` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7206679 | `138d5ba4d435f18c3d092470df4adf5c3588ed7eb890deb81c652c16eb72cc38` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10543104 | `23da6f5b33dc40718207622c61352941f8d7862bd0fec1f1d4daad2455908544` |
+| `src-tauri/target/release/ai-studio.exe` | 30323200 | `25004de3eff2daa95f52037adaa4dc7db2a78640a7d6597ba2bd9b4181dacf67` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7210319 | `f2a383937f5c14dff1ee0db44483e40c4bb26bbf342984fe2827767ca2a96850` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10543104 | `9e21f4c8c518bbd5ee3133e3b537574f38223a0edec1cdb6f8b65f0e93527bcc` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.

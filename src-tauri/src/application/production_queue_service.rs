@@ -404,22 +404,25 @@ impl ProductionQueueService {
         }
         let cancelled = self
             .repository
-            .cancel_pending_items(project_id, &batch_id, self.clock.now())
+            .cancel_pending_items_and_complete(project_id, &batch_id, self.clock.now())
             .await?;
         if cancelled == 0 {
             return Err(ProductionQueueError::InvalidState(
                 "当前没有可取消的待开始队列项目。".to_owned(),
             ));
         }
-        self.repository
-            .set_batch_status(
-                project_id,
-                &batch_id,
-                ProductionBatchStatus::Completed,
-                self.clock.now(),
-            )
-            .await?;
         self.get(project_id, batch_id.as_str()).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn prepare_queue_values_for_test(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        values_json: &Value,
+    ) -> Result<BTreeMap<String, GenerationInputValue>, ProductionQueueError> {
+        self.prepare_queue_values(workflow_version_id, recipe_id, values_json)
+            .await
     }
 
     pub async fn archive(
