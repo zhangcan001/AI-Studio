@@ -26,6 +26,10 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 const COMFY_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+// Queue inspection and model-memory control can briefly block while ComfyUI
+// finishes bookkeeping or unloads a large model. Keep ordinary requests
+// responsive, but give these control-plane operations a wider window.
+const COMFY_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -52,11 +56,23 @@ impl ComfyHttpAdapter {
     where
         T: DeserializeOwned,
     {
+        self.get_json_with_timeout(route, COMFY_HTTP_TIMEOUT).await
+    }
+
+    async fn get_json_with_timeout<T>(
+        &self,
+        route: &str,
+        timeout: Duration,
+    ) -> Result<T, ComfyAdapterError>
+    where
+        T: DeserializeOwned,
+    {
         let endpoint = self.endpoint();
         let url = self.config.route_url(route);
         let response = self
             .client
             .get(&url)
+            .timeout(timeout)
             .send()
             .await
             .map_err(|error| request_error("GET", &url, error))?;
@@ -360,7 +376,9 @@ impl ComfyHttpAdapter {
     }
 
     async fn get_queue_state_internal(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
-        let body: Value = self.get_json("queue").await?;
+        let body: Value = self
+            .get_json_with_timeout("queue", COMFY_CONTROL_TIMEOUT)
+            .await?;
         let root = body.as_object().ok_or_else(|| {
             ComfyAdapterError::Protocol("GET /queue response must be a JSON object".to_owned())
         })?;
@@ -389,6 +407,7 @@ impl ComfyHttpAdapter {
         let response = self
             .client
             .post(&url)
+            .timeout(COMFY_CONTROL_TIMEOUT)
             .json(&serde_json::json!({
                 "unload_models": true,
                 "free_memory": true
@@ -1071,6 +1090,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::collections::VecDeque;
     use std::net::TcpListener;
+    use std::time::Duration;
     use tokio::io::AsyncWriteExt;
     use tokio_tungstenite::{accept_async, tungstenite::Message};
     use wiremock::{
@@ -1164,6 +1184,45 @@ mod tests {
             .await
             .expect("idle memory release should succeed");
         server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn queue_state_allows_slow_control_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/queue"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "queue_running": [], "queue_pending": [] }))
+                    .set_delay(Duration::from_secs(6)),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let queue = adapter
+            .get_queue_state()
+            .await
+            .expect("slow queue response should remain within the control timeout");
+
+        assert!(queue.running_prompt_ids.is_empty());
+        assert!(queue.pending_prompt_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn free_memory_allows_slow_control_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/free"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(6)))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        adapter
+            .free_memory(true, true)
+            .await
+            .expect("slow memory release response should remain within the control timeout");
     }
 
     #[tokio::test]
