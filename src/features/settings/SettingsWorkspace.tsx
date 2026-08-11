@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   exportDiagnostics,
+  freeComfyMemory,
   getComfySettings,
   getDiagnosticsSummary,
   saveComfyEndpoint,
@@ -40,6 +41,7 @@ export function SettingsWorkspace({
   const [endpointTesting, setEndpointTesting] = useState(false);
   const [endpointApplying, setEndpointApplying] = useState(false);
   const [endpointTest, setEndpointTest] = useState<ComfyEndpointTest>();
+  const [memoryReleasing, setMemoryReleasing] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -117,6 +119,21 @@ export function SettingsWorkspace({
       setError(exportError);
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function releaseComfyMemory() {
+    setMemoryReleasing(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      await freeComfyMemory();
+      setNotice("已请求 ComfyUI 卸载模型并释放显存/内存。模型文件不会删除。");
+      window.setTimeout(() => onReconnect(), 250);
+    } catch (releaseError: unknown) {
+      setError(releaseError);
+    } finally {
+      setMemoryReleasing(false);
     }
   }
 
@@ -206,6 +223,20 @@ export function SettingsWorkspace({
             </p>
           )}
         </div>
+        <section className="comfy-memory-release" aria-labelledby="comfy-memory-release-title">
+          <div>
+            <h4 id="comfy-memory-release-title">释放模型内存</h4>
+            <p>仅在任务和 ComfyUI 队列空闲时执行。会调用官方内存释放接口，模型文件不会删除。</p>
+          </div>
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => void releaseComfyMemory()}
+            disabled={memoryReleasing || connectionLoading || comfy?.status !== "CONNECTED"}
+          >
+            {memoryReleasing ? "正在释放……" : "释放显存/内存"}
+          </button>
+        </section>
         <dl className="settings-list settings-comfy-summary">
           <div><dt>版本</dt><dd>{summary?.comfyVersion ?? comfy?.comfyuiVersion ?? "--"}</dd></div>
           <div><dt>GPU</dt><dd>{summary?.gpuName ?? "--"}</dd></div>

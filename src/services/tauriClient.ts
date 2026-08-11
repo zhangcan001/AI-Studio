@@ -1,12 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppStatus } from "../types/app";
-import type { CapabilitySummary, ComfyStatus } from "../types/comfy";
+import type { CapabilitySummary, ComfyMemoryReleaseResult, ComfyStatus } from "../types/comfy";
 import type {
   DiagnosticsExport,
   DiagnosticsSummary,
   RuntimeActivityStatus,
 } from "../types/diagnostics";
-import type { AssetLibraryPage, AssetLibraryQuery, AssetView } from "../types/asset";
+import type {
+  AssetDeleteInspection,
+  AssetDeleteResult,
+  AssetLibraryPage,
+  AssetLibraryQuery,
+  AssetView,
+} from "../types/asset";
 import type { AssetVideoPromptView } from "../types/assetVideoPrompt";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
@@ -127,6 +133,10 @@ export function testComfyConnection(endpoint: string): Promise<ComfyEndpointTest
 
 export function saveComfyEndpoint(endpoint: string): Promise<ComfySettingsView> {
   return invoke<ComfySettingsView>("comfy_save_endpoint", { endpoint });
+}
+
+export function freeComfyMemory(): Promise<ComfyMemoryReleaseResult> {
+  return invoke<ComfyMemoryReleaseResult>("comfy_free_memory");
 }
 
 export function getRuntimeActivityStatus(): Promise<RuntimeActivityStatus> {
@@ -521,6 +531,14 @@ export function getAssetMediaUrl(
 
 export function getAsset(projectId: string, assetId: string): Promise<AssetView> {
   return invoke<AssetView>("asset_get", { projectId, assetId });
+}
+
+export function inspectAssetDeletion(projectId: string, assetIds: string[]): Promise<AssetDeleteInspection> {
+  return invoke<AssetDeleteInspection>("inspect_asset_deletion", { projectId, assetIds });
+}
+
+export function deleteAssets(projectId: string, assetIds: string[]): Promise<AssetDeleteResult> {
+  return invoke<AssetDeleteResult>("delete_assets", { projectId, assetIds });
 }
 
 export function getAssetVideoPrompt(projectId: string, assetId: string): Promise<AssetVideoPromptView | null> {

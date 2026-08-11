@@ -438,6 +438,16 @@ pub trait ComfyAdapter: Send + Sync {
         ))
     }
 
+    async fn free_memory(
+        &self,
+        _unload_models: bool,
+        _free_memory: bool,
+    ) -> Result<(), ComfyAdapterError> {
+        Err(ComfyAdapterError::Incompatible(
+            "ComfyUI memory release is not supported by this adapter".to_owned(),
+        ))
+    }
+
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError>;
 
     async fn download_output(
@@ -546,6 +556,14 @@ impl ComfyAdapter for ComfyAdapterHandle {
 
     async fn get_queue_state(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
         self.current().get_queue_state().await
+    }
+
+    async fn free_memory(
+        &self,
+        unload_models: bool,
+        free_memory: bool,
+    ) -> Result<(), ComfyAdapterError> {
+        self.current().free_memory(unload_models, free_memory).await
     }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {

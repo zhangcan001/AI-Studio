@@ -1,7 +1,7 @@
 # AI Studio 0.3.0 Release Notes
 
 Status: code ready / live validation deferred
-Date: 2026-08-10
+Date: 2026-08-11
 
 > 0.3.0 当前是本地开发候选线。没有创建 `v0.3.0` tag，没有创建 GitHub Release，也没有上传安装包。
 
@@ -24,10 +24,12 @@ Date: 2026-08-10
 - 新增 `011_asset_video_prompt.sql`；Project Backup 升级为 v5，并保留 v1–v5 恢复兼容。
 - 创建队列时冻结输入、参数和随机 Seed；两个产品都使用严格串行队列与失败继续策略。
 - 普通导航收敛为“批量图片 / 批量视频 / 资产库 / 任务 / 项目 / 工作流 / 设置”。
+- 资产库支持单个或批量删除图片、视频、音频素材；删除前检查活动任务与生产队列引用，安全清理项目内素材文件和缩略图，同时保留任务、快照、事件历史。
+- 设置 → ComfyUI 增加“释放显存/内存”：仅在 AI Studio 与 ComfyUI 队列均空闲时调用官方 `POST /free`，只卸载模型并释放内存，不删除模型文件。
 
 ## Verification status
 
-Code Gate 结果为 Rust 330 tests、frontend 35 files / 114 tests、frontend build、diff 检查和 Windows 安装包构建。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
+Code Gate 结果为 Rust 346 tests、frontend 36 files / 115 tests、frontend build、diff 检查和 Windows 安装包构建。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
 当前候选线状态：
 

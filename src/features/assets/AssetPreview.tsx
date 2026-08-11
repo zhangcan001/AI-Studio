@@ -12,9 +12,10 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
   allTags?: AssetTag[];
   onOrganizationChanged?: (asset: AssetView) => void;
+  onRequestDelete?: (asset: AssetView) => void;
 }
 
-export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenTask, allTags = [], onOrganizationChanged }: Props) {
+export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenTask, allTags = [], onOrganizationChanged, onRequestDelete }: Props) {
   const [url, setUrl] = useState<string>();
   const [posterUrl, setPosterUrl] = useState<string>();
   const [error, setError] = useState<string>();
@@ -164,6 +165,7 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
                 查看生成任务
               </button>
             )}
+            {onRequestDelete && <button type="button" className="danger-button" onClick={() => onRequestDelete(asset)} disabled={organizationBusy}>删除素材</button>}
             <button type="button" className="quiet-button" onClick={onClose} aria-label="关闭预览">
               关闭
             </button>

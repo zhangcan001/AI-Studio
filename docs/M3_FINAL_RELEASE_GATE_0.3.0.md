@@ -21,8 +21,10 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | H3 Recipe contract | 只接受精确语义键；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
 | H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有不可变 `1.2.0`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
+| Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
+| Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 330 tests、frontend 35 files / 114 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Regression | Rust 346 tests、frontend 36 files / 115 tests、frontend build、diff 检查和 Tauri installer build。 |
 
 ## H3 1.2.0 Local Package Audit
 
@@ -50,9 +52,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 29573632 | `b11bcd91e112a97704b4f8a55f833df2a332765b238afa819c177702df0d9f37` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7079381 | `a6a1c68f6d957b988795c5a4bb4111af58944331b40d800cf505c1abb87661b4` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10321920 | `35effe74fcaa8c038654c3a42d716cf692841588038686f90d2292531b390cd7` |
+| `src-tauri/target/release/ai-studio.exe` | 29982208 | `fb3a87a2a15115541655e78845d369713fa284c39b80846f1f852c8d316f1ac5` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7126961 | `b48bbc13fa053aca27b90df44d4cf226eb1d2f031c1fd7262772cff9f525175a` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10416128 | `cf348e60c973fffdcde19ad4eac8940fafc83bb78bb1c4840835cdee641d70ea` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.

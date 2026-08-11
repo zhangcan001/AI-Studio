@@ -1,5 +1,6 @@
 mod asset;
 mod asset_browse;
+mod asset_deletion;
 mod asset_video_prompt;
 mod generation_definition;
 mod generation_snapshot;
@@ -18,6 +19,7 @@ mod workflow_runtime_state;
 
 pub use asset::SqliteAssetRepository;
 pub use asset_browse::SqliteAssetBrowseRepository;
+pub use asset_deletion::SqliteAssetDeletionRepository;
 pub use asset_video_prompt::SqliteAssetVideoPromptRepository;
 pub use generation_definition::SqliteGenerationDefinitionRepository;
 pub use generation_snapshot::SqliteGenerationSnapshotRepository;

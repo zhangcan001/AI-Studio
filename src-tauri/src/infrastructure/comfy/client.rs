@@ -384,6 +384,24 @@ impl ComfyHttpAdapter {
         })
     }
 
+    async fn free_memory_internal(&self) -> Result<(), ComfyAdapterError> {
+        let url = self.config.route_url("free");
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({
+                "unload_models": true,
+                "free_memory": true
+            }))
+            .send()
+            .await
+            .map_err(|error| request_error("POST", &url, error))?;
+        if !response.status().is_success() {
+            return Err(http_status_error("POST", &url, response.status()));
+        }
+        Ok(())
+    }
+
     async fn get_history_internal(
         &self,
         prompt_id: &str,
@@ -602,6 +620,19 @@ impl ComfyAdapter for ComfyHttpAdapter {
 
     async fn get_queue_state(&self) -> Result<ComfyQueueState, ComfyAdapterError> {
         self.get_queue_state_internal().await
+    }
+
+    async fn free_memory(
+        &self,
+        unload_models: bool,
+        free_memory: bool,
+    ) -> Result<(), ComfyAdapterError> {
+        if !unload_models || !free_memory {
+            return Err(ComfyAdapterError::Incompatible(
+                "AI Studio requires unload_models=true and free_memory=true".to_owned(),
+            ));
+        }
+        self.free_memory_internal().await
     }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
@@ -1111,6 +1142,45 @@ mod tests {
             .expect_err("HTML should not parse as ComfyUI stats");
 
         assert!(matches!(error, ComfyAdapterError::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn free_memory_posts_exact_official_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/free"))
+            .and(body_json(json!({
+                "unload_models": true,
+                "free_memory": true
+            })))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        adapter
+            .free_memory(true, true)
+            .await
+            .expect("idle memory release should succeed");
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn free_memory_http_error_is_not_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/free"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let error = adapter
+            .free_memory(true, true)
+            .await
+            .expect_err("HTTP 500 must fail memory release");
+        assert!(matches!(error, ComfyAdapterError::Incompatible(_)));
     }
 
     #[tokio::test]

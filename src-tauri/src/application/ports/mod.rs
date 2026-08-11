@@ -1,6 +1,7 @@
 //! Application ports are the boundary for infrastructure implementations.
 
 pub mod asset_browse_repository;
+pub mod asset_deletion_repository;
 pub mod asset_repository;
 pub mod asset_store;
 pub mod asset_video_prompt_repository;
@@ -32,9 +33,11 @@ pub use asset_browse_repository::{
     AssetBrowseRepository, AssetCategoryFilter, AssetCreatedOrder, AssetLibraryQuery,
     AssetMediaTypeFilter, AssetSourceFilter,
 };
+pub use asset_deletion_repository::{AssetDeletionReferences, AssetDeletionRepository};
 pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
 pub use asset_store::{
-    AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StoredAssetFile,
+    AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile,
+    StoredAssetFile,
 };
 pub use asset_video_prompt_repository::{AssetVideoPromptRecord, AssetVideoPromptRepository};
 pub use clock::{Clock, MonotonicEventClock};

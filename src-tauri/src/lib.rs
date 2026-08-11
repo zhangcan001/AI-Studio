@@ -7,23 +7,26 @@ mod error;
 mod infrastructure;
 
 pub use application::ports::{
-    AssetRepository, AssetStore, AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
-    GenerationSnapshotRepository, ProductionQueueRepository, ProjectRepository, RepositoryError,
-    TaskRepository, WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
-    WorkflowRuntimeStateRepository,
+    AssetDeletionRepository, AssetRepository, AssetStore, AssetVideoPromptRepository, Clock,
+    GenerationDefinitionRepository, GenerationSnapshotRepository, ProductionQueueRepository,
+    ProjectRepository, RepositoryError, TaskRepository, WorkflowLibraryRepository,
+    WorkflowRunRepository, WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{
-    SqliteAssetRepository, SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
-    SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
-    SqliteProductionQueueRepository, SqliteProjectRepository, SqlitePromptLibraryRepository,
-    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteAssetDeletionRepository, SqliteAssetRepository, SqliteAssetVideoPromptRepository,
+    SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
+    SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionQueueRepository,
+    SqliteProjectRepository, SqlitePromptLibraryRepository, SqliteTaskRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
 use application::{
+    asset_deletion_service::AssetDeletionService,
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
     asset_video_prompt_service::AssetVideoPromptService,
+    comfy_memory_service::ComfyMemoryService,
     comfy_service::{ComfyRuntime, ComfyService},
     diagnostics_service::DiagnosticsService,
     generation_catalog_service::GenerationCatalogService,
@@ -199,6 +202,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(SqliteProjectRepository::new(database_pool.clone()));
             let asset_repository: Arc<dyn AssetRepository> =
                 Arc::new(SqliteAssetRepository::new(database_pool.clone()));
+            let asset_deletion_repository: Arc<dyn application::ports::AssetDeletionRepository> =
+                Arc::new(SqliteAssetDeletionRepository::new(database_pool.clone()));
             let asset_video_prompt_repository: Arc<dyn application::ports::AssetVideoPromptRepository> =
                 Arc::new(SqliteAssetVideoPromptRepository::new(database_pool.clone()));
             let task_history_repository: Arc<dyn application::ports::TaskHistoryRepository> =
@@ -293,6 +298,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let comfy_runtime = Arc::new(ComfyRuntime::new(initial_adapter, comfy_config));
             let comfy_adapter = comfy_runtime.adapter();
             let comfy_service = Arc::new(ComfyService::from_runtime(comfy_runtime.clone()));
+            let comfy_memory_service = Arc::new(ComfyMemoryService::new(
+                comfy_adapter.clone(),
+                task_repository.clone(),
+                production_queue_repository.clone(),
+            ));
             let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
                 infrastructure::database::SqliteWorkflowRunRepository::new(database_pool.clone()),
             );
@@ -363,6 +373,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let asset_library_service = Arc::new(AssetLibraryService::new(
                 asset_browse_repository,
                 organization_repository.clone(),
+            ));
+            let asset_deletion_service = Arc::new(AssetDeletionService::new(
+                asset_repository.clone(),
+                asset_deletion_repository,
+                project_repository.clone(),
+                asset_store.clone(),
             ));
             let asset_video_prompt_service = Arc::new(AssetVideoPromptService::new(
                 asset_video_prompt_repository,
@@ -486,6 +502,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             app.manage(AppState::new(
                 data_dirs,
                 comfy_service,
+                comfy_memory_service,
                 generation_service,
                 workflow_library_service,
                 workflow_onboarding_service,
@@ -494,6 +511,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 asset_library_service,
+                asset_deletion_service,
                 asset_video_prompt_service,
                 task_history_service,
                 source_asset_import_service,
@@ -635,6 +653,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::comfy::comfy_get_settings,
             commands::comfy::comfy_test_connection,
             commands::comfy::comfy_save_endpoint,
+            commands::comfy::comfy_free_memory,
             commands::settings::runtime_profiles_list,
             commands::settings::runtime_profiles_save,
             commands::settings::runtime_profiles_delete,
@@ -729,6 +748,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::asset::asset_read_thumbnail,
             commands::asset::asset_library_page,
             commands::asset::asset_get,
+            commands::asset::inspect_asset_deletion,
+            commands::asset::delete_assets,
             commands::asset::asset_video_prompt_get,
             commands::asset::asset_video_prompt_list,
             commands::asset::asset_video_prompt_set,

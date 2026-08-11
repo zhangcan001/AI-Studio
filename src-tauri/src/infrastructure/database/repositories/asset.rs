@@ -121,6 +121,78 @@ impl AssetRepository for SqliteAssetRepository {
         .map_err(map_sqlx_error)?;
         rows.into_iter().map(AssetRow::try_into_domain).collect()
     }
+
+    async fn delete_by_ids(
+        &self,
+        project_id: &str,
+        asset_ids: &[AssetId],
+    ) -> Result<(), RepositoryError> {
+        if asset_ids.is_empty() {
+            return Ok(());
+        }
+
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        for asset_id in asset_ids {
+            let exists: Option<String> =
+                sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
+                    .bind(asset_id.as_str())
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(map_sqlx_error)?;
+            match exists {
+                None => {
+                    return Err(RepositoryError::not_found("asset", asset_id.as_str()));
+                }
+                Some(owner) if owner != project_id => {
+                    return Err(RepositoryError::integrity(format!(
+                        "asset {} does not belong to project {}",
+                        asset_id.as_str(),
+                        project_id
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+
+        for asset_id in asset_ids {
+            for statement in [
+                "DELETE FROM task_output_assets WHERE asset_id = ?",
+                "DELETE FROM asset_tag_links WHERE project_id = ? AND asset_id = ?",
+                "DELETE FROM asset_favorites WHERE project_id = ? AND asset_id = ?",
+                "DELETE FROM asset_video_prompts WHERE project_id = ? AND asset_id = ?",
+                "DELETE FROM shot_reference_assets WHERE asset_id = ?",
+                "UPDATE shots SET selected_image_asset_id = NULL WHERE project_id = ? AND selected_image_asset_id = ?",
+                "UPDATE shots SET selected_video_asset_id = NULL WHERE project_id = ? AND selected_video_asset_id = ?",
+            ] {
+                let result = if statement.contains("project_id = ? AND asset_id = ?")
+                    || statement.contains("project_id = ? AND selected_")
+                {
+                    sqlx::query(statement)
+                        .bind(project_id)
+                        .bind(asset_id.as_str())
+                        .execute(&mut *transaction)
+                        .await
+                } else {
+                    sqlx::query(statement)
+                        .bind(asset_id.as_str())
+                        .execute(&mut *transaction)
+                        .await
+                };
+                result.map_err(map_sqlx_error)?;
+            }
+            let result = sqlx::query("DELETE FROM assets WHERE project_id = ? AND id = ?")
+                .bind(project_id)
+                .bind(asset_id.as_str())
+                .execute(&mut *transaction)
+                .await
+                .map_err(map_sqlx_error)?;
+            if result.rows_affected() != 1 {
+                return Err(RepositoryError::not_found("asset", asset_id.as_str()));
+            }
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
 }
 
 const ASSET_SELECT: &str = "SELECT
@@ -592,5 +664,163 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn delete_removes_asset_relations_but_preserves_task_history() {
+        let (_directory, _pool, task, repository) = setup().await;
+        let image = asset(&task.id, "ast_delete_me");
+        let mapping = TaskOutputAssetMapping {
+            task_id: task.id.clone(),
+            output_id: "image".to_owned(),
+            ordinal: 0,
+            asset_id: image.id.clone(),
+            created_at: image.created_at,
+        };
+        repository
+            .insert_generated_outputs(std::slice::from_ref(&image), std::slice::from_ref(&mapping))
+            .await
+            .expect("asset and mapping should insert");
+
+        repository
+            .delete_by_ids("project-1", std::slice::from_ref(&image.id))
+            .await
+            .expect("asset should delete transactionally");
+        assert!(repository.find_by_id(&image.id).await.unwrap().is_none());
+        assert!(repository
+            .list_output_mappings(&task.id)
+            .await
+            .unwrap()
+            .is_empty());
+        let task_repository = SqliteTaskRepository::new(_pool.clone());
+        assert!(task_repository
+            .find_by_id(&task.id)
+            .await
+            .expect("task should remain queryable")
+            .is_some());
+        assert_eq!(
+            task_repository.list_events(&task.id).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_cleans_organization_prompt_and_legacy_shot_relations() {
+        let (_directory, pool, task, repository) = setup().await;
+        let image = asset(&task.id, "ast_delete_relations");
+        repository
+            .insert_many(std::slice::from_ref(&image))
+            .await
+            .expect("asset should insert");
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO asset_tags
+             (id, project_id, name, normalized_name, created_at, updated_at)
+             VALUES ('tag_delete_test', 'project-1', 'Delete', 'delete', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("tag fixture");
+        sqlx::query(
+            "INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at)
+             VALUES (?, 'tag_delete_test', 'project-1', ?)",
+        )
+        .bind(image.id.as_str())
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("tag link fixture");
+        sqlx::query(
+            "INSERT INTO asset_favorites (asset_id, project_id, created_at)
+             VALUES (?, 'project-1', ?)",
+        )
+        .bind(image.id.as_str())
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("favorite fixture");
+        sqlx::query(
+            "INSERT INTO asset_video_prompts (asset_id, project_id, prompt_text, updated_at)
+             VALUES (?, 'project-1', 'move gently', ?)",
+        )
+        .bind(image.id.as_str())
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("video prompt fixture");
+        sqlx::query(
+            "INSERT INTO shots
+             (id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
+              selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
+             VALUES ('shot_delete_test', 'project-1', 0, 'Shot', 'Prompt', NULL, NULL, ?, NULL, ?, ?)",
+        )
+        .bind(image.id.as_str())
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("shot fixture");
+        sqlx::query(
+            "INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal)
+             VALUES ('shot_delete_test', 'image', ?, 0)",
+        )
+        .bind(image.id.as_str())
+        .execute(&pool)
+        .await
+        .expect("shot reference fixture");
+        sqlx::query(
+            "INSERT INTO generation_snapshots
+             (id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, created_at)
+             VALUES ('snapshot_delete_test', ?, '{}', 'schema_version: 1', '{}', '{}', ?)",
+        )
+        .bind(task.id.as_str())
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("snapshot fixture");
+
+        repository
+            .delete_by_ids("project-1", std::slice::from_ref(&image.id))
+            .await
+            .expect("asset relations should delete");
+        let relation_count: i64 = sqlx::query_scalar(
+            "SELECT
+                (SELECT COUNT(*) FROM asset_tag_links WHERE asset_id = ?)
+              + (SELECT COUNT(*) FROM asset_favorites WHERE asset_id = ?)
+              + (SELECT COUNT(*) FROM asset_video_prompts WHERE asset_id = ?)
+              + (SELECT COUNT(*) FROM shot_reference_assets WHERE asset_id = ?)",
+        )
+        .bind(image.id.as_str())
+        .bind(image.id.as_str())
+        .bind(image.id.as_str())
+        .bind(image.id.as_str())
+        .fetch_one(&pool)
+        .await
+        .expect("relation count");
+        assert_eq!(relation_count, 0);
+        let selected_image: Option<String> = sqlx::query_scalar(
+            "SELECT selected_image_asset_id FROM shots WHERE id = 'shot_delete_test'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("shot should remain");
+        assert!(selected_image.is_none());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM generation_snapshots WHERE task_id = ?",
+            )
+            .bind(task.id.as_str())
+            .fetch_one(&pool)
+            .await
+            .expect("snapshot count"),
+            1
+        );
+        assert!(SqliteTaskRepository::new(pool)
+            .find_by_id(&task.id)
+            .await
+            .expect("task should remain")
+            .is_some());
     }
 }

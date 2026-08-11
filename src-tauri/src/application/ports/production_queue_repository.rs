@@ -27,6 +27,10 @@ pub trait ProductionQueueRepository: Send + Sync {
 
     async fn list_active_items(&self) -> Result<Vec<ActiveProductionItem>, RepositoryError>;
 
+    async fn list_non_terminal_items(&self) -> Result<Vec<ActiveProductionItem>, RepositoryError> {
+        self.list_active_items().await
+    }
+
     async fn find_detail(
         &self,
         project_id: &str,

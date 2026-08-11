@@ -27,3 +27,8 @@ export interface ComfyStatus {
   devices: ComfyDeviceInfo[];
   capability?: CapabilitySummary;
 }
+
+export interface ComfyMemoryReleaseResult {
+  unloadModels: boolean;
+  freeMemory: boolean;
+}

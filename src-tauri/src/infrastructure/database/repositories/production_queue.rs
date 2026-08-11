@@ -84,6 +84,33 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
             .collect()
     }
 
+    async fn list_non_terminal_items(&self) -> Result<Vec<ActiveProductionItem>, RepositoryError> {
+        let rows = sqlx::query_as::<_, ActiveItemRow>(
+            "SELECT
+                b.id AS batch_id, b.project_id, b.name AS batch_name,
+                b.status AS batch_status, b.continue_on_failure, b.archived_at,
+                b.created_at AS batch_created_at, b.updated_at AS batch_updated_at,
+                i.id AS item_id, i.ordinal, i.workflow_version_id, i.recipe_id,
+                i.values_json, i.status AS item_status, i.task_id, i.retry_of_item_id,
+                i.error_code, i.error_message, i.created_at AS item_created_at,
+                i.updated_at AS item_updated_at
+             FROM production_batch_items i
+             INNER JOIN production_batches b ON b.id = i.batch_id
+             ORDER BY b.created_at ASC, b.id ASC, i.ordinal ASC, i.id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(ActiveItemRow::try_into_domain)
+            .filter_map(|result| match result {
+                Ok(item) if !item.item.status.is_terminal() => Some(Ok(item)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
+    }
+
     async fn find_detail(
         &self,
         project_id: &str,

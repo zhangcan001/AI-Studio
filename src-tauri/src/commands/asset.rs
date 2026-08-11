@@ -5,6 +5,7 @@ use crate::{
         AssetSourceFilter,
     },
     application::{
+        asset_deletion_service::{AssetDeleteInspection, AssetDeleteResult, AssetDeletionError},
         asset_library_service::{AssetLibraryError, AssetLibraryPageView},
         asset_query_service::{AssetQueryError, AssetView},
         asset_video_prompt_service::{AssetVideoPromptError, AssetVideoPromptView},
@@ -204,6 +205,34 @@ pub async fn asset_get(
         .get(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn inspect_asset_deletion(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_ids: Vec<String>,
+) -> Result<AssetDeleteInspection, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .asset_deletion_service
+        .inspect(&project_id, &asset_ids)
+        .await
+        .map_err(map_asset_deletion_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn delete_assets(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_ids: Vec<String>,
+) -> Result<AssetDeleteResult, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .asset_deletion_service
+        .delete(&project_id, &asset_ids)
+        .await
+        .map_err(map_asset_deletion_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -413,6 +442,25 @@ fn map_asset_library_error(error: AssetLibraryError) -> AppError {
             AppError::invalid_input("INVALID_PROJECT_ID: project id must not be empty")
         }
         AssetLibraryError::Repository(error) => super::map_repository_error(&error),
+    }
+}
+
+fn map_asset_deletion_error(error: AssetDeletionError) -> AppError {
+    match error {
+        AssetDeletionError::InvalidInput(message) => AppError::invalid_input(message),
+        AssetDeletionError::NotFound(message) => AppError::asset_not_found(message),
+        AssetDeletionError::Blocked(inspection) => AppError::asset_deletion_blocked(
+            "一个或多个素材仍被活动任务或生产队列使用。",
+            serde_json::to_value(inspection).unwrap_or_default(),
+        ),
+        AssetDeletionError::FilesystemBoundary(message) => {
+            AppError::filesystem_boundary(format!("FILESYSTEM_BOUNDARY_ERROR: {message}"))
+        }
+        AssetDeletionError::Store(
+            crate::application::ports::AssetStoreError::FilesystemBoundary(message),
+        ) => AppError::filesystem_boundary(format!("FILESYSTEM_BOUNDARY_ERROR: {message}")),
+        AssetDeletionError::Store(error) => AppError::filesystem(error.to_string()),
+        AssetDeletionError::Repository(error) => super::map_repository_error(&error),
     }
 }
 

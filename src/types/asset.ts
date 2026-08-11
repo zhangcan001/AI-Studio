@@ -46,6 +46,28 @@ export interface AssetLibraryPage {
   nextCursor?: PageCursor;
 }
 
+export interface AssetDeleteInspectionItem {
+  assetId: string;
+  name: string;
+  assetType: string;
+  fileSize: number;
+  canDelete: boolean;
+  blockingReasons: string[];
+  warnings: string[];
+}
+
+export interface AssetDeleteInspection {
+  items: AssetDeleteInspectionItem[];
+  deletable: string[];
+  blocked: string[];
+  historicalReferences: string[];
+}
+
+export interface AssetDeleteResult {
+  deletedCount: number;
+  warnings: string[];
+}
+
 export interface PageCursor {
   createdAt: string;
   id: string;

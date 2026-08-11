@@ -677,7 +677,8 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .production-queue-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .production-queue-open span { color: #8aa7dc; font-size: 0.75rem; }
 .production-queue-row-actions, .production-item-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.danger-button { color: #ffd2b8; border-color: #8a5548; }
+.danger-button { min-height: 44px; color: #ffd2b8; border-color: #8a5548; }
+.danger-button:hover:not(:disabled) { color: #fff3ed; border-color: #d07c68; background: #4a2927; }
 .production-queue-detail { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid #2c3547; }
 .production-queue-detail-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; }
 .production-queue-detail-heading > div { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
@@ -2037,6 +2038,9 @@ summary:focus-visible {
 .settings-endpoint-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .settings-endpoint-row input { flex: 1 1 320px; min-width: 220px; }
 .settings-warning { margin: 0; padding: 9px 11px; border: 1px solid #886c35; border-radius: 8px; color: #f6d99a; background: #332a18; }
+.comfy-memory-release { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 14px; padding: 14px; border: 1px solid #725244; border-radius: 10px; background: #241d1d; }
+.comfy-memory-release h4 { margin: 0; color: #ffe1d6; }
+.comfy-memory-release p { margin: 4px 0 0; color: #c7a9a0; font-size: 0.82rem; }
 
 .settings-comfy-card .comfy-status-card {
   margin: 0;
@@ -2068,6 +2072,20 @@ summary:focus-visible {
   color: var(--ux-success, #65d295);
 }
 
+.asset-delete-backdrop { position: fixed; inset: 0; z-index: 12; display: grid; place-items: center; padding: 24px; background: rgb(4 7 12 / 78%); }
+.asset-delete-dialog { width: min(720px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 22px; border: 1px solid #8a5548; border-radius: 16px; background: #171d28; box-shadow: 0 28px 80px rgb(0 0 0 / 45%); }
+.asset-delete-warning { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid #d07c68; color: #ffd2b8; background: #2b2020; }
+.asset-delete-summary, .asset-delete-confirm-copy { color: #b9c8df; }
+.asset-delete-list { display: grid; gap: 8px; max-height: 42vh; overflow: auto; }
+.asset-delete-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 1.2fr); gap: 14px; padding: 11px 12px; border: 1px solid #36506e; border-radius: 9px; background: #182337; }
+.asset-delete-item-blocked { border-color: #8a5548; background: #2a2021; }
+.asset-delete-item strong, .asset-delete-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-delete-item > div:first-child span { margin-top: 4px; color: #8997ad; font-size: 0.78rem; }
+.asset-delete-reason, .asset-delete-warning-detail { margin: 0; color: #ffd2b8; font-size: 0.78rem; line-height: 1.45; }
+.asset-delete-warning-detail { color: #f6d99a; }
+.asset-delete-ready { color: #65d295; font-size: 0.78rem; }
+.asset-delete-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
 @media (max-width: 760px) {
   .settings-grid,
   .settings-comfy-summary {
@@ -2083,6 +2101,9 @@ summary:focus-visible {
   .no-workflow-actions button {
     flex: 1 1 180px;
   }
+
+  .comfy-memory-release, .asset-delete-item { align-items: stretch; grid-template-columns: 1fr; flex-direction: column; }
+  .comfy-memory-release .danger-button { width: 100%; }
 }
 
 @media (max-width: 560px) {

@@ -33,6 +33,10 @@ pub enum AppErrorCode {
     BackupInspectionExpired,
     BackupAssetHashMismatch,
     BackupSnapshotAssetRemapFailed,
+    AssetDeletionBlocked,
+    FilesystemBoundaryError,
+    ComfyMemoryBusy,
+    ComfyMemoryReleaseFailed,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,6 +162,26 @@ impl AppError {
         Self::new(AppErrorCode::BackupSnapshotAssetRemapFailed, message)
     }
 
+    pub fn asset_deletion_blocked(message: impl Into<String>, details: Value) -> Self {
+        let mut error = Self::new(AppErrorCode::AssetDeletionBlocked, message);
+        error.details = Some(details);
+        error
+    }
+
+    pub fn filesystem_boundary(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::FilesystemBoundaryError, message)
+    }
+
+    pub fn comfy_memory_busy(message: impl Into<String>, details: Value) -> Self {
+        let mut error = Self::new(AppErrorCode::ComfyMemoryBusy, message);
+        error.details = Some(details);
+        error
+    }
+
+    pub fn comfy_memory_release_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ComfyMemoryReleaseFailed, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -188,6 +212,10 @@ impl AppError {
             AppErrorCode::BackupInspectionExpired => "BACKUP_INSPECTION_EXPIRED",
             AppErrorCode::BackupAssetHashMismatch => "BACKUP_ASSET_HASH_MISMATCH",
             AppErrorCode::BackupSnapshotAssetRemapFailed => "BACKUP_SNAPSHOT_ASSET_REMAP_FAILED",
+            AppErrorCode::AssetDeletionBlocked => "ASSET_DELETION_BLOCKED",
+            AppErrorCode::FilesystemBoundaryError => "FILESYSTEM_BOUNDARY_ERROR",
+            AppErrorCode::ComfyMemoryBusy => "COMFY_MEMORY_BUSY",
+            AppErrorCode::ComfyMemoryReleaseFailed => "COMFY_MEMORY_RELEASE_FAILED",
         }
     }
 

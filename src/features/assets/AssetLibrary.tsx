@@ -15,6 +15,7 @@ import { toggleCompareSelection } from "./assetCompare";
 import { mergeAssetPage } from "./assetLibraryState";
 import { AssetGrid } from "./AssetGrid";
 import { AssetPreview } from "./AssetPreview";
+import { AssetDeleteDialog } from "./AssetDeleteDialog";
 import { TagManagerDialog } from "./TagManagerDialog";
 import type { AssetTag } from "../../types/organization";
 import { replaceAssetOrganization } from "./assetOrganization";
@@ -60,6 +61,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [bulkTagId, setBulkTagId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [deleteRequest, setDeleteRequest] = useState<AssetView[]>();
   const requestVersion = useRef(0);
 
   useEffect(() => {
@@ -195,6 +197,23 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
   const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
   const selectedImageAssets = assets.filter((asset) => selectedAssetIds.has(asset.id) && isImageAssetForVideo(asset));
 
+  function requestDeleteSelection() {
+    const selected = assets.filter((asset) => selectedAssetIds.has(asset.id));
+    if (selected.length) setDeleteRequest(selected);
+  }
+
+  function handleDeleted(assetIds: string[], result: { deletedCount: number; warnings: string[] }) {
+    const deleted = new Set(assetIds);
+    setAssets((current) => current.filter((asset) => !deleted.has(asset.id)));
+    setCompareAssets((current) => current.filter((asset) => !deleted.has(asset.id)));
+    setSelectedAssetIds((current) => new Set([...current].filter((assetId) => !deleted.has(assetId))));
+    setSelectedAsset((current) => (current && deleted.has(current.id) ? undefined : current));
+    setCompareOpen((current) => current && compareAssets.some((asset) => deleted.has(asset.id)) ? false : current);
+    setDeleteRequest(undefined);
+    setNotice(`已删除 ${result.deletedCount} 个素材。${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""}`);
+    void requestPage(undefined, true);
+  }
+
   return (
     <section className="workspace-panel" aria-busy={loading}>
       <div className="section-heading workspace-heading">
@@ -282,6 +301,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
           </select>
           <button type="button" onClick={() => void runBulkTag(true)} disabled={bulkBusy || !selectedAssetIds.size || !bulkTagId}>添加标签</button>
           <button type="button" className="quiet-button" onClick={() => void runBulkTag(false)} disabled={bulkBusy || !selectedAssetIds.size || !bulkTagId}>移除标签</button>
+          <button type="button" className="danger-button" onClick={requestDeleteSelection} disabled={bulkBusy || !selectedAssetIds.size}>删除（{selectedAssetIds.size}）</button>
           <button
             type="button"
             onClick={() => onOpenVideoBatch(selectedImageAssets)}
@@ -341,6 +361,15 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
           onOpenTask={onOpenTask}
           allTags={tags}
           onOrganizationChanged={applyOrganizationAsset}
+          onRequestDelete={(asset) => setDeleteRequest([asset])}
+        />
+      )}
+      {deleteRequest && (
+        <AssetDeleteDialog
+          projectId={projectId}
+          assets={deleteRequest}
+          onClose={() => setDeleteRequest(undefined)}
+          onDeleted={handleDeleted}
         />
       )}
       {tagManagerOpen && <TagManagerDialog projectId={projectId} onClose={() => setTagManagerOpen(false)} onChanged={(nextTags) => { setTags(nextTags); void requestPage(undefined, true); }} />}

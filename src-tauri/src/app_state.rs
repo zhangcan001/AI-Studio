@@ -1,6 +1,8 @@
+use crate::application::asset_deletion_service::AssetDeletionService;
 use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
 use crate::application::asset_video_prompt_service::AssetVideoPromptService;
+use crate::application::comfy_memory_service::ComfyMemoryService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
@@ -29,6 +31,7 @@ use std::sync::Arc;
 pub struct AppState {
     pub data_dirs: AppDataDirs,
     pub comfy_service: Arc<ComfyService>,
+    pub comfy_memory_service: Arc<ComfyMemoryService>,
     pub generation_service: Arc<GenerationService>,
     pub workflow_library_service: Arc<WorkflowLibraryService>,
     pub workflow_onboarding_service: Arc<WorkflowOnboardingService>,
@@ -37,6 +40,7 @@ pub struct AppState {
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
+    pub asset_deletion_service: Arc<AssetDeletionService>,
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
     pub task_history_service: Arc<TaskHistoryService>,
     pub source_asset_import_service: Arc<SourceAssetImportService>,
@@ -59,6 +63,7 @@ impl AppState {
     pub fn new(
         data_dirs: AppDataDirs,
         comfy_service: Arc<ComfyService>,
+        comfy_memory_service: Arc<ComfyMemoryService>,
         generation_service: Arc<GenerationService>,
         workflow_library_service: Arc<WorkflowLibraryService>,
         workflow_onboarding_service: Arc<WorkflowOnboardingService>,
@@ -67,6 +72,7 @@ impl AppState {
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
+        asset_deletion_service: Arc<AssetDeletionService>,
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
         task_history_service: Arc<TaskHistoryService>,
         source_asset_import_service: Arc<SourceAssetImportService>,
@@ -87,6 +93,7 @@ impl AppState {
         Self {
             data_dirs,
             comfy_service,
+            comfy_memory_service,
             generation_service,
             workflow_library_service,
             workflow_onboarding_service,
@@ -95,6 +102,7 @@ impl AppState {
             task_query_service,
             asset_query_service,
             asset_library_service,
+            asset_deletion_service,
             asset_video_prompt_service,
             task_history_service,
             source_asset_import_service,

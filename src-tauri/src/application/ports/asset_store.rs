@@ -1,10 +1,16 @@
-use crate::domain::AssetId;
+use crate::domain::{Asset, AssetId};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredAssetFile {
     pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StagedAssetFile {
+    pub original_path: PathBuf,
+    pub staged_path: PathBuf,
 }
 
 #[async_trait]
@@ -22,6 +28,7 @@ pub trait AssetReadStream: Send {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssetStoreError {
     InvalidPath(String),
+    FilesystemBoundary(String),
     Write(String),
     Delete(String),
     Read(String),
@@ -31,6 +38,9 @@ impl std::fmt::Display for AssetStoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidPath(message) => write!(formatter, "invalid asset path: {message}"),
+            Self::FilesystemBoundary(message) => {
+                write!(formatter, "asset filesystem boundary error: {message}")
+            }
             Self::Write(message) => write!(formatter, "asset write failed: {message}"),
             Self::Delete(message) => write!(formatter, "asset delete failed: {message}"),
             Self::Read(message) => write!(formatter, "asset read failed: {message}"),
@@ -117,6 +127,43 @@ pub trait AssetStore: Send + Sync {
     }
 
     async fn delete(&self, path: &Path) -> Result<(), AssetStoreError>;
+
+    async fn validate_delete_paths(
+        &self,
+        _project_root: &Path,
+        _asset: &Asset,
+    ) -> Result<(), AssetStoreError> {
+        Ok(())
+    }
+
+    async fn stage_for_delete(
+        &self,
+        _project_root: &Path,
+        _operation_id: &str,
+        _asset: &Asset,
+    ) -> Result<Vec<StagedAssetFile>, AssetStoreError> {
+        Err(AssetStoreError::Delete(
+            "transactional asset deletion is not available".to_owned(),
+        ))
+    }
+
+    async fn restore_staged_delete(
+        &self,
+        _staged: &[StagedAssetFile],
+    ) -> Result<(), AssetStoreError> {
+        Err(AssetStoreError::Delete(
+            "transactional asset restore is not available".to_owned(),
+        ))
+    }
+
+    async fn commit_staged_delete(
+        &self,
+        _staged: &[StagedAssetFile],
+    ) -> Result<(), AssetStoreError> {
+        Err(AssetStoreError::Delete(
+            "transactional asset cleanup is not available".to_owned(),
+        ))
+    }
 
     async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError>;
 

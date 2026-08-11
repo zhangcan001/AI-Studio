@@ -26,6 +26,20 @@ pub trait AssetRepository: Send + Sync {
         limit: u32,
     ) -> Result<Vec<Asset>, RepositoryError>;
 
+    /// Deletes only the selected asset rows and their project-local relation rows.
+    ///
+    /// The default keeps lightweight test repositories source-compatible; the
+    /// production SQLite implementation provides the transactional delete.
+    async fn delete_by_ids(
+        &self,
+        _project_id: &str,
+        _asset_ids: &[AssetId],
+    ) -> Result<(), RepositoryError> {
+        Err(RepositoryError::database(
+            "asset deletion is not supported by this repository",
+        ))
+    }
+
     async fn insert_generated_outputs(
         &self,
         assets: &[Asset],

@@ -1,9 +1,11 @@
+pub mod asset_deletion_service;
 pub mod asset_import_service;
 pub mod asset_library_service;
 pub mod asset_query_service;
 pub mod asset_video_prompt_service;
 #[cfg(test)]
 mod cancellation_e2e;
+pub mod comfy_memory_service;
 pub mod comfy_service;
 pub mod diagnostics_service;
 pub mod generation_catalog_service;

@@ -73,6 +73,7 @@ and Kera2/H3 live UX gates are validated. Evidence is recorded in
 - Workspace navigation between Batch Images, Batch Videos, Assets, and Tasks
 - Project-scoped task history with status filters, keyset pagination, detail views, and safe snapshot reuse
 - Project-scoped Asset Library with category filters, keyset pagination, binary previews, and Blob URL cleanup
+- Asset Library single/bulk deletion for project image, video, and audio assets with reference inspection, safe in-project file/thumbnail cleanup, and preserved task history
 - Local-first historical input loading that never auto-generates a new task
 - Project Repository CRUD foundation with stable ID-based project roots and metadata validation
 - Active Project selector, persisted local context, and Projects workspace
@@ -107,6 +108,8 @@ and Kera2/H3 live UX gates are validated. Evidence is recorded in
   event-driven status refresh, project production summary, and direct Task-detail navigation
 - Global production admission allowing one persistent production batch across all projects,
   with active-item protection, interactive submission blocking, and deterministic legacy recovery
+- Settings → ComfyUI supports guarded model-memory release through the official `POST /free`
+  request (`unload_models=true`, `free_memory=true`); model files are never deleted
 
 Batch Foundations 01–04 and `PRODUCTION VALIDATION 01` are PASS. Native Windows Cargo/pnpm regression is green, and a real four-item Kera2 persistent queue passed strict ordering, pause/resume, desktop restart recovery, Asset Library output, Archive/Restore/Delete, and transient-failure Skip/Requeue gates. Evidence is recorded in `docs/M1_PRODUCTION_VALIDATION_01.md`.
 
