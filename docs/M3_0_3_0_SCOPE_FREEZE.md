@@ -14,7 +14,7 @@ Release status: `CODE READY / LIVE VALIDATION DEFERRED`
 | 批量图片 | 提示词列表 → Krea2 图片批次 → 图片 Task / Snapshot / Asset | `wfl_kera2_t2i_local_v2` |
 | 批量视频 | 项目图片 Asset + 已保存视频提示词 → H3 视频批次 → 视频 Task / Snapshot / Asset | `wfl_minimax_h3_reference_video` |
 
-Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频从 Asset Library 选择 1–100 张图片，为每张图片保存视频提示词，然后创建独立视频队列。两个入口均复用既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链。
+Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频支持两种输入来源：从 Asset Library 选择 1–100 张图片并保存视频提示词，或从本地任务目录按同名图片/Prompt 配对或 `h3-batch.json` 批量导入。后者先创建正常 source image Asset 和 Asset Video Prompt，再与前者汇合到既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链；Production Queue 永不保存本地绝对路径。
 
 ## Frozen runtime and queue contract
 
@@ -33,6 +33,7 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 - `011_asset_video_prompt.sql` 为图片 Asset 保存项目级视频提示词；提示词会 trim、非空校验，UTF-8 最大 64 KiB。
 - Project Backup 版本升级为 v5，新增 Asset 视频提示词数据；恢复继续接受 v1–v5，并执行项目边界校验与 Asset ID remap。
 - 不创建第二 Task 模型、第二执行引擎或隐藏的 Shot 自动链路。
+- 本地 H3 导入使用 Rust 短时会话（20 分钟），React 只接收 session ID、目录显示名、相对文件名、Prompt 预览和检查状态；不创建第二队列、第二 Prompt 表、外部路径表或目录监控器。
 
 ## Ordinary UI boundary
 

@@ -31,6 +31,7 @@ use application::{
     diagnostics_service::DiagnosticsService,
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
+    h3_local_import_service::H3LocalImportService,
     media_protocol::MediaProtocolService,
     organization_service::OrganizationService,
     ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
@@ -422,6 +423,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_recovery_service.clone(),
                 clock.clone(),
             ));
+            let h3_local_import_service = Arc::new(H3LocalImportService::new(
+                source_asset_import_service.clone(),
+                asset_video_prompt_service.clone(),
+                production_queue_service.clone(),
+                clock.clone(),
+            ));
             let diagnostics_service = Arc::new(DiagnosticsService::new(
                 database_pool.clone(),
                 task_repository.clone(),
@@ -515,6 +522,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_video_prompt_service,
                 task_history_service,
                 source_asset_import_service,
+                h3_local_import_service,
                 task_cancellation_service,
                 task_recovery_service,
                 project_service,
@@ -684,6 +692,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
             commands::generation::generation_create_batch,
+            commands::h3_local_import::h3_local_import_pick_directory,
+            commands::h3_local_import::h3_local_import_rescan,
+            commands::h3_local_import::h3_local_import_commit,
             commands::production_queue::production_queue_create,
             commands::production_queue::production_queue_list,
             commands::production_queue::production_queue_overview,

@@ -17,6 +17,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
+| H3 input sources | MiniMax H3 支持 A：Asset Library 图片 + 视频提示词；B：Local Batch Import 同名图片/Prompt 配对或 `h3-batch.json`。本地图片先导入正常 source image Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
 | Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
 | H3 Recipe contract | 只接受精确语义键；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
 | H3 Recipe selection audit | 当前官方 H3 workflow ID 的活动 Catalog 只有不可变 `1.2.0`；历史包保留兼容。普通 workspace 假设一个活动生产 Recipe，作为已记录技术债，本轮不改选择系统。 |
@@ -24,7 +25,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 346 tests、frontend 36 files / 115 tests、frontend build、diff 检查和 Tauri installer build。 |
+| Regression | Rust 352 tests、frontend 37 files / 120 tests、frontend build、diff 检查和 Tauri installer build。 |
 
 ## H3 1.2.0 Local Package Audit
 
@@ -45,6 +46,21 @@ The historical `1.1.2` package and its validated workflow bytes remain
 preserved and were not modified. The local package audit used no user absolute
 paths in this document.
 
+## MiniMax H3 input sources
+
+| Input | Result |
+| --- | --- |
+| A. Asset Library | PASS · existing image Asset → saved Asset Video Prompt → normal H3 ProductionBatch |
+| B. Local Batch Import | PASS · native folder dialog → read-only inspection → source image Asset import → Asset Video Prompt → normal H3 ProductionBatch |
+| Local pairing | PASS · recursive relative-path stem pairing, natural order, PNG/JPG/JPEG/WebP with TXT/MD, UTF-8/BOM, multiline prompt preservation |
+| JSON manifest | PASS · `h3-batch.json`, relative image paths only, maximum 100 entries, duplicate/unknown/boundary paths blocked |
+| Queue boundary | PASS · session keeps the absolute root only in Rust for 20 minutes; persisted queue values contain Asset IDs, not external paths |
+| Auto start | PASS · default ON; OFF creates a READY normal ProductionBatch |
+
+Local Batch Import does not create a second executor, queue, prompt table,
+asset category, migration, or folder watcher. Existing cancel-pending, asset
+delete guards, and ComfyUI memory-release guards remain generic.
+
 ## Final candidate artifacts
 
 The final `pnpm tauri build` completed successfully for the current HEAD. These
@@ -52,9 +68,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 29982208 | `fb3a87a2a15115541655e78845d369713fa284c39b80846f1f852c8d316f1ac5` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7126961 | `b48bbc13fa053aca27b90df44d4cf226eb1d2f031c1fd7262772cff9f525175a` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10416128 | `cf348e60c973fffdcde19ad4eac8940fafc83bb78bb1c4840835cdee641d70ea` |
+| `src-tauri/target/release/ai-studio.exe` | 30316544 | `f0846c0820321f756480f5d270584eba73c3264756c7760cb98a89cbdf179ee7` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7206679 | `138d5ba4d435f18c3d092470df4adf5c3588ed7eb890deb81c652c16eb72cc38` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10543104 | `23da6f5b33dc40718207622c61352941f8d7862bd0fec1f1d4daad2455908544` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-11`.
@@ -70,7 +86,7 @@ generation date `2026-08-11`.
 
 ## Deferred live validation — batch videos
 
-1. 在“资产库”选择 3 张图片，进入“批量视频”。其中至少 1 张必须是手动导入的图片，以证明视频入口不依赖图片批次来源。
+1. 在“资产库”选择 3 张图片，或在“批量视频”切换到“从本地导入”并选择一个最小任务目录。其中至少 1 张必须是手动导入的图片，以证明视频入口不依赖图片批次来源。
 2. 为 3 张图片分别填写并保存视频提示词；确认资格状态、`最高 15 秒 · 最高 2K` 产品能力提示、`4 步 · 单任务串行` 当前 Runtime 提示、历史验证档位提示、Recipe 时长下拉（1–15 秒，默认 5 秒）和精确 H3 runtime READY。
 3. 创建 H3 批次，确认 3 项、严格串行、3 个 Task、3 个 Snapshot 和 3 个视频 Asset；视频可以用原生播放器播放。
 4. 编辑一条提示词后重新创建或检查批次，确认队列项保留编辑后的冻结值；Krea2 批次不应被创建或自动依赖。

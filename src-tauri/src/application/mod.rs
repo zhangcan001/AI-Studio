@@ -13,6 +13,7 @@ pub mod generation_catalog_service;
 mod generation_e2e;
 pub mod generation_input_preparer;
 pub mod generation_service;
+pub mod h3_local_import_service;
 pub(crate) mod image_inspection;
 pub mod media_probe;
 pub mod media_protocol;

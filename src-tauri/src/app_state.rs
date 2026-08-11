@@ -7,6 +7,7 @@ use crate::application::comfy_service::ComfyService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
+use crate::application::h3_local_import_service::H3LocalImportService;
 use crate::application::organization_service::OrganizationService;
 use crate::application::preset_service::PresetService;
 use crate::application::production_queue_service::ProductionQueueService;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
     pub task_history_service: Arc<TaskHistoryService>,
     pub source_asset_import_service: Arc<SourceAssetImportService>,
+    pub h3_local_import_service: Arc<H3LocalImportService>,
     pub task_cancellation_service: Arc<TaskCancellationService>,
     pub task_recovery_service: Arc<TaskRecoveryService>,
     pub project_service: Arc<ProjectService>,
@@ -76,6 +78,7 @@ impl AppState {
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
         task_history_service: Arc<TaskHistoryService>,
         source_asset_import_service: Arc<SourceAssetImportService>,
+        h3_local_import_service: Arc<H3LocalImportService>,
         task_cancellation_service: Arc<TaskCancellationService>,
         task_recovery_service: Arc<TaskRecoveryService>,
         project_service: Arc<ProjectService>,
@@ -106,6 +109,7 @@ impl AppState {
             asset_video_prompt_service,
             task_history_service,
             source_asset_import_service,
+            h3_local_import_service,
             task_cancellation_service,
             task_recovery_service,
             project_service,

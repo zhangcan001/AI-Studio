@@ -14,6 +14,11 @@ import type {
   AssetView,
 } from "../types/asset";
 import type { AssetVideoPromptView } from "../types/assetVideoPrompt";
+import type {
+  H3LocalImportInspection,
+  H3LocalImportMode,
+  H3LocalImportResult,
+} from "../types/h3LocalImport";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type { ShotBatchPlan, ShotInputValues, ShotStage, ShotView } from "../types/shot";
@@ -561,6 +566,34 @@ export function setAssetVideoPrompt(
   return invoke<AssetVideoPromptView>("asset_video_prompt_set", {
     request: { projectId, assetId, promptText },
   });
+}
+
+export function pickH3LocalImportDirectory(
+  projectId: string,
+  mode: H3LocalImportMode,
+): Promise<H3LocalImportInspection | null> {
+  return invoke<H3LocalImportInspection | null>("h3_local_import_pick_directory", { projectId, mode });
+}
+
+export function rescanH3LocalImport(
+  sessionId: string,
+  mode: H3LocalImportMode,
+): Promise<H3LocalImportInspection> {
+  return invoke<H3LocalImportInspection>("h3_local_import_rescan", { sessionId, mode });
+}
+
+export function commitH3LocalImport(request: {
+  sessionId: string;
+  batchName?: string;
+  workflowVersionId: string;
+  recipeId: string;
+  width: number;
+  height: number;
+  durationSeconds: number;
+  seed?: string;
+  autoStart: boolean;
+}): Promise<H3LocalImportResult> {
+  return invoke<H3LocalImportResult>("h3_local_import_commit", { request });
 }
 
 export function taskHistoryPage(
