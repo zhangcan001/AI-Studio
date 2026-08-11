@@ -27,7 +27,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   BACKUP_SNAPSHOT_ASSET_REMAP_FAILED: "项目备份中的历史素材引用无法安全恢复，恢复已取消。",
   ASSET_DELETION_BLOCKED: "所选素材仍被活动任务或生产队列使用，请完成或取消后再删除。",
   FILESYSTEM_BOUNDARY_ERROR: "素材文件路径不在当前项目目录内，删除已阻止。",
-  COMFY_MEMORY_BUSY: "当前仍有任务或 ComfyUI 队列活动，请等待完成后再释放模型内存。",
+  COMFY_MEMORY_BUSY: "当前仍有任务或 ComfyUI 队列活动，完成或取消后再释放模型内存。",
   COMFY_MEMORY_RELEASE_FAILED: "ComfyUI 释放显存/内存失败，请检查连接后重试。",
   EXECUTION_ERROR: "生成执行失败，请查看任务详情中的技术信息。",
   EXECUTION_INTERRUPTED: "生成任务已被中断。",
