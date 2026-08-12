@@ -834,6 +834,8 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .production-queue-detail-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; }
 .production-queue-detail-heading > div:first-child { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .production-queue-detail-heading-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.review-jump-button { border-color: var(--ux-accent); color: var(--ux-text); background: var(--ux-accent-strong); }
+.review-jump-button:hover:not(:disabled) { background: var(--ux-accent); }
 .production-queue-detail-heading strong { overflow: hidden; color: #d5deec; text-overflow: ellipsis; white-space: nowrap; }
 .production-queue-detail-heading > div > span:last-child, .production-queue-detail-heading small { color: #8997ad; font-size: 0.75rem; }
 .production-queue-stats { display: grid; grid-template-columns: repeat(7, minmax(78px, 1fr)); gap: 6px; }

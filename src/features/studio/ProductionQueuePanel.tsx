@@ -37,6 +37,7 @@ import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
 import { ProductionAssetPreview } from "./ProductionAssetPreview";
 import { ProductionBatchReviewWorkspace } from "./ProductionBatchReviewWorkspace";
+import { hasReviewableVideoOutput } from "./productionQueueReview";
 import {
   readStoredProductionQueueId,
   rememberProductionQueue,
@@ -87,6 +88,7 @@ export function ProductionQueuePanel({
   const [expandedInlineItemId, setExpandedInlineItemId] = useState<string>();
   const [previewAsset, setPreviewAsset] = useState<AssetView>();
   const selectedIdRef = useRef<string | undefined>(undefined);
+  const reviewAnchorRef = useRef<HTMLDivElement>(null);
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
     selectedIdRef.current = next?.id;
@@ -218,6 +220,7 @@ export function ProductionQueuePanel({
 
   useEffect(() => {
     setExpandedInlineItemId(undefined);
+    setResultAssetsByItem({});
   }, [detail?.id]);
 
   const visibleQueues = useMemo(
@@ -428,6 +431,7 @@ export function ProductionQueuePanel({
   const activeItem = detail?.items.find((item) => item.status === "DISPATCHING" || item.status === "DISPATCHED");
   const canCancelPending = detail ? canCancelPendingProductionQueue(detail) : false;
   const renderedItems = detail?.items ?? [];
+  const hasReviewableVideo = hasReviewableVideoOutput(resultAssetsByItem);
 
   return (
     <section className={`production-queue-panel${inline ? " production-queue-panel-inline" : ""}`} aria-label={inline ? "批次进度" : "生产队列"}>
@@ -611,6 +615,15 @@ export function ProductionQueuePanel({
               <span>{detail.archivedAt ? "已归档" : productionStatusLabel(detail.status)}</span>
             </div>
             <div className="production-queue-detail-heading-actions">
+              {hasReviewableVideo && (
+                <button
+                  type="button"
+                  className="review-jump-button"
+                  onClick={() => reviewAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                >
+                  审核
+                </button>
+              )}
               {canCancelPending && (
                 <button
                   type="button"
@@ -739,20 +752,19 @@ export function ProductionQueuePanel({
               onPromoteWinner={onPromoteWinner}
             />
           )}
-          {detail.items.some((item) => {
-            const identity = `${item.workflowVersionId} ${item.recipeId}`.toLowerCase();
-            return identity.includes("minimax") || identity.includes("h3");
-          }) && (
-            <ProductionBatchReviewWorkspace
-              projectId={projectId}
-              batchId={detail.id}
-              refreshKey={detail.items.map((item) => `${item.id}:${item.status}:${item.taskId ?? ""}:${item.updatedAt ?? ""}`).join("|")}
-              onOpenTask={onOpenTask}
-              onBatchChanged={async () => {
-                await refreshQueues(true);
-                await onAdmissionChanged();
-              }}
-            />
+          {hasReviewableVideo && (
+            <div ref={reviewAnchorRef}>
+              <ProductionBatchReviewWorkspace
+                projectId={projectId}
+                batchId={detail.id}
+                refreshKey={detail.items.map((item) => `${item.id}:${item.status}:${item.taskId ?? ""}:${item.updatedAt ?? ""}`).join("|")}
+                onOpenTask={onOpenTask}
+                onBatchChanged={async () => {
+                  await refreshQueues(true);
+                  await onAdmissionChanged();
+                }}
+              />
+            </div>
           )}
         </div>
       )}
