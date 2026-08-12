@@ -8,6 +8,7 @@ pub struct AssetDeletionReferences {
     pub active_production_item_ids: Vec<String>,
     pub active_task_ids: Vec<TaskId>,
     pub historical_task_ids: Vec<TaskId>,
+    pub historical_review_ids: Vec<String>,
 }
 
 #[async_trait]

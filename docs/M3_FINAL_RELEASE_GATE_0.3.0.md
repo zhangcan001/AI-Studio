@@ -15,7 +15,7 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | --- | --- |
 | Exact runtime scope | Krea2 只按精确 workflow ID 进入批量图片；MiniMax H3 只按 FAST 的 `wfl_minimax_h3_fl2va` / `wfl_minimax_h3_reference_video` 或 QUALITY 的四个 mode-specific workflow ID 进入批量视频；不创建第三 Runtime。 |
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
-| Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
+| Backup compatibility | Backup v6 保存/恢复 Asset 视频提示词与审片/返工版本，并继续接受 v1–v6。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
 | H3 input sources | MiniMax H3 支持 Asset Library 与一个仅限 `PROJECT_FOLDER` 的普通本地导入入口：每个一级子文件夹对应一个 Segment。旧配对/清单/文本/首尾帧格式保留后端兼容，但不在普通 UI 展示。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
 | Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；H3 提供图片规格中的 14 档 16:9 输出梯度（0.2–2.0 MP）；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
@@ -24,8 +24,8 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏，H3 本地导入仅展示 Project Folder。 |
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
-| Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 378 tests / 0 failed；frontend 40 files / 133 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
+| Migration / backup safety | Fresh DB、001–011 保留性、012 审片表、FK cascade、AssetVideoPrompt/Review 边界和 Backup v6 remap/恶意输入回归覆盖。 |
+| Regression | Rust 383 tests / 0 failed；frontend 40 files / 133 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
 
 ## H3 Production Quality / FAST Package Audit
 

@@ -36,6 +36,7 @@ import { AssetCard } from "../assets/AssetCard";
 import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
 import { ProductionAssetPreview } from "./ProductionAssetPreview";
+import { ProductionBatchReviewWorkspace } from "./ProductionBatchReviewWorkspace";
 
 interface Props {
   projectId: string;
@@ -695,6 +696,21 @@ export function ProductionQueuePanel({
               recipe={experimentContexts?.[detail.id]?.recipe}
               baseValues={experimentContexts?.[detail.id]?.baseValues}
               onPromoteWinner={onPromoteWinner}
+            />
+          )}
+          {detail.items.some((item) => {
+            const identity = `${item.workflowVersionId} ${item.recipeId}`.toLowerCase();
+            return identity.includes("minimax") || identity.includes("h3");
+          }) && (
+            <ProductionBatchReviewWorkspace
+              projectId={projectId}
+              batchId={detail.id}
+              refreshKey={detail.items.map((item) => `${item.id}:${item.status}:${item.taskId ?? ""}:${item.updatedAt ?? ""}`).join("|")}
+              onOpenTask={onOpenTask}
+              onBatchChanged={async () => {
+                await refreshQueues(true);
+                await onAdmissionChanged();
+              }}
             />
           )}
         </div>

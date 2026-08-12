@@ -2732,6 +2732,10 @@ fn is_h3_output_resolution(width: i64, height: i64) -> bool {
     H3_OUTPUT_RESOLUTIONS.contains(&(width, height))
 }
 
+pub fn is_supported_h3_output_resolution(width: i64, height: i64) -> bool {
+    is_h3_output_resolution(width, height)
+}
+
 fn valid_project_resolution(width: i64, height: i64) -> bool {
     is_h3_output_resolution(width, height)
 }

@@ -8,16 +8,17 @@ mod infrastructure;
 
 pub use application::ports::{
     AssetDeletionRepository, AssetRepository, AssetStore, AssetVideoPromptRepository, Clock,
-    GenerationDefinitionRepository, GenerationSnapshotRepository, ProductionQueueRepository,
-    ProjectRepository, RepositoryError, TaskRepository, WorkflowLibraryRepository,
-    WorkflowRunRepository, WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+    GenerationDefinitionRepository, GenerationSnapshotRepository, ProductionItemReviewRepository,
+    ProductionQueueRepository, ProjectRepository, RepositoryError, TaskRepository,
+    WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
+    WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{
     SqliteAssetDeletionRepository, SqliteAssetRepository, SqliteAssetVideoPromptRepository,
     SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
-    SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionQueueRepository,
-    SqliteProjectRepository, SqlitePromptLibraryRepository, SqliteTaskRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionItemReviewRepository,
+    SqliteProductionQueueRepository, SqliteProjectRepository, SqlitePromptLibraryRepository,
+    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -36,6 +37,7 @@ use application::{
     organization_service::OrganizationService,
     ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
     preset_service::PresetService,
+    production_item_review_service::ProductionItemReviewService,
     production_queue_service::ProductionQueueService,
     project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
@@ -232,6 +234,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> =
                 production_queue_repository_impl.clone();
+            let production_item_review_repository: Arc<dyn application::ports::ProductionItemReviewRepository> =
+                Arc::new(infrastructure::database::SqliteProductionItemReviewRepository::new(
+                    database_pool.clone(),
+                ));
             let shot_batch_repository: Arc<dyn application::ports::ShotBatchRepository> =
                 production_queue_repository_impl.clone();
             let project_directory_store: Arc<dyn application::ports::ProjectDirectoryStore> =
@@ -420,12 +426,20 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_update_sink,
             ));
             let production_queue_service = Arc::new(ProductionQueueService::new(
-                production_queue_repository,
+                production_queue_repository.clone(),
                 task_repository.clone(),
                 definition_repository.clone(),
                 generation_service.clone(),
                 shot_batch_repository.clone(),
                 task_recovery_service.clone(),
+                clock.clone(),
+            ));
+            let production_item_review_service = Arc::new(ProductionItemReviewService::new(
+                production_item_review_repository,
+                production_queue_repository,
+                production_queue_service.clone(),
+                task_repository.clone(),
+                asset_repository.clone(),
                 clock.clone(),
             ));
             let h3_local_import_service = Arc::new(H3LocalImportService::new(
@@ -500,7 +514,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_repository.clone(),
                 definition_repository.clone(),
                 project_repository.clone(),
-                clock,
+                clock.clone(),
             ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
                 *slot = Some(Arc::new(MediaProtocolService::new(
@@ -539,6 +553,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 organization_service,
                 project_template_service,
                 production_queue_service,
+                production_item_review_service,
                 diagnostics_service,
                 settings_service,
             ));
@@ -715,6 +730,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_skip_item,
             commands::production_queue::production_queue_requeue_item,
             commands::production_queue::production_queue_requeue_item_by_item,
+            commands::production_item_review::production_item_review_get,
+            commands::production_item_review::production_item_review_set_status,
+            commands::production_item_review::production_item_review_set_note,
+            commands::production_item_review::production_item_review_regenerate,
+            commands::production_item_review::production_item_review_regenerate_marked,
             commands::project::project_list,
             commands::project::project_create,
             commands::project::project_update,

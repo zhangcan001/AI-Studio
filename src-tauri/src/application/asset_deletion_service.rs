@@ -137,11 +137,18 @@ impl AssetDeletionService {
                 .map_err(map_store_error)?;
 
             let mut warnings = Vec::new();
-            if !reference.historical_task_ids.is_empty() {
+            if !reference.historical_task_ids.is_empty()
+                || !reference.historical_review_ids.is_empty()
+            {
                 historical_references.push(asset.id.as_str().to_owned());
                 warnings.push(
-                    "该素材已被历史生成任务使用。删除后历史记录仍保留，但无法再次读取该素材，基于该历史输入的重试可能需要重新选择素材。"
-                        .to_owned(),
+                    if reference.historical_review_ids.is_empty() {
+                        "该素材已被历史生成任务使用。删除后历史记录仍保留，但无法再次读取该素材，基于该历史输入的重试可能需要重新选择素材。"
+                            .to_owned()
+                    } else {
+                        "该素材已被历史生成任务或审片版本引用。删除后历史记录仍保留，但无法再次读取该素材，基于该历史输入的重试可能需要重新选择素材。"
+                            .to_owned()
+                    },
                 );
             }
             let can_delete = blocking_reasons.is_empty();

@@ -11,6 +11,7 @@ pub mod generation_definition_repository;
 pub mod generation_snapshot_repository;
 pub mod organization_repository;
 pub mod preset_repository;
+pub mod production_item_review_repository;
 pub mod production_queue_repository;
 pub mod project_directory_store;
 pub mod project_repository;
@@ -58,6 +59,9 @@ pub use organization_repository::{
     AssetOrganization, AssetTag, NewProjectTemplate, OrganizationRepository, ProjectTemplate,
 };
 pub use preset_repository::PresetRepository;
+pub use production_item_review_repository::{
+    ProductionItemReviewRecord, ProductionItemReviewRepository,
+};
 pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepository};
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};

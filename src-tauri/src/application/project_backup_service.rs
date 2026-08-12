@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 5;
+const BACKUP_VERSION: u32 = 6;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -422,6 +422,8 @@ impl ProjectBackupService {
         let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
+        let mut production_item_reviews =
+            query_production_item_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
         let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
         let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
@@ -465,6 +467,13 @@ impl ProjectBackupService {
             .iter()
             .map(|item| item.id.as_str())
             .collect::<HashSet<_>>();
+        production_item_reviews.retain(|review| {
+            included_batch_item_ids.contains(review.production_batch_item_id.as_str())
+                && review
+                    .task_id
+                    .as_ref()
+                    .is_none_or(|task_id| included_task_ids.contains(task_id))
+        });
         let included_shot_ids = shots
             .iter()
             .map(|shot| shot.id.clone())
@@ -638,6 +647,7 @@ impl ProjectBackupService {
             asset_tag_links,
             asset_favorites,
             asset_video_prompts,
+            production_item_reviews,
             shots,
             shot_stage_configs,
             shot_reference_assets,
@@ -745,6 +755,8 @@ struct BackupDocument {
     asset_favorites: Vec<BackupAssetFavorite>,
     #[serde(default)]
     asset_video_prompts: Vec<BackupAssetVideoPrompt>,
+    #[serde(default)]
+    production_item_reviews: Vec<BackupProductionItemReview>,
     #[serde(default)]
     shots: Vec<BackupShot>,
     #[serde(default)]
@@ -932,6 +944,25 @@ struct BackupBatchItem {
     retry_of_item_id: Option<String>,
     error_code: Option<String>,
     error_message: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionItemReview {
+    id: String,
+    project_id: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    task_id: Option<String>,
+    result_asset_id: Option<String>,
+    review_status: String,
+    review_note: String,
+    version: i64,
+    lineage_key: String,
+    parent_batch_id: Option<String>,
+    parent_item_id: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -1157,6 +1188,24 @@ struct DbBatchItem {
     retry_of_item_id: Option<String>,
     error_code: Option<String>,
     error_message: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbProductionItemReview {
+    id: String,
+    project_id: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    task_id: Option<String>,
+    result_asset_id: Option<String>,
+    review_status: String,
+    review_note: String,
+    version: i64,
+    lineage_key: String,
+    parent_batch_id: Option<String>,
+    parent_item_id: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -1483,6 +1532,43 @@ async fn query_batch_items(
         }
     }
     Ok(result)
+}
+
+async fn query_production_item_reviews(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProductionItemReview>, AppError> {
+    let rows = sqlx::query_as::<_, DbProductionItemReview>(
+        "SELECT id, project_id, production_batch_id, production_batch_item_id,
+                task_id, result_asset_id, review_status, review_note, version,
+                lineage_key, parent_batch_id, parent_item_id, created_at, updated_at
+         FROM production_item_reviews
+         WHERE project_id = ?
+         ORDER BY lineage_key, version, production_batch_item_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupProductionItemReview {
+            id: row.id,
+            project_id: row.project_id,
+            production_batch_id: row.production_batch_id,
+            production_batch_item_id: row.production_batch_item_id,
+            task_id: row.task_id,
+            result_asset_id: row.result_asset_id,
+            review_status: row.review_status,
+            review_note: row.review_note,
+            version: row.version,
+            lineage_key: row.lineage_key,
+            parent_batch_id: row.parent_batch_id,
+            parent_item_id: row.parent_item_id,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
 }
 
 #[derive(FromRow)]
@@ -1851,7 +1937,7 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5) {
+    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6) {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -1893,9 +1979,76 @@ fn validate_document_entries(
         }
     }
     validate_asset_video_prompt_document(document)?;
+    validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
     validate_prompt_document(document)?;
     validate_shot_document(document)?;
+    Ok(())
+}
+
+fn validate_production_item_review_document(document: &BackupDocument) -> Result<(), AppError> {
+    use crate::domain::ProductionReviewStatus;
+
+    let batch_ids = document
+        .batches
+        .iter()
+        .map(|batch| batch.id.as_str())
+        .collect::<HashSet<_>>();
+    let item_ids = document
+        .items
+        .iter()
+        .map(|item| (item.id.as_str(), item.batch_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let task_ids = document
+        .tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<HashSet<_>>();
+    let asset_ids = document
+        .assets
+        .iter()
+        .map(|asset| asset.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut review_ids = HashSet::new();
+    let mut reviewed_items = HashSet::new();
+    let mut lineage_versions = HashSet::new();
+    for review in &document.production_item_reviews {
+        if review.project_id != document.project.id
+            || review.id.trim().is_empty()
+            || !review_ids.insert(review.id.as_str())
+            || !reviewed_items.insert(review.production_batch_item_id.as_str())
+            || item_ids
+                .get(review.production_batch_item_id.as_str())
+                .copied()
+                != Some(review.production_batch_id.as_str())
+            || !batch_ids.contains(review.production_batch_id.as_str())
+            || review.version < 1
+            || review.lineage_key.trim().is_empty()
+            || !lineage_versions.insert((review.lineage_key.as_str(), review.version))
+            || review.review_note.as_bytes().len() > 4 * 1024
+            || review
+                .task_id
+                .as_ref()
+                .is_some_and(|task_id| !task_ids.contains(task_id.as_str()))
+            || review
+                .result_asset_id
+                .as_ref()
+                .is_some_and(|asset_id| !asset_ids.contains(asset_id.as_str()))
+            || review
+                .parent_batch_id
+                .as_ref()
+                .is_some_and(|batch_id| !batch_ids.contains(batch_id.as_str()))
+            || review
+                .parent_item_id
+                .as_ref()
+                .is_some_and(|item_id| !item_ids.contains_key(item_id.as_str()))
+            || ProductionReviewStatus::parse(&review.review_status).is_err()
+        {
+            return Err(AppError::backup_invalid(
+                "备份审片版本无效或引用了未知项目数据",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -2776,6 +2929,57 @@ async fn restore_rows_in_transaction(
             .bind(item_id).bind(batch_id).bind(item.ordinal).bind(&item.workflow_version_id).bind(&item.recipe_id).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
             .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
     }
+    for review in &document.production_item_reviews {
+        let (Some(item_id), Some(batch_id)) = (
+            item_ids.get(&review.production_batch_item_id),
+            batch_ids.get(&review.production_batch_id),
+        ) else {
+            continue;
+        };
+        let lineage_key = item_ids
+            .get(&review.lineage_key)
+            .cloned()
+            .unwrap_or_else(|| review.lineage_key.clone());
+        sqlx::query(
+            "INSERT INTO production_item_reviews
+             (id, project_id, production_batch_id, production_batch_item_id, task_id,
+              result_asset_id, review_status, review_note, version, lineage_key,
+              parent_batch_id, parent_item_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(format!("pri_{}", Uuid::new_v4().simple()))
+        .bind(&project.id)
+        .bind(batch_id)
+        .bind(item_id)
+        .bind(review.task_id.as_ref().and_then(|id| task_ids.get(id)))
+        .bind(
+            review
+                .result_asset_id
+                .as_ref()
+                .and_then(|id| asset_ids.get(id)),
+        )
+        .bind(&review.review_status)
+        .bind(&review.review_note)
+        .bind(review.version)
+        .bind(lineage_key)
+        .bind(
+            review
+                .parent_batch_id
+                .as_ref()
+                .and_then(|id| batch_ids.get(id)),
+        )
+        .bind(
+            review
+                .parent_item_id
+                .as_ref()
+                .and_then(|id| item_ids.get(id)),
+        )
+        .bind(&review.created_at)
+        .bind(&review.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for shot in &document.shots {
         let shot_id = shot_ids
             .get(&shot.id)
@@ -3196,6 +3400,7 @@ mod tests {
             asset_tag_links: links,
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
+            production_item_reviews: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -3545,6 +3750,18 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO production_item_reviews
+             (id, project_id, production_batch_id, production_batch_item_id, task_id,
+              result_asset_id, review_status, review_note, version, lineage_key,
+              parent_batch_id, parent_item_id, created_at, updated_at)
+             VALUES ('pri_backup', 'project-backup', 'pbt_backup', 'pbi_backup', 'tsk_backup',
+                     'ast_video', 'APPROVED', '镜头稳定，保留。', 1, 'pbi_backup',
+                     NULL, NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO shot_generation_links (id, shot_id, stage, task_id, production_batch_item_id, created_at) VALUES ('sgl_backup', 'sht_backup', 'image', 'tsk_backup', 'pbi_backup', '2026-01-01T00:03:00Z')")
             .execute(&pool)
             .await
@@ -3564,7 +3781,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 5);
+        assert_eq!(manifest.version, 6);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -3647,6 +3864,29 @@ mod tests {
                 && asset_id != "ast_backup"
                 && asset_id != "ast_source_backup"
         }));
+        let restored_review: (String, String, String, String, String, String) = sqlx::query_as(
+            "SELECT project_id, production_batch_id, production_batch_item_id, task_id,
+                    result_asset_id, review_status
+             FROM production_item_reviews WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_review.0, restored.id);
+        assert_ne!(restored_review.1, "pbt_backup");
+        assert_ne!(restored_review.2, "pbi_backup");
+        assert_ne!(restored_review.3, "tsk_backup");
+        assert_ne!(restored_review.4, "ast_video");
+        assert_eq!(restored_review.5, "APPROVED");
+        let restored_review_note: String = sqlx::query_scalar(
+            "SELECT review_note FROM production_item_reviews WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_review_note, "镜头稳定，保留。");
         let restored_tags: Vec<(String, String)> =
             sqlx::query_as("SELECT id, name FROM asset_tags WHERE project_id = ? ORDER BY name")
                 .bind(&restored.id)
@@ -4040,6 +4280,7 @@ mod tests {
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
+            production_item_reviews: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -4167,6 +4408,7 @@ mod tests {
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
+            production_item_reviews: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),

@@ -1230,7 +1230,7 @@ pub(crate) fn freeze_random_seed_values(
         .collect()
 }
 
-fn generation_values_from_json(
+pub(crate) fn generation_values_from_json(
     value: &Value,
 ) -> Result<BTreeMap<String, GenerationInputValue>, String> {
     let object = value

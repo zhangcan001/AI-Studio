@@ -30,9 +30,9 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 
 ## Compatibility contract
 
-- 既有 `001`–`011` 迁移、Shot 表和 Shot 后端保持可读可恢复，不删除表、不重写历史数据；`012` 不存在。
+- 既有 `001`–`011` 迁移、Shot 表和 Shot 后端保持可读可恢复，不删除表、不重写历史数据；新增 `012_production_item_review.sql` 只保存审片状态、备注和返工版本 lineage。
 - `011_asset_video_prompt.sql` 为图片 Asset 保存项目级视频提示词；提示词会 trim、非空校验，UTF-8 最大 64 KiB。
-- Project Backup 版本升级为 v5，新增 Asset 视频提示词数据；恢复继续接受 v1–v5，并执行项目边界校验与 Asset ID remap。
+- Project Backup 版本升级为 v6，新增 Asset 视频提示词和审片/返工版本数据；恢复继续接受 v1–v6，并执行项目边界校验与 Asset ID remap。
 - 不创建第二 Task 模型、第二执行引擎或隐藏的 Shot 自动链路。
 - 本地 H3 Project Folder 导入使用 Rust 短时会话（20 分钟），React 只接收 session ID、目录显示名、Segment/相对文件名、Prompt 预览和检查状态；旧导入模式仍由后端兼容但不进入普通 UI；不创建第二队列、第二 Prompt 表、外部路径表或目录监控器。
 

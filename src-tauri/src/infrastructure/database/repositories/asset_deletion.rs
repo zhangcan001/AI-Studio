@@ -42,6 +42,12 @@ struct SourceTaskRow {
     status: String,
 }
 
+#[derive(FromRow)]
+struct ReviewReferenceRow {
+    review_id: String,
+    result_asset_id: String,
+}
+
 #[async_trait]
 impl AssetDeletionRepository for SqliteAssetDeletionRepository {
     async fn references_for(
@@ -177,6 +183,25 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
             } else {
                 push_unique(&mut reference.active_task_ids, task_id);
             }
+        }
+
+        let review_rows = sqlx::query_as::<_, ReviewReferenceRow>(
+            "SELECT id AS review_id, result_asset_id
+             FROM production_item_reviews
+             WHERE project_id = ? AND result_asset_id IS NOT NULL",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        for row in review_rows {
+            if !selected.contains(&row.result_asset_id) {
+                continue;
+            }
+            let reference = references
+                .get_mut(&row.result_asset_id)
+                .expect("selected asset reference");
+            push_unique(&mut reference.historical_review_ids, row.review_id);
         }
 
         Ok(asset_ids
@@ -315,5 +340,50 @@ mod tests {
             vec!["pbi_delete_test"]
         );
         assert!(references[0].active_task_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reports_review_result_asset_as_historical_reference() {
+        let (_directory, pool) = setup_queue().await;
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path,
+              thumbnail_path, sha256, mime_type, width, height, file_size, source_task_id,
+              metadata_json, created_at, updated_at)
+             VALUES ('ast_reviewed_output', 'project-1', 'video', 'generated_video',
+                     'Reviewed output', 'reviewed.mp4', 'C:/project/reviewed.mp4', NULL,
+                     'sha', 'video/mp4', 608, 352, 1, NULL, '{}', ?, ?)",
+        )
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .expect("asset fixture");
+        sqlx::query(
+            "INSERT INTO production_item_reviews
+             (id, project_id, production_batch_id, production_batch_item_id,
+              task_id, result_asset_id, review_status, review_note, version, lineage_key,
+              created_at, updated_at)
+             VALUES ('pri_delete_test', 'project-1', 'pbt_delete_test', 'pbi_delete_test',
+                     NULL, 'ast_reviewed_output', 'REGENERATE', 'needs a new take', 1,
+                     'pbi_delete_test', ?, ?)",
+        )
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .expect("review fixture");
+
+        let repository = SqliteAssetDeletionRepository::new(pool);
+        let references = repository
+            .references_for(
+                "project-1",
+                &[AssetId::parse("ast_reviewed_output").expect("asset id")],
+            )
+            .await
+            .expect("references should load");
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].historical_review_ids, vec!["pri_delete_test"]);
+        assert!(references[0].active_production_item_ids.is_empty());
     }
 }

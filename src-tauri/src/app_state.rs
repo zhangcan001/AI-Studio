@@ -10,6 +10,7 @@ use crate::application::generation_service::GenerationService;
 use crate::application::h3_local_import_service::H3LocalImportService;
 use crate::application::organization_service::OrganizationService;
 use crate::application::preset_service::PresetService;
+use crate::application::production_item_review_service::ProductionItemReviewService;
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::project_backup_service::ProjectBackupService;
 use crate::application::project_service::ProjectService;
@@ -57,6 +58,7 @@ pub struct AppState {
     pub organization_service: Arc<OrganizationService>,
     pub project_template_service: Arc<ProjectTemplateService>,
     pub production_queue_service: Arc<ProductionQueueService>,
+    pub production_item_review_service: Arc<ProductionItemReviewService>,
     pub diagnostics_service: Arc<DiagnosticsService>,
     pub settings_service: Arc<SettingsService>,
 }
@@ -90,6 +92,7 @@ impl AppState {
         organization_service: Arc<OrganizationService>,
         project_template_service: Arc<ProjectTemplateService>,
         production_queue_service: Arc<ProductionQueueService>,
+        production_item_review_service: Arc<ProductionItemReviewService>,
         diagnostics_service: Arc<DiagnosticsService>,
         settings_service: Arc<SettingsService>,
     ) -> Self {
@@ -121,6 +124,7 @@ impl AppState {
             organization_service,
             project_template_service,
             production_queue_service,
+            production_item_review_service,
             diagnostics_service,
             settings_service,
         }

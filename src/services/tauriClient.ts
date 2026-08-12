@@ -59,6 +59,11 @@ import type {
   ProductionQueueOverview,
 } from "../types/productionQueue";
 import type {
+  ProductionBatchReview,
+  ProductionReviewRegenerateResult,
+  ProductionReviewStatus,
+} from "../types/productionItemReview";
+import type {
   CapabilityCheckView,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
@@ -450,6 +455,50 @@ export function requeueProductionQueueItem(
 
 export function requeueProductionQueueItemByItem(projectId: string, itemId: string): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_requeue_item_by_item", { projectId, itemId });
+}
+
+export function getProductionBatchReview(projectId: string, batchId: string): Promise<ProductionBatchReview> {
+  return invoke<ProductionBatchReview>("production_item_review_get", { projectId, batchId });
+}
+
+export function setProductionReviewStatus(request: {
+  projectId: string;
+  batchId: string;
+  itemId: string;
+  status: Exclude<ProductionReviewStatus, "FAILED" | "IN_PROGRESS">;
+}): Promise<ProductionBatchReview> {
+  return invoke<ProductionBatchReview>("production_item_review_set_status", { request });
+}
+
+export function setProductionReviewNote(request: {
+  projectId: string;
+  batchId: string;
+  itemId: string;
+  note: string;
+}): Promise<ProductionBatchReview> {
+  return invoke<ProductionBatchReview>("production_item_review_set_note", { request });
+}
+
+export function regenerateProductionItem(request: {
+  projectId: string;
+  batchId: string;
+  itemId: string;
+  promptOverride?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  useOriginalSeed: boolean;
+  autoStart: boolean;
+}): Promise<ProductionReviewRegenerateResult> {
+  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate", { request });
+}
+
+export function regenerateMarkedProductionItems(request: {
+  projectId: string;
+  batchId: string;
+  autoStart: boolean;
+}): Promise<ProductionReviewRegenerateResult> {
+  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate_marked", { request });
 }
 
 export function listProjects(): Promise<ProjectView[]> {
