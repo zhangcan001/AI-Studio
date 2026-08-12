@@ -33,7 +33,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSelectedWorkflow: (workflow) =>
     set({
       selectedWorkflow: workflow,
-      values: workflow ? defaultValues(workflow) : {},
+      values: workflow ? defaultGenerationValues(workflow) : {},
       draftDirty: false,
       validationErrors: {},
       reuseProvenance: undefined,
@@ -54,8 +54,9 @@ export const useStudioStore = create<StudioState>((set) => ({
   setValidationErrors: (validationErrors) => set({ validationErrors }),
   clearValidationErrors: () => set({ validationErrors: {} }),
   resetDraft: () =>
-    set((state) => ({
-      values: state.selectedWorkflow ? defaultValues(state.selectedWorkflow) : {},
+    set(() => ({
+      selectedWorkflow: undefined,
+      values: {},
       draftDirty: false,
       validationErrors: {},
       pendingAssetIntent: undefined,
@@ -63,7 +64,7 @@ export const useStudioStore = create<StudioState>((set) => ({
     })),
 }));
 
-function defaultValues(workflow: RecipeViewModel): GenerationValues {
+export function defaultGenerationValues(workflow: RecipeViewModel): GenerationValues {
   return Object.fromEntries(
     workflow.fields.map((field) => {
       switch (field.type) {

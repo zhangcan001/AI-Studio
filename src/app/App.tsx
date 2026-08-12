@@ -585,6 +585,7 @@ function App() {
               setWorkspace("tasks");
             }}
             onBackToAssets={() => setWorkspace("assets")}
+            onOpenWorkflows={() => setWorkspace("workflows")}
           />
         </WorkspaceErrorBoundary>
       )}

@@ -49,10 +49,23 @@ import type { PromptEntryView } from "../../types/prompt";
 import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
 import { CreationDashboard } from "../production/CreationDashboard";
 import type { RecentWorkflowRecord } from "../production/productionUx";
-import { KERA2_WORKFLOW_ID, kera2PromptField, kera2RecipeContract } from "../runtime/productRuntimeScope";
+import { KERA2_WORKFLOW_ID, kera2RecipeContract } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
 import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { splitPromptBlocks } from "../assets/assetVideoBatch";
+import { WorkflowSelector } from "../runtime/WorkflowSelector";
+import {
+  clearSelectedRecipeRef,
+  filterImageRecipes,
+  findRecipe,
+  imageRecipeCapability,
+  migrateGenerationValues,
+  readSelectedRecipeRef,
+  recipeRef,
+  sameRecipeRef,
+  writeSelectedRecipeRef,
+  type SelectedRecipeRef,
+} from "../runtime/workflowCapabilities";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
   switch (type) {
@@ -107,11 +120,20 @@ export function GenerationStudio({
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const productCatalog = useMemo(
-    () => catalog.filter((recipe) => {
-      if (recipe.workflowId !== KERA2_WORKFLOW_ID) return false;
-      return kera2RecipeContract(recipe).ok;
-    }),
+    () => filterImageRecipes(catalog),
     [catalog],
+  );
+  const [manualSelection, setManualSelection] = useState<SelectedRecipeRef | undefined>(
+    () => readSelectedRecipeRef(projectId, "image"),
+  );
+  const recommendedWorkflow = useMemo(
+    () => productCatalog.find((recipe) => recipe.workflowId === KERA2_WORKFLOW_ID && kera2RecipeContract(recipe).ok)
+      ?? productCatalog[0],
+    [productCatalog],
+  );
+  const manualWorkflow = useMemo(
+    () => findRecipe(productCatalog, manualSelection),
+    [manualSelection, productCatalog],
   );
   const values = useStudioStore((state) => state.values);
   const draftDirty = useStudioStore((state) => state.draftDirty);
@@ -186,6 +208,7 @@ export function GenerationStudio({
     setDashboardPromptTargetFieldKey("");
     setPresetEditorOpen(false);
     setTemplateEditorOpen(false);
+    setManualSelection(readSelectedRecipeRef(projectId, "image"));
   }, [projectId]);
 
   async function saveProjectTemplate() {
@@ -199,13 +222,13 @@ export function GenerationStudio({
   }
 
   useEffect(() => {
-    const next = selectedWorkflow
-      ? productCatalog.find(
-          (recipe) =>
-            recipe.workflowVersionId === selectedWorkflow.workflowVersionId &&
-            recipe.recipeId === selectedWorkflow.recipeId,
-        )
-      : productCatalog[0];
+    const explicitDraft = selectedWorkflow
+      ? productCatalog.find((recipe) => (
+        recipe.workflowVersionId === selectedWorkflow.workflowVersionId
+        && recipe.recipeId === selectedWorkflow.recipeId
+      ))
+      : undefined;
+    const next = explicitDraft ?? manualWorkflow ?? recommendedWorkflow;
     if (
       next?.workflowVersionId !== selectedWorkflow?.workflowVersionId ||
       next?.recipeId !== selectedWorkflow?.recipeId
@@ -213,7 +236,14 @@ export function GenerationStudio({
       setSelectedWorkflow(next);
       setMissingAssetFields(new Set());
     }
-  }, [productCatalog, selectedWorkflow, setSelectedWorkflow]);
+  }, [manualWorkflow, productCatalog, recommendedWorkflow, selectedWorkflow, setSelectedWorkflow]);
+
+  useEffect(() => {
+    if (!manualSelection || manualWorkflow || !productCatalog.length) return;
+    clearSelectedRecipeRef(projectId, "image");
+    setManualSelection(undefined);
+    setNotice("上次使用的工作流当前不可用，已切换到推荐工作流。");
+  }, [manualSelection, manualWorkflow, productCatalog.length, projectId]);
 
   function applyPendingAsset(field: RecipeField, replaceSingle: boolean) {
     if (!selectedWorkflow || !pendingAssetIntent) return;
@@ -269,10 +299,14 @@ export function GenerationStudio({
     () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
     [selectedWorkflow],
   );
-  const krea2Prompt = selectedWorkflow ? kera2PromptField(selectedWorkflow) : undefined;
+  const imageCapability = selectedWorkflow ? imageRecipeCapability(selectedWorkflow) : undefined;
+  const imagePrompt = imageCapability?.promptField;
   const krea2Contract = selectedWorkflow ? kera2RecipeContract(selectedWorkflow) : undefined;
-  const krea2ConfigError = selectedWorkflow && krea2Contract && !krea2Contract.ok
+  const krea2ConfigError = selectedWorkflow?.workflowId === KERA2_WORKFLOW_ID && krea2Contract && !krea2Contract.ok
     ? krea2Contract.reason
+    : undefined;
+  const genericImageNotice = selectedWorkflow && imageCapability && !imageCapability.batchPromptCompatible
+    ? imageCapability.reason
     : undefined;
   const krea2ResolutionPresets = useMemo(
     () => selectedWorkflow && krea2Contract?.ok
@@ -293,7 +327,12 @@ export function GenerationStudio({
       Object.keys(errors).length === 0,
   );
   const canAddToBatch = Boolean(
-    selectedWorkflow && !krea2ConfigError && !hasUnsupportedField && missingAssetFields.size === 0 && Object.keys(errors).length === 0,
+    selectedWorkflow
+      && imageCapability?.batchPromptCompatible
+      && !krea2ConfigError
+      && !hasUnsupportedField
+      && missingAssetFields.size === 0
+      && Object.keys(errors).length === 0,
   );
   const canExperimentBase = Boolean(
     canAddToBatch &&
@@ -501,8 +540,8 @@ export function GenerationStudio({
   }
 
   function addCurrentToBatch() {
-    if (!selectedWorkflow || !krea2Prompt) {
-      setBatchNotice(krea2ConfigError ?? "Krea2 Recipe 不可用，暂时无法添加到图片批次。");
+    if (!selectedWorkflow || !imageCapability?.batchPromptCompatible || !imagePrompt) {
+      setBatchNotice(krea2ConfigError ?? genericImageNotice ?? "当前工作流没有可识别的标准 Prompt 输入，暂时无法添加到图片批次。");
       return;
     }
     const nextErrors = validateRecipeValues(selectedWorkflow, values);
@@ -536,12 +575,12 @@ export function GenerationStudio({
     else setValue("height", { type: "integer", value: next.height });
   }
 
-  function promptFieldForBatch() {
-    return selectedWorkflow ? kera2PromptField(selectedWorkflow) : undefined;
+  function promptFieldForRecipe(recipe?: RecipeViewModel) {
+    return recipe ? imageRecipeCapability(recipe).promptField : undefined;
   }
 
-  function setBatchPrompt(valuesToUpdate: BatchDraftItem["values"], promptText: string) {
-    const promptField = promptFieldForBatch();
+  function setBatchPrompt(valuesToUpdate: BatchDraftItem["values"], promptText: string, recipe = selectedWorkflow) {
+    const promptField = promptFieldForRecipe(recipe);
     if (!promptField) return valuesToUpdate;
     return {
       ...valuesToUpdate,
@@ -550,14 +589,20 @@ export function GenerationStudio({
   }
 
   function batchPrompt(item: BatchDraftItem) {
-    const promptField = promptFieldForBatch();
+    const recipe = productCatalog.find((candidate) => (
+      candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId
+    ));
+    const promptField = promptFieldForRecipe(recipe);
     if (!promptField) return "";
     const value = item.values[promptField.key];
     return value?.type === "string" ? value.value : "";
   }
 
   function addBlankPromptCard() {
-    if (!selectedWorkflow) return;
+    if (!selectedWorkflow || !imageCapability?.batchPromptCompatible) {
+      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准 Prompt 输入，不能创建 Prompt 列表批次。");
+      return;
+    }
     if (batchItems.length >= 100) {
       setBatchNotice("已达到图片批次上限，最多支持 100 项。");
       return;
@@ -567,15 +612,19 @@ export function GenerationStudio({
       workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
       workflowVersionId: selectedWorkflow.workflowVersionId,
       recipeId: selectedWorkflow.recipeId,
-      values: setBatchPrompt(cloneGenerationValues(values), ""),
+      values: setBatchPrompt(cloneGenerationValues(values), "", selectedWorkflow),
     }]);
     setBatchNotice("已添加空白提示词卡片，请填写后再创建图片批次。");
   }
 
   function updateBatchPrompt(id: string, promptText: string) {
-    setBatchItems((current) => current.map((item) => (
-      item.id === id ? { ...item, values: setBatchPrompt(cloneGenerationValues(item.values), promptText) } : item
-    )));
+    setBatchItems((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      const recipe = productCatalog.find((candidate) => (
+        candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId
+      ));
+      return { ...item, values: setBatchPrompt(cloneGenerationValues(item.values), promptText, recipe) };
+    }));
   }
 
   function copyBatchItem(id: string) {
@@ -592,7 +641,10 @@ export function GenerationStudio({
   }
 
   function splitPastedPrompts() {
-    if (!selectedWorkflow) return;
+    if (!selectedWorkflow || !imageCapability?.batchPromptCompatible) {
+      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准 Prompt 输入，不能拆分 Prompt 列表。");
+      return;
+    }
     const parsed = splitPromptBlocks(batchPasteText);
     if (!parsed.length) {
       setBatchNotice("请先粘贴提示词；多个提示词之间使用空行分隔。");
@@ -609,7 +661,7 @@ export function GenerationStudio({
         workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
         workflowVersionId: selectedWorkflow.workflowVersionId,
         recipeId: selectedWorkflow.recipeId,
-        values: setBatchPrompt(cloneGenerationValues(values), promptText),
+        values: setBatchPrompt(cloneGenerationValues(values), promptText, selectedWorkflow),
       })),
     ]);
     setBatchPasteText("");
@@ -641,8 +693,8 @@ export function GenerationStudio({
 
   async function submitBatch() {
     if (!batchItems.length) return;
-    if (!selectedWorkflow || !krea2Prompt) {
-      setBatchNotice(krea2ConfigError ?? "Krea2 Recipe 不可用，暂时无法创建图片批次。");
+    if (!selectedWorkflow) {
+      setBatchNotice("当前没有可用的图片工作流。");
       return;
     }
     if (!productionPolicy.canSubmitLocalBatch) {
@@ -661,7 +713,7 @@ export function GenerationStudio({
         const recipe = productCatalog.find(
           (candidate) => candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId,
         );
-        if (!recipe || !kera2PromptField(recipe) || Object.keys(validateRecipeValues(recipe, item.values)).length > 0) return [index];
+        if (!recipe || !imageRecipeCapability(recipe).batchPromptCompatible || Object.keys(validateRecipeValues(recipe, item.values)).length > 0) return [index];
         return [];
       });
       if (invalidIndexes.length) {
@@ -803,7 +855,32 @@ export function GenerationStudio({
   function selectWorkflowFromUx(workflow: RecipeViewModel) {
     if (workflow.workflowVersionId === selectedWorkflow?.workflowVersionId && workflow.recipeId === selectedWorkflow.recipeId) return;
     if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认切换工作流吗？")) return;
-    setSelectedWorkflow(workflow);
+    writeSelectedRecipeRef(projectId, "image", recipeRef(workflow));
+    setManualSelection(recipeRef(workflow));
+    const currentState = useStudioStore.getState();
+    if (currentState.selectedWorkflow) {
+      currentState.loadDraft(workflow, migrateGenerationValues(currentState.selectedWorkflow, workflow, currentState.values));
+    } else {
+      setSelectedWorkflow(workflow);
+    }
+    setAssetIntentTargets([]);
+    setMissingAssetFields(new Set());
+    setPresetEditorOpen(false);
+    setPromptExperimentDimensions([]);
+    setDashboardPromptTargetFieldKey("");
+  }
+
+  function restoreRecommendedWorkflow() {
+    if (!recommendedWorkflow) return;
+    if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认恢复推荐工作流吗？")) return;
+    clearSelectedRecipeRef(projectId, "image");
+    setManualSelection(undefined);
+    const currentState = useStudioStore.getState();
+    if (currentState.selectedWorkflow) {
+      currentState.loadDraft(recommendedWorkflow, migrateGenerationValues(currentState.selectedWorkflow, recommendedWorkflow, currentState.values));
+    } else {
+      setSelectedWorkflow(recommendedWorkflow);
+    }
     setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
     setPresetEditorOpen(false);
@@ -869,20 +946,30 @@ export function GenerationStudio({
   return (
     <>
       <section className={`studio-panel${studioMode === "batch" ? " studio-panel-batch" : ""}`}>
-        <section className="product-ready-banner" aria-label="Krea2 产品状态">
+        <section className="product-ready-banner" aria-label="图片工作流状态">
           <div>
-            <span className="section-label">Krea2 批量图片</span>
-            <strong>Krea2 已就绪</strong>
+            <span className="section-label">批量图片</span>
+            <strong>{selectedWorkflow ? `${workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name)} 已就绪` : "图片工作流"}</strong>
           </div>
-          <span>多条 Prompt 按顺序进入生产队列，结果自动进入资产库。</span>
+          <span>自动推荐稳定工作流；手动更换后，工作流版本和 Recipe 会随任务冻结。</span>
         </section>
+        <WorkflowSelector
+          stage="image"
+          candidates={productCatalog}
+          selected={selectedWorkflow}
+          recommended={recommendedWorkflow}
+          selectionSource={selectedWorkflow && manualSelection && sameRecipeRef(selectedWorkflow, manualSelection) ? "manual" : selectedWorkflow && recommendedWorkflow && sameRecipeRef(selectedWorkflow, recommendedWorkflow) ? "recommended" : "compatible"}
+          onSelect={selectWorkflowFromUx}
+          onRestoreRecommendation={restoreRecommendedWorkflow}
+          onOpenWorkflows={onOpenWorkflows ? () => onOpenWorkflows() : undefined}
+        />
         {selectedWorkflow && (
           <>
             {studioMode !== "batch" && <>
             <div className="studio-input-heading">
               <div>
                 <span className="section-label">公开参数</span>
-                <h2>Krea2 批量图片</h2>
+                <h2>{workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name)}</h2>
               </div>
               <small>{workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name)}</small>
             </div>
@@ -1010,7 +1097,8 @@ export function GenerationStudio({
             />
             </>}
             {krea2ConfigError && <p className="error-message" role="alert">{krea2ConfigError}</p>}
-            {krea2Contract?.ok && (
+            {genericImageNotice && <p className="disabled-note" role="status">{genericImageNotice}</p>}
+            {selectedWorkflow.workflowId === KERA2_WORKFLOW_ID && krea2Contract?.ok && (
               <ResolutionControl
                 widthField={krea2Contract.contract.widthField}
                 heightField={krea2Contract.contract.heightField}
@@ -1047,13 +1135,13 @@ export function GenerationStudio({
                 <div className="batch-panel-header">
                   <div>
                     <span className="section-label">提示词列表</span>
-                    <p>每张提示词卡片都会创建一个 Krea2 图片任务；创建批次后参数会冻结。</p>
+                  <p>{imageCapability?.batchPromptCompatible ? "每张提示词卡片都会创建一个图片任务；创建批次后工作流版本和参数会冻结。" : "当前工作流没有标准 Prompt 输入，Prompt 列表批量生成不可用；请使用上方通用参数模式单次生成。"}</p>
                   </div>
                 <div className="batch-actions">
-                  <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting}>
+                  <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible}>
                     添加当前提示词
                   </button>
-                  <button type="button" className="quiet-button" onClick={addBlankPromptCard} disabled={batchSubmitting}>
+                  <button type="button" className="quiet-button" onClick={addBlankPromptCard} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible}>
                     添加提示词
                   </button>
                   <label className="quiet-button batch-file-button">
@@ -1095,7 +1183,7 @@ export function GenerationStudio({
                   recipe={selectedWorkflow}
                   values={values}
                   validationErrors={validationErrors}
-                  hiddenFieldKeys={krea2Contract?.ok ? [krea2Prompt?.key ?? "prompt", "width", "height"] : [krea2Prompt?.key ?? "prompt"]}
+                  hiddenFieldKeys={krea2Contract?.ok ? [imagePrompt?.key ?? "prompt", "width", "height"] : [imagePrompt?.key ?? "prompt"]}
                   onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
                   onGenerate={() => void generate()}
                   projectId={projectId}
@@ -1113,7 +1201,7 @@ export function GenerationStudio({
                     disabled={batchSubmitting}
                   />
                 </label>
-                <button type="button" onClick={splitPastedPrompts} disabled={batchSubmitting || !batchPasteText.trim()}>
+                  <button type="button" onClick={splitPastedPrompts} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible || !batchPasteText.trim()}>
                   按空行拆分
                 </button>
               </div>
@@ -1152,6 +1240,7 @@ export function GenerationStudio({
                 onClick={() => void submitBatch()}
                 disabled={
                   !batchItems.length ||
+                  !imageCapability?.batchPromptCompatible ||
                   batchSubmitting ||
                   !comfyConnected ||
                   !taskEventsReady ||
