@@ -47,6 +47,16 @@ const workspaceLabels: Record<Workspace, string> = {
   settings: "设置",
 };
 
+const workspaceDescriptions: Record<Workspace, string> = {
+  studio: "用 Prompt 列表串行生产图片，并在当前工作区追踪结果。",
+  video: "为图片资产配置 MiniMax H3 视频参数，并串行生成。",
+  assets: "集中浏览、筛选和继续使用当前项目的媒体资产。",
+  tasks: "查看任务状态、输入快照和生成结果。",
+  projects: "管理项目、模板和本地备份。",
+  workflows: "检查运行包、配方和工作流发布状态。",
+  settings: "连接运行时、释放模型内存和导出诊断信息。",
+};
+
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
@@ -382,7 +392,8 @@ function App() {
 
   return (
     <main className={`app-shell app-workspace-${workspace}`}>
-      <header className="app-header">
+      <a className="skip-link" href="#app-main-content">跳到当前工作区</a>
+      <aside className="app-sidebar" aria-label="AI Studio 主导航">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true"><span>AI</span></div>
           <div className="brand-copy">
@@ -391,54 +402,74 @@ function App() {
             <span className="brand-subtitle">PROMPT · RUNTIME · ASSET</span>
           </div>
         </div>
-        <div className="header-context-group">
-          <div className="project-selector">
-            <label htmlFor="active-project">当前项目</label>
-            <select
-              id="active-project"
-              value={activeProjectId ?? ""}
-              onChange={(event) => openProject(event.target.value)}
-              disabled={projectLoading || !projects.length || projectContextLoading}
-            >
-              {!activeProjectId && <option value="">正在加载项目...</option>}
-              {projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project.id, project.name)}</option>)}
-            </select>
+        <div className="sidebar-project project-selector">
+          <label htmlFor="active-project">当前项目</label>
+          <select
+            id="active-project"
+            value={activeProjectId ?? ""}
+            onChange={(event) => openProject(event.target.value)}
+            disabled={projectLoading || !projects.length || projectContextLoading}
+          >
+            {!activeProjectId && <option value="">正在加载项目...</option>}
+            {projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project.id, project.name)}</option>)}
+          </select>
+        </div>
+        <nav className="workspace-nav" aria-label="工作区导航">
+          <div className="workspace-nav-heading">
+            <span className="section-label">工作台</span>
+            <small>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</small>
           </div>
-          <button type="button" className="quiet-button header-new-project" onClick={() => setWorkspace("projects")}>
-            <span className="button-leading-icon" aria-hidden="true">+</span>
-            新建项目
-          </button>
-          {comfy && (
-            <div className="header-status">
-              <span className="header-status-kicker">RUNTIME LINK</span>
+          <div className="workspace-nav-items">
+            {(Object.keys(workspaceLabels) as Workspace[]).map((value) => (
+              <button
+                type="button"
+                key={value}
+                className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
+                onClick={() => setWorkspace(value)}
+                aria-current={workspace === value ? "page" : undefined}
+              >
+                <WorkspaceGlyph name={value} />
+                <span>{workspaceLabels[value]}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+        {comfy && (
+          <div className="sidebar-runtime" aria-label="运行时状态">
+            <span className="header-status-kicker">RUNTIME LINK</span>
+            <div className="sidebar-runtime-status">
               <span className={`status-dot status-${comfy.status.toLowerCase()}`} />
-              <span>ComfyUI {comfyStatusLabel(comfy.status)}</span>
-              <small>{comfy.devices[0]?.name ?? "GPU 不可用"}</small>
+              <strong>ComfyUI {comfyStatusLabel(comfy.status)}</strong>
             </div>
-          )}
+            <small>{comfy.devices[0]?.name ?? "GPU 不可用"}</small>
+          </div>
+        )}
+        <div className="sidebar-footer">
+          <span>LOCAL · PRIVATE</span>
+          <small>工作内容保存在本机</small>
         </div>
-      </header>
+      </aside>
 
-      <nav className="workspace-nav" aria-label="工作区导航">
-        <div className="workspace-nav-heading">
-          <span className="section-label">工作台</span>
-          <small>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</small>
-        </div>
-        <div className="workspace-nav-items">
-          {(Object.keys(workspaceLabels) as Workspace[]).map((value) => (
-            <button
-              type="button"
-              key={value}
-              className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
-              onClick={() => setWorkspace(value)}
-              aria-current={workspace === value ? "page" : undefined}
-            >
-              <WorkspaceGlyph name={value} />
-              <span>{workspaceLabels[value]}</span>
+      <div className="app-main">
+        <header className="app-header">
+          <div className="app-page-heading">
+            <span className="section-label">当前工作区</span>
+            <h1>{workspaceLabels[workspace]}</h1>
+            <p>{workspaceDescriptions[workspace]}</p>
+          </div>
+          <div className="app-header-actions">
+            <span className="header-project-chip">
+              <span className="header-project-chip-label">PROJECT</span>
+              <strong>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</strong>
+            </span>
+            <button type="button" className="quiet-button header-new-project" onClick={() => setWorkspace("projects")}>
+              <span className="button-leading-icon" aria-hidden="true">+</span>
+              新建项目
             </button>
-          ))}
-        </div>
-      </nav>
+          </div>
+        </header>
+
+        <div className="app-main-content" id="app-main-content" tabIndex={-1}>
 
       {(workspace === "studio" || workspace === "video") && productionAdmission.busy && (
         <section className="production-admission-banner" role="status" aria-live="polite">
@@ -590,6 +621,8 @@ function App() {
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
       {error && <p className="error-message global-error">提示：{error}</p>}
       {bootstrapState && <p className="version">版本 {bootstrapState.status.version}</p>}
+        </div>
+      </div>
     </main>
   );
 }

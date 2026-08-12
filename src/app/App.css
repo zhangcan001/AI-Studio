@@ -5049,3 +5049,328 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Evidence-based navigation refinement
+   Inspired by the persistent rail/session patterns in Krea, Runway, InvokeAI
+   and Firefly: one stable navigation surface, one current workspace header,
+   and production content that owns the remaining width.
+   -------------------------------------------------------------------------- */
+
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 8px;
+  left: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--ux-accent);
+  border-radius: var(--ux-radius-sm);
+  color: #04111c;
+  background: var(--ux-accent);
+  transform: translateY(-150%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(224px, 252px) minmax(0, 1fr);
+  align-items: start;
+  gap: 22px;
+}
+
+.app-sidebar {
+  position: sticky;
+  z-index: 35;
+  top: 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 28px);
+  padding: 17px 13px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-lg);
+  background: linear-gradient(160deg, rgb(12 29 48 / 97%), rgb(5 13 24 / 98%));
+  box-shadow: var(--ux-shadow), inset 0 1px 0 rgb(255 255 255 / 4%);
+}
+
+.app-sidebar .brand-lockup {
+  align-items: flex-start;
+  padding: 2px 4px 18px;
+  border-bottom: 1px solid var(--ux-border);
+}
+
+.app-sidebar .brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+}
+
+.app-sidebar .brand-subtitle {
+  font-size: 0.57rem;
+}
+
+.sidebar-project {
+  width: 100%;
+  margin-top: 18px;
+}
+
+.app-sidebar .project-selector select {
+  width: 100%;
+}
+
+.app-sidebar .workspace-nav {
+  position: static;
+  display: block;
+  margin: 20px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.app-sidebar .workspace-nav-heading {
+  min-width: 0;
+  padding: 0 8px 9px;
+}
+
+.app-sidebar .workspace-nav-items {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.app-sidebar .workspace-nav-button {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.sidebar-runtime {
+  display: grid;
+  gap: 7px;
+  margin-top: auto;
+  padding: 13px 12px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-md);
+  background: rgb(4 12 23 / 66%);
+}
+
+.sidebar-runtime-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sidebar-runtime-status strong,
+.sidebar-runtime small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-runtime small {
+  color: var(--ux-muted);
+  font-size: 0.7rem;
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 12px 12px 0;
+  border-top: 1px solid var(--ux-border);
+  color: var(--ux-muted);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+}
+
+.sidebar-footer small {
+  color: color-mix(in srgb, var(--ux-muted) 74%, transparent);
+  font-size: 0.68rem;
+  letter-spacing: 0;
+}
+
+.app-main {
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.app-main .app-header {
+  position: sticky;
+  top: 14px;
+  z-index: 30;
+  min-height: 82px;
+  margin-bottom: 18px;
+}
+
+.app-page-heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.app-page-heading h1 {
+  margin: 0;
+  color: var(--ux-text);
+  font-size: clamp(1.25rem, 2.2vw, 1.7rem);
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.app-page-heading p {
+  max-width: 68ch;
+  margin: 1px 0 0;
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.header-project-chip {
+  display: grid;
+  max-width: min(260px, 24vw);
+  gap: 3px;
+  padding: 7px 10px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-sm);
+  background: rgb(4 12 23 / 72%);
+}
+
+.header-project-chip-label {
+  color: var(--ux-accent);
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.header-project-chip strong {
+  overflow: hidden;
+  color: var(--ux-text);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: minmax(208px, 224px) minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .header-project-chip {
+    max-width: 19vw;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    display: block;
+  }
+
+  .app-sidebar {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    min-height: 0;
+    margin-bottom: 16px;
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .app-sidebar .brand-lockup {
+    grid-column: 1 / -1;
+  }
+
+  .sidebar-project,
+  .app-sidebar .workspace-nav,
+  .sidebar-runtime,
+  .sidebar-footer {
+    grid-column: 1 / -1;
+  }
+
+  .sidebar-project {
+    margin-top: 0;
+  }
+
+  .app-sidebar .workspace-nav {
+    margin-top: 0;
+  }
+
+  .app-sidebar .workspace-nav-items {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .app-sidebar .workspace-nav-button {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .sidebar-runtime {
+    margin-top: 0;
+  }
+
+  .sidebar-footer {
+    display: none;
+  }
+
+  .app-main .app-header {
+    top: 14px;
+  }
+}
+
+@media (max-width: 620px) {
+  .app-sidebar {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .app-sidebar .brand-lockup {
+    padding-bottom: 13px;
+  }
+
+  .app-main .app-header {
+    position: static;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .app-header-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .header-project-chip {
+    max-width: calc(100% - 122px);
+  }
+}
