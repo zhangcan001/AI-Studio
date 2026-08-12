@@ -295,6 +295,19 @@ export function ProjectFolderImportControls({
   );
 }
 
+export function projectParameterSourceLabel(source: string): string {
+  switch (source) {
+    case "USER_OVERRIDE": return "用户修改";
+    case "FRONT_MATTER": return "Front Matter";
+    case "PROMPT_SPEC": return "提示词";
+    case "PROMPT_SPEC_ROUNDED": return "提示词取整";
+    case "REFERENCE_VIDEO": return "参考视频";
+    case "SOURCE_ASPECT": return "素材比例";
+    case "RECIPE_DEFAULT": return "默认值";
+    default: return source;
+  }
+}
+
 function projectSegmentForm(segment: H3ProjectSegment): ProjectSegmentForm {
   return {
     mode: segment.generationMode,
@@ -396,6 +409,7 @@ function ProjectFolderSegmentEditor({
               <div className="h3-project-segment-main">
                 <strong>{segment.folderName}</strong>
                 <span>{H3_MODE_OPTIONS.find((option) => option.id === segment.generationMode)?.label ?? segment.generationMode} · {segment.durationSeconds} 秒 · {segment.width} × {segment.height}</span>
+                <small>时长来源：{projectParameterSourceLabel(segment.durationSource)} · 分辨率来源：{projectParameterSourceLabel(segment.resolutionSource)}</small>
                 <small>{segment.prompt?.replace(/\s+/g, " ").slice(0, 180) || "缺少 Prompt"}</small>
               </div>
               <div className="h3-project-segment-counts">
@@ -449,7 +463,7 @@ function ProjectFolderSegmentEditor({
                 <div className="h3-project-segment-actions">
                   <button type="button" onClick={() => onSave(segment)} disabled={busy}>保存本段修改</button>
                   <button type="button" className="quiet-button" onClick={() => onReset(segment)} disabled={busy}>恢复自动识别</button>
-                  <span>模式来源：{segment.modeSource} · 分辨率：{segment.resolutionSource} · 时长：{segment.durationSource}</span>
+                  <span>模式来源：{segment.modeSource} · 分辨率来源：{projectParameterSourceLabel(segment.resolutionSource)} · 时长来源：{projectParameterSourceLabel(segment.durationSource)}</span>
                 </div>
               </div>
             )}
@@ -1199,9 +1213,9 @@ export function AssetVideoBatchWorkspace({
         </div>}
         {sourceMode === "LOCAL_FOLDER" && (
           <div className="h3-project-folder-defaults" role="status">
-            <strong>Segment 默认参数</strong>
-            <span>{qualityProfile} · 5 秒 · 960 × 544</span>
-            <small>每段可展开单独编辑；Prompt Front Matter 中的时长和分辨率优先。</small>
+            <strong>Segment 参数优先级</strong>
+            <span>用户修改 → Front Matter → 提示词规格 → 素材比例 → 默认</span>
+            <small>无规格且无可用素材推断时使用 {qualityProfile} · 5 秒 · 960 × 544；每段可展开单独编辑。</small>
           </div>
         )}
         <small>{recipe ? `运行时已锁定：${recipe.workflowId}` : "运行时未就绪"}</small>

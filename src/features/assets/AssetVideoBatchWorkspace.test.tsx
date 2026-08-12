@@ -7,6 +7,7 @@ import {
   ProjectFolderImportControls,
   h3InitialGenerationMode,
   h3PickerAssets,
+  projectParameterSourceLabel,
 } from "./AssetVideoBatchWorkspace";
 import type { AssetView } from "../../types/asset";
 
@@ -67,6 +68,13 @@ describe("H3 批量视频工作区渲染安全", () => {
     expect(html).not.toContain("Prompt 文生视频");
     expect(html).not.toContain("首尾帧配对");
     expect(html).not.toContain("Omni 全能参考清单");
+  });
+
+  it("labels per-segment parameter sources for confirmation", () => {
+    expect(projectParameterSourceLabel("PROMPT_SPEC")).toBe("提示词");
+    expect(projectParameterSourceLabel("PROMPT_SPEC_ROUNDED")).toBe("提示词取整");
+    expect(projectParameterSourceLabel("USER_OVERRIDE")).toBe("用户修改");
+    expect(projectParameterSourceLabel("SOURCE_ASPECT")).toBe("素材比例");
   });
 
   it("renders direct navigation with no assets and defaults to text-to-video", () => {

@@ -77,6 +77,17 @@ struct ProjectPromptData {
     text: String,
     bytes: usize,
     front_matter: ProjectFrontMatter,
+    prompt_spec: ProjectPromptSpec,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ProjectPromptSpec {
+    duration_seconds: Option<i64>,
+    resolution: Option<(i64, i64)>,
+    duration_rounded: bool,
+    duration_out_of_range: Option<f64>,
+    unsupported_resolution: Option<(i64, i64)>,
+    warnings: Vec<String>,
 }
 
 async fn inspect_project_folder(
@@ -239,7 +250,9 @@ async fn inspect_project_segment(
                     segment
                         .warnings
                         .extend(prompt.front_matter.warnings.clone());
+                    segment.warnings.extend(prompt.prompt_spec.warnings.clone());
                     segment.front_matter = Some(prompt.front_matter);
+                    segment.prompt_spec = Some(prompt.prompt_spec);
                 }
                 Err(error) => segment.errors.push(error),
             },
@@ -300,6 +313,7 @@ fn empty_project_segment(
         prompt_sha256: None,
         all_media: Vec::new(),
         front_matter: None,
+        prompt_spec: None,
         base_errors: Vec::new(),
         base_warnings: Vec::new(),
     }
@@ -470,6 +484,7 @@ pub struct H3ProjectSegmentInspection {
     pub(crate) prompt_sha256: Option<String>,
     pub(crate) all_media: Vec<H3ProjectMedia>,
     front_matter: Option<ProjectFrontMatter>,
+    prompt_spec: Option<ProjectPromptSpec>,
     base_errors: Vec<String>,
     base_warnings: Vec<String>,
 }
@@ -1752,16 +1767,9 @@ fn parse_project_prompt_bytes(bytes: &[u8]) -> Result<ProjectPromptData, String>
                     front_matter.duration_seconds = Some(duration);
                 }
                 "resolution" => {
-                    let resolution = value.to_ascii_lowercase();
-                    let (width, height) = resolution.split_once('x').ok_or_else(|| {
+                    let (width, height) = find_exact_resolution(value, 0).ok_or_else(|| {
                         "FRONT_MATTER_INVALID：resolution 必须是 widthxheight。".to_owned()
                     })?;
-                    let width = width
-                        .parse::<i64>()
-                        .map_err(|_| "FRONT_MATTER_INVALID：resolution 宽度无效。".to_owned())?;
-                    let height = height
-                        .parse::<i64>()
-                        .map_err(|_| "FRONT_MATTER_INVALID：resolution 高度无效。".to_owned())?;
                     front_matter.resolution = Some((width, height));
                 }
                 _ => front_matter
@@ -1779,11 +1787,363 @@ fn parse_project_prompt_bytes(bytes: &[u8]) -> Result<ProjectPromptData, String>
     };
     let (prompt, _) = parse_prompt_text_with_bytes(body, bytes.len())
         .map_err(|issue| format_project_prompt_issue(issue))?;
+    let prompt_spec = parse_project_prompt_spec(&prompt);
     Ok(ProjectPromptData {
         text: prompt,
         bytes: bytes.len(),
         front_matter,
+        prompt_spec,
     })
+}
+
+fn parse_project_prompt_spec(prompt: &str) -> ProjectPromptSpec {
+    let mut spec = ProjectPromptSpec::default();
+    for line in project_prompt_scan_lines(prompt) {
+        let is_spec_line = is_project_spec_line(line) || is_compact_project_spec_line(line);
+        if !is_spec_line
+            && !has_project_parameter_key(line, true)
+            && !has_project_parameter_key(line, false)
+        {
+            continue;
+        }
+
+        if spec.duration_seconds.is_none() && spec.duration_out_of_range.is_none() {
+            let duration = if is_spec_line {
+                find_duration_with_unit(line, 0)
+            } else {
+                find_explicit_parameter_value(line, true)
+                    .and_then(|start| find_duration_value(line, start, false))
+            };
+            if let Some((value, raw)) = duration {
+                apply_prompt_duration(&mut spec, value, &raw);
+            }
+        }
+
+        if spec.resolution.is_none() {
+            let resolution = if is_spec_line {
+                find_resolution_or_alias(line, 0, &mut spec.warnings)
+            } else {
+                find_explicit_parameter_value(line, false)
+                    .and_then(|start| find_resolution_or_alias(line, start, &mut spec.warnings))
+            };
+            if let Some(resolution) = resolution {
+                spec.resolution = Some(resolution);
+                if !valid_project_resolution(resolution.0, resolution.1) {
+                    spec.unsupported_resolution = Some(resolution);
+                }
+            }
+        }
+    }
+    spec
+}
+
+fn project_prompt_scan_lines(prompt: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    for (index, line) in prompt.lines().enumerate() {
+        if index >= 30 || is_project_timeline_line(line) {
+            break;
+        }
+        lines.push(line);
+    }
+    lines
+}
+
+fn is_project_timeline_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.contains("时间线") || contains_ascii_word(trimmed, "timeline") {
+        return true;
+    }
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index == 0 {
+        return false;
+    }
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    let separator = trimmed.get(index..).and_then(|value| value.chars().next());
+    if !separator.is_some_and(|value| matches!(value, '-' | '–' | '—')) {
+        return false;
+    }
+    index += separator.unwrap().len_utf8();
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    let second_start = index;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if second_start == index {
+        return false;
+    }
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    bytes
+        .get(index)
+        .is_some_and(|byte| *byte == b's' || *byte == b'S')
+        || trimmed
+            .get(index..)
+            .is_some_and(|value| value.starts_with('秒'))
+}
+
+fn is_project_spec_line(line: &str) -> bool {
+    line.contains("规格")
+        || contains_ascii_word(line, "spec")
+        || contains_ascii_word(line, "specification")
+}
+
+fn is_compact_project_spec_line(line: &str) -> bool {
+    find_duration_with_unit(line, 0).is_some() && find_exact_resolution(line, 0).is_some()
+}
+
+fn contains_ascii_word(value: &str, word: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    let mut offset = 0;
+    while let Some(found) = lower[offset..].find(&word.to_ascii_lowercase()) {
+        let start = offset + found;
+        let end = start + word.len();
+        let before_ok = start == 0 || !lower.as_bytes()[start - 1].is_ascii_alphanumeric();
+        let after_ok = end >= lower.len() || !lower.as_bytes()[end].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        offset = end;
+        if offset >= lower.len() {
+            break;
+        }
+    }
+    false
+}
+
+fn has_project_parameter_key(line: &str, duration: bool) -> bool {
+    let keys = if duration {
+        &["视频时长", "总时长", "时长", "video duration", "duration"][..]
+    } else {
+        &["输出分辨率", "分辨率", "video resolution", "resolution"][..]
+    };
+    keys.iter().any(|key| find_project_key(line, key).is_some())
+}
+
+fn find_project_key(line: &str, key: &str) -> Option<usize> {
+    if key.is_ascii() {
+        let lower = line.to_ascii_lowercase();
+        let key_lower = key.to_ascii_lowercase();
+        let mut offset = 0;
+        while let Some(found) = lower[offset..].find(&key_lower) {
+            let start = offset + found;
+            let end = start + key_lower.len();
+            let before_ok = start == 0 || !lower.as_bytes()[start - 1].is_ascii_alphanumeric();
+            let after_ok = end >= lower.len() || !lower.as_bytes()[end].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                return Some(end);
+            }
+            offset = end;
+            if offset >= lower.len() {
+                break;
+            }
+        }
+        None
+    } else {
+        line.find(key).map(|start| start + key.len())
+    }
+}
+
+fn find_explicit_parameter_value(line: &str, duration: bool) -> Option<usize> {
+    let keys = if duration {
+        &["视频时长", "总时长", "时长", "video duration", "duration"][..]
+    } else {
+        &["输出分辨率", "分辨率", "video resolution", "resolution"][..]
+    };
+    keys.iter().find_map(|key| {
+        find_project_key(line, key).map(|mut index| {
+            while index < line.len() {
+                let character = line[index..]
+                    .chars()
+                    .next()
+                    .expect("parameter separator should be a character");
+                if character.is_whitespace() || matches!(character, ':' | '=' | '：' | '｜' | '|')
+                {
+                    index += character.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            index
+        })
+    })
+}
+
+fn find_duration_with_unit(line: &str, start: usize) -> Option<(f64, String)> {
+    find_duration_value(line, start, true)
+}
+
+fn find_duration_value(line: &str, start: usize, require_unit: bool) -> Option<(f64, String)> {
+    let tail = line.get(start..)?;
+    for (offset, character) in tail.char_indices() {
+        if !character.is_ascii_digit() && character != '-' && character != '+' {
+            continue;
+        }
+        let candidate = &tail[offset..];
+        let mut end = 0;
+        let mut dot_count = 0;
+        for (index, character) in candidate.char_indices() {
+            if character.is_ascii_digit()
+                || ((character == '.' || character == ',') && dot_count == 0)
+            {
+                if character == '.' || character == ',' {
+                    dot_count += 1;
+                }
+                end = index + character.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end == 0 || candidate[..end].ends_with(['+', '-']) {
+            continue;
+        }
+        let raw = candidate[..end].replace(',', ".");
+        let value = raw.parse::<f64>().ok()?;
+        let rest = candidate[end..].trim_start();
+        let has_unit = rest.starts_with('秒') || rest.starts_with('s') || rest.starts_with('S');
+        if !require_unit || has_unit {
+            return Some((value, candidate[..end].to_owned()));
+        }
+    }
+    None
+}
+
+fn apply_prompt_duration(spec: &mut ProjectPromptSpec, value: f64, raw: &str) {
+    if !value.is_finite() {
+        return;
+    }
+    let rounded = value.round();
+    let rounded_i64 = rounded as i64;
+    if !(1..=15).contains(&rounded_i64) {
+        spec.duration_out_of_range = Some(value);
+        return;
+    }
+    spec.duration_seconds = Some(rounded_i64);
+    if (value - rounded).abs() > f64::EPSILON {
+        spec.duration_rounded = true;
+        spec.warnings.push(format!(
+            "Prompt时长{raw}秒已按H3整数秒要求取整为{rounded_i64}秒。"
+        ));
+    }
+}
+
+fn format_prompt_number(value: f64) -> String {
+    if value.fract().abs() < f64::EPSILON {
+        format!("{}", value as i64)
+    } else {
+        value.to_string()
+    }
+}
+
+fn find_resolution_or_alias(
+    line: &str,
+    start: usize,
+    warnings: &mut Vec<String>,
+) -> Option<(i64, i64)> {
+    if let Some(resolution) = find_exact_resolution(line, start) {
+        return Some(resolution);
+    }
+    let lower = line.get(start..)?.to_ascii_lowercase();
+    for alias in ["1080p", "2k", "1k"] {
+        if contains_project_alias(&lower, alias) {
+            return h3_resolution_alias(alias);
+        }
+    }
+    if contains_unknown_project_alias(&lower) {
+        warnings.push("Prompt 指定了未定义的模糊分辨率别名，已回退到其他参数来源。".to_owned());
+    }
+    None
+}
+
+fn contains_project_alias(value: &str, alias: &str) -> bool {
+    let mut offset = 0;
+    while let Some(found) = value[offset..].find(alias) {
+        let start = offset + found;
+        let end = start + alias.len();
+        let before_ok = start == 0 || !value.as_bytes()[start - 1].is_ascii_alphanumeric();
+        let after_ok = end >= value.len() || !value.as_bytes()[end].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        offset = end;
+        if offset >= value.len() {
+            break;
+        }
+    }
+    false
+}
+
+fn contains_unknown_project_alias(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        if !byte.is_ascii_digit() || (index > 0 && bytes[index - 1].is_ascii_alphanumeric()) {
+            continue;
+        }
+        let mut end = index;
+        while end < bytes.len() && (bytes[end].is_ascii_digit() || bytes[end] == b'.') {
+            end += 1;
+        }
+        if end < bytes.len() && matches!(bytes[end], b'k' | b'K' | b'p' | b'P') {
+            return true;
+        }
+    }
+    false
+}
+
+fn h3_resolution_alias(alias: &str) -> Option<(i64, i64)> {
+    match alias.to_ascii_lowercase().as_str() {
+        "2k" | "1080p" => Some((1920, 1088)),
+        "1k" => Some((PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT)),
+        _ => None,
+    }
+}
+
+fn find_exact_resolution(line: &str, start: usize) -> Option<(i64, i64)> {
+    let tail = line.get(start..)?;
+    let bytes = tail.as_bytes();
+    for (offset, character) in tail.char_indices() {
+        if !character.is_ascii_digit() {
+            continue;
+        }
+        let mut index = offset;
+        let width_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        let width = tail.get(width_start..index)?.parse::<i64>().ok()?;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() {
+            continue;
+        }
+        let separator = tail[index..].chars().next()?;
+        if !matches!(separator, 'x' | 'X' | '×' | '*') {
+            continue;
+        }
+        index += separator.len_utf8();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        let height_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if height_start == index {
+            continue;
+        }
+        let height = tail.get(height_start..index)?.parse::<i64>().ok()?;
+        return Some((width, height));
+    }
+    None
 }
 
 fn first_line_is_front_matter(text: &str) -> bool {
@@ -2047,6 +2407,43 @@ fn infer_project_mode(media: &[H3ProjectMedia]) -> (H3CommitGenerationMode, Vec<
 fn initialize_project_segment_inputs(segment: &mut H3ProjectSegmentInspection, _root_path: &Path) {
     segment.base_errors = segment.errors.clone();
     segment.base_warnings = segment.warnings.clone();
+    let front_matter_duration = segment
+        .front_matter
+        .as_ref()
+        .and_then(|matter| matter.duration_seconds);
+    let front_matter_resolution = segment
+        .front_matter
+        .as_ref()
+        .and_then(|matter| matter.resolution);
+    if front_matter_duration.is_some() {
+        segment
+            .warnings
+            .retain(|warning| !warning.starts_with("Prompt时长"));
+    }
+    if front_matter_resolution.is_some() {
+        segment
+            .warnings
+            .retain(|warning| !warning.starts_with("Prompt 指定了未定义"));
+    }
+    segment.base_warnings = segment.warnings.clone();
+    if let Some(prompt_spec) = segment.prompt_spec.as_ref() {
+        if front_matter_duration.is_none() {
+            if let Some(duration) = prompt_spec.duration_out_of_range {
+                segment.base_errors.push(format!(
+                    "PROMPT_DURATION_UNSUPPORTED：Prompt指定{}秒，当前 H3 只支持 1–15 秒。",
+                    format_prompt_number(duration)
+                ));
+            }
+        }
+        if front_matter_resolution.is_none() {
+            if let Some((width, height)) = prompt_spec.unsupported_resolution {
+                segment.base_errors.push(format!(
+                    "PROMPT_RESOLUTION_UNSUPPORTED：Prompt指定{}×{}，但当前H3不支持该输出尺寸，请选择合法分辨率。",
+                    width, height
+                ));
+            }
+        }
+    }
     let (inferred, inference_errors) = infer_project_mode(&segment.all_media);
     segment.inferred_mode = inferred.as_str().to_owned();
     let front_mode = segment
@@ -2143,6 +2540,13 @@ fn project_resolution_for_segment(
     {
         return (width, height, "FRONT_MATTER".to_owned());
     }
+    if let Some((width, height)) = segment
+        .prompt_spec
+        .as_ref()
+        .and_then(|spec| spec.resolution)
+    {
+        return (width, height, "PROMPT_SPEC".to_owned());
+    }
     let source = match mode {
         H3CommitGenerationMode::Fl2vaFirstLast => segment.first_frame.as_ref(),
         H3CommitGenerationMode::Ref2vaVideoImage => segment.reference_videos.first(),
@@ -2167,11 +2571,25 @@ fn project_resolution_for_segment(
         ))
 }
 
-fn nearest_project_resolution(_aspect: f64) -> (i64, i64) {
-    // The official H3 output ladder is 16:9 only. Auto-import stays on the
-    // low-cost default instead of silently selecting a larger tier because a
-    // source image has a slightly different aspect ratio.
-    (PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT)
+fn nearest_project_resolution(aspect: f64) -> (i64, i64) {
+    H3_OUTPUT_RESOLUTIONS
+        .iter()
+        .copied()
+        .min_by(|left, right| {
+            let left_delta = ((left.0 as f64 / left.1 as f64) - aspect).abs();
+            let right_delta = ((right.0 as f64 / right.1 as f64) - aspect).abs();
+            left_delta
+                .partial_cmp(&right_delta)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| {
+                    let left_cost =
+                        (left.0 * left.1 - PROJECT_DEFAULT_WIDTH * PROJECT_DEFAULT_HEIGHT).abs();
+                    let right_cost =
+                        (right.0 * right.1 - PROJECT_DEFAULT_WIDTH * PROJECT_DEFAULT_HEIGHT).abs();
+                    left_cost.cmp(&right_cost)
+                })
+        })
+        .unwrap_or((PROJECT_DEFAULT_WIDTH, PROJECT_DEFAULT_HEIGHT))
 }
 
 fn project_duration_for_segment(
@@ -2184,6 +2602,18 @@ fn project_duration_for_segment(
         .and_then(|matter| matter.duration_seconds)
     {
         return (duration, "FRONT_MATTER".to_owned());
+    }
+    if let Some(prompt_spec) = segment.prompt_spec.as_ref() {
+        if let Some(duration) = prompt_spec.duration_seconds {
+            return (
+                duration,
+                if prompt_spec.duration_rounded {
+                    "PROMPT_SPEC_ROUNDED".to_owned()
+                } else {
+                    "PROMPT_SPEC".to_owned()
+                },
+            );
+        }
     }
     if mode == H3CommitGenerationMode::Ref2vaVideoImage {
         if let Some(duration_ms) = segment
@@ -3784,8 +4214,81 @@ mod tests {
     }
 
     #[test]
-    fn project_folder_auto_resolution_uses_the_h3_default_ladder_entry() {
-        assert_eq!(nearest_project_resolution(16.0 / 9.0), (960, 544));
+    fn project_folder_auto_resolution_uses_the_closest_h3_ladder_entry() {
+        assert_eq!(nearest_project_resolution(16.0 / 9.0), (1824, 1024));
+        assert_eq!(h3_resolution_alias("2K"), Some((1920, 1088)));
+        assert_eq!(h3_resolution_alias("1080p"), Some((1920, 1088)));
+        assert_eq!(h3_resolution_alias("1K"), Some((960, 544)));
+    }
+
+    #[test]
+    fn project_prompt_spec_extracts_duration_resolution_without_touching_prompt_body() {
+        let chinese = parse_project_prompt_bytes("视频规格：10秒，分辨率：1344×768".as_bytes())
+            .expect("Chinese prompt spec should parse");
+        assert_eq!(chinese.prompt_spec.duration_seconds, Some(10));
+        assert_eq!(chinese.prompt_spec.resolution, Some((1344, 768)));
+        assert_eq!(chinese.prompt_spec.duration_rounded, false);
+        assert_eq!(chinese.text, "视频规格：10秒，分辨率：1344×768");
+
+        let english = parse_project_prompt_bytes(b"Duration: 8s\nResolution: 960x544")
+            .expect("English prompt spec should parse");
+        assert_eq!(english.prompt_spec.duration_seconds, Some(8));
+        assert_eq!(english.prompt_spec.resolution, Some((960, 544)));
+
+        let compact =
+            parse_project_prompt_bytes("规格：15秒｜1920×1088｜16:9｜原生立体声".as_bytes())
+                .expect("compact prompt spec should parse");
+        assert_eq!(compact.prompt_spec.duration_seconds, Some(15));
+        assert_eq!(compact.prompt_spec.resolution, Some((1920, 1088)));
+
+        let slash = parse_project_prompt_bytes(b"10s / 1344x768")
+            .expect("compact slash prompt spec should parse");
+        assert_eq!(slash.prompt_spec.duration_seconds, Some(10));
+        assert_eq!(slash.prompt_spec.resolution, Some((1344, 768)));
+    }
+
+    #[test]
+    fn project_prompt_spec_ignores_timeline_and_rounds_fractional_duration() {
+        let data = parse_project_prompt_bytes(
+            "视频规格：10秒，1344×768\n\n0–2秒：人物转身\n2–5秒：镜头推进\n5–10秒：人物停下"
+                .as_bytes(),
+        )
+        .expect("timeline prompt should parse");
+        assert_eq!(data.prompt_spec.duration_seconds, Some(10));
+        assert_eq!(data.prompt_spec.resolution, Some((1344, 768)));
+
+        let rounded = parse_project_prompt_bytes("时长：7.5秒".as_bytes())
+            .expect("fractional duration should parse");
+        assert_eq!(rounded.prompt_spec.duration_seconds, Some(8));
+        assert!(rounded.prompt_spec.duration_rounded);
+        assert!(rounded
+            .prompt_spec
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("7.5秒") && warning.contains("8秒")));
+    }
+
+    #[test]
+    fn project_prompt_spec_prefers_exact_resolution_over_alias_and_blocks_unsupported_size() {
+        let exact = parse_project_prompt_bytes("规格：2K，1344×768".as_bytes())
+            .expect("exact resolution should win over alias");
+        assert_eq!(exact.prompt_spec.resolution, Some((1344, 768)));
+
+        let unsupported = parse_project_prompt_bytes("分辨率：1280×720".as_bytes())
+            .expect("unsupported resolution should remain inspectable");
+        assert_eq!(unsupported.prompt_spec.resolution, Some((1280, 720)));
+        assert_eq!(
+            unsupported.prompt_spec.unsupported_resolution,
+            Some((1280, 720))
+        );
+    }
+
+    #[test]
+    fn project_prompt_spec_uses_no_default_when_prompt_has_no_explicit_spec() {
+        let data = parse_project_prompt_bytes("人物缓慢向前行走。".as_bytes())
+            .expect("ordinary prompt should parse");
+        assert_eq!(data.prompt_spec.duration_seconds, None);
+        assert_eq!(data.prompt_spec.resolution, None);
     }
 
     use crate::application::asset_video_prompt_service::AssetVideoPromptService;
@@ -4834,7 +5337,7 @@ outputs:
         fs::create_dir_all(&front_matter_segment).expect("front matter segment should exist");
         fs::write(
             front_matter_segment.join("prompt.txt"),
-            "---\nmode: text\nduration: 8\nresolution: 1376x768\n---\nline one\nline two",
+            "---\nmode: text\nduration: 8\nresolution: 1376x768\n---\n视频规格：10秒，1344×768\nline one\nline two",
         )
         .expect("front matter prompt should write");
         let invalid_segment = fixture_root.join("002_invalid_resolution");
@@ -4868,8 +5371,13 @@ outputs:
         assert_eq!(front.generation_mode, "FL2VA_TEXT_TO_VIDEO");
         assert_eq!(front.duration_seconds, 8);
         assert_eq!((front.width, front.height), (1376, 768));
-        assert_eq!(front.prompt.as_deref(), Some("line one\nline two"));
+        assert_eq!(
+            front.prompt.as_deref(),
+            Some("视频规格：10秒，1344×768\nline one\nline two")
+        );
         assert_eq!(front.mode_source, "FRONT_MATTER");
+        assert_eq!(front.duration_source, "FRONT_MATTER");
+        assert_eq!(front.resolution_source, "FRONT_MATTER");
         assert!(project.segments[1]
             .errors
             .iter()
@@ -4883,6 +5391,61 @@ outputs:
             .iter()
             .any(|error| error.contains("AMBIGUOUS_MEDIA_COMBINATION")));
         assert!(project.error_count >= 3);
+    }
+
+    #[tokio::test]
+    async fn project_folder_prompt_specs_are_independent_per_segment() {
+        let directory = tempdir().expect("prompt spec directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("ProjectRoot");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        for (folder, prompt) in [
+            ("001", "视频规格：5秒，960×544"),
+            ("002", "Duration: 10s\nResolution: 1344x768"),
+            ("003", "规格：15秒｜1920×1088｜16:9｜原生立体声"),
+            ("004", "分辨率：1280×720"),
+        ] {
+            let segment = fixture_root.join(folder);
+            fs::create_dir_all(&segment).expect("segment should exist");
+            fs::write(segment.join("prompt.txt"), prompt).expect("prompt should write");
+        }
+        let harness = build_harness(&directory.path().join("app.db"), &project_root, true).await;
+        let (_, inspection) = harness
+            .local
+            .pick(PROJECT_ID, fixture_root, H3LocalImportMode::ProjectFolder)
+            .await
+            .expect("project folder inspection should succeed");
+        let project = inspection
+            .project_folder
+            .expect("project folder data should be returned");
+        assert!(project
+            .segments
+            .iter()
+            .find(|segment| segment.folder_name == "004")
+            .expect("unsupported segment should exist")
+            .errors
+            .iter()
+            .any(|error| error.contains("PROMPT_RESOLUTION_UNSUPPORTED")));
+        assert_eq!(project.ready_count, 3);
+        assert_eq!(
+            project
+                .segments
+                .iter()
+                .take(3)
+                .map(|segment| (segment.duration_seconds, segment.width, segment.height))
+                .collect::<Vec<_>>(),
+            vec![(5, 960, 544), (10, 1344, 768), (15, 1920, 1088)]
+        );
+        assert!(project
+            .segments
+            .iter()
+            .take(3)
+            .all(|segment| segment.duration_source == "PROMPT_SPEC"));
+        assert!(project
+            .segments
+            .iter()
+            .take(3)
+            .all(|segment| segment.resolution_source == "PROMPT_SPEC"));
     }
 
     #[tokio::test]
