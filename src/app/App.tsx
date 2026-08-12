@@ -37,6 +37,16 @@ import "./App.css";
 
 type Workspace = "studio" | "video" | "assets" | "tasks" | "projects" | "workflows" | "settings";
 
+const workspaceLabels: Record<Workspace, string> = {
+  studio: "批量图片",
+  video: "批量视频",
+  assets: "资产库",
+  tasks: "任务",
+  projects: "项目",
+  workflows: "工作流",
+  settings: "设置",
+};
+
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
@@ -371,15 +381,19 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell app-workspace-${workspace}`}>
       <header className="app-header">
-        <div>
-          <p className="eyebrow">本地 AI 创作工作台</p>
-          <h1>AI Studio</h1>
+        <div className="brand-lockup">
+          <div className="brand-mark" aria-hidden="true"><span>AI</span></div>
+          <div className="brand-copy">
+            <p className="eyebrow">LOCAL CREATIVE CONTROL ROOM</p>
+            <h1>AI Studio</h1>
+            <span className="brand-subtitle">PROMPT · RUNTIME · ASSET</span>
+          </div>
         </div>
         <div className="header-context-group">
           <div className="project-selector">
-            <label htmlFor="active-project">项目</label>
+            <label htmlFor="active-project">当前项目</label>
             <select
               id="active-project"
               value={activeProjectId ?? ""}
@@ -391,10 +405,12 @@ function App() {
             </select>
           </div>
           <button type="button" className="quiet-button header-new-project" onClick={() => setWorkspace("projects")}>
+            <span className="button-leading-icon" aria-hidden="true">+</span>
             新建项目
           </button>
           {comfy && (
             <div className="header-status">
+              <span className="header-status-kicker">RUNTIME LINK</span>
               <span className={`status-dot status-${comfy.status.toLowerCase()}`} />
               <span>ComfyUI {comfyStatusLabel(comfy.status)}</span>
               <small>{comfy.devices[0]?.name ?? "GPU 不可用"}</small>
@@ -404,25 +420,24 @@ function App() {
       </header>
 
       <nav className="workspace-nav" aria-label="工作区导航">
-        {([
-          ["studio", "批量图片"],
-          ["video", "批量视频"],
-          ["assets", "资产库"],
-          ["tasks", "任务"],
-          ["projects", "项目"],
-          ["workflows", "工作流"],
-          ["settings", "设置"],
-        ] as const).map(([value, label]) => (
-          <button
-            type="button"
-            key={value}
-            className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
-            onClick={() => setWorkspace(value)}
-            aria-current={workspace === value ? "page" : undefined}
-          >
-            {label}
-          </button>
-        ))}
+        <div className="workspace-nav-heading">
+          <span className="section-label">工作台</span>
+          <small>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</small>
+        </div>
+        <div className="workspace-nav-items">
+          {(Object.keys(workspaceLabels) as Workspace[]).map((value) => (
+            <button
+              type="button"
+              key={value}
+              className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
+              onClick={() => setWorkspace(value)}
+              aria-current={workspace === value ? "page" : undefined}
+            >
+              <WorkspaceGlyph name={value} />
+              <span>{workspaceLabels[value]}</span>
+            </button>
+          ))}
+        </div>
       </nav>
 
       {(workspace === "studio" || workspace === "video") && productionAdmission.busy && (
@@ -580,3 +595,21 @@ function App() {
 }
 
 export default App;
+
+function WorkspaceGlyph({ name }: { name: Workspace }) {
+  const paths: Record<Workspace, string> = {
+    studio: "M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v10a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3v-3H5.5A1.5 1.5 0 0 1 4 15.5z M8 8h8 M8 12h5",
+    video: "M4.5 6.5A2.5 2.5 0 0 1 7 4h8a2.5 2.5 0 0 1 2.5 2.5v1L21 6v12l-3.5-1.5v1A2.5 2.5 0 0 1 15 20H7a2.5 2.5 0 0 1-2.5-2.5z M10 9l5 3-5 3z",
+    assets: "M3.5 7h6l2 2h9v10h-17z M3.5 7V5.5A1.5 1.5 0 0 1 5 4h5l2 2h7.5A1.5 1.5 0 0 1 21 7.5V9",
+    tasks: "M6 4h12v16H6z M9 8h6 M9 12h6 M9 16h4",
+    projects: "M3.5 8h7l2 2h8v9h-17z M5 8V5.5A1.5 1.5 0 0 1 6.5 4h4l1.5 2H19A1.5 1.5 0 0 1 20.5 7.5V10",
+    workflows: "M5 5h4v4H5z M15 15h4v4h-4z M9 7h6v10 M15 7h2v8 M7 9v6h8",
+    settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-2.6V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H6v-2.6h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V4.8h2.6V5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v2.6h-.2a1.7 1.7 0 0 0-1.6 1z",
+  };
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={paths[name]} />
+    </svg>
+  );
+}
