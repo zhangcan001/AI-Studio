@@ -57,6 +57,14 @@ const workspaceDescriptions: Record<Workspace, string> = {
   settings: "连接运行时、释放模型内存和导出诊断信息。",
 };
 
+function keepsNativeContextMenu(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target.closest('[contenteditable="true"]') !== null;
+}
+
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("studio");
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
@@ -391,7 +399,12 @@ function App() {
   }
 
   return (
-    <main className={`app-shell app-workspace-${workspace}`}>
+    <main
+      className={`app-shell app-workspace-${workspace}`}
+      onContextMenu={(event) => {
+        if (!keepsNativeContextMenu(event.target)) event.preventDefault();
+      }}
+    >
       <a className="skip-link" href="#app-main-content">跳到当前工作区</a>
       <aside className="app-sidebar" aria-label="AI Studio 主导航">
         <div className="brand-lockup">
