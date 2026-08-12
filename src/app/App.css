@@ -2658,6 +2658,11 @@ summary:focus-visible {
   flex-wrap: wrap;
 }
 
+.asset-import-button {
+  min-height: 42px;
+  font-weight: 700;
+}
+
 .asset-library-query,
 .task-history-query {
   display: grid;

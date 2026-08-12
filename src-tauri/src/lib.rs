@@ -760,6 +760,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::asset::asset_list_by_task,
             commands::asset::asset_list_recent,
             commands::asset::asset_pick_and_import_image,
+            commands::asset::asset_pick_and_import_source_assets,
             commands::asset::asset_pick_and_import_video,
             commands::asset::asset_pick_and_import_audio,
             commands::asset::asset_read_image,

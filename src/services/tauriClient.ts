@@ -11,6 +11,7 @@ import type {
   AssetDeleteResult,
   AssetLibraryPage,
   AssetLibraryQuery,
+  AssetSourceImportBatch,
   AssetView,
 } from "../types/asset";
 import type { AssetVideoPromptView } from "../types/assetVideoPrompt";
@@ -513,6 +514,10 @@ export function listRecentAssets(projectId: string, limit = 100): Promise<AssetV
 
 export function pickAndImportImage(projectId: string): Promise<AssetView | null> {
   return invoke<AssetView | null>("asset_pick_and_import_image", { projectId });
+}
+
+export function importSourceAssets(projectId: string): Promise<AssetSourceImportBatch> {
+  return invoke<AssetSourceImportBatch>("asset_pick_and_import_source_assets", { projectId });
 }
 
 export function pickAndImportVideo(projectId: string): Promise<AssetView | null> {

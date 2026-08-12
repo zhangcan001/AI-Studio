@@ -10,14 +10,14 @@ use crate::{
         asset_query_service::{AssetQueryError, AssetView},
         asset_video_prompt_service::{AssetVideoPromptError, AssetVideoPromptView},
         source_asset_import_service::{
-            SourceAssetImportError, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES,
-            MAX_SOURCE_VIDEO_BYTES,
+            SourceAssetImportError, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_VIDEO_BYTES,
         },
     },
     error::AppError,
 };
+use std::path::Path;
 use tauri::{ipc::Response, AppHandle, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, FilePath};
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn asset_list_by_task(
@@ -302,31 +302,100 @@ pub async fn asset_pick_and_import_image(
     let path = file.into_path().map_err(|error| {
         AppError::filesystem(format!("selected image path is unavailable: {error}"))
     })?;
-    let original_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| AppError::invalid_input("selected image has no usable file name"))?
-        .to_owned();
-    let file_size = tokio::fs::metadata(&path)
-        .await
-        .map_err(|error| {
-            AppError::filesystem(format!("selected image could not be inspected: {error}"))
-        })?
-        .len();
-    if file_size > MAX_SOURCE_IMAGE_BYTES {
-        return Err(AppError::invalid_input(format!(
-            "SOURCE_IMAGE_TOO_LARGE: image is {file_size} bytes; maximum is {MAX_SOURCE_IMAGE_BYTES}"
-        )));
-    }
-    let bytes = tokio::fs::read(&path).await.map_err(|error| {
-        AppError::filesystem(format!("selected image could not be read: {error}"))
-    })?;
     let asset = state
         .source_asset_import_service
-        .import_bytes(&project_id, &original_name, &bytes)
+        .import_image_file(&project_id, &path)
         .await
         .map_err(map_source_import_error)?;
     Ok(Some(AssetView::from(asset)))
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetImportFailureView {
+    pub display_name: String,
+    pub error: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetSourceImportBatchView {
+    pub imported: Vec<AssetView>,
+    pub failed: Vec<AssetImportFailureView>,
+    pub cancelled: bool,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_pick_and_import_source_assets(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<AssetSourceImportBatchView, AppError> {
+    super::validate_project_id(&project_id)?;
+    let Some(files) = app_handle
+        .dialog()
+        .file()
+        .add_filter(
+            "图像、视频和音频",
+            &[
+                "png", "jpg", "jpeg", "webp", "mp4", "webm", "mov", "mkv", "wav", "flac", "mp3",
+                "ogg", "opus", "m4a",
+            ],
+        )
+        .blocking_pick_files()
+    else {
+        return Ok(AssetSourceImportBatchView {
+            imported: Vec::new(),
+            failed: Vec::new(),
+            cancelled: true,
+        });
+    };
+
+    let mut imported = Vec::new();
+    let mut failed = Vec::new();
+    for file in files {
+        let display_name = selected_file_display_name(&file);
+        let path = match file.into_path() {
+            Ok(path) => path,
+            Err(_) => {
+                failed.push(AssetImportFailureView {
+                    display_name,
+                    error: "无法读取所选文件，请重新选择后重试。".to_owned(),
+                });
+                continue;
+            }
+        };
+        let result = state
+            .source_asset_import_service
+            .import_files(&project_id, std::slice::from_ref(&path))
+            .await;
+        imported.extend(result.imported.into_iter().map(AssetView::from));
+        failed.extend(
+            result
+                .failed
+                .into_iter()
+                .map(|failure| AssetImportFailureView {
+                    display_name: failure.display_name,
+                    error: failure.error,
+                }),
+        );
+    }
+
+    Ok(AssetSourceImportBatchView {
+        imported,
+        failed,
+        cancelled: false,
+    })
+}
+
+fn selected_file_display_name(file: &FilePath) -> String {
+    file.as_path()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("所选文件")
+        .to_owned()
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -499,6 +568,9 @@ fn map_source_import_error(error: SourceAssetImportError) -> AppError {
         SourceAssetImportError::InvalidSourceVideo { message }
         | SourceAssetImportError::InvalidSourceAudio { message } => {
             AppError::invalid_input(format!("{code}: {message}"))
+        }
+        SourceAssetImportError::UnsupportedSourceMedia { extension } => {
+            AppError::invalid_input(format!("{code}: .{extension}"))
         }
         SourceAssetImportError::ProjectStorageMissing { project_id } => AppError::database(
             format!("ASSET_PERSISTENCE_ERROR: project {project_id} has no storage root"),

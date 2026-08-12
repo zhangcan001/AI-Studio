@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assetLibraryPage, bulkAddAssetTag, bulkRemoveAssetTag, bulkSetAssetFavorite, getAsset, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
+import { assetLibraryPage, bulkAddAssetTag, bulkRemoveAssetTag, bulkSetAssetFavorite, getAsset, importSourceAssets, listAssetTags, setAssetFavorite } from "../../services/tauriClient";
 import type {
   AssetCategoryFilter,
   AssetCreatedOrder,
@@ -51,7 +51,9 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
   const [cursor, setCursor] = useState<PageCursor>();
   const [selectedAsset, setSelectedAsset] = useState<AssetView>();
   const [loading, setLoading] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [importError, setImportError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [compareMode, setCompareMode] = useState(false);
   const [compareAssets, setCompareAssets] = useState<AssetView[]>([]);
@@ -134,6 +136,32 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
     setNotice(undefined);
   }
 
+  async function importLocalAssets() {
+    if (importBusy) return;
+    setImportBusy(true);
+    setError(undefined);
+    setImportError(undefined);
+    try {
+      const result = await importSourceAssets(projectId);
+      if (result.cancelled) return;
+
+      await requestPage(undefined, true);
+      const filterHint = hasFilters ? " 当前筛选条件可能隐藏新素材。" : "";
+      const failureDetails = result.failed
+        .map((failure) => `${failure.displayName}：${failure.error}`)
+        .join("；");
+      if (result.failed.length) {
+        setNotice(`已导入 ${result.imported.length} 个素材，${result.failed.length} 个失败。${failureDetails ? `失败项：${failureDetails}。` : ""}${filterHint}`);
+      } else {
+        setNotice(`已导入 ${result.imported.length} 个素材。${filterHint}`);
+      }
+    } catch (value: unknown) {
+      setImportError(toUserMessage(value));
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   function toggleBulkSelection(asset: AssetView) {
     setSelectedAssetIds((current) => {
       const next = new Set(current);
@@ -214,7 +242,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
   }
 
   return (
-    <section className="workspace-panel" aria-busy={loading}>
+    <section className="workspace-panel" aria-busy={loading || importBusy}>
       <div className="section-heading workspace-heading">
         <div>
           <span className="section-label">资产</span>
@@ -222,6 +250,9 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
           <p className="section-description">搜索、筛选、对比当前项目的源素材和生成结果。</p>
         </div>
         <div className="asset-library-actions">
+          <button type="button" className="asset-import-button" onClick={() => void importLocalAssets()} disabled={importBusy || loading || bulkBusy} aria-busy={importBusy}>
+            {importBusy ? "正在导入…" : "导入本地素材"}
+          </button>
           <button type="button" className="quiet-button" onClick={() => setTagManagerOpen(true)}>管理标签</button>
           <button type="button" className={compareMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setCompareMode((value) => !value)}>
             {compareMode ? "结束对比选择" : "选择进行对比"}
@@ -229,7 +260,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
           <button type="button" className={selectionMode ? "filter-button filter-button-active" : "quiet-button"} onClick={() => setSelectionMode((value) => !value)}>
             {selectionMode ? "结束批量整理" : "批量选择"}
           </button>
-          <button type="button" className="quiet-button" onClick={() => void requestPage(undefined, true)} disabled={loading}>
+          <button type="button" className="quiet-button" onClick={() => void requestPage(undefined, true)} disabled={loading || importBusy}>
             {loading ? "正在刷新..." : "刷新"}
           </button>
         </div>
@@ -312,6 +343,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
         </section>
       )}
       {error && <p className="error-message">资产加载失败：{error}</p>}
+      {importError && <p className="error-message" role="alert">资产导入失败：{importError}</p>}
       {notice && <p className="studio-notice" role="status">{notice}</p>}
       <AssetGrid
         projectId={projectId}

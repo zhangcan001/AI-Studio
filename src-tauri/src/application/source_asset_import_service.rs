@@ -7,7 +7,12 @@ use crate::application::ports::{
 use crate::domain::{Asset, AssetId};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{error::Error, fmt, path::Path, sync::Arc};
+use std::{
+    error::Error,
+    fmt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::io::AsyncReadExt;
 
 pub const MAX_SOURCE_IMAGE_BYTES: u64 = 256 * 1024 * 1024;
@@ -31,6 +36,7 @@ pub enum SourceAssetImportError {
     InvalidSourceImage { message: String },
     InvalidSourceVideo { message: String },
     InvalidSourceAudio { message: String },
+    UnsupportedSourceMedia { extension: String },
     AssetPersistence { message: String },
 }
 
@@ -46,6 +52,7 @@ impl SourceAssetImportError {
             Self::InvalidSourceImage { .. } => "INVALID_SOURCE_IMAGE",
             Self::InvalidSourceVideo { .. } => "INVALID_SOURCE_VIDEO",
             Self::InvalidSourceAudio { .. } => "INVALID_SOURCE_AUDIO",
+            Self::UnsupportedSourceMedia { .. } => "UNSUPPORTED_SOURCE_MEDIA",
         }
     }
 }
@@ -87,6 +94,9 @@ impl fmt::Display for SourceAssetImportError {
             Self::InvalidSourceAudio { message } => {
                 write!(formatter, "INVALID_SOURCE_AUDIO: {message}")
             }
+            Self::UnsupportedSourceMedia { extension } => {
+                write!(formatter, "UNSUPPORTED_SOURCE_MEDIA: .{extension}")
+            }
             Self::AssetPersistence { message } => {
                 write!(formatter, "ASSET_PERSISTENCE_ERROR: {message}")
             }
@@ -95,6 +105,18 @@ impl fmt::Display for SourceAssetImportError {
 }
 
 impl Error for SourceAssetImportError {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceAssetImportFailure {
+    pub display_name: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceAssetImportBatch {
+    pub imported: Vec<Asset>,
+    pub failed: Vec<SourceAssetImportFailure>,
+}
 
 pub struct SourceAssetImportService {
     project_repository: Arc<dyn ProjectRepository>,
@@ -211,6 +233,77 @@ impl SourceAssetImportService {
         }
 
         Ok(asset)
+    }
+
+    pub async fn import_image_file(
+        &self,
+        project_id: &str,
+        path: &Path,
+    ) -> Result<Asset, SourceAssetImportError> {
+        let original_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| SourceAssetImportError::InvalidSourceImage {
+                message: "selected file has no usable name".to_owned(),
+            })
+            .and_then(safe_file_name)?;
+        let file_size = tokio::fs::metadata(path)
+            .await
+            .map_err(|error| SourceAssetImportError::AssetPersistence {
+                message: format!("inspect selected image: {error}"),
+            })?
+            .len();
+        if file_size > MAX_SOURCE_IMAGE_BYTES {
+            return Err(SourceAssetImportError::SourceImageTooLarge {
+                max_bytes: MAX_SOURCE_IMAGE_BYTES,
+                actual_bytes: file_size,
+            });
+        }
+        let bytes = tokio::fs::read(path).await.map_err(|error| {
+            SourceAssetImportError::AssetPersistence {
+                message: format!("read selected image: {error}"),
+            }
+        })?;
+        self.import_bytes(project_id, &original_name, &bytes).await
+    }
+
+    pub async fn import_files(
+        &self,
+        project_id: &str,
+        paths: &[PathBuf],
+    ) -> SourceAssetImportBatch {
+        let mut result = SourceAssetImportBatch::default();
+        for path in paths {
+            let display_name = source_display_name(path);
+            match self.import_file(project_id, path).await {
+                Ok(asset) => result.imported.push(asset),
+                Err(error) => result.failed.push(SourceAssetImportFailure {
+                    display_name,
+                    error: public_import_error(&error),
+                }),
+            }
+        }
+        result
+    }
+
+    async fn import_file(
+        &self,
+        project_id: &str,
+        path: &Path,
+    ) -> Result<Asset, SourceAssetImportError> {
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        match extension.as_str() {
+            "png" | "jpg" | "jpeg" | "webp" => self.import_image_file(project_id, path).await,
+            "mp4" | "webm" | "mov" | "mkv" => self.import_video_file(project_id, path).await,
+            "wav" | "flac" | "mp3" | "ogg" | "opus" | "m4a" => {
+                self.import_audio_file(project_id, path).await
+            }
+            _ => Err(SourceAssetImportError::UnsupportedSourceMedia { extension }),
+        }
     }
 
     pub async fn import_video_file(
@@ -423,6 +516,39 @@ fn safe_file_name(value: &str) -> Result<String, SourceAssetImportError> {
         });
     }
     Ok(candidate.to_owned())
+}
+
+fn source_display_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("所选文件")
+        .to_owned()
+}
+
+fn public_import_error(error: &SourceAssetImportError) -> String {
+    match error {
+        SourceAssetImportError::ProjectStorageMissing { .. }
+        | SourceAssetImportError::AssetPersistence { .. } => {
+            "无法读取或保存素材，请检查文件是否可访问。".to_owned()
+        }
+        SourceAssetImportError::SourceImageTooLarge { max_bytes, .. } => {
+            format!("图片超过大小限制（最大 {} MB）。", max_bytes / 1024 / 1024)
+        }
+        SourceAssetImportError::SourceVideoTooLarge { max_bytes, .. } => {
+            format!("视频超过大小限制（最大 {} MB）。", max_bytes / 1024 / 1024)
+        }
+        SourceAssetImportError::SourceAudioTooLarge { max_bytes, .. } => {
+            format!("音频超过大小限制（最大 {} MB）。", max_bytes / 1024 / 1024)
+        }
+        SourceAssetImportError::InvalidSourceImage { .. }
+        | SourceAssetImportError::InvalidSourceVideo { .. }
+        | SourceAssetImportError::InvalidSourceAudio { .. } => {
+            "文件内容与扩展名不匹配，或文件已损坏。".to_owned()
+        }
+        SourceAssetImportError::UnsupportedSourceMedia { .. } => "暂不支持该素材格式。".to_owned(),
+    }
 }
 
 fn safe_file_name_for_kind(
@@ -882,6 +1008,70 @@ mod tests {
             );
             assert!(asset.storage_path.ends_with(&format!(".{extension}")));
         }
+    }
+
+    #[tokio::test]
+    async fn imports_source_image_file_into_project_store_without_external_path_dependency() {
+        let project_root = tempdir().unwrap();
+        let fixture_root = tempdir().unwrap();
+        let image_path = fixture_root.path().join("reference.png");
+        std::fs::write(&image_path, png()).unwrap();
+
+        let asset = service(project_root.path(), FakeAssetRepository::default())
+            .import_image_file("project-1", &image_path)
+            .await
+            .unwrap();
+        assert_eq!(asset.category, "source_image");
+        assert_eq!(asset.width, 2);
+        assert_eq!(asset.height, 3);
+        assert!(asset.thumbnail_path.is_some());
+        assert!(Path::new(&asset.storage_path).is_file());
+        assert!(!asset
+            .storage_path
+            .contains(image_path.to_string_lossy().as_ref()));
+
+        std::fs::remove_file(image_path).unwrap();
+        assert!(Path::new(&asset.storage_path).is_file());
+        assert!(asset
+            .thumbnail_path
+            .as_deref()
+            .map(Path::new)
+            .is_some_and(Path::is_file));
+    }
+
+    #[tokio::test]
+    async fn imports_selected_source_files_serially_and_keeps_partial_failures() {
+        let project_root = tempdir().unwrap();
+        let fixture_root = tempdir().unwrap();
+        let image_path = fixture_root.path().join("image.png");
+        let invalid_video_path = fixture_root.path().join("broken.mp4");
+        let audio_path = fixture_root.path().join("audio.wav");
+        std::fs::write(&image_path, png()).unwrap();
+        std::fs::write(&invalid_video_path, b"not-a-video").unwrap();
+        std::fs::write(&audio_path, wav_prefix()).unwrap();
+
+        let repository = FakeAssetRepository::default();
+        let result = service(project_root.path(), repository.clone())
+            .import_files(
+                "project-1",
+                &[
+                    image_path.clone(),
+                    invalid_video_path.clone(),
+                    audio_path.clone(),
+                ],
+            )
+            .await;
+
+        assert_eq!(result.imported.len(), 2);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].display_name, "broken.mp4");
+        assert!(result.failed[0].error.contains("文件内容"));
+        assert!(!result.failed[0]
+            .error
+            .contains(fixture_root.path().to_string_lossy().as_ref()));
+        assert_eq!(repository.assets.lock().unwrap().len(), 2);
+        assert_eq!(result.imported[0].category, "source_image");
+        assert_eq!(result.imported[1].category, "source_audio");
     }
 
     #[tokio::test]

@@ -16,6 +16,17 @@ export interface AssetView {
   tags: Array<{ id: string; name: string }>;
 }
 
+export interface AssetImportFailure {
+  displayName: string;
+  error: string;
+}
+
+export interface AssetSourceImportBatch {
+  imported: AssetView[];
+  failed: AssetImportFailure[];
+  cancelled: boolean;
+}
+
 export type AssetCategoryFilter =
   | "ALL"
   | "SOURCE_IMAGE"

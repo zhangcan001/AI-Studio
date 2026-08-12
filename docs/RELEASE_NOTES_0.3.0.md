@@ -20,6 +20,7 @@ Date: 2026-08-12
 - Krea2 批量图片增加 Recipe-bound width/height 控件，提供 8 个官方宽高比以及按 Recipe 约束过滤的 1K/2K 预设；自定义值严格校验，不自动取整或裁剪。
 - MiniMax H3 输出分辨率预设调整为图片规格中的 14 档 16:9 MP 梯度：608×352、736×416、864×480、960×544、1056×608、1152×640、1216×672、1280×736、1344×768、1376×768、1504×832、1664×928、1824×1024、1920×1088；Project Folder 自动导入默认使用 960×544。
 - 资产库支持选择图片、视频、音频 Asset，并为图片保存项目级视频提示词；H3 批量视频入口按模式创建独立的严格串行 Production Queue。
+- 资产库新增“导入本地素材”原生多选入口；图片、视频、音频按选择顺序串行复用 SourceAssetImportService，支持局部失败、自动刷新，并不向前端返回原始绝对路径。
 - MiniMax H3 批量视频新增“从本地导入”模式：Prompt-only、同名图片/Prompt、首尾帧配对、`h3-batch.json` 与安全的 `h3-omni-batch.json`；图片、视频、音频先导入正常 Asset，再汇合到现有 Production Queue，队列和快照只保存 Asset ID，不保存本地绝对路径。
 - MiniMax H3 本地导入新增 `PROJECT_FOLDER`：ProjectRoot 的每个一级子文件夹独立作为一个 Segment，自动推断 FL2VA/REF2VA 模式，读取 Prompt front matter，按自然顺序排列参考媒体，并支持在提交前编辑每段 Prompt、模式、首尾帧、媒体顺序、时长和分辨率；所有 Segment 仍汇入一个严格串行 Production Queue。
 - H3 只接受先经过本机 `/object_info` 与真实 graph 审计的精确 Recipe 语义键；产品能力为最高 15 秒、最高 2K，`duration_seconds` 公开为 Recipe 驱动的 1–15 秒下拉，step 1、默认 5 秒；QUALITY 默认 20 步正式工作流，FAST 保留 4 步 Turbo，均使用单任务串行队列，历史本机验证档位单独保留。
@@ -32,7 +33,7 @@ Date: 2026-08-12
 
 ## Verification status
 
-本轮 Code Gate：Rust 370 tests / 0 failed；frontend 39 files / 130 tests / 0 failed；frontend build 与 Tauri installer build PASS。产物 SHA 以 `RELEASE_SHA256_0.3.0.txt` 为准。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
+本轮 Code Gate：Rust 372 tests / 0 failed；frontend 40 files / 131 tests / 0 failed；frontend build 与 Tauri installer build PASS。产物 SHA 以 `RELEASE_SHA256_0.3.0.txt` 为准。GPU、Computer Use 和 Desktop Live Gate 暂不执行；真实 Gate A/B 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
 当前候选线状态：
 
