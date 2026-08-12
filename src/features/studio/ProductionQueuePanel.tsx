@@ -37,6 +37,11 @@ import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
 import { ProductionAssetPreview } from "./ProductionAssetPreview";
 import { ProductionBatchReviewWorkspace } from "./ProductionBatchReviewWorkspace";
+import {
+  readStoredProductionQueueId,
+  rememberProductionQueue,
+  selectProductionQueueId,
+} from "./productionQueueSelection";
 
 interface Props {
   projectId: string;
@@ -85,8 +90,9 @@ export function ProductionQueuePanel({
 
   const setQueueDetail = useCallback((next?: ProductionBatchDetail) => {
     selectedIdRef.current = next?.id;
+    rememberProductionQueue(projectId, next?.id);
     setDetail(next);
-  }, []);
+  }, [projectId]);
 
   const refreshQueues = useCallback(
     async (refreshDetail = true) => {
@@ -98,18 +104,25 @@ export function ProductionQueuePanel({
         setQueues(nextQueues);
         setOverview(nextOverview);
         const selectedId = selectedIdRef.current;
-        const autoFocusQueue = inline && !selectedId && !focusBatchId
-          ? nextQueues.find((queue) => !queue.archivedAt && queue.status === "RUNNING")
-            ?? nextQueues.find((queue) => !queue.archivedAt && queue.status === "PAUSED")
-            ?? nextQueues.find((queue) => !queue.archivedAt && queue.status === "READY")
-            ?? nextQueues.find((queue) => !queue.archivedAt)
-          : undefined;
-        const detailId = selectedId ?? autoFocusQueue?.id;
-        if (detailId && (refreshDetail || Boolean(autoFocusQueue))) {
+        const detailId = selectProductionQueueId(nextQueues, [selectedId, focusBatchId], inline);
+        const shouldRestoreDetail = Boolean(detailId) && (refreshDetail || inline || Boolean(selectedId) || Boolean(focusBatchId));
+        if (detailId && shouldRestoreDetail) {
           try {
             setQueueDetail(await getProductionQueue(projectId, detailId));
           } catch {
-            setQueueDetail(undefined);
+            // A stale saved selection must not leave the inline panel blank after a restart.
+            if (selectedId === detailId) rememberProductionQueue(projectId);
+            selectedIdRef.current = undefined;
+            const fallbackId = inline ? selectProductionQueueId(nextQueues, [], true) : undefined;
+            if (fallbackId && fallbackId !== detailId) {
+              try {
+                setQueueDetail(await getProductionQueue(projectId, fallbackId));
+              } catch {
+                setQueueDetail(undefined);
+              }
+            } else {
+              setQueueDetail(undefined);
+            }
           }
         }
       } catch (error: unknown) {
@@ -125,12 +138,13 @@ export function ProductionQueuePanel({
     setContinueOnFailure(false);
     setQueues([]);
     setOverview(undefined);
-    setQueueDetail(undefined);
+    selectedIdRef.current = readStoredProductionQueueId(projectId);
+    setDetail(undefined);
     setShowArchived(false);
     setNotice(undefined);
     setResultAssetsByItem({});
     setExpandedInlineItemId(undefined);
-    void refreshQueues(false);
+    void refreshQueues(true);
     void listProductionQueueNamePresets().then(setNamePresets).catch(() => setNamePresets([]));
   }, [projectId, refreshQueues, setQueueDetail]);
 
@@ -168,7 +182,10 @@ export function ProductionQueuePanel({
         if (active) setQueueDetail(focused);
       })
       .catch((error: unknown) => {
-        if (active) setNotice(toUserMessage(error));
+        if (active) {
+          setNotice(toUserMessage(error));
+          void refreshQueues(true);
+        }
       })
       .finally(() => {
         if (active) {
@@ -207,6 +224,7 @@ export function ProductionQueuePanel({
     () => queues.filter((queue) => showArchived || !queue.archivedAt),
     [queues, showArchived],
   );
+  const inlineQueueHistory = inline ? queues : visibleQueues;
 
   function mergeSummary(updated: ProductionBatchSummary) {
     setQueues((current) => [updated, ...current.filter((queue) => queue.id !== updated.id)]);
@@ -527,10 +545,33 @@ export function ProductionQueuePanel({
         <p className="disabled-note">当前筛选条件下没有找到队列。</p>
       ))}
 
-      {inline && !detail && (
+      {inline && inlineQueueHistory.length > 0 && (
+        <div className="production-inline-queue-history" aria-label="已保存批次">
+          <div className="production-inline-queue-history-heading">
+            <span className="section-label">已保存批次</span>
+            <span>重启后仍保留，点击可恢复查看</span>
+          </div>
+          <div className="production-inline-queue-history-list">
+            {inlineQueueHistory.slice(0, 8).map((queue) => (
+              <button
+                key={queue.id}
+                type="button"
+                className={`production-inline-queue-history-item${detail?.id === queue.id ? " is-active" : ""}`}
+                onClick={() => void openQueue(queue.id)}
+                disabled={busy}
+              >
+                <strong title={queue.name}>{queue.name}</strong>
+                <span>{queue.archivedAt ? "已归档" : productionStatusLabel(queue.status)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {inline && !detail && !inlineQueueHistory.length && (
         <div className="production-inline-empty" role="status">
-          <strong>创建批次后，进度会显示在这里</strong>
-          <span>任务会按顺序执行，完成、失败和等待状态都会自动更新。</span>
+          <strong>当前项目暂无已保存批次</strong>
+          <span>创建批次后，进度会持久化保存，并在重新打开软件后自动恢复。</span>
         </div>
       )}
 

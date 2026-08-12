@@ -187,11 +187,12 @@ function App() {
     };
   }, [activeProjectId, setRecentTasks]);
 
-  function openProject(projectId: string) {
+  function openProject(projectId: string, preserveProductionBatch = false) {
     if (projectId === activeProjectId) return;
     useTaskStore.getState().clear();
     useStudioStore.getState().resetDraft();
     useStudioStore.getState().clearPendingAssetIntent();
+    if (!preserveProductionBatch) setFocusedProductionBatchId(undefined);
     setVideoBatchAssets([]);
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
@@ -203,7 +204,7 @@ function App() {
     const { batchId, projectId } = productionAdmission;
     if (!batchId || !projectId) return;
     setFocusedProductionBatchId(batchId);
-    if (projectId !== activeProjectId) openProject(projectId);
+    if (projectId !== activeProjectId) openProject(projectId, true);
     else if (workspace !== "video") setWorkspace("studio");
   }
 
