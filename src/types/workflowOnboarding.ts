@@ -7,6 +7,15 @@ export type CapabilityState =
   | "INCOMPATIBLE_INPUT_VALUES"
   | "COMFY_OFFLINE";
 
+export type WorkflowAutoOnboardingState =
+  | "AUTO_PUBLISHED"
+  | "NEEDS_REVIEW"
+  | "WAITING_FOR_COMFY_UI"
+  | "ALREADY_EXISTS"
+  | "BLOCKED";
+
+export type InferenceConfidence = "CERTAIN" | "HIGH" | "AMBIGUOUS" | "UNKNOWN";
+
 export type WorkflowFieldType =
   | "textarea"
   | "integer"
@@ -27,6 +36,7 @@ export interface WorkflowInputView {
   suggestedType?: string;
   numericMin?: string;
   numericMax?: string;
+  numericStep?: string;
   allowedOptions: string[];
 }
 
@@ -62,6 +72,7 @@ export interface WorkflowInputMappingView {
   defaultValue?: string;
   minValue?: string;
   maxValue?: string;
+  step?: string;
   minItems?: number;
   maxItems?: number;
   targetNode: string;
@@ -95,6 +106,7 @@ export interface RecipeInputView {
   defaultValue?: string;
   minValue?: string;
   maxValue?: string;
+  step?: string;
   minItems?: number;
   maxItems?: number;
 }
@@ -149,6 +161,55 @@ export interface WorkflowOnboardingPublishView {
   packageName: string;
   workflowSha256: string;
   refreshed: WorkflowSyncReport;
+}
+
+export interface WorkflowAutoInferenceView {
+  field: string;
+  value?: string;
+  confidence: InferenceConfidence;
+  source: string;
+  alternatives: string[];
+  nodeId?: string;
+  inputName?: string;
+}
+
+export interface WorkflowAutoIssueCandidateView {
+  label: string;
+  nodeId?: string;
+  inputName?: string;
+  outputId?: string;
+  outputType?: "image" | "video" | string;
+  fieldType?: WorkflowFieldType | string;
+}
+
+export interface WorkflowAutoIssueView {
+  code: string;
+  message: string;
+  field?: string;
+  candidates: WorkflowAutoIssueCandidateView[];
+}
+
+export interface WorkflowAutoOnboardingPlanView {
+  draftId: string;
+  state: WorkflowAutoOnboardingState;
+  workflowKind: string;
+  workflowSha256: string;
+  originalFilename: string;
+  nodeCount: number;
+  uniqueClassCount: number;
+  metadata: WorkflowManifestView;
+  capability: CapabilityCheckView;
+  inputMappings: WorkflowInputMappingView[];
+  outputMappings: WorkflowOutputMappingView[];
+  validation: WorkflowOnboardingValidationView;
+  inferences: WorkflowAutoInferenceView[];
+  issues: WorkflowAutoIssueView[];
+  autoPublishable: boolean;
+  published?: WorkflowOnboardingPublishView;
+  existingWorkflowId?: string;
+  existingWorkflowVersion?: string;
+  existingPackageName?: string;
+  message: string;
 }
 
 export interface WorkflowWorkspaceView {
@@ -264,6 +325,7 @@ export interface WorkflowOnboardingInputMappingRequest {
   defaultValue?: string;
   minValue?: string;
   maxValue?: string;
+  step?: string;
   minItems?: number;
   maxItems?: number;
   targetNode: string;

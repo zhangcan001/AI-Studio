@@ -65,6 +65,7 @@ import type {
 } from "../types/productionItemReview";
 import type {
   CapabilityCheckView,
+  WorkflowAutoOnboardingPlanView,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingMetadataRequest,
@@ -180,6 +181,16 @@ export function pickApiWorkflow(existingWorkflowId?: string): Promise<WorkflowOn
   return invoke<WorkflowOnboardingDraftView | null>("workflow_onboarding_pick_api_workflow", {
     existingWorkflowId,
   });
+}
+
+export function autoOnboardWorkflow(existingWorkflowId?: string): Promise<WorkflowAutoOnboardingPlanView | null> {
+  return invoke<WorkflowAutoOnboardingPlanView | null>("workflow_onboarding_auto_import_api_workflow", {
+    existingWorkflowId,
+  });
+}
+
+export function autoConfirmOnboarding(draftId: string): Promise<WorkflowAutoOnboardingPlanView> {
+  return invoke<WorkflowAutoOnboardingPlanView>("workflow_onboarding_auto_confirm", { draftId });
 }
 
 export function getOnboardingDraft(draftId: string): Promise<WorkflowOnboardingDraftView> {

@@ -1,7 +1,7 @@
 use crate::{
     app_state::AppState,
     application::workflow_onboarding_service::{
-        WorkflowOnboardingDraftView, WorkflowOnboardingError,
+        WorkflowAutoOnboardingPlanView, WorkflowOnboardingDraftView, WorkflowOnboardingError,
         WorkflowOnboardingInputMappingRequest, WorkflowOnboardingMetadataRequest,
         WorkflowOnboardingOutputMappingRequest, WorkflowOnboardingPublishView,
         WorkflowOnboardingRemoveInputMappingRequest, WorkflowOnboardingValidationView,
@@ -16,12 +16,9 @@ fn map_onboarding_error(error: WorkflowOnboardingError) -> AppError {
     AppError::workflow_onboarding(format!("{}: {}", error.code(), error))
 }
 
-#[tauri::command(rename_all = "camelCase")]
-pub async fn workflow_onboarding_pick_api_workflow(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
-    existing_workflow_id: Option<String>,
-) -> Result<Option<WorkflowOnboardingDraftView>, AppError> {
+async fn pick_api_workflow_file(
+    app_handle: &AppHandle,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
     let Some(file) = app_handle
         .dialog()
         .file()
@@ -61,11 +58,52 @@ pub async fn workflow_onboarding_pick_api_workflow(
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|_| AppError::filesystem("selected workflow file could not be read"))?;
+    Ok(Some((bytes, original_filename)))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_onboarding_pick_api_workflow(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    existing_workflow_id: Option<String>,
+) -> Result<Option<WorkflowOnboardingDraftView>, AppError> {
+    let Some((bytes, original_filename)) = pick_api_workflow_file(&app_handle).await? else {
+        return Ok(None);
+    };
     state
         .workflow_onboarding_service
         .import_bytes(bytes, original_filename, existing_workflow_id)
         .await
         .map(Some)
+        .map_err(map_onboarding_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_onboarding_auto_import_api_workflow(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    existing_workflow_id: Option<String>,
+) -> Result<Option<WorkflowAutoOnboardingPlanView>, AppError> {
+    let Some((bytes, original_filename)) = pick_api_workflow_file(&app_handle).await? else {
+        return Ok(None);
+    };
+    state
+        .workflow_onboarding_service
+        .auto_onboard_bytes(bytes, original_filename, existing_workflow_id)
+        .await
+        .map(Some)
+        .map_err(map_onboarding_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_onboarding_auto_confirm(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<WorkflowAutoOnboardingPlanView, AppError> {
+    state
+        .workflow_onboarding_service
+        .auto_confirm(&draft_id)
+        .await
         .map_err(map_onboarding_error)
 }
 

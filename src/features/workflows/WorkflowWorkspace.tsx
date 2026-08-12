@@ -11,6 +11,8 @@ import {
   importWorkflowPackageBackup,
   listWorkflowProductionWorkspace,
   pickApiWorkflow,
+  autoConfirmOnboarding,
+  autoOnboardWorkflow,
   publishOnboarding,
   recheckWorkflowCapability,
   removeOnboardingInputMapping,
@@ -23,6 +25,9 @@ import {
 import { useWorkflowOnboardingStore, type WorkflowOnboardingStep } from "../../stores/workflowOnboardingStore";
 import type {
   WorkflowFieldType,
+  WorkflowAutoIssueCandidateView,
+  WorkflowAutoIssueView,
+  WorkflowAutoOnboardingPlanView,
   WorkflowInputView,
   WorkflowNodeView,
   WorkflowOnboardingDraftView,
@@ -34,6 +39,7 @@ import type {
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, stagingStatusLabel, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
+import { WorkflowSmartImport } from "./WorkflowSmartImport";
 
 interface Props {
   projectId?: string;
@@ -120,6 +126,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [outputDraft, setOutputDraft] = useState<OutputDraft>(createDefaultOutputDraft);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
+  const [autoPlan, setAutoPlan] = useState<WorkflowAutoOnboardingPlanView>();
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const draft = useWorkflowOnboardingStore((state) => state.draft);
   const step = useWorkflowOnboardingStore((state) => state.step);
   const loading = useWorkflowOnboardingStore((state) => state.loading);
@@ -179,6 +187,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     try {
       const imported = await pickApiWorkflow(existingWorkflowId);
       if (imported) {
+        setAutoPlan(undefined);
+        setShowAdvanced(true);
         setDraft(imported);
         const validation = imported.validation;
         const failedChecks = [
@@ -192,6 +202,31 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           : `导入质量初检通过：${imported.nodeCount} 个节点、${imported.uniqueClassCount} 种节点类型；请继续完成能力检查与试运行。`,
         );
         await loadWorkspace();
+      }
+    } catch (importError: unknown) {
+      setError(toUserMessage(importError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function smartImportWorkflow(existingWorkflowId?: string) {
+    setLoading(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const plan = await autoOnboardWorkflow(existingWorkflowId);
+      if (plan) {
+        setAutoPlan(plan);
+        setShowAdvanced(false);
+        setDraft(await getOnboardingDraft(plan.draftId));
+        if (plan.published) {
+          setNotice(plan.message);
+          await loadWorkspace();
+          await onCatalogChanged();
+        } else {
+          setNotice(plan.message);
+        }
       }
     } catch (importError: unknown) {
       setError(toUserMessage(importError));
@@ -241,6 +276,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     if (!item.workflowVersionId) return;
     try {
       const duplicated = await duplicateWorkflowRecipe(item.workflowVersionId, item.recipes[item.recipes.length - 1]?.recipeId);
+      setAutoPlan(undefined);
+      setShowAdvanced(true);
       setDraft(duplicated);
       setStep("inputs");
       setNotice("配方已复制，请检查映射并发布新的配方版本。");
@@ -347,6 +384,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     await runDraftAction(async () => {
       await discardOnboarding(draft.draftId);
       reset();
+      setAutoPlan(undefined);
+      setShowAdvanced(false);
       setNotice("草稿已丢弃。");
     });
   }
@@ -417,6 +456,91 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     });
   }
 
+  async function resumeAutoImport() {
+    if (!autoPlan) return;
+    await runDraftAction(async () => {
+      const nextPlan = await autoConfirmOnboarding(autoPlan.draftId);
+      setAutoPlan(nextPlan);
+      setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setNotice(nextPlan.message);
+      if (nextPlan.published) {
+        await loadWorkspace();
+        await onCatalogChanged();
+      }
+    });
+  }
+
+  async function resolveAutoIssue(issue: WorkflowAutoIssueView, candidate: WorkflowAutoIssueCandidateView) {
+    if (!autoPlan || !draft) return;
+    await runDraftAction(async () => {
+      if (issue.code === "AMBIGUOUS_OUTPUT" && candidate.nodeId && candidate.outputType) {
+        await setOnboardingOutputMapping(autoPlan.draftId, {
+          outputId: candidate.outputId ?? "output_1",
+          label: candidate.label,
+          type: candidate.outputType as "image" | "video",
+          nodeId: candidate.nodeId,
+          required: true,
+        });
+      } else if (candidate.nodeId && candidate.inputName) {
+        const node = draft.nodes.find((item) => item.nodeId === candidate.nodeId);
+        const input = node?.inputs.find((item) => item.name === candidate.inputName);
+        if (!input) return;
+        const base = defaultMapping(candidate.nodeId, input);
+        const fieldType = candidate.fieldType && fieldTypes.includes(candidate.fieldType as WorkflowFieldType)
+          ? candidate.fieldType as WorkflowFieldType
+          : base.fieldType;
+        await setOnboardingInputMapping(autoPlan.draftId, {
+          semanticKey: issue.field ?? base.semanticKey,
+          fieldType,
+          label: base.label,
+          required: base.required,
+          defaultValue: optionalText(base.defaultValue),
+          minValue: optionalText(base.minValue),
+          maxValue: optionalText(base.maxValue),
+          step: input.numericStep,
+          minItems: optionalNumber(base.minItems),
+          maxItems: optionalNumber(base.maxItems),
+          itemIndex: optionalNumber(base.itemIndex),
+          targetNode: candidate.nodeId,
+          targetInput: candidate.inputName,
+        });
+      }
+      const nextPlan = await autoConfirmOnboarding(autoPlan.draftId);
+      setAutoPlan(nextPlan);
+      setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setNotice(nextPlan.message);
+      if (nextPlan.published) {
+        await loadWorkspace();
+        await onCatalogChanged();
+      }
+    });
+  }
+
+  async function openAdvancedImport() {
+    if (autoPlan) {
+      try {
+        setDraft(await getOnboardingDraft(autoPlan.draftId));
+      } catch (actionError: unknown) {
+        setError(toUserMessage(actionError));
+      }
+    }
+    setShowAdvanced(true);
+  }
+
+  async function openExistingWorkflow() {
+    if (!autoPlan?.existingWorkflowId) return;
+    const existing = items.find((item) =>
+      item.workflowId === autoPlan.existingWorkflowId
+      && (!autoPlan.existingWorkflowVersion || item.workflowVersion === autoPlan.existingWorkflowVersion),
+    );
+    const recipe = existing?.recipes[existing.recipes.length - 1];
+    if (!recipe) {
+      setNotice("该工作流已经导入，请在工作流列表中查看现有版本。");
+      return;
+    }
+    await onOpenStudio(autoPlan.existingWorkflowId, recipe.recipeId);
+  }
+
   const outputCandidates = useMemo(
     () => draft?.nodes.filter((node) => node.isOutputNode) ?? [],
     [draft],
@@ -432,7 +556,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         </div>
         <div className="workflow-workspace-actions">
           <button type="button" onClick={() => void loadWorkspace()} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
-          <button type="button" onClick={() => void importWorkflow()} disabled={loading}>导入 API 工作流</button>
+          <button type="button" onClick={() => void smartImportWorkflow()} disabled={loading}>导入工作流</button>
+          <button type="button" className="quiet-button" onClick={() => void importWorkflow()} disabled={loading}>高级：手动配置工作流</button>
           <button type="button" onClick={() => void importBackup()} disabled={loading}>导入工作流备份</button>
         </div>
       </div>
@@ -440,19 +565,29 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       <section className="workflow-import-quality" aria-label="工作流导入质量门">
         <div>
           <span className="section-label">导入质量门</span>
-          <strong>API 格式 → 节点与依赖 → 输入/输出映射 → 试运行</strong>
-          <p>编辑器 UI JSON 会明确提示转换；导入过程不会下载模型，也不会猜测未声明的本机依赖。</p>
+          <strong>选择 JSON → 自动识别 → 能力检查 → Recipe → 自动确认</strong>
+          <p>正常工作流只需一次操作；只有歧义、缺失节点或不兼容字段才会进入问题聚焦。</p>
         </div>
         <ul>
           <li>校验 JSON 根结构、节点类型与输入对象</li>
-          <li>检查疑似凭据和本机绝对路径</li>
-          <li>发布前必须完成能力检查、输出映射和真实快速测试</li>
+          <li>已连接 ComfyUI 时自动读取 /object_info</li>
+          <li>不会自动提交 GPU 生成任务，快速测试仍由用户主动触发</li>
         </ul>
       </section>
 
       {workspaceError && <p className="error-message" role="alert">{workspaceError}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
+
+      <WorkflowSmartImport
+        plan={autoPlan}
+        loading={loading}
+        onResolve={(issue, candidate) => void resolveAutoIssue(issue, candidate)}
+        onResume={() => void resumeAutoImport()}
+        onOpenAdvanced={() => void openAdvancedImport()}
+        onOpenExisting={() => void openExistingWorkflow()}
+        onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
+      />
 
       <section className="workflow-health-dashboard" aria-label="运行环境健康概览">
         <div><span>运行包总数</span><strong>{items.length}</strong></div>
@@ -488,7 +623,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>复制配方</button>}
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "快速测试"}</button>}
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
-              {item.workflowId && <button type="button" className="quiet-button" onClick={() => void importWorkflow(item.workflowId)}>创建新版本</button>}
+              {item.workflowId && <button type="button" className="quiet-button" onClick={() => void smartImportWorkflow(item.workflowId)}>创建新版本</button>}
             </div>
             <details className="workflow-catalog-detail">
               <summary>查看详情</summary>
@@ -516,15 +651,18 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       {!!staging.length && <div className="workflow-diagnostics-panel"><h3>运行诊断</h3>{staging.map((entry) => <div key={entry.stagingId}><span>{stagingStatusLabel(entry.status)}</span><code>{entry.stagingId}</code><button type="button" className="quiet-button" onClick={() => void cleanWorkflowStaging(entry.stagingId)} disabled={entry.inUse}>{entry.inUse ? "使用中" : "清理暂存"}</button></div>)}</div>}
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
 
-      {draft && (
+      {showAdvanced && draft && (
         <div className="workflow-onboarding-panel">
           <div className="workflow-onboarding-heading">
             <div>
-              <span className="section-label">API 工作流导入向导</span>
+              <span className="section-label">高级工作流编辑</span>
               <h3>{draft.manifest.name}</h3>
               <p className="section-description">{draft.originalFilename} · {draft.nodeCount} 个节点 · {draft.uniqueClassCount} 种节点类型</p>
             </div>
-            <button type="button" className="quiet-button" onClick={() => void discardDraft()} disabled={loading}>丢弃草稿</button>
+            <div className="workflow-smart-actions">
+              <button type="button" className="quiet-button" onClick={() => setShowAdvanced(false)}>返回智能导入</button>
+              <button type="button" className="quiet-button" onClick={() => void discardDraft()} disabled={loading}>丢弃草稿</button>
+            </div>
           </div>
           <div className="workflow-step-tabs" role="tablist" aria-label="工作流导入步骤">
             {steps.map((item) => (

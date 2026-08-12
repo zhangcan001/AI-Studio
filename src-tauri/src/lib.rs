@@ -690,6 +690,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::settings::production_queue_name_preset_delete,
             commands::workflow_library::workflow_library_refresh,
             commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
+            commands::workflow_onboarding::workflow_onboarding_auto_import_api_workflow,
+            commands::workflow_onboarding::workflow_onboarding_auto_confirm,
             commands::workflow_onboarding::workflow_onboarding_get,
             commands::workflow_onboarding::workflow_onboarding_check_capability,
             commands::workflow_onboarding::workflow_onboarding_set_metadata,
