@@ -14,7 +14,7 @@ Release status: `CODE READY / LIVE VALIDATION DEFERRED`
 | 批量图片 | 提示词列表 → Krea2 图片批次 → 图片 Task / Snapshot / Asset | `wfl_kera2_t2i_local_v2` |
 | 批量视频 | MiniMax H3 FL2VA / REF2VA mode-specific Asset or local import inputs → H3 视频批次 → 视频 Task / Snapshot / Asset | FAST: `wfl_minimax_h3_fl2va`, `wfl_minimax_h3_reference_video`; QUALITY: `wfl_minimax_h3_fl2va_t2v_quality`, `wfl_minimax_h3_fl2va_i2v_quality`, `wfl_minimax_h3_fl2va_first_last_quality`, `wfl_minimax_h3_reference_video_quality` |
 
-Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频支持 FL2VA 文生视频、一张图生视频、首尾帧，以及 REF2VA 图片、音频、图片+音频、视频+图片模式；输入可来自 Asset Library 或本地任务目录（Prompt-only、同名图片/Prompt、首尾帧配对、`h3-omni-batch.json`）。本地媒体先创建正常 source Asset 和 Asset Video Prompt（图片），再与资产库输入汇合到既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链；Production Queue 永不保存本地绝对路径。
+Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、添加、复制、删除和排序。MiniMax H3 批量视频支持 FL2VA 文生视频、一张图生视频、首尾帧，以及 REF2VA 图片、音频、图片+音频、视频+图片模式；普通 UI 的本地入口统一为 ProjectRoot（每个一级子文件夹一个 Segment），可自动识别 Prompt-only、任意单图 I2V、首尾帧和 REF2VA 混合模式；旧配对/清单格式只保留后端兼容。本地媒体先创建正常 source Asset 和 Asset Video Prompt（图片），再与资产库输入汇合到既有 `ProductionQueue` → `GenerationService` → `Task` → `Snapshot` → `Asset` 链；Production Queue 永不保存本地绝对路径。
 
 ## Frozen runtime and queue contract
 
@@ -34,11 +34,11 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 - `011_asset_video_prompt.sql` 为图片 Asset 保存项目级视频提示词；提示词会 trim、非空校验，UTF-8 最大 64 KiB。
 - Project Backup 版本升级为 v5，新增 Asset 视频提示词数据；恢复继续接受 v1–v5，并执行项目边界校验与 Asset ID remap。
 - 不创建第二 Task 模型、第二执行引擎或隐藏的 Shot 自动链路。
-- 本地 H3 导入使用 Rust 短时会话（20 分钟），React 只接收 session ID、目录显示名、相对文件名、Prompt 预览和检查状态；不创建第二队列、第二 Prompt 表、外部路径表或目录监控器。
+- 本地 H3 Project Folder 导入使用 Rust 短时会话（20 分钟），React 只接收 session ID、目录显示名、Segment/相对文件名、Prompt 预览和检查状态；旧导入模式仍由后端兼容但不进入普通 UI；不创建第二队列、第二 Prompt 表、外部路径表或目录监控器。
 
 ## Ordinary UI boundary
 
-主导航使用“批量图片”“批量视频”“资产库”“任务”“项目”“工作流”“设置”。普通产品界面不使用旧 Shot 生产术语；通用 Workflow 技术工作区和旧兼容代码不等同于正式产品入口。
+主导航使用“批量图片”“批量视频”“资产库”“任务”“项目”“工作流”“设置”。普通产品界面不使用旧 Shot 生产术语，H3 本地导入只显示 Project Folder；通用 Workflow 技术工作区和旧兼容代码不等同于正式产品入口。
 
 ## Explicit non-goals
 

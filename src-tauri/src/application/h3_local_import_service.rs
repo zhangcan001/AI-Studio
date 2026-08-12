@@ -4726,6 +4726,105 @@ outputs:
     }
 
     #[tokio::test]
+    async fn project_folder_auto_detection_supports_arbitrary_i2v_and_explicit_frame_aliases() {
+        let directory = tempdir().expect("project auto detection directory should exist");
+        let project_root = directory.path().join("project");
+        let fixture_root = directory.path().join("ProjectRoot");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+
+        let i2v_segment = fixture_root.join("001_arbitrary_i2v");
+        fs::create_dir_all(&i2v_segment).expect("i2v segment should exist");
+        fs::write(i2v_segment.join("prompt.md"), "single image prompt")
+            .expect("i2v prompt should write");
+        fs::write(i2v_segment.join("character.png"), png_bytes())
+            .expect("arbitrary image should write");
+
+        let first_last_segment = fixture_root.join("002_chinese_frames");
+        fs::create_dir_all(&first_last_segment).expect("first/last segment should exist");
+        fs::write(first_last_segment.join("prompt.txt"), "frame prompt")
+            .expect("frame prompt should write");
+        fs::write(first_last_segment.join("001_首帧.png"), png_bytes())
+            .expect("first frame should write");
+        fs::write(first_last_segment.join("001_尾帧.png"), png_bytes())
+            .expect("last frame should write");
+
+        let reference_segment = fixture_root.join("003_plain_references");
+        fs::create_dir_all(&reference_segment).expect("reference segment should exist");
+        fs::write(reference_segment.join("prompt.txt"), "reference prompt")
+            .expect("reference prompt should write");
+        fs::write(reference_segment.join("person.png"), png_bytes())
+            .expect("first reference image should write");
+        fs::write(reference_segment.join("scene.png"), png_bytes())
+            .expect("second reference image should write");
+
+        let override_segment = fixture_root.join("004_explicit_image");
+        fs::create_dir_all(&override_segment).expect("override segment should exist");
+        fs::write(
+            override_segment.join("prompt.txt"),
+            "---\nmode: image\n---\nexplicit image mode",
+        )
+        .expect("override prompt should write");
+        fs::write(override_segment.join("character.png"), png_bytes())
+            .expect("override image should write");
+        fs::write(override_segment.join("unused.wav"), b"audio")
+            .expect("unused audio should write");
+
+        let harness = build_harness(&directory.path().join("app.db"), &project_root, true).await;
+        let (_, inspection) = harness
+            .local
+            .pick(PROJECT_ID, fixture_root, H3LocalImportMode::ProjectFolder)
+            .await
+            .expect("project folder inspection should succeed");
+        let project = inspection
+            .project_folder
+            .expect("project folder data should be returned");
+
+        assert_eq!(project.segment_count, 4);
+        assert_eq!(project.segments[0].generation_mode, "FL2VA_IMAGE_TO_VIDEO");
+        assert_eq!(
+            project.segments[0]
+                .first_frame
+                .as_ref()
+                .map(|media| media.display_name.as_str()),
+            Some("character.png")
+        );
+        assert_eq!(project.segments[1].generation_mode, "FL2VA_FIRST_LAST");
+        assert_eq!(
+            project.segments[1]
+                .first_frame
+                .as_ref()
+                .map(|media| media.display_name.as_str()),
+            Some("001_首帧.png")
+        );
+        assert_eq!(
+            project.segments[1]
+                .last_frame
+                .as_ref()
+                .map(|media| media.display_name.as_str()),
+            Some("001_尾帧.png")
+        );
+        assert_eq!(project.segments[2].generation_mode, "REF2VA_IMAGE");
+        assert_eq!(
+            project.segments[2]
+                .reference_images
+                .iter()
+                .map(|media| media.display_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["person.png", "scene.png"]
+        );
+        assert_eq!(project.segments[3].generation_mode, "FL2VA_IMAGE_TO_VIDEO");
+        assert!(project.segments[3]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unused.wav")));
+        assert!(
+            project.errors.is_empty(),
+            "unexpected project errors: {:?}",
+            project.errors
+        );
+    }
+
+    #[tokio::test]
     async fn project_folder_front_matter_and_ambiguous_segments_are_explicitly_blocked() {
         let directory = tempdir().expect("front matter directory should exist");
         let project_root = directory.path().join("project");
@@ -4803,6 +4902,14 @@ outputs:
                 fs::write(segment.join(image), png_bytes()).expect("image should write");
             }
         }
+        let first_last_segment = fixture_root.join("003_first_last");
+        fs::create_dir_all(&first_last_segment).expect("first/last segment should exist");
+        fs::write(first_last_segment.join("prompt.txt"), "Prompt C\nline two")
+            .expect("first/last prompt should write");
+        fs::write(first_last_segment.join("first.png"), png_bytes())
+            .expect("first frame should write");
+        fs::write(first_last_segment.join("last.png"), png_bytes())
+            .expect("last frame should write");
         let db_path = directory.path().join("app.db");
         let harness = build_harness(&db_path, &project_root, true).await;
         sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
@@ -4859,7 +4966,7 @@ outputs:
             )
             .await
             .expect("first Segment draft should save");
-        assert_eq!(first.ready_count, 2);
+        assert_eq!(first.ready_count, 3);
         let second_segment = first
             .project_folder
             .as_ref()
@@ -4895,6 +5002,45 @@ outputs:
             .await
             .expect("second Segment draft should save");
         assert_eq!(second.error_count, 0);
+        let third_segment = second
+            .project_folder
+            .as_ref()
+            .unwrap()
+            .segments
+            .iter()
+            .find(|segment| segment.folder_name == "003_first_last")
+            .unwrap()
+            .clone();
+        let third = harness
+            .local
+            .update_h3_project_segment_draft(
+                &session_id,
+                H3ProjectSegmentDraft {
+                    segment_id: third_segment.segment_id.clone(),
+                    mode: Some("FL2VA_FIRST_LAST".to_owned()),
+                    prompt: Some("Prompt C\nline two".to_owned()),
+                    duration_seconds: Some(6),
+                    width: Some(960),
+                    height: Some(544),
+                    reference_image_ids: Some(Vec::new()),
+                    reference_audio_ids: Some(Vec::new()),
+                    reference_video_ids: Some(Vec::new()),
+                    first_frame_id: third_segment
+                        .all_media
+                        .iter()
+                        .find(|media| media.display_name == "first.png")
+                        .map(|media| media.id.clone()),
+                    last_frame_id: third_segment
+                        .all_media
+                        .iter()
+                        .find(|media| media.display_name == "last.png")
+                        .map(|media| media.id.clone()),
+                    reset_auto_detection: false,
+                },
+            )
+            .await
+            .expect("third Segment draft should save");
+        assert_eq!(third.error_count, 0);
         let result = harness
             .local
             .commit(
@@ -4919,13 +5065,16 @@ outputs:
             )
             .await
             .expect("project commit should succeed");
-        assert_eq!(result.imported_asset_count, 1);
-        assert_eq!(result.item_count, 2);
+        assert_eq!(result.imported_asset_count, 3);
+        assert_eq!(result.item_count, 3);
         let detail = harness
             .queue
             .get(PROJECT_ID, &result.batch_id)
             .await
             .expect("project batch should be readable");
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+        assert!(detail.batch.continue_on_failure);
+        assert_eq!(detail.items.len(), 3);
         assert_eq!(detail.items[0].values_json["duration_seconds"]["value"], 5);
         assert_eq!(detail.items[0].values_json["width"]["value"], 1344);
         assert_eq!(detail.items[1].values_json["duration_seconds"]["value"], 8);
@@ -4934,6 +5083,44 @@ outputs:
         assert_eq!(
             detail.items[1].values_json["first_frame"]["type"],
             "image_asset"
+        );
+        assert_eq!(detail.items[2].values_json["duration_seconds"]["value"], 6);
+        assert_eq!(detail.items[2].values_json["width"]["value"], 960);
+        assert_eq!(detail.items[2].values_json["height"]["value"], 544);
+        assert_eq!(
+            detail.items[2].values_json["first_frame"]["type"],
+            "image_asset"
+        );
+        assert_eq!(
+            detail.items[2].values_json["last_frame"]["type"],
+            "image_asset"
+        );
+        let second_asset_id = detail.items[1].values_json["first_frame"]["assetId"]
+            .as_str()
+            .expect("I2V item should contain an asset id")
+            .to_owned();
+        fs::write(
+            fixture_root.join("002_i2v").join("prompt.txt"),
+            "Prompt D\nchanged after commit",
+        )
+        .expect("changed project prompt should write");
+        harness
+            .prompt_service
+            .set(
+                PROJECT_ID,
+                &second_asset_id,
+                "Prompt E\nasset prompt changed",
+            )
+            .await
+            .expect("project asset prompt update should succeed");
+        let frozen_detail = harness
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("frozen project batch should remain readable");
+        assert_eq!(
+            frozen_detail.items[1].values_json["prompt"]["value"],
+            "Prompt B\nline two"
         );
         let values_text = detail
             .items
@@ -4944,10 +5131,59 @@ outputs:
             .collect::<String>();
         assert!(!values_text.contains(&fixture_root.to_string_lossy().to_string()));
         fs::remove_dir_all(&fixture_root).expect("source project should be removable");
-        harness
+        let deleted_folder_detail = harness
             .queue
             .get(PROJECT_ID, &result.batch_id)
             .await
             .expect("batch should survive source deletion");
+        for item in &deleted_folder_detail.items {
+            harness
+                .queue
+                .prepare_queue_values_for_test(
+                    &item.workflow_version_id,
+                    &item.recipe_id,
+                    &item.values_json,
+                )
+                .await
+                .expect("persisted project values should compile after folder removal");
+        }
+        harness.pool.close().await;
+        drop(harness);
+        let restarted = build_harness(&db_path, &project_root, false).await;
+        let persisted_assets = restarted
+            .assets
+            .list_recent(PROJECT_ID, 10)
+            .await
+            .expect("restarted project asset repository should read assets");
+        assert_eq!(persisted_assets.len(), 3);
+        assert!(persisted_assets
+            .iter()
+            .all(|asset| asset.category == crate::domain::SOURCE_IMAGE_CATEGORY));
+        for asset in &persisted_assets {
+            assert!(Path::new(&asset.storage_path).is_file());
+            assert!(restarted
+                .prompts
+                .find(PROJECT_ID, asset.id.as_str())
+                .await
+                .unwrap()
+                .is_some());
+        }
+        let restarted_detail = restarted
+            .queue
+            .get(PROJECT_ID, &result.batch_id)
+            .await
+            .expect("project batch should persist across repository restart");
+        assert_eq!(restarted_detail.items.len(), 3);
+        for item in restarted_detail.items {
+            restarted
+                .queue
+                .prepare_queue_values_for_test(
+                    &item.workflow_version_id,
+                    &item.recipe_id,
+                    &item.values_json,
+                )
+                .await
+                .expect("restarted project values should compile");
+        }
     }
 }

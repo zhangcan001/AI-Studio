@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
 import { MINIMAX_H3_FL2VA_WORKFLOW_ID } from "../runtime/productRuntimeScope";
-import { AssetVideoBatchWorkspace, h3InitialGenerationMode, h3PickerAssets } from "./AssetVideoBatchWorkspace";
+import {
+  AssetVideoBatchWorkspace,
+  ProjectFolderImportControls,
+  h3InitialGenerationMode,
+  h3PickerAssets,
+} from "./AssetVideoBatchWorkspace";
 import type { AssetView } from "../../types/asset";
 
 function asset(id: string, assetType: "image" | "video" | "audio", category: AssetView["category"]): AssetView {
@@ -49,6 +54,21 @@ const fl2vaRecipe: RecipeViewModel = {
 };
 
 describe("H3 批量视频工作区渲染安全", () => {
+  it("exposes only the project-folder local import entry", () => {
+    const html = renderToStaticMarkup(
+      <ProjectFolderImportControls busy={false} hasInspection onRescan={vi.fn()} />,
+    );
+
+    expect(html).toContain("项目文件夹 · Segment 自动识别");
+    expect(html).toContain("每个一级子文件夹对应一个视频 Segment");
+    expect(html).toContain("重新扫描");
+    expect(html).not.toContain("自动同名配对");
+    expect(html).not.toContain("JSON 批量清单");
+    expect(html).not.toContain("Prompt 文生视频");
+    expect(html).not.toContain("首尾帧配对");
+    expect(html).not.toContain("Omni 全能参考清单");
+  });
+
   it("renders direct navigation with no assets and defaults to text-to-video", () => {
     const html = renderToStaticMarkup(
       <AssetVideoBatchWorkspace

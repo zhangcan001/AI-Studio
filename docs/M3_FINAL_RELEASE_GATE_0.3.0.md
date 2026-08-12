@@ -17,15 +17,15 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
 | Backup compatibility | Backup v5 保存/恢复 Asset 视频提示词，并继续接受 v1–v5。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
-| H3 input sources | MiniMax H3 支持 Asset Library 与 Local Batch Import；Local Import 支持 Prompt-only、同名图片/Prompt、首尾帧配对、`h3-batch.json`、`h3-omni-batch.json` 与 `PROJECT_FOLDER` Segment 自动导入。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
+| H3 input sources | MiniMax H3 支持 Asset Library 与一个仅限 `PROJECT_FOLDER` 的普通本地导入入口：每个一级子文件夹对应一个 Segment。旧配对/清单/文本/首尾帧格式保留后端兼容，但不在普通 UI 展示。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
 | Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；H3 提供图片规格中的 14 档 16:9 输出梯度（0.2–2.0 MP）；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
 | H3 Recipe contract | 只接受经本机 `/object_info` 与 graph 审计的精确语义键；FL2VA 支持 `prompt` / optional `first_frame` / optional `last_frame`，REF2VA 支持 plural `reference_images` / `reference_videos` / `reference_audios`；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
 | H3 Recipe selection audit | 默认/推荐 profile 为 QUALITY（四个不可变 `2.0.0` mode-specific 包、20 步）；FAST 保留旧 FL2VA `1.0.0` / Omni REF2VA `1.3.0` 的 4 步 Turbo 图且未修改。Project Folder 按 mode + profile 选择并冻结 workflow/Recipe；多 Recipe Registry 仍是已记录、非阻塞技术债。 |
-| Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏。 |
+| Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏，H3 本地导入仅展示 Project Folder。 |
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
 | Migration / backup safety | Fresh DB、001–011 保留性、012 缺失、FK cascade、AssetVideoPrompt 边界和 Backup v5 remap/恶意输入回归覆盖。 |
-| Regression | Rust 372 tests / 0 failed；frontend 40 files / 131 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
+| Regression | Rust 373 tests / 0 failed；frontend 40 files / 132 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
 
 ## H3 Production Quality / FAST Package Audit
 
@@ -86,12 +86,12 @@ paths in this document.
 | Input | Result |
 | --- | --- |
 | A. Asset Library | PASS · selected image/video/audio Assets → mode-specific frozen values → normal H3 ProductionBatch |
-| B. Local Batch Import | PASS · native folder dialog → read-only inspection → source Image/Video/Audio Asset import → normal H3 ProductionBatch |
+| B. Project Folder Local Import | PASS · native folder dialog → read-only Segment inspection → source Image/Video/Audio Asset import → normal H3 ProductionBatch；ordinary UI only exposes this entry |
 | FL2VA modes | PASS · Prompt-only / one-image / first+last-frame contracts |
 | REF2VA modes | PASS · image-only / audio-only / image+audio / video+image contracts |
 | Local pairing | PASS · recursive relative-path stem pairing, natural order, PNG/JPG/JPEG/WebP with TXT/MD, UTF-8/BOM, multiline prompt preservation |
-| Local mode formats | PASS · Prompt-only `.txt`, `001_first` + `001_last` + `001.txt`, safe relative `h3-omni-batch.json` media references, and ProjectRoot first-level Segment folders |
-| Project Folder Segment Import | PASS · natural folder order；per-Segment Prompt/front matter/mode/media ordering/resolution/duration drafts；read-only inspection；normal Asset Library import；independent frozen queue values；TOCTOU and source-path boundary checks；one serial Production Queue |
+| Legacy Local Import formats | BACKEND COMPATIBILITY PRESERVED · Prompt-only `.txt`, same-name pairing, first/last pairing, `h3-batch.json` and `h3-omni-batch.json`; hidden from ordinary UI |
+| Project Folder Segment Import | PASS · natural folder order；text/I2V/First-Last/REF2VA auto detection；arbitrary single-image I2V；per-Segment Prompt/front matter/mode/media ordering/resolution/duration drafts；read-only inspection；normal Asset Library import；independent frozen queue values；TOCTOU and source-path boundary checks；one serial Production Queue |
 | JSON manifest | PASS · `h3-batch.json`, relative image paths only, maximum 100 entries, duplicate/unknown/boundary paths blocked |
 | Queue boundary | PASS · session keeps the absolute root only in Rust for 20 minutes; persisted queue values contain Asset IDs, not external paths |
 | Auto start | PASS · default ON; OFF creates a READY normal ProductionBatch |
@@ -107,9 +107,9 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 31299584 | `d154fdae2b970b449e27d379095b672f110722fea31244e962687bd8a2b84ecb` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7408394 | `9a0639d8bdb36f17f559b305439e5ec4d9ce5b068d528b176be2c1429d444d0a` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10846208 | `ae0dadbbcb16aaa0f3410b8aa749247d27e70f2de7b5246f252feff56da078dc` |
+| `src-tauri/target/release/ai-studio.exe` | 31299584 | `6ccfeed201546dd3fdf28deec32411bb4804554450f13848bb8623f3430ccbba` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7417689 | `81b1d5b3918aa891c6450db06425fab173569410a05aeafb7c7a7b4f5231184a` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10846208 | `cf65e35f5306ec4e3df38ed8aca97aa003abc6800fa888eadc94e90286011d25` |
 
 The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
 generation date `2026-08-12`.

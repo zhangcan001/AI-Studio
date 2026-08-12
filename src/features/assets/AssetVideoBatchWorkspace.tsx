@@ -16,7 +16,6 @@ import type { AssetMediaTypeFilter, AssetView, PageCursor } from "../../types/as
 import type { RecipeViewModel } from "../../types/generation";
 import type {
   H3LocalImportInspection,
-  H3LocalImportMode,
   H3ProjectSegment,
   H3ProjectGenerationMode,
   H3ProjectFolderInspection,
@@ -50,7 +49,7 @@ import {
 } from "./assetVideoBatch";
 import { ProductionQueuePanel } from "../studio/ProductionQueuePanel";
 import type { BatchDraftItem } from "../studio/batchDraft";
-import { formatPromptBytes, localImportCanCommit, localImportModeLabel, localImportStatusLabel } from "./h3LocalImport";
+import { formatPromptBytes, localImportCanCommit, localImportStatusLabel } from "./h3LocalImport";
 import { AssetCard } from "./AssetCard";
 
 interface Props {
@@ -65,17 +64,6 @@ interface Props {
   onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
   onBackToAssets: () => void;
-}
-
-function localImportModeForGeneration(mode: H3GenerationMode): H3LocalImportMode {
-  switch (mode) {
-    case "FL2VA_TEXT_TO_VIDEO": return "TEXT";
-    case "FL2VA_FIRST_LAST": return "FIRST_LAST";
-    case "REF2VA_AUDIO":
-    case "REF2VA_IMAGE_AUDIO":
-    case "REF2VA_VIDEO_IMAGE": return "OMNI_MANIFEST";
-    default: return "PAIRING";
-  }
 }
 
 interface H3AssetLibraryPickerProps {
@@ -281,6 +269,32 @@ interface ProjectSegmentForm {
   lastFrameId?: string;
 }
 
+interface ProjectFolderImportControlsProps {
+  busy: boolean;
+  hasInspection: boolean;
+  onRescan: () => void;
+}
+
+export function ProjectFolderImportControls({
+  busy,
+  hasInspection,
+  onRescan,
+}: ProjectFolderImportControlsProps) {
+  return (
+    <div className="h3-local-import-controls" aria-label="项目文件夹导入规则">
+      <div className="h3-project-folder-policy">
+        <strong>项目文件夹 · Segment 自动识别</strong>
+        <span>每个一级子文件夹对应一个视频 Segment；系统按 Prompt 和媒体自动选择生成模式。</span>
+      </div>
+      {hasInspection && (
+        <button type="button" className="quiet-button" onClick={onRescan} disabled={busy}>
+          重新扫描
+        </button>
+      )}
+    </div>
+  );
+}
+
 function projectSegmentForm(segment: H3ProjectSegment): ProjectSegmentForm {
   return {
     mode: segment.generationMode,
@@ -460,7 +474,6 @@ export function AssetVideoBatchWorkspace({
   onBackToAssets,
 }: Props) {
   const [sourceMode, setSourceMode] = useState<"ASSET_LIBRARY" | "LOCAL_FOLDER">("ASSET_LIBRARY");
-  const [localMode, setLocalMode] = useState<H3LocalImportMode>("PROJECT_FOLDER");
   const [localInspection, setLocalInspection] = useState<H3LocalImportInspection>();
   const [projectSegmentForms, setProjectSegmentForms] = useState<Record<string, ProjectSegmentForm>>({});
   const [localBatchName, setLocalBatchName] = useState("");
@@ -623,13 +636,6 @@ export function AssetVideoBatchWorkspace({
     setWidth(contract.ok ? contract.contract.widthField.default : undefined);
     setHeight(contract.ok ? contract.contract.heightField.default : undefined);
   }, [contract]);
-
-  useEffect(() => {
-    setLocalMode((current) => current === "PROJECT_FOLDER" ? current : localImportModeForGeneration(generationMode));
-    setLocalInspection(undefined);
-    setProjectSegmentForms({});
-    setExpandedLocalOrdinal(undefined);
-  }, [generationMode]);
 
   const selectedAssets = [...selectedIds]
     .map((assetId) => availableAssets.find((asset) => asset.id === assetId))
@@ -960,7 +966,7 @@ export function AssetVideoBatchWorkspace({
   async function chooseLocalDirectory() {
     setBusy(true); setNotice(undefined);
     try {
-      const inspection = await pickH3LocalImportDirectory(projectId, localMode);
+      const inspection = await pickH3LocalImportDirectory(projectId, "PROJECT_FOLDER");
       if (!inspection) return;
       applyLocalInspection(inspection);
       setExpandedLocalOrdinal(undefined);
@@ -972,29 +978,11 @@ export function AssetVideoBatchWorkspace({
     }
   }
 
-  async function changeLocalMode(nextMode: H3LocalImportMode) {
-    setLocalMode(nextMode);
-    if (!localInspection) return;
-    setBusy(true); setNotice(undefined);
-    try {
-      const inspection = await rescanH3LocalImport(localInspection.sessionId, nextMode);
-      applyLocalInspection(inspection);
-      setExpandedLocalOrdinal(undefined);
-    } catch (error: unknown) {
-      setLocalInspection(undefined);
-      setProjectSegmentForms({});
-      setExpandedLocalOrdinal(undefined);
-      setNotice(toUserMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function rescanLocalDirectory() {
     if (!localInspection) return;
     setBusy(true); setNotice(undefined);
     try {
-      const inspection = await rescanH3LocalImport(localInspection.sessionId, localMode);
+      const inspection = await rescanH3LocalImport(localInspection.sessionId, "PROJECT_FOLDER");
       applyLocalInspection(inspection);
       setExpandedLocalOrdinal(undefined);
       setNotice(`已重新扫描，当前可生成 ${inspection.readyCount} 项。`);
@@ -1053,7 +1041,7 @@ export function AssetVideoBatchWorkspace({
       setLocalInspection(undefined);
       setProjectSegmentForms({});
       setExpandedLocalOrdinal(undefined);
-      setNotice(`导入未完成，请重新选择任务目录。${toUserMessage(error)}`);
+      setNotice(`导入未完成，请重新选择项目文件夹。${toUserMessage(error)}`);
     } finally {
       setBusy(false);
     }
@@ -1093,6 +1081,7 @@ export function AssetVideoBatchWorkspace({
         </button>
       </div>
 
+      {sourceMode === "ASSET_LIBRARY" && (
       <section className="h3-mode-selector" aria-label="MiniMax H3 生成模式">
         <div className="h3-mode-selector-heading">
           <div>
@@ -1147,6 +1136,7 @@ export function AssetVideoBatchWorkspace({
         </div>
         {!modeSupported && <p className="h3-mode-disabled-note" role="status">当前本地 H3 工作流未启用该模式。请先安装/启用经过本机 `/object_info` 与 graph 审计的 Recipe。</p>}
       </section>
+      )}
 
       <section className="h3-quality-profile" aria-label="H3 生成质量">
         <label htmlFor="h3-quality-profile">生成质量</label>
@@ -1173,7 +1163,7 @@ export function AssetVideoBatchWorkspace({
           <p>当前 Runtime：{qualityProfile === "QUALITY" ? "20 步正式工作流" : "4 步 Turbo 预览"} · 单任务串行</p>
           <small>{qualityProfile === "QUALITY" ? "QUALITY 不会因 16GB 设备自动降级；失败按正常 Task FAILED 处理。" : "FAST 仅用于快速预览，历史包保持不变。"}</small>
         </div>
-        {contract.ok && (
+        {sourceMode === "ASSET_LIBRARY" && contract.ok && (
           <ResolutionControl
             widthField={contract.contract.widthField}
             heightField={contract.contract.heightField}
@@ -1188,7 +1178,7 @@ export function AssetVideoBatchWorkspace({
             }}
           />
         )}
-        <div className="h3-duration-control">
+        {sourceMode === "ASSET_LIBRARY" && <div className="h3-duration-control">
           <label htmlFor="h3-duration-seconds">视频时长</label>
           <select
             id="h3-duration-seconds"
@@ -1206,10 +1196,17 @@ export function AssetVideoBatchWorkspace({
               ? `Recipe 范围 ${contract.contract.durationField.min}–${contract.contract.durationField.max} 秒 · 默认 ${contract.contract.durationField.default} 秒`
               : "H3 runtime unavailable"}
           </small>
-        </div>
+        </div>}
+        {sourceMode === "LOCAL_FOLDER" && (
+          <div className="h3-project-folder-defaults" role="status">
+            <strong>Segment 默认参数</strong>
+            <span>{qualityProfile} · 5 秒 · 960 × 544</span>
+            <small>每段可展开单独编辑；Prompt Front Matter 中的时长和分辨率优先。</small>
+          </div>
+        )}
         <small>{recipe ? `运行时已锁定：${recipe.workflowId}` : "运行时未就绪"}</small>
       </section>
-      {exceedsHistoricalProfile && (
+      {sourceMode === "ASSET_LIBRARY" && exceedsHistoricalProfile && (
         <p className="h3-profile-warning" role="status">
           当前配置超出本机已验证范围。模型/产品允许该配置，但 RTX 5060 Ti 16GB 的显存占用尚未验证，生成时可能出现显存不足。
         </p>
@@ -1217,41 +1214,28 @@ export function AssetVideoBatchWorkspace({
 
       {sourceMode === "LOCAL_FOLDER" ? (
         <div className="h3-local-import-layout">
-          <section className="h3-local-import-panel" aria-label="MiniMax H3 本地批量导入">
+          <section className="h3-local-import-panel" aria-label="MiniMax H3 项目文件夹批量导入">
             <div className="section-heading">
               <div>
                 <span className="section-label">本地批量</span>
-                <h3>MiniMax H3 本地导入</h3>
-                <p className="section-description">选择任务目录，检查图片与 Prompt 后导入资产库并创建普通视频生产队列。</p>
+                <h3>项目文件夹导入</h3>
+                <p className="section-description">选择一个项目根目录；每个一级子文件夹对应一个视频 Segment。扫描只读，提交后才导入素材并创建严格串行队列。</p>
               </div>
               <button type="button" onClick={() => void chooseLocalDirectory()} disabled={busy}>
-                {busy ? "处理中…" : "选择任务目录"}
+                {busy ? "处理中…" : "选择项目文件夹"}
               </button>
             </div>
 
-            <div className="h3-local-import-controls">
-              <label>
-                <span>导入方式</span>
-                <select value={localMode} onChange={(event) => void changeLocalMode(event.target.value as H3LocalImportMode)} disabled={busy}>
-                  <option value="PAIRING">{localImportModeLabel("PAIRING")}</option>
-                  <option value="MANIFEST">{localImportModeLabel("MANIFEST")}</option>
-                  <option value="TEXT">{localImportModeLabel("TEXT")}</option>
-                  <option value="FIRST_LAST">{localImportModeLabel("FIRST_LAST")}</option>
-                  <option value="OMNI_MANIFEST">{localImportModeLabel("OMNI_MANIFEST")}</option>
-                  <option value="PROJECT_FOLDER">{localImportModeLabel("PROJECT_FOLDER")}</option>
-                </select>
-              </label>
-              {localInspection && (
-                <button type="button" className="quiet-button" onClick={() => void rescanLocalDirectory()} disabled={busy}>
-                  重新扫描
-                </button>
-              )}
-            </div>
+            <ProjectFolderImportControls
+              busy={busy}
+              hasInspection={Boolean(localInspection)}
+              onRescan={() => void rescanLocalDirectory()}
+            />
 
             {!localInspection ? (
               <div className="h3-local-import-empty">
-                <strong>尚未选择任务目录</strong>
-                <span>目录只在本机短时使用；页面不会显示或保存绝对路径。</span>
+                <strong>尚未选择项目文件夹</strong>
+                <span>项目根目录只在本机短时使用；页面不会显示或保存绝对路径。</span>
               </div>
             ) : (
               <>
@@ -1265,9 +1249,6 @@ export function AssetVideoBatchWorkspace({
                   <span className="h3-local-import-summary-ready">可生成 <strong>{localInspection.readyCount}</strong></span>
                   <span className={localInspection.errorCount ? "h3-local-import-summary-error" : ""}>异常 <strong>{localInspection.errorCount}</strong></span>
                 </div>
-                {localInspection.detectedManifest && localMode === "PAIRING" && (
-                  <p className="h3-local-import-warning" role="status">检测到 h3-batch.json；当前使用自动同名配对，可切换为 JSON 批量清单。</p>
-                )}
                 {localInspection.warnings.map((warning) => <p key={warning} className="h3-local-import-warning" role="status">{warning}</p>)}
                 {localInspection.errors.length > 0 && (
                   <div className="h3-local-import-errors" role="alert">
