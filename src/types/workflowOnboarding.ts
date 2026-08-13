@@ -35,6 +35,7 @@ export interface WorkflowInputView {
   isLinked: boolean;
   bindable: boolean;
   suggestedType?: string;
+  suggestedSemanticKey?: string;
   numericMin?: string;
   numericMax?: string;
   numericStep?: string;

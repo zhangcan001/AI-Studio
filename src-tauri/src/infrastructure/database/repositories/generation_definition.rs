@@ -54,6 +54,7 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                 w.id AS workflow_id,
                 wv.id AS workflow_version_id,
                 r.id AS recipe_id,
+                r.version AS recipe_version,
                 w.name,
                 w.category,
                 w.mode,
@@ -65,12 +66,7 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
              WHERE w.current_version_id = wv.id
                AND COALESCE(wrs.enabled, 1) = 1
                AND COALESCE(wrs.archived, 0) = 0
-               AND r.version = (
-                   SELECT MAX(latest.version)
-                   FROM recipes latest
-                   WHERE latest.workflow_version_id = wv.id
-               )
-             ORDER BY w.name ASC, wv.version ASC",
+             ORDER BY w.name ASC, wv.version ASC, r.created_at DESC, r.id DESC",
         )
         .fetch_all(&self.pool)
         .await
@@ -82,6 +78,7 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                 workflow_id: row.workflow_id,
                 workflow_version_id: row.workflow_version_id,
                 recipe_id: row.recipe_id,
+                recipe_version: row.recipe_version,
                 name: row.name,
                 category: row.category,
                 mode: row.mode,
@@ -105,6 +102,7 @@ struct AvailableDefinitionRow {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    recipe_version: String,
     name: String,
     category: String,
     mode: String,
@@ -188,7 +186,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lists_only_the_latest_recipe_for_each_current_workflow_version() {
+    async fn lists_all_recipes_for_each_current_workflow_version() {
         let (_directory, pool, repository) = setup().await;
         sqlx::query(
             "INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
@@ -210,8 +208,11 @@ mod tests {
             .await
             .expect("available definitions should load");
 
-        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions.len(), 2);
         assert_eq!(definitions[0].recipe_id, "recipe-2");
+        assert_eq!(definitions[0].recipe_version, "1.0.1");
+        assert_eq!(definitions[1].recipe_id, "recipe-1");
+        assert_eq!(definitions[1].recipe_version, "1");
         assert!(definitions[0].recipe_yaml.contains("latest-recipe"));
     }
 

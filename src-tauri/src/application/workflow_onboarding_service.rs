@@ -235,6 +235,7 @@ pub struct WorkflowInputView {
     pub is_linked: bool,
     pub bindable: bool,
     pub suggested_type: Option<String>,
+    pub suggested_semantic_key: Option<String>,
     pub numeric_min: Option<String>,
     pub numeric_max: Option<String>,
     pub numeric_step: Option<String>,
@@ -1036,6 +1037,15 @@ impl WorkflowOnboardingService {
                     "Connected input — not directly bindable",
                 ));
             }
+            if is_dangerous_input_name(&request.target_input) {
+                return Err(WorkflowOnboardingError::new(
+                    "MAPPING_DANGEROUS_INPUT",
+                    format!(
+                        "{} is an internal or unsafe input and cannot be exposed",
+                        request.target_input
+                    ),
+                ));
+            }
             validate_mapping_value(field_type, current)?;
             let input_view = draft
                 .nodes
@@ -1057,17 +1067,6 @@ impl WorkflowOnboardingService {
                 return Err(WorkflowOnboardingError::new(
                     "MAPPING_INVALID",
                     "one semantic key cannot use multiple field types",
-                ));
-            }
-            if draft.input_mappings.iter().any(|existing| {
-                existing.target_node == request.target_node
-                    && existing.target_input == request.target_input
-                    && (existing.semantic_key != request.semantic_key
-                        || existing.item_index != request.item_index)
-            }) {
-                return Err(WorkflowOnboardingError::new(
-                    "MAPPING_INVALID",
-                    "one workflow input cannot be mapped twice",
                 ));
             }
             if draft.input_mappings.iter().any(|existing| {
@@ -1118,9 +1117,11 @@ impl WorkflowOnboardingService {
                 target_input: request.target_input,
                 item_index: request.item_index,
             };
-            draft
-                .input_mappings
-                .retain(|existing| (existing.semantic_key.clone(), existing.item_index) != key);
+            draft.input_mappings.retain(|existing| {
+                (existing.semantic_key.clone(), existing.item_index) != key
+                    && (existing.target_node != mapping.target_node
+                        || existing.target_input != mapping.target_input)
+            });
             draft.input_mappings.push(mapping);
             draft.input_mappings.sort_by(|left, right| {
                 left.semantic_key
@@ -3297,6 +3298,7 @@ fn inspect_workflow(
                     is_linked: linked,
                     bindable: !linked,
                     suggested_type: suggestion_for_input(name, value, linked),
+                    suggested_semantic_key: suggestion_for_semantic_key(name, value, linked),
                     numeric_min: None,
                     numeric_max: None,
                     numeric_step: None,
@@ -3695,37 +3697,111 @@ fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<Strin
             .iter()
             .any(|key| name == *key || name.contains(key))
     {
-        return Some("seed".to_owned());
+        return (value.as_i64().is_some() || value.as_u64().is_some()).then_some("seed".to_owned());
     }
     if value.is_number()
         && ["cfg", "cfg_scale", "guidance"]
             .iter()
             .any(|key| name == *key || name.contains(key))
     {
-        return None;
+        return value.as_i64().map(|_| "integer".to_owned());
     }
     if value.is_number() {
-        return Some("integer".to_owned());
+        return value.as_i64().map(|_| "integer".to_owned());
     }
     if (value.is_string() || value.is_array()) && name.contains("image") {
-        if name.contains("images") || name.contains("references") {
+        if value.is_array() || name.contains("images") || name.contains("references") {
             return Some("images".to_owned());
         }
         return Some("image".to_owned());
     }
     if (value.is_string() || value.is_array()) && name.contains("video") {
-        if name.contains("videos") || name.contains("references") {
+        if value.is_array() || name.contains("videos") || name.contains("references") {
             return Some("videos".to_owned());
         }
         return Some("video".to_owned());
     }
     if (value.is_string() || value.is_array()) && name.contains("audio") {
-        if name.contains("audios") || name.contains("references") {
+        if value.is_array() || name.contains("audios") || name.contains("references") {
             return Some("audios".to_owned());
         }
         return Some("audio".to_owned());
     }
+    if value.is_string()
+        && ["first_frame", "start_frame", "last_frame", "end_frame"]
+            .iter()
+            .any(|key| name == *key)
+    {
+        return Some("image".to_owned());
+    }
     None
+}
+
+fn suggestion_for_semantic_key(name: &str, value: &Value, linked: bool) -> Option<String> {
+    if linked || value.is_object() || value.is_boolean() || value.is_null() {
+        return None;
+    }
+    let lower = name.to_ascii_lowercase();
+    let semantic = [
+        "prompt",
+        "seed",
+        "first_frame",
+        "last_frame",
+        "width",
+        "height",
+        "steps",
+        "cfg",
+        "guidance",
+        "denoise",
+        "fps",
+        "duration",
+        "frame_count",
+        "strength",
+        "images",
+        "image",
+        "videos",
+        "video",
+        "audios",
+        "audio",
+    ];
+    semantic
+        .iter()
+        .find(|candidate| lower == **candidate || lower.contains(**candidate))
+        .map(|candidate| (*candidate).to_owned())
+        .or_else(|| is_safe_key(&lower).then_some(lower))
+}
+
+fn is_dangerous_input_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "model_path",
+        "filename_prefix",
+        "output_directory",
+        "output_dir",
+        "filesystem_path",
+        "file_path",
+        "custom_python",
+        "python_path",
+        "backend_endpoint",
+        "endpoint",
+        "filename",
+        "directory",
+        "folder",
+        "path",
+        "prefix",
+        "python",
+        "device",
+        "provider",
+        "checkpoint",
+        "ckpt",
+        "unet",
+        "vae",
+        "clip",
+        "lora",
+        "model",
+    ]
+    .iter()
+    .any(|token| lower == *token || lower.contains(token))
 }
 
 fn truncate(value: &str, limit: usize) -> String {
@@ -4132,6 +4208,9 @@ mod tests {
         );
         assert!(is_safe_key("generated_image"));
         assert!(!is_safe_key("GeneratedImage"));
+        assert!(is_dangerous_input_name("filename_prefix"));
+        assert!(is_dangerous_input_name("model_path"));
+        assert!(!is_dangerous_input_name("steps"));
 
         let input = WorkflowInputView {
             name: "steps".to_owned(),
@@ -4140,6 +4219,7 @@ mod tests {
             is_linked: false,
             bindable: true,
             suggested_type: Some("integer".to_owned()),
+            suggested_semantic_key: Some("steps".to_owned()),
             numeric_min: Some("1".to_owned()),
             numeric_max: Some("10".to_owned()),
             numeric_step: None,
@@ -4166,6 +4246,22 @@ mod tests {
                 .code(),
             "MAPPING_OUT_OF_RANGE"
         );
+    }
+
+    #[test]
+    fn inspector_suggests_semantic_keys_without_exposing_links_or_unsupported_values() {
+        assert_eq!(
+            suggestion_for_semantic_key("positive_prompt", &json!("hello"), false).as_deref(),
+            Some("prompt")
+        );
+        assert_eq!(
+            suggestion_for_semantic_key("steps", &json!(20), false).as_deref(),
+            Some("steps")
+        );
+        assert!(suggestion_for_input("denoise", &json!(0.5), false).is_none());
+        assert!(suggestion_for_input("steps", &json!(20.5), false).is_none());
+        assert!(suggestion_for_semantic_key("connected", &json!(["1", 0]), true).is_none());
+        assert!(suggestion_for_semantic_key("enabled", &json!(true), false).is_none());
     }
 
     #[test]
@@ -4235,13 +4331,55 @@ mod tests {
             )),
             Arc::new(TestClock),
         );
-        let raw = br#"{"1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0]},"class_type":"SaveImage"}}"#.to_vec();
+        let raw = br#"{"1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0],"filename_prefix":"ComfyUI"},"class_type":"SaveImage"}}"#.to_vec();
         let draft = service
             .import_bytes(raw, "onboarded_t2i.json".to_owned(), None)
             .await
             .unwrap();
         let capability = service.check_capability(&draft.draft_id).await.unwrap();
         assert_eq!(capability.state, CapabilityState::Ready);
+        let linked_error = service
+            .set_input_mapping(
+                &draft.draft_id,
+                WorkflowOnboardingInputMappingRequest {
+                    semantic_key: "reference_image".to_owned(),
+                    field_type: "image".to_owned(),
+                    label: "Reference image".to_owned(),
+                    required: false,
+                    default_value: None,
+                    min_value: None,
+                    max_value: None,
+                    step: None,
+                    min_items: None,
+                    max_items: None,
+                    target_node: "2".to_owned(),
+                    target_input: "image".to_owned(),
+                    item_index: None,
+                },
+            )
+            .expect_err("linked inputs must remain internal");
+        assert_eq!(linked_error.code(), "LINKED_INPUT_NOT_BINDABLE");
+        let dangerous_error = service
+            .set_input_mapping(
+                &draft.draft_id,
+                WorkflowOnboardingInputMappingRequest {
+                    semantic_key: "output_prefix".to_owned(),
+                    field_type: "textarea".to_owned(),
+                    label: "Output prefix".to_owned(),
+                    required: false,
+                    default_value: Some("ComfyUI".to_owned()),
+                    min_value: None,
+                    max_value: None,
+                    step: None,
+                    min_items: None,
+                    max_items: None,
+                    target_node: "2".to_owned(),
+                    target_input: "filename_prefix".to_owned(),
+                    item_index: None,
+                },
+            )
+            .expect_err("dangerous path-like inputs must remain internal");
+        assert_eq!(dangerous_error.code(), "MAPPING_DANGEROUS_INPUT");
         let mapped = service
             .set_input_mapping(
                 &draft.draft_id,

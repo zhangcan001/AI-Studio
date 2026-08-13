@@ -58,6 +58,7 @@ export interface RecipeViewModel {
   workflowId: string;
   workflowVersionId: string;
   recipeId: string;
+  recipeVersion?: string;
   name: string;
   category: string;
   mode: string;

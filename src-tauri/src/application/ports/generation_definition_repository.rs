@@ -16,6 +16,7 @@ pub struct AvailableGenerationDefinition {
     pub workflow_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    pub recipe_version: String,
     pub name: String,
     pub category: String,
     pub mode: String,

@@ -32,7 +32,7 @@ export function filterRuntimeCatalog(
   const needle = search.trim().toLocaleLowerCase();
   return catalog.filter((recipe) => {
     const kindMatches = filter === "all" || runtimeKindFor(recipe) === filter;
-    const searchMatches = !needle || `${recipe.name} ${recipe.category} ${recipe.mode}`.toLocaleLowerCase().includes(needle);
+    const searchMatches = !needle || `${recipe.name} ${recipe.category} ${recipe.mode} ${recipe.recipeVersion ?? ""}`.toLocaleLowerCase().includes(needle);
     return kindMatches && searchMatches;
   });
 }

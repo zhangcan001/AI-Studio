@@ -645,6 +645,7 @@ mod tests {
                 workflow_id: workflow_id.to_owned(),
                 workflow_version_id: "wfv".to_owned(),
                 recipe_id: "recipe".to_owned(),
+                recipe_version: "1.0.0".to_owned(),
                 name: name.to_owned(),
                 category: category.to_owned(),
                 mode: mode.to_owned(),

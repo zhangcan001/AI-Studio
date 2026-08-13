@@ -37,7 +37,7 @@ export function WorkflowSelector({
     const needle = search.trim().toLocaleLowerCase();
     if (!needle) return candidates;
     return candidates.filter((recipe) => (
-      `${recipe.name} ${recipe.workflowId} ${recipe.recipeId}`.toLocaleLowerCase().includes(needle)
+      `${recipe.name} ${recipe.workflowId} ${recipe.recipeId} ${recipe.recipeVersion ?? ""}`.toLocaleLowerCase().includes(needle)
     ));
   }, [candidates, search]);
   const selectedRef: SelectedRecipeRef | undefined = selected
@@ -54,7 +54,7 @@ export function WorkflowSelector({
           <strong>{selected ? workflowDisplayName(selected.workflowId, selected.name) : "没有可用工作流"}</strong>
           {selected && (
             <span className="workflow-selector-meta">
-              {selected.workflowVersionId} · {selected.recipeId}
+              {selected.workflowVersionId} · Recipe {selected.recipeVersion ?? selected.recipeId}
             </span>
           )}
         </div>
@@ -83,7 +83,7 @@ export function WorkflowSelector({
                 <span>搜索工作流</span>
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="名称、workflowId 或 recipeId" autoFocus />
               </label>
-            ) : <span>{candidates.length} 个正式可用工作流</span>}
+            ) : <span>{candidates.length} 个正式可用 Recipe</span>}
             <div>
               <button type="button" className="quiet-button" onClick={() => { onRestoreRecommendation(); setOpen(false); }} disabled={disabled || !recommended || isRecommended}>
                 恢复推荐工作流
@@ -108,7 +108,7 @@ export function WorkflowSelector({
                 >
                   <span className="workflow-selector-option-copy">
                     <strong>{workflowDisplayName(recipe.workflowId, recipe.name)}</strong>
-                    <small>{recipe.workflowVersionId} · {recipe.recipeId}</small>
+                    <small>{recipe.workflowVersionId} · Recipe {recipe.recipeVersion ?? recipe.recipeId}</small>
                     <span>{recipe.outputTypes?.join(" · ") || "未声明输出"} · {recipe.mode}</span>
                   </span>
                   <span className="workflow-selector-option-tags">
