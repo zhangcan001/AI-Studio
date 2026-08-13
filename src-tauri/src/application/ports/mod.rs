@@ -96,6 +96,7 @@ pub use workflow_package_store::{
 };
 pub use workflow_run_repository::WorkflowRunRepository;
 pub use workflow_runtime_repository::{
-    RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowRuntimeRepository,
+    RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
+    WorkflowRuntimeRepository,
 };
 pub use workflow_runtime_state_repository::{WorkflowRuntimeState, WorkflowRuntimeStateRepository};

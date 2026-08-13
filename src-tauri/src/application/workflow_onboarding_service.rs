@@ -2,6 +2,7 @@ use crate::application::{
     ports::{
         Clock, ComfyAdapter, ComfyAdapterError, WorkflowLibrarySource, WorkflowPackageBytes,
         WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
+        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
@@ -123,6 +124,7 @@ pub enum WorkflowAutoOnboardingState {
     NeedsReview,
     WaitingForComfyUi,
     AlreadyExists,
+    AlreadyExistsArchived,
     Blocked,
 }
 
@@ -537,6 +539,8 @@ pub struct WorkflowOnboardingService {
     workflow_run_repository: Arc<dyn WorkflowRunRepository>,
     package_store: Arc<dyn WorkflowPackageStore>,
     clock: Arc<dyn Clock>,
+    runtime_repository: Option<Arc<dyn WorkflowRuntimeRepository>>,
+    state_repository: Option<Arc<dyn WorkflowRuntimeStateRepository>>,
     registry: Mutex<WorkflowOnboardingRegistry>,
 }
 
@@ -556,8 +560,20 @@ impl WorkflowOnboardingService {
             workflow_run_repository,
             package_store,
             clock,
+            runtime_repository: None,
+            state_repository: None,
             registry: Mutex::new(WorkflowOnboardingRegistry::default()),
         }
+    }
+
+    pub fn with_runtime_state(
+        mut self,
+        runtime_repository: Arc<dyn WorkflowRuntimeRepository>,
+        state_repository: Arc<dyn WorkflowRuntimeStateRepository>,
+    ) -> Self {
+        self.runtime_repository = Some(runtime_repository);
+        self.state_repository = Some(state_repository);
+        self
     }
 
     pub async fn import_bytes(
@@ -657,9 +673,16 @@ impl WorkflowOnboardingService {
             .existing_package_for_sha(&initial.workflow_sha256)
             .await?
         {
+            let archived = self
+                .is_archived_package(&manifest.id, &manifest.workflow_version)
+                .await?;
             return Ok(auto_plan_for_draft(
                 &initial,
-                WorkflowAutoOnboardingState::AlreadyExists,
+                if archived {
+                    WorkflowAutoOnboardingState::AlreadyExistsArchived
+                } else {
+                    WorkflowAutoOnboardingState::AlreadyExists
+                },
                 &[],
                 &[],
                 false,
@@ -667,7 +690,11 @@ impl WorkflowOnboardingService {
                 Some(manifest.id),
                 Some(manifest.workflow_version),
                 Some(package_name),
-                "该工作流已经导入。".to_owned(),
+                if archived {
+                    "该工作流已归档，可在工作流管理中恢复。".to_owned()
+                } else {
+                    "该工作流已经导入。".to_owned()
+                },
             ));
         }
 
@@ -799,6 +826,32 @@ impl WorkflowOnboardingService {
                 })
                 .flatten()
         }))
+    }
+
+    async fn is_archived_package(
+        &self,
+        workflow_id: &str,
+        workflow_version: &str,
+    ) -> Result<bool, WorkflowOnboardingError> {
+        let (Some(runtime_repository), Some(state_repository)) =
+            (&self.runtime_repository, &self.state_repository)
+        else {
+            return Ok(false);
+        };
+        let versions = runtime_repository
+            .list_versions()
+            .await
+            .map_err(|error| WorkflowOnboardingError::new("DATABASE_ERROR", error.to_string()))?;
+        let Some(version) = versions.into_iter().find(|version| {
+            version.workflow_id == workflow_id && version.workflow_version == workflow_version
+        }) else {
+            return Ok(false);
+        };
+        Ok(state_repository
+            .find_state(&version.workflow_version_id)
+            .await
+            .map_err(|error| WorkflowOnboardingError::new("DATABASE_ERROR", error.to_string()))?
+            .is_some_and(|state| state.archived))
     }
 
     pub fn get(
@@ -1442,6 +1495,12 @@ impl WorkflowOnboardingService {
                 Ok(manifest) => manifest,
                 Err(_) => continue,
             };
+            if self
+                .is_archived_package(&manifest.id, &manifest.workflow_version)
+                .await?
+            {
+                continue;
+            }
             let workflow = match parse_api_workflow_string(&files.workflow_json) {
                 Ok(workflow) => workflow,
                 Err(_) => continue,

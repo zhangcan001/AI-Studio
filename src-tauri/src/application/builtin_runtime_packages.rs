@@ -14,6 +14,12 @@ struct BuiltinPackage {
     workflow: &'static str,
 }
 
+struct BuiltinPackageIdentity {
+    /// Package directory reserved by a product-owned runtime whose files are
+    /// provisioned by the local runtime integration rather than embedded here.
+    directory: &'static str,
+}
+
 const PACKAGES: &[BuiltinPackage] = &[
     BuiltinPackage {
         directory: "minimax_h3_fl2va_1_0_0",
@@ -93,6 +99,33 @@ const PACKAGES: &[BuiltinPackage] = &[
     },
 ];
 
+// Kera2 is provisioned by the local image runtime, so its package files are
+// not embedded in this H3-only source list. Keeping its package identity here
+// still makes the builtin decision come from formal package metadata rather
+// than from a workflow ID conditional in the deletion service.
+const PRODUCT_PACKAGE_IDENTITIES: &[BuiltinPackageIdentity] = &[
+    BuiltinPackageIdentity {
+        directory: "kera2_t2i_local_v2",
+    },
+    BuiltinPackageIdentity {
+        directory: "kera2_t2i_local_v2_1_1_0_1d99a10d",
+    },
+    BuiltinPackageIdentity {
+        directory: "krea2_t2i_local",
+    },
+];
+
+/// Built-in identity is derived from formal product Runtime Package sources,
+/// not from workflow IDs. User-installed packages are never matched here.
+pub fn is_builtin_package_name(package_name: &str) -> bool {
+    PACKAGES
+        .iter()
+        .any(|package| package.directory == package_name)
+        || PRODUCT_PACKAGE_IDENTITIES
+            .iter()
+            .any(|package| package.directory == package_name)
+}
+
 pub fn ensure_installed(root: &Path) -> Result<(), String> {
     for package in PACKAGES {
         let directory = root.join(package.directory);
@@ -119,7 +152,7 @@ pub fn ensure_installed(root: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_installed, PACKAGES};
+    use super::{ensure_installed, is_builtin_package_name, PACKAGES};
     use crate::application::workflow_manifest::WorkflowManifest;
     use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
     use crate::domain::WorkflowDocument;
@@ -158,6 +191,14 @@ mod tests {
             WorkflowValidator::validate(&workflow).expect("workflow validates");
             BindingValidator::validate(&recipe, &workflow).expect("bindings validate");
         }
+    }
+
+    #[test]
+    fn product_package_identity_marks_kera2_builtin_without_workflow_id_logic() {
+        assert!(is_builtin_package_name("kera2_t2i_local_v2"));
+        assert!(is_builtin_package_name("kera2_t2i_local_v2_1_1_0_1d99a10d"));
+        assert!(is_builtin_package_name("krea2_t2i_local"));
+        assert!(!is_builtin_package_name("custom_kera2_copy"));
     }
 
     #[test]

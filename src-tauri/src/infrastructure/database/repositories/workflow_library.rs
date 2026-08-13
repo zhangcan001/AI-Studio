@@ -75,14 +75,15 @@ async fn register_package(
             let id = format!("wfv_{}", Uuid::new_v4());
             sqlx::query(
                 "INSERT INTO workflow_versions (
-                    id, workflow_id, version, api_workflow_json, workflow_sha256, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)",
+                    id, workflow_id, version, api_workflow_json, workflow_sha256, package_name, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(&package.workflow_id)
             .bind(&package.workflow_version)
             .bind(package.workflow_json.to_string())
             .bind(&package.workflow_sha256)
+            .bind(&package.package_name)
             .bind(format_datetime(package.created_at))
             .execute(&mut **transaction)
             .await
@@ -90,6 +91,13 @@ async fn register_package(
             (id, true)
         }
     };
+
+    sqlx::query("UPDATE workflow_versions SET package_name = ? WHERE id = ?")
+        .bind(&package.package_name)
+        .bind(&workflow_version_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
 
     sqlx::query(
         "UPDATE workflows
@@ -186,6 +194,7 @@ mod tests {
     fn package(workflow_hash: &str, recipe_hash: &str) -> WorkflowPackageRecord {
         WorkflowPackageRecord {
             workflow_id: "wfl_test".to_owned(),
+            package_name: "test-package".to_owned(),
             name: "Test Workflow".to_owned(),
             category: "image".to_owned(),
             mode: "text_to_image".to_owned(),

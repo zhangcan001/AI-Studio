@@ -12,6 +12,7 @@ export type WorkflowAutoOnboardingState =
   | "NEEDS_REVIEW"
   | "WAITING_FOR_COMFY_UI"
   | "ALREADY_EXISTS"
+  | "ALREADY_EXISTS_ARCHIVED"
   | "BLOCKED";
 
 export type InferenceConfidence = "CERTAIN" | "HIGH" | "AMBIGUOUS" | "UNKNOWN";
@@ -250,6 +251,9 @@ export interface WorkflowStagingView {
 
 export interface WorkflowProductionWorkspaceView {
   packageName: string;
+  builtin: boolean;
+  archived: boolean;
+  archivedAt?: string;
   packageStatus: string;
   errorCode?: string;
   errorMessage?: string;
@@ -280,6 +284,30 @@ export interface WorkflowProductionWorkspaceView {
 export interface WorkflowProductionWorkspaceResponse {
   items: WorkflowProductionWorkspaceView[];
   staging: WorkflowStagingView[];
+}
+
+export interface WorkflowDeletionInspection {
+  workflowId: string;
+  workflowVersionId: string;
+  name: string;
+  builtin: boolean;
+  enabled: boolean;
+  archived: boolean;
+  archivedAt?: string;
+  activeTaskCount: number;
+  activeQueueItemCount: number;
+  historicalTaskCount: number;
+  productionBatchItemCount: number;
+  canHardDelete: boolean;
+  requiresArchive: boolean;
+  blockingReasons: string[];
+}
+
+export interface WorkflowDeletionResult {
+  action: "HARD_DELETE" | "ARCHIVE";
+  workflowId: string;
+  workflowVersionId: string;
+  archived: boolean;
 }
 
 export interface WorkflowCapabilityBatchView {

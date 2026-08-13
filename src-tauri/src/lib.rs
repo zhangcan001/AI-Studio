@@ -340,7 +340,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_run_repository,
                 package_store.clone(),
                 clock.clone(),
-            ));
+            )
+            .with_runtime_state(runtime_repository.clone(), runtime_state_repository.clone()));
             let workflow_lifecycle_service = Arc::new(WorkflowLifecycleService::new(
                 workflow_library_source.clone(),
                 workflow_library_service.clone(),
@@ -713,6 +714,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_lifecycle::workflow_export_package,
             commands::workflow_lifecycle::workflow_import_package_backup,
             commands::workflow_lifecycle::workflow_clean_staging,
+            commands::workflow_lifecycle::workflow_inspect_deletion,
+            commands::workflow_lifecycle::workflow_delete_version,
+            commands::workflow_lifecycle::workflow_delete_workflow,
+            commands::workflow_lifecycle::workflow_restore_version,
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
             commands::generation::generation_create_batch,

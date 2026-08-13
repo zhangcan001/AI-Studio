@@ -1,5 +1,6 @@
 use super::RepositoryError;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeRecipeRecord {
@@ -19,6 +20,7 @@ pub struct RuntimeWorkflowVersionRecord {
     pub mode: String,
     pub workflow_version: String,
     pub workflow_sha256: String,
+    pub package_name: Option<String>,
     pub is_current: bool,
     pub recipes: Vec<RuntimeRecipeRecord>,
     pub active_tasks: u64,
@@ -26,6 +28,15 @@ pub struct RuntimeWorkflowVersionRecord {
     pub has_successful_run: bool,
     pub latest_success_at: Option<String>,
     pub latest_failure_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkflowDeletionCounts {
+    pub active_task_count: u64,
+    pub active_queue_item_count: u64,
+    pub historical_task_count: u64,
+    pub production_batch_item_count: u64,
+    pub other_reference_count: u64,
 }
 
 #[async_trait]
@@ -36,4 +47,16 @@ pub trait WorkflowRuntimeRepository: Send + Sync {
         &self,
         workflow_version_id: &str,
     ) -> Result<Option<RuntimeWorkflowVersionRecord>, RepositoryError>;
+
+    async fn inspect_deletion(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Option<WorkflowDeletionCounts>, RepositoryError>;
+
+    async fn delete_version(
+        &self,
+        workflow_version_id: &str,
+        workflow_id: &str,
+        updated_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError>;
 }

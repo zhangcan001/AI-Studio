@@ -1,8 +1,9 @@
 use crate::{
     app_state::AppState,
     application::workflow_lifecycle_service::{
-        WorkflowExportView, WorkflowLifecycleError, WorkflowProductionWorkspaceResponse,
-        WorkflowRestoreView, WorkflowVersionDiffView, MAX_WORKFLOW_ARCHIVE_BYTES,
+        WorkflowDeletionInspection, WorkflowDeletionResult, WorkflowExportView,
+        WorkflowLifecycleError, WorkflowProductionWorkspaceResponse, WorkflowRestoreView,
+        WorkflowVersionDiffView, MAX_WORKFLOW_ARCHIVE_BYTES,
     },
     error::AppError,
 };
@@ -200,6 +201,54 @@ pub async fn workflow_clean_staging(
     state
         .workflow_lifecycle_service
         .cleanup_staging(&staging_id)
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_inspect_deletion(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+) -> Result<WorkflowDeletionInspection, AppError> {
+    state
+        .workflow_lifecycle_service
+        .inspect_deletion(&workflow_version_id)
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_delete_version(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+) -> Result<WorkflowDeletionResult, AppError> {
+    state
+        .workflow_lifecycle_service
+        .delete_version(&workflow_version_id)
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_delete_workflow(
+    state: State<'_, AppState>,
+    workflow_id: String,
+) -> Result<Vec<WorkflowDeletionResult>, AppError> {
+    state
+        .workflow_lifecycle_service
+        .delete_workflow(&workflow_id)
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_restore_version(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+) -> Result<(), AppError> {
+    state
+        .workflow_lifecycle_service
+        .restore_version(&workflow_version_id)
         .await
         .map_err(map_error)
 }

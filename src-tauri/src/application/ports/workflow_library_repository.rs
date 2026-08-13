@@ -6,6 +6,7 @@ use serde_json::Value;
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkflowPackageRecord {
     pub workflow_id: String,
+    pub package_name: String,
     pub name: String,
     pub category: String,
     pub mode: String,

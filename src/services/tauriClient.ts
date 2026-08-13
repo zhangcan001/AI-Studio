@@ -67,6 +67,8 @@ import type {
   CapabilityCheckView,
   WorkflowAutoOnboardingPlanView,
   WorkflowCapabilityBatchView,
+  WorkflowDeletionInspection,
+  WorkflowDeletionResult,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingMetadataRequest,
@@ -292,6 +294,22 @@ export function importWorkflowPackageBackup(): Promise<WorkflowRestoreView | nul
 
 export function cleanWorkflowStaging(stagingId: string): Promise<void> {
   return invoke<void>("workflow_clean_staging", { stagingId });
+}
+
+export function inspectWorkflowDeletion(workflowVersionId: string): Promise<WorkflowDeletionInspection> {
+  return invoke<WorkflowDeletionInspection>("workflow_inspect_deletion", { workflowVersionId });
+}
+
+export function deleteWorkflowVersion(workflowVersionId: string): Promise<WorkflowDeletionResult> {
+  return invoke<WorkflowDeletionResult>("workflow_delete_version", { workflowVersionId });
+}
+
+export function deleteWorkflow(workflowId: string): Promise<WorkflowDeletionResult[]> {
+  return invoke<WorkflowDeletionResult[]>("workflow_delete_workflow", { workflowId });
+}
+
+export function restoreWorkflowVersion(workflowVersionId: string): Promise<void> {
+  return invoke<void>("workflow_restore_version", { workflowVersionId });
 }
 
 export function listGenerationCatalog(): Promise<RecipeViewModel[]> {

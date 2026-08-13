@@ -64,6 +64,7 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
              LEFT JOIN workflow_runtime_states wrs ON wrs.workflow_version_id = wv.id
              WHERE w.current_version_id = wv.id
                AND COALESCE(wrs.enabled, 1) = 1
+               AND COALESCE(wrs.archived, 0) = 0
                AND r.version = (
                    SELECT MAX(latest.version)
                    FROM recipes latest

@@ -12,9 +12,10 @@ interface Props {
   onResume: () => void;
   onOpenAdvanced: () => void;
   onOpenExisting: () => void;
+  onRestoreExisting?: () => void;
 }
 
-export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting }: Props) {
+export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRestoreExisting }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
   const waiting = plan.state === "WAITING_FOR_COMFY_UI";
   return (
@@ -70,7 +71,8 @@ export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpe
       )}
       <div className="workflow-smart-actions">
         {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续自动确认"}</button>}
-        {plan.state === "ALREADY_EXISTS" && <button type="button" onClick={onOpenExisting}>打开现有工作流</button>}
+        {(plan.state === "ALREADY_EXISTS" || plan.state === "ALREADY_EXISTS_ARCHIVED") && <button type="button" onClick={onOpenExisting}>打开现有工作流</button>}
+        {plan.state === "ALREADY_EXISTS_ARCHIVED" && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复归档工作流</button>}
         <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>
       </div>
     </section>

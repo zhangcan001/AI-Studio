@@ -6,6 +6,8 @@ use chrono::{DateTime, Utc};
 pub struct WorkflowRuntimeState {
     pub workflow_version_id: String,
     pub enabled: bool,
+    pub archived: bool,
+    pub archived_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -18,6 +20,20 @@ pub trait WorkflowRuntimeStateRepository: Send + Sync {
         &self,
         workflow_version_id: &str,
         enabled: bool,
+        updated_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError>;
+
+    async fn find_state(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Option<WorkflowRuntimeState>, RepositoryError>;
+
+    async fn set_archived(
+        &self,
+        workflow_version_id: &str,
+        archived: bool,
+        enabled: bool,
+        archived_at: Option<DateTime<Utc>>,
         updated_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError>;
 

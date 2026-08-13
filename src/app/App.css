@@ -759,6 +759,12 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .workflow-catalog-detail { grid-column: 1 / -1; border-top: 1px solid #2c3547; padding-top: 8px; white-space: normal; }
 .workflow-catalog-detail summary { cursor: pointer; color: #b9c8df; font-size: 0.8rem; }
 .workflow-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.workflow-row-menu { position: relative; flex: 0 0 auto; }
+.workflow-row-menu > summary { display: grid; place-items: center; min-width: 32px; height: 32px; border: 1px solid #3b4960; border-radius: 7px; color: #c9d6e8; cursor: pointer; list-style: none; font-size: 1.2rem; line-height: 1; }
+.workflow-row-menu > summary::-webkit-details-marker { display: none; }
+.workflow-row-menu-content { position: absolute; z-index: 4; right: 0; top: calc(100% + 6px); display: grid; gap: 6px; min-width: 170px; padding: 8px; border: 1px solid #3b4960; border-radius: 9px; background: #151d2a; box-shadow: 0 14px 30px rgb(0 0 0 / 32%); }
+.workflow-row-menu-content button { width: 100%; text-align: left; }
+.workflow-row-menu-note { padding: 6px 8px; color: #9aabc1; font-size: 0.78rem; white-space: normal; }
 .workflow-recipe-summary, .workflow-diagnostics-panel, .workflow-diff-panel { margin-top: 14px; padding: 14px; border: 1px solid #2c3547; border-radius: 9px; }
 .workflow-recipe-summary { display: grid; gap: 6px; color: #8997ad; }
 .workflow-diagnostics-panel > div { display: flex; align-items: center; gap: 10px; margin-top: 8px; }

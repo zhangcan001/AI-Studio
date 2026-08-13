@@ -1,4 +1,5 @@
 use crate::application::{
+    builtin_runtime_packages::is_builtin_package_name,
     ports::{
         Clock, RuntimeWorkflowVersionRecord, WorkflowLibrarySource, WorkflowPackageBytes,
         WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeRepository,
@@ -88,6 +89,9 @@ pub struct WorkflowStagingView {
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowProductionWorkspaceView {
     pub package_name: String,
+    pub builtin: bool,
+    pub archived: bool,
+    pub archived_at: Option<String>,
     pub package_status: String,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
@@ -121,6 +125,34 @@ pub struct WorkflowProductionWorkspaceView {
 pub struct WorkflowProductionWorkspaceResponse {
     pub items: Vec<WorkflowProductionWorkspaceView>,
     pub staging: Vec<WorkflowStagingView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDeletionInspection {
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub name: String,
+    pub builtin: bool,
+    pub enabled: bool,
+    pub archived: bool,
+    pub archived_at: Option<String>,
+    pub active_task_count: u64,
+    pub active_queue_item_count: u64,
+    pub historical_task_count: u64,
+    pub production_batch_item_count: u64,
+    pub can_hard_delete: bool,
+    pub requires_archive: bool,
+    pub blocking_reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDeletionResult {
+    pub action: String,
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub archived: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -248,22 +280,29 @@ impl WorkflowLifecycleService {
             .list_states()
             .await
             .map_err(db_error)?;
-        let enabled_by_version = states
+        let state_by_version = states
             .into_iter()
-            .map(|state| (state.workflow_version_id, state.enabled))
+            .map(|state| {
+                (
+                    state.workflow_version_id,
+                    (state.enabled, state.archived, state.archived_at),
+                )
+            })
             .collect::<HashMap<_, _>>();
         let cached_views = self.workspace_cache.read().await.clone();
         let capabilities = self.capability_cache.read().await.clone();
         let mut items = runtime_versions
             .iter()
             .map(|version| {
-                let enabled = enabled_by_version
+                let (enabled, archived, archived_at) = state_by_version
                     .get(&version.workflow_version_id)
                     .copied()
-                    .unwrap_or(true);
+                    .unwrap_or((true, false, None));
                 fast_view_for_version(
                     version,
                     enabled,
+                    archived,
+                    archived_at.map(|value| value.to_rfc3339()),
                     cached_views.get(&version.workflow_version_id),
                     capabilities.get(&version.workflow_version_id),
                 )
@@ -382,13 +421,25 @@ impl WorkflowLifecycleService {
             if seen_keys.contains(&key) {
                 continue;
             }
-            let enabled = self
+            let state = self
                 .state_repository
-                .is_enabled(&version.workflow_version_id)
+                .find_state(&version.workflow_version_id)
                 .await
                 .map_err(db_error)?;
+            let enabled = state.as_ref().map_or(true, |state| state.enabled);
+            let archived = state.as_ref().is_some_and(|state| state.archived);
+            let archived_at = state
+                .as_ref()
+                .and_then(|state| state.archived_at)
+                .map(|value| value.to_rfc3339());
             items.push(WorkflowProductionWorkspaceView {
                 package_name: String::new(),
+                builtin: version
+                    .package_name
+                    .as_deref()
+                    .is_some_and(is_builtin_package_name),
+                archived,
+                archived_at,
                 package_status: "MISSING".to_owned(),
                 error_code: Some("RUNTIME_PACKAGE_MISSING".to_owned()),
                 error_message: Some("database registration has no runtime package".to_owned()),
@@ -542,6 +593,17 @@ impl WorkflowLifecycleService {
         workflow_version_id: &str,
         enabled: bool,
     ) -> Result<(), WorkflowLifecycleError> {
+        let state = self
+            .state_repository
+            .find_state(workflow_version_id)
+            .await
+            .map_err(db_error)?;
+        if state.as_ref().is_some_and(|state| state.archived) {
+            return Err(WorkflowLifecycleError::new(
+                "WORKFLOW_ARCHIVED",
+                "archived workflow versions must be restored before they can be enabled",
+            ));
+        }
         self.runtime_repository
             .find_version(workflow_version_id)
             .await
@@ -575,6 +637,356 @@ impl WorkflowLifecycleService {
             view.readiness_reasons = reasons;
         }
         Ok(())
+    }
+
+    pub async fn inspect_deletion(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowDeletionInspection, WorkflowLifecycleError> {
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| {
+                WorkflowLifecycleError::new(
+                    "WORKFLOW_VERSION_NOT_FOUND",
+                    "workflow version was not found",
+                )
+            })?;
+        let counts = self
+            .runtime_repository
+            .inspect_deletion(workflow_version_id)
+            .await
+            .map_err(db_error)?
+            .unwrap_or_default();
+        let packages = self
+            .find_packages(&version.workflow_id, &version.workflow_version)
+            .await?;
+        let builtin = version
+            .package_name
+            .as_deref()
+            .is_some_and(is_builtin_package_name)
+            || packages
+                .iter()
+                .any(|package| is_builtin_package_name(&package.package_name));
+        let state = self
+            .state_repository
+            .find_state(workflow_version_id)
+            .await
+            .map_err(db_error)?;
+        let enabled = state.as_ref().map_or(true, |state| state.enabled);
+        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let archived_at = state
+            .as_ref()
+            .and_then(|state| state.archived_at)
+            .map(|value| value.to_rfc3339());
+        let mut blocking_reasons = Vec::new();
+        if archived {
+            blocking_reasons.push("该工作流版本已从生产库移除，请先恢复后再管理。".to_owned());
+        }
+        if builtin {
+            blocking_reasons.push("内置 Runtime Package 不允许永久删除。".to_owned());
+        }
+        if counts.active_task_count > 0 {
+            blocking_reasons.push(format!(
+                "仍有 {} 个活动任务或队列项，完成或取消后才能处理。",
+                counts.active_task_count
+            ));
+        }
+        if counts.active_queue_item_count > 0 {
+            blocking_reasons.push(format!(
+                "仍有 {} 个生产队列项处于待开始、运行或暂停状态，完成或取消后才能处理。",
+                counts.active_queue_item_count
+            ));
+        }
+        if counts.historical_task_count > 0 {
+            blocking_reasons.push(format!(
+                "存在 {} 条历史任务记录，将保留运行包并归档。",
+                counts.historical_task_count
+            ));
+        }
+        if counts.production_batch_item_count > 0 {
+            blocking_reasons.push(format!(
+                "存在 {} 条生产批次引用，将保留历史真相并归档。",
+                counts.production_batch_item_count
+            ));
+        }
+        if counts.other_reference_count > 0 {
+            blocking_reasons.push(format!(
+                "存在 {} 条预设、模板或 Shot 配置引用，不能永久删除。",
+                counts.other_reference_count
+            ));
+        }
+        let has_active_work = counts.active_task_count > 0 || counts.active_queue_item_count > 0;
+        let has_history = counts.historical_task_count > 0
+            || counts.production_batch_item_count > 0
+            || counts.other_reference_count > 0;
+        Ok(WorkflowDeletionInspection {
+            workflow_id: version.workflow_id,
+            workflow_version_id: version.workflow_version_id,
+            name: version.name,
+            builtin,
+            enabled,
+            archived,
+            archived_at,
+            active_task_count: counts.active_task_count,
+            active_queue_item_count: counts.active_queue_item_count,
+            historical_task_count: counts.historical_task_count,
+            production_batch_item_count: counts.production_batch_item_count,
+            can_hard_delete: !archived && !builtin && !has_active_work && !has_history,
+            requires_archive: !archived && !builtin && !has_active_work && has_history,
+            blocking_reasons,
+        })
+    }
+
+    pub async fn delete_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<WorkflowDeletionResult, WorkflowLifecycleError> {
+        let inspection = self.inspect_deletion(workflow_version_id).await?;
+        if inspection.builtin {
+            return Err(WorkflowLifecycleError::new(
+                "WORKFLOW_BUILTIN_DELETE_BLOCKED",
+                "built-in Runtime Packages cannot be permanently deleted",
+            ));
+        }
+        if inspection.archived {
+            return Err(WorkflowLifecycleError::new(
+                "WORKFLOW_ARCHIVED_DELETE_BLOCKED",
+                "archived workflow versions must be restored before they can be managed",
+            ));
+        }
+        if inspection.active_task_count > 0 || inspection.active_queue_item_count > 0 {
+            return Err(WorkflowLifecycleError::new(
+                "WORKFLOW_DELETE_BLOCKED_ACTIVE_TASKS",
+                inspection.blocking_reasons.join(" "),
+            ));
+        }
+        if inspection.requires_archive {
+            self.state_repository
+                .set_archived(
+                    workflow_version_id,
+                    true,
+                    false,
+                    Some(self.clock.now()),
+                    self.clock.now(),
+                )
+                .await
+                .map_err(db_error)?;
+            self.update_cached_archive_state(workflow_version_id, true, false)
+                .await;
+            self.capability_cache
+                .write()
+                .await
+                .remove(workflow_version_id);
+            return Ok(WorkflowDeletionResult {
+                action: "ARCHIVE".to_owned(),
+                workflow_id: inspection.workflow_id,
+                workflow_version_id: inspection.workflow_version_id,
+                archived: true,
+            });
+        }
+
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| {
+                WorkflowLifecycleError::new(
+                    "WORKFLOW_VERSION_NOT_FOUND",
+                    "workflow version was not found",
+                )
+            })?;
+        let packages = self
+            .find_packages(&version.workflow_id, &version.workflow_version)
+            .await?;
+        let mut package_names = packages
+            .iter()
+            .map(|package| package.package_name.clone())
+            .collect::<Vec<_>>();
+        if let Some(package_name) = &version.package_name {
+            if !package_names.iter().any(|name| name == package_name) {
+                package_names.push(package_name.clone());
+            }
+        }
+        let mut removed = Vec::new();
+        for package_name in package_names {
+            let bytes = match self.package_store.read_runtime(&package_name).await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.restore_removed_packages(&removed).await;
+                    return Err(store_error(error));
+                }
+            };
+            if let Err(error) = self.package_store.remove_published(&package_name).await {
+                self.restore_removed_packages(&removed).await;
+                return Err(store_error(error));
+            }
+            removed.push((package_name, bytes));
+        }
+        if let Err(error) = self
+            .runtime_repository
+            .delete_version(
+                &version.workflow_version_id,
+                &version.workflow_id,
+                self.clock.now(),
+            )
+            .await
+        {
+            self.restore_removed_packages(&removed).await;
+            return Err(db_error(error));
+        }
+        self.capability_cache
+            .write()
+            .await
+            .remove(workflow_version_id);
+        self.workspace_cache
+            .write()
+            .await
+            .remove(workflow_version_id);
+        Ok(WorkflowDeletionResult {
+            action: "HARD_DELETE".to_owned(),
+            workflow_id: version.workflow_id,
+            workflow_version_id: version.workflow_version_id,
+            archived: false,
+        })
+    }
+
+    pub async fn delete_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Vec<WorkflowDeletionResult>, WorkflowLifecycleError> {
+        let versions = self
+            .runtime_repository
+            .list_versions()
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .filter(|version| version.workflow_id == workflow_id)
+            .map(|version| version.workflow_version_id)
+            .collect::<Vec<_>>();
+        if versions.is_empty() {
+            return Err(WorkflowLifecycleError::new(
+                "WORKFLOW_NOT_FOUND",
+                "workflow was not found",
+            ));
+        }
+        for version_id in &versions {
+            let inspection = self.inspect_deletion(version_id).await?;
+            if inspection.active_task_count > 0
+                || inspection.active_queue_item_count > 0
+                || inspection.builtin
+            {
+                return Err(WorkflowLifecycleError::new(
+                    if inspection.active_task_count > 0 || inspection.active_queue_item_count > 0 {
+                        "WORKFLOW_DELETE_BLOCKED_ACTIVE_TASKS"
+                    } else if inspection.builtin {
+                        "WORKFLOW_BUILTIN_DELETE_BLOCKED"
+                    } else {
+                        "WORKFLOW_ARCHIVED_DELETE_BLOCKED"
+                    },
+                    inspection.blocking_reasons.join(" "),
+                ));
+            }
+        }
+        let mut result = Vec::new();
+        let mut deletable_versions = Vec::new();
+        for version_id in versions {
+            let inspection = self.inspect_deletion(&version_id).await?;
+            if inspection.archived {
+                result.push(WorkflowDeletionResult {
+                    action: "ARCHIVE".to_owned(),
+                    workflow_id: inspection.workflow_id,
+                    workflow_version_id: inspection.workflow_version_id,
+                    archived: true,
+                });
+            } else {
+                deletable_versions.push(version_id);
+            }
+        }
+        for version_id in deletable_versions {
+            result.push(self.delete_version(&version_id).await?);
+        }
+        Ok(result)
+    }
+
+    pub async fn restore_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<(), WorkflowLifecycleError> {
+        self.runtime_repository
+            .find_version(workflow_version_id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| {
+                WorkflowLifecycleError::new(
+                    "WORKFLOW_VERSION_NOT_FOUND",
+                    "workflow version was not found",
+                )
+            })?;
+        self.state_repository
+            .set_archived(workflow_version_id, false, false, None, self.clock.now())
+            .await
+            .map_err(db_error)?;
+        self.workspace_cache
+            .write()
+            .await
+            .remove(workflow_version_id);
+        self.capability_cache
+            .write()
+            .await
+            .remove(workflow_version_id);
+        Ok(())
+    }
+
+    async fn update_cached_archive_state(
+        &self,
+        workflow_version_id: &str,
+        archived: bool,
+        enabled: bool,
+    ) {
+        if let Some(view) = self
+            .workspace_cache
+            .write()
+            .await
+            .get_mut(workflow_version_id)
+        {
+            view.archived = archived;
+            view.archived_at = if archived {
+                Some(self.clock.now().to_rfc3339())
+            } else {
+                None
+            };
+            view.enabled = enabled;
+            let (readiness, reasons) = readiness_for(
+                enabled,
+                &view.package_status,
+                &view.capability,
+                &view.diagnostics,
+                view.recipes.len(),
+                view.has_successful_run,
+            );
+            view.readiness = readiness;
+            view.readiness_reasons = reasons;
+        }
+    }
+
+    async fn restore_removed_packages(&self, packages: &[(String, WorkflowPackageBytes)]) {
+        for (package_name, bytes) in packages {
+            let staging_id = format!("onb_{}", Uuid::new_v4());
+            if self.package_store.stage(&staging_id, bytes).await.is_ok() {
+                if self
+                    .package_store
+                    .publish_atomic(&staging_id, package_name)
+                    .await
+                    .is_err()
+                {
+                    let _ = self.package_store.remove_staging(&staging_id).await;
+                }
+            }
+        }
     }
 
     pub async fn recheck_capability(
@@ -773,17 +1185,18 @@ impl WorkflowLifecycleService {
                 .find(|recipe| recipe.version == manifest.recipe_version)
             {
                 if recipe.recipe_sha256 == recipe_sha {
+                    let state = self
+                        .state_repository
+                        .find_state(&existing.workflow_version_id)
+                        .await
+                        .map_err(db_error)?;
                     return Ok(WorkflowRestoreView {
                         status: "ALREADY_INSTALLED".to_owned(),
                         package_name: String::new(),
                         workflow_id: manifest.id,
                         workflow_version: manifest.workflow_version,
                         recipe_id: Some(recipe.recipe_id.clone()),
-                        enabled: self
-                            .state_repository
-                            .is_enabled(&existing.workflow_version_id)
-                            .await
-                            .map_err(db_error)?,
+                        enabled: state.as_ref().map_or(true, |value| value.enabled),
                         capability: "READY".to_owned(),
                     });
                 }
@@ -897,11 +1310,17 @@ impl WorkflowLifecycleService {
         manifest: &WorkflowManifest,
         version: &RuntimeWorkflowVersionRecord,
     ) -> Result<WorkflowProductionWorkspaceView, WorkflowLifecycleError> {
-        let enabled = self
+        let state = self
             .state_repository
-            .is_enabled(&version.workflow_version_id)
+            .find_state(&version.workflow_version_id)
             .await
             .map_err(db_error)?;
+        let enabled = state.as_ref().map_or(true, |state| state.enabled);
+        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let archived_at = state
+            .as_ref()
+            .and_then(|state| state.archived_at)
+            .map(|value| value.to_rfc3339());
         let workflow = match parse_workflow(&package.workflow_json) {
             Ok(workflow) => workflow,
             Err(error) => {
@@ -959,6 +1378,9 @@ impl WorkflowLifecycleService {
         );
         Ok(WorkflowProductionWorkspaceView {
             package_name: package.package_name.clone(),
+            builtin: is_builtin_package_name(&package.package_name),
+            archived,
+            archived_at,
             package_status: package_status.to_owned(),
             error_code: diagnostics
                 .first()
@@ -1024,15 +1446,14 @@ impl WorkflowLifecycleService {
         workflow_version: &str,
         recipe_version: Option<&str>,
     ) -> Result<crate::application::ports::WorkflowPackageFiles, WorkflowLifecycleError> {
-        let packages = self.load_packages().await?;
+        let packages = self.find_packages(workflow_id, workflow_version).await?;
         packages
             .into_iter()
             .filter_map(|package| {
                 let manifest = WorkflowManifest::parse(&package.manifest_yaml).ok()?;
-                (manifest.id == workflow_id
-                    && manifest.workflow_version == workflow_version
-                    && recipe_version.is_none_or(|version| manifest.recipe_version == version))
-                .then_some((manifest, package))
+                recipe_version
+                    .is_none_or(|version| manifest.recipe_version == version)
+                    .then_some((manifest, package))
             })
             .max_by(|left, right| compare_versions(&left.0.recipe_version, &right.0.recipe_version))
             .map(|(_, package)| package)
@@ -1042,6 +1463,23 @@ impl WorkflowLifecycleService {
                     "the runtime package was not found",
                 )
             })
+    }
+
+    async fn find_packages(
+        &self,
+        workflow_id: &str,
+        workflow_version: &str,
+    ) -> Result<Vec<crate::application::ports::WorkflowPackageFiles>, WorkflowLifecycleError> {
+        Ok(self
+            .load_packages()
+            .await?
+            .into_iter()
+            .filter(|package| {
+                WorkflowManifest::parse(&package.manifest_yaml).is_ok_and(|manifest| {
+                    manifest.id == workflow_id && manifest.workflow_version == workflow_version
+                })
+            })
+            .collect())
     }
 
     async fn load_packages(
@@ -1073,6 +1511,9 @@ fn invalid_package_view(
     let message = message.into();
     WorkflowProductionWorkspaceView {
         package_name: package_name.to_owned(),
+        builtin: is_builtin_package_name(package_name),
+        archived: false,
+        archived_at: None,
         package_status: "INVALID".to_owned(),
         error_code: Some(code.to_owned()),
         error_message: Some(message.clone()),
@@ -1107,6 +1548,8 @@ fn invalid_package_view(
 fn fast_view_for_version(
     version: &RuntimeWorkflowVersionRecord,
     enabled: bool,
+    archived: bool,
+    archived_at: Option<String>,
     cached: Option<&WorkflowProductionWorkspaceView>,
     capability: Option<&CapabilityCheckView>,
 ) -> WorkflowProductionWorkspaceView {
@@ -1123,6 +1566,12 @@ fn fast_view_for_version(
         .cloned()
         .unwrap_or_else(|| WorkflowProductionWorkspaceView {
             package_name: version.workflow_id.clone(),
+            builtin: version
+                .package_name
+                .as_deref()
+                .is_some_and(is_builtin_package_name),
+            archived,
+            archived_at: archived_at.clone(),
             package_status: "VALID".to_owned(),
             error_code: None,
             error_message: None,
@@ -1155,6 +1604,16 @@ fn fast_view_for_version(
             diagnostics: Vec::new(),
         });
     view.enabled = enabled;
+    view.package_name = version
+        .package_name
+        .clone()
+        .unwrap_or_else(|| view.package_name.clone());
+    view.builtin = version
+        .package_name
+        .as_deref()
+        .map_or(view.builtin, is_builtin_package_name);
+    view.archived = archived;
+    view.archived_at = archived_at;
     view.workflow_id = Some(version.workflow_id.clone());
     view.workflow_version_id = Some(version.workflow_version_id.clone());
     view.name = Some(version.name.clone());
@@ -1724,6 +2183,7 @@ mod tests {
             mode: "image_to_video".to_owned(),
             workflow_version: "1.0.0".to_owned(),
             workflow_sha256: "workflow-sha".to_owned(),
+            package_name: None,
             is_current: true,
             recipes: vec![RuntimeRecipeRecord {
                 recipe_id: "recipe_1".to_owned(),
@@ -1739,7 +2199,7 @@ mod tests {
             latest_failure_at: None,
         };
 
-        let view = fast_view_for_version(&version, true, None, None);
+        let view = fast_view_for_version(&version, true, false, None, None, None);
 
         assert_eq!(view.workflow_version_id.as_deref(), Some("ver_1"));
         assert_eq!(view.workflow_sha256.as_deref(), Some("workflow-sha"));

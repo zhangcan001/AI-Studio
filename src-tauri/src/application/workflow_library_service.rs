@@ -130,6 +130,7 @@ impl WorkflowLibraryService {
 
         let package = WorkflowPackageRecord {
             workflow_id: manifest.id,
+            package_name: files.package_name.clone(),
             name: manifest.name,
             category: manifest.category,
             mode: manifest.mode,

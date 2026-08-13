@@ -13,10 +13,11 @@ interface Props {
   onResume: () => void;
   onOpenAdvanced: () => void;
   onOpenExisting: () => void;
+  onRestoreExisting?: () => void;
   onOpenStudio?: (workflowId: string, recipeId: string) => void;
 }
 
-export function WorkflowSmartImport({ plan, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenStudio }: Props) {
+export function WorkflowSmartImport({ plan, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRestoreExisting, onOpenStudio }: Props) {
   if (!plan) return null;
   if (plan.state === "AUTO_PUBLISHED") {
     return <WorkflowImportResult plan={plan} onOpenAdvanced={onOpenAdvanced} onOpenStudio={onOpenStudio} />;
@@ -29,6 +30,7 @@ export function WorkflowSmartImport({ plan, loading, onResolve, onResume, onOpen
       onResume={onResume}
       onOpenAdvanced={onOpenAdvanced}
       onOpenExisting={onOpenExisting}
+      onRestoreExisting={onRestoreExisting}
     />
   );
 }

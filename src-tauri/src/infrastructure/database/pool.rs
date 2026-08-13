@@ -109,6 +109,20 @@ mod tests {
             prompt_columns,
             vec!["asset_id", "project_id", "prompt_text", "updated_at"]
         );
+        let workflow_version_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('workflow_versions') WHERE name = 'package_name'",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("workflow version metadata should be readable");
+        assert_eq!(workflow_version_columns, vec!["package_name"]);
+        let runtime_state_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('workflow_runtime_states') WHERE name IN ('archived', 'archived_at') ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("workflow archive metadata should be readable");
+        assert_eq!(runtime_state_columns, vec!["archived", "archived_at"]);
 
         sqlx::query(
             "INSERT INTO projects (id, name, root_path, created_at, updated_at)
