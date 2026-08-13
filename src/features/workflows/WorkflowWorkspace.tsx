@@ -725,7 +725,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       </div>
       <div className="workflow-catalog" aria-label="工作流运行包">
         <div className="workflow-catalog-header">
-          <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>就绪状态</span><span>运行记录</span><span>操作</span>
+          <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>就绪状态</span><span>运行记录</span><span>操作 / 删除</span>
         </div>
         {workspaceLoading && !visibleItems.length && <p className="loading-state">正在读取已注册工作流…</p>}
         {visibleItems.map((item) => (
@@ -743,13 +743,14 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>复制配方</button>}
               {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "快速测试"}</button>}
               {item.workflowId && <button type="button" className="quiet-button" onClick={() => void smartImportWorkflow(item.workflowId)}>创建新版本</button>}
+              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)} disabled={item.builtin} title={item.builtin ? "内置 Runtime Package 不可永久删除" : "删除此工作流版本"}>{item.builtin ? "删除（内置不可用）" : "删除"}</button>}
+              {item.workflowVersionId && item.archived && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复到列表</button>}
               <details className="workflow-row-menu">
                 <summary aria-label="更多工作流操作">⋯</summary>
                 <div className="workflow-row-menu-content">
                   {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "停用" : "启用"}</button>}
                   {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
-                  {item.workflowVersionId && item.archived && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复到列表</button>}
-                  {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)}>删除此版本</button>}
+                  {item.workflowVersionId && !item.archived && !item.builtin && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)}>删除此版本</button>}
                   {item.workflowVersionId && !item.archived && item.workflowId && <button type="button" className="quiet-button danger-button" onClick={() => void removeEntireWorkflow(item)}>删除整个工作流</button>}
                   {item.builtin && <span className="workflow-row-menu-note">内置 Runtime Package 不可永久删除</span>}
                 </div>
