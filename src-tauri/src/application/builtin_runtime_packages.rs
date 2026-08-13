@@ -79,6 +79,18 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        manifest: include_str!(
+            "../../runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/workflow_api.json"
+        ),
+    },
 ];
 
 pub fn ensure_installed(root: &Path) -> Result<(), String> {
@@ -146,6 +158,29 @@ mod tests {
             WorkflowValidator::validate(&workflow).expect("workflow validates");
             BindingValidator::validate(&recipe, &workflow).expect("bindings validate");
         }
+    }
+
+    #[test]
+    fn aitudou_fast_package_keeps_fixed_eight_step_graph_and_safe_user_inputs() {
+        let package = PACKAGES
+            .iter()
+            .find(|package| package.directory == "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0")
+            .expect("AITUDOU package");
+        let manifest = WorkflowManifest::parse(package.manifest).expect("manifest parses");
+        assert_eq!(manifest.id, "wfl_aitudou_minimax_h3_lightx2v_8step_fast");
+        assert_eq!(manifest.category, "video");
+        let recipe = RecipeParser::parse(package.recipe).expect("recipe parses");
+        assert_eq!(recipe.inputs.len(), 2);
+        assert!(recipe.inputs.contains_key("prompt"));
+        assert!(recipe.inputs.contains_key("seed"));
+        assert!(recipe
+            .bindings
+            .iter()
+            .all(|binding| { binding.target.node == "59" || binding.target.node == "2" }));
+        let workflow: serde_json::Value = serde_json::from_str(package.workflow).unwrap();
+        assert_eq!(workflow["50"]["inputs"]["steps"], 8);
+        assert_eq!(workflow["61"]["inputs"]["megapixels"], 0.9);
+        assert_eq!(workflow["62"]["class_type"], "VHS_VideoCombine");
     }
 
     #[test]

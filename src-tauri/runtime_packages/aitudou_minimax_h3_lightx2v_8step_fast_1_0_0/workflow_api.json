@@ -1,0 +1,306 @@
+{
+  "1": {
+    "inputs": {
+      "model": [
+        "57",
+        0
+      ],
+      "conditioning": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "2": {
+    "inputs": {
+      "noise_seed": 214348188981202
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "3": {
+    "inputs": {
+      "clip_name": "minmaxh3\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "14": {
+    "inputs": {
+      "noise": [
+        "2",
+        0
+      ],
+      "guider": [
+        "1",
+        0
+      ],
+      "sampler": [
+        "54",
+        0
+      ],
+      "sigmas": [
+        "50",
+        0
+      ],
+      "latent_image": [
+        "63",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "18": {
+    "inputs": {
+      "samples": [
+        "14",
+        0
+      ],
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "35": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式"
+    }
+  },
+  "39": {
+    "inputs": {
+      "samples": [
+        "14",
+        0
+      ],
+      "vae": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "40": {
+    "inputs": {
+      "anything": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "easy clearCacheAll",
+    "_meta": {
+      "title": "清除全部缓存"
+    }
+  },
+  "41": {
+    "inputs": {
+      "model": [
+        "56",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Mem Eff Sage Attention Patch"
+    }
+  },
+  "49": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "Float Constant"
+    }
+  },
+  "50": {
+    "inputs": {
+      "scheduler": "beta",
+      "steps": 8,
+      "denoise": 1,
+      "model": [
+        "57",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "54": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "56": {
+    "inputs": {
+      "unet_name": "minmaxh3\\minimax_h3_fl2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "57": {
+    "inputs": {
+      "lora_name": "minmanH3\\minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "118",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "59": {
+    "inputs": {
+      "text": "integrated_multimodal_description: [Shot 1] Premium cinematic anime wuxia, 16:9, ultra-detailed rendering, two original adult sword immortals are already moving at extreme speed across a shattered stone bridge above a frozen cloud canyon. Bai Yue is a silver-haired female sword immortal in flowing white-and-cyan robes, wielding a translucent ice-blue jian. Cang Yan is a black-haired male sword immortal in dark black-and-crimson robes, wielding a burning red jian. Bai Yue rushes diagonally downward from the left while Cang Yan surges diagonally upward from the right; their swords collide in mid-air with a violent burst of sparks. Their bodies compress from the impact, sleeves and hair whip backward, snow and ice fragments explode outward. The camera tracks forward with large amplitude at fast speed, pushing from a wide aerial view into an intense close-up while broken pillars and ice shards streak across the foreground.\n\n[Shot 2] At 00:01.600, the sword collision throws both fighters apart. Bai Yue spins downward around a suspended stone pillar, then hooks her ice-blue sword into its edge to redirect herself upward. Cang Yan dives after her, slices through a hanging iron chain, and uses the recoil to change direction toward the opposite side of the canyon. The chain snaps, sparks scatter, snow dust spirals into a vortex, and fragments fall into the clouds below. The camera arcs rapidly beneath them with large amplitude, then trucks right at fast speed as the two fighters cross on different vertical levels, creating strong parallax and a dramatic change of scale.\n\n[Shot 3] At 00:03.400, Bai Yue plants one foot against the frozen cliff wall and launches upward, leaving a bright cyan sword trail. Cang Yan rebounds from a broken stone gate and accelerates laterally across the frame, his red sword trail cutting through the snowstorm. The camera rolls counterclockwise with large amplitude while tracking their intersecting paths, briefly passing behind Cang Yan before switching to a frontal view. At 00:04.400, both sword immortals converge from opposite directions and perform one decisive synchronized slash. Their blades collide at the center of the frame at 00:04.700, producing a clean non-graphic shockwave that splits the snow clouds, bends the falling ice, and shakes the camera strongly. End at 00:05.000 with both fighters pushed backward through the opened cloud canyon, still airborne and ready to continue fighting. Preserve exactly two adult sword immortals, two distinct swords, stable faces, correct anatomy, coherent sword physics, sharp costume details, volumetric moonlight, realistic cloth and hair motion, cyan-versus-crimson color contrast, no extra characters, no duplicated limbs, no blood, no gore, no text, no watermark.\n\noverall_soundscape: Roaring mountain wind and frozen cloud turbulence continue throughout the video. Sharp metal sword impacts, ice cracking, chain snapping, falling stone, snow bursts, fabric whipping, sword trails, and the final pressure-wave boom are synchronized with the visible actions. No dialogue and no human voices.\n\nnon_diegetic_music: A fast 150 BPM cinematic wuxia score with aggressive taiko percussion, rapid low-string ostinatos, metallic impacts, icy bell tones, and rising bamboo-flute accents. The rhythm intensifies at the first sword collision, drops briefly during the mid-air separation, then reaches a powerful orchestral hit at 00:04.700."
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "提示词"
+    }
+  },
+  "60": {
+    "inputs": {
+      "vae_name": "minmaxh3\\minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "61": {
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.9,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "分辨率选择器"
+    }
+  },
+  "62": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "39",
+        0
+      ],
+      "audio": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "63": {
+    "inputs": {
+      "prompt": [
+        "59",
+        0
+      ],
+      "width": [
+        "61",
+        0
+      ],
+      "height": [
+        "61",
+        1
+      ],
+      "length": [
+        "35",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "3",
+        0
+      ],
+      "vae": [
+        "60",
+        0
+      ],
+      "audio_vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    }
+  },
+  "118": {
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  }
+}

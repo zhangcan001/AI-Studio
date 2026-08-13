@@ -728,60 +728,23 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
         let node = node_value.as_object().ok_or_else(|| {
             ComfyAdapterError::Protocol(format!("history output node {node_id} must be an object"))
         })?;
-        let Some(images_value) = node.get("images") else {
-            normalized.insert(
-                node_id.clone(),
-                ComfyNodeOutput {
-                    images: Vec::new(),
-                    saved_results: Vec::new(),
-                },
-            );
-            continue;
-        };
-        let images = images_value.as_array().ok_or_else(|| {
-            ComfyAdapterError::Protocol(format!(
-                "history output node {node_id} images must be an array"
-            ))
-        })?;
         let animated_flags = node.get("animated").and_then(Value::as_array);
-        let mut files = Vec::with_capacity(images.len());
-        let mut saved_results = Vec::with_capacity(images.len());
-        for (index, image) in images.iter().enumerate() {
-            let image = image.as_object().ok_or_else(|| {
-                ComfyAdapterError::Protocol(format!(
-                    "history output node {node_id} image must be an object"
-                ))
-            })?;
-            let filename = image
-                .get("filename")
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    ComfyAdapterError::Protocol(format!(
-                        "history output node {node_id} image filename is missing"
-                    ))
-                })?;
-            let file = ComfyOutputFile {
-                filename: filename.to_owned(),
-                subfolder: image
-                    .get("subfolder")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-                folder_type: image
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("output")
-                    .to_owned(),
-            };
-            saved_results.push(ComfySavedResult {
-                file: file.clone(),
-                animated: animated_flags
-                    .and_then(|flags| flags.get(index))
-                    .and_then(Value::as_bool)
-                    .or_else(|| image.get("animated").and_then(Value::as_bool)),
-            });
-            files.push(file);
+        let image_results =
+            normalize_saved_result_array(node_id, node, "images", animated_flags, None)?;
+        let files = image_results
+            .iter()
+            .map(|result| result.file.clone())
+            .collect();
+        let mut saved_results = image_results;
+        for field in ["gifs", "videos"] {
+            for result in normalize_saved_result_array(node_id, node, field, None, Some(true))? {
+                if !saved_results
+                    .iter()
+                    .any(|existing| existing.file == result.file)
+                {
+                    saved_results.push(result);
+                }
+            }
         }
         normalized.insert(
             node_id.clone(),
@@ -797,6 +760,61 @@ fn normalize_history(prompt_id: &str, body: Value) -> Result<ComfyHistory, Comfy
         status,
         outputs: normalized,
     })
+}
+
+fn normalize_saved_result_array(
+    node_id: &str,
+    node: &serde_json::Map<String, Value>,
+    field: &str,
+    animated_flags: Option<&Vec<Value>>,
+    default_animated: Option<bool>,
+) -> Result<Vec<ComfySavedResult>, ComfyAdapterError> {
+    let Some(value) = node.get(field) else {
+        return Ok(Vec::new());
+    };
+    let entries = value.as_array().ok_or_else(|| {
+        ComfyAdapterError::Protocol(format!(
+            "history output node {node_id} {field} must be an array"
+        ))
+    })?;
+    let mut results = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let entry = entry.as_object().ok_or_else(|| {
+            ComfyAdapterError::Protocol(format!(
+                "history output node {node_id} {field} item must be an object"
+            ))
+        })?;
+        let filename = entry
+            .get("filename")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                ComfyAdapterError::Protocol(format!(
+                    "history output node {node_id} {field} filename is missing"
+                ))
+            })?;
+        results.push(ComfySavedResult {
+            file: ComfyOutputFile {
+                filename: filename.to_owned(),
+                subfolder: entry
+                    .get("subfolder")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                folder_type: entry
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("output")
+                    .to_owned(),
+            },
+            animated: animated_flags
+                .and_then(|flags| flags.get(index))
+                .and_then(Value::as_bool)
+                .or_else(|| entry.get("animated").and_then(Value::as_bool))
+                .or(default_animated),
+        });
+    }
+    Ok(results)
 }
 
 fn normalize_queue_ids(value: &Value, field: &str) -> Result<Vec<String>, ComfyAdapterError> {
@@ -1632,6 +1650,39 @@ mod tests {
         assert_eq!(output.images.len(), 1);
         assert_eq!(output.saved_results.len(), 1);
         assert_eq!(output.saved_results[0].file.filename, "ComfyUI_00001.mp4");
+        assert_eq!(output.saved_results[0].animated, Some(true));
+    }
+
+    #[test]
+    fn vhs_gifs_are_normalized_as_saved_video_results() {
+        let body = json!({
+            "prompt-vhs": {
+                "outputs": {
+                    "62": {
+                        "gifs": [{
+                            "filename": "AnimateDiff_00010-audio.mp4",
+                            "subfolder": "",
+                            "type": "output",
+                            "format": "video/h264-mp4",
+                            "frame_rate": 24.0,
+                            "fullpath": "D:\\ComfyUI\\output\\AnimateDiff_00010-audio.mp4"
+                        }]
+                    }
+                },
+                "status": {"status_str": "success", "completed": true}
+            }
+        });
+
+        let history =
+            normalize_history("prompt-vhs", body).expect("VHS history output should normalize");
+        let output = &history.outputs["62"];
+        assert!(output.images.is_empty());
+        assert_eq!(output.saved_results.len(), 1);
+        assert_eq!(
+            output.saved_results[0].file.filename,
+            "AnimateDiff_00010-audio.mp4"
+        );
+        assert_eq!(output.saved_results[0].file.folder_type, "output");
         assert_eq!(output.saved_results[0].animated, Some(true));
     }
 

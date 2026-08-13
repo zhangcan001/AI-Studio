@@ -1,0 +1,7 @@
+schema_version: 1
+id: wfl_aitudou_minimax_h3_lightx2v_8step_fast
+name: AITUDOU MiniMax H3 LightX2V 8步高动态加速
+workflow_version: 1.0.0
+recipe_version: 1.0.0
+category: video
+mode: text_to_video

@@ -1,0 +1,31 @@
+schema_version: 1
+id: rcp_aitudou_minimax_h3_lightx2v_8step_fast_1_0_0
+name: AITUDOU MiniMax H3 LightX2V 8步高动态加速
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings:
+  - source: prompt
+    target:
+      node: "59"
+      input: text
+  - source: seed
+    target:
+      node: "2"
+      input: noise_seed
+outputs:
+  - id: generated_video
+    type: video
+    node: "62"
+    required: true
