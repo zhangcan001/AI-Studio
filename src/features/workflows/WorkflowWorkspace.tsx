@@ -10,11 +10,13 @@ import {
   getOnboardingDraft,
   importWorkflowPackageBackup,
   listWorkflowProductionWorkspace,
+  refreshWorkflowProductionWorkspace,
   pickApiWorkflow,
   autoConfirmOnboarding,
   autoOnboardWorkflow,
   publishOnboarding,
   recheckWorkflowCapability,
+  recheckAllWorkflowCapabilities,
   removeOnboardingInputMapping,
   setWorkflowEnabled,
   setOnboardingInputMapping,
@@ -40,6 +42,7 @@ import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, stagingStatusLabel, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
 import { WorkflowSmartImport } from "./WorkflowSmartImport";
+import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
 
 interface Props {
   projectId?: string;
@@ -113,14 +116,17 @@ interface MetadataDraft {
 }
 
 export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onOpenTask }: Props) {
-  const [items, setItems] = useState<WorkflowProductionWorkspaceView[]>([]);
-  const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
+  const cachedWorkspace = useWorkflowWorkspaceStore((state) => state.workspace);
+  const setCachedWorkspace = useWorkflowWorkspaceStore((state) => state.setWorkspace);
+  const [items, setItems] = useState<WorkflowProductionWorkspaceView[]>(() => cachedWorkspace?.items ?? []);
+  const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>(() => cachedWorkspace?.staging ?? []);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "enabled" | "disabled" | "issues">("all");
   const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
   const [diff, setDiff] = useState<WorkflowVersionDiffView>();
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string>();
+  const [checkingAll, setCheckingAll] = useState(false);
   const [quickTestingId, setQuickTestingId] = useState<string>();
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, MappingDraft>>({});
   const [outputDraft, setOutputDraft] = useState<OutputDraft>(createDefaultOutputDraft);
@@ -141,22 +147,33 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const setNotice = useWorkflowOnboardingStore((state) => state.setNotice);
   const reset = useWorkflowOnboardingStore((state) => state.reset);
 
-  const loadWorkspace = useCallback(async () => {
-    setWorkspaceLoading(true);
+  const loadWorkspace = useCallback(async (mode: "fast" | "refresh" = "fast") => {
+    const cached = useWorkflowWorkspaceStore.getState().workspace;
+    const hasCachedWorkspace = Boolean(cached);
+    if (cached) {
+      setItems(cached.items);
+      setStaging(cached.staging);
+    }
+    setWorkspaceLoading(mode === "refresh" || !hasCachedWorkspace);
     setWorkspaceError(undefined);
     try {
-      const workspace = await listWorkflowProductionWorkspace();
+      const workspace = mode === "refresh"
+        ? await refreshWorkflowProductionWorkspace()
+        : await listWorkflowProductionWorkspace();
       setItems(workspace.items);
       setStaging(workspace.staging);
+      setCachedWorkspace(workspace);
     } catch (loadError: unknown) {
-      setWorkspaceError(toUserMessage(loadError));
+      if (!hasCachedWorkspace) {
+        setWorkspaceError(toUserMessage(loadError));
+      }
     } finally {
       setWorkspaceLoading(false);
     }
-  }, []);
+  }, [setCachedWorkspace]);
 
   useEffect(() => {
-    void loadWorkspace();
+    void loadWorkspace("fast");
   }, [loadWorkspace]);
 
   useEffect(() => {
@@ -201,7 +218,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           ? `导入质量初检完成：${imported.nodeCount} 个节点；待处理：${failedChecks.join("、")}。`
           : `导入质量初检通过：${imported.nodeCount} 个节点、${imported.uniqueClassCount} 种节点类型；请继续完成能力检查与试运行。`,
         );
-        await loadWorkspace();
+        await loadWorkspace("refresh");
       }
     } catch (importError: unknown) {
       setError(toUserMessage(importError));
@@ -222,7 +239,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         setDraft(await getOnboardingDraft(plan.draftId));
         if (plan.published) {
           setNotice(plan.message);
-          await loadWorkspace();
+          await loadWorkspace("refresh");
           await onCatalogChanged();
         } else {
           setNotice(plan.message);
@@ -241,7 +258,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       const restored = await importWorkflowPackageBackup();
       if (restored) {
         setNotice(`工作流备份已恢复：${restored.workflowVersion}`);
-        await loadWorkspace();
+        await loadWorkspace("refresh");
         await onCatalogChanged();
       }
     } catch (importError: unknown) {
@@ -253,7 +270,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     if (!item.workflowVersionId) return;
     try {
       await setWorkflowEnabled(item.workflowVersionId, !item.enabled);
-      await loadWorkspace();
+      await loadWorkspace("fast");
       await onCatalogChanged();
       setNotice(`${item.name ?? item.packageName} 已${item.enabled ? "停用" : "启用"}。`);
     } catch (actionError: unknown) {
@@ -265,10 +282,24 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     if (!item.workflowVersionId) return;
     try {
       const capability = await recheckWorkflowCapability(item.workflowVersionId);
-      await loadWorkspace();
+      await loadWorkspace("fast");
       setNotice(`${item.name ?? item.packageName}: ${formatCapability(capability.state)}`);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
+  async function recheckAllVersions() {
+    setCheckingAll(true);
+    setWorkspaceError(undefined);
+    try {
+      const checked = await recheckAllWorkflowCapabilities();
+      await loadWorkspace("fast");
+      setNotice(`已完成全部工作流兼容性检查，共 ${checked.length} 项；本次只请求一次 ComfyUI 能力信息。`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
+    } finally {
+      setCheckingAll(false);
     }
   }
 
@@ -373,7 +404,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       const result = await publishOnboarding(draft.draftId);
       setPublished({ workflowId: result.workflowId, recipeId: result.recipeId });
       setNotice(`已发布 ${result.packageName}，运行目录已刷新。`);
-      await loadWorkspace();
+      await loadWorkspace("refresh");
       await onCatalogChanged();
       setStep("publish");
     });
@@ -464,7 +495,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       setDraft(await getOnboardingDraft(nextPlan.draftId));
       setNotice(nextPlan.message);
       if (nextPlan.published) {
-        await loadWorkspace();
+        await loadWorkspace("refresh");
         await onCatalogChanged();
       }
     });
@@ -510,7 +541,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       setDraft(await getOnboardingDraft(nextPlan.draftId));
       setNotice(nextPlan.message);
       if (nextPlan.published) {
-        await loadWorkspace();
+        await loadWorkspace("refresh");
         await onCatalogChanged();
       }
     });
@@ -555,7 +586,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           <p className="section-description">导入 ComfyUI API 工作流，配置安全输入后发布工作流运行包。</p>
         </div>
         <div className="workflow-workspace-actions">
-          <button type="button" onClick={() => void loadWorkspace()} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
+          <button type="button" onClick={() => void loadWorkspace("refresh")} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
+          <button type="button" className="quiet-button" onClick={() => void recheckAllVersions()} disabled={checkingAll || workspaceLoading}>{checkingAll ? "检查中..." : "检查全部兼容性"}</button>
           <button type="button" onClick={() => void smartImportWorkflow()} disabled={loading}>导入工作流</button>
           <button type="button" className="quiet-button" onClick={() => void importWorkflow()} disabled={loading}>高级：手动配置工作流</button>
           <button type="button" onClick={() => void importBackup()} disabled={loading}>导入工作流备份</button>
@@ -607,6 +639,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         <div className="workflow-catalog-header">
           <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>就绪状态</span><span>运行记录</span><span>操作</span>
         </div>
+        {workspaceLoading && !visibleItems.length && <p className="loading-state">正在读取已注册工作流…</p>}
         {visibleItems.map((item) => (
           <article className="workflow-catalog-row" key={`${item.packageName}:${item.workflowVersionId ?? "invalid"}`}>
             <input type="checkbox" aria-label={`比较 ${workflowDisplayName(item.workflowId, item.name ?? item.packageName)}`} checked={item.workflowVersionId ? selectedVersions.includes(item.workflowVersionId) : false} onChange={() => toggleSelected(item)} disabled={!item.workflowVersionId} />

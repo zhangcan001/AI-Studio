@@ -7,8 +7,8 @@ use crate::application::{
     workflow_library_service::WorkflowLibraryService,
     workflow_manifest::WorkflowManifest,
     workflow_onboarding_service::{
-        read_back_and_validate_package, CapabilityCheckView, WorkflowOnboardingDraftView,
-        WorkflowOnboardingService,
+        read_back_and_validate_package, CapabilityCheckView, CapabilityState,
+        WorkflowOnboardingDraftView, WorkflowOnboardingService,
     },
 };
 use crate::compiler::RecipeParser;
@@ -22,7 +22,9 @@ use std::{
     fmt,
     io::{Cursor, Read, Write},
     sync::Arc,
+    time::Instant,
 };
+use tokio::sync::RwLock;
 use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
@@ -123,6 +125,13 @@ pub struct WorkflowProductionWorkspaceResponse {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkflowCapabilityBatchView {
+    pub workflow_version_id: String,
+    pub capability: CapabilityCheckView,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkflowRestoreView {
     pub status: String,
     pub package_name: String,
@@ -193,6 +202,8 @@ pub struct WorkflowLifecycleService {
     state_repository: Arc<dyn WorkflowRuntimeStateRepository>,
     package_store: Arc<dyn WorkflowPackageStore>,
     clock: Arc<dyn Clock>,
+    capability_cache: Arc<RwLock<HashMap<String, CapabilityCheckView>>>,
+    workspace_cache: Arc<RwLock<HashMap<String, WorkflowProductionWorkspaceView>>>,
 }
 
 impl WorkflowLifecycleService {
@@ -214,10 +225,78 @@ impl WorkflowLifecycleService {
             state_repository,
             package_store,
             clock,
+            capability_cache: Arc::new(RwLock::new(HashMap::new())),
+            workspace_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
+    /// Fast navigation path. This deliberately reads only registered runtime
+    /// metadata, enabled state, and the in-memory capability/workspace cache.
+    /// Package parsing, hashing, and live ComfyUI checks belong to the
+    /// explicit diagnostics/refresh path below.
     pub async fn list_workspace(
+        &self,
+    ) -> Result<WorkflowProductionWorkspaceResponse, WorkflowLifecycleError> {
+        let started = Instant::now();
+        let runtime_versions = self
+            .runtime_repository
+            .list_versions()
+            .await
+            .map_err(db_error)?;
+        let states = self
+            .state_repository
+            .list_states()
+            .await
+            .map_err(db_error)?;
+        let enabled_by_version = states
+            .into_iter()
+            .map(|state| (state.workflow_version_id, state.enabled))
+            .collect::<HashMap<_, _>>();
+        let cached_views = self.workspace_cache.read().await.clone();
+        let capabilities = self.capability_cache.read().await.clone();
+        let mut items = runtime_versions
+            .iter()
+            .map(|version| {
+                let enabled = enabled_by_version
+                    .get(&version.workflow_version_id)
+                    .copied()
+                    .unwrap_or(true);
+                fast_view_for_version(
+                    version,
+                    enabled,
+                    cached_views.get(&version.workflow_version_id),
+                    capabilities.get(&version.workflow_version_id),
+                )
+            })
+            .collect::<Vec<_>>();
+        let staging = self
+            .package_store
+            .list_staging_ids()
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(|staging_id| WorkflowStagingView {
+                in_use: self.onboarding_service.is_draft_active(&staging_id),
+                staging_id,
+                status: "STALE_STAGING".to_owned(),
+            })
+            .collect();
+        items.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then(left.workflow_version.cmp(&right.workflow_version))
+        });
+        tracing::info!(
+            workflow_workspace_list_fast_ms = started.elapsed().as_millis() as u64,
+            items = items.len(),
+            "workflow workspace fast list completed"
+        );
+        Ok(WorkflowProductionWorkspaceResponse { items, staging })
+    }
+
+    /// Explicit refresh/diagnostics path. This is intentionally the old,
+    /// complete package audit and may parse/hash packages and query ComfyUI.
+    pub async fn list_workspace_diagnostics(
         &self,
     ) -> Result<WorkflowProductionWorkspaceResponse, WorkflowLifecycleError> {
         let package_loads = self.load_package_loads().await?;
@@ -361,7 +440,101 @@ impl WorkflowLifecycleService {
                 .cmp(&right.name)
                 .then(left.workflow_version.cmp(&right.workflow_version))
         });
+        {
+            let mut workspace_cache = self.workspace_cache.write().await;
+            let mut capability_cache = self.capability_cache.write().await;
+            for item in &items {
+                if let Some(workflow_version_id) = &item.workflow_version_id {
+                    workspace_cache.insert(workflow_version_id.clone(), item.clone());
+                    capability_cache.insert(
+                        workflow_version_id.clone(),
+                        CapabilityCheckView {
+                            state: capability_state_enum(&item.capability),
+                            checked_at: None,
+                            issues: item.capability_issues.clone(),
+                        },
+                    );
+                }
+            }
+        }
         Ok(WorkflowProductionWorkspaceResponse { items, staging })
+    }
+
+    pub async fn refresh_workspace(
+        &self,
+    ) -> Result<WorkflowProductionWorkspaceResponse, WorkflowLifecycleError> {
+        self.library_service.sync().await.map_err(|error| {
+            WorkflowLifecycleError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
+        })?;
+        self.list_workspace_diagnostics().await
+    }
+
+    pub async fn recheck_all_capabilities(
+        &self,
+    ) -> Result<Vec<WorkflowCapabilityBatchView>, WorkflowLifecycleError> {
+        let package_loads = self.load_package_loads().await?;
+        let runtime_versions = self
+            .runtime_repository
+            .list_versions()
+            .await
+            .map_err(db_error)?;
+        let mut packages = HashMap::new();
+        for package in package_loads {
+            let WorkflowPackageLoad::Loaded(files) = package else {
+                continue;
+            };
+            let Ok(manifest) = WorkflowManifest::parse(&files.manifest_yaml) else {
+                continue;
+            };
+            packages.insert(
+                (manifest.id, manifest.workflow_version),
+                files.workflow_json,
+            );
+        }
+        let workflows = runtime_versions
+            .iter()
+            .filter_map(|version| {
+                packages
+                    .get(&(
+                        version.workflow_id.clone(),
+                        version.workflow_version.clone(),
+                    ))
+                    .map(|workflow_json| {
+                        (version.workflow_version_id.clone(), workflow_json.clone())
+                    })
+            })
+            .collect::<Vec<_>>();
+        let checked = self
+            .onboarding_service
+            .check_runtime_workflows(&workflows)
+            .await
+            .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
+        let mut workspace_cache = self.workspace_cache.write().await;
+        let mut capability_cache = self.capability_cache.write().await;
+        let mut result = Vec::with_capacity(checked.len());
+        for (workflow_version_id, capability) in checked {
+            let capability_state = capability_state(&capability);
+            if let Some(view) = workspace_cache.get_mut(&workflow_version_id) {
+                view.capability = capability_state;
+                view.capability_issues = capability.issues.clone();
+                let (readiness, reasons) = readiness_for(
+                    view.enabled,
+                    &view.package_status,
+                    &view.capability,
+                    &view.diagnostics,
+                    view.recipes.len(),
+                    view.has_successful_run,
+                );
+                view.readiness = readiness;
+                view.readiness_reasons = reasons;
+            }
+            capability_cache.insert(workflow_version_id.clone(), capability.clone());
+            result.push(WorkflowCapabilityBatchView {
+                workflow_version_id,
+                capability,
+            });
+        }
+        Ok(result)
     }
 
     pub async fn set_enabled(
@@ -382,7 +555,26 @@ impl WorkflowLifecycleService {
         self.state_repository
             .set_enabled(workflow_version_id, enabled, self.clock.now())
             .await
-            .map_err(db_error)
+            .map_err(db_error)?;
+        if let Some(view) = self
+            .workspace_cache
+            .write()
+            .await
+            .get_mut(workflow_version_id)
+        {
+            view.enabled = enabled;
+            let (readiness, reasons) = readiness_for(
+                view.enabled,
+                &view.package_status,
+                &view.capability,
+                &view.diagnostics,
+                view.recipes.len(),
+                view.has_successful_run,
+            );
+            view.readiness = readiness;
+            view.readiness_reasons = reasons;
+        }
+        Ok(())
     }
 
     pub async fn recheck_capability(
@@ -403,10 +595,35 @@ impl WorkflowLifecycleService {
         let package = self
             .find_package(&version.workflow_id, &version.workflow_version, None)
             .await?;
-        self.onboarding_service
+        let capability = self
+            .onboarding_service
             .check_runtime_workflow(&package.workflow_json)
             .await
-            .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))
+            .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
+        self.capability_cache
+            .write()
+            .await
+            .insert(workflow_version_id.to_owned(), capability.clone());
+        if let Some(view) = self
+            .workspace_cache
+            .write()
+            .await
+            .get_mut(workflow_version_id)
+        {
+            view.capability = capability_state(&capability);
+            view.capability_issues = capability.issues.clone();
+            let (readiness, reasons) = readiness_for(
+                view.enabled,
+                &view.package_status,
+                &view.capability,
+                &view.diagnostics,
+                view.recipes.len(),
+                view.has_successful_run,
+            );
+            view.readiness = readiness;
+            view.readiness_reasons = reasons;
+        }
+        Ok(capability)
     }
 
     pub async fn duplicate_recipe(
@@ -887,6 +1104,117 @@ fn invalid_package_view(
     }
 }
 
+fn fast_view_for_version(
+    version: &RuntimeWorkflowVersionRecord,
+    enabled: bool,
+    cached: Option<&WorkflowProductionWorkspaceView>,
+    capability: Option<&CapabilityCheckView>,
+) -> WorkflowProductionWorkspaceView {
+    let cached_capability = cached.map(|view| CapabilityCheckView {
+        state: capability_state_enum(&view.capability),
+        checked_at: None,
+        issues: view.capability_issues.clone(),
+    });
+    let capability = capability.or(cached_capability.as_ref());
+    let capability_name = capability
+        .map(capability_state)
+        .unwrap_or_else(|| "NOT_CHECKED".to_owned());
+    let mut view = cached
+        .cloned()
+        .unwrap_or_else(|| WorkflowProductionWorkspaceView {
+            package_name: version.workflow_id.clone(),
+            package_status: "VALID".to_owned(),
+            error_code: None,
+            error_message: None,
+            workflow_id: Some(version.workflow_id.clone()),
+            workflow_version_id: Some(version.workflow_version_id.clone()),
+            name: Some(version.name.clone()),
+            category: Some(version.category.clone()),
+            mode: Some(version.mode.clone()),
+            workflow_version: Some(version.workflow_version.clone()),
+            workflow_sha256: Some(version.workflow_sha256.clone()),
+            recipe_sha256: version
+                .recipes
+                .last()
+                .map(|recipe| recipe.recipe_sha256.clone()),
+            enabled,
+            capability: capability_name.clone(),
+            readiness: "DEGRADED".to_owned(),
+            readiness_reasons: Vec::new(),
+            capability_issues: capability
+                .map(|value| value.issues.clone())
+                .unwrap_or_default(),
+            node_count: 0,
+            recipes: fast_recipe_summaries(version),
+            active_tasks: version.active_tasks,
+            total_tasks: version.total_tasks,
+            has_successful_run: version.has_successful_run,
+            latest_success_at: version.latest_success_at.clone(),
+            latest_failure_at: version.latest_failure_at.clone(),
+            live_verified_at: version.latest_success_at.clone(),
+            diagnostics: Vec::new(),
+        });
+    view.enabled = enabled;
+    view.workflow_id = Some(version.workflow_id.clone());
+    view.workflow_version_id = Some(version.workflow_version_id.clone());
+    view.name = Some(version.name.clone());
+    view.category = Some(version.category.clone());
+    view.mode = Some(version.mode.clone());
+    view.workflow_version = Some(version.workflow_version.clone());
+    view.workflow_sha256 = Some(version.workflow_sha256.clone());
+    view.recipe_sha256 = version
+        .recipes
+        .last()
+        .map(|recipe| recipe.recipe_sha256.clone());
+    view.active_tasks = version.active_tasks;
+    view.total_tasks = version.total_tasks;
+    view.has_successful_run = version.has_successful_run;
+    view.latest_success_at = version.latest_success_at.clone();
+    view.latest_failure_at = version.latest_failure_at.clone();
+    if view.recipes.is_empty() {
+        view.recipes = fast_recipe_summaries(version);
+    }
+    if let Some(capability) = capability {
+        view.capability = capability_name;
+        view.capability_issues = capability.issues.clone();
+    }
+    let (readiness, reasons) = readiness_for(
+        enabled,
+        &view.package_status,
+        &view.capability,
+        &view.diagnostics,
+        view.recipes.len(),
+        view.has_successful_run,
+    );
+    view.readiness = readiness;
+    view.readiness_reasons = reasons;
+    view
+}
+
+fn fast_recipe_summaries(version: &RuntimeWorkflowVersionRecord) -> Vec<WorkflowRecipeSummaryView> {
+    version
+        .recipes
+        .iter()
+        .map(|recipe| WorkflowRecipeSummaryView {
+            recipe_id: recipe.recipe_id.clone(),
+            version: recipe.version.clone(),
+            input_count: 0,
+            output_count: 0,
+            preset_count: None,
+        })
+        .collect()
+}
+
+fn capability_state_enum(value: &str) -> CapabilityState {
+    match value {
+        "READY" => CapabilityState::Ready,
+        "MISSING_NODES" => CapabilityState::MissingNodes,
+        "INCOMPATIBLE_INPUT_VALUES" => CapabilityState::IncompatibleInputValues,
+        "COMFY_OFFLINE" => CapabilityState::ComfyOffline,
+        _ => CapabilityState::NotChecked,
+    }
+}
+
 fn readiness_for(
     enabled: bool,
     package_status: &str,
@@ -1317,9 +1645,12 @@ fn archive_error(message: impl Into<String>) -> WorkflowLifecycleError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_archive, diff_workflow, parse_archive, readiness_for, WorkflowDiagnosticView,
+        build_archive, diff_workflow, fast_view_for_version, parse_archive, readiness_for,
+        WorkflowDiagnosticView,
     };
-    use crate::application::ports::WorkflowPackageBytes;
+    use crate::application::ports::{
+        RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowPackageBytes,
+    };
     use crate::domain::WorkflowDocument;
     use serde_json::json;
     use std::io::{Cursor, Write};
@@ -1381,5 +1712,40 @@ mod tests {
         }];
         let (blocked, _) = readiness_for(true, "INVALID", "READY", &diagnostics, 1, true);
         assert_eq!(blocked, "BLOCKED");
+    }
+
+    #[test]
+    fn fast_workspace_view_uses_registered_metadata_without_package_parsing() {
+        let version = RuntimeWorkflowVersionRecord {
+            workflow_version_id: "ver_1".to_owned(),
+            workflow_id: "wfl_demo".to_owned(),
+            name: "Demo".to_owned(),
+            category: "video".to_owned(),
+            mode: "image_to_video".to_owned(),
+            workflow_version: "1.0.0".to_owned(),
+            workflow_sha256: "workflow-sha".to_owned(),
+            is_current: true,
+            recipes: vec![RuntimeRecipeRecord {
+                recipe_id: "recipe_1".to_owned(),
+                version: "1.0.0".to_owned(),
+                schema_version: 1,
+                recipe_yaml: "not parsed on the fast path".to_owned(),
+                recipe_sha256: "recipe-sha".to_owned(),
+            }],
+            active_tasks: 0,
+            total_tasks: 3,
+            has_successful_run: false,
+            latest_success_at: None,
+            latest_failure_at: None,
+        };
+
+        let view = fast_view_for_version(&version, true, None, None);
+
+        assert_eq!(view.workflow_version_id.as_deref(), Some("ver_1"));
+        assert_eq!(view.workflow_sha256.as_deref(), Some("workflow-sha"));
+        assert_eq!(view.recipes.len(), 1);
+        assert_eq!(view.recipes[0].recipe_id, "recipe_1");
+        assert_eq!(view.total_tasks, 3);
+        assert_eq!(view.capability, "NOT_CHECKED");
     }
 }

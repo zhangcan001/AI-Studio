@@ -66,6 +66,7 @@ import type {
 import type {
   CapabilityCheckView,
   WorkflowAutoOnboardingPlanView,
+  WorkflowCapabilityBatchView,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingMetadataRequest,
@@ -249,12 +250,20 @@ export function listWorkflowProductionWorkspace(): Promise<WorkflowProductionWor
   return invoke<WorkflowProductionWorkspaceResponse>("workflow_runtime_workspace_list");
 }
 
+export function refreshWorkflowProductionWorkspace(): Promise<WorkflowProductionWorkspaceResponse> {
+  return invoke<WorkflowProductionWorkspaceResponse>("workflow_runtime_workspace_refresh");
+}
+
 export function setWorkflowEnabled(workflowVersionId: string, enabled: boolean): Promise<void> {
   return invoke<void>("workflow_set_enabled", { workflowVersionId, enabled });
 }
 
 export function recheckWorkflowCapability(workflowVersionId: string): Promise<CapabilityCheckView> {
   return invoke<CapabilityCheckView>("workflow_recheck_capability", { workflowVersionId });
+}
+
+export function recheckAllWorkflowCapabilities(): Promise<WorkflowCapabilityBatchView[]> {
+  return invoke<WorkflowCapabilityBatchView[]>("workflow_recheck_all_capabilities");
 }
 
 export function duplicateWorkflowRecipe(

@@ -1211,6 +1211,76 @@ impl WorkflowOnboardingService {
         Ok(self.check_capability_for_workflow(&draft).await.0)
     }
 
+    pub fn check_runtime_workflow_with_object_info(
+        &self,
+        workflow_json: &str,
+        object_info: &Value,
+    ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
+        let workflow =
+            validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
+            })?)?;
+        let nodes = inspect_workflow(&workflow)?;
+        Ok(evaluate_capability(&workflow, &nodes, object_info))
+    }
+
+    /// Check several runtime graphs against one already fetched ComfyUI
+    /// object_info document. This is the only batch capability path and keeps
+    /// the network request count at one.
+    pub async fn check_runtime_workflows(
+        &self,
+        workflows: &[(String, String)],
+    ) -> Result<Vec<(String, CapabilityCheckView)>, WorkflowOnboardingError> {
+        if workflows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let object_info = self.comfy_adapter.get_object_info().await;
+        workflows
+            .iter()
+            .map(|(workflow_version_id, workflow_json)| {
+                let capability = match &object_info {
+                    Ok(object) if object.is_object() => {
+                        self.check_runtime_workflow_with_object_info(workflow_json, object)?
+                    }
+                    Ok(_) => CapabilityCheckView {
+                        state: CapabilityState::IncompatibleInputValues,
+                        checked_at: Some(self.clock.now().to_rfc3339()),
+                        issues: vec![CapabilityIssueView {
+                            code: "COMFY_PROTOCOL_ERROR".to_owned(),
+                            class_type: None,
+                            node_id: None,
+                            affected_node_ids: Vec::new(),
+                            input_name: None,
+                            current_value: None,
+                            message: "ComfyUI object_info response is not an object".to_owned(),
+                        }],
+                    },
+                    Err(ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)) => {
+                        CapabilityCheckView {
+                            state: CapabilityState::ComfyOffline,
+                            checked_at: Some(self.clock.now().to_rfc3339()),
+                            issues: Vec::new(),
+                        }
+                    }
+                    Err(error) => CapabilityCheckView {
+                        state: CapabilityState::IncompatibleInputValues,
+                        checked_at: Some(self.clock.now().to_rfc3339()),
+                        issues: vec![CapabilityIssueView {
+                            code: "COMFY_PROTOCOL_ERROR".to_owned(),
+                            class_type: None,
+                            node_id: None,
+                            affected_node_ids: Vec::new(),
+                            input_name: None,
+                            current_value: None,
+                            message: error.to_string(),
+                        }],
+                    },
+                };
+                Ok((workflow_version_id.clone(), capability))
+            })
+            .collect()
+    }
+
     pub fn validate(
         &self,
         draft_id: &str,
@@ -4205,6 +4275,7 @@ mod tests {
                 }}},
                 "SaveImage": {"output_node": true, "input": {"required": {}}}
             })),
+            object_info_calls: std::sync::atomic::AtomicUsize::new(0),
             submit_calls: std::sync::atomic::AtomicUsize::new(0),
             upload_calls: std::sync::atomic::AtomicUsize::new(0),
         });
@@ -4279,6 +4350,46 @@ mod tests {
             WorkflowAutoOnboardingState::AutoPublished
         );
         assert_eq!(next_version.metadata.workflow_version, "1.0.1");
+    }
+
+    #[tokio::test]
+    async fn batch_capability_check_fetches_object_info_once() {
+        let directory = tempdir().unwrap();
+        let library_root = directory.path().join("library");
+        let staging_root = directory.path().join("staging");
+        tokio::fs::create_dir_all(&library_root).await.unwrap();
+        tokio::fs::create_dir_all(&staging_root).await.unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        let source = Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+        let adapter = Arc::new(StubComfyAdapter::ready());
+        let service = WorkflowOnboardingService::new(
+            source.clone(),
+            adapter.clone(),
+            Arc::new(WorkflowLibraryService::new(
+                source,
+                Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+                Arc::new(TestClock),
+            )),
+            Arc::new(StubRunRepository),
+            Arc::new(FileSystemWorkflowPackageStore::new(
+                library_root,
+                staging_root,
+            )),
+            Arc::new(TestClock),
+        );
+        let workflow = r#"{
+            "1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},
+            "2":{"inputs":{"image":["1",0]},"class_type":"SaveImage"}
+        }"#
+        .to_owned();
+        let workflows = (0..10)
+            .map(|index| (format!("version_{index}"), workflow.clone()))
+            .collect::<Vec<_>>();
+
+        let checked = service.check_runtime_workflows(&workflows).await.unwrap();
+
+        assert_eq!(checked.len(), 10);
+        assert_eq!(adapter.object_info_calls(), 1);
     }
 
     #[test]
@@ -4594,6 +4705,7 @@ mod tests {
 
     struct StubComfyAdapter {
         object_info: Result<serde_json::Value, ComfyAdapterError>,
+        object_info_calls: std::sync::atomic::AtomicUsize,
         submit_calls: std::sync::atomic::AtomicUsize,
         upload_calls: std::sync::atomic::AtomicUsize,
     }
@@ -4605,6 +4717,7 @@ mod tests {
                     "Sampler": {"input": {"required": {"prompt": ["STRING", {}]} }},
                     "SaveImage": {"output_node": true, "input": {"required": {}}}
                 })),
+                object_info_calls: std::sync::atomic::AtomicUsize::new(0),
                 submit_calls: std::sync::atomic::AtomicUsize::new(0),
                 upload_calls: std::sync::atomic::AtomicUsize::new(0),
             }
@@ -4613,9 +4726,15 @@ mod tests {
         fn offline() -> Self {
             Self {
                 object_info: Err(ComfyAdapterError::Offline("test offline".to_owned())),
+                object_info_calls: std::sync::atomic::AtomicUsize::new(0),
                 submit_calls: std::sync::atomic::AtomicUsize::new(0),
                 upload_calls: std::sync::atomic::AtomicUsize::new(0),
             }
+        }
+
+        fn object_info_calls(&self) -> usize {
+            self.object_info_calls
+                .load(std::sync::atomic::Ordering::SeqCst)
         }
 
         fn submit_calls(&self) -> usize {
@@ -4638,6 +4757,8 @@ mod tests {
         }
 
         async fn get_object_info(&self) -> Result<serde_json::Value, ComfyAdapterError> {
+            self.object_info_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.object_info.clone()
         }
 

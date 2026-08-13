@@ -282,6 +282,11 @@ export interface WorkflowProductionWorkspaceResponse {
   staging: WorkflowStagingView[];
 }
 
+export interface WorkflowCapabilityBatchView {
+  workflowVersionId: string;
+  capability: CapabilityCheckView;
+}
+
 export interface WorkflowRestoreView {
   status: string;
   packageName: string;

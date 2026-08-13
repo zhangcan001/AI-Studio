@@ -25,12 +25,37 @@ pub async fn workflow_runtime_workspace_list(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_runtime_workspace_refresh(
+    state: State<'_, AppState>,
+) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
+    state
+        .workflow_lifecycle_service
+        .refresh_workspace()
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_runtime_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
     state
         .workflow_lifecycle_service
-        .list_workspace()
+        .list_workspace_diagnostics()
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_recheck_all_capabilities(
+    state: State<'_, AppState>,
+) -> Result<
+    Vec<crate::application::workflow_lifecycle_service::WorkflowCapabilityBatchView>,
+    AppError,
+> {
+    state
+        .workflow_lifecycle_service
+        .recheck_all_capabilities()
         .await
         .map_err(map_error)
 }

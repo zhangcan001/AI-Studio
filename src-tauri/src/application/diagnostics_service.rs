@@ -133,25 +133,28 @@ impl DiagnosticsService {
             }
         };
 
-        let (workflow_packages, valid_workflow_packages, invalid_workflow_packages) =
-            match self.workflow_lifecycle_service.list_workspace().await {
-                Ok(workspace) => {
-                    let total = workspace.items.len();
-                    let valid = workspace
-                        .items
-                        .iter()
-                        .filter(|item| item.package_status == "VALID")
-                        .count();
-                    (total, valid, total.saturating_sub(valid))
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        error_code = error.code(),
-                        "diagnostics could not read workflow package status"
-                    );
-                    (0, 0, 0)
-                }
-            };
+        let (workflow_packages, valid_workflow_packages, invalid_workflow_packages) = match self
+            .workflow_lifecycle_service
+            .list_workspace_diagnostics()
+            .await
+        {
+            Ok(workspace) => {
+                let total = workspace.items.len();
+                let valid = workspace
+                    .items
+                    .iter()
+                    .filter(|item| item.package_status == "VALID")
+                    .count();
+                (total, valid, total.saturating_sub(valid))
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error_code = error.code(),
+                    "diagnostics could not read workflow package status"
+                );
+                (0, 0, 0)
+            }
+        };
 
         let (gpu_name, vram_total, vram_free) = summarize_devices(&comfy);
 
