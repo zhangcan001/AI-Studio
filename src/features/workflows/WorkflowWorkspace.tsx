@@ -465,7 +465,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   }
 
   async function exposeParameter(nodeId: string, input: WorkflowInputView) {
-    if (!parameterDraft || !input.bindable || input.isLinked || isDangerousParameterName(input.name)) return;
+    if (!parameterDraft || !isExposableWorkflowInput(input)) return;
     const fieldType = supportedParameterFieldType(input);
     if (!fieldType) return;
     const mapping = defaultMapping(nodeId, input);
@@ -1105,15 +1105,12 @@ function ParameterExposurePane({
   const candidates = draft.nodes.flatMap((node) => node.inputs
     .filter((input) => matches(node, input)
       && !mappingsByTarget.has(mappingKey(node.nodeId, input.name))
-      && input.bindable
-      && !input.isLinked
-      && Boolean(supportedParameterFieldType(input))
-      && !isDangerousParameterName(input.name))
+      && isExposableWorkflowInput(input))
     .map((input) => ({ node, input })));
   const internal = draft.nodes.flatMap((node) => node.inputs
     .filter((input) => matches(node, input)
       && !mappingsByTarget.has(mappingKey(node.nodeId, input.name))
-      && (input.isLinked || !input.bindable || !supportedParameterFieldType(input) || isDangerousParameterName(input.name)))
+      && !isExposableWorkflowInput(input))
     .map((input) => ({ node, input })));
   const newKeys = new Set(draft.inputMappings.map((mapping) => mapping.semanticKey));
   const addedKeys = draft.inputMappings.map((mapping) => mapping.semanticKey).filter((key) => !originalKeys.includes(key));
@@ -1155,6 +1152,7 @@ function ParameterExposurePane({
         <strong>{draft.inputMappings.length} 个生产参数</strong>
         <small>新增：{addedKeys.length ? addedKeys.join("、") : "无"}</small>
         <small>删除：{removedKeys.length ? removedKeys.join("、") : "无"}</small>
+        <small>发布后直接使用现有 Preset / 默认预设系统；旧 Recipe 的预设保持原作用域，不自动改写。</small>
       </div>
 
       <label className="workflow-parameter-search">搜索节点 / 输入 / Semantic Key
@@ -1448,6 +1446,13 @@ function supportedParameterFieldType(input: WorkflowInputView): WorkflowFieldTyp
     return input.suggestedType as WorkflowFieldType;
   }
   return undefined;
+}
+
+export function isExposableWorkflowInput(input: WorkflowInputView): boolean {
+  return input.bindable
+    && !input.isLinked
+    && Boolean(supportedParameterFieldType(input))
+    && !isDangerousParameterName(input.name);
 }
 
 function isDangerousParameterName(name: string): boolean {

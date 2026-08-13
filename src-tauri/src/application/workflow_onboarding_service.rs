@@ -1460,10 +1460,41 @@ impl WorkflowOnboardingService {
             }
         };
 
+        let published_recipe_id = if let Some(runtime_repository) = &self.runtime_repository {
+            match runtime_repository.list_versions().await {
+                Ok(versions) => versions
+                    .into_iter()
+                    .find(|version| {
+                        version.workflow_id == draft.manifest.id
+                            && version.workflow_version == draft.manifest.workflow_version
+                    })
+                    .and_then(|version| {
+                        version
+                            .recipes
+                            .into_iter()
+                            .find(|recipe| recipe.version == draft.manifest.recipe_version)
+                    })
+                    .map(|recipe| recipe.recipe_id)
+                    .unwrap_or_else(|| draft.recipe_id.clone()),
+                Err(error) => {
+                    tracing::warn!(
+                        workflow_id = %draft.manifest.id,
+                        workflow_version = %draft.manifest.workflow_version,
+                        recipe_version = %draft.manifest.recipe_version,
+                        error = %error,
+                        "published recipe identity could not be reloaded; returning draft identity"
+                    );
+                    draft.recipe_id.clone()
+                }
+            }
+        } else {
+            draft.recipe_id.clone()
+        };
+
         Ok(WorkflowOnboardingPublishView {
             workflow_id: draft.manifest.id,
             workflow_version: draft.manifest.workflow_version,
-            recipe_id: draft.recipe_id,
+            recipe_id: published_recipe_id,
             package_name,
             workflow_sha256: draft.workflow_sha256,
             refreshed,
@@ -4038,22 +4069,29 @@ fn sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::{
+        generation_input_preparer::GenerationInputValue, preset_service::PresetService,
+    };
     use crate::{
         application::ports::{
             ComfyEventSubscription, ComfyHealth, ComfyHistory, ComfyInputUpload, ComfyOutputData,
             ComfyOutputFile, ComfyQueueState, ComfyUploadedInput, PromptSubmission,
-            RepositoryError, SystemStats, WorkflowRunRepository,
+            RepositoryError, SystemStats, WorkflowRunRepository, WorkflowRuntimeRepository,
         },
         compiler::RecipeParser,
         domain::OutputType,
         infrastructure::{
-            database::{initialize, SqliteWorkflowLibraryRepository},
+            database::{
+                initialize, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
+                SqlitePresetRepository, SqliteWorkflowLibraryRepository,
+                SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
+            },
             filesystem::{FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore},
         },
     };
     use async_trait::async_trait;
     use serde_json::json;
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
     use tempfile::tempdir;
 
     #[test]
@@ -4320,6 +4358,9 @@ mod tests {
             Arc::new(TestClock),
         ));
         let adapter = Arc::new(StubComfyAdapter::ready());
+        let runtime_repository = Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
+        let runtime_state_repository =
+            Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
         let service = WorkflowOnboardingService::new(
             source,
             adapter.clone(),
@@ -4330,7 +4371,8 @@ mod tests {
                 staging_root.clone(),
             )),
             Arc::new(TestClock),
-        );
+        )
+        .with_runtime_state(runtime_repository.clone(), runtime_state_repository);
         let raw = br#"{"1":{"inputs":{"prompt":"hello"},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0],"filename_prefix":"ComfyUI"},"class_type":"SaveImage"}}"#.to_vec();
         let draft = service
             .import_bytes(raw, "onboarded_t2i.json".to_owned(), None)
@@ -4423,11 +4465,20 @@ mod tests {
         assert_eq!(adapter.upload_calls(), 0);
         let definitions =
             crate::application::ports::GenerationDefinitionRepository::list_available(
-                &crate::infrastructure::database::SqliteGenerationDefinitionRepository::new(pool),
+                &crate::infrastructure::database::SqliteGenerationDefinitionRepository::new(
+                    pool.clone(),
+                ),
             )
             .await
             .unwrap();
         assert_eq!(definitions.len(), 1);
+        assert_eq!(published.recipe_id, definitions[0].recipe_id);
+        let versions = runtime_repository.list_versions().await.unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].workflow_sha256, draft.workflow_sha256);
+        assert_eq!(versions[0].recipes.len(), 1);
+        assert_eq!(versions[0].recipes[0].version, "1.0.0");
+        assert_eq!(versions[0].recipes[0].recipe_id, published.recipe_id);
 
         let duplicate = service
             .duplicate_recipe_draft("wfl_onboarded_t2i", "1.0.0", Some("1.0.0"), None)
@@ -4445,6 +4496,97 @@ mod tests {
         );
         let duplicate_published = service.publish(&duplicate.draft_id).await.unwrap();
         assert_ne!(duplicate_published.package_name, published.package_name);
+        assert_eq!(
+            duplicate_published.workflow_version,
+            published.workflow_version
+        );
+        assert_eq!(
+            duplicate_published.workflow_sha256,
+            published.workflow_sha256
+        );
+        assert_ne!(duplicate_published.recipe_id, published.recipe_id);
+        let versions = runtime_repository.list_versions().await.unwrap();
+        assert_eq!(
+            versions.len(),
+            1,
+            "recipe exposure must not create a workflow version"
+        );
+        assert_eq!(versions[0].workflow_sha256, draft.workflow_sha256);
+        assert_eq!(versions[0].recipes.len(), 2);
+        let new_recipe = versions[0]
+            .recipes
+            .iter()
+            .find(|recipe| recipe.version == "1.0.1")
+            .expect("new recipe version should be registered on the existing workflow version");
+        assert_eq!(new_recipe.recipe_id, duplicate_published.recipe_id);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            2
+        );
+
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)\n             VALUES ('project-parameter-preset', 'Parameter Preset', NULL, 'test-root', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let preset_service = PresetService::new(
+            Arc::new(SqlitePresetRepository::new(pool.clone())),
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone())),
+            Arc::new(SqliteAssetRepository::new(pool.clone())),
+            Arc::new(TestClock),
+        );
+        let preset_values = BTreeMap::from([(
+            "prompt".to_owned(),
+            GenerationInputValue::Text("exposed parameter preset".to_owned()),
+        )]);
+        let preset = preset_service
+            .create(
+                "project-parameter-preset",
+                &versions[0].workflow_version_id,
+                &duplicate_published.recipe_id,
+                "Exposed Recipe Preset",
+                &preset_values,
+            )
+            .await
+            .unwrap();
+        assert_eq!(preset.workflow_version_id, versions[0].workflow_version_id);
+        assert_eq!(preset.recipe_id, duplicate_published.recipe_id);
+        assert_eq!(
+            preset_service
+                .list(
+                    "project-parameter-preset",
+                    &versions[0].workflow_version_id,
+                    &published.recipe_id,
+                )
+                .await
+                .unwrap()
+                .len(),
+            0,
+            "presets remain scoped to their recipe identity"
+        );
+        assert_eq!(
+            preset_service
+                .list(
+                    "project-parameter-preset",
+                    &versions[0].workflow_version_id,
+                    &duplicate_published.recipe_id,
+                )
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
