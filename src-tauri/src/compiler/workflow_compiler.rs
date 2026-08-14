@@ -495,6 +495,7 @@ fn apply_bindings(
     for binding in &recipe.bindings {
         let Some(value) = resolved_inputs.get(&binding.source) else {
             clear_binding_targets(workflow, binding)?;
+            clear_unresolved_binding_target(workflow, binding)?;
             continue;
         };
 
@@ -513,6 +514,7 @@ fn apply_bindings(
             | (Some(index), ResolvedInputValue::Audios(values)) => {
                 let Some(value) = values.get(index).cloned() else {
                     clear_binding_targets(workflow, binding)?;
+                    clear_unresolved_binding_target(workflow, binding)?;
                     continue;
                 };
                 Value::String(value)
@@ -531,6 +533,47 @@ fn apply_bindings(
     }
 
     Ok(())
+}
+
+fn clear_unresolved_binding_target(
+    workflow: &mut WorkflowDocument,
+    binding: &crate::domain::Binding,
+) -> Result<(), CompileError> {
+    let Some(inputs) = workflow.inputs_mut(&binding.target.node) else {
+        return Err(CompileError::Internal {
+            message: format!(
+                "validated binding target node \"{}\" became inaccessible",
+                binding.target.node
+            ),
+        });
+    };
+    inputs.remove(&binding.target.input);
+    if !workflow_references_node(workflow, &binding.target.node) {
+        workflow.remove_node(&binding.target.node);
+    }
+    Ok(())
+}
+
+fn workflow_references_node(workflow: &WorkflowDocument, node_id: &str) -> bool {
+    fn contains_link(value: &Value, node_id: &str) -> bool {
+        if let Some(array) = value.as_array() {
+            if array.len() == 2
+                && array.first().and_then(Value::as_str) == Some(node_id)
+                && array.get(1).and_then(Value::as_u64).is_some()
+            {
+                return true;
+            }
+            return array.iter().any(|value| contains_link(value, node_id));
+        }
+        value
+            .as_object()
+            .is_some_and(|object| object.values().any(|value| contains_link(value, node_id)))
+    }
+
+    workflow
+        .value()
+        .as_object()
+        .is_some_and(|nodes| nodes.values().any(|node| contains_link(node, node_id)))
 }
 
 fn clear_binding_targets(
@@ -876,6 +919,10 @@ inputs:
     type: image
     label: First Frame
     required: false
+  last_frame:
+    type: image
+    label: Last Frame
+    required: false
 bindings:
   - source: prompt
     target:
@@ -888,13 +935,21 @@ bindings:
     clear_targets:
       - node: "14"
         input: first_frame
+  - source: last_frame
+    target:
+      node: "28"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: last_frame
 outputs: []
 "#,
         )
         .expect("optional frame recipe should parse");
         let workflow = WorkflowDocument::parse(serde_json::json!({
-            "14": {"inputs": {"prompt": "", "first_frame": ["24", 0]}, "class_type": "MiniMaxH3ImageToVideo"},
-            "24": {"inputs": {"image": "__optional__.png"}, "class_type": "LoadImage"}
+            "14": {"inputs": {"prompt": "", "first_frame": ["24", 0], "last_frame": ["28", 0]}, "class_type": "MiniMaxH3ImageToVideo"},
+            "24": {"inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"}, "class_type": "LoadImage"},
+            "28": {"inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"}, "class_type": "LoadImage"}
         }))
         .expect("workflow should parse");
 
@@ -911,10 +966,11 @@ outputs: []
         assert!(without_frame.workflow["14"]["inputs"]
             .get("first_frame")
             .is_none());
-        assert_eq!(
-            without_frame.workflow["24"]["inputs"]["image"],
-            "__optional__.png"
-        );
+        assert!(without_frame.workflow["14"]["inputs"]
+            .get("last_frame")
+            .is_none());
+        assert!(without_frame.workflow.get("24").is_none());
+        assert!(without_frame.workflow.get("28").is_none());
 
         let with_frame = WorkflowCompiler
             .compile(
@@ -929,6 +985,10 @@ outputs: []
                         "first_frame".to_owned(),
                         InputValue::Image("asset_image_1".to_owned()),
                     ),
+                    (
+                        "last_frame".to_owned(),
+                        InputValue::Image("asset_image_2".to_owned()),
+                    ),
                 ])),
             )
             .expect("image compile should succeed");
@@ -939,6 +999,14 @@ outputs: []
         assert_eq!(
             with_frame.workflow["24"]["inputs"]["image"],
             "asset_image_1"
+        );
+        assert_eq!(
+            with_frame.workflow["14"]["inputs"]["last_frame"],
+            serde_json::json!(["28", 0])
+        );
+        assert_eq!(
+            with_frame.workflow["28"]["inputs"]["image"],
+            "asset_image_2"
         );
     }
 

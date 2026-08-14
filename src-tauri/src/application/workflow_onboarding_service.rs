@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     error::Error,
     fmt,
     path::Path,
@@ -1230,42 +1230,41 @@ impl WorkflowOnboardingService {
         Ok(capability)
     }
 
+    #[allow(dead_code)]
     pub async fn check_runtime_workflow(
         &self,
         workflow_json: &str,
     ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
-        let raw_bytes = workflow_json.as_bytes().to_vec();
-        let workflow =
-            validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
-                WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
-            })?)?;
-        let draft = WorkflowOnboardingDraft {
-            draft_id: "onb_runtime_check".to_owned(),
-            workflow_sha256: sha256(&raw_bytes),
-            original_filename: "runtime.json".to_owned(),
-            nodes: inspect_workflow(&workflow)?,
-            workflow,
-            raw_bytes,
-            manifest: WorkflowManifest {
-                schema_version: 1,
-                id: "wfl_runtime_check".to_owned(),
-                name: "Runtime Check".to_owned(),
-                workflow_version: "1.0.0".to_owned(),
-                recipe_version: "1.0.0".to_owned(),
-                category: "diagnostic".to_owned(),
-                mode: "diagnostic".to_owned(),
-            },
-            recipe_id: "rcp_runtime_check".to_owned(),
-            allow_existing_workflow_sha: true,
-            capability: CapabilityCheckView {
-                state: CapabilityState::NotChecked,
-                checked_at: None,
-                issues: Vec::new(),
-            },
-            input_mappings: Vec::new(),
-            output_mappings: Vec::new(),
-        };
-        Ok(self.check_capability_for_workflow(&draft).await.0)
+        self.check_runtime_workflow_with_dynamic_targets(workflow_json, &BTreeSet::new())
+            .await
+    }
+
+    /// Check a runtime workflow while treating Recipe-owned inputs as dynamic.
+    ///
+    /// The raw workflow package can contain internal placeholders for optional
+    /// media inputs. Those values are intentionally not required to exist in
+    /// ComfyUI before the compiler and input preparer replace or clear them.
+    /// Static inputs remain subject to the normal capability checks.
+    pub async fn check_runtime_workflow_with_recipe(
+        &self,
+        workflow_json: &str,
+        recipe: &Recipe,
+    ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
+        let dynamic_binding_targets = dynamic_binding_targets(recipe);
+        self.check_runtime_workflow_with_dynamic_targets(workflow_json, &dynamic_binding_targets)
+            .await
+    }
+
+    async fn check_runtime_workflow_with_dynamic_targets(
+        &self,
+        workflow_json: &str,
+        dynamic_binding_targets: &BTreeSet<(String, String)>,
+    ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
+        let draft = runtime_check_draft(workflow_json)?;
+        Ok(self
+            .check_capability_for_workflow_with_dynamic_targets(&draft, dynamic_binding_targets)
+            .await
+            .0)
     }
 
     pub fn check_runtime_workflow_with_object_info(
@@ -1674,12 +1673,26 @@ impl WorkflowOnboardingService {
         &self,
         draft: &WorkflowOnboardingDraft,
     ) -> (CapabilityCheckView, Option<Vec<WorkflowNodeView>>) {
+        self.check_capability_for_workflow_with_dynamic_targets(draft, &BTreeSet::new())
+            .await
+    }
+
+    async fn check_capability_for_workflow_with_dynamic_targets(
+        &self,
+        draft: &WorkflowOnboardingDraft,
+        dynamic_binding_targets: &BTreeSet<(String, String)>,
+    ) -> (CapabilityCheckView, Option<Vec<WorkflowNodeView>>) {
         match self.comfy_adapter.get_object_info().await {
             Ok(object) if object.is_object() => {
                 let mut nodes = draft.nodes.clone();
                 enrich_nodes_with_capability(&mut nodes, &object);
                 (
-                    evaluate_capability(&draft.workflow, &nodes, &object),
+                    evaluate_capability_with_dynamic_targets(
+                        &draft.workflow,
+                        &nodes,
+                        &object,
+                        dynamic_binding_targets,
+                    ),
                     Some(nodes),
                 )
             }
@@ -3404,10 +3417,66 @@ fn inspect_workflow(
     Ok(nodes)
 }
 
+fn runtime_check_draft(
+    workflow_json: &str,
+) -> Result<WorkflowOnboardingDraft, WorkflowOnboardingError> {
+    let raw_bytes = workflow_json.as_bytes().to_vec();
+    let workflow =
+        validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
+            WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
+        })?)?;
+    Ok(WorkflowOnboardingDraft {
+        draft_id: "onb_runtime_check".to_owned(),
+        workflow_sha256: sha256(&raw_bytes),
+        original_filename: "runtime.json".to_owned(),
+        nodes: inspect_workflow(&workflow)?,
+        workflow,
+        raw_bytes,
+        manifest: WorkflowManifest {
+            schema_version: 1,
+            id: "wfl_runtime_check".to_owned(),
+            name: "Runtime Check".to_owned(),
+            workflow_version: "1.0.0".to_owned(),
+            recipe_version: "1.0.0".to_owned(),
+            category: "diagnostic".to_owned(),
+            mode: "diagnostic".to_owned(),
+        },
+        recipe_id: "rcp_runtime_check".to_owned(),
+        allow_existing_workflow_sha: true,
+        capability: CapabilityCheckView {
+            state: CapabilityState::NotChecked,
+            checked_at: None,
+            issues: Vec::new(),
+        },
+        input_mappings: Vec::new(),
+        output_mappings: Vec::new(),
+    })
+}
+
+fn dynamic_binding_targets(recipe: &Recipe) -> BTreeSet<(String, String)> {
+    let mut targets = BTreeSet::new();
+    for binding in &recipe.bindings {
+        targets.insert((binding.target.node.clone(), binding.target.input.clone()));
+        for target in &binding.clear_targets {
+            targets.insert((target.node.clone(), target.input.clone()));
+        }
+    }
+    targets
+}
+
 fn evaluate_capability(
     workflow: &WorkflowDocument,
     nodes: &[WorkflowNodeView],
     object_info: &Value,
+) -> CapabilityCheckView {
+    evaluate_capability_with_dynamic_targets(workflow, nodes, object_info, &BTreeSet::new())
+}
+
+fn evaluate_capability_with_dynamic_targets(
+    workflow: &WorkflowDocument,
+    nodes: &[WorkflowNodeView],
+    object_info: &Value,
+    dynamic_binding_targets: &BTreeSet<(String, String)>,
 ) -> CapabilityCheckView {
     let Some(object) = object_info.as_object() else {
         return CapabilityCheckView {
@@ -3451,23 +3520,27 @@ fn evaluate_capability(
             let Some(spec_array) = spec.as_array() else {
                 continue;
             };
-            let options = spec_array.first().and_then(Value::as_array);
-            if let Some(options) = options {
-                if let Some(current) = value.as_str() {
-                    let available = options
-                        .iter()
-                        .any(|option| option.as_str() == Some(current));
-                    if !available {
-                        issues.push(CapabilityIssueView {
-                            code: "INPUT_OPTION_UNAVAILABLE".to_owned(),
-                            class_type: Some(node.class_type.clone()),
-                            node_id: Some(node.node_id.clone()),
-                            affected_node_ids: Vec::new(),
-                            input_name: Some(input_name.clone()),
-                            current_value: Some(current.to_owned()),
-                            message: "Current ComfyUI does not offer this workflow value."
-                                .to_owned(),
-                        });
+            let is_dynamic_binding_target =
+                dynamic_binding_targets.contains(&(node.node_id.clone(), input_name.clone()));
+            if !is_dynamic_binding_target {
+                let options = spec_array.first().and_then(Value::as_array);
+                if let Some(options) = options {
+                    if let Some(current) = value.as_str() {
+                        let available = options
+                            .iter()
+                            .any(|option| option.as_str() == Some(current));
+                        if !available {
+                            issues.push(CapabilityIssueView {
+                                code: "INPUT_OPTION_UNAVAILABLE".to_owned(),
+                                class_type: Some(node.class_type.clone()),
+                                node_id: Some(node.node_id.clone()),
+                                affected_node_ids: Vec::new(),
+                                input_name: Some(input_name.clone()),
+                                current_value: Some(current.to_owned()),
+                                message: "Current ComfyUI does not offer this workflow value."
+                                    .to_owned(),
+                            });
+                        }
                     }
                 }
             }
@@ -4344,6 +4417,124 @@ mod tests {
             .iter()
             .any(|issue| issue.code == "INPUT_OPTION_UNAVAILABLE"
                 && issue.node_id.as_deref() == Some("1")));
+    }
+
+    #[test]
+    fn dynamic_recipe_target_allows_optional_placeholder_but_static_missing_file_fails() {
+        let object_info = json!({
+            "LoadImage": {"input": {"required": {
+                "image": [["available.png"], {}]
+            }}}
+        });
+        let workflow = WorkflowDocument::parse(json!({
+            "24": {
+                "inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"},
+                "class_type": "LoadImage"
+            }
+        }))
+        .unwrap();
+        let nodes = inspect_workflow(&workflow).unwrap();
+        let dynamic_targets = BTreeSet::from([("24".to_owned(), "image".to_owned())]);
+
+        let dynamic_report = evaluate_capability_with_dynamic_targets(
+            &workflow,
+            &nodes,
+            &object_info,
+            &dynamic_targets,
+        );
+        assert_eq!(dynamic_report.state, CapabilityState::Ready);
+        assert!(!dynamic_report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "INPUT_OPTION_UNAVAILABLE"));
+
+        let static_workflow = WorkflowDocument::parse(json!({
+            "24": {
+                "inputs": {"image": "missing_real_image.png"},
+                "class_type": "LoadImage"
+            }
+        }))
+        .unwrap();
+        let static_nodes = inspect_workflow(&static_workflow).unwrap();
+        let static_report = evaluate_capability(&static_workflow, &static_nodes, &object_info);
+        assert_eq!(
+            static_report.state,
+            CapabilityState::IncompatibleInputValues
+        );
+        assert!(static_report.issues.iter().any(|issue| {
+            issue.code == "INPUT_OPTION_UNAVAILABLE"
+                && issue.current_value.as_deref() == Some("missing_real_image.png")
+        }));
+    }
+
+    #[test]
+    fn dynamic_target_does_not_skip_missing_nodes_or_static_enum_validation() {
+        let workflow = WorkflowDocument::parse(json!({
+            "24": {
+                "inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"},
+                "class_type": "MissingLoadImage"
+            },
+            "7": {
+                "inputs": {"sampler_name": "not_available"},
+                "class_type": "KSamplerSelect"
+            }
+        }))
+        .unwrap();
+        let nodes = inspect_workflow(&workflow).unwrap();
+        let object_info = json!({
+            "KSamplerSelect": {"input": {"required": {
+                "sampler_name": [["euler", "ddim"], {}]
+            }}}
+        });
+        let dynamic_targets = BTreeSet::from([("24".to_owned(), "image".to_owned())]);
+        let report = evaluate_capability_with_dynamic_targets(
+            &workflow,
+            &nodes,
+            &object_info,
+            &dynamic_targets,
+        );
+
+        assert_eq!(report.state, CapabilityState::MissingNodes);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "MISSING_NODE"
+                && issue.class_type.as_deref() == Some("MissingLoadImage")));
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "INPUT_OPTION_UNAVAILABLE" && issue.node_id.as_deref() == Some("7")
+        }));
+    }
+
+    #[test]
+    fn recipe_dynamic_targets_include_binding_and_clear_targets() {
+        let recipe = RecipeParser::parse(
+            r#"
+schema_version: 1
+id: h3_optional_frames
+name: H3 Optional Frames
+workflow:
+  file: workflow.json
+inputs:
+  first_frame:
+    type: image
+    label: First Frame
+    required: false
+bindings:
+  - source: first_frame
+    target:
+      node: "24"
+      input: image
+    clear_targets:
+      - node: "14"
+        input: first_frame
+outputs: []
+"#,
+        )
+        .unwrap();
+        let targets = dynamic_binding_targets(&recipe);
+
+        assert!(targets.contains(&("24".to_owned(), "image".to_owned())));
+        assert!(targets.contains(&("14".to_owned(), "first_frame".to_owned())));
     }
 
     #[test]

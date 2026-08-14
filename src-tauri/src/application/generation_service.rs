@@ -361,7 +361,10 @@ impl GenerationService {
             };
         if let Some(service) = &self.workflow_compatibility_service {
             let workflow_json = definition.workflow_json.to_string();
-            match service.check_runtime_workflow(&workflow_json).await {
+            match service
+                .check_runtime_workflow_with_recipe(&workflow_json, &recipe)
+                .await
+            {
                 Ok(capability)
                     if matches!(
                         capability.state,
@@ -483,6 +486,15 @@ impl GenerationService {
                     .await);
             }
         };
+        if let Err(error) = reject_internal_workflow_placeholders(&compile_result.workflow) {
+            return Err(self
+                .fail_and_preserve(
+                    &mut task,
+                    task_error_from_compile(&error),
+                    GenerationServiceError::Compile(error),
+                )
+                .await);
+        }
         if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
             return Ok(task);
         }
@@ -1134,6 +1146,30 @@ fn task_error_from_compile(error: &CompileError) -> TaskError {
     }
 }
 
+const INTERNAL_WORKFLOW_PLACEHOLDER_MARKERS: [&str; 2] =
+    ["__AI_STUDIO_OPTIONAL__", "__aistudio_preflight_image__"];
+
+fn reject_internal_workflow_placeholders(workflow: &Value) -> Result<(), CompileError> {
+    if let Some(marker) = find_internal_workflow_placeholder(workflow) {
+        return Err(CompileError::Internal {
+            message: format!("compiled workflow contains unresolved internal placeholder {marker}"),
+        });
+    }
+    Ok(())
+}
+
+fn find_internal_workflow_placeholder(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::String(value) => INTERNAL_WORKFLOW_PLACEHOLDER_MARKERS
+            .iter()
+            .copied()
+            .find(|marker| value.contains(marker)),
+        Value::Array(values) => values.iter().find_map(find_internal_workflow_placeholder),
+        Value::Object(values) => values.values().find_map(find_internal_workflow_placeholder),
+        Value::Null | Value::Bool(_) | Value::Number(_) => None,
+    }
+}
+
 fn task_error_from_adapter(error: &ComfyAdapterError) -> TaskError {
     let (code, message, raw) = match error {
         ComfyAdapterError::Offline(message) => ("COMFY_OFFLINE", message.clone(), None),
@@ -1385,6 +1421,21 @@ mod tests {
             message: "invalid png".to_owned(),
         });
         assert_eq!(task_error_from_output(&error).code, "OUTPUT_IMPORT_FAILED");
+    }
+
+    #[test]
+    fn final_workflow_rejects_internal_placeholders_before_prompt_submission() {
+        let optional = json!({
+            "24": {"inputs": {"image": "__AI_STUDIO_OPTIONAL__.png"}}
+        });
+        let preflight = json!({
+            "24": {"inputs": {"image": "__aistudio_preflight_image__.png"}}
+        });
+        let resolved = json!({"24": {"inputs": {"image": "ComfyUI_uploaded_1.png"}}});
+
+        assert!(reject_internal_workflow_placeholders(&optional).is_err());
+        assert!(reject_internal_workflow_placeholders(&preflight).is_err());
+        assert!(reject_internal_workflow_placeholders(&resolved).is_ok());
     }
 
     #[test]

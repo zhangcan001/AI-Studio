@@ -29,6 +29,10 @@ impl WorkflowDocument {
         self.value.as_object_mut()?.get_mut(node_id)
     }
 
+    pub fn remove_node(&mut self, node_id: &str) -> Option<Value> {
+        self.value.as_object_mut()?.remove(node_id)
+    }
+
     pub fn class_type(&self, node_id: &str) -> Option<&str> {
         self.node(node_id)?.as_object()?.get("class_type")?.as_str()
     }

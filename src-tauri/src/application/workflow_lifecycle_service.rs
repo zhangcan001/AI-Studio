@@ -1016,9 +1016,11 @@ impl WorkflowLifecycleService {
         let package = self
             .find_package(&version.workflow_id, &version.workflow_version, None)
             .await?;
+        let recipe = RecipeParser::parse(&package.recipe_yaml)
+            .map_err(|error| invalid_error(error.to_string()))?;
         let capability = self
             .onboarding_service
-            .check_runtime_workflow(&package.workflow_json)
+            .check_runtime_workflow_with_recipe(&package.workflow_json, &recipe)
             .await
             .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
         self.capability_cache
@@ -1170,6 +1172,10 @@ impl WorkflowLifecycleService {
         let manifest = parse_manifest_bytes(&package.manifest_yaml)?;
         let workflow_json = String::from_utf8(package.workflow_api_json.clone())
             .map_err(|error| invalid_error(error.to_string()))?;
+        let recipe_yaml = String::from_utf8(package.recipe_yaml.clone())
+            .map_err(|error| invalid_error(error.to_string()))?;
+        let recipe =
+            RecipeParser::parse(&recipe_yaml).map_err(|error| invalid_error(error.to_string()))?;
         let workflow_sha = sha256(&package.workflow_api_json);
         let recipe_sha = sha256(&package.recipe_yaml);
 
@@ -1218,7 +1224,7 @@ impl WorkflowLifecycleService {
 
         let capability = self
             .onboarding_service
-            .check_runtime_workflow(&workflow_json)
+            .check_runtime_workflow_with_recipe(&workflow_json, &recipe)
             .await
             .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
         let enabled = capability.state
@@ -1340,9 +1346,11 @@ impl WorkflowLifecycleService {
                 ));
             }
         };
+        let recipe = RecipeParser::parse(&package.recipe_yaml)
+            .map_err(|error| WorkflowLifecycleError::new("RECIPE_INVALID", error.to_string()))?;
         let capability = self
             .onboarding_service
-            .check_runtime_workflow(&package.workflow_json)
+            .check_runtime_workflow_with_recipe(&package.workflow_json, &recipe)
             .await
             .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
         let workflow_hash = sha256(package.workflow_json.as_bytes());
