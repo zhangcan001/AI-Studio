@@ -684,6 +684,21 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .input-snapshot dt { color: #8997ad; font-size: 0.8rem; }
 .input-snapshot dd { margin: 0; overflow: hidden; color: #d5deec; font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
 .detail-section .asset-library-card { display: grid; }
+.comfy-node-error-section { display: grid; gap: 12px; padding: 14px; border: 1px solid #744b50; border-radius: 10px; background: #1d171b; }
+.comfy-node-error-list { display: grid; gap: 10px; }
+.comfy-node-error { display: grid; gap: 10px; padding: 12px; border: 1px solid #4e3540; border-radius: 8px; background: #271d23; }
+.comfy-node-error-heading { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.comfy-node-error-heading strong { color: #ffd2b8; }
+.comfy-node-error-heading code { color: #ffcf9e; overflow-wrap: anywhere; }
+.comfy-node-error dl { display: grid; gap: 7px; margin: 0; }
+.comfy-node-error dl > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; }
+.comfy-node-error dt { color: #a997a4; font-size: 0.78rem; }
+.comfy-node-error dd { min-width: 0; margin: 0; color: #eadde3; font-size: 0.82rem; overflow-wrap: anywhere; }
+.comfy-node-error .diagnostic-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+.comfy-raw-error { margin-top: 2px; color: #d5deec; }
+.comfy-raw-error summary { cursor: pointer; color: #ffcf9e; }
+.comfy-raw-error-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.comfy-raw-error pre { max-height: 360px; margin: 8px 0 0; padding: 10px; overflow: auto; border-radius: 7px; color: #d5deec; background: #0c1017; font-size: 0.76rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .project-loading { margin: 0 0 16px; padding: 10px 12px; border: 1px solid #4d658f; border-radius: 9px; color: #b9c8df; background: #182337; }
 .project-workspace { display: grid; gap: 18px; }

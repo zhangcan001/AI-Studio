@@ -483,10 +483,36 @@ impl ShotBatchService {
                             reasons.push(reason);
                         }
                         if let Some((key, multiple)) = &image_input {
+                            let mut references = vec![asset_id.clone()];
+                            for reference in data
+                                .reference_assets
+                                .iter()
+                                .filter(|reference| reference.stage == stage)
+                            {
+                                match AssetId::parse(reference.asset_id.clone()) {
+                                    Ok(reference_id) if references.contains(&reference_id) => {}
+                                    Ok(reference_id) => {
+                                        if let Err(reason) = self
+                                            .validate_asset(
+                                                project_id,
+                                                &reference_id,
+                                                AssetType::Image,
+                                            )
+                                            .await
+                                        {
+                                            reasons.push(reason);
+                                        }
+                                        references.push(reference_id);
+                                    }
+                                    Err(error) => {
+                                        reasons.push(format!("Reference 素材 ID 无效：{error}"))
+                                    }
+                                }
+                            }
                             values.insert(
                                 key.clone(),
                                 if *multiple {
-                                    GenerationInputValue::ImageAssets(vec![asset_id])
+                                    GenerationInputValue::ImageAssets(references)
                                 } else {
                                     GenerationInputValue::ImageAsset(asset_id)
                                 },

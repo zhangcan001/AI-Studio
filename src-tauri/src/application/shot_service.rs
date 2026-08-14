@@ -1,6 +1,6 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::generation_service::{
-    CreateGenerationRequest, GenerationService, GenerationServiceError,
+    CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
 };
 use crate::application::ports::{
     AssetRepository, Clock, GenerationDefinitionRepository, PromptLibraryRepository,
@@ -429,6 +429,7 @@ impl ShotService {
         let _ = scalar_values_to_json(&recipe.inputs, &request.values)?;
         let mut values = scalar_values_from_json(&config.scalar_values)?;
         values.extend(request.values);
+        let mut reference_manifest = None;
         if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
             matches!(input, InputDefinition::TextArea { .. }).then_some(key)
         }) {
@@ -453,10 +454,39 @@ impl ShotService {
                 .expect("video stage selected image is validated above");
             let selected = crate::domain::AssetId::parse(selected.clone())
                 .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
+            let mut references = vec![selected.clone()];
+            for reference in data
+                .reference_assets
+                .iter()
+                .filter(|reference| reference.stage == request.stage)
+            {
+                let asset_id = crate::domain::AssetId::parse(reference.asset_id.clone())
+                    .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
+                if references.contains(&asset_id) {
+                    continue;
+                }
+                let asset = self
+                    .asset_repository
+                    .find_by_id(&asset_id)
+                    .await?
+                    .ok_or_else(|| {
+                        ShotServiceError::InvalidInput("Reference 素材不存在".to_owned())
+                    })?;
+                if asset.project_id != request.project_id || asset.asset_type != AssetType::Image {
+                    return Err(ShotServiceError::InvalidInput(
+                        "Reference 必须是当前项目的图片素材".to_owned(),
+                    ));
+                }
+                references.push(asset_id);
+            }
             values.insert(
                 key.clone(),
                 if multiple {
-                    GenerationInputValue::ImageAssets(vec![selected])
+                    reference_manifest = Some(ReferenceManifest {
+                        input_key: key.clone(),
+                        asset_ids: references.clone(),
+                    });
+                    GenerationInputValue::ImageAssets(references)
                 } else {
                     GenerationInputValue::ImageAsset(selected)
                 },
@@ -496,6 +526,7 @@ impl ShotService {
             workflow_version_id: config.workflow_version_id.clone(),
             recipe_id: config.recipe_id.clone(),
             values,
+            reference_manifest,
         };
         let repository = Arc::clone(&self.repository);
         let project_id = request.project_id.clone();

@@ -12,10 +12,13 @@ use crate::application::ports::{
     TaskUpdateSink,
 };
 use crate::application::task_execution_registry::TaskExecutionRegistry;
+use crate::application::workflow_onboarding_service::{
+    CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
+};
 use crate::compiler::{CompileError, RecipeParser, WorkflowCompiler};
 use crate::domain::{
-    CompileRequest, GenerationSnapshot, ResolvedInputValue, SeedValue, Task, TaskDomainError,
-    TaskError, TaskStateMachine, TaskStatus,
+    AssetId, CompileRequest, GenerationSnapshot, ResolvedInputValue, SeedValue, Task,
+    TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
 };
 use serde_json::{Map, Number, Value};
 use std::{
@@ -34,6 +37,13 @@ pub struct CreateGenerationRequest {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub values: BTreeMap<String, GenerationInputValue>,
+    pub reference_manifest: Option<ReferenceManifest>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReferenceManifest {
+    pub input_key: String,
+    pub asset_ids: Vec<AssetId>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -125,6 +135,7 @@ pub struct GenerationService {
     execution_registry: TaskExecutionRegistry,
     submission_gate: Arc<Semaphore>,
     compiler: WorkflowCompiler,
+    workflow_compatibility_service: Option<Arc<WorkflowOnboardingService>>,
 }
 
 enum CancelResolution {
@@ -169,6 +180,7 @@ impl GenerationService {
             execution_registry: TaskExecutionRegistry::default(),
             submission_gate: Arc::new(Semaphore::new(1)),
             compiler: WorkflowCompiler,
+            workflow_compatibility_service: None,
         }
     }
 
@@ -179,6 +191,14 @@ impl GenerationService {
 
     pub fn with_execution_registry(mut self, execution_registry: TaskExecutionRegistry) -> Self {
         self.execution_registry = execution_registry;
+        self
+    }
+
+    pub fn with_workflow_compatibility_service(
+        mut self,
+        service: Arc<WorkflowOnboardingService>,
+    ) -> Self {
+        self.workflow_compatibility_service = Some(service);
         self
     }
 
@@ -339,6 +359,61 @@ impl GenerationService {
                         .await);
                 }
             };
+        if let Some(service) = &self.workflow_compatibility_service {
+            let workflow_json = definition.workflow_json.to_string();
+            match service.check_runtime_workflow(&workflow_json).await {
+                Ok(capability)
+                    if matches!(
+                        capability.state,
+                        CapabilityState::MissingNodes | CapabilityState::IncompatibleInputValues
+                    ) =>
+                {
+                    let error = ComfyAdapterError::WorkflowValidation {
+                        message: "ComfyUI 当前节点能力与所选工作流不兼容。".to_owned(),
+                        node_errors: capability_node_errors(&capability),
+                    };
+                    return Err(self
+                        .fail_and_preserve(
+                            &mut task,
+                            task_error_from_adapter(&error),
+                            GenerationServiceError::Comfy(error),
+                        )
+                        .await);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    let error = ComfyAdapterError::WorkflowValidation {
+                        message: format!("工作流兼容性检查失败：{error}"),
+                        node_errors: serde_json::json!({
+                            "workflow": {
+                                "errors": [{
+                                    "type": "compatibility_check_failed",
+                                    "message": error.to_string()
+                                }]
+                            }
+                        }),
+                    };
+                    return Err(self
+                        .fail_and_preserve(
+                            &mut task,
+                            task_error_from_adapter(&error),
+                            GenerationServiceError::Comfy(error),
+                        )
+                        .await);
+                }
+            }
+        }
+        if let Err(error) =
+            validate_reference_manifest(&request.values, request.reference_manifest.as_ref())
+        {
+            return Err(self
+                .fail_and_preserve(
+                    &mut task,
+                    task_error_from_input_prepare(&error),
+                    GenerationServiceError::InputPrepare(error),
+                )
+                .await);
+        }
         let preflight_request =
             CompileRequest::new(GenerationInputPreparer::preflight_values(&request.values));
         if let Err(error) = self
@@ -1116,8 +1191,89 @@ fn task_error_from_input_prepare(error: &GenerationInputPrepareError) -> TaskErr
     TaskError {
         code: error.code().to_owned(),
         message: error.to_string(),
-        raw: None,
+        raw: match error {
+            GenerationInputPrepareError::ReferenceMappingIncomplete {
+                input_key,
+                expected_asset_ids,
+                actual_asset_ids,
+            } => Some(serde_json::json!({
+                "inputKey": input_key,
+                "expectedAssetIds": expected_asset_ids,
+                "actualAssetIds": actual_asset_ids,
+            })),
+            _ => None,
+        },
     }
+}
+
+pub(crate) fn validate_reference_manifest(
+    values: &BTreeMap<String, GenerationInputValue>,
+    manifest: Option<&ReferenceManifest>,
+) -> Result<(), GenerationInputPrepareError> {
+    let Some(manifest) = manifest else {
+        return Ok(());
+    };
+    let actual_asset_ids = match values.get(&manifest.input_key) {
+        Some(GenerationInputValue::ImageAsset(asset_id)) => vec![asset_id.as_str().to_owned()],
+        Some(GenerationInputValue::ImageAssets(asset_ids)) => asset_ids
+            .iter()
+            .map(|asset_id| asset_id.as_str().to_owned())
+            .collect(),
+        _ => Vec::new(),
+    };
+    let expected_asset_ids = manifest
+        .asset_ids
+        .iter()
+        .map(|asset_id| asset_id.as_str().to_owned())
+        .collect::<Vec<_>>();
+    if actual_asset_ids != expected_asset_ids {
+        return Err(GenerationInputPrepareError::ReferenceMappingIncomplete {
+            input_key: manifest.input_key.clone(),
+            expected_asset_ids,
+            actual_asset_ids,
+        });
+    }
+    Ok(())
+}
+
+fn capability_node_errors(capability: &CapabilityCheckView) -> Value {
+    let mut nodes = Map::new();
+    for issue in &capability.issues {
+        let node_ids = if let Some(node_id) = issue.node_id.as_ref() {
+            vec![node_id.clone()]
+        } else if issue.affected_node_ids.is_empty() {
+            vec!["workflow".to_owned()]
+        } else {
+            issue.affected_node_ids.clone()
+        };
+        for node_id in node_ids {
+            let entry = nodes.entry(node_id).or_insert_with(|| {
+                serde_json::json!({
+                    "class_type": issue.class_type.clone(),
+                    "errors": []
+                })
+            });
+            if let Some(object) = entry.as_object_mut() {
+                object
+                    .entry("class_type".to_owned())
+                    .or_insert_with(|| serde_json::json!(issue.class_type.clone()));
+                let errors = object
+                    .entry("errors".to_owned())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                if let Some(errors) = errors.as_array_mut() {
+                    errors.push(serde_json::json!({
+                        "type": issue.code.clone(),
+                        "message": issue.message.clone(),
+                        "extra_info": {
+                            "input_name": issue.input_name.clone(),
+                            "received_value": issue.current_value.clone()
+                        }
+                    }));
+                }
+            }
+        }
+    }
+    Value::Object(nodes)
 }
 
 fn input_values_to_json(values: &BTreeMap<String, GenerationInputValue>) -> Value {
@@ -1256,6 +1412,75 @@ mod tests {
         assert_eq!(
             task.error.expect("failed task should have error").raw,
             Some(node_errors)
+        );
+    }
+
+    #[test]
+    fn reference_manifest_blocks_four_assets_when_five_are_expected() {
+        let expected = [
+            "ast_storyboard",
+            "ast_subject_1",
+            "ast_subject_2",
+            "ast_subject_3",
+            "ast_subject_4",
+        ]
+        .into_iter()
+        .map(|id| AssetId::parse(id).unwrap())
+        .collect::<Vec<_>>();
+        let actual = expected[..4].to_vec();
+        let values = BTreeMap::from([(
+            "reference_images".to_owned(),
+            GenerationInputValue::ImageAssets(actual),
+        )]);
+        let error = validate_reference_manifest(
+            &values,
+            Some(&ReferenceManifest {
+                input_key: "reference_images".to_owned(),
+                asset_ids: expected,
+            }),
+        )
+        .expect_err("an incomplete reference mapping must block before submission");
+
+        assert_eq!(error.code(), "REFERENCE_MAPPING_INCOMPLETE");
+        assert!(error.to_string().contains("expected 5 assets"));
+    }
+
+    #[test]
+    fn reference_manifest_freezes_storyboard_then_subject_order() {
+        let ordered = [
+            "ast_storyboard",
+            "ast_subject_1",
+            "ast_subject_2",
+            "ast_subject_3",
+            "ast_subject_4",
+        ]
+        .into_iter()
+        .map(|id| AssetId::parse(id).unwrap())
+        .collect::<Vec<_>>();
+        let values = BTreeMap::from([(
+            "reference_images".to_owned(),
+            GenerationInputValue::ImageAssets(ordered.clone()),
+        )]);
+        validate_reference_manifest(
+            &values,
+            Some(&ReferenceManifest {
+                input_key: "reference_images".to_owned(),
+                asset_ids: ordered.clone(),
+            }),
+        )
+        .expect("the structured reference contract should match exactly");
+        assert_eq!(
+            match &values["reference_images"] {
+                GenerationInputValue::ImageAssets(asset_ids) => asset_ids
+                    .iter()
+                    .map(|asset_id| asset_id.as_str())
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            },
+            ordered
+                .iter()
+                .map(|asset_id| asset_id.as_str())
+                .collect::<Vec<_>>()
         );
     }
 

@@ -47,6 +47,17 @@ export interface ReusableDraftAvailability {
   missingAssetIds: string[];
 }
 
+export interface TaskNodeError {
+  nodeId: string;
+  nodeType?: string;
+  input?: string;
+  errorType?: string;
+  message: string;
+  details?: string;
+  receivedValue?: unknown;
+  expectedConfig?: unknown;
+}
+
 export interface TaskDetail {
   id: string;
   projectId: string;
@@ -61,6 +72,8 @@ export interface TaskDetail {
   finishedAt?: string;
   errorCode?: string;
   errorMessage?: string;
+  nodeErrors?: TaskNodeError[];
+  rawError?: unknown;
   outputAssets: AssetView[];
   reusableDraft: ReusableDraftAvailability;
 }

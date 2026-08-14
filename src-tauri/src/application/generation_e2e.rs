@@ -389,6 +389,7 @@ mod tests {
                     GenerationInputValue::Seed(SeedValue::Fixed(123)),
                 ),
             ]),
+            reference_manifest: None,
         };
         let result = if non_blocking {
             let returned_task = service
@@ -653,6 +654,7 @@ outputs:
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
             values,
+            reference_manifest: None,
         };
         let outcome = service.execute(request).await.map(|_| ());
         let task = task_repository
@@ -749,6 +751,7 @@ outputs:
                             GenerationInputValue::Seed(SeedValue::Fixed(123)),
                         ),
                     ]),
+                    reference_manifest: None,
                 },
                 |_task| async { Err(RepositoryError::integrity("simulated Shot binding failure")) },
             )

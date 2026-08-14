@@ -120,7 +120,19 @@ impl TaskHistoryService {
                 .task
                 .error
                 .as_ref()
-                .map(|_| "The task did not complete successfully.".to_owned()),
+                .map(|error| error.message.clone()),
+            node_errors: record
+                .task
+                .error
+                .as_ref()
+                .and_then(|error| (error.code == "WORKFLOW_VALIDATION_FAILED").then_some(error))
+                .map(|error| structured_node_errors(error.raw.as_ref()))
+                .unwrap_or_default(),
+            raw_error: record
+                .task
+                .error
+                .as_ref()
+                .and_then(|error| error.raw.clone()),
             output_assets,
             reusable_draft,
         })
@@ -389,8 +401,115 @@ pub struct TaskDetailView {
     pub finished_at: Option<DateTime<Utc>>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub node_errors: Vec<TaskNodeErrorView>,
+    pub raw_error: Option<Value>,
     pub output_assets: Vec<AssetSummaryView>,
     pub reusable_draft: ReusableDraftAvailabilityView,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskNodeErrorView {
+    pub node_id: String,
+    pub node_type: Option<String>,
+    pub input: Option<String>,
+    pub error_type: Option<String>,
+    pub message: String,
+    pub details: Option<String>,
+    pub received_value: Option<Value>,
+    pub expected_config: Option<Value>,
+}
+
+fn structured_node_errors(raw: Option<&Value>) -> Vec<TaskNodeErrorView> {
+    let Some(nodes) = raw.and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for (node_id, node) in nodes {
+        let Some(node) = node.as_object() else {
+            continue;
+        };
+        let node_type = first_string(node, &["class_type", "classType"]);
+        if let Some(errors) = node.get("errors").and_then(Value::as_array) {
+            for error in errors {
+                result.push(parse_node_error(node_id, node_type.clone(), error));
+            }
+        } else if node.get("message").is_some() || node.get("details").is_some() {
+            result.push(parse_node_error(
+                node_id,
+                node_type,
+                &Value::Object(node.clone()),
+            ));
+        }
+    }
+    result
+}
+
+fn parse_node_error(node_id: &str, node_type: Option<String>, error: &Value) -> TaskNodeErrorView {
+    let error_object = error.as_object();
+    let extra_info = error_object
+        .and_then(|object| object.get("extra_info"))
+        .and_then(Value::as_object);
+    let input = error_object
+        .and_then(|object| first_string(object, &["input_name", "inputName"]))
+        .or_else(|| {
+            extra_info.and_then(|object| first_string(object, &["input_name", "inputName"]))
+        });
+    let error_type =
+        error_object.and_then(|object| first_string(object, &["type", "error_type", "errorType"]));
+    let details = error_object.and_then(|object| first_string(object, &["details"]));
+    let message = error_object
+        .and_then(|object| first_string(object, &["message"]))
+        .or_else(|| details.clone())
+        .unwrap_or_else(|| error.to_string());
+    let received_value = error_object
+        .and_then(|object| {
+            object
+                .get("received_value")
+                .or_else(|| object.get("receivedValue"))
+        })
+        .cloned()
+        .or_else(|| {
+            extra_info
+                .and_then(|object| {
+                    object
+                        .get("received_value")
+                        .or_else(|| object.get("receivedValue"))
+                })
+                .cloned()
+        });
+    let expected_config = error_object
+        .and_then(|object| {
+            object
+                .get("expected_config")
+                .or_else(|| object.get("expectedConfig"))
+        })
+        .cloned()
+        .or_else(|| {
+            extra_info
+                .and_then(|object| {
+                    object
+                        .get("input_config")
+                        .or_else(|| object.get("inputConfig"))
+                })
+                .cloned()
+        });
+
+    TaskNodeErrorView {
+        node_id: node_id.to_owned(),
+        node_type,
+        input,
+        error_type,
+        message,
+        details,
+        received_value,
+        expected_config,
+    }
+}
+
+fn first_string(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_str).map(str::to_owned))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -930,6 +1049,8 @@ outputs: []
             finished_at: None,
             error_code: Some("WORKFLOW_INVALID".to_owned()),
             error_message: Some("The task did not complete successfully.".to_owned()),
+            node_errors: Vec::new(),
+            raw_error: None,
             output_assets: Vec::new(),
             reusable_draft: super::ReusableDraftAvailabilityView {
                 available: false,
@@ -942,11 +1063,45 @@ outputs: []
             "workflowJson",
             "recipeYaml",
             "rawErrorJson",
-            "nodeId",
             "clientId",
             "promptId",
         ] {
             assert!(!json.contains(forbidden), "task detail leaked {forbidden}");
         }
+    }
+
+    #[test]
+    fn structured_node_errors_preserve_comfy_validation_context() {
+        let raw = serde_json::json!({
+            "26": {
+                "class_type": "NBH3HyperStepSimple",
+                "errors": [{
+                    "type": "value_not_in_list",
+                    "message": "Value not in list: Middle-36",
+                    "details": "The selected mode is not available.",
+                    "extra_info": {
+                        "input_name": "mode",
+                        "received_value": "Middle-36",
+                        "input_config": [["Middle-20", "Middle-28"]]
+                    }
+                }]
+            }
+        });
+
+        let errors = super::structured_node_errors(Some(&raw));
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].node_id, "26");
+        assert_eq!(errors[0].node_type.as_deref(), Some("NBH3HyperStepSimple"));
+        assert_eq!(errors[0].input.as_deref(), Some("mode"));
+        assert_eq!(errors[0].error_type.as_deref(), Some("value_not_in_list"));
+        assert_eq!(errors[0].message, "Value not in list: Middle-36");
+        assert_eq!(
+            errors[0].received_value,
+            Some(serde_json::json!("Middle-36"))
+        );
+        assert_eq!(
+            errors[0].expected_config,
+            Some(serde_json::json!([["Middle-20", "Middle-28"]]))
+        );
     }
 }

@@ -208,6 +208,7 @@ impl GenerationCreateRequest {
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             values,
+            reference_manifest: None,
         })
     }
 }
@@ -225,6 +226,7 @@ impl GenerationBatchItemRequest {
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             values,
+            reference_manifest: None,
         })
     }
 }

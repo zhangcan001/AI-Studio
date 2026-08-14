@@ -507,6 +507,7 @@ impl Harness {
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
             values,
+            reference_manifest: None,
         }
     }
 }

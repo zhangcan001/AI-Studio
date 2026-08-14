@@ -53,11 +53,28 @@ pub struct PreparedGenerationInputs {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GenerationInputPrepareError {
-    AssetNotFound { asset_id: String },
-    AssetProjectMismatch { asset_id: String },
-    AssetTypeInvalid { asset_id: String },
-    AssetRead { asset_id: String, message: String },
-    InvalidAssetMime { asset_id: String, mime_type: String },
+    AssetNotFound {
+        asset_id: String,
+    },
+    AssetProjectMismatch {
+        asset_id: String,
+    },
+    AssetTypeInvalid {
+        asset_id: String,
+    },
+    AssetRead {
+        asset_id: String,
+        message: String,
+    },
+    InvalidAssetMime {
+        asset_id: String,
+        mime_type: String,
+    },
+    ReferenceMappingIncomplete {
+        input_key: String,
+        expected_asset_ids: Vec<String>,
+        actual_asset_ids: Vec<String>,
+    },
     Repository(String),
     Upload(ComfyAdapterError),
 }
@@ -70,6 +87,7 @@ impl GenerationInputPrepareError {
             Self::AssetTypeInvalid { .. } => "INPUT_ASSET_TYPE_INVALID",
             Self::AssetRead { .. } => "INPUT_ASSET_READ_FAILED",
             Self::InvalidAssetMime { .. } => "INPUT_ASSET_MIME_INVALID",
+            Self::ReferenceMappingIncomplete { .. } => "REFERENCE_MAPPING_INCOMPLETE",
             Self::Repository(_) => "INPUT_ASSET_REPOSITORY_ERROR",
             Self::Upload(error) => match error {
                 ComfyAdapterError::Offline(_) => "COMFY_OFFLINE",
@@ -116,6 +134,17 @@ impl fmt::Display for GenerationInputPrepareError {
                 formatter,
                 "{}: asset {asset_id} has unsupported MIME type {mime_type}",
                 self.code()
+            ),
+            Self::ReferenceMappingIncomplete {
+                input_key,
+                expected_asset_ids,
+                actual_asset_ids,
+            } => write!(
+                formatter,
+                "{}: reference input {input_key} expected {} assets in frozen order, received {}",
+                self.code(),
+                expected_asset_ids.len(),
+                actual_asset_ids.len()
             ),
             Self::Repository(message) => write!(formatter, "{}: {message}", self.code()),
             Self::Upload(error) => write!(formatter, "{}: {error}", self.code()),

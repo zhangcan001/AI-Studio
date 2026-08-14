@@ -46,6 +46,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKFLOW_VERSION_CONFLICT: "工作流版本已发生变化，请刷新后重试。",
   RECIPE_VERSION_CONFLICT: "配方版本已发生变化，请刷新后重试。",
   WORKFLOW_VALIDATION_FAILED: "工作流校验未通过，请检查输入和输出映射。",
+  REFERENCE_MAPPING_INCOMPLETE: "参考图绑定不完整，请补齐结构化素材绑定后再生成。",
   WORKFLOW_ONBOARDING_ERROR: "工作流导入失败，请检查文件和映射配置。",
   MISSING_NODE: "当前 ComfyUI 缺少该工作流需要的节点。",
   INPUT_OPTION_UNAVAILABLE: "当前 ComfyUI 中缺少工作流所需的模型或选项。",

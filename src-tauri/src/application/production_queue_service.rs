@@ -945,6 +945,7 @@ impl ProductionQueueService {
                             workflow_version_id: next.workflow_version_id.clone(),
                             recipe_id: next.recipe_id.clone(),
                             values,
+                            reference_manifest: None,
                         },
                         move |task| {
                             let item_id = item_id.clone();

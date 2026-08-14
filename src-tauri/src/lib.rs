@@ -366,6 +366,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     asset_repository.clone(),
                     clock.clone(),
                 )
+                .with_workflow_compatibility_service(workflow_onboarding_service.clone())
                 .with_task_update_sink(task_update_sink.clone())
                 .with_execution_registry(execution_registry.clone()),
             );
