@@ -137,9 +137,11 @@ impl WorkflowRuntimeRepository for SqliteWorkflowRuntimeRepository {
                 (SELECT COUNT(*) FROM production_batch_items pbi WHERE pbi.workflow_version_id = ?) AS production_batch_item_count,
                 ((SELECT COUNT(*) FROM presets p WHERE p.workflow_version_id = ?)
                  + (SELECT COUNT(*) FROM project_templates pt WHERE pt.workflow_version_id = ?)
-                 + (SELECT COUNT(*) FROM shot_stage_configs ssc WHERE ssc.workflow_version_id = ?)) AS other_reference_count
+                 + (SELECT COUNT(*) FROM shot_stage_configs ssc WHERE ssc.workflow_version_id = ?)) AS other_reference_count,
+                (SELECT COUNT(*) FROM benchmark_candidates bc WHERE bc.workflow_version_id = ?) AS benchmark_reference_count
              WHERE EXISTS (SELECT 1 FROM workflow_versions WHERE id = ?)",
         )
+        .bind(workflow_version_id)
         .bind(workflow_version_id)
         .bind(workflow_version_id)
         .bind(workflow_version_id)
@@ -158,6 +160,7 @@ impl WorkflowRuntimeRepository for SqliteWorkflowRuntimeRepository {
             historical_task_count: row.historical_task_count.max(0) as u64,
             production_batch_item_count: row.production_batch_item_count.max(0) as u64,
             other_reference_count: row.other_reference_count.max(0) as u64,
+            benchmark_reference_count: row.benchmark_reference_count.max(0) as u64,
         }))
     }
 
@@ -206,8 +209,10 @@ async fn delete_version(
           + (SELECT COUNT(*) FROM production_batch_items WHERE workflow_version_id = ?)
           + (SELECT COUNT(*) FROM presets WHERE workflow_version_id = ?)
           + (SELECT COUNT(*) FROM project_templates WHERE workflow_version_id = ?)
-          + (SELECT COUNT(*) FROM shot_stage_configs WHERE workflow_version_id = ?)",
+          + (SELECT COUNT(*) FROM shot_stage_configs WHERE workflow_version_id = ?)
+          + (SELECT COUNT(*) FROM benchmark_candidates WHERE workflow_version_id = ?)",
     )
+    .bind(workflow_version_id)
     .bind(workflow_version_id)
     .bind(workflow_version_id)
     .bind(workflow_version_id)
@@ -296,6 +301,7 @@ struct WorkflowDeletionCountsRow {
     active_queue_item_count: i64,
     production_batch_item_count: i64,
     other_reference_count: i64,
+    benchmark_reference_count: i64,
 }
 
 #[cfg(test)]

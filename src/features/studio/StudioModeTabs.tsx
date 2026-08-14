@@ -17,8 +17,8 @@ export function StudioModeTabs({ mode, onChange }: Props) {
         <small>管理任务清单和生产队列</small>
       </button>
       <button type="button" role="tab" aria-selected={mode === "experiment"} className={mode === "experiment" ? "studio-mode-tab studio-mode-tab-active" : "studio-mode-tab"} onClick={() => onChange("experiment")}>
-        实验
-        <small>参数变体与结果择优</small>
+        Benchmark Lab
+        <small>Workflow / Recipe / Preset 横向比较</small>
       </button>
     </div>
   );

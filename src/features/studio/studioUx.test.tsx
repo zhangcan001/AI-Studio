@@ -46,7 +46,7 @@ describe("studio product UX contracts", () => {
 
     expect(html).toContain("单次创作");
     expect(html).toContain("批量生产");
-    expect(html).toContain("实验");
+    expect(html).toContain("Benchmark Lab");
     expect(html).toContain('aria-selected="true"');
   });
 

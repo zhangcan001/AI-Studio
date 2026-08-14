@@ -141,6 +141,7 @@ pub struct WorkflowDeletionInspection {
     pub active_queue_item_count: u64,
     pub historical_task_count: u64,
     pub production_batch_item_count: u64,
+    pub benchmark_reference_count: u64,
     pub can_hard_delete: bool,
     pub requires_archive: bool,
     pub blocking_reasons: Vec<String>,
@@ -718,10 +719,17 @@ impl WorkflowLifecycleService {
                 counts.other_reference_count
             ));
         }
+        if counts.benchmark_reference_count > 0 {
+            blocking_reasons.push(format!(
+                "存在 {} 条 Benchmark 历史引用，将保留历史真相并归档。",
+                counts.benchmark_reference_count
+            ));
+        }
         let has_active_work = counts.active_task_count > 0 || counts.active_queue_item_count > 0;
         let has_history = counts.historical_task_count > 0
             || counts.production_batch_item_count > 0
-            || counts.other_reference_count > 0;
+            || counts.other_reference_count > 0
+            || counts.benchmark_reference_count > 0;
         Ok(WorkflowDeletionInspection {
             workflow_id: version.workflow_id,
             workflow_version_id: version.workflow_version_id,
@@ -734,6 +742,7 @@ impl WorkflowLifecycleService {
             active_queue_item_count: counts.active_queue_item_count,
             historical_task_count: counts.historical_task_count,
             production_batch_item_count: counts.production_batch_item_count,
+            benchmark_reference_count: counts.benchmark_reference_count,
             can_hard_delete: !archived && !builtin && !has_active_work && !has_history,
             requires_archive: !archived && !builtin && !has_active_work && has_history,
             blocking_reasons,

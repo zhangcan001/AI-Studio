@@ -53,6 +53,7 @@ use application::{
     task_history_service::TaskHistoryService,
     task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
+    workflow_benchmark_service::WorkflowBenchmarkService,
     workflow_library_service::WorkflowLibraryService,
     workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::WorkflowOnboardingService,
@@ -443,6 +444,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_repository.clone(),
                 clock.clone(),
             ));
+            let workflow_benchmark_service = Arc::new(WorkflowBenchmarkService::new(
+                database_pool.clone(),
+                definition_repository.clone(),
+                preset_repository.clone(),
+                production_queue_service.clone(),
+                clock.clone(),
+            ));
             let h3_local_import_service = Arc::new(H3LocalImportService::new(
                 source_asset_import_service.clone(),
                 asset_video_prompt_service.clone(),
@@ -488,7 +496,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 data_dirs.cache.clone(),
             ));
             let preset_service = Arc::new(PresetService::new(
-                preset_repository,
+                preset_repository.clone(),
                 definition_repository.clone(),
                 asset_repository.clone(),
                 clock.clone(),
@@ -534,6 +542,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_library_service,
                 workflow_onboarding_service,
                 workflow_lifecycle_service,
+                workflow_benchmark_service,
                 generation_catalog_service,
                 task_query_service,
                 asset_query_service,
@@ -718,6 +727,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_lifecycle::workflow_delete_version,
             commands::workflow_lifecycle::workflow_delete_workflow,
             commands::workflow_lifecycle::workflow_restore_version,
+            commands::workflow_benchmark::workflow_benchmark_preview,
+            commands::workflow_benchmark::workflow_benchmark_create,
+            commands::workflow_benchmark::workflow_benchmark_list,
+            commands::workflow_benchmark::workflow_benchmark_get,
+            commands::workflow_benchmark::workflow_benchmark_set_winner,
+            commands::workflow_benchmark::workflow_benchmark_clone,
+            commands::workflow_benchmark::workflow_benchmark_delete,
             commands::catalog::generation_catalog_list,
             commands::generation::generation_create,
             commands::generation::generation_create_batch,

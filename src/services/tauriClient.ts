@@ -23,6 +23,12 @@ import type {
 } from "../types/h3LocalImport";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
+import type {
+  WorkflowBenchmarkCreateRequest,
+  WorkflowBenchmarkCandidatePreview,
+  WorkflowBenchmarkSummary,
+  WorkflowBenchmarkView,
+} from "../types/benchmark";
 import type { ShotBatchPlan, ShotInputValues, ShotStage, ShotView } from "../types/shot";
 import type {
   ReusableGenerationDraft,
@@ -323,6 +329,48 @@ export function createGeneration(request: {
   values: GenerationValues;
 }): Promise<TaskView> {
   return invoke<TaskView>("generation_create", { request });
+}
+
+export function previewWorkflowBenchmark(
+  request: WorkflowBenchmarkCreateRequest,
+): Promise<{ candidates: WorkflowBenchmarkCandidatePreview[] }> {
+  return invoke<{ candidates: WorkflowBenchmarkCandidatePreview[] }>("workflow_benchmark_preview", { request });
+}
+
+export function createWorkflowBenchmark(request: WorkflowBenchmarkCreateRequest): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_create", { request });
+}
+
+export function listWorkflowBenchmarks(projectId: string, limit = 20): Promise<WorkflowBenchmarkSummary[]> {
+  return invoke<WorkflowBenchmarkSummary[]>("workflow_benchmark_list", { request: { projectId, limit } });
+}
+
+export function getWorkflowBenchmark(projectId: string, experimentId: string): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_get", { projectId, experimentId });
+}
+
+export function setWorkflowBenchmarkWinner(
+  projectId: string,
+  experimentId: string,
+  candidateId?: string,
+): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_set_winner", {
+    request: { projectId, experimentId, candidateId },
+  });
+}
+
+export function cloneWorkflowBenchmark(
+  projectId: string,
+  experimentId: string,
+  name?: string,
+): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_clone", {
+    request: { projectId, experimentId, name },
+  });
+}
+
+export function deleteWorkflowBenchmark(projectId: string, experimentId: string): Promise<{ deleted: boolean; experimentId: string }> {
+  return invoke<{ deleted: boolean; experimentId: string }>("workflow_benchmark_delete", { projectId, experimentId });
 }
 
 export function listShots(projectId: string): Promise<ShotView[]> {

@@ -14,6 +14,7 @@ pub mod settings;
 pub mod shot;
 pub mod shot_batch;
 pub mod task;
+pub mod workflow_benchmark;
 pub mod workflow_library;
 pub mod workflow_lifecycle;
 pub mod workflow_onboarding;

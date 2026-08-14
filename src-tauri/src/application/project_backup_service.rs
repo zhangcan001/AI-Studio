@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 6;
+const BACKUP_VERSION: u32 = 7;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -59,6 +59,7 @@ pub struct ProjectBackupPreviewView {
     pub history_tasks: usize,
     pub presets: usize,
     pub production_queues: usize,
+    pub benchmarks: usize,
     pub prompt_entries: usize,
     pub shots: usize,
     pub missing_workflows: Vec<String>,
@@ -185,6 +186,7 @@ impl ProjectBackupService {
             history_tasks: document.tasks.len(),
             presets: document.presets.len(),
             production_queues: document.batches.len(),
+            benchmarks: document.benchmark_experiments.len(),
             prompt_entries: document.prompt_entries.len(),
             shots: document.shots.len(),
             missing_workflows,
@@ -263,6 +265,20 @@ impl ProjectBackupService {
         for item in &document.items {
             item_ids.insert(item.id.clone(), format!("pbi_{}", Uuid::new_v4().simple()));
         }
+        let mut benchmark_experiment_ids = HashMap::new();
+        for experiment in &document.benchmark_experiments {
+            benchmark_experiment_ids.insert(
+                experiment.id.clone(),
+                format!("bmk_{}", Uuid::new_v4().simple()),
+            );
+        }
+        let mut benchmark_candidate_ids = HashMap::new();
+        for candidate in &document.benchmark_candidates {
+            benchmark_candidate_ids.insert(
+                candidate.id.clone(),
+                format!("bmc_{}", Uuid::new_v4().simple()),
+            );
+        }
         let mut shot_ids = HashMap::new();
         for shot in &document.shots {
             shot_ids.insert(shot.id.clone(), format!("sht_{}", Uuid::new_v4()));
@@ -309,6 +325,8 @@ impl ProjectBackupService {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &benchmark_experiment_ids,
+                &benchmark_candidate_ids,
                 &tag_ids,
                 &shot_ids,
                 &shot_generation_link_ids,
@@ -422,6 +440,19 @@ impl ProjectBackupService {
         let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
+        let benchmark_experiments =
+            query_benchmark_experiments(&mut transaction, project_id).await?;
+        let mut benchmark_candidates =
+            query_benchmark_candidates(&mut transaction, project_id).await?;
+        for candidate in &mut benchmark_candidates {
+            if candidate
+                .task_id
+                .as_ref()
+                .is_some_and(|task_id| !included_task_ids.contains(task_id))
+            {
+                candidate.task_id = None;
+            }
+        }
         let mut production_item_reviews =
             query_production_item_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
@@ -511,6 +542,14 @@ impl ProjectBackupService {
                     .is_none_or(|item_id| included_batch_item_ids.contains(item_id.as_str()))
         });
         let mut workflow_refs = collect_workflow_refs(&tasks);
+        for reference in query_benchmark_workflow_refs(&mut transaction, project_id).await? {
+            if !workflow_refs.iter().any(|item| {
+                item.workflow_version_id == reference.workflow_version_id
+                    && item.recipe_id == reference.recipe_id
+            }) {
+                workflow_refs.push(reference);
+            }
+        }
         for config in &shot_stage_configs {
             let reference = WorkflowReference {
                 workflow_id: config.workflow_id.clone(),
@@ -648,6 +687,8 @@ impl ProjectBackupService {
             asset_favorites,
             asset_video_prompts,
             production_item_reviews,
+            benchmark_experiments,
+            benchmark_candidates,
             shots,
             shot_stage_configs,
             shot_reference_assets,
@@ -668,6 +709,8 @@ impl ProjectBackupService {
         prompt_version_ids: &HashMap<String, String>,
         batch_ids: &HashMap<String, String>,
         item_ids: &HashMap<String, String>,
+        benchmark_experiment_ids: &HashMap<String, String>,
+        benchmark_candidate_ids: &HashMap<String, String>,
         tag_ids: &HashMap<String, String>,
         shot_ids: &HashMap<String, String>,
         shot_generation_link_ids: &HashMap<String, String>,
@@ -691,6 +734,8 @@ impl ProjectBackupService {
             prompt_version_ids,
             batch_ids,
             item_ids,
+            benchmark_experiment_ids,
+            benchmark_candidate_ids,
             tag_ids,
             shot_ids,
             shot_generation_link_ids,
@@ -757,6 +802,10 @@ struct BackupDocument {
     asset_video_prompts: Vec<BackupAssetVideoPrompt>,
     #[serde(default)]
     production_item_reviews: Vec<BackupProductionItemReview>,
+    #[serde(default)]
+    benchmark_experiments: Vec<BackupBenchmarkExperiment>,
+    #[serde(default)]
+    benchmark_candidates: Vec<BackupBenchmarkCandidate>,
     #[serde(default)]
     shots: Vec<BackupShot>,
     #[serde(default)]
@@ -946,6 +995,39 @@ struct BackupBatchItem {
     error_message: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupBenchmarkExperiment {
+    id: String,
+    name: String,
+    media_type: String,
+    status: String,
+    base_values: Value,
+    asset_ids: Vec<String>,
+    winner_candidate_id: Option<String>,
+    production_batch_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupBenchmarkCandidate {
+    id: String,
+    experiment_id: String,
+    position: i64,
+    workflow_version_id: String,
+    recipe_id: String,
+    preset_id: Option<String>,
+    preset_name: Option<String>,
+    label: String,
+    values: Value,
+    asset_ids: Vec<String>,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1193,6 +1275,44 @@ struct DbBatchItem {
 }
 
 #[derive(FromRow)]
+struct DbBenchmarkExperiment {
+    id: String,
+    name: String,
+    media_type: String,
+    status: String,
+    base_values_json: String,
+    asset_ids_json: String,
+    winner_candidate_id: Option<String>,
+    production_batch_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbBenchmarkCandidate {
+    id: String,
+    experiment_id: String,
+    position: i64,
+    workflow_version_id: String,
+    recipe_id: String,
+    preset_id: Option<String>,
+    preset_name: Option<String>,
+    label: String,
+    values_json: String,
+    asset_ids_json: String,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    created_at: String,
+}
+
+#[derive(FromRow)]
+struct DbBenchmarkWorkflowRef {
+    workflow_id: String,
+    workflow_version_id: String,
+    recipe_id: String,
+}
+
+#[derive(FromRow)]
 struct DbProductionItemReview {
     id: String,
     project_id: String,
@@ -1250,6 +1370,24 @@ fn parse_optional_value(value: Option<&str>, label: &str) -> Result<Option<Value
     value
         .map(|value| parse_value(Some(value), label))
         .transpose()
+}
+
+fn parse_string_array(value: Option<&str>, label: &str) -> Result<Vec<String>, AppError> {
+    let value = parse_value(value, label)?;
+    let Some(values) = value.as_array() else {
+        return Err(AppError::backup_invalid(format!(
+            "{label} 必须是字符串数组"
+        )));
+    };
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| AppError::backup_invalid(format!("{label} 必须只包含字符串")))
+        })
+        .collect()
 }
 
 fn extension_for_path(path: &str) -> String {
@@ -1532,6 +1670,99 @@ async fn query_batch_items(
         }
     }
     Ok(result)
+}
+
+async fn query_benchmark_experiments(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupBenchmarkExperiment>, AppError> {
+    let rows = sqlx::query_as::<_, DbBenchmarkExperiment>(
+        "SELECT id, name, media_type, status, base_values_json, asset_ids_json,
+                winner_candidate_id, production_batch_id, created_at, updated_at
+         FROM benchmark_experiments WHERE project_id = ? ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(BackupBenchmarkExperiment {
+                id: row.id,
+                name: row.name,
+                media_type: row.media_type,
+                status: row.status,
+                base_values: parse_value(Some(&row.base_values_json), "Benchmark 基准输入")?,
+                asset_ids: parse_string_array(Some(&row.asset_ids_json), "Benchmark 素材")?,
+                winner_candidate_id: row.winner_candidate_id,
+                production_batch_id: row.production_batch_id,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            })
+        })
+        .collect()
+}
+
+async fn query_benchmark_candidates(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupBenchmarkCandidate>, AppError> {
+    let rows = sqlx::query_as::<_, DbBenchmarkCandidate>(
+        "SELECT c.id, c.experiment_id, c.position, c.workflow_version_id, c.recipe_id,
+                c.preset_id, c.preset_name, c.label, c.values_json, c.asset_ids_json,
+                c.production_batch_item_id, c.task_id, c.created_at
+         FROM benchmark_candidates c
+         JOIN benchmark_experiments e ON e.id = c.experiment_id
+         WHERE e.project_id = ? ORDER BY c.experiment_id, c.position, c.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(BackupBenchmarkCandidate {
+                id: row.id,
+                experiment_id: row.experiment_id,
+                position: row.position,
+                workflow_version_id: row.workflow_version_id,
+                recipe_id: row.recipe_id,
+                preset_id: row.preset_id,
+                preset_name: row.preset_name,
+                label: row.label,
+                values: parse_value(Some(&row.values_json), "Benchmark 候选输入")?,
+                asset_ids: parse_string_array(Some(&row.asset_ids_json), "Benchmark 候选素材")?,
+                production_batch_item_id: row.production_batch_item_id,
+                task_id: row.task_id,
+                created_at: row.created_at,
+            })
+        })
+        .collect()
+}
+
+async fn query_benchmark_workflow_refs(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<WorkflowReference>, AppError> {
+    let rows = sqlx::query_as::<_, DbBenchmarkWorkflowRef>(
+        "SELECT DISTINCT wv.workflow_id, c.workflow_version_id, c.recipe_id
+         FROM benchmark_candidates c
+         JOIN benchmark_experiments e ON e.id = c.experiment_id
+         JOIN workflow_versions wv ON wv.id = c.workflow_version_id
+         WHERE e.project_id = ? ORDER BY wv.workflow_id, c.workflow_version_id, c.recipe_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| WorkflowReference {
+            workflow_id: row.workflow_id,
+            workflow_version_id: row.workflow_version_id,
+            recipe_id: row.recipe_id,
+        })
+        .collect())
 }
 
 async fn query_production_item_reviews(
@@ -1937,7 +2168,7 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6) {
+    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7) {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -1982,7 +2213,120 @@ fn validate_document_entries(
     validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
     validate_prompt_document(document)?;
+    validate_benchmark_document(document)?;
     validate_shot_document(document)?;
+    Ok(())
+}
+
+fn validate_benchmark_document(document: &BackupDocument) -> Result<(), AppError> {
+    let batch_ids = document
+        .batches
+        .iter()
+        .map(|batch| batch.id.as_str())
+        .collect::<HashSet<_>>();
+    let item_batches = document
+        .items
+        .iter()
+        .map(|item| (item.id.as_str(), item.batch_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let task_ids = document
+        .tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<HashSet<_>>();
+    let asset_ids = document
+        .assets
+        .iter()
+        .map(|asset| asset.id.as_str())
+        .collect::<HashSet<_>>();
+    let experiment_ids = document
+        .benchmark_experiments
+        .iter()
+        .map(|experiment| experiment.id.as_str())
+        .collect::<HashSet<_>>();
+    if experiment_ids.len() != document.benchmark_experiments.len() {
+        return Err(AppError::backup_invalid("Benchmark 实验 ID 重复"));
+    }
+    let mut candidate_ids = HashSet::new();
+    let mut candidate_positions = HashSet::new();
+    for experiment in &document.benchmark_experiments {
+        if experiment.name.trim().is_empty()
+            || experiment.name.chars().count() > 120
+            || !matches!(experiment.media_type.as_str(), "IMAGE" | "VIDEO")
+            || !matches!(
+                experiment.status.as_str(),
+                "DRAFT"
+                    | "QUEUED"
+                    | "RUNNING"
+                    | "COMPLETED"
+                    | "PARTIAL"
+                    | "CANCELLED"
+                    | "FAILED_TO_QUEUE"
+            )
+            || !experiment.base_values.is_object()
+            || experiment
+                .asset_ids
+                .iter()
+                .any(|id| !asset_ids.contains(id.as_str()))
+            || experiment
+                .production_batch_id
+                .as_ref()
+                .is_some_and(|id| !batch_ids.contains(id.as_str()))
+            || experiment.winner_candidate_id.as_ref().is_some_and(|id| {
+                !document.benchmark_candidates.iter().any(|candidate| {
+                    candidate.id == *id && candidate.experiment_id == experiment.id
+                })
+            })
+        {
+            return Err(AppError::backup_invalid("Benchmark 实验元数据无效"));
+        }
+    }
+    for candidate in &document.benchmark_candidates {
+        if !experiment_ids.contains(candidate.experiment_id.as_str())
+            || !candidate_ids.insert(candidate.id.as_str())
+            || candidate.position < 0
+            || !candidate_positions.insert((candidate.experiment_id.as_str(), candidate.position))
+            || candidate.workflow_version_id.trim().is_empty()
+            || candidate.recipe_id.trim().is_empty()
+            || !candidate.values.is_object()
+            || candidate
+                .asset_ids
+                .iter()
+                .any(|id| !asset_ids.contains(id.as_str()))
+            || candidate
+                .production_batch_item_id
+                .as_ref()
+                .is_some_and(|id| !item_batches.contains_key(id.as_str()))
+            || candidate
+                .task_id
+                .as_ref()
+                .is_some_and(|id| !task_ids.contains(id.as_str()))
+        {
+            return Err(AppError::backup_invalid("Benchmark 候选元数据无效"));
+        }
+        if let Some(item_id) = &candidate.production_batch_item_id {
+            let experiment_batch = document
+                .benchmark_experiments
+                .iter()
+                .find(|experiment| experiment.id == candidate.experiment_id)
+                .and_then(|experiment| experiment.production_batch_id.as_deref());
+            if experiment_batch != item_batches.get(item_id.as_str()).copied() {
+                return Err(AppError::backup_invalid("Benchmark 候选队列引用不一致"));
+            }
+        }
+    }
+    for experiment in &document.benchmark_experiments {
+        let count = document
+            .benchmark_candidates
+            .iter()
+            .filter(|candidate| candidate.experiment_id == experiment.id)
+            .count();
+        if !(2..=crate::application::workflow_benchmark_service::MAX_BENCHMARK_CANDIDATES)
+            .contains(&count)
+        {
+            return Err(AppError::backup_invalid("Benchmark 候选数量必须为 2–8"));
+        }
+    }
     Ok(())
 }
 
@@ -2608,6 +2952,8 @@ async fn restore_rows_in_transaction(
     prompt_version_ids: &HashMap<String, String>,
     batch_ids: &HashMap<String, String>,
     item_ids: &HashMap<String, String>,
+    benchmark_experiment_ids: &HashMap<String, String>,
+    benchmark_candidate_ids: &HashMap<String, String>,
     tag_ids: &HashMap<String, String>,
     shot_ids: &HashMap<String, String>,
     shot_generation_link_ids: &HashMap<String, String>,
@@ -2976,6 +3322,110 @@ async fn restore_rows_in_transaction(
         )
         .bind(&review.created_at)
         .bind(&review.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for experiment in &document.benchmark_experiments {
+        let experiment_id = benchmark_experiment_ids
+            .get(&experiment.id)
+            .ok_or_else(|| AppError::backup_invalid("Benchmark 实验 ID 映射缺失"))?;
+        let status = match experiment.status.as_str() {
+            "QUEUED" | "RUNNING" => "FAILED_TO_QUEUE",
+            other => other,
+        };
+        let winner_candidate_id = experiment
+            .winner_candidate_id
+            .as_ref()
+            .and_then(|id| benchmark_candidate_ids.get(id));
+        let production_batch_id = experiment
+            .production_batch_id
+            .as_ref()
+            .and_then(|id| batch_ids.get(id));
+        let mut base_values = experiment.base_values.clone();
+        remap_snapshot_asset_references(&mut base_values, asset_ids);
+        let asset_ids = experiment
+            .asset_ids
+            .iter()
+            .filter_map(|id| asset_ids.get(id))
+            .cloned()
+            .collect::<Vec<_>>();
+        sqlx::query(
+            "INSERT INTO benchmark_experiments
+             (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
+              winner_candidate_id, production_batch_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(experiment_id)
+        .bind(&project.id)
+        .bind(&experiment.name)
+        .bind(&experiment.media_type)
+        .bind(status)
+        .bind(base_values.to_string())
+        .bind(serde_json::to_string(&asset_ids).map_err(|error| {
+            AppError::backup_invalid(format!("Benchmark 素材序列化失败：{error}"))
+        })?)
+        .bind(winner_candidate_id)
+        .bind(production_batch_id)
+        .bind(&experiment.created_at)
+        .bind(&experiment.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for candidate in &document.benchmark_candidates {
+        let candidate_id = benchmark_candidate_ids
+            .get(&candidate.id)
+            .ok_or_else(|| AppError::backup_invalid("Benchmark 候选 ID 映射缺失"))?;
+        let experiment_id = benchmark_experiment_ids
+            .get(&candidate.experiment_id)
+            .ok_or_else(|| AppError::backup_invalid("Benchmark 候选缺少实验映射"))?;
+        ensure_version_recipe_dependency(
+            transaction,
+            &candidate.workflow_version_id,
+            &candidate.recipe_id,
+        )
+        .await?;
+        let mut values = candidate.values.clone();
+        remap_snapshot_asset_references(&mut values, asset_ids);
+        let restored_asset_ids = candidate
+            .asset_ids
+            .iter()
+            .filter_map(|id| asset_ids.get(id))
+            .cloned()
+            .collect::<Vec<_>>();
+        sqlx::query(
+            "INSERT INTO benchmark_candidates
+             (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
+              preset_name, label, values_json, asset_ids_json, production_batch_item_id,
+              task_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(candidate_id)
+        .bind(experiment_id)
+        .bind(candidate.position)
+        .bind(&candidate.workflow_version_id)
+        .bind(&candidate.recipe_id)
+        .bind(
+            candidate
+                .preset_id
+                .as_ref()
+                .and_then(|id| preset_ids.get(id)),
+        )
+        .bind(&candidate.preset_name)
+        .bind(&candidate.label)
+        .bind(values.to_string())
+        .bind(serde_json::to_string(&restored_asset_ids).map_err(|error| {
+            AppError::backup_invalid(format!("Benchmark 候选素材序列化失败：{error}"))
+        })?)
+        .bind(
+            candidate
+                .production_batch_item_id
+                .as_ref()
+                .and_then(|id| item_ids.get(id)),
+        )
+        .bind(candidate.task_id.as_ref().and_then(|id| task_ids.get(id)))
+        .bind(&candidate.created_at)
         .execute(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
@@ -3401,6 +3851,8 @@ mod tests {
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
             production_item_reviews: Vec::new(),
+            benchmark_experiments: Vec::new(),
+            benchmark_candidates: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -3781,7 +4233,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 6);
+        assert_eq!(manifest.version, 7);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -4281,6 +4733,8 @@ mod tests {
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
             production_item_reviews: Vec::new(),
+            benchmark_experiments: Vec::new(),
+            benchmark_candidates: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -4316,6 +4770,8 @@ mod tests {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &HashMap::new(),
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -4409,6 +4865,8 @@ mod tests {
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
             production_item_reviews: Vec::new(),
+            benchmark_experiments: Vec::new(),
+            benchmark_candidates: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),

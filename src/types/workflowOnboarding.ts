@@ -300,6 +300,7 @@ export interface WorkflowDeletionInspection {
   activeQueueItemCount: number;
   historicalTaskCount: number;
   productionBatchItemCount: number;
+  benchmarkReferenceCount: number;
   canHardDelete: boolean;
   requiresArchive: boolean;
   blockingReasons: string[];

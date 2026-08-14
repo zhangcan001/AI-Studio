@@ -42,6 +42,7 @@ import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
 import { CreationModeHint } from "../runtime/CreationModeHint";
 import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfilePanel";
 import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
+import { WorkflowBenchmarkPanel } from "../experiments/WorkflowBenchmarkPanel";
 import { type ExperimentContext, type ExperimentDimension, type ExperimentPlan } from "../experiments/experimentPlanner";
 import { PromptLibraryPanel } from "../prompts/PromptLibraryPanel";
 import type { PromptVersionView } from "../../types/prompt";
@@ -1112,14 +1113,33 @@ export function GenerationStudio({
               />
             )}
             {studioMode === "experiment" && (
-              <ExperimentPlannerPanel
-                recipe={selectedWorkflow}
-                baseValues={values}
-                baseReady={canExperimentBase}
-                blockedReason={blockedReason}
-                initialDimensions={promptExperimentDimensions}
-                onSubmit={submitExperimentPlan}
-              />
+              <>
+                <WorkflowBenchmarkPanel
+                  projectId={projectId}
+                  catalog={catalog}
+                  baseRecipe={selectedWorkflow}
+                  baseValues={values}
+                  baseReady={canExperimentBase}
+                  blockedReason={blockedReason}
+                  onOpenTask={onOpenTask}
+                  onAdmissionChanged={onProductionAdmissionChanged}
+                  onCreated={(created) => {
+                    setExperimentFocusBatchId(created.productionBatchId);
+                    setNotice(`Benchmark 已保存：${created.candidates.length} 个候选已进入普通生产队列。`);
+                  }}
+                />
+                <details className="legacy-experiment-planner">
+                  <summary>参数变体草稿（兼容旧实验计划）</summary>
+                  <ExperimentPlannerPanel
+                    recipe={selectedWorkflow}
+                    baseValues={values}
+                    baseReady={canExperimentBase}
+                    blockedReason={blockedReason}
+                    initialDimensions={promptExperimentDimensions}
+                    onSubmit={submitExperimentPlan}
+                  />
+                </details>
+              </>
             )}
             {studioMode !== "batch" && (
               <GenerationActionBar

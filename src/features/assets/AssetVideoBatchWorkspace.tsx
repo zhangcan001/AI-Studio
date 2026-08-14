@@ -62,6 +62,7 @@ import { formatPromptBytes, localImportCanCommit, localImportStatusLabel } from 
 import { AssetCard } from "./AssetCard";
 import { DynamicFormRenderer, validateRecipeValues } from "../studio/DynamicFormRenderer";
 import { WorkflowSelector } from "../runtime/WorkflowSelector";
+import { WorkflowBenchmarkPanel } from "../experiments/WorkflowBenchmarkPanel";
 import { defaultGenerationValues } from "../../stores/studioStore";
 import {
   clearSelectedRecipeRef,
@@ -1357,6 +1358,24 @@ export function AssetVideoBatchWorkspace({
           从本地导入
         </button>
       </div>
+
+      {sourceMode === "ASSET_LIBRARY" && recipe && (
+        <WorkflowBenchmarkPanel
+          projectId={projectId}
+          catalog={catalog}
+          baseRecipe={recipe}
+          baseValues={batchItems[0]?.values ?? batchDraft.items[0]?.values ?? defaultGenerationValues(recipe)}
+          baseReady={Boolean(canCreate && batchDraft.items.length)}
+          blockedReason={!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !modeAssetReady ? "当前模式的参考素材尚未准备完成。" : "请先填写有效的视频 Prompt。"}
+          onOpenTask={onOpenTask}
+          onAdmissionChanged={onAdmissionChanged}
+          onCreated={(created) => {
+            setCreatedBatchId(created.productionBatchId);
+            setCreatedBatchStarted(created.status === "RUNNING");
+            setNotice(`视频 Benchmark 已创建：${created.candidates.length} 个候选进入普通串行队列。`);
+          }}
+        />
+      )}
 
       {sourceMode === "ASSET_LIBRARY" && (
       <section className="h3-mode-selector" aria-label="MiniMax H3 生成模式">

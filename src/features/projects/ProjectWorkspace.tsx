@@ -190,7 +190,7 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
             </div>
             <button type="button" className="quiet-button" onClick={() => setBackupPreview(undefined)} disabled={backupBusy}>取消</button>
           </div>
-          <p>图片 {backupPreview.imageCount} · 视频 {backupPreview.videoCount} · 音频 {backupPreview.audioCount} · 历史任务 {backupPreview.historyTasks} · 预设 {backupPreview.presets} · 生产队列 {backupPreview.productionQueues} · 镜头 {backupPreview.shots ?? 0}</p>
+          <p>图片 {backupPreview.imageCount} · 视频 {backupPreview.videoCount} · 音频 {backupPreview.audioCount} · 历史任务 {backupPreview.historyTasks} · 预设 {backupPreview.presets} · 生产队列 {backupPreview.productionQueues} · Benchmark {backupPreview.benchmarks ?? 0} · 镜头 {backupPreview.shots ?? 0}</p>
           {backupPreview.missingWorkflows.length > 0 && <p className="error-message">缺少工作流：{backupPreview.missingWorkflows.join("、")}；历史记录仍可恢复。</p>}
           <p className="settings-warning">{backupPreview.warning}</p>
           <button type="button" className="primary-action" onClick={() => void restoreBackup()} disabled={backupBusy}>

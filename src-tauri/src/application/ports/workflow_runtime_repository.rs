@@ -37,6 +37,7 @@ pub struct WorkflowDeletionCounts {
     pub historical_task_count: u64,
     pub production_batch_item_count: u64,
     pub other_reference_count: u64,
+    pub benchmark_reference_count: u64,
 }
 
 #[async_trait]

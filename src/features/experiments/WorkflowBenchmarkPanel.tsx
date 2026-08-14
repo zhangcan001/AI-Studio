@@ -1,0 +1,550 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  cloneWorkflowBenchmark,
+  createWorkflowBenchmark,
+  deleteWorkflowBenchmark,
+  getAsset,
+  getWorkflowBenchmark,
+  listPresets,
+  listWorkflowBenchmarks,
+  previewWorkflowBenchmark,
+  setProductionReviewStatus,
+  setWorkflowBenchmarkWinner,
+} from "../../services/tauriClient";
+import { toUserMessage } from "../../i18n/errorMessages";
+import type { AssetView } from "../../types/asset";
+import type { GenerationValues, RecipeViewModel } from "../../types/generation";
+import type { PresetView } from "../../types/preset";
+import type {
+  BenchmarkCandidateCompatibility,
+  BenchmarkMediaType,
+  BenchmarkSeedMode,
+  WorkflowBenchmarkCandidatePreview,
+  WorkflowBenchmarkCandidateRequest,
+  WorkflowBenchmarkCandidateView,
+  WorkflowBenchmarkCreateRequest,
+  WorkflowBenchmarkSummary,
+  WorkflowBenchmarkView,
+} from "../../types/benchmark";
+import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
+
+interface Props {
+  projectId: string;
+  catalog: RecipeViewModel[];
+  baseRecipe?: RecipeViewModel;
+  baseValues: GenerationValues;
+  baseReady: boolean;
+  blockedReason?: string;
+  onOpenTask?: (taskId: string) => void;
+  onAdmissionChanged?: () => Promise<void>;
+  onCreated?: (experiment: WorkflowBenchmarkView) => void;
+}
+
+interface CandidateDraft extends WorkflowBenchmarkCandidateRequest {
+  key: string;
+}
+
+const compatibilityLabels: Record<BenchmarkCandidateCompatibility, string> = {
+  COMPATIBLE: "兼容",
+  PARTIAL: "部分兼容",
+  INCOMPATIBLE: "不兼容",
+};
+
+function recipeKey(recipe: Pick<RecipeViewModel, "workflowVersionId" | "recipeId">): string {
+  return `${recipe.workflowVersionId}:${recipe.recipeId}`;
+}
+
+function mediaRecipes(catalog: RecipeViewModel[], mediaType: BenchmarkMediaType): RecipeViewModel[] {
+  const output = mediaType.toLowerCase() as "image" | "video";
+  return catalog.filter((recipe) => recipe.outputTypes?.includes(output));
+}
+
+function recipeLabel(recipe: RecipeViewModel): string {
+  return `${recipe.name}${recipe.recipeVersion ? ` · v${recipe.recipeVersion}` : ""}`;
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "QUEUED": return "排队中";
+    case "RUNNING": return "生成中";
+    case "COMPLETED": return "已完成";
+    case "PARTIAL": return "部分完成";
+    case "CANCELLED": return "已取消";
+    case "FAILED_TO_QUEUE": return "未入队";
+    default: return status;
+  }
+}
+
+function taskStatusLabel(status?: string): string {
+  switch (status) {
+    case "SUCCEEDED": return "已完成";
+    case "FAILED": return "失败";
+    case "CANCELLED": return "已取消";
+    case "IN_PROGRESS": return "执行中";
+    case "PENDING": return "等待中";
+    default: return status ?? "等待中";
+  }
+}
+
+function formatDuration(duration?: number): string {
+  if (duration === undefined) return "—";
+  if (duration < 1000) return `${duration} ms`;
+  return `${(duration / 1000).toFixed(1)} s`;
+}
+
+function mediaTypeForRecipe(recipe?: RecipeViewModel): BenchmarkMediaType {
+  return recipe?.outputTypes?.includes("video") ? "VIDEO" : "IMAGE";
+}
+
+function initialCandidates(catalog: RecipeViewModel[], baseRecipe: RecipeViewModel | undefined, mediaType: BenchmarkMediaType): CandidateDraft[] {
+  const compatible = mediaRecipes(catalog, mediaType);
+  const preferred = baseRecipe && mediaTypeForRecipe(baseRecipe) === mediaType ? baseRecipe : compatible[0];
+  const alternative = compatible.find((recipe) => recipeKey(recipe) !== (preferred ? recipeKey(preferred) : ""));
+  return [preferred, alternative]
+    .filter((recipe): recipe is RecipeViewModel => Boolean(recipe))
+    .map((recipe, index) => ({
+      key: `${recipeKey(recipe)}-${index}`,
+      workflowVersionId: recipe.workflowVersionId,
+      recipeId: recipe.recipeId,
+      label: `候选 ${index + 1}`,
+    }));
+}
+
+function candidateRequests(candidates: CandidateDraft[]): WorkflowBenchmarkCandidateRequest[] {
+  return candidates.map(({ key: _key, ...candidate }) => candidate);
+}
+
+function compatibilityClass(compatibility: string): string {
+  return compatibility === "COMPATIBLE"
+    ? "benchmark-compatibility benchmark-compatibility-good"
+    : compatibility === "PARTIAL"
+      ? "benchmark-compatibility benchmark-compatibility-partial"
+      : "benchmark-compatibility benchmark-compatibility-bad";
+}
+
+function candidateTitle(candidate: WorkflowBenchmarkCandidatePreview, catalog: RecipeViewModel[]): string {
+  const recipe = catalog.find((item) => item.workflowVersionId === candidate.workflowVersionId && item.recipeId === candidate.recipeId);
+  return recipe ? recipeLabel(recipe) : `${candidate.workflowVersionId} · ${candidate.recipeId}`;
+}
+
+function reviewLabel(status?: string): string {
+  switch (status) {
+    case "STARRED": return "最佳";
+    case "APPROVED": return "可用";
+    case "REJECTED": return "不推荐";
+    default: return "未审";
+  }
+}
+
+export function WorkflowBenchmarkPanel({
+  projectId,
+  catalog,
+  baseRecipe,
+  baseValues,
+  baseReady,
+  blockedReason,
+  onOpenTask,
+  onAdmissionChanged,
+  onCreated,
+}: Props) {
+  const [mediaType, setMediaType] = useState<BenchmarkMediaType>(() => mediaTypeForRecipe(baseRecipe));
+  const [name, setName] = useState("工作流横向 Benchmark");
+  const [candidates, setCandidates] = useState<CandidateDraft[]>(() => initialCandidates(catalog, baseRecipe, mediaType));
+  const [seedMode, setSeedMode] = useState<BenchmarkSeedMode>("FIXED");
+  const [fixedSeed, setFixedSeed] = useState(() => {
+    const seed = Object.values(baseValues).find((value) => value.type === "seed_fixed");
+    return seed?.type === "seed_fixed" ? seed.value : "";
+  });
+  const [presets, setPresets] = useState<Record<string, PresetView[]>>({});
+  const [preview, setPreview] = useState<WorkflowBenchmarkCandidatePreview[]>();
+  const [history, setHistory] = useState<WorkflowBenchmarkSummary[]>([]);
+  const [selected, setSelected] = useState<WorkflowBenchmarkView>();
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [previewAsset, setPreviewAsset] = useState<AssetView>();
+
+  const availableRecipes = useMemo(() => mediaRecipes(catalog, mediaType), [catalog, mediaType]);
+  const selectedPreviewMap = useMemo(() => new Map((preview ?? []).map((item) => [item.id, item])), [preview]);
+
+  useEffect(() => {
+    setCandidates(initialCandidates(catalog, baseRecipe, mediaType));
+    setPreview(undefined);
+  }, [baseRecipe?.recipeId, baseRecipe?.workflowVersionId, catalog, mediaType]);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingHistory(true);
+    void listWorkflowBenchmarks(projectId, 20)
+      .then((items) => { if (active) setHistory(items); })
+      .catch((loadError: unknown) => { if (active) setError(toUserMessage(loadError)); })
+      .finally(() => { if (active) setLoadingHistory(false); });
+    return () => { active = false; };
+  }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    const keys = [...new Set(candidates.map((candidate) => recipeKey(candidate)))];
+    void Promise.all(keys.map(async (key) => {
+      const [workflowVersionId, recipeId] = key.split(":");
+      try {
+        return [key, await listPresets(projectId, workflowVersionId, recipeId)] as const;
+      } catch {
+        return [key, []] as const;
+      }
+    })).then((entries) => {
+      if (!active) return;
+      setPresets((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    });
+    return () => { active = false; };
+  }, [candidates, projectId]);
+
+  function updateCandidate(key: string, patch: Partial<CandidateDraft>) {
+    setCandidates((current) => current.map((candidate) => candidate.key === key ? { ...candidate, ...patch } : candidate));
+    setPreview(undefined);
+    setError(undefined);
+  }
+
+  function selectRecipe(key: string, value: string) {
+    const [workflowVersionId, recipeId] = value.split(":");
+    updateCandidate(key, { workflowVersionId, recipeId, presetId: undefined });
+  }
+
+  function addCandidate() {
+    if (candidates.length >= 8 || !availableRecipes.length) return;
+    const nextRecipe = availableRecipes.find((recipe) => !candidates.some((candidate) => recipeKey(candidate) === recipeKey(recipe))) ?? availableRecipes[0];
+    setCandidates((current) => [...current, {
+      key: `${recipeKey(nextRecipe)}-${Date.now()}`,
+      workflowVersionId: nextRecipe.workflowVersionId,
+      recipeId: nextRecipe.recipeId,
+      label: `候选 ${current.length + 1}`,
+    }]);
+    setPreview(undefined);
+  }
+
+  function moveCandidate(index: number, offset: -1 | 1) {
+    const target = index + offset;
+    if (target < 0 || target >= candidates.length) return;
+    setCandidates((current) => {
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+    setPreview(undefined);
+  }
+
+  function request(): WorkflowBenchmarkCreateRequest {
+    return {
+      projectId,
+      name,
+      mediaType,
+      baseValues,
+      candidates: candidateRequests(candidates),
+      seedMode,
+      fixedSeed: fixedSeed.trim() || undefined,
+      autoStart: false,
+    };
+  }
+
+  async function previewCandidates() {
+    setBusy(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const result = await previewWorkflowBenchmark(request());
+      setPreview(result.candidates);
+      if (result.candidates.some((candidate) => candidate.compatibility === "INCOMPATIBLE")) {
+        setError("存在不兼容候选，请修正后再创建 Benchmark。");
+      } else {
+        setNotice("候选已按语义输入校验，冻结值可在下方复核。不会自动启动。 ");
+      }
+    } catch (previewError: unknown) {
+      setPreview(undefined);
+      setError(toUserMessage(previewError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function create(autoStart: boolean) {
+    if (candidates.length < 2 || candidates.length > 8 || !name.trim()) {
+      setError("Benchmark 需要名称和 2–8 个候选。");
+      return;
+    }
+    if (!baseReady) {
+      setError(`请先完成基础输入：${blockedReason ?? "当前基础 Draft 尚未通过校验。"}`);
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const checked = await previewWorkflowBenchmark(request());
+      setPreview(checked.candidates);
+      if (checked.candidates.some((candidate) => candidate.compatibility === "INCOMPATIBLE")) {
+        setError("存在不兼容候选，未创建队列。");
+        return;
+      }
+      const created = await createWorkflowBenchmark({ ...request(), autoStart });
+      setSelected(created);
+      setHistory((current) => [created.summary, ...current.filter((item) => item.id !== created.id)]);
+      onCreated?.(created);
+      await onAdmissionChanged?.();
+      setNotice(autoStart ? `Benchmark 已创建并开始，${created.candidates.length} 个候选将复用普通串行队列。` : "Benchmark 已创建，尚未启动；可在生产队列中开始。 ");
+    } catch (createError: unknown) {
+      setError(toUserMessage(createError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openHistory(id: string) {
+    setBusy(true);
+    setError(undefined);
+    try {
+      setSelected(await getWorkflowBenchmark(projectId, id));
+    } catch (loadError: unknown) {
+      setError(toUserMessage(loadError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshSelected() {
+    if (!selected) return;
+    await openHistory(selected.id);
+  }
+
+  async function markWinner(candidateId?: string) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      setSelected(await setWorkflowBenchmarkWinner(projectId, selected.id, candidateId));
+      setHistory((current) => current.map((item) => item.id === selected.id ? { ...item, winnerCandidateId: candidateId } : item));
+    } catch (winnerError: unknown) {
+      setError(toUserMessage(winnerError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markReview(candidate: WorkflowBenchmarkCandidateView, status: "STARRED" | "APPROVED" | "REJECTED") {
+    if (!selected?.productionBatchId || !candidate.productionBatchItemId) return;
+    setBusy(true);
+    try {
+      await setProductionReviewStatus({ projectId, batchId: selected.productionBatchId, itemId: candidate.productionBatchItemId, status });
+      await refreshSelected();
+    } catch (reviewError: unknown) {
+      setError(toUserMessage(reviewError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openAsset(assetId: string) {
+    setBusy(true);
+    try {
+      setPreviewAsset(await getAsset(projectId, assetId));
+    } catch (assetError: unknown) {
+      setError(toUserMessage(assetError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cloneSelected() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const cloned = await cloneWorkflowBenchmark(projectId, selected.id);
+      setSelected(cloned);
+      setHistory((current) => [cloned.summary, ...current]);
+      setNotice("Benchmark 已克隆；任务、结果、审片和胜者不会被复制。");
+    } catch (cloneError: unknown) {
+      setError(toUserMessage(cloneError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSelected() {
+    if (!selected || !window.confirm("只删除 Benchmark 历史元数据，不删除任务、批次、资产或审片记录。继续？")) return;
+    setBusy(true);
+    try {
+      await deleteWorkflowBenchmark(projectId, selected.id);
+      setHistory((current) => current.filter((item) => item.id !== selected.id));
+      setSelected(undefined);
+      setNotice("Benchmark 元数据已删除；普通生产历史保持不变。");
+    } catch (deleteError: unknown) {
+      setError(toUserMessage(deleteError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="workflow-benchmark-panel" aria-label="Workflow Benchmark Lab">
+      <div className="workflow-benchmark-heading">
+        <div>
+          <span className="section-label">Workflow Benchmark Lab</span>
+          <h3>横向比较 Workflow / Recipe / Preset</h3>
+          <p>相同基础输入、素材和 Seed，候选只通过现有 Production Queue 串行执行；结果由人审，不自动选胜者。</p>
+        </div>
+        <span className="workflow-benchmark-badge">v1 · 2–8 候选</span>
+      </div>
+
+      <div className="workflow-benchmark-create-grid">
+        <label>
+          <span>实验名称</span>
+          <input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="例如：H3 低成本参数对比" />
+        </label>
+        <label>
+          <span>媒体类型</span>
+          <select value={mediaType} onChange={(event) => setMediaType(event.target.value as BenchmarkMediaType)}>
+            <option value="IMAGE">IMAGE · 图片</option>
+            <option value="VIDEO">VIDEO · 视频</option>
+          </select>
+        </label>
+        <label>
+          <span>Seed 策略</span>
+          <select value={seedMode} onChange={(event) => setSeedMode(event.target.value as BenchmarkSeedMode)}>
+            <option value="FIXED">固定 Seed · 推荐</option>
+            <option value="EXPLORATION">探索模式 · 冻结随机 Seed</option>
+          </select>
+        </label>
+        {seedMode === "FIXED" && (
+          <label>
+            <span>固定 Seed <small>可选</small></span>
+            <input value={fixedSeed} inputMode="numeric" onChange={(event) => setFixedSeed(event.target.value.replace(/[^0-9]/g, ""))} placeholder="留空则沿用基础输入" />
+          </label>
+        )}
+      </div>
+
+      <div className="workflow-benchmark-candidate-toolbar">
+        <div>
+          <strong>候选冻结</strong>
+          <small>按语义 key 对齐输入；Preset 只记录来源，数值会冻结到候选。</small>
+        </div>
+        <button type="button" className="quiet-button" onClick={addCandidate} disabled={busy || candidates.length >= 8 || !availableRecipes.length}>添加候选</button>
+      </div>
+      <div className="workflow-benchmark-candidates">
+        {candidates.map((candidate, index) => {
+          const key = recipeKey(candidate);
+          const candidatePresets = presets[key] ?? [];
+          const candidatePreview = selectedPreviewMap.get(candidate.key);
+          return (
+            <article className="workflow-benchmark-candidate" key={candidate.key}>
+              <div className="workflow-benchmark-candidate-index">#{index + 1}</div>
+              <div className="workflow-benchmark-candidate-fields">
+                <label>
+                  <span>Workflow / Recipe</span>
+                  <select value={key} onChange={(event) => selectRecipe(candidate.key, event.target.value)} disabled={!availableRecipes.length}>
+                    {availableRecipes.map((recipe) => <option key={recipeKey(recipe)} value={recipeKey(recipe)}>{recipeLabel(recipe)}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Preset <small>可选</small></span>
+                  <select value={candidate.presetId ?? ""} onChange={(event) => updateCandidate(candidate.key, { presetId: event.target.value || undefined })}>
+                    <option value="">不使用 Preset</option>
+                    {candidatePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>候选标签</span>
+                  <input value={candidate.label ?? ""} maxLength={80} onChange={(event) => updateCandidate(candidate.key, { label: event.target.value })} />
+                </label>
+              </div>
+              <div className="workflow-benchmark-candidate-actions">
+                <button type="button" className="quiet-button" onClick={() => moveCandidate(index, -1)} disabled={index === 0}>上移</button>
+                <button type="button" className="quiet-button" onClick={() => moveCandidate(index, 1)} disabled={index === candidates.length - 1}>下移</button>
+                <button type="button" className="quiet-button" onClick={() => { setCandidates((current) => current.filter((item) => item.key !== candidate.key)); setPreview(undefined); }} disabled={candidates.length <= 2}>移除</button>
+              </div>
+              {candidatePreview && (
+                <div className="workflow-benchmark-preview-row">
+                  <span className={compatibilityClass(candidatePreview.compatibility)}>{compatibilityLabels[candidatePreview.compatibility]}</span>
+                  <span>{candidatePreview.assetIds.length} 个素材 ID 已冻结</span>
+                  {candidatePreview.compatibilityReasons.map((reason) => <small key={reason}>{reason}</small>)}
+                </div>
+              )}
+            </article>
+          );
+        })}
+        {!candidates.length && <p className="disabled-note">当前媒体类型没有可用 Recipe。</p>}
+      </div>
+
+      <div className="workflow-benchmark-create-actions">
+        <button type="button" className="quiet-button" onClick={() => void previewCandidates()} disabled={busy || candidates.length < 2}>预览兼容性与冻结值</button>
+        <button type="button" onClick={() => void create(false)} disabled={busy || candidates.length < 2 || !baseReady}>创建 Benchmark（不启动）</button>
+        <button type="button" onClick={() => void create(true)} disabled={busy || candidates.length < 2 || !baseReady}>创建并开始实验</button>
+      </div>
+      {!baseReady && <p className="workflow-benchmark-blocked" role="status">基础输入尚未就绪：{blockedReason ?? "请先完成当前创作参数。"}</p>}
+      {error && <p className="error-message" role="alert">{error}</p>}
+      {notice && <p className="studio-notice" role="status">{notice}</p>}
+
+      <div className="workflow-benchmark-history-heading">
+        <div>
+          <span className="section-label">历史实验</span>
+          <strong>可重启恢复的 Benchmark 结果</strong>
+        </div>
+        {loadingHistory && <small>加载中…</small>}
+      </div>
+      <div className="workflow-benchmark-history-list">
+        {history.map((item) => (
+          <button type="button" className={`workflow-benchmark-history-row${selected?.id === item.id ? " workflow-benchmark-history-row-active" : ""}`} key={item.id} onClick={() => void openHistory(item.id)}>
+            <span><strong>{item.name}</strong><small>{item.mediaType} · {statusLabel(item.status)}</small></span>
+            <span>{item.succeededCount}/{item.candidateCount} 完成</span>
+            <span>{item.winnerCandidateId ? "已指定胜者" : "未指定胜者"}</span>
+          </button>
+        ))}
+        {!history.length && !loadingHistory && <p className="disabled-note">还没有历史 Benchmark。</p>}
+      </div>
+
+      {selected && (
+        <section className="workflow-benchmark-result" aria-label="Benchmark 结果">
+          <div className="workflow-benchmark-result-heading">
+            <div>
+              <span className="section-label">结果审阅</span>
+              <h4>{selected.name}</h4>
+              <p>{selected.mediaType} · {statusLabel(selected.status)} · {selected.summary.succeededCount}/{selected.summary.candidateCount} 完成 · 最快：{selected.summary.fastestCandidateId ? formatDuration(selected.summary.fastestDurationMs) : "—"}</p>
+            </div>
+            <div className="workflow-benchmark-result-actions">
+              <button type="button" className="quiet-button" onClick={() => void refreshSelected()} disabled={busy}>刷新</button>
+              <button type="button" className="quiet-button" onClick={() => void cloneSelected()} disabled={busy}>克隆</button>
+              <button type="button" className="quiet-button" onClick={() => void deleteSelected()} disabled={busy}>删除历史</button>
+            </div>
+          </div>
+          <div className="workflow-benchmark-result-list">
+            {selected.candidates.map((candidate) => {
+              const isWinner = selected.winnerCandidateId === candidate.id;
+              const isFastest = selected.summary.fastestCandidateId === candidate.id;
+              return (
+                <article className={`workflow-benchmark-result-card${isWinner ? " workflow-benchmark-result-card-winner" : ""}`} key={candidate.id}>
+                  <div className="workflow-benchmark-result-card-main">
+                    <div className="workflow-benchmark-result-card-title"><strong>#{candidate.position + 1} · {candidate.label}</strong><span className={compatibilityClass(candidate.compatibility)}>{compatibilityLabels[candidate.compatibility]}</span></div>
+                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {formatDuration(candidate.executionDurationMs)} · 审片：{reviewLabel(candidate.reviewStatus)}</small>
+                    {isWinner && <span className="workflow-benchmark-winner-mark">显式胜者</span>}
+                    {isFastest && <span className="workflow-benchmark-fastest-mark">最快完成</span>}
+                    {candidate.outputAssetIds.length > 0 && (
+                      <div className="workflow-benchmark-output-assets">
+                        {candidate.outputAssetIds.map((assetId) => <button type="button" className="quiet-button" key={assetId} onClick={() => void openAsset(assetId)}>查看生成结果</button>)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="workflow-benchmark-result-card-actions">
+                    {candidate.taskId && onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(candidate.taskId!)}>打开任务</button>}
+                    <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "STARRED")} disabled={!candidate.productionBatchItemId || busy}>标为最佳</button>
+                    <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "APPROVED")} disabled={!candidate.productionBatchItemId || busy}>可用</button>
+                    <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "REJECTED")} disabled={!candidate.productionBatchItemId || busy}>不推荐</button>
+                    <button type="button" onClick={() => void markWinner(isWinner ? undefined : candidate.id)} disabled={busy}>{isWinner ? "取消胜者" : "指定胜者"}</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {previewAsset && <ProductionAssetPreview projectId={projectId} asset={previewAsset} onClose={() => setPreviewAsset(undefined)} onOpenTask={onOpenTask} />}
+    </section>
+  );
+}

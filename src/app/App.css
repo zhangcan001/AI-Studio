@@ -1622,6 +1622,221 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
   width: 100%;
 }
 
+.legacy-experiment-planner {
+  margin-top: 12px;
+  border-top: 1px solid var(--ux-border);
+  padding-top: 10px;
+}
+
+.legacy-experiment-planner > summary {
+  cursor: pointer;
+  color: var(--ux-muted);
+  font-size: 0.8rem;
+}
+
+.workflow-benchmark-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--ux-accent) 45%, var(--ux-border));
+  border-radius: 14px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--ux-surface-1) 92%, var(--ux-accent)), var(--ux-surface-1));
+  box-shadow: 0 14px 34px rgb(0 0 0 / 12%);
+}
+
+.workflow-benchmark-heading,
+.workflow-benchmark-candidate-toolbar,
+.workflow-benchmark-history-heading,
+.workflow-benchmark-result-heading,
+.workflow-benchmark-result-card-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-benchmark-heading h3,
+.workflow-benchmark-result-heading h4 {
+  margin: 3px 0 0;
+}
+
+.workflow-benchmark-heading p,
+.workflow-benchmark-result-heading p,
+.workflow-benchmark-candidate-toolbar small,
+.workflow-benchmark-history-heading small {
+  margin: 5px 0 0;
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+}
+
+.workflow-benchmark-badge,
+.workflow-benchmark-winner-mark,
+.workflow-benchmark-fastest-mark {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--ux-accent) 55%, var(--ux-border));
+  border-radius: 999px;
+  color: var(--ux-accent);
+  font-size: 0.72rem;
+}
+
+.workflow-benchmark-create-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.workflow-benchmark-create-grid label,
+.workflow-benchmark-candidate-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
+.workflow-benchmark-candidates,
+.workflow-benchmark-history-list,
+.workflow-benchmark-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-benchmark-candidate,
+.workflow-benchmark-result-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 11px;
+  border: 1px solid var(--ux-border);
+  border-radius: 10px;
+  background: var(--ux-surface-0);
+}
+
+.workflow-benchmark-candidate-index {
+  display: grid;
+  place-items: center;
+  min-height: 30px;
+  border-radius: 8px;
+  color: var(--ux-accent);
+  background: var(--ux-surface-2);
+  font-weight: 700;
+}
+
+.workflow-benchmark-candidate-fields {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.4fr) minmax(150px, 0.8fr) minmax(130px, 0.7fr);
+  gap: 8px;
+}
+
+.workflow-benchmark-candidate-actions,
+.workflow-benchmark-create-actions,
+.workflow-benchmark-result-actions,
+.workflow-benchmark-result-card-actions,
+.workflow-benchmark-output-assets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.workflow-benchmark-preview-row {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--ux-muted);
+  font-size: 0.75rem;
+}
+
+.workflow-compatibility,
+.benchmark-compatibility {
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.benchmark-compatibility-good { color: var(--ux-success); background: color-mix(in srgb, var(--ux-success) 14%, transparent); }
+.benchmark-compatibility-partial { color: var(--ux-warning); background: color-mix(in srgb, var(--ux-warning) 14%, transparent); }
+.benchmark-compatibility-bad { color: var(--ux-danger); background: color-mix(in srgb, var(--ux-danger) 14%, transparent); }
+
+.workflow-benchmark-create-actions {
+  justify-content: flex-end;
+}
+
+.workflow-benchmark-blocked {
+  margin: 0;
+  color: var(--ux-warning);
+  font-size: 0.78rem;
+}
+
+.workflow-benchmark-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--ux-border);
+  border-radius: 9px;
+  color: var(--ux-text);
+  background: var(--ux-surface-0);
+  text-align: left;
+}
+
+.workflow-benchmark-history-row:hover,
+.workflow-benchmark-history-row-active {
+  border-color: var(--ux-accent);
+  background: var(--ux-surface-2);
+}
+
+.workflow-benchmark-history-row span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.workflow-benchmark-history-row small,
+.workflow-benchmark-result-card-main > small {
+  color: var(--ux-muted);
+  font-size: 0.74rem;
+}
+
+.workflow-benchmark-result {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--ux-border);
+}
+
+.workflow-benchmark-result-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.workflow-benchmark-result-card-winner {
+  border-color: color-mix(in srgb, var(--ux-accent) 70%, var(--ux-border));
+  box-shadow: inset 3px 0 0 var(--ux-accent);
+}
+
+.workflow-benchmark-result-card-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflow-benchmark-result-card-title {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.workflow-benchmark-fastest-mark {
+  width: fit-content;
+  color: var(--ux-success);
+  border-color: color-mix(in srgb, var(--ux-success) 55%, var(--ux-border));
+}
+
 .prompt-library-panel {
   display: grid;
   gap: 12px;
@@ -3171,6 +3386,36 @@ summary:focus-visible {
 
   .experiment-dimension-form {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-benchmark-heading,
+  .workflow-benchmark-candidate-toolbar,
+  .workflow-benchmark-history-heading,
+  .workflow-benchmark-result-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workflow-benchmark-create-grid,
+  .workflow-benchmark-candidate-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-benchmark-candidate,
+  .workflow-benchmark-result-card,
+  .workflow-benchmark-history-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-benchmark-preview-row {
+    grid-column: 1;
+  }
+
+  .workflow-benchmark-candidate-actions,
+  .workflow-benchmark-create-actions,
+  .workflow-benchmark-result-actions,
+  .workflow-benchmark-result-card-actions {
+    justify-content: flex-start;
   }
 
   .prompt-library-layout,

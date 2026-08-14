@@ -67,7 +67,8 @@ mod tests {
                'production_batches', 'production_batch_items', 'asset_tags', 'asset_tag_links',
                'asset_favorites', 'project_templates', 'prompt_entries', 'prompt_versions',
                'shots', 'shot_stage_configs', 'shot_reference_assets', 'shot_generation_links',
-               'asset_video_prompts', 'production_item_reviews')",
+               'asset_video_prompts', 'production_item_reviews', 'benchmark_experiments',
+               'benchmark_candidates')",
         )
         .fetch_one(pool)
         .await
@@ -83,7 +84,7 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 24);
+        assert_eq!(table_count(&pool).await, 26);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
                 .fetch_one(&pool)
@@ -176,7 +177,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 24);
+        assert_eq!(table_count(&second_pool).await, 26);
         second_pool.close().await;
     }
 
