@@ -369,6 +369,16 @@ export function cloneWorkflowBenchmark(
   });
 }
 
+export function queueWorkflowBenchmark(
+  projectId: string,
+  experimentId: string,
+  autoStart: boolean,
+): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_queue_existing", {
+    request: { projectId, experimentId, autoStart },
+  });
+}
+
 export function deleteWorkflowBenchmark(projectId: string, experimentId: string): Promise<{ deleted: boolean; experimentId: string }> {
   return invoke<{ deleted: boolean; experimentId: string }>("workflow_benchmark_delete", { projectId, experimentId });
 }

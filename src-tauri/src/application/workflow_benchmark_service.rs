@@ -274,8 +274,23 @@ impl WorkflowBenchmarkService {
             }
         };
 
-        self.link_queue(&experiment_id, queue.batch.id.as_str(), &queue.items)
-            .await?;
+        if let Err(error) = self
+            .link_queue(&experiment_id, queue.batch.id.as_str(), &queue.items)
+            .await
+        {
+            if let Err(compensation_error) = self
+                .mark_queue_link_failed(&experiment_id, queue.batch.id.as_str())
+                .await
+            {
+                tracing::error!(
+                    error = %compensation_error,
+                    experiment_id = %experiment_id,
+                    batch_id = queue.batch.id.as_str(),
+                    "failed to record benchmark queue link compensation"
+                );
+            }
+            return Err(WorkflowBenchmarkError::Queue(error.to_string()));
+        }
 
         if request.auto_start {
             if let Err(error) = self
@@ -471,6 +486,108 @@ impl WorkflowBenchmarkService {
         }
         transaction.commit().await.map_err(db_error)?;
         self.get(project_id, &new_id).await
+    }
+
+    pub async fn queue_existing(
+        &self,
+        project_id: &str,
+        experiment_id: &str,
+        auto_start: bool,
+    ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
+        validate_project_id(project_id)?;
+        let row = self
+            .load_experiment(project_id, experiment_id)
+            .await?
+            .ok_or_else(|| WorkflowBenchmarkError::NotFound(experiment_id.to_owned()))?;
+        if row.status != "DRAFT" || row.production_batch_id.is_some() {
+            return Err(WorkflowBenchmarkError::InvalidInput(
+                "只有尚未创建生产批次的 DRAFT Benchmark 才能运行。".to_owned(),
+            ));
+        }
+
+        let available = self.definition_repository.list_available().await?;
+        let candidate_rows = self.load_candidate_rows(experiment_id).await?;
+        if candidate_rows.len() < 2 || candidate_rows.len() > MAX_BENCHMARK_CANDIDATES {
+            return Err(WorkflowBenchmarkError::InvalidInput(
+                "Benchmark 候选数量不在允许范围内。".to_owned(),
+            ));
+        }
+
+        let mut items = Vec::with_capacity(candidate_rows.len());
+        for candidate in candidate_rows {
+            let available_definition = available.iter().find(|definition| {
+                definition.workflow_version_id == candidate.workflow_version_id
+                    && definition.recipe_id == candidate.recipe_id
+            });
+            if available_definition.is_none() {
+                return Err(WorkflowBenchmarkError::InvalidInput(format!(
+                    "候选 {} 的 Workflow / Recipe 不可用、已停用或已归档。",
+                    candidate.label
+                )));
+            }
+            let frozen_values = parse_json_value(&candidate.values_json)?;
+            let values = generation_values_from_json(&frozen_values)
+                .map_err(WorkflowBenchmarkError::InvalidInput)?;
+            self.verify_frozen_assets(project_id, &candidate.asset_ids_json, &values)
+                .await?;
+            items.push(CreateProductionBatchItem {
+                workflow_version_id: candidate.workflow_version_id,
+                recipe_id: candidate.recipe_id,
+                values,
+            });
+        }
+
+        let queue = match self
+            .production_queue_service
+            .create(CreateProductionBatchRequest {
+                project_id: project_id.to_owned(),
+                name: format!("Benchmark · {}", row.name.trim()),
+                continue_on_failure: true,
+                items,
+            })
+            .await
+        {
+            Ok(queue) => queue,
+            Err(error) => {
+                self.set_experiment_status(experiment_id, "FAILED_TO_QUEUE")
+                    .await?;
+                return Err(WorkflowBenchmarkError::Queue(error.to_string()));
+            }
+        };
+
+        if let Err(error) = self
+            .link_queue(experiment_id, queue.batch.id.as_str(), &queue.items)
+            .await
+        {
+            if let Err(compensation_error) = self
+                .mark_queue_link_failed(experiment_id, queue.batch.id.as_str())
+                .await
+            {
+                tracing::error!(
+                    error = %compensation_error,
+                    experiment_id = %experiment_id,
+                    batch_id = queue.batch.id.as_str(),
+                    "failed to record benchmark queue link compensation"
+                );
+            }
+            return Err(WorkflowBenchmarkError::Queue(error.to_string()));
+        }
+
+        if auto_start {
+            if let Err(error) = self
+                .production_queue_service
+                .start(project_id, queue.batch.id.as_str())
+                .await
+            {
+                tracing::info!(
+                    error = %error,
+                    experiment_id = %experiment_id,
+                    "cloned benchmark queue was created but not started"
+                );
+            }
+        }
+
+        self.get(project_id, experiment_id).await
     }
 
     pub async fn delete(
@@ -692,6 +809,53 @@ impl WorkflowBenchmarkService {
         transaction.commit().await.map_err(db_error)
     }
 
+    async fn mark_queue_link_failed(
+        &self,
+        experiment_id: &str,
+        batch_id: &str,
+    ) -> Result<(), WorkflowBenchmarkError> {
+        sqlx::query(
+            "UPDATE benchmark_experiments
+             SET production_batch_id = ?, status = 'FAILED_TO_QUEUE', updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(batch_id)
+        .bind(self.clock.now().to_rfc3339())
+        .bind(experiment_id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(())
+    }
+
+    async fn verify_frozen_assets(
+        &self,
+        project_id: &str,
+        stored_asset_ids_json: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<(), WorkflowBenchmarkError> {
+        let mut asset_ids = parse_string_array(stored_asset_ids_json)?;
+        asset_ids.extend(collect_asset_ids(values));
+        asset_ids.sort();
+        asset_ids.dedup();
+        for asset_id in asset_ids {
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM assets WHERE id = ? AND project_id = ?",
+            )
+            .bind(&asset_id)
+            .bind(project_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+            if exists == 0 {
+                return Err(WorkflowBenchmarkError::InvalidInput(format!(
+                    "Benchmark 冻结素材不存在或不属于当前项目：{asset_id}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     async fn set_experiment_status(
         &self,
         experiment_id: &str,
@@ -797,14 +961,10 @@ impl WorkflowBenchmarkService {
             let (task_status, task_created_at, task_started_at, task_finished_at) = runtime
                 .as_ref()
                 .map(|runtime| {
-                    let task_status = runtime.task_status.clone().or_else(|| {
-                        match runtime.item_status.as_str() {
-                            "SUCCEEDED" => Some("SUCCEEDED".to_owned()),
-                            "FAILED" => Some("FAILED".to_owned()),
-                            "CANCELLED" | "SKIPPED" => Some("CANCELLED".to_owned()),
-                            _ => None,
-                        }
-                    });
+                    let task_status = effective_candidate_status(
+                        runtime.task_status.as_deref(),
+                        Some(runtime.item_status.as_str()),
+                    );
                     (
                         task_status,
                         runtime.task_created_at.clone(),
@@ -997,7 +1157,18 @@ fn merge_candidate_values(
     for (key, definition) in &recipe.inputs {
         let override_value = preset_values.get(key);
         let base_value = base_values.get(key);
-        let selected = override_value.or(base_value);
+        let selected = if is_benchmark_controlled_key(key) {
+            if let (Some(base_value), Some(override_value)) = (base_value, override_value) {
+                if base_value != override_value {
+                    reasons.push(format!(
+                        "参数 {key} 的 Preset 值被 Benchmark 基准输入覆盖。"
+                    ));
+                }
+            }
+            base_value.or(override_value)
+        } else {
+            override_value.or(base_value)
+        };
         if let Some(value) = selected {
             if !value_matches_definition(definition, value) {
                 incompatible = true;
@@ -1046,6 +1217,36 @@ fn merge_candidate_values(
         "COMPATIBLE"
     };
     Ok((values, compatibility.to_owned(), reasons))
+}
+
+fn is_benchmark_controlled_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase().replace('-', "_");
+    matches!(
+        normalized.as_str(),
+        "prompt"
+            | "seed"
+            | "image"
+            | "images"
+            | "video"
+            | "videos"
+            | "audio"
+            | "audios"
+            | "first_frame"
+            | "last_frame"
+            | "reference_image"
+            | "reference_images"
+            | "reference_video"
+            | "reference_videos"
+            | "reference_audio"
+            | "reference_audios"
+            | "width"
+            | "height"
+            | "duration"
+            | "duration_seconds"
+            | "fps"
+            | "frame_count"
+            | "frames"
+    )
 }
 
 fn value_matches_definition(definition: &InputDefinition, value: &GenerationInputValue) -> bool {
@@ -1169,20 +1370,36 @@ fn derive_experiment_status(
     if production_batch_id.is_none() {
         return stored_status.to_owned();
     }
+    if candidates.is_empty() {
+        return "QUEUED".to_owned();
+    }
+    let status_for = |candidate: &WorkflowBenchmarkCandidateView| {
+        candidate
+            .task_status
+            .as_deref()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| "QUEUED".to_owned())
+    };
     if candidates
         .iter()
-        .all(|candidate| candidate.task_id.is_none())
+        .all(|candidate| status_for(candidate) == "QUEUED")
     {
         return "QUEUED".to_owned();
     }
+    if candidates
+        .iter()
+        .any(|candidate| status_for(candidate) == "RUNNING")
+    {
+        return "RUNNING".to_owned();
+    }
     let succeeded = candidates
         .iter()
-        .filter(|candidate| candidate.task_status.as_deref() == Some("SUCCEEDED"))
+        .filter(|candidate| status_for(candidate) == "SUCCEEDED")
         .count();
     let terminal = candidates.iter().all(|candidate| {
         matches!(
-            candidate.task_status.as_deref(),
-            Some("SUCCEEDED") | Some("FAILED") | Some("CANCELLED")
+            status_for(candidate).as_str(),
+            "SUCCEEDED" | "FAILED" | "CANCELLED" | "SKIPPED"
         )
     });
     if !terminal {
@@ -1193,12 +1410,30 @@ fn derive_experiment_status(
     } else if succeeded == 0
         && candidates
             .iter()
-            .all(|candidate| candidate.task_status.as_deref() == Some("CANCELLED"))
+            .all(|candidate| matches!(status_for(candidate).as_str(), "CANCELLED" | "SKIPPED"))
     {
         "CANCELLED".to_owned()
     } else {
         "PARTIAL".to_owned()
     }
+}
+
+fn effective_candidate_status(
+    task_status: Option<&str>,
+    item_status: Option<&str>,
+) -> Option<String> {
+    let status = task_status.or(item_status)?;
+    let effective = match status {
+        "CREATED" | "VALIDATING" | "PREPARING" | "QUEUED" | "CANCEL_REQUESTED" | "PENDING"
+        | "DISPATCHING" => "QUEUED",
+        "DISPATCHED" | "RUNNING" | "COLLECTING" => "RUNNING",
+        "SUCCEEDED" => "SUCCEEDED",
+        "FAILED" => "FAILED",
+        "CANCELLED" => "CANCELLED",
+        "SKIPPED" => "SKIPPED",
+        other => other,
+    };
+    Some(effective.to_owned())
 }
 
 fn summary_from_candidates(
@@ -1215,7 +1450,7 @@ fn summary_from_candidates(
         .filter(|candidate| {
             matches!(
                 candidate.task_status.as_deref(),
-                Some("FAILED") | Some("CANCELLED")
+                Some("FAILED") | Some("CANCELLED") | Some("SKIPPED")
             )
         })
         .count();
@@ -1271,7 +1506,8 @@ impl From<ProductionQueueError> for WorkflowBenchmarkError {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_asset_ids, derive_experiment_status, merge_candidate_values, output_matches_media,
+        collect_asset_ids, derive_experiment_status, effective_candidate_status,
+        is_benchmark_controlled_key, merge_candidate_values, output_matches_media,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::domain::{InputDefinition, Recipe, SeedDefault, SeedValue, WorkflowRef};
@@ -1312,6 +1548,35 @@ mod tests {
                         default: SeedDefault::Random,
                         min: Some(0),
                         max: Some(1000),
+                    },
+                ),
+                (
+                    "width".to_owned(),
+                    InputDefinition::Integer {
+                        label: "Width".to_owned(),
+                        required: false,
+                        default: Some(864),
+                        min: Some(1),
+                        max: Some(4096),
+                        step: Some(1),
+                    },
+                ),
+                (
+                    "duration_seconds".to_owned(),
+                    InputDefinition::Integer {
+                        label: "Duration".to_owned(),
+                        required: false,
+                        default: Some(5),
+                        min: Some(1),
+                        max: Some(15),
+                        step: Some(1),
+                    },
+                ),
+                (
+                    "image".to_owned(),
+                    InputDefinition::Image {
+                        label: "Image".to_owned(),
+                        required: false,
                     },
                 ),
             ]),
@@ -1355,6 +1620,97 @@ mod tests {
         .unwrap();
         assert_eq!(status, "INCOMPATIBLE");
         assert!(reasons.iter().any(|reason| reason.contains("媒体")));
+    }
+
+    #[test]
+    fn benchmark_base_controls_identity_and_dimensions_while_preset_controls_tuning() {
+        let base = BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                GenerationInputValue::Text("base prompt".to_owned()),
+            ),
+            (
+                "seed".to_owned(),
+                GenerationInputValue::Seed(SeedValue::Fixed(101)),
+            ),
+            ("width".to_owned(), GenerationInputValue::Integer(864)),
+            (
+                "duration_seconds".to_owned(),
+                GenerationInputValue::Integer(5),
+            ),
+            (
+                "image".to_owned(),
+                GenerationInputValue::ImageAsset(
+                    crate::domain::AssetId::parse("ast_base").unwrap(),
+                ),
+            ),
+        ]);
+        let preset = BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                GenerationInputValue::Text("preset prompt".to_owned()),
+            ),
+            (
+                "seed".to_owned(),
+                GenerationInputValue::Seed(SeedValue::Fixed(202)),
+            ),
+            ("width".to_owned(), GenerationInputValue::Integer(1920)),
+            (
+                "duration_seconds".to_owned(),
+                GenerationInputValue::Integer(10),
+            ),
+            (
+                "image".to_owned(),
+                GenerationInputValue::ImageAsset(
+                    crate::domain::AssetId::parse("ast_preset").unwrap(),
+                ),
+            ),
+            ("cfg".to_owned(), GenerationInputValue::Number(7.0)),
+        ]);
+
+        let (values, status, reasons) =
+            merge_candidate_values(&recipe(), &base, &preset, "FIXED", None, true).unwrap();
+
+        assert_eq!(status, "PARTIAL");
+        assert_eq!(
+            values["prompt"],
+            GenerationInputValue::Text("base prompt".to_owned())
+        );
+        assert_eq!(
+            values["seed"],
+            GenerationInputValue::Seed(SeedValue::Fixed(101))
+        );
+        assert_eq!(values["width"], GenerationInputValue::Integer(864));
+        assert_eq!(values["duration_seconds"], GenerationInputValue::Integer(5));
+        assert_eq!(
+            values["image"],
+            GenerationInputValue::ImageAsset(crate::domain::AssetId::parse("ast_base").unwrap())
+        );
+        assert_eq!(values["cfg"], GenerationInputValue::Number(7.0));
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("prompt") && reason.contains("覆盖")));
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("width") && reason.contains("覆盖")));
+    }
+
+    #[test]
+    fn controlled_key_helper_covers_identity_and_runtime_shape_inputs() {
+        for key in [
+            "prompt",
+            "image",
+            "reference_video",
+            "duration_seconds",
+            "frame-count",
+        ] {
+            assert!(
+                is_benchmark_controlled_key(key),
+                "{key} should be controlled"
+            );
+        }
+        assert!(!is_benchmark_controlled_key("cfg"));
+        assert!(!is_benchmark_controlled_key("steps"));
     }
 
     #[test]
@@ -1410,6 +1766,126 @@ mod tests {
         assert_eq!(
             derive_experiment_status("RUNNING", Some("pbt_1"), &[first, second]),
             "PARTIAL"
+        );
+    }
+
+    fn candidate_with_status(status: Option<&str>) -> super::WorkflowBenchmarkCandidateView {
+        super::WorkflowBenchmarkCandidateView {
+            id: status.unwrap_or("missing").to_owned(),
+            position: 0,
+            workflow_version_id: "w".to_owned(),
+            recipe_id: "r".to_owned(),
+            preset_id: None,
+            preset_name: None,
+            label: "candidate".to_owned(),
+            compatibility: "COMPATIBLE".to_owned(),
+            compatibility_reasons: Vec::new(),
+            frozen_values: serde_json::json!({}),
+            asset_ids: Vec::new(),
+            production_batch_item_id: Some("item".to_owned()),
+            task_id: None,
+            task_status: status.map(ToOwned::to_owned),
+            task_created_at: None,
+            task_started_at: None,
+            task_finished_at: None,
+            execution_duration_ms: None,
+            output_asset_ids: Vec::new(),
+            review_status: None,
+            review_note: None,
+        }
+    }
+
+    #[test]
+    fn status_derivation_covers_waiting_running_success_partial_and_cancelled() {
+        assert_eq!(
+            derive_experiment_status(
+                "DRAFT",
+                None,
+                &[candidate_with_status(None), candidate_with_status(None)]
+            ),
+            "DRAFT"
+        );
+        assert_eq!(
+            derive_experiment_status(
+                "QUEUED",
+                Some("batch"),
+                &[
+                    candidate_with_status(Some("QUEUED")),
+                    candidate_with_status(None)
+                ]
+            ),
+            "QUEUED"
+        );
+        assert_eq!(
+            derive_experiment_status(
+                "QUEUED",
+                Some("batch"),
+                &[
+                    candidate_with_status(Some("RUNNING")),
+                    candidate_with_status(Some("QUEUED"))
+                ]
+            ),
+            "RUNNING"
+        );
+        assert_eq!(
+            derive_experiment_status(
+                "RUNNING",
+                Some("batch"),
+                &[
+                    candidate_with_status(Some("SUCCEEDED")),
+                    candidate_with_status(Some("SUCCEEDED"))
+                ]
+            ),
+            "COMPLETED"
+        );
+        assert_eq!(
+            derive_experiment_status(
+                "RUNNING",
+                Some("batch"),
+                &[
+                    candidate_with_status(Some("SUCCEEDED")),
+                    candidate_with_status(Some("FAILED"))
+                ]
+            ),
+            "PARTIAL"
+        );
+        assert_eq!(
+            derive_experiment_status(
+                "RUNNING",
+                Some("batch"),
+                &[
+                    candidate_with_status(Some("CANCELLED")),
+                    candidate_with_status(Some("SKIPPED"))
+                ]
+            ),
+            "CANCELLED"
+        );
+        assert_eq!(
+            derive_experiment_status(
+                "RUNNING",
+                Some("batch"),
+                &[
+                    candidate_with_status(Some("FAILED")),
+                    candidate_with_status(Some("SKIPPED"))
+                ]
+            ),
+            "PARTIAL"
+        );
+    }
+
+    #[test]
+    fn effective_status_prefers_task_and_falls_back_to_batch_item() {
+        assert_eq!(
+            effective_candidate_status(None, Some("CANCELLED")),
+            Some("CANCELLED".to_owned())
+        );
+        assert_eq!(
+            effective_candidate_status(None, Some("SKIPPED")),
+            Some("SKIPPED".to_owned())
+        );
+        assert_eq!(
+            effective_candidate_status(Some("RUNNING"), Some("PENDING")),
+            Some("RUNNING".to_owned())
         );
     }
 

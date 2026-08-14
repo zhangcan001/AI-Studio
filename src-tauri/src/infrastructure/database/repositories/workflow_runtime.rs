@@ -386,6 +386,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn benchmark_reference_requires_metadata_cleanup_before_hard_delete() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = SqliteWorkflowRuntimeRepository::new(pool.clone());
+
+        sqlx::query(
+            "INSERT INTO benchmark_experiments
+             (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
+              winner_candidate_id, production_batch_id, created_at, updated_at)
+             VALUES ('benchmark-ref', 'project-1', 'Reference', 'IMAGE', 'DRAFT', '{}', '[]', NULL, NULL, ?, ?)",
+        )
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO benchmark_candidates
+             (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
+              preset_name, label, values_json, asset_ids_json, production_batch_item_id,
+              task_id, created_at)
+             VALUES ('benchmark-candidate-ref', 'benchmark-ref', 0, 'workflow-version-1', 'recipe-1',
+                     NULL, NULL, 'Reference', '{}', '[]', NULL, NULL, ?)",
+        )
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let counts = repository
+            .inspect_deletion("workflow-version-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counts.benchmark_reference_count, 1);
+
+        let error = repository
+            .delete_version("workflow-version-1", "workflow-1", chrono::Utc::now())
+            .await
+            .expect_err("benchmark metadata must protect the version");
+        assert!(error.to_string().contains("references"));
+
+        sqlx::query("DELETE FROM benchmark_experiments WHERE id = 'benchmark-ref'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        repository
+            .delete_version("workflow-version-1", "workflow-1", chrono::Utc::now())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn unreferenced_version_deletes_registration_and_parent_workflow_atomically() {
         let directory = tempdir().unwrap();
         let pool = initialize(&directory.path().join("app.db")).await.unwrap();

@@ -8,6 +8,7 @@ import {
   listPresets,
   listWorkflowBenchmarks,
   previewWorkflowBenchmark,
+  queueWorkflowBenchmark,
   setProductionReviewStatus,
   setWorkflowBenchmarkWinner,
 } from "../../services/tauriClient";
@@ -27,6 +28,11 @@ import type {
   WorkflowBenchmarkView,
 } from "../../types/benchmark";
 import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
+import {
+  benchmarkAdmissionNotice,
+  canRunBenchmarkDraft,
+  previewForCandidatePosition,
+} from "./workflowBenchmarkUi";
 
 interface Props {
   projectId: string;
@@ -166,8 +172,6 @@ export function WorkflowBenchmarkPanel({
   const [previewAsset, setPreviewAsset] = useState<AssetView>();
 
   const availableRecipes = useMemo(() => mediaRecipes(catalog, mediaType), [catalog, mediaType]);
-  const selectedPreviewMap = useMemo(() => new Map((preview ?? []).map((item) => [item.id, item])), [preview]);
-
   useEffect(() => {
     setCandidates(initialCandidates(catalog, baseRecipe, mediaType));
     setPreview(undefined);
@@ -291,7 +295,7 @@ export function WorkflowBenchmarkPanel({
       setHistory((current) => [created.summary, ...current.filter((item) => item.id !== created.id)]);
       onCreated?.(created);
       await onAdmissionChanged?.();
-      setNotice(autoStart ? `Benchmark 已创建并开始，${created.candidates.length} 个候选将复用普通串行队列。` : "Benchmark 已创建，尚未启动；可在生产队列中开始。 ");
+      setNotice(benchmarkAdmissionNotice(created.status, autoStart));
     } catch (createError: unknown) {
       setError(toUserMessage(createError));
     } finally {
@@ -368,6 +372,24 @@ export function WorkflowBenchmarkPanel({
     }
   }
 
+  async function queueSelected(autoStart: boolean) {
+    if (!selected || !canRunBenchmarkDraft(selected.status, selected.productionBatchId)) return;
+    setBusy(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const queued = await queueWorkflowBenchmark(projectId, selected.id, autoStart);
+      setSelected(queued);
+      setHistory((current) => [queued.summary, ...current.filter((item) => item.id !== queued.id)]);
+      await onAdmissionChanged?.();
+      setNotice(benchmarkAdmissionNotice(queued.status, autoStart));
+    } catch (queueError: unknown) {
+      setError(toUserMessage(queueError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteSelected() {
     if (!selected || !window.confirm("只删除 Benchmark 历史元数据，不删除任务、批次、资产或审片记录。继续？")) return;
     setBusy(true);
@@ -432,7 +454,7 @@ export function WorkflowBenchmarkPanel({
         {candidates.map((candidate, index) => {
           const key = recipeKey(candidate);
           const candidatePresets = presets[key] ?? [];
-          const candidatePreview = selectedPreviewMap.get(candidate.key);
+          const candidatePreview = previewForCandidatePosition(preview, index);
           return (
             <article className="workflow-benchmark-candidate" key={candidate.key}>
               <div className="workflow-benchmark-candidate-index">#{index + 1}</div>
@@ -511,6 +533,12 @@ export function WorkflowBenchmarkPanel({
             <div className="workflow-benchmark-result-actions">
               <button type="button" className="quiet-button" onClick={() => void refreshSelected()} disabled={busy}>刷新</button>
               <button type="button" className="quiet-button" onClick={() => void cloneSelected()} disabled={busy}>克隆</button>
+              {canRunBenchmarkDraft(selected.status, selected.productionBatchId) && (
+                <>
+                  <button type="button" className="quiet-button" onClick={() => void queueSelected(false)} disabled={busy}>加入生产队列</button>
+                  <button type="button" onClick={() => void queueSelected(true)} disabled={busy}>运行此克隆</button>
+                </>
+              )}
               <button type="button" className="quiet-button" onClick={() => void deleteSelected()} disabled={busy}>删除历史</button>
             </div>
           </div>

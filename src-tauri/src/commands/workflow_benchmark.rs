@@ -64,6 +64,15 @@ pub struct WorkflowBenchmarkCloneRequest {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkQueueExistingRequest {
+    pub project_id: String,
+    pub experiment_id: String,
+    #[serde(default)]
+    pub auto_start: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowBenchmarkPreviewResponse {
@@ -197,6 +206,23 @@ pub async fn workflow_benchmark_clone(
     state
         .workflow_benchmark_service
         .clone_experiment(&request.project_id, &request.experiment_id, request.name)
+        .await
+        .map_err(map_benchmark_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_benchmark_queue_existing(
+    state: State<'_, AppState>,
+    request: WorkflowBenchmarkQueueExistingRequest,
+) -> Result<WorkflowBenchmarkView, AppError> {
+    super::validate_project_id(&request.project_id)?;
+    state
+        .workflow_benchmark_service
+        .queue_existing(
+            &request.project_id,
+            &request.experiment_id,
+            request.auto_start,
+        )
         .await
         .map_err(map_benchmark_error)
 }
