@@ -1,6 +1,6 @@
 # AI Studio 0.3.0 Simplified Final Live Gate
 
-Date: 2026-08-12
+Date: 2026-08-14
 Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他产品能力。
 
 ## Current status
@@ -9,23 +9,40 @@ Scope: Product Scope Realignment；禁止回到旧 Shot 主路径或新增其他
 
 当前代码目标是两个独立产品：批量图片（Krea2）和批量视频（MiniMax H3）。旧 Shot 数据与后端保持兼容，但不作为普通导航入口。本轮明确不执行 GPU、Computer Use、Desktop Live Gate、tag、GitHub Release 或二进制上传；Live validation 标记为 `DEFERRED BY PRODUCT OWNER`，不是失败。
 
+## Post-Benchmark automated code gate — 2026-08-14
+
+本轮在 source baseline `db5faa4ea47ab8efcec767bcbcec5a349f57dfa3` 上完成最终自动化回归；没有执行 GPU 或真实桌面 Live Gate：
+
+- Rust：`415 passed / 0 failed`。
+- Frontend：`46 files / 152 tests / 0 failed`。
+- `cargo fmt --all -- --check`、`cargo check`、`pnpm build`、`git diff --check`：PASS。
+- Fresh migration `001→014`、现有库 `012→013→014` upgrade、Backup v7 round-trip/remap、v1–v6 fixed compatibility、Benchmark chain、H3 compatibility gate、ReferenceManifest 与 Krea2 regression：PASS。
+- `pnpm tauri build`：本轮未执行；旧本地候选产物及 SHA 已标记为 `STALE AFTER POST-GATE SOURCE CHANGES`。
+
+最终状态仍为：`AI STUDIO 0.3.0 = CODE READY / LIVE VALIDATION DEFERRED`。
+
 ## Code and compatibility gate
 
 | Gate | Current boundary |
 | --- | --- |
 | Exact runtime scope | Krea2 只按精确 workflow ID 进入批量图片；MiniMax H3 只按 FAST 的 `wfl_minimax_h3_fl2va` / `wfl_minimax_h3_reference_video` 或 QUALITY 的四个 mode-specific workflow ID 进入批量视频；不创建第三 Runtime。 |
 | Asset video prompt | 图片 Asset 的提示词持久化、项目隔离、非空和 64 KiB 校验已接入。 |
-| Backup compatibility | Backup v6 保存/恢复 Asset 视频提示词与审片/返工版本，并继续接受 v1–v6。 |
+| Backup compatibility | Backup v7 保存/恢复 Asset 视频提示词、审片/返工版本、Workflow Benchmark 实验/候选与生产队列引用，正确 remap IDs，并继续接受 v1–v7。 |
 | Queue contract | 两个入口都创建持久化 Production Queue；输入、参数和随机 Seed 在创建时冻结；严格串行。 |
 | H3 input sources | MiniMax H3 支持 Asset Library 与一个仅限 `PROJECT_FOLDER` 的普通本地导入入口：每个一级子文件夹对应一个 Segment。旧配对/清单/文本/首尾帧格式保留后端兼容，但不在普通 UI 展示。所有 Source Image/Video/Audio 先进入正常 Asset，再进入同一 Production Queue；Queue 与 Snapshot 不保存外部绝对路径。 |
 | Resolution contract | Krea2 提供 8 个官方宽高比及 1K/2K 预设；H3 提供图片规格中的 14 档 16:9 输出梯度（0.2–2.0 MP）；Krea2/H3 自定义 width/height 均按 Recipe min/max/step 校验，不自动取整。 |
 | H3 Recipe contract | 只接受经本机 `/object_info` 与 graph 审计的精确语义键；FL2VA 支持 `prompt` / optional `first_frame` / optional `last_frame`，REF2VA 支持 plural `reference_images` / `reference_videos` / `reference_audios`；`duration_seconds` 为 1–15 秒、step 1、默认 5 秒，并要求 width/height integer 与 video output。 |
-| H3 Recipe selection audit | 默认/推荐 profile 为 QUALITY（四个不可变 `2.0.0` mode-specific 包、20 步）；FAST 保留旧 FL2VA `1.0.0` / Omni REF2VA `1.3.0` 的 4 步 Turbo 图且未修改。Project Folder 按 mode + profile 选择并冻结 workflow/Recipe；多 Recipe Registry 仍是已记录、非阻塞技术债。 |
+| H3 Recipe selection audit | 默认/推荐 profile 为 QUALITY（四个不可变 `2.0.0` mode-specific 包、20 步）；FAST 保留旧 FL2VA `1.0.0` / Omni REF2VA `1.3.0` 的 4 步 Turbo 图且未修改。Project Folder 按 mode + profile 选择并冻结 workflow/Recipe；普通工作区已按 `workflowVersionId + recipeId` 支持多个正式 Recipe 的显示、手动选择与推荐/兼容回退。 |
+| Workflow Parameter Exposure | 从既有 Workflow Version 创建新 Recipe draft；仅开放安全 literal input。发布时原始 Workflow JSON bytes 与 Workflow SHA 保持不变，不新增 Workflow Version，只注册新 Recipe version。发布返回值解析为真实 DB Recipe ID。 |
+| Preset / preferred preset scope | 继续复用既有 Preset 系统；Preset 与 Preferred Preset 都按 `project + workflowVersionId + recipeId` 作用域读取/保存，旧 Recipe 的预设不会被新 Recipe 改写。 |
+| Task Truth | 生产选择、Preset、Queue 与 GenerationService 都使用真实 `workflowVersionId + recipeId`；Task/Snapshot 继续保存 Recipe YAML、原始输入与 resolved inputs，不引入第二套 Task Truth。 |
 | Ordinary UI | 主导航为批量图片、批量视频、资产库、任务、项目、工作流、设置；旧 Shot 入口隐藏，H3 本地导入仅展示 Project Folder。 |
 | Asset deletion safety | 资产库删除前检查活动 Task/Production Queue 引用；数据库关系、项目内主文件和缩略图按事务边界清理，任务历史保留。 |
 | Comfy memory release | 设置页仅在 AI Studio 与 ComfyUI 队列空闲时调用官方 `POST /free`；只释放模型内存，不删除模型文件。 |
-| Migration / backup safety | Fresh DB、001–011 保留性、012 审片表、FK cascade、AssetVideoPrompt/Review 边界和 Backup v6 remap/恶意输入回归覆盖。 |
-| Regression | Rust 383 tests / 0 failed；frontend 40 files / 133 tests / 0 failed；frontend build、diff 检查和 Tauri installer build 均 PASS。 |
+| Migration / backup safety | Fresh DB、001–014、现有 012→013→014 upgrade、FK integrity、Backup v7 remap、v1–v7 compatibility 和恶意输入回归覆盖。 |
+| Benchmark gate | Benchmark metadata and candidate freeze are covered; queue creation stays on the existing ProductionBatch/ProductionQueueService/GenerationService chain, repeat queue is blocked after binding, and workflow deletion counts Benchmark references. |
+| H3 validation gate | FL2VA/REF2VA mode contracts, compatibility gate, exact ordered ReferenceManifest, and structured `REFERENCE_MAPPING_INCOMPLETE` diagnostics are covered by automated regression. |
+| Regression | Rust `415 passed / 0 failed`; frontend `46 files / 152 tests / 0 failed`; frontend build and diff check PASS. Full evidence: `docs/M3_POST_BENCHMARK_CODE_GATE_0.3.0.md`. |
 
 ## H3 Production Quality / FAST Package Audit
 
@@ -100,10 +117,11 @@ Local Batch Import does not create a second executor, queue, prompt table,
 asset category, migration, or folder watcher. Existing cancel-pending, asset
 delete guards, and ComfyUI memory-release guards remain generic.
 
-## Final candidate artifacts
+## Previous candidate artifacts (stale after post-gate source changes)
 
-The final `pnpm tauri build` completed successfully for the current HEAD. These
-candidate artifacts are local only; no upload, tag, or GitHub Release was made.
+The hashes below belong to the previous local candidate build and are stale after
+the post-benchmark test/doc source changes. This code gate does not require a new
+installer build; no upload, tag, or GitHub Release was made.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -111,8 +129,8 @@ candidate artifacts are local only; no upload, tag, or GitHub Release was made.
 | `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe` | 7422990 | `2c9cccbef05c07fef015b6111baebff6e9fa09f4a6821b20589617309e012682` |
 | `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi` | 10870784 | `3277658787e4fe926eb2b095dee4f0ad824c7ae990a6b66bc79d0b1d837984a0` |
 
-The complete list is also recorded in `docs/RELEASE_SHA256_0.3.0.txt` with
-generation date `2026-08-12`.
+The complete previous-candidate list is marked stale in
+`docs/RELEASE_SHA256_0.3.0.txt`.
 
 ## Deferred live validation — batch images
 
@@ -129,6 +147,18 @@ generation date `2026-08-12`.
 2. 为 3 张图片分别填写并保存视频提示词；确认资格状态、`最高 15 秒 · 最高 2K` 产品能力提示、QUALITY 默认 `20 步正式工作流`（或显式选择 FAST 的 `4 步 Turbo`）、单任务串行、历史验证档位提示、Recipe 时长下拉（1–15 秒，默认 5 秒）和精确 H3 runtime READY。
 3. 创建 H3 批次，确认 3 项、严格串行、3 个 Task、3 个 Snapshot 和 3 个视频 Asset；视频可以用原生播放器播放。
 4. 编辑一条提示词后重新创建或检查批次，确认队列项保留编辑后的冻结值；Krea2 批次不应被创建或自动依赖。
+
+## Live validation — Workflow Parameter Exposure
+
+该 Gate 只验证生产配置闭环，不改变 Workflow graph：
+
+1. 在“工作流”选择一个已注册、可用于普通生产页的 Workflow Version，记录其 Workflow Version ID、Recipe ID、Recipe version 与 Workflow SHA-256。
+2. 打开“生产参数”，只选择一个安全的未连接 literal input（优先 `steps`、`width`、`height` 或 `duration_seconds`），保存并发布新 Recipe。
+3. 发布后确认 Workflow Version ID 未变化、Workflow SHA-256 与发布前完全一致、Workflow Version 总数未增加；Recipe version 增加且新 Recipe ID 与旧 Recipe ID 不同。
+4. 打开对应普通生产页，确认 WorkflowSelector 能看到并选择新 Recipe；DynamicFormRenderer 显示新增公开参数，旧 Recipe 仍可单独选择。
+5. 在新 Recipe 下创建一个 Preset，并将其设为 Preferred Preset；切换回旧 Recipe，确认旧 Recipe 的 Preset/Preferred Preset 不被改写。
+6. 使用新 Recipe 创建一次真实 Task；在 Task / Snapshot / Queue 证据中核对冻结的是新 Recipe 的真实 DB `recipeId`，并确认 Snapshot 仍保存对应 Recipe YAML、raw inputs 与 resolved inputs。
+7. Gate PASS 条件：`Original Workflow Immutable`、`Workflow SHA Unchanged`、`New Recipe Version`、`Existing Preset Reused`、`Task Truth` 六项全部有真实 UI/数据库/Task 证据；任一项缺证据则保持 PENDING，不以自动测试代替 Live Gate。
 
 ## Regression commands
 

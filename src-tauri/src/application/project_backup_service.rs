@@ -4203,6 +4203,33 @@ mod tests {
             .await
             .unwrap();
         sqlx::query(
+            "INSERT INTO benchmark_experiments
+             (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
+              winner_candidate_id, production_batch_id, created_at, updated_at)
+             VALUES ('bmk_backup', 'project-backup', 'H3 参数对比', 'VIDEO', 'COMPLETED',
+                     '{\"prompt\":\"base\"}', '[\"ast_backup\"]', 'bmc_backup_2',
+                     'pbt_backup', '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO benchmark_candidates
+             (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
+              preset_name, label, values_json, asset_ids_json, production_batch_item_id,
+              task_id, created_at)
+             VALUES
+             ('bmc_backup_1', 'bmk_backup', 0, 'workflow-version-1', 'recipe-1', NULL,
+              NULL, '基准 A', '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}',
+              '[\"ast_backup\"]', 'pbi_backup', 'tsk_backup', '2026-01-01T00:03:00Z'),
+             ('bmc_backup_2', 'bmk_backup', 1, 'workflow-version-1', 'recipe-1', NULL,
+              NULL, '基准 B', '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}',
+              '[\"ast_backup\"]', 'pbi_backup', 'tsk_backup', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
             "INSERT INTO production_item_reviews
              (id, project_id, production_batch_id, production_batch_item_id, task_id,
               result_asset_id, review_status, review_note, version, lineage_key,
@@ -4339,6 +4366,55 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(restored_review_note, "镜头稳定，保留。");
+        let restored_benchmark: (String, String, Option<String>, String) = sqlx::query_as(
+            "SELECT id, production_batch_id, winner_candidate_id, asset_ids_json
+             FROM benchmark_experiments WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_benchmark.0, "bmk_backup");
+        assert_ne!(restored_benchmark.1, "pbt_backup");
+        assert_ne!(restored_benchmark.2.as_deref(), Some("bmc_backup_2"));
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&restored_benchmark.3).unwrap(),
+            vec![restored_asset_id.clone()]
+        );
+        let restored_candidates: Vec<(
+            String,
+            i64,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        )> = sqlx::query_as(
+            "SELECT id, position, asset_ids_json, values_json,
+                        production_batch_item_id, task_id
+                 FROM benchmark_candidates WHERE experiment_id = ? ORDER BY position",
+        )
+        .bind(&restored_benchmark.0)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_candidates.len(), 2);
+        assert_eq!(
+            restored_candidates
+                .iter()
+                .map(|(_, position, ..)| *position)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        for (id, _, asset_ids_json, values_json, item_id, task_id) in &restored_candidates {
+            assert!(!["bmc_backup_1", "bmc_backup_2"].contains(&id.as_str()));
+            assert_eq!(
+                serde_json::from_str::<Vec<String>>(asset_ids_json).unwrap(),
+                vec![restored_asset_id.clone()]
+            );
+            assert!(values_json.contains(&restored_asset_id));
+            assert_ne!(item_id.as_deref(), Some("pbi_backup"));
+            assert_ne!(task_id.as_deref(), Some("tsk_backup"));
+        }
         let restored_tags: Vec<(String, String)> =
             sqlx::query_as("SELECT id, name FROM asset_tags WHERE project_id = ? ORDER BY name")
                 .bind(&restored.id)
@@ -4620,6 +4696,87 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn fixed_v5_and_v6_fixtures_restore_with_empty_later_data() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+
+        for version in [5_u32, 6_u32] {
+            let project_id = format!("legacy-v{version}-project");
+            let project_name = format!("旧项目 v{version}");
+            let archive_path = directory.path().join(format!("legacy-v{version}.zip"));
+            let file = File::create(&archive_path).unwrap();
+            let mut writer = ZipWriter::new(file);
+            let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+            let manifest = json!({
+                "format": "ai-studio-project-backup",
+                "version": version,
+                "createdBy": "0.3.0",
+                "project": {"id": project_id, "name": project_name}
+            });
+            let project = json!({
+                "project": {"id": project_id, "name": project_name},
+                "description": null,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z",
+                "activeTasksExcluded": 0,
+                "incompleteTasksExcluded": 0,
+                "tasks": [],
+                "taskEvents": [],
+                "assets": [],
+                "mappings": [],
+                "snapshots": [],
+                "presets": [],
+                "batches": [],
+                "items": [],
+                "workflowRefs": [],
+                "assetTags": [],
+                "assetTagLinks": [],
+                "assetFavorites": [],
+                "assetVideoPrompts": [],
+                "productionItemReviews": [],
+                "shots": [],
+                "shotStageConfigs": [],
+                "shotReferenceAssets": [],
+                "shotGenerationLinks": []
+            });
+            writer.start_file("manifest.json", options).unwrap();
+            writer
+                .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+                .unwrap();
+            writer.start_file("project.json", options).unwrap();
+            writer
+                .write_all(serde_json::to_string(&project).unwrap().as_bytes())
+                .unwrap();
+            writer.finish().unwrap();
+
+            let preview = service.inspect(archive_path).await.unwrap();
+            assert_eq!(preview.project_name, project_name);
+            assert_eq!(preview.production_queues, 0);
+            assert_eq!(preview.benchmarks, 0);
+            let restored = service.restore(&preview.inspection_id).await.unwrap();
+            let counts: (i64, i64, i64) = sqlx::query_as(
+                "SELECT
+                   (SELECT COUNT(*) FROM asset_video_prompts WHERE project_id = ?),
+                   (SELECT COUNT(*) FROM production_item_reviews WHERE project_id = ?),
+                   (SELECT COUNT(*) FROM benchmark_experiments WHERE project_id = ?)",
+            )
+            .bind(&restored.id)
+            .bind(&restored.id)
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(counts, (0, 0, 0));
+        }
     }
 
     #[tokio::test]

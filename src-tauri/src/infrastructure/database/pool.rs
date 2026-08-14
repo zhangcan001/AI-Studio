@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adding_migration_011_preserves_existing_project_runtime_rows() {
+    async fn adding_migrations_011_to_014_preserves_existing_project_runtime_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-app.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -257,6 +257,17 @@ mod tests {
         .await
         .expect("migration 011 should apply to the legacy database");
 
+        for migration in [
+            include_str!("../../../migrations/012_production_item_review.sql"),
+            include_str!("../../../migrations/013_workflow_archive_and_package_metadata.sql"),
+            include_str!("../../../migrations/014_workflow_benchmark.sql"),
+        ] {
+            sqlx::raw_sql(migration)
+                .execute(&pool)
+                .await
+                .expect("migrations 012-014 should apply to the 011 database");
+        }
+
         let after: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT
                (SELECT COUNT(*) FROM projects WHERE id = 'legacy-project'),
@@ -278,6 +289,39 @@ mod tests {
                 .expect("legacy foreign keys pragma should be readable"),
             1
         );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
+                 ('production_item_reviews', 'benchmark_experiments', 'benchmark_candidates')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("post-011 tables should be readable"),
+            3
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT name FROM pragma_table_info('workflow_versions') WHERE name = 'package_name'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("workflow package metadata should be readable"),
+            "package_name"
+        );
+        let preserved_rows: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM projects WHERE id = 'legacy-project'),
+               (SELECT COUNT(*) FROM tasks WHERE id = 'legacy-task'),
+               (SELECT COUNT(*) FROM assets WHERE id = 'legacy-asset'),
+               (SELECT COUNT(*) FROM production_batches WHERE id = 'legacy-batch'),
+               (SELECT COUNT(*) FROM production_batch_items WHERE id = 'legacy-item'),
+               (SELECT COUNT(*) FROM shots WHERE id = 'legacy-shot'),
+               (SELECT COUNT(*) FROM shot_generation_links)",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("post-014 legacy rows should remain readable");
+        assert_eq!(preserved_rows, before);
         pool.close().await;
     }
 }

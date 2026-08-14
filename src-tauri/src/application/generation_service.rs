@@ -1484,6 +1484,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reference_manifest_blocks_wrong_order_and_duplicate_ids_with_structured_details() {
+        let expected = ["ast_storyboard", "ast_subject_1", "ast_subject_2"]
+            .into_iter()
+            .map(|id| AssetId::parse(id).unwrap())
+            .collect::<Vec<_>>();
+        for actual in [
+            vec![
+                expected[1].clone(),
+                expected[0].clone(),
+                expected[2].clone(),
+            ],
+            vec![
+                expected[0].clone(),
+                expected[1].clone(),
+                expected[1].clone(),
+            ],
+        ] {
+            let values = BTreeMap::from([(
+                "reference_images".to_owned(),
+                GenerationInputValue::ImageAssets(actual.clone()),
+            )]);
+            let error = validate_reference_manifest(
+                &values,
+                Some(&ReferenceManifest {
+                    input_key: "reference_images".to_owned(),
+                    asset_ids: expected.clone(),
+                }),
+            )
+            .expect_err("reference order and multiplicity must be frozen exactly");
+            let task_error = task_error_from_input_prepare(&error);
+
+            assert_eq!(task_error.code, "REFERENCE_MAPPING_INCOMPLETE");
+            assert_eq!(
+                task_error.raw,
+                Some(json!({
+                    "inputKey": "reference_images",
+                    "expectedAssetIds": ["ast_storyboard", "ast_subject_1", "ast_subject_2"],
+                    "actualAssetIds": actual.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                }))
+            );
+        }
+    }
+
     #[derive(Clone)]
     struct FakeClock {
         values: Arc<std::sync::Mutex<Vec<chrono::DateTime<Utc>>>>,

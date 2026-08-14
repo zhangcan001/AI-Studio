@@ -1,6 +1,6 @@
 AI Studio 0.3.0 local release candidate artifacts
 Generated: 2026-08-12
-Status: local only; no upload, tag, or GitHub Release
+Status: STALE AFTER POST-GATE SOURCE CHANGES; local only; no upload, tag, or GitHub Release
 
 SHA-256                                    Bytes       Artifact
 6DDA820FAA5CA6B00C4871E8105DB643F9A61F123BCFB58128FBEEF763512757  31424512  src-tauri/target/release/ai-studio.exe

@@ -1,6 +1,7 @@
 # AI Studio 0.3.0 Product Scope Realignment
 
 Date: 2026-08-10
+Consolidated: 2026-08-14
 Release status: `CODE READY / LIVE VALIDATION DEFERRED`
 
 ## Product direction
@@ -19,20 +20,24 @@ Krea2 批量图片直接提供提示词卡片、粘贴文本按空行拆分、�
 ## Frozen runtime and queue contract
 
 - 普通批量图片目录只接受 `wfl_kera2_t2i_local_v2`。
-- 普通批量视频目录只接受 `wfl_minimax_h3_reference_video`。
+- 普通批量视频目录只接受本冻结文件列出的 MiniMax H3 FAST/QUALITY 精确 workflow ID；不接受第三 Runtime 或未审计的 H3 workflow。
 - Krea2 Recipe 必须提供 `prompt`、`width`、`height`、`seed`；界面显示 8 个官方宽高比预设，并按 Recipe 约束过滤 1K/2K 预设，非法自定义值不自动取整或裁剪。
 - 创建队列时冻结每项的工作流版本、Recipe、输入 Asset ID、提示词、数字参数和随机 Seed；随机 Seed 在持久化前解析为固定值。
 - 队列严格串行执行，`continueOnFailure` 保留失败项并允许后续项目继续；致命执行错误仍按既有队列策略暂停。
 - H3 输出分辨率预设固定为图片规格中的 16:9 梯度：`608×352`、`736×416`、`864×480`、`960×544`、`1056×608`、`1152×640`、`1216×672`、`1280×736`、`1344×768`、`1376×768`、`1504×832`、`1664×928`、`1824×1024`、`1920×1088`；Project Folder 按 UI Override → Front Matter → Prompt 正文显式规格 → 素材比例 → Recipe 默认值为每个 Segment 独立解析 duration/resolution；无规格且无素材推断时才使用 `5 秒 / 960×544` 默认档，手动值仍按 Recipe 合法范围校验。
 - H3 产品能力边界为最高 15 秒、最高 2K；QUALITY 为默认/推荐的 20 步正式工作流，FAST 保留历史 4 步 Turbo 工作流；两者都使用既有单任务串行队列，历史本机验证档位单独标注为 `0.1 MP · 5 秒 · RTX 5060 Ti 16GB`。
 - H3 Recipe 必须具备经过本机 `/object_info` 与 graph 审计的精确语义键：FL2VA 的 `prompt` / optional `first_frame` / optional `last_frame`，或 REF2VA 的 plural `reference_images` / `reference_videos` / `reference_audios`，以及 `width`、`height`、`duration_seconds`（1–15、step 1、默认 5）、`seed` 和 video output；契约缺失时显示 `当前本地 H3 工作流未启用该模式`，不静默猜字段。
-- H3 当前内置 FAST 生产 Recipe 为 FL2VA `1.0.0` 与 Omni REF2VA `1.3.0`，QUALITY 生产 Recipe 为四个不可变 `2.0.0` 包（T2V、I2V、First/Last、REF2VA）；Project Folder 按 mode + profile 选择并把 QUALITY/FAST 冻结进队列真相。历史 `1.2.0`、`1.1.2` 及更早 H3 包继续保留用于兼容。技术债：普通 H3 workspace 当前按每个正式 workflow ID 假设一个活动生产 Recipe；本次冻结不新增 Recipe Registry 或选择系统。
+- H3 当前内置 FAST 生产 Recipe 为 FL2VA `1.0.0` 与 Omni REF2VA `1.3.0`，QUALITY 生产 Recipe 为四个不可变 `2.0.0` 包（T2V、I2V、First/Last、REF2VA）；Project Folder 按 mode + profile 选择并把 QUALITY/FAST 冻结进队列真相。历史 `1.2.0`、`1.1.2` 及更早 H3 包继续保留用于兼容。
+- 普通图片/视频工作区已经按 `workflowVersionId + recipeId` 支持多个正式 Recipe 的显示、手动选择、推荐/兼容回退和项目级选择记忆；Preset 与 Preferred Preset 继续按同一 Recipe identity 隔离。剩余技术债是 Recipe 的显式推荐/晋升、归档、历史管理与引用可视化，不再是“缺少 Recipe 选择系统”。
+- Workflow Parameter Exposure 只允许安全、未连接、现有字段类型可表达的 literal input；模型、路径、设备等内部输入保持在 Workflow 内。发布参数暴露时复用原始 Workflow JSON bytes 与 Workflow SHA，不创建新的 Workflow Version，只创建新的 Recipe version；Task/Queue 仍冻结真实的 `workflowVersionId + recipeId`。
 
 ## Compatibility contract
 
-- 既有 `001`–`011` 迁移、Shot 表和 Shot 后端保持可读可恢复，不删除表、不重写历史数据；新增 `012_production_item_review.sql` 只保存审片状态、备注和返工版本 lineage。
+- 既有 `001`–`014` 迁移、Shot 表和 Shot 后端保持可读可恢复，不删除表、不重写历史数据；`012_production_item_review.sql` 保存审片状态，`013_workflow_archive_and_package_metadata.sql` 保存归档/包元数据，`014_workflow_benchmark.sql` 保存 Benchmark 元数据；001–014 均为冻结历史迁移。
 - `011_asset_video_prompt.sql` 为图片 Asset 保存项目级视频提示词；提示词会 trim、非空校验，UTF-8 最大 64 KiB。
-- Project Backup 版本升级为 v6，新增 Asset 视频提示词和审片/返工版本数据；恢复继续接受 v1–v6，并执行项目边界校验与 Asset ID remap。
+- Project Backup 版本升级为 v7，新增 Asset 视频提示词、审片/返工版本和 Workflow Benchmark 实验/候选数据；恢复继续接受 v1–v7，并执行项目边界校验与 Asset ID remap。
+- Workflow Benchmark 只通过 `ProductionBatch → ProductionBatchItem → ProductionQueueService → GenerationService → Task → Snapshot → Asset` 进入生产，不直接提交 ComfyUI；候选冻结 Workflow/Recipe/Asset IDs，状态保留 DRAFT、QUEUED、RUNNING、COMPLETED、PARTIAL、CANCELLED 和 FAILED_TO_QUEUE。
+- H3 GenerationService 在提交前执行 Workflow compatibility gate 与严格 `ReferenceManifest` 顺序校验；缺失/不兼容节点或 `REFERENCE_MAPPING_INCOMPLETE` 会保留结构化错误，不静默回退或提交。
 - 不创建第二 Task 模型、第二执行引擎或隐藏的 Shot 自动链路。
 - 本地 H3 Project Folder 导入使用 Rust 短时会话（20 分钟），React 只接收 session ID、目录显示名、Segment/相对文件名、Prompt 预览和检查状态；旧导入模式仍由后端兼容但不进入普通 UI；不创建第二队列、第二 Prompt 表、外部路径表或目录监控器。
 

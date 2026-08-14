@@ -183,7 +183,8 @@ new work is development-only on the 0.3.0 line.
 
 Pack 05–10 remain historical implementation records and their old Shot data
 paths remain compatible. The current product direction, exact runtime IDs,
-Backup v5 contract, and hidden legacy UI boundary are recorded in
+the Backup v7 contract, migrations 001–014, Workflow Benchmark boundary, and
+hidden legacy UI boundary are recorded in
 `docs/M3_0_3_0_SCOPE_FREEZE.md`. The two required independent live gates are
 recorded in `docs/M3_FINAL_RELEASE_GATE_0.3.0.md`; user-facing notes are in
 `docs/RELEASE_NOTES_0.3.0.md`. No `v0.3.0` tag or GitHub Release has been
@@ -193,13 +194,28 @@ Runtime Workflow Packages are loaded only from
 `%LOCALAPPDATA%/AIStudio/AIStudioData/workflow_library/`. Test fixtures are not
 installed as runtime packages, and no model files are bundled or modified.
 
-The current local catalog exposes one active production Recipe for the official
-MiniMax H3 workflow ID (`wfl_minimax_h3_reference_video`), version `1.2.0`;
-historical H3 package versions remain in compatibility storage. The active
-Recipe exposes `duration_seconds` 1–15 with step 1, plus Recipe-bound width and
-height controls up to 2K. Technical debt: the ordinary H3 workspace currently
-assumes one active production Recipe for the official workflow ID. The 0.3.0
-code freeze does not add a Recipe registry or selection system.
+The current production catalog may expose multiple Recipes for the same current
+Workflow Version. The ordinary image/video workspaces select by the stable pair
+`workflowVersionId + recipeId`, show the Recipe version, preserve a project-level
+manual selection, and otherwise fall back to the recommended/compatible Recipe.
+Workflow Parameter Exposure duplicates only the Recipe definition: publishing a
+new exposed parameter set keeps the original Workflow JSON bytes and Workflow
+SHA unchanged, reuses the same Workflow Version, and registers a new Recipe
+version. Presets and preferred presets remain scoped to the selected Recipe.
+The remaining lifecycle debt is explicit Recipe promotion/archival/history
+management, not basic Recipe selection.
+
+## 0.3.0 Post-Benchmark Code Gate
+
+The 2026-08-14 automated gate passed: Rust `415 passed / 0 failed`, frontend
+`46 files / 152 tests / 0 failed`, frontend build, migration `001–014` Fresh /
+`012→013→014` upgrade, Backup v7 remap, Workflow Benchmark, H3 compatibility,
+ReferenceManifest diagnostics, Krea2 regression, and diff checks. The detailed
+evidence is in `docs/M3_POST_BENCHMARK_CODE_GATE_0.3.0.md`.
+
+GPU and desktop Live Validation remain `DEFERRED BY PRODUCT OWNER`. The old
+local release hashes are marked stale after these post-gate source changes; no
+`v0.3.0` tag, GitHub Release, or artifact upload exists.
 
 ## Development
 
