@@ -18,6 +18,16 @@ export type RecipeField =
     }
   | {
       key: string;
+      type: "number";
+      label: string;
+      required: boolean;
+      default?: number;
+      min?: number;
+      max?: number;
+      step?: number;
+    }
+  | {
+      key: string;
       type: "seed";
       label: string;
       defaultMode: "random" | "fixed";
@@ -69,6 +79,7 @@ export interface RecipeViewModel {
 export type DraftValue =
   | { type: "string"; value: string }
   | { type: "integer"; value: number }
+  | { type: "number"; value: number }
   | { type: "seed_random" }
   | { type: "seed_fixed"; value: string }
   | { type: "image_asset"; assetId: string }

@@ -1,6 +1,7 @@
 import type { DraftValue, GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
 import { fieldLabel } from "../../i18n/statusLabels";
 import { IntegerField } from "./fields/IntegerField";
+import { NumberField } from "./fields/NumberField";
 import { ImageField } from "./fields/ImageField";
 import { MultiImageField } from "./fields/MultiImageField";
 import { MediaField } from "./fields/MediaField";
@@ -75,6 +76,16 @@ function renderField(
     case "integer":
       return (
         <IntegerField
+          key={field.key}
+          field={{ ...field, label: fieldLabel(field.key, field.label) }}
+          value={value}
+          error={error}
+          onChange={(next) => onChange(field.key, next)}
+        />
+      );
+    case "number":
+      return (
+        <NumberField
           key={field.key}
           field={{ ...field, label: fieldLabel(field.key, field.label) }}
           value={value}
@@ -172,6 +183,20 @@ export function validateRecipeValues(
       } else if (field.step !== undefined && field.step > 0 && value.value % field.step !== 0) {
         errors[field.key] = `数值必须是 ${field.step} 的倍数。`;
       }
+    } else if (field.type === "number") {
+      if (!value || value.type !== "number" || !Number.isFinite(value.value)) {
+        if (field.required) errors[field.key] = "请输入数字。";
+      } else if (field.min !== undefined && value.value < field.min) {
+        errors[field.key] = `数值不能小于 ${field.min}。`;
+      } else if (field.max !== undefined && value.value > field.max) {
+        errors[field.key] = `数值不能大于 ${field.max}。`;
+      } else if (
+        field.step !== undefined
+        && field.step > 0
+        && !isNumberAlignedToStep(value.value, field.min ?? 0, field.step)
+      ) {
+        errors[field.key] = `数值必须按 ${field.step} 的步长输入。`;
+      }
     } else if (field.type === "seed" && value?.type === "seed_fixed") {
       if (!/^\d+$/.test(value.value) || value.value.length > 20) {
         errors[field.key] = "请输入十进制随机种子。";
@@ -217,4 +242,10 @@ export function validateRecipeValues(
     }
   }
   return errors;
+}
+
+export function isNumberAlignedToStep(value: number, base: number, step: number): boolean {
+  if (!Number.isFinite(value) || !Number.isFinite(base) || !Number.isFinite(step) || step <= 0) return false;
+  const quotient = (value - base) / step;
+  return Math.abs(quotient - Math.round(quotient)) <= 1e-9 * Math.max(1, Math.abs(quotient));
 }

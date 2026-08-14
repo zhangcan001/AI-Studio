@@ -82,6 +82,8 @@ function fieldTypeLabel(type: RecipeField["type"]): string {
       return "文字";
     case "integer":
       return "数字";
+    case "number":
+      return "小数";
     case "seed":
       return "种子";
   }
@@ -296,7 +298,7 @@ export function GenerationStudio({
   }, [pendingAssetIntent, projectId, selectedWorkflow]);
 
   const hasUnsupportedField = useMemo(
-    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
+    () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "number", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
     [selectedWorkflow],
   );
   const imageCapability = selectedWorkflow ? imageRecipeCapability(selectedWorkflow) : undefined;

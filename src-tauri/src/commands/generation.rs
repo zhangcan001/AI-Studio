@@ -81,6 +81,8 @@ pub(crate) enum InputValueDto {
     String { value: String },
     #[serde(rename = "integer")]
     Integer { value: i64 },
+    #[serde(rename = "number")]
+    Number { value: f64 },
     #[serde(rename = "seed_random")]
     SeedRandom,
     #[serde(rename = "seed_fixed")]
@@ -122,6 +124,14 @@ impl InputValueDto {
         match self {
             Self::String { value } => Ok(GenerationInputValue::Text(value)),
             Self::Integer { value } => Ok(GenerationInputValue::Integer(value)),
+            Self::Number { value } => {
+                if !value.is_finite() {
+                    return Err(AppError::invalid_input(format!(
+                        "number value for {key} must be finite"
+                    )));
+                }
+                Ok(GenerationInputValue::Number(value))
+            }
             Self::SeedRandom => Ok(GenerationInputValue::Seed(SeedValue::Random)),
             Self::SeedFixed { value } => {
                 let seed = value.parse::<u64>().map_err(|_| {

@@ -20,6 +20,7 @@ export type InferenceConfidence = "CERTAIN" | "HIGH" | "AMBIGUOUS" | "UNKNOWN";
 export type WorkflowFieldType =
   | "textarea"
   | "integer"
+  | "number"
   | "seed"
   | "image"
   | "images"

@@ -1,5 +1,6 @@
 use crate::compiler::{
-    BindingValidator, CompileError, RecipeValidator, SeedResolver, WorkflowValidator,
+    number_is_aligned_to_step, BindingValidator, CompileError, RecipeValidator, SeedResolver,
+    WorkflowValidator,
 };
 use crate::domain::{
     CompileRequest, InputDefinition, InputValue, Recipe, ResolvedInputValue, SeedDefault,
@@ -62,6 +63,22 @@ impl WorkflowCompiler {
                     if let Some(value) = value {
                         resolved_inputs
                             .insert(input_key.clone(), ResolvedInputValue::Integer(value));
+                    }
+                }
+                InputDefinition::Number {
+                    required,
+                    default,
+                    min,
+                    max,
+                    step,
+                    ..
+                } => {
+                    let value = resolve_number_input(
+                        input_key, *required, *default, *min, *max, *step, request,
+                    )?;
+                    if let Some(value) = value {
+                        resolved_inputs
+                            .insert(input_key.clone(), ResolvedInputValue::Number(value));
                     }
                 }
                 InputDefinition::Seed {
@@ -296,6 +313,59 @@ fn resolve_integer_input(
     Ok(Some(value))
 }
 
+fn resolve_number_input(
+    input_key: &str,
+    required: bool,
+    default: Option<f64>,
+    min: Option<f64>,
+    max: Option<f64>,
+    step: Option<f64>,
+    request: &CompileRequest,
+) -> Result<Option<f64>, CompileError> {
+    let value = request
+        .values
+        .get(input_key)
+        .map(|value| match value {
+            InputValue::Number(value) => Ok(*value),
+            other => Err(type_mismatch(input_key, "number", other)),
+        })
+        .transpose()?
+        .or(default);
+
+    let Some(value) = value else {
+        if required {
+            return Err(CompileError::InputRequired {
+                input: input_key.to_owned(),
+            });
+        }
+        return Ok(None);
+    };
+
+    if !value.is_finite()
+        || min.is_some_and(|min| value < min)
+        || max.is_some_and(|max| value > max)
+    {
+        return Err(CompileError::InputNumberOutOfRange {
+            input: input_key.to_owned(),
+            value,
+            min,
+            max,
+        });
+    }
+
+    if let Some(step) = step {
+        if !number_is_aligned_to_step(value, min.unwrap_or(0.0), step) {
+            return Err(CompileError::InputNumberStepMismatch {
+                input: input_key.to_owned(),
+                value,
+                step,
+            });
+        }
+    }
+
+    Ok(Some(value))
+}
+
 fn resolve_single_media_input<F>(
     input_key: &str,
     required: bool,
@@ -404,6 +474,7 @@ fn type_mismatch(input_key: &str, expected: &str, value: &InputValue) -> Compile
         actual: match value {
             InputValue::String(_) => "string",
             InputValue::Integer(_) => "integer",
+            InputValue::Number(_) => "number",
             InputValue::Seed(_) => "seed",
             InputValue::Image(_) => "image",
             InputValue::Images(_) => "images",
@@ -484,6 +555,9 @@ fn resolved_value_to_json(value: &ResolvedInputValue) -> Value {
     match value {
         ResolvedInputValue::String(value) => Value::String(value.clone()),
         ResolvedInputValue::Integer(value) => Value::Number(Number::from(*value)),
+        ResolvedInputValue::Number(value) => {
+            Value::Number(Number::from_f64(*value).expect("validated number must be finite"))
+        }
         ResolvedInputValue::Seed(value) => Value::Number(Number::from(*value)),
         ResolvedInputValue::Image(value) => Value::String(value.clone()),
         ResolvedInputValue::Images(values) => {
@@ -1228,5 +1302,72 @@ outputs: []
             .expect_err("type mismatch must fail");
 
         assert!(matches!(error, CompileError::InputTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn compiles_number_as_json_number_and_preserves_fractional_value() {
+        let recipe = RecipeParser::parse(
+            r#"
+schema_version: 1
+id: number_recipe
+name: Number Recipe
+workflow:
+  file: workflow.json
+inputs:
+  strength:
+    type: number
+    label: Strength
+    required: true
+    default: 0.3
+    min: 0.0
+    max: 1.0
+    step: 0.1
+bindings:
+  - source: strength
+    target:
+      node: "1"
+      input: strength
+outputs: []
+"#,
+        )
+        .expect("number recipe should parse");
+        let workflow = WorkflowDocument::parse(
+            serde_json::from_str(r#"{"1":{"inputs":{"strength":0.1},"class_type":"NumberNode"}}"#)
+                .expect("workflow should parse"),
+        )
+        .expect("workflow should validate");
+        let result = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([(
+                    "strength".to_owned(),
+                    InputValue::Number(0.3),
+                )])),
+            )
+            .expect("number should compile");
+
+        assert_eq!(
+            result.workflow["1"]["inputs"]["strength"].as_f64(),
+            Some(0.3)
+        );
+        assert_eq!(
+            result.resolved_inputs.get("strength"),
+            Some(&ResolvedInputValue::Number(0.3))
+        );
+        let invalid = WorkflowCompiler
+            .compile(
+                &workflow,
+                &recipe,
+                &CompileRequest::new(BTreeMap::from([(
+                    "strength".to_owned(),
+                    InputValue::Number(0.35),
+                )])),
+            )
+            .expect_err("misaligned number should fail");
+        assert!(matches!(
+            invalid,
+            CompileError::InputNumberStepMismatch { .. }
+        ));
     }
 }

@@ -14,5 +14,5 @@ pub use binding::BindingValidator;
 pub use errors::CompileError;
 pub use parser::RecipeParser;
 pub use seed::SeedResolver;
-pub use validator::{RecipeValidator, WorkflowValidator};
+pub use validator::{number_is_aligned_to_step, RecipeValidator, WorkflowValidator};
 pub use workflow_compiler::{CompileResult, WorkflowCompiler};

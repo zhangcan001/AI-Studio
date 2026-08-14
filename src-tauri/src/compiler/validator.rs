@@ -3,6 +3,15 @@ use std::collections::BTreeSet;
 
 pub struct RecipeValidator;
 
+pub fn number_is_aligned_to_step(value: f64, base: f64, step: f64) -> bool {
+    if !value.is_finite() || !base.is_finite() || !step.is_finite() || step <= 0.0 {
+        return false;
+    }
+    let quotient = (value - base) / step;
+    let tolerance = 1e-9 * quotient.abs().max(1.0);
+    (quotient - quotient.round()).abs() <= tolerance
+}
+
 impl RecipeValidator {
     pub fn validate(recipe: &Recipe) -> Result<(), RecipeError> {
         if recipe.schema_version != 1 {
@@ -76,6 +85,64 @@ impl RecipeValidator {
                     if let Some(step) = step {
                         if min.is_some_and(|min| min % step != 0)
                             || max.is_some_and(|max| max % step != 0)
+                        {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" min/max must be aligned to step {step}"
+                            )));
+                        }
+                    }
+                }
+                InputDefinition::Number {
+                    default,
+                    min,
+                    max,
+                    step,
+                    ..
+                } => {
+                    for (label, value) in [
+                        ("default", *default),
+                        ("min", *min),
+                        ("max", *max),
+                        ("step", *step),
+                    ] {
+                        if value.is_some_and(|value| !value.is_finite()) {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" {label} must be finite"
+                            )));
+                        }
+                    }
+                    if step.is_some_and(|step| step <= 0.0) {
+                        return Err(RecipeError::invalid(format!(
+                            "input \"{key}\" step must be greater than zero"
+                        )));
+                    }
+                    if let (Some(min), Some(max)) = (min, max) {
+                        if min > max {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" min {min} must be less than or equal to max {max}"
+                            )));
+                        }
+                    }
+                    if let Some(default) = default {
+                        if min.is_some_and(|min| *default < min)
+                            || max.is_some_and(|max| *default > max)
+                        {
+                            return Err(RecipeError::invalid(format!(
+                                "input \"{key}\" default {default} is outside its declared range"
+                            )));
+                        }
+                        if let Some(step) = step {
+                            if !number_is_aligned_to_step(*default, min.unwrap_or(0.0), *step) {
+                                return Err(RecipeError::invalid(format!(
+                                    "input \"{key}\" default {default} is not aligned to step {step}"
+                                )));
+                            }
+                        }
+                    }
+                    if let Some(step) = step {
+                        let base = min.unwrap_or(0.0);
+                        if min.is_some_and(|min| !number_is_aligned_to_step(min, base, *step))
+                            || max.is_some_and(|max| !number_is_aligned_to_step(max, base, *step))
                         {
                             return Err(RecipeError::invalid(format!(
                                 "input \"{key}\" min/max must be aligned to step {step}"
@@ -332,6 +399,25 @@ bindings: []
 outputs: []
 "#;
 
+    const RECIPE_WITH_NUMBER_RANGE: &str = r#"
+schema_version: 1
+id: number_range
+name: Number Range
+workflow:
+  file: workflow.json
+inputs:
+  strength:
+    type: number
+    label: Strength
+    required: true
+    default: 0.3
+    min: 0.0
+    max: 1.0
+    step: 0.1
+bindings: []
+outputs: []
+"#;
+
     #[test]
     fn rejects_unsupported_schema() {
         let mut recipe = RecipeParser::parse(RECIPE_WITH_RANGE).expect("recipe should parse");
@@ -403,6 +489,24 @@ outputs: []
         let recipe = RecipeParser::parse(RECIPE_WITH_SEED_RANGE).expect("recipe should parse");
 
         RecipeValidator::validate(&recipe).expect("seed range should be valid");
+    }
+
+    #[test]
+    fn accepts_fractional_number_step_without_binary_rounding_failure() {
+        let recipe =
+            RecipeParser::parse(RECIPE_WITH_NUMBER_RANGE).expect("number recipe should parse");
+        RecipeValidator::validate(&recipe).expect("0.3 should align to 0.1");
+    }
+
+    #[test]
+    fn rejects_non_finite_number_contract_values() {
+        let mut recipe =
+            RecipeParser::parse(RECIPE_WITH_NUMBER_RANGE).expect("number recipe should parse");
+        if let Some(InputDefinition::Number { default, .. }) = recipe.inputs.get_mut("strength") {
+            *default = Some(f64::NAN);
+        }
+        let error = RecipeValidator::validate(&recipe).expect_err("NaN must be rejected");
+        assert!(error.to_string().contains("must be finite"));
     }
 
     #[test]

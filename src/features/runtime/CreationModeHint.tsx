@@ -8,7 +8,7 @@ interface Props {
 export function CreationModeHint({ recipe }: Props) {
   const kind = runtimeKindFor(recipe);
   const normalizedMode = `${recipe.category} ${recipe.mode}`.toLocaleLowerCase();
-  const mediaFields = recipe.fields.filter((field): field is Exclude<RecipeField, Extract<RecipeField, { type: "textarea" | "integer" | "seed" }>> => ["image", "images", "video", "videos", "audio", "audios"].includes(field.type));
+  const mediaFields = recipe.fields.filter((field): field is Exclude<RecipeField, Extract<RecipeField, { type: "textarea" | "integer" | "number" | "seed" }>> => ["image", "images", "video", "videos", "audio", "audios"].includes(field.type));
   const requiredMediaFields = mediaFields.filter((field) => field.required).length;
   const isReferenceMode = /(reference|image.?to.?image|img2img|参考|图生图)/i.test(normalizedMode);
   const message = isReferenceMode

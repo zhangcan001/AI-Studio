@@ -59,6 +59,20 @@ enum InputDefinitionDto {
         #[serde(default)]
         step: Option<i64>,
     },
+    #[serde(rename = "number")]
+    Number {
+        label: String,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        default: Option<f64>,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>,
+        #[serde(default)]
+        step: Option<f64>,
+    },
     #[serde(rename = "seed")]
     Seed {
         label: String,
@@ -253,6 +267,21 @@ impl InputDefinitionDto {
                 max,
                 step,
             }),
+            Self::Number {
+                label,
+                required,
+                default,
+                min,
+                max,
+                step,
+            } => Ok(InputDefinition::Number {
+                label,
+                required,
+                default,
+                min,
+                max,
+                step,
+            }),
             Self::Seed {
                 label,
                 default,
@@ -393,6 +422,26 @@ outputs:
         assert!(matches!(
             recipe.inputs.get("steps"),
             Some(InputDefinition::Integer { step: Some(4), .. })
+        ));
+    }
+
+    #[test]
+    fn parses_number_range_and_fractional_step_into_domain_types() {
+        let yaml = VALID_RECIPE.replace(
+            "  steps:\n",
+            "  strength:\n    type: number\n    label: Strength\n    required: true\n    default: 0.3\n    min: 0.0\n    max: 1.0\n    step: 0.1\n  steps:\n",
+        );
+        let recipe = RecipeParser::parse(&yaml).expect("number recipe should parse");
+
+        assert!(matches!(
+            recipe.inputs.get("strength"),
+            Some(InputDefinition::Number {
+                default: Some(default),
+                min: Some(0.0),
+                max: Some(1.0),
+                step: Some(0.1),
+                ..
+            }) if (*default - 0.3).abs() < f64::EPSILON
         ));
     }
 

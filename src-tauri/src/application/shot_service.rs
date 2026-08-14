@@ -762,6 +762,9 @@ pub(crate) fn scalar_values_to_json(
             (InputDefinition::Integer { .. }, GenerationInputValue::Integer(value)) => {
                 json!({"type": "integer", "value": value})
             }
+            (InputDefinition::Number { .. }, GenerationInputValue::Number(value)) => {
+                json!({"type": "number", "value": value})
+            }
             (InputDefinition::Seed { .. }, GenerationInputValue::Seed(SeedValue::Random)) => {
                 json!({"type": "seed_random"})
             }
@@ -775,7 +778,7 @@ pub(crate) fn scalar_values_to_json(
             }
             _ => {
                 return Err(ShotServiceError::InvalidInput(format!(
-                    "参数 {key} 必须是 Recipe 的 integer 或 seed"
+                    "参数 {key} 必须是 Recipe 的 integer、number 或 seed"
                 )))
             }
         };
@@ -803,6 +806,16 @@ pub(crate) fn scalar_values_from_json(
                     })?,
                 ),
             ),
+            Some("number") => {
+                let value = value
+                    .get("value")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| ShotServiceError::InvalidInput(format!("参数 {key} 无效")))?;
+                if !value.is_finite() {
+                    return Err(ShotServiceError::InvalidInput(format!("参数 {key} 无效")));
+                }
+                result.insert(key.clone(), GenerationInputValue::Number(value))
+            }
             Some("seed_random") => {
                 result.insert(key.clone(), GenerationInputValue::Seed(SeedValue::Random))
             }

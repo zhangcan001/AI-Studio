@@ -298,6 +298,8 @@ function safeDraftValueLabel(value: DraftValue | undefined): string {
       return value.value ? (value.value.length > 80 ? `${value.value.slice(0, 77)}…` : value.value) : "（空）";
     case "integer":
       return String(value.value);
+    case "number":
+      return String(value.value);
     case "seed_random":
       return "随机 Seed";
     case "seed_fixed":

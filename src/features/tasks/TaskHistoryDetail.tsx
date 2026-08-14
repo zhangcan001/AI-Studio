@@ -206,6 +206,8 @@ function formatValue(value: DraftValue): string {
       return value.value || "（空）";
     case "integer":
       return String(value.value);
+    case "number":
+      return String(value.value);
     case "seed_random":
       return "随机种子";
     case "seed_fixed":

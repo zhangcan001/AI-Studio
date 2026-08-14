@@ -1159,6 +1159,7 @@ pub(crate) fn generation_values_to_json(values: &BTreeMap<String, GenerationInpu
         let value = match value {
             GenerationInputValue::Text(value) => json!({"type": "string", "value": value}),
             GenerationInputValue::Integer(value) => json!({"type": "integer", "value": value}),
+            GenerationInputValue::Number(value) => json!({"type": "number", "value": value}),
             GenerationInputValue::Seed(SeedValue::Random) => json!({"type": "seed_random"}),
             GenerationInputValue::Seed(SeedValue::Fixed(value)) => {
                 json!({"type": "seed_fixed", "value": value.to_string()})
@@ -1260,6 +1261,16 @@ fn generation_value_from_json(key: &str, value: &Value) -> Result<GenerationInpu
                 .and_then(Value::as_i64)
                 .ok_or_else(|| format!("production queue integer for {key} is invalid"))?,
         )),
+        "number" => {
+            let value = object
+                .get("value")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| format!("production queue number for {key} is invalid"))?;
+            if !value.is_finite() {
+                return Err(format!("production queue number for {key} is invalid"));
+            }
+            Ok(GenerationInputValue::Number(value))
+        }
         "seed_random" => Ok(GenerationInputValue::Seed(SeedValue::Random)),
         "seed_fixed" => Ok(GenerationInputValue::Seed(SeedValue::Fixed(
             required_string(object, "value", key)?
@@ -1388,6 +1399,7 @@ mod tests {
             "seed".to_owned(),
             GenerationInputValue::Seed(SeedValue::Fixed(42)),
         );
+        values.insert("strength".to_owned(), GenerationInputValue::Number(0.3));
         values.insert(
             "image".to_owned(),
             GenerationInputValue::ImageAsset(AssetId::parse("ast_test".to_owned()).unwrap()),

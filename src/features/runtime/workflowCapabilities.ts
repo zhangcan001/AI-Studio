@@ -322,7 +322,7 @@ function findMediaField(
   return recipe.fields.find((field) => keys.has(field.key) && types.includes(field.type));
 }
 
-function isMediaField(field: RecipeField): field is Exclude<RecipeField, Extract<RecipeField, { type: "textarea" | "integer" | "seed" }>> {
+function isMediaField(field: RecipeField): field is Exclude<RecipeField, Extract<RecipeField, { type: "textarea" | "integer" | "number" | "seed" }>> {
   return ["image", "images", "video", "videos", "audio", "audios"].includes(field.type);
 }
 
@@ -331,6 +331,7 @@ function defaultValuesForRecipe(recipe: RecipeViewModel): GenerationValues {
     switch (field.type) {
       case "textarea": return [field.key, { type: "string", value: field.default }];
       case "integer": return [field.key, field.default === undefined ? undefined : { type: "integer", value: field.default }];
+      case "number": return [field.key, field.default === undefined ? undefined : { type: "number", value: field.default }];
       case "seed": return [field.key, field.defaultMode === "fixed" ? { type: "seed_fixed", value: field.defaultValue ?? "" } : { type: "seed_random" }];
       case "images": return [field.key, { type: "image_assets", assetIds: [] }];
       case "videos": return [field.key, { type: "video_assets", assetIds: [] }];
@@ -349,6 +350,7 @@ function draftValueMatchesField(field: RecipeField, value: DraftValue): boolean 
   switch (field.type) {
     case "textarea": return value.type === "string";
     case "integer": return value.type === "integer";
+    case "number": return value.type === "number";
     case "seed": return value.type === "seed_random" || value.type === "seed_fixed";
     case "image": return value.type === "image_asset";
     case "images": return value.type === "image_assets";

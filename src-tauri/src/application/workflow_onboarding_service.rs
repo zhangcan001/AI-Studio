@@ -60,6 +60,7 @@ impl Error for WorkflowOnboardingError {}
 enum SemanticFieldType {
     Textarea,
     Integer,
+    Number,
     Seed,
     Image,
     Images,
@@ -74,6 +75,7 @@ impl SemanticFieldType {
         match value {
             "textarea" => Ok(Self::Textarea),
             "integer" => Ok(Self::Integer),
+            "number" => Ok(Self::Number),
             "seed" => Ok(Self::Seed),
             "image" => Ok(Self::Image),
             "images" => Ok(Self::Images),
@@ -92,6 +94,7 @@ impl SemanticFieldType {
         match self {
             Self::Textarea => "textarea",
             Self::Integer => "integer",
+            Self::Number => "number",
             Self::Seed => "seed",
             Self::Image => "image",
             Self::Images => "images",
@@ -1822,28 +1825,6 @@ fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult
             else {
                 continue;
             };
-            let lower_name = input.name.to_ascii_lowercase();
-            if value.is_number() && is_float_input_name(&lower_name) {
-                result.inferences.push(WorkflowAutoInferenceView {
-                    field: lower_name.clone(),
-                    value: Some(current_value_summary(value)),
-                    confidence: InferenceConfidence::Ambiguous,
-                    source: "INPUT_NAME_WITHOUT_FLOAT_RECIPE_TYPE".to_owned(),
-                    alternatives: vec!["integer（不安全）".to_owned(), "手动字段类型".to_owned()],
-                    node_id: Some(node.node_id.clone()),
-                    input_name: Some(input.name.clone()),
-                });
-                result.issues.push(WorkflowAutoIssueView {
-                    code: "FLOAT_INPUT_NEEDS_REVIEW".to_owned(),
-                    message: format!(
-                        "{} 是数字输入，但当前 Recipe 字段体系不支持浮点数，不能自动转换。",
-                        input.name
-                    ),
-                    field: Some(lower_name),
-                    candidates: Vec::new(),
-                });
-                continue;
-            }
             let Some(guess) = auto_input_guess(&node.class_type, &input.name, value) else {
                 continue;
             };
@@ -2039,6 +2020,9 @@ fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoI
         });
     }
     if is_number && ["seed", "noise_seed", "random_seed"].contains(&name.as_str()) {
+        if !is_integer_number(value) {
+            return None;
+        }
         return Some(AutoInputGuess {
             semantic_key: "seed",
             field_type: SemanticFieldType::Seed,
@@ -2052,32 +2036,48 @@ fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoI
         });
     }
     if is_number && name == "width" {
-        return Some(integer_guess("width"));
+        return Some(numeric_guess("width", value, InferenceConfidence::Certain));
     }
     if is_number && name == "height" {
-        return Some(integer_guess("height"));
+        return Some(numeric_guess("height", value, InferenceConfidence::Certain));
     }
     if is_number && ["steps", "num_steps", "sampling_steps"].contains(&name.as_str()) {
-        return Some(AutoInputGuess {
-            semantic_key: "steps",
-            field_type: SemanticFieldType::Integer,
-            confidence: if name == "steps" {
+        return Some(numeric_guess(
+            "steps",
+            value,
+            if name == "steps" {
                 InferenceConfidence::Certain
             } else {
                 InferenceConfidence::High
             },
-            source: "INPUT_NAME_INTEGER_PARAMETER",
-            required: true,
-        });
+        ));
     }
     if is_number && ["duration", "duration_seconds", "seconds"].contains(&name.as_str()) {
-        return Some(AutoInputGuess {
-            semantic_key: "duration_seconds",
-            field_type: SemanticFieldType::Integer,
-            confidence: InferenceConfidence::High,
-            source: "INPUT_NAME_DURATION_PARAMETER",
-            required: true,
-        });
+        return Some(numeric_guess(
+            "duration_seconds",
+            value,
+            InferenceConfidence::High,
+        ));
+    }
+    if is_number {
+        let semantic_key = match name.as_str() {
+            "cfg" | "cfg_scale" => Some("cfg"),
+            "guidance" => Some("guidance"),
+            "denoise" => Some("denoise"),
+            "strength" => Some("strength"),
+            "shift" => Some("shift"),
+            "scale" => Some("scale"),
+            "weight" => Some("weight"),
+            "fps" | "frame_rate" => Some("fps"),
+            _ => None,
+        };
+        if let Some(semantic_key) = semantic_key {
+            return Some(numeric_guess(
+                semantic_key,
+                value,
+                InferenceConfidence::High,
+            ));
+        }
     }
     if is_text && (name == "first_frame" || name == "start_frame") {
         return Some(AutoInputGuess {
@@ -2162,14 +2162,30 @@ fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoI
     None
 }
 
-fn integer_guess(key: &'static str) -> AutoInputGuess {
+fn numeric_guess(
+    key: &'static str,
+    value: &Value,
+    confidence: InferenceConfidence,
+) -> AutoInputGuess {
     AutoInputGuess {
         semantic_key: key,
-        field_type: SemanticFieldType::Integer,
-        confidence: InferenceConfidence::Certain,
-        source: "INPUT_NAME_INTEGER_PARAMETER",
+        field_type: if is_integer_number(value) {
+            SemanticFieldType::Integer
+        } else {
+            SemanticFieldType::Number
+        },
+        confidence,
+        source: if is_integer_number(value) {
+            "INPUT_NAME_INTEGER_PARAMETER"
+        } else {
+            "INPUT_NAME_NUMBER_PARAMETER"
+        },
         required: true,
     }
+}
+
+fn is_integer_number(value: &Value) -> bool {
+    value.as_i64().is_some() || value.as_u64().is_some()
 }
 
 fn auto_input_mapping(
@@ -2180,16 +2196,26 @@ fn auto_input_mapping(
 ) -> Result<InputMapping, WorkflowOnboardingError> {
     validate_mapping_value(guess.field_type, value)?;
     let default_value = match guess.field_type {
-        SemanticFieldType::Textarea | SemanticFieldType::Integer | SemanticFieldType::Seed => {
-            Some(current_value_summary(value))
-        }
+        SemanticFieldType::Textarea
+        | SemanticFieldType::Integer
+        | SemanticFieldType::Number
+        | SemanticFieldType::Seed => Some(current_value_summary(value)),
         _ => None,
     };
-    let step = if guess.field_type == SemanticFieldType::Integer {
-        input
-            .numeric_step
-            .clone()
-            .filter(|value| value.parse::<i64>().ok().is_some_and(|step| step > 0))
+    let step = if matches!(
+        guess.field_type,
+        SemanticFieldType::Integer | SemanticFieldType::Number
+    ) {
+        input.numeric_step.clone().filter(|value| {
+            if guess.field_type == SemanticFieldType::Integer {
+                value.parse::<i64>().ok().is_some_and(|step| step > 0)
+            } else {
+                value
+                    .parse::<f64>()
+                    .ok()
+                    .is_some_and(|step| step.is_finite() && step > 0.0)
+            }
+        })
     } else {
         None
     };
@@ -2201,7 +2227,7 @@ fn auto_input_mapping(
         default_value,
         min_value: if matches!(
             guess.field_type,
-            SemanticFieldType::Integer | SemanticFieldType::Seed
+            SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
         ) {
             input.numeric_min.clone()
         } else {
@@ -2209,7 +2235,7 @@ fn auto_input_mapping(
         },
         max_value: if matches!(
             guess.field_type,
-            SemanticFieldType::Integer | SemanticFieldType::Seed
+            SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
         ) {
             input.numeric_max.clone()
         } else {
@@ -2454,12 +2480,6 @@ fn workflow_kind_for_outputs(outputs: &[OutputMapping]) -> String {
         (true, false) => "IMAGE".to_owned(),
         (false, false) => "UNKNOWN".to_owned(),
     }
-}
-
-fn is_float_input_name(name: &str) -> bool {
-    ["cfg", "cfg_scale", "guidance"]
-        .iter()
-        .any(|key| name == *key || name.contains(key))
 }
 
 fn is_probable_output_node(node: &WorkflowNodeView) -> bool {
@@ -2793,6 +2813,14 @@ impl InputMapping {
                 max: parse_optional_i64(self.max_value.clone(), "max_value")?,
                 step: parse_optional_i64(self.step.clone(), "step")?,
             }),
+            SemanticFieldType::Number => Ok(InputDefinition::Number {
+                label: self.label.clone(),
+                required: self.required,
+                default: parse_optional_f64(default, "default_value")?,
+                min: parse_optional_f64(self.min_value.clone(), "min_value")?,
+                max: parse_optional_f64(self.max_value.clone(), "max_value")?,
+                step: parse_optional_f64(self.step.clone(), "step")?,
+            }),
             SemanticFieldType::Seed => Ok(InputDefinition::Seed {
                 label: self.label.clone(),
                 default: match default.as_deref() {
@@ -2936,6 +2964,16 @@ fn input_definition_json(definition: &InputDefinition) -> Value {
         } => {
             json!({"type":"integer","label":label,"required":required,"default":default,"min":min,"max":max,"step":step})
         }
+        InputDefinition::Number {
+            label,
+            required,
+            default,
+            min,
+            max,
+            step,
+        } => {
+            json!({"type":"number","label":label,"required":required,"default":default,"min":min,"max":max,"step":step})
+        }
         InputDefinition::Seed {
             label,
             default,
@@ -2994,6 +3032,9 @@ fn dry_run_compile(
             ),
             InputDefinition::Integer { default, min, .. } => {
                 InputValue::Integer(default.unwrap_or(min.unwrap_or(0)))
+            }
+            InputDefinition::Number { default, min, .. } => {
+                InputValue::Number(default.unwrap_or(min.unwrap_or(0.0)))
             }
             InputDefinition::Seed { default, min, .. } => {
                 let seed = match default {
@@ -3150,6 +3191,7 @@ fn input_required(definition: &InputDefinition) -> bool {
     match definition {
         InputDefinition::TextArea { required, .. }
         | InputDefinition::Integer { required, .. }
+        | InputDefinition::Number { required, .. }
         | InputDefinition::Image { required, .. }
         | InputDefinition::Images { required, .. }
         | InputDefinition::Video { required, .. }
@@ -3164,6 +3206,7 @@ fn input_default(definition: &InputDefinition) -> Option<String> {
     match definition {
         InputDefinition::TextArea { default, .. } => default.clone(),
         InputDefinition::Integer { default, .. } => default.map(|value| value.to_string()),
+        InputDefinition::Number { default, .. } => default.map(|value| value.to_string()),
         InputDefinition::Seed { default, .. } => Some(match default {
             SeedDefault::Random => "random".to_owned(),
             SeedDefault::Fixed(value) => value.to_string(),
@@ -3175,6 +3218,7 @@ fn input_default(definition: &InputDefinition) -> Option<String> {
 fn input_min(definition: &InputDefinition) -> Option<String> {
     match definition {
         InputDefinition::Integer { min, .. } => min.map(|value| value.to_string()),
+        InputDefinition::Number { min, .. } => min.map(|value| value.to_string()),
         InputDefinition::Seed { min, .. } => min.map(|value| value.to_string()),
         _ => None,
     }
@@ -3183,6 +3227,7 @@ fn input_min(definition: &InputDefinition) -> Option<String> {
 fn input_max(definition: &InputDefinition) -> Option<String> {
     match definition {
         InputDefinition::Integer { max, .. } => max.map(|value| value.to_string()),
+        InputDefinition::Number { max, .. } => max.map(|value| value.to_string()),
         InputDefinition::Seed { max, .. } => max.map(|value| value.to_string()),
         _ => None,
     }
@@ -3191,6 +3236,7 @@ fn input_max(definition: &InputDefinition) -> Option<String> {
 fn input_step(definition: &InputDefinition) -> Option<String> {
     match definition {
         InputDefinition::Integer { step, .. } => step.map(|value| value.to_string()),
+        InputDefinition::Number { step, .. } => step.map(|value| value.to_string()),
         _ => None,
     }
 }
@@ -3540,7 +3586,7 @@ fn validate_mapping_bounds(
     };
     if !matches!(
         field_type,
-        SemanticFieldType::Integer | SemanticFieldType::Seed
+        SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
     ) {
         return Ok(());
     }
@@ -3561,10 +3607,54 @@ fn validate_numeric_mapping_bounds(
     let Some(input) = input else {
         return Ok(());
     };
-    if !matches!(
-        field_type,
-        SemanticFieldType::Integer | SemanticFieldType::Seed
-    ) {
+    if field_type == SemanticFieldType::Number {
+        let parse = |value: Option<&String>, label: &str| {
+            value
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| {
+                    let parsed = value.parse::<f64>().map_err(|_| {
+                        WorkflowOnboardingError::new(
+                            "MAPPING_INVALID",
+                            format!("{label} must be a number"),
+                        )
+                    })?;
+                    if !parsed.is_finite() {
+                        return Err(WorkflowOnboardingError::new(
+                            "MAPPING_INVALID",
+                            format!("{label} must be finite"),
+                        ));
+                    }
+                    Ok(parsed)
+                })
+                .transpose()
+        };
+        let requested_min = parse(min_value, "min_value")?;
+        let requested_max = parse(max_value, "max_value")?;
+        if requested_min.is_some_and(|min| requested_max.is_some_and(|max| min > max)) {
+            return Err(WorkflowOnboardingError::new(
+                "MAPPING_INVALID",
+                "min_value must be less than or equal to max_value",
+            ));
+        }
+        let actual_min = input
+            .numeric_min
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok());
+        let actual_max = input
+            .numeric_max
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok());
+        if requested_min.is_some_and(|min| actual_min.is_some_and(|actual| min < actual))
+            || requested_max.is_some_and(|max| actual_max.is_some_and(|actual| max > actual))
+        {
+            return Err(WorkflowOnboardingError::new(
+                "MAPPING_OUT_OF_RANGE",
+                "mapping bounds cannot exceed the current ComfyUI input range",
+            ));
+        }
+        return Ok(());
+    }
+    if field_type != SemanticFieldType::Integer && field_type != SemanticFieldType::Seed {
         return Ok(());
     }
     let parse = |value: Option<&String>, label: &str| {
@@ -3631,6 +3721,7 @@ fn validate_mapping_value(
         SemanticFieldType::Integer | SemanticFieldType::Seed => {
             value.as_i64().is_some() || value.as_u64().is_some()
         }
+        SemanticFieldType::Number => value.as_f64().is_some_and(f64::is_finite),
         SemanticFieldType::Image | SemanticFieldType::Video | SemanticFieldType::Audio => {
             value.is_string()
         }
@@ -3735,10 +3826,18 @@ fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<Strin
             .iter()
             .any(|key| name == *key || name.contains(key))
     {
-        return value.as_i64().map(|_| "integer".to_owned());
+        return Some(if is_integer_number(value) {
+            "integer".to_owned()
+        } else {
+            "number".to_owned()
+        });
     }
     if value.is_number() {
-        return value.as_i64().map(|_| "integer".to_owned());
+        return Some(if is_integer_number(value) {
+            "integer".to_owned()
+        } else {
+            "number".to_owned()
+        });
     }
     if (value.is_string() || value.is_array()) && name.contains("image") {
         if value.is_array() || name.contains("images") || name.contains("references") {
@@ -3956,6 +4055,26 @@ fn parse_optional_i64(
                     format!("{field} must be an integer"),
                 )
             })
+        })
+        .transpose()
+}
+
+fn parse_optional_f64(
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<f64>, WorkflowOnboardingError> {
+    value
+        .map(|value| {
+            let parsed = value.parse::<f64>().map_err(|_| {
+                WorkflowOnboardingError::new("MAPPING_INVALID", format!("{field} must be a number"))
+            })?;
+            if !parsed.is_finite() {
+                return Err(WorkflowOnboardingError::new(
+                    "MAPPING_INVALID",
+                    format!("{field} must be finite"),
+                ));
+            }
+            Ok(parsed)
         })
         .transpose()
 }
@@ -4231,6 +4350,7 @@ mod tests {
     fn mapping_supports_recipe_types_and_rejects_unsafe_or_expanded_ranges() {
         assert!(validate_mapping_value(SemanticFieldType::Textarea, &json!("text")).is_ok());
         assert!(validate_mapping_value(SemanticFieldType::Integer, &json!(7)).is_ok());
+        assert!(validate_mapping_value(SemanticFieldType::Number, &json!(0.3)).is_ok());
         assert!(validate_mapping_value(SemanticFieldType::Seed, &json!(7)).is_ok());
         assert!(validate_mapping_value(SemanticFieldType::Image, &json!("image.png")).is_ok());
         assert!(validate_mapping_value(SemanticFieldType::Images, &json!("image.png")).is_ok());
@@ -4296,8 +4416,18 @@ mod tests {
             suggestion_for_semantic_key("steps", &json!(20), false).as_deref(),
             Some("steps")
         );
-        assert!(suggestion_for_input("denoise", &json!(0.5), false).is_none());
-        assert!(suggestion_for_input("steps", &json!(20.5), false).is_none());
+        assert_eq!(
+            suggestion_for_input("denoise", &json!(0.5), false).as_deref(),
+            Some("number")
+        );
+        assert_eq!(
+            suggestion_for_input("steps", &json!(20.5), false).as_deref(),
+            Some("number")
+        );
+        assert_eq!(
+            suggestion_for_input("steps", &json!(20), false).as_deref(),
+            Some("integer")
+        );
         assert!(suggestion_for_semantic_key("connected", &json!(["1", 0]), true).is_none());
         assert!(suggestion_for_semantic_key("enabled", &json!(true), false).is_none());
     }

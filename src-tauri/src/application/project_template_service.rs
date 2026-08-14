@@ -200,6 +200,13 @@ pub(crate) fn sanitize_values(
             InputDefinition::Integer { .. } => {
                 value_type == Some("integer") && value.get("value").is_some_and(Value::is_i64)
             }
+            InputDefinition::Number { .. } => {
+                value_type == Some("number")
+                    && value
+                        .get("value")
+                        .and_then(Value::as_f64)
+                        .is_some_and(f64::is_finite)
+            }
             InputDefinition::Seed { .. } => {
                 value_type == Some("seed_random")
                     || (value_type == Some("seed_fixed")

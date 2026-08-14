@@ -422,6 +422,9 @@ pub enum DraftValueView {
     Integer {
         value: i64,
     },
+    Number {
+        value: f64,
+    },
     SeedRandom,
     SeedFixed {
         value: String,
@@ -509,6 +512,7 @@ fn parse_snapshot_values(
                 definition,
                 InputDefinition::TextArea { required: true, .. }
                     | InputDefinition::Integer { required: true, .. }
+                    | InputDefinition::Number { required: true, .. }
                     | InputDefinition::Image { required: true, .. }
                     | InputDefinition::Images { required: true, .. }
                     | InputDefinition::Video { required: true, .. }
@@ -536,6 +540,21 @@ fn parse_snapshot_values(
                     return Err("integer input is not aligned to the current recipe step");
                 }
                 DraftValueView::Integer { value: integer }
+            }
+            InputDefinition::Number { min, max, step, .. } => {
+                let number = value.as_f64().ok_or("number input must be a number")?;
+                if !number.is_finite()
+                    || min.is_some_and(|min| number < min)
+                    || max.is_some_and(|max| number > max)
+                {
+                    return Err("number input is outside the current recipe range");
+                }
+                if step.is_some_and(|step| {
+                    !crate::compiler::number_is_aligned_to_step(number, min.unwrap_or(0.0), step)
+                }) {
+                    return Err("number input is not aligned to the current recipe step");
+                }
+                DraftValueView::Number { value: number }
             }
             InputDefinition::Seed { min, max, .. } => {
                 if value.as_str() == Some("random") {
@@ -762,6 +781,29 @@ mod tests {
         .unwrap()
     }
 
+    fn number_recipe() -> crate::domain::Recipe {
+        RecipeParser::parse(
+            r#"
+schema_version: 1
+id: number_history
+name: Number History
+workflow:
+  file: workflow_api.json
+inputs:
+  strength:
+    type: number
+    label: Strength
+    required: true
+    min: 0.0
+    max: 1.0
+    step: 0.1
+bindings: []
+outputs: []
+"#,
+        )
+        .unwrap()
+    }
+
     #[test]
     fn parses_random_fixed_u64_max_and_image_values_without_exact_retry_payload() {
         let values = parse_snapshot_values(
@@ -792,6 +834,12 @@ mod tests {
                 value: "hello".to_owned()
             }
         );
+    }
+
+    #[test]
+    fn parses_number_from_historical_task_snapshot() {
+        let values = parse_snapshot_values(&number_recipe(), &json!({"strength": 0.3})).unwrap();
+        assert_eq!(values["strength"], DraftValueView::Number { value: 0.3 });
     }
 
     #[test]

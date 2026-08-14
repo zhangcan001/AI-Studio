@@ -3,6 +3,7 @@ use crate::application::ports::Clock;
 use crate::application::ports::{
     AssetRepository, GenerationDefinitionRepository, PresetRepository, RepositoryError,
 };
+use crate::compiler::number_is_aligned_to_step;
 use crate::compiler::RecipeParser;
 use crate::domain::{
     AssetId, AssetType, InputDefinition, Preset, PresetDomainError, PresetId, Recipe, SeedValue,
@@ -213,6 +214,26 @@ impl PresetService {
                         )));
                     }
                 }
+                (
+                    InputDefinition::Number { min, max, step, .. },
+                    GenerationInputValue::Number(value),
+                ) => {
+                    if !value.is_finite()
+                        || min.is_some_and(|min| *value < min)
+                        || max.is_some_and(|max| *value > max)
+                    {
+                        return Err(PresetServiceError::ValuesInvalid(format!(
+                            "input \"{key}\" is outside its recipe range"
+                        )));
+                    }
+                    if step.is_some_and(|step| {
+                        !number_is_aligned_to_step(*value, min.unwrap_or(0.0), step)
+                    }) {
+                        return Err(PresetServiceError::ValuesInvalid(format!(
+                            "input \"{key}\" is not aligned to its recipe step"
+                        )));
+                    }
+                }
                 (InputDefinition::Seed { min, max, .. }, GenerationInputValue::Seed(seed)) => {
                     if let SeedValue::Fixed(value) = seed {
                         if min.is_some_and(|min| *value < min)
@@ -418,6 +439,9 @@ fn input_value_to_json(value: &GenerationInputValue) -> Value {
         GenerationInputValue::Integer(value) => {
             serde_json::json!({ "type": "integer", "value": value })
         }
+        GenerationInputValue::Number(value) => {
+            serde_json::json!({ "type": "number", "value": value })
+        }
         GenerationInputValue::Seed(SeedValue::Random) => {
             serde_json::json!({ "type": "seed_random" })
         }
@@ -567,7 +591,7 @@ mod tests {
         test_support::seed_task_dependencies(&pool).await;
         sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
             .bind(
-                "schema_version: 1\nid: demo\nname: Demo\nworkflow:\n  file: workflow_api.json\ninputs:\n  prompt:\n    type: textarea\n    label: Prompt\n    required: true\n  seed:\n    type: seed\n    label: Seed\n    default: random\nbindings: []\noutputs: []\n",
+            "schema_version: 1\nid: demo\nname: Demo\nworkflow:\n  file: workflow_api.json\ninputs:\n  prompt:\n    type: textarea\n    label: Prompt\n    required: true\n  strength:\n    type: number\n    label: Strength\n    required: false\n    default: 0.3\n    min: 0.0\n    max: 1.0\n    step: 0.1\n  seed:\n    type: seed\n    label: Seed\n    default: random\nbindings: []\noutputs: []\n",
             )
             .execute(&pool)
             .await
@@ -629,6 +653,56 @@ mod tests {
             service.delete("project-1", &created.id).await,
             Err(PresetServiceError::NotFound(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn number_preset_round_trip_keeps_json_number_and_recipe_scope() {
+        let (_directory, service) = service().await;
+        let values = BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                GenerationInputValue::Text("hello".to_owned()),
+            ),
+            ("strength".to_owned(), GenerationInputValue::Number(0.3)),
+        ]);
+        let created = service
+            .create(
+                "project-1",
+                "workflow-version-1",
+                "recipe-1",
+                "Float",
+                &values,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            created.values["strength"],
+            json!({"type": "number", "value": 0.3})
+        );
+        assert_eq!(
+            service
+                .list("project-1", "workflow-version-1", "recipe-2")
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+
+        let updated_values = BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                GenerationInputValue::Text("updated".to_owned()),
+            ),
+            ("strength".to_owned(), GenerationInputValue::Number(0.4)),
+        ]);
+        let updated = service
+            .update("project-1", &created.id, "Float Updated", &updated_values)
+            .await
+            .unwrap();
+        assert_eq!(
+            updated.values["strength"],
+            json!({"type": "number", "value": 0.4})
+        );
     }
 
     #[test]

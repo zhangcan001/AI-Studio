@@ -1132,6 +1132,9 @@ fn input_value_to_json(value: &GenerationInputValue) -> Value {
     match value {
         GenerationInputValue::Text(value) => Value::String(value.clone()),
         GenerationInputValue::Integer(value) => Value::Number(Number::from(*value)),
+        GenerationInputValue::Number(value) => {
+            Value::Number(Number::from_f64(*value).expect("number values must be finite"))
+        }
         GenerationInputValue::Seed(SeedValue::Random) => Value::String("random".to_owned()),
         GenerationInputValue::Seed(SeedValue::Fixed(value)) => Value::Number(Number::from(*value)),
         GenerationInputValue::ImageAsset(asset_id) => serde_json::json!({
@@ -1171,6 +1174,9 @@ fn resolved_inputs_to_json(
             let value = match value {
                 ResolvedInputValue::String(value) => Value::String(value.clone()),
                 ResolvedInputValue::Integer(value) => Value::Number(Number::from(*value)),
+                ResolvedInputValue::Number(value) => {
+                    Value::Number(Number::from_f64(*value).expect("resolved number must be finite"))
+                }
                 ResolvedInputValue::Seed(value) => Value::Number(Number::from(*value)),
                 ResolvedInputValue::Image(_) => prepared
                     .images
@@ -1318,13 +1324,16 @@ mod tests {
 
     #[test]
     fn multi_image_snapshot_payload_preserves_user_and_resolved_order() {
-        let values = BTreeMap::from([(
-            "references".to_owned(),
-            GenerationInputValue::ImageAssets(vec![
-                crate::domain::AssetId::parse("ast_first").unwrap(),
-                crate::domain::AssetId::parse("ast_second").unwrap(),
-            ]),
-        )]);
+        let values = BTreeMap::from([
+            (
+                "references".to_owned(),
+                GenerationInputValue::ImageAssets(vec![
+                    crate::domain::AssetId::parse("ast_first").unwrap(),
+                    crate::domain::AssetId::parse("ast_second").unwrap(),
+                ]),
+            ),
+            ("strength".to_owned(), GenerationInputValue::Number(0.3)),
+        ]);
         let user_inputs = input_values_to_json(&values);
         assert_eq!(
             user_inputs["references"],
@@ -1333,6 +1342,7 @@ mod tests {
                 "assetIds": ["ast_first", "ast_second"]
             })
         );
+        assert_eq!(user_inputs["strength"], json!(0.3));
 
         let prepared = PreparedGenerationInputs {
             compiler_values: BTreeMap::new(),
@@ -1362,14 +1372,21 @@ mod tests {
             media: BTreeMap::new(),
         };
         let resolved = resolved_inputs_to_json(
-            &BTreeMap::from([(
-                "references".to_owned(),
-                ResolvedInputValue::Images(vec!["first.png".to_owned(), "second.png".to_owned()]),
-            )]),
+            &BTreeMap::from([
+                (
+                    "references".to_owned(),
+                    ResolvedInputValue::Images(vec![
+                        "first.png".to_owned(),
+                        "second.png".to_owned(),
+                    ]),
+                ),
+                ("strength".to_owned(), ResolvedInputValue::Number(0.3)),
+            ]),
             &prepared,
         );
         assert_eq!(resolved["references"][0]["assetId"], "ast_first");
         assert_eq!(resolved["references"][1]["assetId"], "ast_second");
+        assert_eq!(resolved["strength"], json!(0.3));
     }
 
     #[test]

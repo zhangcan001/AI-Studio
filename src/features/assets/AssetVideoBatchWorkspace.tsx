@@ -2,20 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   assetLibraryPage,
   commitH3LocalImport,
+  createPreset,
   createGeneration,
   createProductionQueue,
+  deletePreset,
+  getPreferredPreset,
+  listPresets,
   readAssetImage,
   readAssetThumbnail,
   listAssetVideoPrompts,
   pickH3LocalImportDirectory,
   rescanH3LocalImport,
   setAssetVideoPrompt,
+  setPreferredPreset,
   startProductionQueue,
+  updatePreset,
   updateH3ProjectSegmentDraft,
 } from "../../services/tauriClient";
 import type { AssetMediaTypeFilter, AssetView, PageCursor } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
 import type { GenerationValues } from "../../types/generation";
+import type { PresetView } from "../../types/preset";
 import type {
   H3LocalImportInspection,
   H3ProjectSegment,
@@ -1788,6 +1795,14 @@ function GenericVideoWorkflowPanel({
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [createdTaskId, setCreatedTaskId] = useState<string>();
+  const draftDirtyRef = useRef(false);
+  const [presets, setPresets] = useState<PresetView[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [preferredPresetId, setPreferredPresetId] = useState<string | null>(null);
+  const [presetName, setPresetName] = useState("");
+  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
+  const [presetLoading, setPresetLoading] = useState(false);
+  const [presetError, setPresetError] = useState<string>();
 
   useEffect(() => {
     setValues(defaultGenerationValues(recipe));
@@ -1795,7 +1810,143 @@ function GenericVideoWorkflowPanel({
     setMissingAssetFields(new Set());
     setCreatedTaskId(undefined);
     setNotice(undefined);
-  }, [recipe]);
+    draftDirtyRef.current = false;
+    setPresets([]);
+    setSelectedPresetId("");
+    setPreferredPresetId(null);
+    setPresetName("");
+    setPresetEditorOpen(false);
+    setPresetError(undefined);
+    let active = true;
+    setPresetLoading(true);
+    void Promise.all([
+      listPresets(projectId, recipe.workflowVersionId, recipe.recipeId),
+      getPreferredPreset(projectId, recipe.workflowVersionId, recipe.recipeId),
+    ])
+      .then(([nextPresets, nextPreferredId]) => {
+        if (!active) return;
+        setPresets(nextPresets);
+        setPreferredPresetId(nextPreferredId);
+        const preferred = nextPreferredId
+          ? nextPresets.find((preset) => preset.id === nextPreferredId)
+          : undefined;
+        if (preferred && !draftDirtyRef.current) {
+          setValues(preferred.values);
+          setSelectedPresetId(preferred.id);
+          setPresetName(preferred.name);
+          draftDirtyRef.current = false;
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (active) setPresetError(toUserMessage(loadError));
+      })
+      .finally(() => {
+        if (active) setPresetLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, recipe.recipeId, recipe.workflowVersionId]);
+
+  function applyPreset(preset: PresetView) {
+    setValues(preset.values);
+    setValidationErrors({});
+    setMissingAssetFields(new Set());
+    setSelectedPresetId(preset.id);
+    setPresetName(preset.name);
+    setPresetEditorOpen(false);
+    setPresetError(undefined);
+    draftDirtyRef.current = false;
+  }
+
+  async function savePreset() {
+    if (!presetName.trim()) {
+      setPresetError("请输入预设名称后再保存。");
+      return;
+    }
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      const preset = await createPreset({
+        projectId,
+        workflowVersionId: recipe.workflowVersionId,
+        recipeId: recipe.recipeId,
+        name: presetName,
+        values,
+      });
+      setPresets((current) => [preset, ...current.filter((item) => item.id !== preset.id)]);
+      applyPreset(preset);
+    } catch (saveError: unknown) {
+      setPresetError(toUserMessage(saveError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
+
+  async function savePresetChanges() {
+    if (!selectedPresetId) return savePreset();
+    if (!presetName.trim()) {
+      setPresetError("请输入预设名称后再保存。");
+      return;
+    }
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      const preset = await updatePreset({ projectId, presetId: selectedPresetId, name: presetName, values });
+      setPresets((current) => current.map((item) => (item.id === preset.id ? preset : item)));
+      applyPreset(preset);
+    } catch (updateError: unknown) {
+      setPresetError(toUserMessage(updateError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
+
+  async function removePreset() {
+    if (!selectedPresetId || !window.confirm("确定删除这个预设吗？")) return;
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      if (preferredPresetId === selectedPresetId) {
+        await setPreferredPreset({
+          projectId,
+          workflowVersionId: recipe.workflowVersionId,
+          recipeId: recipe.recipeId,
+        });
+        setPreferredPresetId(null);
+      }
+      await deletePreset(projectId, selectedPresetId);
+      setPresets((current) => current.filter((preset) => preset.id !== selectedPresetId));
+      setSelectedPresetId("");
+      setPresetName("");
+      draftDirtyRef.current = false;
+    } catch (deleteError: unknown) {
+      setPresetError(toUserMessage(deleteError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
+
+  async function togglePreferredPreset() {
+    if (!selectedPresetId) return;
+    setPresetLoading(true);
+    setPresetError(undefined);
+    try {
+      const nextPreferredId = preferredPresetId === selectedPresetId ? undefined : selectedPresetId;
+      await setPreferredPreset({
+        projectId,
+        workflowVersionId: recipe.workflowVersionId,
+        recipeId: recipe.recipeId,
+        presetId: nextPreferredId,
+      });
+      setPreferredPresetId(nextPreferredId ?? null);
+      setNotice(nextPreferredId ? "已设为当前视频工作流默认预设。" : "已取消当前视频工作流默认预设。");
+    } catch (preferredError: unknown) {
+      setPresetError(toUserMessage(preferredError));
+    } finally {
+      setPresetLoading(false);
+    }
+  }
 
   const errors = validateRecipeValues(recipe, values);
   const canGenerate = comfyConnected
@@ -1840,16 +1991,61 @@ function GenericVideoWorkflowPanel({
         </div>
         <span className="workflow-selector-origin">自定义</span>
       </div>
+      <div className="preset-toolbar" aria-label="通用视频预设管理">
+        <label>
+          <span>预设</span>
+          <select
+            aria-label="已保存视频预设"
+            value={selectedPresetId}
+            onChange={(event) => {
+              const preset = presets.find((item) => item.id === event.target.value);
+              if (preset) applyPreset(preset);
+              else {
+                setSelectedPresetId("");
+                setPresetName("");
+                setPresetEditorOpen(false);
+              }
+            }}
+            disabled={presetLoading}
+          >
+            <option value="">选择已保存的预设</option>
+            {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+          </select>
+        </label>
+        <div className="preset-actions">
+          <button type="button" onClick={() => { setPresetName(""); setPresetError(undefined); setPresetEditorOpen(true); }} disabled={presetLoading}>{selectedPresetId ? "另存为" : "保存当前"}</button>
+          <button type="button" onClick={() => void savePresetChanges()} disabled={presetLoading || !selectedPresetId}>更新预设</button>
+          <button type="button" className="quiet-button" onClick={() => void togglePreferredPreset()} disabled={presetLoading || !selectedPresetId}>
+            {preferredPresetId === selectedPresetId ? "取消默认" : "设为默认"}
+          </button>
+          <button type="button" className="quiet-button" onClick={() => void removePreset()} disabled={presetLoading || !selectedPresetId}>删除预设</button>
+        </div>
+      </div>
+      {preferredPresetId && <p className="preset-default-note" role="status">当前视频工作流会优先加载默认预设。</p>}
+      {presetEditorOpen && (
+        <div className="preset-inline-editor" aria-label="保存视频预设">
+          <label>
+            <span>预设名称</span>
+            <input aria-label="视频预设名称" autoFocus value={presetName} maxLength={80} onChange={(event) => setPresetName(event.target.value)} placeholder="例如：低成本预览" />
+          </label>
+          <button type="button" onClick={() => void savePreset()} disabled={presetLoading}>保存</button>
+          <button type="button" className="quiet-button" onClick={() => setPresetEditorOpen(false)} disabled={presetLoading}>取消</button>
+        </div>
+      )}
+      {presetError && <p className="error-message" role="alert">预设：{presetError}</p>}
       <DynamicFormRenderer
         recipe={recipe}
         values={values}
         validationErrors={validationErrors}
-        onChange={(key, value) => setValues((current) => {
+        onChange={(key, value) => {
+          draftDirtyRef.current = true;
+          setValues((current) => {
           const next = { ...current };
           if (value) next[key] = value;
           else delete next[key];
           return next;
-        })}
+          });
+        }}
         onGenerate={() => void generate()}
         projectId={projectId}
         onImageAssetAvailabilityChange={(key, available) => setMissingAssetFields((current) => {

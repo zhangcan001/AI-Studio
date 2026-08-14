@@ -71,6 +71,7 @@ const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
 const fieldTypes: WorkflowFieldType[] = [
   "textarea",
   "integer",
+  "number",
   "seed",
   "image",
   "images",
@@ -1172,12 +1173,12 @@ function ParameterExposurePane({
                 <label>Semantic Key<input value={edit.semanticKey} onChange={(event) => patchMapping(mapping, { semanticKey: event.target.value })} /></label>
                 <label>类型<select value={edit.fieldType} onChange={(event) => patchMapping(mapping, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
                 <label className="checkbox-label"><input type="checkbox" checked={edit.required} onChange={(event) => patchMapping(mapping, { required: event.target.checked })} /> 必填</label>
-                {(edit.fieldType === "textarea" || edit.fieldType === "integer" || edit.fieldType === "seed") && <label>默认值<input value={edit.defaultValue} onChange={(event) => patchMapping(mapping, { defaultValue: event.target.value })} /></label>}
-                {(edit.fieldType === "integer" || edit.fieldType === "seed") && <>
-                  <label>最小值<input value={edit.minValue} onChange={(event) => patchMapping(mapping, { minValue: event.target.value })} inputMode="numeric" /></label>
-                  <label>最大值<input value={edit.maxValue} onChange={(event) => patchMapping(mapping, { maxValue: event.target.value })} inputMode="numeric" /></label>
+                {(edit.fieldType === "textarea" || edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <label>默认值<input value={edit.defaultValue} onChange={(event) => patchMapping(mapping, { defaultValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : undefined} /></label>}
+                {(edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <>
+                  <label>最小值<input value={edit.minValue} onChange={(event) => patchMapping(mapping, { minValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>
+                  <label>最大值<input value={edit.maxValue} onChange={(event) => patchMapping(mapping, { maxValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>
                 </>}
-                {edit.fieldType === "integer" && <label>Step<input value={edit.step} onChange={(event) => patchMapping(mapping, { step: event.target.value })} inputMode="numeric" /></label>}
+                {(edit.fieldType === "integer" || edit.fieldType === "number") && <label>Step<input value={edit.step} onChange={(event) => patchMapping(mapping, { step: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>}
                 {edit.fieldType.endsWith("s") && <label>最大数量<input value={edit.maxItems} onChange={(event) => patchMapping(mapping, { maxItems: event.target.value })} inputMode="numeric" /></label>}
                 <button type="button" onClick={() => onSaveMapping(edit, mapping.targetNode, mapping.targetInput)} disabled={loading}>保存字段</button>
               </div>
@@ -1292,12 +1293,12 @@ function InputsPane({
                   <label>字段类型<select value={mapping.fieldType} onChange={(event) => onPatch(key, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
                   <label>显示名称<input value={mapping.label} onChange={(event) => onPatch(key, { label: event.target.value })} /></label>
                   <label className="checkbox-label"><input type="checkbox" checked={mapping.required} onChange={(event) => onPatch(key, { required: event.target.checked })} /> 必填</label>
-                  {mapping.fieldType === "integer" || mapping.fieldType === "seed" ? <>
+                  {mapping.fieldType === "integer" || mapping.fieldType === "number" || mapping.fieldType === "seed" ? <>
                     <label>默认值<input value={mapping.defaultValue} onChange={(event) => onPatch(key, { defaultValue: event.target.value })} /></label>
-                    <label>最小值<input value={mapping.minValue} onChange={(event) => onPatch(key, { minValue: event.target.value })} inputMode="numeric" /></label>
-                    <label>最大值<input value={mapping.maxValue} onChange={(event) => onPatch(key, { maxValue: event.target.value })} inputMode="numeric" /></label>
+                    <label>最小值<input value={mapping.minValue} onChange={(event) => onPatch(key, { minValue: event.target.value })} inputMode={mapping.fieldType === "number" ? "decimal" : "numeric"} /></label>
+                    <label>最大值<input value={mapping.maxValue} onChange={(event) => onPatch(key, { maxValue: event.target.value })} inputMode={mapping.fieldType === "number" ? "decimal" : "numeric"} /></label>
                   </> : null}
-                  {mapping.fieldType === "integer" ? <label>步长<input value={mapping.step} onChange={(event) => onPatch(key, { step: event.target.value })} inputMode="numeric" /></label> : null}
+                  {mapping.fieldType === "integer" || mapping.fieldType === "number" ? <label>步长<input value={mapping.step} onChange={(event) => onPatch(key, { step: event.target.value })} inputMode={mapping.fieldType === "number" ? "decimal" : "numeric"} /></label> : null}
                   {mapping.fieldType.endsWith("s") ? <label>最大数量<input value={mapping.maxItems} onChange={(event) => onPatch(key, { maxItems: event.target.value })} inputMode="numeric" /></label> : null}
                   <button type="button" onClick={() => onBind(node.nodeId, input)} disabled={!input.bindable}>确认映射</button>
                 </div>
@@ -1417,7 +1418,7 @@ function defaultMapping(nodeId: string, input: WorkflowInputView): MappingDraft 
     fieldType,
     label: fieldLabel(input.name),
     required: true,
-    defaultValue: fieldType === "textarea" || fieldType === "integer" || fieldType === "seed"
+    defaultValue: fieldType === "textarea" || fieldType === "integer" || fieldType === "number" || fieldType === "seed"
       ? input.currentValueSummary === "random" ? "" : input.currentValueSummary
       : "",
     minValue: input.numericMin ?? "",
@@ -1558,6 +1559,7 @@ function fieldTypeLabel(value: WorkflowFieldType): string {
   return {
     textarea: "多行文本",
     integer: "整数",
+    number: "小数",
     seed: "随机种子",
     image: "图片",
     images: "多张图片",

@@ -74,6 +74,10 @@ export function defaultGenerationValues(workflow: RecipeViewModel): GenerationVa
           return field.default === undefined
             ? [field.key, undefined]
             : [field.key, { type: "integer", value: field.default }];
+        case "number":
+          return field.default === undefined
+            ? [field.key, undefined]
+            : [field.key, { type: "number", value: field.default }];
         case "seed":
           return field.defaultMode === "fixed"
             ? [field.key, { type: "seed_fixed", value: field.defaultValue ?? "" }]

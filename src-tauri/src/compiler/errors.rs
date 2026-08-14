@@ -1,7 +1,7 @@
 use crate::domain::{RecipeError, WorkflowError};
 use std::{error::Error, fmt};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CompileError {
     Recipe(RecipeError),
     Workflow(WorkflowError),
@@ -38,6 +38,17 @@ pub enum CompileError {
         value: i64,
         step: i64,
     },
+    InputNumberOutOfRange {
+        input: String,
+        value: f64,
+        min: Option<f64>,
+        max: Option<f64>,
+    },
+    InputNumberStepMismatch {
+        input: String,
+        value: f64,
+        step: f64,
+    },
     InputCountOutOfRange {
         input: String,
         count: usize,
@@ -67,6 +78,8 @@ impl CompileError {
             Self::InputTypeMismatch { .. } => "INPUT_TYPE_MISMATCH",
             Self::InputOutOfRange { .. } => "INPUT_OUT_OF_RANGE",
             Self::InputStepMismatch { .. } => "INPUT_STEP_MISMATCH",
+            Self::InputNumberOutOfRange { .. } => "INPUT_NUMBER_OUT_OF_RANGE",
+            Self::InputNumberStepMismatch { .. } => "INPUT_NUMBER_STEP_MISMATCH",
             Self::InputCountOutOfRange { .. } => "INPUT_COUNT_OUT_OF_RANGE",
             Self::SeedOutOfRange { .. } => "SEED_OUT_OF_RANGE",
             Self::Internal { .. } => "COMPILE_INTERNAL",
@@ -136,6 +149,23 @@ impl fmt::Display for CompileError {
             Self::InputStepMismatch { input, value, step } => write!(
                 formatter,
                 "{}: input \"{input}\" value {value} must be a multiple of {step}",
+                self.code()
+            ),
+            Self::InputNumberOutOfRange {
+                input,
+                value,
+                min,
+                max,
+            } => write!(
+                formatter,
+                "{}: input \"{input}\" value {value} is outside range [{}, {}]",
+                self.code(),
+                min.map_or_else(|| "-∞".to_owned(), |value| value.to_string()),
+                max.map_or_else(|| "∞".to_owned(), |value| value.to_string())
+            ),
+            Self::InputNumberStepMismatch { input, value, step } => write!(
+                formatter,
+                "{}: input \"{input}\" value {value} must align to step {step}",
                 self.code()
             ),
             Self::InputCountOutOfRange {

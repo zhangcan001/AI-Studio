@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, error::Error, fmt, path::Component, path::Path};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Recipe {
     pub schema_version: u32,
     pub id: String,
@@ -40,7 +40,7 @@ impl WorkflowRef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum InputDefinition {
     TextArea {
         label: String,
@@ -54,6 +54,14 @@ pub enum InputDefinition {
         min: Option<i64>,
         max: Option<i64>,
         step: Option<i64>,
+    },
+    Number {
+        label: String,
+        required: bool,
+        default: Option<f64>,
+        min: Option<f64>,
+        max: Option<f64>,
+        step: Option<f64>,
     },
     Seed {
         label: String,
@@ -98,6 +106,7 @@ impl InputDefinition {
         match self {
             Self::TextArea { .. } => "textarea",
             Self::Integer { .. } => "integer",
+            Self::Number { .. } => "number",
             Self::Seed { .. } => "seed",
             Self::Image { .. } => "image",
             Self::Images { .. } => "images",
@@ -112,6 +121,7 @@ impl InputDefinition {
         match self {
             Self::TextArea { label, .. }
             | Self::Integer { label, .. }
+            | Self::Number { label, .. }
             | Self::Seed { label, .. } => label,
             Self::Image { label, .. }
             | Self::Images { label, .. }
@@ -168,7 +178,7 @@ pub struct OutputDefinition {
     pub required: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompileRequest {
     pub values: BTreeMap<String, InputValue>,
 }
@@ -179,10 +189,11 @@ impl CompileRequest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum InputValue {
     String(String),
     Integer(i64),
+    Number(f64),
     Seed(SeedValue),
     Image(String),
     Images(Vec<String>),
@@ -192,10 +203,11 @@ pub enum InputValue {
     Audios(Vec<String>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ResolvedInputValue {
     String(String),
     Integer(i64),
+    Number(f64),
     Seed(u64),
     Image(String),
     Images(Vec<String>),

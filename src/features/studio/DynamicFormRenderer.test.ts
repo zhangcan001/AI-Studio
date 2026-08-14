@@ -76,6 +76,18 @@ describe("validateRecipeValues integer steps", () => {
   });
 });
 
+describe("validateRecipeValues number steps", () => {
+  const numberRecipe: RecipeViewModel = {
+    ...recipe,
+    fields: [{ key: "strength", type: "number", label: "强度", required: true, min: 0, max: 1, step: 0.1, default: 0.3 }],
+  };
+
+  it("accepts 0.3 with a 0.1 step and rejects misaligned values", () => {
+    expect(validateRecipeValues(numberRecipe, { strength: { type: "number", value: 0.3 } })).toEqual({});
+    expect(validateRecipeValues(numberRecipe, { strength: { type: "number", value: 0.35 } }).strength).toContain("0.1");
+  });
+});
+
 describe("validateRecipeValues image inputs", () => {
   const imageRecipe: RecipeViewModel = {
     ...recipe,

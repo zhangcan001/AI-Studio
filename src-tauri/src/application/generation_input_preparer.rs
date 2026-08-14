@@ -20,6 +20,7 @@ const IMAGE_PREVIEW_REFERENCE: &str = "__aistudio_preflight_image__";
 pub enum GenerationInputValue {
     Text(String),
     Integer(i64),
+    Number(f64),
     Seed(SeedValue),
     ImageAsset(AssetId),
     ImageAssets(Vec<AssetId>),
@@ -152,6 +153,7 @@ impl GenerationInputPreparer {
                 let value = match value {
                     GenerationInputValue::Text(value) => InputValue::String(value.clone()),
                     GenerationInputValue::Integer(value) => InputValue::Integer(*value),
+                    GenerationInputValue::Number(value) => InputValue::Number(*value),
                     GenerationInputValue::Seed(value) => InputValue::Seed(value.clone()),
                     GenerationInputValue::ImageAsset(_) => {
                         InputValue::Image(IMAGE_PREVIEW_REFERENCE.to_owned())
@@ -245,6 +247,9 @@ impl GenerationInputPreparer {
                 }
                 GenerationInputValue::Integer(value) => {
                     compiler_values.insert(key.clone(), InputValue::Integer(*value));
+                }
+                GenerationInputValue::Number(value) => {
+                    compiler_values.insert(key.clone(), InputValue::Number(*value));
                 }
                 GenerationInputValue::Seed(value) => {
                     compiler_values.insert(key.clone(), InputValue::Seed(value.clone()));
