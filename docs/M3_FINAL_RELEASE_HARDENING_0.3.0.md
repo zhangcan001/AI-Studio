@@ -15,12 +15,12 @@ Scope: final hardening only; no product feature expansion, tag, release or binar
 
 ## 2. Live validation status
 
-- DEV-016C exact three-reference-image FAST case: **FAIL / NOT COMPLETED**. Current evidence is a QUALITY three-image run at 3 seconds and 960×544, not the required FAST 5-second 864×480 run. No exact replacement task exists in the current database.
+- DEV-016C exact three-reference-image FAST case: **USER-VERIFIED LIVE PASS**. Evidence source: Product owner manual live acceptance. The final acceptance covered 3 reference images, FAST, 5 seconds, 864×480, fixed seed, A→B→C order, ComfyUI execution, Task success, MP4/Asset recovery, restart, Task History and Load to Studio. Machine-readable Task identifier: **NOT RECORDED**.
 - DEV-016C Case 2 (two images + audio): PASS, with real output and ordered compiled slots.
 - DEV-016C Case 3 (video + two images): PASS, with real output, ordered compiled slots and native playback evidence.
 - DEV-016D QUALITY 20-Step: PASS; the current database contains a real successful task, ComfyUI prompt ID, 20 progress updates, output MP4 and persisted provenance. Full details are in `docs/M3_LIVE_VALIDATION_0.3.0.md`.
 - Restart persistence of Task/Snapshot/Asset rows: PASS by read-only database verification.
-- Restart UI Task History and `Load to Studio` order: **NOT RECORDED**. The relaunch window exposed no usable WebView accessibility tree and screenshot capture failed, so this was not represented as PASS.
+- Restart UI, Task History and `Load to Studio` order: **USER-VERIFIED PASS**. The previous `NOT RECORDED` state reflected desktop WebView automation visibility limitations, not a reproduced product defect.
 
 ## 3. Automated gate
 
@@ -68,7 +68,7 @@ No product source code was changed during this audit.
 - Persisted: PASS — new Task rows contain app version, build commit, workflow/recipe IDs and versions, both SHA-256 values, package name/source and dynamic binding targets.
 - Current live examples persisted build `d8dabc9a104f7b14cfd041cbc62c5cfde53678ac`, matching the audited application build.
 - Restart: PASS for database readability; current successful Task/Snapshot/Asset rows remain present after relaunch.
-- Task History: backend serialization and structured validation diagnostics tests PASS; **UI display smoke NOT RECORDED** because the WebView was not targetable in this run.
+- Task History: backend serialization, structured validation diagnostics and product owner UI smoke **PASS**.
 - `WORKFLOW_VALIDATION_FAILED` diagnostics include the actual runtime package, workflow/recipe hashes and dynamic targets through the persisted provenance payload.
 - Old Task rows with null provenance are handled by the repository/history models without a required non-null migration.
 
@@ -79,7 +79,7 @@ No product source code was changed during this audit.
 - Completed output recovery: PASS by automated recovery tests, including history success importing video/output mappings without duplicate assets.
 - Duplicate `/prompt` on restart: PASS by recovery tests; restart-created and queued/running recovery paths do not resubmit.
 - Normal relaunch database persistence: PASS.
-- Forced-crash UI recovery and `Load to Studio` order: **NOT RECORDED**, not treated as a product PASS. No known backend recovery blocker was found.
+- Forced-crash/restart UI recovery and `Load to Studio` order: **USER-VERIFIED PASS**. No known backend recovery blocker was found.
 
 ## 9. Workflow compiler safety audit
 
@@ -101,33 +101,28 @@ No product source code was changed during this audit.
 
 ## 11. UI / performance smoke
 
-- Workflow page first open: **NOT RECORDED**
-- Workflow fast list: **NOT RECORDED**
-- Workflow diagnostics refresh: **NOT RECORDED**
-- Task History: **NOT RECORDED**
-- Asset Library: **NOT RECORDED**
-- Production Queue: **NOT RECORDED**
-- Workflow Benchmark: **NOT RECORDED**
-- Project switching: **NOT RECORDED**
+- Workflow page first open: **USER-VERIFIED PASS**
+- Workflow fast list: **USER-VERIFIED PASS**
+- Workflow diagnostics refresh: **USER-VERIFIED PASS**
+- Task History: **USER-VERIFIED PASS**
+- Asset Library: **USER-VERIFIED PASS**
+- Production Queue: **USER-VERIFIED PASS**
+- Workflow Benchmark: **USER-VERIFIED PASS**
+- Project switching: **USER-VERIFIED PASS**
 
-The desktop app was open, but its WebView exposed only generic window panes to the UI automation layer. Screenshot capture returned `SetIsBorderRequired failed (0x80004002)`. No page was claimed PASS from this incomplete observation.
+Evidence source for the above UI entries: Product owner manual live acceptance. The previous desktop WebView automation limitation (`SetIsBorderRequired failed (0x80004002)`) is retained as historical context only and is not a product blocker.
 
 ## 12. Known non-blocking gaps
 
-- UI smoke evidence is unavailable in this run because of the desktop WebView automation limitation. This is a validation/evidence gap, not a reproduced product defect; POST-0.3.0 follow-up is recommended.
-- Backend crash-recovery tests pass, but an interactive forced-close plus `Load to Studio` proof remains unrecorded. POST-0.3.0 follow-up is recommended.
-- DEV-016C exact FAST three-image live case is a required hardening gate and is therefore a release blocker for this audit, even though no new code defect was found.
+- The desktop WebView automation layer cannot independently observe all UI controls; product owner manual acceptance is the recorded evidence source for this Gate.
+- Final compiled workflow validator expansion, crash recovery/idempotency hardening and telemetry remain POST-0.3.0 work.
 
 ## 13. Release blockers
 
-1. **BLOCKER — DEV-016C exact live evidence missing:** no current Task records three reference images + FAST + 5 seconds + 864×480 + fixed seed + A→B→C ordering in one successful run.
-2. **BLOCKER — restart UI acceptance evidence missing:** Task History and `Load to Studio` order could not be verified after relaunch.
-3. **BLOCKER — required UI smoke evidence missing:** the requested Workflow, Diagnostics, Task History, Asset Library, Production Queue, Benchmark and Project switching checks were not observable in this run.
-
-These are evidence blockers under the DEV-017 acceptance checklist. They are not being converted into fabricated PASS states or broad product changes.
+**NONE.** The previously recorded evidence blockers were closed by the product owner's manual live acceptance. No new product blocker was found in the automated, migration, backup, package, provenance, recovery or queue audits.
 
 ## 14. Final decision
 
-**0.3.0 RELEASE HARDENING FAIL — DEV-016C exact FAST three-reference-image live evidence and required post-restart/UI smoke evidence are not recorded.**
+**0.3.0 RELEASE HARDENING PASS**
 
 No tag, GitHub Release, installer upload or binary publication was performed.

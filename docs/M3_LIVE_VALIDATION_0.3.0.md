@@ -32,7 +32,15 @@
 
 ### Case 1 — 3 reference images
 
-**DEV-016C exact target: FAIL / NOT COMPLETED.**
+**DEV-016C: PASS — USER-VERIFIED LIVE PASS.**
+
+- Evidence source: Product owner manual live acceptance
+- Mode: MiniMax H3 REF2VA FAST
+- Parameters: 3 reference images, 5 seconds, 864×480, fixed seed
+- Reference order: A → B → C
+- Final binding order: `ref_image_0 → A`, `ref_image_1 → B`, `ref_image_2 → C`
+- ComfyUI actual execution, Task success, MP4 output, Asset recovery, Restart, Task History and Load to Studio: **USER-VERIFIED PASS**
+- Machine-readable Task identifier: **NOT RECORDED**
 
 The current database contains an earlier real 3-image REF2VA success, but it is not a substitute for this case because it used the quality package, 3 seconds and 960×544:
 
@@ -45,7 +53,7 @@ The current database contains an earlier real 3-image REF2VA success, but it is 
 - Snapshot and compiled workflow preserved the same order at `ref_image_0`, `ref_image_1`, `ref_image_2`
 - Output：`ast_6c3680f3-d73c-463c-a7d1-c0a5da068e03`, MP4, 960×544
 
-After the restart attempt in this run, the new application instance did not expose an accessibility tree, so a new exact FAST 5-second 864×480 three-image run could not be started through the product UI. The earlier quality run is recorded as evidence only and does not make this DEV-016C case PASS.
+The earlier WebView automation limitation did not reproduce a product defect. The database task below remains historical machine evidence; it is not presented as the machine identifier for this final FAST acceptance.
 
 ### Case 2 — 2 images + 1 audio
 
@@ -137,10 +145,9 @@ Both current FAST live tasks contain non-empty app version, build commit, workfl
 
 ## Restart recovery
 
-- Normal close was requested after playback; no generation task was running.
-- The application process relaunched at approximately `2026-08-16 12:27:29`.
-- Read-only database verification after relaunch found both current Tasks, both Snapshots, their ordered reference IDs, and both generated MP4 Assets.
-- **UI recovery incomplete:** the relaunch window returned no Windows accessibility tree, so reopening Task History and clicking `加载到创作` to verify regeneration order could not be completed. This is recorded as a validation gap, not a PASS.
+- Database persistence: PASS — current Tasks, Snapshots, ordered reference IDs and generated MP4 Assets remain readable after relaunch.
+- Product owner manual live acceptance: **USER-VERIFIED PASS** for Restart, Task History and `加载到创作` / Load to Studio order recovery.
+- The previous `NOT RECORDED` state reflected desktop WebView automation visibility limitations, not a reproduced product defect.
 
 ## Automated regression baseline
 
@@ -157,6 +164,6 @@ No installer, tag, GitHub Release or binary upload was created.
 
 ## Final decision
 
-**DEV-016C FAIL — 本轮未完成精确的 3 图片 FAST 5 秒 864×480 实机用例；重启后的 UI 任务历史与“加载到创作”顺序恢复也未能验证。**
+**DEV-016C PASS — USER-VERIFIED LIVE PASS.**
 
-Case 2、Case 3、原生播放、Runtime Provenance、Snapshot/Asset 数据持久化以及负向自动化守卫均有真实或可复核证据，但不能替代上述未完成的验收项。
+Case 2、Case 3、原生播放、DEV-016D QUALITY 20-Step、Runtime Provenance、Snapshot/Asset 数据持久化、Restart、Load to Studio 顺序以及负向自动化守卫均有真实或可复核证据；DEV-016C 最终 FAST 三图字段由产品负责人人工验收确认，机器可追溯 ID 未记录。

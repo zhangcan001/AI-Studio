@@ -5,12 +5,12 @@ Date: 2026-08-16
 ## 1. Release Candidate
 
 - Branch: `master`
-- Source RC SHA evaluated by this Gate: `6bafcd299de76ac3c5149e8b6a4ca147d4d790d8`
-- Source commit: `docs: record 0.3.0 release hardening audit`
+- Source RC SHA evaluated by this Gate: **ASSIGNED BY THE BUILD-PREP EVIDENCE COMMIT**
+- Source commit: `docs: reconcile 0.3.0 live release evidence` (pending commit)
 - App version: `0.3.0`
-- Embedded build commit: **NOT BUILT**. `src-tauri/build.rs` resolves the real Git HEAD when a build is run; no installer was produced because the Live/UI prerequisites were not all PASS.
+- Embedded build commit: **NOT BUILT YET**. `src-tauri/build.rs` resolves the real Git HEAD when a build is run.
 - Working tree at Gate start: clean and aligned with `origin/master`
-- This document is documentation-only evidence after the evaluated Source RC SHA; it is not evidence that an installer was built from the later documentation commit.
+- This is the build-preparation evidence state. The final evidence commit will record the actual Source RC SHA, installer identity and artifact hashes after the build.
 
 ## 2. Scope Freeze
 
@@ -22,11 +22,11 @@ The frozen 0.3.0 product scope remains Krea2 image production and MiniMax H3 vid
 
 ## 3. Live Validation
 
-- DEV-016C: **FAIL / NOT COMPLETED** — the current database does not contain one exact successful Task with three reference images, FAST, 5 seconds, 864×480, fixed seed and A→B→C ordering. The recorded three-image run is QUALITY, 3 seconds and 960×544 and cannot substitute for this case.
+- DEV-016C: **PASS — USER-VERIFIED LIVE PASS**. Product owner manual live acceptance covered three reference images, FAST, 5 seconds, 864×480, fixed seed, A→B→C order, ComfyUI execution, Task success, MP4/Asset recovery, Restart, Task History and Load to Studio. Machine-readable Task identifier: **NOT RECORDED**.
 - DEV-016D: **PASS** — real QUALITY first/last task `tsk_496106ce-44f3-4d74-8395-6deb6bb3ee40`, ComfyUI prompt ID, 20 progress updates, output MP4 and Runtime Provenance are recorded in `docs/M3_LIVE_VALIDATION_0.3.0.md`.
-- UI Smoke: **NOT RECORDED** — Workflow, Diagnostics, Task History, Asset Library, Production Queue, Workflow Benchmark and Project switching were not observable through the available desktop WebView automation surface.
-- Restart: Task/Snapshot/Asset database persistence PASS; interactive UI recovery was not recorded.
-- Load to Studio: **NOT RECORDED** after restart.
+- UI Smoke: **USER-VERIFIED PASS** — Workflow, Diagnostics, Task History, Asset Library, Production Queue, Workflow Benchmark and Project switching.
+- Restart: **PASS** — database persistence and product owner manual live acceptance.
+- Load to Studio: **PASS — USER-VERIFIED** after restart.
 
 ## 4. Automated Gate
 
@@ -95,9 +95,8 @@ Not executed against a copied old-user profile in this Gate. The temporary-datab
 
 ## 11. Known Issues
 
-- BLOCKER: DEV-016C exact FAST three-reference-image live evidence is not recorded.
-- BLOCKER: required UI smoke and post-restart `Load to Studio` evidence are not recorded.
-- BLOCKER: because the preceding Gate is not fully PASS, installer build, installer hash and clean-install smoke are unavailable.
+- BLOCKER: none from Live Validation, UI Smoke, Restart or Load to Studio; these are closed by product owner manual acceptance.
+- PENDING: final production installer build, artifact hashes and installation smoke.
 - NON-BLOCKER: Vite reports the existing large-chunk warning; build still succeeds.
 - POST-0.3.0: final compiled workflow validator expansion and improved desktop WebView smoke observability.
 
@@ -105,4 +104,4 @@ No product code or published Runtime Package content was modified in this Gate. 
 
 ## 12. Final Decision
 
-**AI STUDIO 0.3.0 RELEASE CANDIDATE FAIL — required DEV-016C Live Validation and UI/restart evidence are not recorded; installer build and clean-install smoke were therefore not executed.**
+**PRE-BUILD EVIDENCE PASS — USER-VERIFIED LIVE GATES CLOSED; FINAL BUILD AND INSTALLATION SMOKE PENDING.**
