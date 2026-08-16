@@ -25,6 +25,7 @@ use crate::domain::{
     Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
 };
 use serde_json::{Map, Number, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashSet},
     error::Error,
@@ -32,7 +33,7 @@ use std::{
     future::Future,
     sync::Arc,
 };
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{watch, Mutex as AsyncMutex, Semaphore};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +43,9 @@ pub struct CreateGenerationRequest {
     pub recipe_id: String,
     pub values: BTreeMap<String, GenerationInputValue>,
     pub reference_manifest: Option<ReferenceManifest>,
+    /// A caller-owned idempotency boundary. Reusing it returns the original Task
+    /// instead of creating another remote execution attempt.
+    pub submission_idempotency_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -137,6 +141,7 @@ pub struct GenerationService {
     clock: Arc<dyn Clock>,
     task_update_sink: Arc<dyn TaskUpdateSink>,
     execution_registry: TaskExecutionRegistry,
+    idempotency_gate: Arc<AsyncMutex<()>>,
     submission_gate: Arc<Semaphore>,
     compiler: WorkflowCompiler,
     workflow_compatibility_service: Option<Arc<WorkflowOnboardingService>>,
@@ -182,6 +187,7 @@ impl GenerationService {
             clock,
             task_update_sink: Arc::new(NoopTaskUpdateSink),
             execution_registry: TaskExecutionRegistry::default(),
+            idempotency_gate: Arc::new(AsyncMutex::new(())),
             submission_gate: Arc::new(Semaphore::new(1)),
             compiler: WorkflowCompiler,
             workflow_compatibility_service: None,
@@ -211,6 +217,10 @@ impl GenerationService {
         &self,
         request: CreateGenerationRequest,
     ) -> Result<Task, GenerationServiceError> {
+        let _idempotency_guard = self.lock_idempotency(&request).await;
+        if let Some(existing) = self.find_existing_idempotent_task(&request).await? {
+            return Ok(existing);
+        }
         let (request, definition, task) = self.prepare_task(request).await?;
         let (cancel_signal, _guard) = self.execution_registry.register(task.id.clone());
         self.execute_prepared(request, definition, task, cancel_signal)
@@ -234,6 +244,10 @@ impl GenerationService {
         F: FnOnce(&Task) -> Fut + Send,
         Fut: Future<Output = Result<(), RepositoryError>> + Send,
     {
+        let _idempotency_guard = self.lock_idempotency(&request).await;
+        if let Some(existing) = self.find_existing_idempotent_task(&request).await? {
+            return Ok(existing);
+        }
         let (request, definition, task) = self.prepare_task(request).await?;
         if let Err(error) = hook(&task).await {
             let mut failed_task = task.clone();
@@ -287,6 +301,39 @@ impl GenerationService {
             }
         });
         Ok(task)
+    }
+
+    async fn lock_idempotency(
+        &self,
+        request: &CreateGenerationRequest,
+    ) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+        if request
+            .submission_idempotency_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty())
+        {
+            Some(self.idempotency_gate.lock().await)
+        } else {
+            None
+        }
+    }
+
+    async fn find_existing_idempotent_task(
+        &self,
+        request: &CreateGenerationRequest,
+    ) -> Result<Option<Task>, GenerationServiceError> {
+        let Some(key) = request
+            .submission_idempotency_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+        else {
+            return Ok(None);
+        };
+        self.task_repository
+            .find_by_submission_idempotency_key(&request.project_id, key)
+            .await
+            .map_err(GenerationServiceError::Repository)
     }
 
     async fn prepare_task(
@@ -534,10 +581,19 @@ impl GenerationService {
                         .await);
                 }
             };
+        let generation_execution_id =
+            build_generation_execution_id(&task, &definition, &compiled_workflow_sha256);
+        let submission_idempotency_key = request
+            .submission_idempotency_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| generation_execution_id.clone());
         let compiled_event = task.record_compiled_workflow_validated(
             definition.workflow_sha256.clone(),
             definition.recipe_sha256.clone(),
-            compiled_workflow_sha256,
+            compiled_workflow_sha256.clone(),
             self.clock.now(),
         )?;
         self.task_repository
@@ -600,8 +656,14 @@ impl GenerationService {
 
         let client_id = Uuid::new_v4().to_string();
         let prompt_id = Uuid::new_v4().to_string();
-        let submission_event =
-            task.prepare_submission(prompt_id.clone(), client_id.clone(), self.clock.now())?;
+        let submission_event = task.prepare_submission_with_identity(
+            prompt_id.clone(),
+            client_id.clone(),
+            Some(&generation_execution_id),
+            Some(&submission_idempotency_key),
+            Some(&compiled_workflow_sha256),
+            self.clock.now(),
+        )?;
         self.task_repository
             .persist_runtime_update(&task, &submission_event)
             .await?;
@@ -634,7 +696,16 @@ impl GenerationService {
             Err(error) => {
                 let original = GenerationServiceError::Comfy(error.clone());
                 return Err(self
-                    .fail_and_preserve(&mut task, task_error_from_adapter(&error), original)
+                    .fail_and_preserve(
+                        &mut task,
+                        task_error_from_submission_failure(
+                            &error,
+                            &prompt_id,
+                            &client_id,
+                            &generation_execution_id,
+                        ),
+                        original,
+                    )
                     .await);
             }
         };
@@ -654,8 +725,26 @@ impl GenerationService {
         match persisted_after_submit {
             Some(current) if current.status == TaskStatus::CancelRequested => {
                 task = current;
+                let confirmed_event = task.record_submission_confirmed(
+                    &submission.prompt_id,
+                    submission.number,
+                    self.clock.now(),
+                )?;
+                self.task_repository
+                    .persist_runtime_update(&task, &confirmed_event)
+                    .await?;
+                self.task_update_sink.publish(&task);
             }
             Some(_) => {
+                let confirmed_event = task.record_submission_confirmed(
+                    &submission.prompt_id,
+                    submission.number,
+                    self.clock.now(),
+                )?;
+                self.task_repository
+                    .persist_runtime_update(&task, &confirmed_event)
+                    .await?;
+                self.task_update_sink.publish(&task);
                 task.set_queue_number(submission.number)?;
                 self.transition_and_persist(&mut task, TaskStatus::Queued)
                     .await?;
@@ -1188,6 +1277,24 @@ fn history_error(history: &ComfyHistory) -> TaskError {
     }
 }
 
+fn build_generation_execution_id(
+    task: &Task,
+    definition: &crate::application::ports::GenerationDefinition,
+    compiled_workflow_sha256: &str,
+) -> String {
+    let mut digest = Sha256::new();
+    for value in [
+        task.id.as_str(),
+        &definition.workflow_version_id,
+        &definition.recipe_id,
+        compiled_workflow_sha256,
+    ] {
+        digest.update(value.as_bytes());
+        digest.update([0]);
+    }
+    format!("gen_{:x}", digest.finalize())
+}
+
 fn task_error_from_compile(error: &CompileError) -> TaskError {
     let raw = match error {
         CompileError::CompiledDanglingNodeReference {
@@ -1347,6 +1454,30 @@ fn task_error_from_adapter(error: &ComfyAdapterError) -> TaskError {
         code: code.to_owned(),
         message,
         raw,
+    }
+}
+
+fn task_error_from_submission_failure(
+    error: &ComfyAdapterError,
+    prompt_id: &str,
+    client_id: &str,
+    generation_execution_id: &str,
+) -> TaskError {
+    if matches!(error, ComfyAdapterError::WorkflowValidation { .. }) {
+        return task_error_from_adapter(error);
+    }
+    TaskError {
+        code: "SUBMISSION_STATE_UNCERTAIN".to_owned(),
+        message: format!(
+            "POST /prompt submission outcome is unknown for execution {generation_execution_id}: {error}"
+        ),
+        raw: Some(serde_json::json!({
+            "submissionState": "SUBMISSION_STATE_UNCERTAIN",
+            "promptId": prompt_id,
+            "clientId": client_id,
+            "generationExecutionId": generation_execution_id,
+            "adapterError": task_error_from_adapter(error).raw,
+        })),
     }
 }
 

@@ -527,6 +527,7 @@ impl ShotService {
             recipe_id: config.recipe_id.clone(),
             values,
             reference_manifest,
+            submission_idempotency_key: None,
         };
         let repository = Arc::clone(&self.repository);
         let project_id = request.project_id.clone();

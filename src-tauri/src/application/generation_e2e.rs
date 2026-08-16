@@ -390,6 +390,7 @@ mod tests {
                 ),
             ]),
             reference_manifest: None,
+            submission_idempotency_key: None,
         };
         let result = if non_blocking {
             let returned_task = service
@@ -655,6 +656,7 @@ outputs:
             recipe_id: "recipe-1".to_owned(),
             values,
             reference_manifest: None,
+            submission_idempotency_key: None,
         };
         let outcome = service.execute(request).await.map(|_| ());
         let task = task_repository
@@ -752,6 +754,7 @@ outputs:
                         ),
                     ]),
                     reference_manifest: None,
+                    submission_idempotency_key: None,
                 },
                 |_task| async { Err(RepositoryError::integrity("simulated Shot binding failure")) },
             )
@@ -828,13 +831,13 @@ outputs:
                 .find(|event| event.event_type == TaskEventType::TaskCollecting)
                 .unwrap()
                 .created_at,
-            Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 1).unwrap()
+            Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap()
         );
         assert_eq!(
             run.task.finished_at,
             Some(
                 Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap()
-                    + chrono::Duration::microseconds(1),
+                    + chrono::Duration::microseconds(2),
             )
         );
         let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM generation_snapshots")

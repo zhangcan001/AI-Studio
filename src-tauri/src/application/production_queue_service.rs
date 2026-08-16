@@ -946,6 +946,10 @@ impl ProductionQueueService {
                             recipe_id: next.recipe_id.clone(),
                             values,
                             reference_manifest: None,
+                            submission_idempotency_key: Some(format!(
+                                "production-item:{}",
+                                next.id.as_str()
+                            )),
                         },
                         move |task| {
                             let item_id = item_id.clone();

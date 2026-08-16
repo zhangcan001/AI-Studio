@@ -19,6 +19,8 @@ pub struct GenerationCreateRequest {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub values: BTreeMap<String, InputValueDto>,
+    #[serde(default)]
+    pub submission_idempotency_key: Option<String>,
 }
 
 const MAX_BATCH_ITEMS: usize = 100;
@@ -209,6 +211,7 @@ impl GenerationCreateRequest {
             recipe_id: self.recipe_id,
             values,
             reference_manifest: None,
+            submission_idempotency_key: self.submission_idempotency_key,
         })
     }
 }
@@ -227,6 +230,7 @@ impl GenerationBatchItemRequest {
             recipe_id: self.recipe_id,
             values,
             reference_manifest: None,
+            submission_idempotency_key: None,
         })
     }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelTask,
   createPreset,
@@ -150,6 +150,7 @@ export function GenerationStudio({
   const currentTask = useTaskStore((state) => state.currentTask);
   const adoptCreatedTask = useTaskStore((state) => state.adoptCreatedTask);
   const [creating, setCreating] = useState(false);
+  const generationRequestIdRef = useRef<string | undefined>(undefined);
   const [cancelling, setCancelling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -525,6 +526,7 @@ export function GenerationStudio({
       return;
     }
 
+    const submissionIdempotencyKey = generationRequestIdRef.current ??= crypto.randomUUID();
     setCreating(true);
     setNotice(null);
     try {
@@ -533,12 +535,16 @@ export function GenerationStudio({
         workflowVersionId: selectedWorkflow.workflowVersionId,
         recipeId: selectedWorkflow.recipeId,
         values,
+        submissionIdempotencyKey,
       });
       adoptCreatedTask(task);
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
     } finally {
       setCreating(false);
+      if (generationRequestIdRef.current === submissionIdempotencyKey) {
+        generationRequestIdRef.current = undefined;
+      }
     }
   }
 

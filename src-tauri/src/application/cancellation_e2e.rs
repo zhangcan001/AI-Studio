@@ -508,6 +508,7 @@ impl Harness {
             recipe_id: "recipe-1".to_owned(),
             values,
             reference_manifest: None,
+            submission_idempotency_key: None,
         }
     }
 }

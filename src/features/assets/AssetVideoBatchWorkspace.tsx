@@ -1812,6 +1812,7 @@ function GenericVideoWorkflowPanel({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
+  const generationRequestIdRef = useRef<string | undefined>(undefined);
   const [notice, setNotice] = useState<string>();
   const [createdTaskId, setCreatedTaskId] = useState<string>();
   const draftDirtyRef = useRef(false);
@@ -1982,6 +1983,7 @@ function GenericVideoWorkflowPanel({
       setNotice(!comfyConnected ? "请先连接 ComfyUI。" : !taskEventsReady ? "任务事件通道尚未就绪。" : productionBusy ? "当前有生产队列正在运行。" : "请先补齐通用工作流的必填输入。" );
       return;
     }
+    const submissionIdempotencyKey = generationRequestIdRef.current ??= crypto.randomUUID();
     setCreating(true);
     setNotice(undefined);
     try {
@@ -1990,6 +1992,7 @@ function GenericVideoWorkflowPanel({
         workflowVersionId: recipe.workflowVersionId,
         recipeId: recipe.recipeId,
         values,
+        submissionIdempotencyKey,
       });
       setCreatedTaskId(task.id);
       setNotice("通用视频任务已创建；工作流版本和 Recipe 已冻结。" );
@@ -1997,6 +2000,9 @@ function GenericVideoWorkflowPanel({
       setNotice(toUserMessage(error));
     } finally {
       setCreating(false);
+      if (generationRequestIdRef.current === submissionIdempotencyKey) {
+        generationRequestIdRef.current = undefined;
+      }
     }
   }
 

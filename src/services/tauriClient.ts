@@ -331,6 +331,7 @@ export function createGeneration(request: {
   workflowVersionId: string;
   recipeId: string;
   values: GenerationValues;
+  submissionIdempotencyKey?: string;
 }): Promise<TaskView> {
   return invoke<TaskView>("generation_create", { request });
 }

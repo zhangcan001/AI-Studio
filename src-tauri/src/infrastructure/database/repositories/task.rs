@@ -353,8 +353,12 @@ fn validate_event(
 
 fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), RepositoryError> {
     let allowed = match event.event_type {
-        TaskEventType::TaskSubmissionPrepared | TaskEventType::TaskCompiledWorkflowValidated => {
+        TaskEventType::TaskSubmissionPrepared
+        | TaskEventType::TaskSubmissionConfirmed
+        | TaskEventType::TaskCompiledWorkflowValidated => {
             task.status == TaskStatus::Preparing
+                || (event.event_type == TaskEventType::TaskSubmissionConfirmed
+                    && task.status == TaskStatus::CancelRequested)
         }
         TaskEventType::TaskNodeStarted | TaskEventType::TaskProgressUpdated => {
             task.status == TaskStatus::Running
@@ -1294,5 +1298,62 @@ mod tests {
             Some("550e8400-e29b-41d4-a716-446655440000")
         );
         assert_eq!(repository.list_events(&task.id).await.unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn submission_idempotency_lookup_survives_repository_reload() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("create should succeed");
+        let base = task.created_at;
+        let validating = TaskStateMachine::transition(
+            &mut task,
+            TaskStatus::Validating,
+            base + Duration::seconds(1),
+        )
+        .unwrap();
+        repository
+            .persist_transition(&task, &validating, TaskStatus::Created)
+            .await
+            .unwrap();
+        let preparing = TaskStateMachine::transition(
+            &mut task,
+            TaskStatus::Preparing,
+            base + Duration::seconds(2),
+        )
+        .unwrap();
+        repository
+            .persist_transition(&task, &preparing, TaskStatus::Validating)
+            .await
+            .unwrap();
+        let prepared = task
+            .prepare_submission_with_identity(
+                "prompt-idempotent",
+                "client-idempotent",
+                Some("gen-idempotent"),
+                Some("request-idempotent"),
+                Some("compiled-idempotent"),
+                base + Duration::seconds(3),
+            )
+            .unwrap();
+        repository
+            .persist_runtime_update(&task, &prepared)
+            .await
+            .unwrap();
+
+        let found = repository
+            .find_by_submission_idempotency_key("project-1", "request-idempotent")
+            .await
+            .unwrap()
+            .expect("idempotency key should resolve to the original task");
+        assert_eq!(found.id, task.id);
+        assert!(repository
+            .find_by_submission_idempotency_key("project-1", "other-request")
+            .await
+            .unwrap()
+            .is_none());
     }
 }

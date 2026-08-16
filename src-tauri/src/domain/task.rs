@@ -268,6 +268,18 @@ impl Task {
         client_id: impl Into<String>,
         at: DateTime<Utc>,
     ) -> Result<NewTaskEvent, TaskDomainError> {
+        self.prepare_submission_with_identity(prompt_id, client_id, None, None, None, at)
+    }
+
+    pub fn prepare_submission_with_identity(
+        &mut self,
+        prompt_id: impl Into<String>,
+        client_id: impl Into<String>,
+        generation_execution_id: Option<&str>,
+        submission_idempotency_key: Option<&str>,
+        compiled_workflow_sha256: Option<&str>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
         if self.status != TaskStatus::Preparing {
             return Err(TaskDomainError::invalid_transition(
                 self.status,
@@ -292,22 +304,88 @@ impl Task {
                 "submission prompt_id and client_id must not be empty",
             ));
         }
+        for (name, value) in [
+            ("generation_execution_id", generation_execution_id),
+            ("submission_idempotency_key", submission_idempotency_key),
+            ("compiled_workflow_sha256", compiled_workflow_sha256),
+        ] {
+            if value.is_some_and(|value| value.trim().is_empty()) {
+                return Err(TaskDomainError::invalid_task(format!(
+                    "{name} must not be empty when present"
+                )));
+            }
+        }
 
         let mut next = self.clone();
         next.prompt_id = Some(prompt_id.clone());
         next.validate()?;
         *self = next;
 
+        let mut payload = serde_json::Map::new();
+        payload.insert("promptId".to_owned(), serde_json::json!(prompt_id));
+        payload.insert("clientId".to_owned(), serde_json::json!(client_id));
+        payload.insert(
+            "submissionState".to_owned(),
+            serde_json::json!("SUBMITTING"),
+        );
+        if let Some(value) = generation_execution_id {
+            payload.insert("generationExecutionId".to_owned(), serde_json::json!(value));
+        }
+        if let Some(value) = submission_idempotency_key {
+            payload.insert(
+                "submissionIdempotencyKey".to_owned(),
+                serde_json::json!(value),
+            );
+        }
+        if let Some(value) = compiled_workflow_sha256 {
+            payload.insert(
+                "compiledWorkflowSha256".to_owned(),
+                serde_json::json!(value),
+            );
+        }
+
         Ok(NewTaskEvent {
             id: new_event_id(),
             task_id: self.id.clone(),
             event_type: TaskEventType::TaskSubmissionPrepared,
-            payload: Some(serde_json::json!({
-                "promptId": prompt_id,
-                "clientId": client_id,
-            })),
+            payload: Some(Value::Object(payload)),
             created_at: at,
         })
+    }
+
+    pub fn record_submission_confirmed(
+        &self,
+        prompt_id: &str,
+        queue_number: Option<i64>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if !matches!(
+            self.status,
+            TaskStatus::Preparing | TaskStatus::CancelRequested
+        ) {
+            return Err(TaskDomainError::invalid_task(
+                "submission confirmation requires a task before queue transition",
+            ));
+        }
+        if self.prompt_id.as_deref() != Some(prompt_id) {
+            return Err(TaskDomainError::invalid_task(
+                "submission confirmation prompt_id does not match the prepared prompt",
+            ));
+        }
+        if queue_number.is_some_and(|number| number < 0) {
+            return Err(TaskDomainError::invalid_task(
+                "submission confirmation queue_number must not be negative",
+            ));
+        }
+        self.new_runtime_event(
+            TaskEventType::TaskSubmissionConfirmed,
+            Some(serde_json::json!({
+                "promptId": prompt_id,
+                "queueNumber": queue_number,
+                "submissionState": "SUBMITTED",
+            })),
+            at,
+        )
     }
 
     pub fn set_queue_number(&mut self, queue_number: Option<i64>) -> Result<(), TaskDomainError> {
@@ -699,6 +777,7 @@ pub enum TaskEventType {
     TaskFailed,
     TaskCancelled,
     TaskSubmissionPrepared,
+    TaskSubmissionConfirmed,
     TaskCompiledWorkflowValidated,
     TaskNodeStarted,
     TaskProgressUpdated,
@@ -724,6 +803,7 @@ impl TaskEventType {
             Self::TaskFailed => "TASK_FAILED",
             Self::TaskCancelled => "TASK_CANCELLED",
             Self::TaskSubmissionPrepared => "TASK_SUBMISSION_PREPARED",
+            Self::TaskSubmissionConfirmed => "TASK_SUBMISSION_CONFIRMED",
             Self::TaskCompiledWorkflowValidated => "TASK_COMPILED_WORKFLOW_VALIDATED",
             Self::TaskNodeStarted => "TASK_NODE_STARTED",
             Self::TaskProgressUpdated => "TASK_PROGRESS_UPDATED",
@@ -749,6 +829,7 @@ impl TaskEventType {
             "TASK_FAILED" => Ok(Self::TaskFailed),
             "TASK_CANCELLED" => Ok(Self::TaskCancelled),
             "TASK_SUBMISSION_PREPARED" => Ok(Self::TaskSubmissionPrepared),
+            "TASK_SUBMISSION_CONFIRMED" => Ok(Self::TaskSubmissionConfirmed),
             "TASK_COMPILED_WORKFLOW_VALIDATED" => Ok(Self::TaskCompiledWorkflowValidated),
             "TASK_NODE_STARTED" => Ok(Self::TaskNodeStarted),
             "TASK_PROGRESS_UPDATED" => Ok(Self::TaskProgressUpdated),
@@ -1007,6 +1088,64 @@ mod tests {
         assert!(task.queued_at.is_none());
         assert!(task.started_at.is_none());
         assert!(task.finished_at.is_none());
+    }
+
+    #[test]
+    fn submission_identity_is_persisted_before_post_and_confirmed_after_response() {
+        let mut task = created_task();
+        let base = task.created_at;
+        TaskStateMachine::transition(
+            &mut task,
+            TaskStatus::Validating,
+            base + Duration::seconds(1),
+        )
+        .unwrap();
+        TaskStateMachine::transition(
+            &mut task,
+            TaskStatus::Preparing,
+            base + Duration::seconds(2),
+        )
+        .unwrap();
+
+        let prepared = task
+            .prepare_submission_with_identity(
+                "prompt-1",
+                "client-1",
+                Some("gen_1"),
+                Some("request-1"),
+                Some("compiled-sha"),
+                base + Duration::seconds(3),
+            )
+            .unwrap();
+        assert_eq!(task.prompt_id.as_deref(), Some("prompt-1"));
+        assert_eq!(prepared.event_type, TaskEventType::TaskSubmissionPrepared);
+        assert_eq!(
+            prepared.payload,
+            Some(serde_json::json!({
+                "promptId": "prompt-1",
+                "clientId": "client-1",
+                "submissionState": "SUBMITTING",
+                "generationExecutionId": "gen_1",
+                "submissionIdempotencyKey": "request-1",
+                "compiledWorkflowSha256": "compiled-sha",
+            }))
+        );
+
+        let confirmed = task
+            .record_submission_confirmed("prompt-1", Some(7), base + Duration::seconds(4))
+            .unwrap();
+        assert_eq!(confirmed.event_type, TaskEventType::TaskSubmissionConfirmed);
+        assert_eq!(
+            confirmed.payload,
+            Some(serde_json::json!({
+                "promptId": "prompt-1",
+                "queueNumber": 7,
+                "submissionState": "SUBMITTED",
+            }))
+        );
+        assert!(task
+            .prepare_submission("prompt-2", "client-2", base + Duration::seconds(5))
+            .is_err());
     }
 
     #[test]

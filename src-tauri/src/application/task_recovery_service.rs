@@ -155,7 +155,7 @@ impl TaskRecoveryService {
                 return Ok(RecoveryOutcome::Deferred);
             }
             Err(error) => {
-                self.record_unresolved(&task, &format!("HISTORY_CHECK_FAILED: {error}"))
+                self.record_submission_uncertain(&task, &format!("HISTORY_CHECK_FAILED: {error}"))
                     .await?;
                 return Ok(RecoveryOutcome::Unresolved);
             }
@@ -197,7 +197,7 @@ impl TaskRecoveryService {
                 return Ok(RecoveryOutcome::Deferred);
             }
             Err(error) => {
-                self.record_unresolved(&task, &format!("QUEUE_CHECK_FAILED: {error}"))
+                self.record_submission_uncertain(&task, &format!("QUEUE_CHECK_FAILED: {error}"))
                     .await?;
                 return Ok(RecoveryOutcome::Unresolved);
             }
@@ -221,7 +221,7 @@ impl TaskRecoveryService {
             return Ok(RecoveryOutcome::Succeeded);
         }
 
-        self.record_unresolved(&task, "prompt is absent from ComfyUI history and queue")
+        self.record_submission_uncertain(&task, "prompt is absent from ComfyUI history and queue")
             .await?;
         Ok(RecoveryOutcome::Unresolved)
     }
@@ -452,6 +452,23 @@ impl TaskRecoveryService {
             task,
             TaskEventType::TaskRecoveryUnresolved,
             Some(serde_json::json!({ "reason": reason })),
+        )
+        .await
+    }
+
+    async fn record_submission_uncertain(
+        &self,
+        task: &Task,
+        reason: &str,
+    ) -> Result<(), TaskRecoveryError> {
+        self.record_recovery_event(
+            task,
+            TaskEventType::TaskRecoveryUnresolved,
+            Some(serde_json::json!({
+                "code": "SUBMISSION_STATE_UNCERTAIN",
+                "reason": reason,
+                "promptId": task.prompt_id,
+            })),
         )
         .await
     }
@@ -1322,6 +1339,19 @@ outputs:
         assert_eq!(counters.queue, 2);
         assert_eq!(counters.submit, 0);
         assert_eq!(counters.upload, 0);
+        let events = harness
+            .task_repository
+            .list_events(&first.id)
+            .await
+            .unwrap();
+        assert!(events.iter().any(|event| {
+            event.event_type == TaskEventType::TaskRecoveryUnresolved
+                && event
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| payload.get("code"))
+                    == Some(&json!("SUBMISSION_STATE_UNCERTAIN"))
+        }));
         assert_eq!(first.prompt_id, second.prompt_id);
     }
 
