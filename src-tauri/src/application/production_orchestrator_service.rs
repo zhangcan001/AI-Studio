@@ -1682,10 +1682,44 @@ fn db_error(error: sqlx::Error) -> ProductionOrchestratorError {
 
 #[cfg(test)]
 mod tests {
-    use super::{inject_reference_values, SelectedReference};
+    use super::{
+        inject_reference_values, ProductionOrchestratorError, ProductionOrchestratorService,
+        ProductionRunCreateRequest, SelectedReference,
+    };
     use crate::application::generation_input_preparer::GenerationInputValue;
+    use crate::application::generation_service::GenerationService;
+    use crate::application::ports::{
+        Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyHealth, ComfyHistory,
+        ComfyOutputData, ComfyOutputFile, NoopTaskUpdateSink, PromptSubmission, SystemStats,
+    };
+    use crate::application::production_queue_service::{
+        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueService,
+    };
+    use crate::application::task_cancellation_service::TaskCancellationService;
+    use crate::application::task_execution_registry::TaskExecutionRegistry;
+    use crate::application::task_recovery_service::TaskRecoveryService;
     use crate::domain::{AssetId, InputDefinition};
+    use crate::infrastructure::database::{
+        initialize,
+        repositories::{
+            test_support, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
+            SqliteGenerationSnapshotRepository, SqliteProductionQueueRepository,
+            SqliteProjectRepository, SqliteTaskRepository,
+        },
+    };
+    use crate::infrastructure::filesystem::FileSystemAssetStore;
+    use crate::infrastructure::time::SystemClock;
+    use async_trait::async_trait;
+    use serde_json::json;
+    use sqlx::SqlitePool;
     use std::collections::{BTreeMap, HashMap};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    const SIMPLE_RECIPE_YAML: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/simple_t2i/recipe.yaml"
+    ));
 
     fn asset(id: &str) -> AssetId {
         AssetId::parse(id.to_owned()).expect("test asset id should be valid")
@@ -1797,5 +1831,475 @@ mod tests {
 
         assert!(values.contains_key("first_frame"));
         assert!(!values.contains_key("last_frame"));
+    }
+
+    struct NoopComfyAdapter;
+
+    #[async_trait]
+    impl ComfyAdapter for NoopComfyAdapter {
+        async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+
+        async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+
+        async fn get_object_info(&self) -> Result<serde_json::Value, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+
+        async fn get_history(&self, _prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+
+        async fn download_output(
+            &self,
+            _file: &ComfyOutputFile,
+        ) -> Result<ComfyOutputData, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+
+        async fn submit_workflow(
+            &self,
+            _client_id: &str,
+            _prompt_id: &str,
+            _workflow: serde_json::Value,
+        ) -> Result<PromptSubmission, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+
+        async fn subscribe_events(
+            &self,
+            _client_id: &str,
+        ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
+        }
+    }
+
+    async fn insert_succeeded_output(
+        pool: &SqlitePool,
+        task_id: &str,
+        asset_id: &str,
+        asset_type: &str,
+        storage_path: &str,
+    ) {
+        let now = "2026-08-16T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO tasks
+             (id, project_id, workflow_id, workflow_version_id, recipe_id, status,
+              progress_mode, created_at, finished_at)
+             VALUES (?, 'prj_default', 'workflow-1', 'workflow-version-1', 'recipe-1',
+                     'SUCCEEDED', 'indeterminate', ?, ?)",
+        )
+        .bind(task_id)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("test task should persist");
+
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path, sha256,
+              mime_type, width, height, file_size, source_task_id, metadata_json,
+              created_at, updated_at)
+             VALUES (?, 'prj_default', ?, 'generated', ?, ?, ?, ?, ?, 864, 480, 4, ?, '{}', ?, ?)",
+        )
+        .bind(asset_id)
+        .bind(asset_type)
+        .bind(format!("{asset_id}.media"))
+        .bind(format!("{asset_id}.media"))
+        .bind(storage_path)
+        .bind(format!("sha-{asset_id}"))
+        .bind(if asset_type == "video" {
+            "video/mp4"
+        } else {
+            "image/png"
+        })
+        .bind(task_id)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("test output asset should persist");
+
+        sqlx::query(
+            "INSERT INTO task_output_assets
+             (task_id, output_id, ordinal, asset_id, created_at)
+             VALUES (?, ?, 0, ?, ?)",
+        )
+        .bind(task_id)
+        .bind(format!("output-{asset_id}"))
+        .bind(asset_id)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("test task output link should persist");
+    }
+
+    #[tokio::test]
+    async fn production_run_lifecycle_keeps_batch_task_asset_lineage_without_gpu() {
+        let directory = tempdir().expect("lifecycle test directory should exist");
+        let project_root = directory.path().join("project");
+        let image_root = project_root.join("assets/generated/image");
+        let video_root = project_root.join("assets/generated/video");
+        std::fs::create_dir_all(&image_root).expect("image asset directory should exist");
+        std::fs::create_dir_all(&video_root).expect("video asset directory should exist");
+        std::fs::write(image_root.join("asset-krea-e2e.png"), b"image")
+            .expect("image asset fixture should exist");
+        std::fs::write(video_root.join("asset-video-e2e.mp4"), b"video")
+            .expect("video asset fixture should exist");
+
+        let pool = initialize(&directory.path().join("orchestrator.db"))
+            .await
+            .expect("orchestrator test database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET id = 'prj_default' WHERE id = 'project-1'")
+            .execute(&pool)
+            .await
+            .expect("test project id should be valid for the service");
+        sqlx::query("UPDATE projects SET root_path = ? WHERE id = 'prj_default'")
+            .bind(project_root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("test project root should update");
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+            .bind(SIMPLE_RECIPE_YAML)
+            .execute(&pool)
+            .await
+            .expect("valid test Recipe should persist");
+
+        let asset_repository = Arc::new(SqliteAssetRepository::new(pool.clone()));
+        let project_repository = Arc::new(SqliteProjectRepository::new(pool.clone()));
+        let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
+        let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
+        let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
+        let definition_repository =
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
+        let asset_store = Arc::new(FileSystemAssetStore::new());
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(NoopComfyAdapter);
+        let generation_service = Arc::new(GenerationService::new(
+            task_repository.clone(),
+            snapshot_repository.clone(),
+            definition_repository.clone(),
+            comfy_adapter.clone(),
+            project_repository.clone(),
+            asset_store.clone(),
+            asset_repository.clone(),
+            clock.clone(),
+        ));
+        let task_recovery_service = Arc::new(TaskRecoveryService::new(
+            task_repository.clone(),
+            snapshot_repository,
+            asset_repository.clone(),
+            comfy_adapter,
+            project_repository,
+            asset_store,
+            clock.clone(),
+            Arc::new(NoopTaskUpdateSink),
+        ));
+        let queue = Arc::new(ProductionQueueService::new(
+            queue_repository.clone(),
+            task_repository.clone(),
+            definition_repository.clone(),
+            generation_service,
+            queue_repository.clone(),
+            task_recovery_service,
+            clock.clone(),
+        ));
+        let cancellation = Arc::new(TaskCancellationService::new(
+            task_repository,
+            TaskExecutionRegistry::default(),
+            clock.clone(),
+            Arc::new(NoopTaskUpdateSink),
+        ));
+        let orchestrator = ProductionOrchestratorService::new(
+            pool.clone(),
+            definition_repository,
+            queue.clone(),
+            cancellation,
+            clock,
+        );
+
+        let mut krea_values = BTreeMap::new();
+        krea_values.insert(
+            "prompt".to_owned(),
+            GenerationInputValue::Text("lifecycle image".to_owned()),
+        );
+        let mut h3_values = BTreeMap::new();
+        h3_values.insert(
+            "prompt".to_owned(),
+            GenerationInputValue::Text("lifecycle video".to_owned()),
+        );
+        let created = orchestrator
+            .create(ProductionRunCreateRequest {
+                project_id: "prj_default".to_owned(),
+                name: "No-GPU lifecycle".to_owned(),
+                krea2_workflow_version_id: "workflow-version-1".to_owned(),
+                krea2_recipe_id: "recipe-1".to_owned(),
+                krea2_preset_id: None,
+                krea2_values: krea_values.clone(),
+                image_count: 1,
+                h3_workflow_version_id: Some("workflow-version-1".to_owned()),
+                h3_recipe_id: Some("recipe-1".to_owned()),
+                h3_profile: Some("H3_TEST".to_owned()),
+                h3_values: h3_values.clone(),
+                template_id: None,
+            })
+            .await
+            .expect("Production Run should be created");
+        assert_eq!(created.stages.len(), 3);
+        assert_eq!(created.status, "READY");
+
+        let stage0 = created
+            .stages
+            .iter()
+            .find(|stage| stage.ordinal == 0)
+            .expect("Krea2 stage should exist");
+        let selection_stage = created
+            .stages
+            .iter()
+            .find(|stage| stage.ordinal == 1)
+            .expect("selection stage should exist");
+        let h3_stage = created
+            .stages
+            .iter()
+            .find(|stage| stage.ordinal == 2)
+            .expect("H3 stage should exist");
+
+        let krea_batch = queue
+            .create(CreateProductionBatchRequest {
+                project_id: "prj_default".to_owned(),
+                name: "No-GPU lifecycle · Krea2".to_owned(),
+                continue_on_failure: true,
+                items: vec![CreateProductionBatchItem {
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    values: krea_values,
+                }],
+            })
+            .await
+            .expect("Krea2 ProductionBatch should be created");
+        let krea_batch_id = krea_batch.batch.id.as_str().to_owned();
+        let krea_item_id = krea_batch.items[0].id.as_str().to_owned();
+        let now = "2026-08-16T00:00:00Z";
+        sqlx::query(
+            "UPDATE production_stages SET production_batch_id = ?, status = 'RUNNING', updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&krea_batch_id)
+        .bind(now)
+        .bind(&stage0.id)
+        .execute(&pool)
+        .await
+        .expect("Krea2 stage should link to its batch");
+        sqlx::query(
+            "INSERT INTO production_stage_items
+             (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
+              source_asset_id, reference_index, attempt, submission_idempotency_key,
+              frozen_values_json, created_at, updated_at)
+             VALUES ('prsi-e2e-krea', ?, 0, 'PENDING', ?, NULL, NULL, NULL, NULL, 1,
+                     'production-stage-item:prsi-e2e-krea:attempt:1', ?, ?, ?)",
+        )
+        .bind(&stage0.id)
+        .bind(&krea_item_id)
+        .bind(krea_batch.items[0].values_json.to_string())
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("Krea2 stage item should persist");
+        insert_succeeded_output(
+            &pool,
+            "task-krea-e2e",
+            "asset-krea-e2e",
+            "image",
+            "assets/generated/image/asset-krea-e2e.png",
+        )
+        .await;
+        sqlx::query(
+            "UPDATE production_batches SET status = 'COMPLETED', updated_at = ? WHERE id = ?;
+             UPDATE production_batch_items
+             SET status = 'SUCCEEDED', task_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(now)
+        .bind(&krea_batch_id)
+        .bind("task-krea-e2e")
+        .bind(now)
+        .bind(&krea_item_id)
+        .execute(&pool)
+        .await
+        .expect("Krea2 batch truth should persist");
+
+        let after_images = orchestrator
+            .refresh("prj_default", &created.id)
+            .await
+            .expect("Krea2 stage should synchronize");
+        assert_eq!(after_images.status, "WAITING_FOR_SELECTION");
+        assert_eq!(after_images.stages[0].status, "SUCCEEDED");
+        assert_eq!(
+            after_images.stages[0].production_batch_id.as_deref(),
+            Some(krea_batch_id.as_str())
+        );
+        assert_eq!(
+            after_images.stages[0].items[0].task_id.as_deref(),
+            Some("task-krea-e2e")
+        );
+        assert_eq!(
+            after_images.stages[0].items[0].asset_id.as_deref(),
+            Some("asset-krea-e2e")
+        );
+        assert_eq!(after_images.stages[1].status, "WAITING");
+
+        let after_selection = orchestrator
+            .select_assets(
+                "prj_default",
+                &created.id,
+                vec!["asset-krea-e2e".to_owned()],
+            )
+            .await
+            .expect("asset selection should persist in original order");
+        assert_eq!(after_selection.status, "READY");
+        assert_eq!(after_selection.current_stage_ordinal, 2);
+        assert_eq!(after_selection.stages[1].status, "SUCCEEDED");
+        assert_eq!(
+            after_selection.stages[1].items[0]
+                .source_asset_id
+                .as_deref(),
+            Some("asset-krea-e2e")
+        );
+
+        let h3_batch = queue
+            .create(CreateProductionBatchRequest {
+                project_id: "prj_default".to_owned(),
+                name: "No-GPU lifecycle · H3".to_owned(),
+                continue_on_failure: true,
+                items: vec![CreateProductionBatchItem {
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    values: h3_values,
+                }],
+            })
+            .await
+            .expect("H3 ProductionBatch should be created");
+        let h3_batch_id = h3_batch.batch.id.as_str().to_owned();
+        let h3_item_id = h3_batch.items[0].id.as_str().to_owned();
+        let frozen_h3_values = json!({
+            "reference_image": {"type": "image_asset", "assetId": "asset-krea-e2e"},
+            "duration_seconds": {"type": "integer", "value": 1}
+        });
+        sqlx::query(
+            "UPDATE production_stages SET production_batch_id = ?, status = 'RUNNING', updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&h3_batch_id)
+        .bind(now)
+        .bind(&h3_stage.id)
+        .execute(&pool)
+        .await
+        .expect("H3 stage should link to its batch");
+        sqlx::query(
+            "INSERT INTO production_stage_items
+             (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
+              source_asset_id, reference_index, attempt, submission_idempotency_key,
+              frozen_values_json, created_at, updated_at)
+             VALUES ('prsi-e2e-h3', ?, 0, 'PENDING', ?, NULL, NULL, 'asset-krea-e2e', 0, 1,
+                     'production-stage-item:prsi-e2e-h3:attempt:1', ?, ?, ?)",
+        )
+        .bind(&h3_stage.id)
+        .bind(&h3_item_id)
+        .bind(frozen_h3_values.to_string())
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("H3 stage item should persist");
+        insert_succeeded_output(
+            &pool,
+            "task-h3-e2e",
+            "asset-video-e2e",
+            "video",
+            "assets/generated/video/asset-video-e2e.mp4",
+        )
+        .await;
+        sqlx::query(
+            "UPDATE production_batches SET status = 'COMPLETED', updated_at = ? WHERE id = ?;
+             UPDATE production_batch_items
+             SET status = 'SUCCEEDED', task_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(now)
+        .bind(&h3_batch_id)
+        .bind("task-h3-e2e")
+        .bind(now)
+        .bind(&h3_item_id)
+        .execute(&pool)
+        .await
+        .expect("H3 batch truth should persist");
+
+        let finished = orchestrator
+            .refresh("prj_default", &created.id)
+            .await
+            .expect("H3 stage should synchronize");
+        assert_eq!(finished.status, "SUCCEEDED");
+        assert_eq!(finished.current_stage_ordinal, 2);
+        assert_eq!(finished.stages[0].status, "SUCCEEDED");
+        assert_eq!(finished.stages[1].status, "SUCCEEDED");
+        assert_eq!(finished.stages[2].status, "SUCCEEDED");
+        assert_eq!(
+            finished.stages[2].production_batch_id.as_deref(),
+            Some(h3_batch_id.as_str())
+        );
+        assert_eq!(
+            finished.stages[2].items[0].task_id.as_deref(),
+            Some("task-h3-e2e")
+        );
+        assert_eq!(
+            finished.stages[2].items[0].asset_id.as_deref(),
+            Some("asset-video-e2e")
+        );
+        assert_eq!(
+            finished.stages[2].items[0].source_asset_id.as_deref(),
+            Some("asset-krea-e2e")
+        );
+
+        let batch_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM production_batches WHERE project_id = 'prj_default'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("production batch count should be readable");
+        assert_eq!(batch_count, 2, "one normal batch per generation stage");
+        let lineage_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM production_stage_items
+             WHERE task_id IN ('task-krea-e2e', 'task-h3-e2e')
+               AND asset_id IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("stage lineage should be readable");
+        assert_eq!(lineage_count, 2);
+        assert!(matches!(
+            orchestrator
+                .get("prj_00000000-0000-0000-0000-000000000001", &created.id)
+                .await,
+            Err(ProductionOrchestratorError::NotFound(_))
+        ));
+        assert_eq!(selection_stage.ordinal, 1);
     }
 }
