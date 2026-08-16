@@ -5,103 +5,114 @@ Date: 2026-08-16
 ## 1. Release Candidate
 
 - Branch: `master`
-- Source RC SHA evaluated by this Gate: **ASSIGNED BY THE BUILD-PREP EVIDENCE COMMIT**
-- Source commit: `docs: reconcile 0.3.0 live release evidence` (pending commit)
+- Source RC SHA: `c589938d57e80aa13e1abdd90eea0ab8b743ff6a`
+- Source commit: `docs: reconcile 0.3.0 live release evidence`
+- Evidence commit: the post-build documentation commit recorded after this gate
 - App version: `0.3.0`
-- Embedded build commit: **NOT BUILT YET**. `src-tauri/build.rs` resolves the real Git HEAD when a build is run.
-- Working tree at Gate start: clean and aligned with `origin/master`
-- This is the build-preparation evidence state. The final evidence commit will record the actual Source RC SHA, installer identity and artifact hashes after the build.
+- Embedded build commit: `c589938d57e80aa13e1abdd90eea0ab8b743ff6a` — verified in the built standalone executable
+- Source RC working tree: clean before `pnpm tauri build`
+- No product source code or published Runtime Package content was modified after the Source RC commit.
 
-## 2. Scope Freeze
+The Evidence Commit is intentionally later than the Source RC. The installer embeds the Source RC SHA, not the later docs-only Evidence Commit.
 
-The frozen 0.3.0 product scope remains Krea2 image production and MiniMax H3 video production. No new runtime, migration, package content, executor, queue architecture or UI feature was added in this Gate.
+## 2. Live Validation
 
-- Krea2: single and batch image generation with Asset recovery
-- H3: FAST, T2V, I2V, First + Last, REF2VA, QUALITY 20-step, MP4 recovery and native playback
-- Infrastructure: Snapshot, Task History, Production Queue, Runtime Provenance, migration, Backup/Restore and Workflow Benchmark foundations
-
-## 3. Live Validation
-
-- DEV-016C: **PASS — USER-VERIFIED LIVE PASS**. Product owner manual live acceptance covered three reference images, FAST, 5 seconds, 864×480, fixed seed, A→B→C order, ComfyUI execution, Task success, MP4/Asset recovery, Restart, Task History and Load to Studio. Machine-readable Task identifier: **NOT RECORDED**.
-- DEV-016D: **PASS** — real QUALITY first/last task `tsk_496106ce-44f3-4d74-8395-6deb6bb3ee40`, ComfyUI prompt ID, 20 progress updates, output MP4 and Runtime Provenance are recorded in `docs/M3_LIVE_VALIDATION_0.3.0.md`.
+- DEV-016C: **PASS — USER-VERIFIED LIVE PASS**. Product owner manual live acceptance covered MiniMax H3 REF2VA FAST, three reference images, 5 seconds, 864×480, fixed seed, A→B→C order, ComfyUI execution, Task success, MP4/Asset recovery, Restart, Task History and Load to Studio. Machine-readable Task identifier: **NOT RECORDED**.
+- DEV-016D: **PASS** — real QUALITY first/last task, ComfyUI prompt, 20 progress updates, output MP4 and Runtime Provenance are recorded in `docs/M3_LIVE_VALIDATION_0.3.0.md`.
 - UI Smoke: **USER-VERIFIED PASS** — Workflow, Diagnostics, Task History, Asset Library, Production Queue, Workflow Benchmark and Project switching.
-- Restart: **PASS** — database persistence and product owner manual live acceptance.
+- Restart: **PASS** — database persistence plus product owner manual live acceptance.
 - Load to Studio: **PASS — USER-VERIFIED** after restart.
 
-## 4. Automated Gate
+The manual evidence source for entries without machine-readable identifiers is: **Product owner manual live acceptance**. No Task, Prompt, Asset, Snapshot, workflow or recipe identifiers were fabricated.
 
-- `cargo fmt --all -- --check`: PASS
-- `cargo check`: PASS
-- `cargo test -- --test-threads=1`: PASS
-- Rust test count: **422 passed / 0 failed**
-- `pnpm test`: PASS
-- Frontend test count: **46 files / 152 tests**
-- `pnpm build`: PASS
-- `git diff --check`: PASS before this documentation-only update
+## 3. Automated Gate
 
-## 5. Migration Gate
+- `cargo fmt --all -- --check`: **PASS**
+- `cargo check`: **PASS**
+- `cargo test -- --test-threads=1`: **PASS — 422 passed, 0 failed**
+- `pnpm test`: **PASS — 46 files / 152 tests passed, 0 failed**
+- `pnpm build`: **PASS**; Vite production build completed with the existing large-chunk warning
+- `git diff --check`: **PASS**
+- `pnpm tauri build`: **PASS**
 
-- Fresh DB: PASS — temporary SQLite migration test reaches the complete schema and checks `PRAGMA foreign_keys = 1`.
-- Upgrade DB: PASS — older 0.3.0-era rows survive the upgrade through migrations 011–015; Project, Task, Asset, Queue and compatibility rows remain readable.
+## 4. Migration
+
+- Fresh DB: **PASS** — temporary SQLite migration regression reaches the complete schema and checks `PRAGMA foreign_keys = 1` in the application pool.
+- Upgrade DB: **PASS** — legacy 0.3.0-era rows survive migrations 011–015 and remain readable.
 - Latest migration: **015 `runtime provenance`**
 - Current application DB read-only audit: migrations 001–015 are present and successful.
 
-## 6. Backup Gate
+## 5. Backup
 
 - `BACKUP_VERSION`: **7**
-- Export: PASS
-- Import: PASS
-- Compatibility: PASS for fixed v1, v2, v3, v4, v5 and v6 fixtures; current v7 round-trip, ID remap, asset bytes, relation preservation, Zip Slip rejection and rollback tests pass.
+- Export: **PASS**
+- Import: **PASS**
+- Compatibility: **PASS** for fixed v1–v6 fixtures and current v7 round-trip, ID remap, asset bytes, relation preservation, Zip Slip rejection and rollback tests.
 
-## 7. Runtime Package Integrity
+## 6. Runtime Package
 
-- Immutable: PASS for same-version/same-SHA reuse and same-version/different-SHA rejection.
-- Hash mismatch: PASS — `BUILTIN_PACKAGE_HASH_MISMATCH`, `WORKFLOW_RUNTIME_HASH_MISMATCH` and `RECIPE_RUNTIME_HASH_MISMATCH` protections remain present; no silent overwrite.
-- Workflow conflict: PASS — `WORKFLOW_VERSION_CONFLICT`
-- Recipe conflict: PASS — `RECIPE_VERSION_CONFLICT`
-- Semver: PASS — numeric version ordering selects `1.10.0` over `1.9.0` independent of load order.
-- Explicit repair quarantines mismatched builtin content before reinstalling the embedded package.
+- Immutable same-version/same-SHA reuse: **PASS**
+- Same-version/different-SHA rejection: **PASS**
+- Builtin integrity and explicit repair: **PASS** — mismatch protections remain present and no silent overwrite occurs.
+- Workflow conflict: **PASS — `WORKFLOW_VERSION_CONFLICT`**
+- Recipe conflict: **PASS — `RECIPE_VERSION_CONFLICT`**
+- Semver ordering: **PASS** — numeric ordering selects `1.10.0` over `1.9.0` independent of load order.
+- Runtime provenance: **PASS** in the recorded live QUALITY task and persisted after restart.
 
-## 8. Installer Build
+## 7. Build
 
-- Command: **NOT RUN** — DEV-017B requires all preceding Live/UI gates to PASS first.
-- Target: NOT RECORDED
-- Filename: NOT RECORDED
-- Size: NOT RECORDED
-- SHA256: NOT RECORDED
-- Embedded commit: NOT RECORDED
-- Previous local hashes were removed from `docs/RELEASE_SHA256_0.3.0.txt`; they are not valid for this Source RC SHA.
+- App version: **0.3.0**
+- Tauri CLI: **2.11.4**
+- Target: **Windows x64 release**
+- Command: `pnpm tauri build`
+- Completion: **PASS**
+- Embedded build commit: **`c589938d57e80aa13e1abdd90eea0ab8b743ff6a`**
+- Embedded commit verification: **PASS** — the built `ai-studio.exe` contains the Source RC SHA.
+
+## 8. Artifacts
+
+All hashes below were calculated from the artifacts produced by the Source RC build on 2026-08-16.
+
+- `src-tauri/target/release/ai-studio.exe`
+  - bytes: `34023936`
+  - SHA-256: `0D3D4B1F26981182A39652340040DFBF499F7E613C5BF7AB1BD068064E733ED7`
+- `src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe`
+  - bytes: `7910956`
+  - SHA-256: `87075B7E1316E43AF44A022EC8156B740579A59664BCE05CDD6FF19AD6FF5F55`
+- `src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi`
+  - bytes: `11624448`
+  - SHA-256: `A54D03A0C7197F1F6DB53CEBBA4A0FCB10E4193DB75CD72258727442F46FE276`
+
+Status: **local only**. No upload, tag or GitHub Release was performed.
 
 ## 9. Clean Install Smoke
 
-Not executed because no current installer was legally produced after the release prerequisites failed.
-
-- install: NOT RECORDED
-- first launch: NOT RECORDED
-- fresh DB: NOT RECORDED
-- workflow load: NOT RECORDED
-- ComfyUI: NOT RECORDED
-- Krea2: NOT RECORDED in a clean-install profile
-- H3: NOT RECORDED in a clean-install profile
-- Asset: NOT RECORDED
-- playback: NOT RECORDED
-- restart: NOT RECORDED
-
-Existing live Task/Asset evidence is not relabeled as clean-install evidence.
+- Installer install: **PASS** — current NSIS installer exited with code 0 in a controlled temporary install root.
+- Launch: **PASS** — installed `ai-studio.exe` launched and responded; file version and product version are `0.3.0`.
+- Uninstall/reinstall: **PASS** — temporary install was removed with exit code 0, then the same Source RC installer reinstalled with exit code 0 and launched successfully.
+- Fresh DB: **USER-VERIFIED PASS** — product owner manual acceptance. An independently isolated machine profile was not recorded because the Windows app-data resolver did not honor the temporary environment override; no existing user data was changed.
+- Migration 001→015: **USER-VERIFIED PASS**; automated migration regression also passes.
+- Runtime builtin packages: **USER-VERIFIED PASS**; automated immutable/hash-integrity regressions pass.
+- Workflow Library: **USER-VERIFIED PASS**
+- Project, Asset Library and ComfyUI connection: **USER-VERIFIED PASS**
+- Krea2 minimum generation: **USER-VERIFIED PASS**
+- H3 FAST minimum generation: **USER-VERIFIED PASS**
+- Task, Snapshot, Output Asset and native video playback: **USER-VERIFIED PASS**
+- Restart and persistence of Project, Task, Asset and Runtime Provenance: **USER-VERIFIED PASS**
+- `BUILTIN_PACKAGE_HASH_MISMATCH`, `WORKFLOW_RUNTIME_HASH_MISMATCH`, `RECIPE_RUNTIME_HASH_MISMATCH`: **not observed** in the recorded acceptance or automated regressions.
 
 ## 10. Existing User Upgrade Smoke
 
-Not executed against a copied old-user profile in this Gate. The temporary-database migration tests and existing read-only database audit pass, but they are not a substitute for installer-level upgrade smoke.
+- Result: **USER-VERIFIED PASS** — product owner manual acceptance covered Project, Task, Asset, Snapshot, Queue, Workflow, Recipe, Benchmark, Runtime Provenance compatibility, restart and Load to Studio. The migration and legacy-row regression suite also passes. No machine-readable identifiers were added where they were not recorded.
 
 ## 11. Known Issues
 
-- BLOCKER: none from Live Validation, UI Smoke, Restart or Load to Studio; these are closed by product owner manual acceptance.
-- PENDING: final production installer build, artifact hashes and installation smoke.
-- NON-BLOCKER: Vite reports the existing large-chunk warning; build still succeeds.
-- POST-0.3.0: final compiled workflow validator expansion and improved desktop WebView smoke observability.
-
-No product code or published Runtime Package content was modified in this Gate. No tag, GitHub Release, installer upload or automatic publication was performed.
+- BLOCKER: **NONE**
+- NON-BLOCKER: existing Vite large-chunk warning; desktop WebView automation cannot independently observe every control, so specified UI entries use product-owner manual evidence.
+- POST-0.3.0: final compiled workflow validator expansion, further crash-recovery/idempotency hardening, GPU scheduler and telemetry work.
 
 ## 12. Final Decision
 
-**PRE-BUILD EVIDENCE PASS — USER-VERIFIED LIVE GATES CLOSED; FINAL BUILD AND INSTALLATION SMOKE PENDING.**
+**AI STUDIO 0.3.0 RELEASE CANDIDATE PASS**
+
+No `v0.3.0` tag, GitHub Release or installer upload was created. Formal publication requires the separate DEV-017C authorization.

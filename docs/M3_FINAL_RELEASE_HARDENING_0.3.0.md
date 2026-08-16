@@ -126,3 +126,12 @@ Evidence source for the above UI entries: Product owner manual live acceptance. 
 **0.3.0 RELEASE HARDENING PASS**
 
 No tag, GitHub Release, installer upload or binary publication was performed.
+
+## 15. DEV-017B-RECONCILE final build evidence
+
+- Source RC SHA: `c589938d57e80aa13e1abdd90eea0ab8b743ff6a`
+- `pnpm tauri build`: **PASS**
+- Embedded build commit: **PASS** — matches the Source RC SHA.
+- Release artifacts: standalone executable, NSIS installer and MSI were built locally; byte counts and SHA-256 values are recorded in `docs/RELEASE_SHA256_0.3.0.txt`.
+- Installation, launch, normal close, uninstall and reinstall smoke: **PASS** in a controlled temporary install root.
+- The final reconciliation does not change the hardening result: **0.3.0 RELEASE HARDENING PASS**.

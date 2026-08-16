@@ -160,7 +160,16 @@ No product source code changed in this validation run. The current HEAD baseline
 - `pnpm build`：PASS
 - `git diff --check`：PASS before this documentation-only change
 
-No installer, tag, GitHub Release or binary upload was created.
+The final local Release Candidate build was completed after this live-validation record. No tag, GitHub Release or binary upload was performed.
+
+## DEV-017B-RECONCILE final evidence
+
+- Source RC SHA: `c589938d57e80aa13e1abdd90eea0ab8b743ff6a`
+- `pnpm tauri build`: **PASS**
+- Embedded build commit: **PASS** — the standalone executable contains the Source RC SHA.
+- Artifact SHA-256 and byte counts: recorded in `docs/RELEASE_SHA256_0.3.0.txt`.
+- Installation, normal launch, close, uninstall and reinstall smoke: **PASS** in a controlled temporary install root.
+- Product-owner manual acceptance remains the evidence source for live/UI/restart/load-to-studio entries without machine-readable identifiers; those entries are **USER-VERIFIED PASS**, not fabricated machine evidence.
 
 ## Final decision
 
