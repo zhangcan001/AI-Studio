@@ -41,11 +41,12 @@ describe("studio product UX contracts", () => {
     expect(html).toContain('aria-pressed="true"');
   });
 
-  it("keeps the three creation modes as presentation tabs", () => {
+  it("keeps the creation modes as presentation tabs", () => {
     const html = renderToStaticMarkup(<StudioModeTabs mode="batch" onChange={vi.fn()} />);
 
     expect(html).toContain("单次创作");
     expect(html).toContain("批量生产");
+    expect(html).toContain("Production Run");
     expect(html).toContain("Benchmark Lab");
     expect(html).toContain('aria-selected="true"');
   });

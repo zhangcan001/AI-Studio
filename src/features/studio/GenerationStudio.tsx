@@ -36,7 +36,7 @@ import { productionInteractionPolicy } from "./productionQueuePolicy";
 import { CreationResultPanel } from "./CreationResultPanel";
 import { GenerationActionBar } from "./GenerationActionBar";
 import { generationBlockedReason } from "./generationBlockedReason";
-import type { StudioMode } from "./StudioModeTabs";
+import { StudioModeTabs, type StudioMode } from "./StudioModeTabs";
 import { NoWorkflowGuide } from "./NoWorkflowGuide";
 import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
 import { CreationModeHint } from "../runtime/CreationModeHint";
@@ -963,6 +963,7 @@ export function GenerationStudio({
           </div>
           <span>自动推荐稳定工作流；手动更换后，工作流版本和 Recipe 会随任务冻结。</span>
         </section>
+        <StudioModeTabs mode={studioMode} onChange={setStudioMode} />
         <WorkflowSelector
           stage="image"
           candidates={productCatalog}
@@ -1119,16 +1120,18 @@ export function GenerationStudio({
                 onChange={updateKrea2Resolution}
               />
             )}
+            {studioMode === "production" && (
+              <ProductionRunPanel
+                projectId={projectId}
+                catalog={catalog}
+                baseRecipe={selectedWorkflow}
+                baseValues={values}
+                onOpenTask={onOpenTask}
+                onAdmissionChanged={onProductionAdmissionChanged}
+              />
+            )}
             {studioMode === "experiment" && (
               <>
-                <ProductionRunPanel
-                  projectId={projectId}
-                  catalog={catalog}
-                  baseRecipe={selectedWorkflow}
-                  baseValues={values}
-                  onOpenTask={onOpenTask}
-                  onAdmissionChanged={onProductionAdmissionChanged}
-                />
                 <WorkflowBenchmarkPanel
                   projectId={projectId}
                   catalog={catalog}

@@ -29,7 +29,7 @@ function recipe(workflowId: string, name: string): RecipeViewModel {
   };
 }
 
-describe("0.3.0 product runtime scope", () => {
+describe("0.4.0 product runtime scope", () => {
   it("accepts the frozen Krea2 runtime and both H3 runtime families", () => {
     expect(PRODUCTION_WORKFLOW_IDS).toEqual([
       KERA2_WORKFLOW_ID,

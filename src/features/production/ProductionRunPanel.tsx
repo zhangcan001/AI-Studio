@@ -18,6 +18,7 @@ import type { GenerationValues, RecipeField, RecipeViewModel } from "../../types
 import type { ProductionRun, ProductionRunTemplate } from "../../types/productionRun";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { defaultGenerationValues } from "../../stores/studioStore";
+import { h3RecipeForMode, type H3QualityProfile } from "../runtime/productRuntimeScope";
 
 type NumericRecipeField = Extract<RecipeField, { type: "integer" | "number" }>;
 
@@ -39,9 +40,15 @@ function h3PromptKey(recipe: RecipeViewModel | undefined): string | undefined {
     ?? firstField(recipe, (field) => field.type === "textarea")?.key;
 }
 
-function h3RecipeFor(catalog: RecipeViewModel[], baseRecipe: RecipeViewModel): RecipeViewModel | undefined {
-  return catalog.find((recipe) => recipe.outputTypes?.includes("video"))
-    ?? (baseRecipe.outputTypes?.includes("video") ? baseRecipe : undefined);
+type H3Profile = "H3_FAST" | "H3_QUALITY";
+
+function h3ProfileValue(value: string | undefined): H3Profile {
+  return value === "H3_QUALITY" ? "H3_QUALITY" : "H3_FAST";
+}
+
+function h3RecipeFor(catalog: RecipeViewModel[], profile: H3Profile): RecipeViewModel | undefined {
+  const runtimeProfile: H3QualityProfile = profile === "H3_QUALITY" ? "QUALITY" : "FAST";
+  return h3RecipeForMode(catalog, "FL2VA_IMAGE_TO_VIDEO", runtimeProfile);
 }
 
 function h3NumericFields(recipe: RecipeViewModel | undefined): NumericRecipeField[] {
@@ -88,13 +95,13 @@ function stageLabel(stageType: string): string {
 }
 
 export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues, onOpenTask, onAdmissionChanged }: Props) {
-  const h3Recipe = useMemo(() => h3RecipeFor(catalog, baseRecipe), [baseRecipe, catalog]);
-  const numericFields = useMemo(() => h3NumericFields(h3Recipe), [h3Recipe]);
-  const promptKey = h3PromptKey(h3Recipe);
   const [name, setName] = useState("Production Run");
   const [imageCount, setImageCount] = useState(2);
   const [h3Prompt, setH3Prompt] = useState("");
-  const [h3Profile, setH3Profile] = useState("H3_FAST");
+  const [h3Profile, setH3Profile] = useState<H3Profile>("H3_FAST");
+  const h3Recipe = useMemo(() => h3RecipeFor(catalog, h3Profile), [catalog, h3Profile]);
+  const numericFields = useMemo(() => h3NumericFields(h3Recipe), [h3Recipe]);
+  const promptKey = h3PromptKey(h3Recipe);
   const [h3Values, setH3Values] = useState<GenerationValues>(() => h3Recipe ? defaultGenerationValues(h3Recipe) : {});
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [templates, setTemplates] = useState<ProductionRunTemplate[]>([]);
@@ -103,6 +110,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [runsLoading, setRunsLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
@@ -121,7 +129,8 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
           if (details[0]) setSelectedRun(details[0]);
         }
       })
-      .catch((loadError: unknown) => { if (active) setError(toUserMessage(loadError)); });
+      .catch((loadError: unknown) => { if (active) setError(toUserMessage(loadError)); })
+      .finally(() => { if (active) setRunsLoading(false); });
     return () => { active = false; };
   }, [projectId]);
 
@@ -133,17 +142,20 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
     return () => { active = false; };
   }, [projectId]);
 
-  useEffect(() => {
-    let active = true;
-    void assetLibraryPage({
+  async function refreshAssets() {
+    const page = await assetLibraryPage({
       projectId,
       category: "ALL",
       mediaType: "IMAGE",
       sourceKind: "ALL",
       createdOrder: "NEWEST",
       limit: 100,
-    }).then((page) => { if (active) setAssets(page.items); }).catch(() => undefined);
-    return () => { active = false; };
+    });
+    setAssets(page.items);
+  }
+
+  useEffect(() => {
+    void refreshAssets().catch(() => undefined);
   }, [projectId]);
 
   function updatePrompt(value: string) {
@@ -155,7 +167,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
     setSelectedTemplateId(template.id);
     setName(template.name);
     setImageCount(template.defaultImageCount);
-    setH3Profile(template.h3Profile ?? "H3_FAST");
+    setH3Profile(h3ProfileValue(template.h3Profile));
     setH3Values((current) => {
       const next = { ...current };
       numericFields.forEach((field) => {
@@ -239,6 +251,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       const updated = await action();
       setSelectedRun(updated);
       setRuns((current) => current.map((run) => run.id === updated.id ? updated : run));
+      await refreshAssets().catch(() => undefined);
       await onAdmissionChanged?.();
       setNotice(message);
     } catch (actionError: unknown) { setError(toUserMessage(actionError)); }
@@ -250,6 +263,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
   const h3Stage = selectedRun?.stages.find((stage) => stage.stageType === "H3_VIDEO_GENERATION");
   const generatedIds = imageStage?.items.map((item) => item.assetId).filter((id): id is string => Boolean(id)) ?? [];
   const generatedAssets = assets.filter((asset) => generatedIds.includes(asset.id));
+  const failedH3Item = h3Stage?.items.find((item) => item.errorCode || item.errorMessage);
 
   return (
     <section className="production-run-panel" aria-label="Production Runs">
@@ -260,7 +274,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       <div className="production-run-create-grid">
         <label><span>Run 名称</span><input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
         <label><span>Krea2 图片数量</span><input type="number" min={1} max={100} value={imageCount} onChange={(event) => setImageCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
-        <label><span>H3 Profile</span><select value={h3Profile} onChange={(event) => setH3Profile(event.target.value)}><option value="H3_FAST">FAST</option><option value="H3_QUALITY">QUALITY</option></select></label>
+        <label><span>H3 Profile</span><select value={h3Profile} onChange={(event) => setH3Profile(h3ProfileValue(event.target.value))}><option value="H3_FAST">FAST</option><option value="H3_QUALITY">QUALITY</option></select></label>
         {numericFields.map((field) => <label key={field.key}><span>{field.label}</span><input type="number" min={field.min} max={field.max} step={field.step} value={numericValue(h3Values, field.key) ?? ""} onChange={(event) => { const value = Number(event.target.value); if (!Number.isFinite(value)) return; setH3Values((current) => ({ ...current, [field.key]: { type: field.type, value } })); }} /></label>)}
         <label className="production-run-prompt"><span>H3 Prompt</span><textarea rows={2} value={h3Prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder="输入视频 Prompt" /></label>
       </div>
@@ -270,13 +284,19 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
         {templates.length > 0 && <label className="production-run-template-picker"><span>模板</span><select value={selectedTemplateId} onChange={(event) => { const template = templates.find((item) => item.id === event.target.value); if (template) applyTemplate(template); }}><option value="">选择模板</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}
         {selectedRun && <button type="button" className="quiet-button" onClick={() => void execute(() => reload(selectedRun.id), "Production Run 已刷新。 ")} disabled={busy}>刷新</button>}
       </div>
+      {!h3Recipe && <p className="disabled-note" role="status">当前目录没有可用的 H3 FL2VA 图生视频 Recipe，Production Run 暂不可用。</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
       {notice && <p className="studio-notice" role="status">{notice}</p>}
-      {runs.length > 0 && <div className="production-run-history" aria-label="Production Run 历史">
+      {runsLoading && <p className="disabled-note" role="status">正在加载 Production Run 历史…</p>}
+      {!runsLoading && runs.length === 0 && <p className="disabled-note" role="status">暂无 Production Run，请先新建一个运行。</p>}
+      {!runsLoading && runs.length > 0 && <div className="production-run-history" aria-label="Production Run 历史">
         {runs.map((run) => <button type="button" key={run.id} className={selectedRun?.id === run.id ? "production-run-history-row production-run-history-row-active" : "production-run-history-row"} onClick={() => { setSelectedRun(run); setSelectedAssetIds([]); }}>{run.name}<span>{statusLabel(run.status)}</span></button>)}
       </div>}
       {selectedRun && <div className="production-run-stages">
         <div className="production-run-status"><strong>{selectedRun.name}</strong><span>{statusLabel(selectedRun.status)}</span><small>{selectedRun.id}</small></div>
+        {imageStage?.status === "SUCCEEDED" && selectionStage?.status !== "SUCCEEDED" && generatedAssets.length === 0 && <p className="disabled-note" role="status">Krea2 图片已完成，正在加载可选图片…</p>}
+        {h3Stage?.status === "RUNNING" && <p className="disabled-note" role="status">H3 正在生成，按钮已锁定；可点击刷新查看进度。</p>}
+        {h3Stage?.status === "FAILED" && <p className="error-message" role="alert">H3 生成失败{failedH3Item?.errorCode ? `（${failedH3Item.errorCode}）` : ""}，可查看诊断后重试。</p>}
         {selectedRun.stages.map((stage) => <article className="production-run-stage" key={stage.id}>
           <div className="production-run-stage-heading"><strong>{stage.ordinal + 1}. {stageLabel(stage.stageType)}</strong><span>{statusLabel(stage.status)}</span><small>{stage.productionBatchId ?? "尚未创建批次"}</small></div>
           {stage.items.map((item) => <div className="production-run-stage-item" key={item.id}><span>#{item.ordinal + 1}</span><b>{statusLabel(item.status)}</b><small>{item.assetId ?? item.taskId ?? "等待队列"}</small>{item.taskId && onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>任务</button>}</div>)}
@@ -289,6 +309,16 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
           {!['SUCCEEDED', 'CANCELLED'].includes(selectedRun.status) && <button type="button" className="quiet-button" onClick={() => void execute(() => cancelProductionRun(projectId, selectedRun.id), "Production Run 已取消，成功资产保留。 ")} disabled={busy}>取消 Run</button>}
         </div>
         {h3Stage?.items.some((item) => item.assetId) && <p className="studio-notice">Final Video Asset：{h3Stage.items.filter((item) => item.assetId).map((item) => item.assetId).join(", ")}</p>}
+        <details className="production-run-diagnostics">
+          <summary>诊断 / 冻结配置</summary>
+          <p>Run ID：{selectedRun.id} · 当前阶段：{selectedRun.currentStageOrdinal + 1}</p>
+          {selectedRun.stages.map((stage) => <div key={stage.id}>
+            <strong>{stage.ordinal + 1}. {stageLabel(stage.stageType)}</strong>
+            <p>Stage ID：{stage.id} · Workflow Version：{stage.workflowVersionId ?? "—"} · Recipe：{stage.recipeId ?? "—"} · Batch：{stage.productionBatchId ?? "—"}</p>
+            <pre>{JSON.stringify(stage.frozenConfig, null, 2) ?? "{}"}</pre>
+            {stage.items.map((item) => <p key={item.id}>Item {item.ordinal + 1} · attempt {item.attempt} · task {item.taskId ?? "—"} · asset {item.assetId ?? "—"} · source {item.sourceAssetId ?? "—"} · reference_index {item.referenceIndex ?? "—"} · submission {item.submissionIdempotencyKey ?? "—"}{item.errorCode ? ` · ${item.errorCode}: ${item.errorMessage ?? ""}` : ""}</p>)}
+          </div>)}
+        </details>
       </div>}
     </section>
   );
