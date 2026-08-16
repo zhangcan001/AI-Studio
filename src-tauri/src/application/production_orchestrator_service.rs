@@ -7,7 +7,9 @@ use crate::application::production_queue_service::{
 use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::compiler::RecipeParser;
 use crate::domain::InputDefinition;
-use crate::domain::{ProductionRunStatus, ProductionStageStatus, ProductionStageType};
+use crate::domain::{
+    ProductionRunStatus, ProductionStageStatus, ProductionStageType, Recipe, SeedValue,
+};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
@@ -469,19 +471,34 @@ impl ProductionOrchestratorService {
         let recipe_id = stage.recipe_id.clone().ok_or_else(|| {
             ProductionOrchestratorError::InvalidState("Krea2 Recipe 未冻结。".to_owned())
         })?;
+        let definition = self
+            .definition_repository
+            .find(&workflow_version_id, &recipe_id)
+            .await
+            .map_err(|error| ProductionOrchestratorError::Repository(error.to_string()))?
+            .ok_or_else(|| {
+                ProductionOrchestratorError::InvalidInput(
+                    "Krea2 Workflow / Recipe 不可用。".to_owned(),
+                )
+            })?;
+        let recipe = RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|error| ProductionOrchestratorError::InvalidInput(error.to_string()))?;
+        let items = (0..image_count)
+            .map(|ordinal| {
+                Ok(CreateProductionBatchItem {
+                    workflow_version_id: workflow_version_id.clone(),
+                    recipe_id: recipe_id.clone(),
+                    values: diversify_seed_values(&values, &recipe, ordinal)?,
+                })
+            })
+            .collect::<Result<Vec<_>, ProductionOrchestratorError>>()?;
         let queue = self
             .production_queue_service
             .create(CreateProductionBatchRequest {
                 project_id: project_id.to_owned(),
                 name: format!("Production Run · {} · Krea2", run.name),
                 continue_on_failure: true,
-                items: (0..image_count)
-                    .map(|_| CreateProductionBatchItem {
-                        workflow_version_id: workflow_version_id.clone(),
-                        recipe_id: recipe_id.clone(),
-                        values: values.clone(),
-                    })
-                    .collect(),
+                items,
             })
             .await?;
         let now = self.clock.now().to_rfc3339();
@@ -1585,6 +1602,41 @@ fn values_from_config(
     generation_values_from_json(&values).map_err(ProductionOrchestratorError::InvalidInput)
 }
 
+fn diversify_seed_values(
+    values: &BTreeMap<String, GenerationInputValue>,
+    recipe: &Recipe,
+    ordinal: u32,
+) -> Result<BTreeMap<String, GenerationInputValue>, ProductionOrchestratorError> {
+    let offset = u64::from(ordinal);
+    values
+        .iter()
+        .map(|(key, value)| {
+            let value = match (recipe.inputs.get(key), value) {
+                (
+                    Some(InputDefinition::Seed { max, .. }),
+                    GenerationInputValue::Seed(SeedValue::Fixed(seed)),
+                ) => {
+                    let candidate = seed.checked_add(offset).ok_or_else(|| {
+                        ProductionOrchestratorError::InvalidInput(format!(
+                            "seed input \"{key}\" overflows at candidate ordinal {ordinal}"
+                        ))
+                    })?;
+                    if let Some(max) = max {
+                        if candidate > *max {
+                            return Err(ProductionOrchestratorError::InvalidInput(format!(
+                                "seed input \"{key}\" candidate {candidate} exceeds Recipe max {max}"
+                            )));
+                        }
+                    }
+                    GenerationInputValue::Seed(SeedValue::Fixed(candidate))
+                }
+                _ => value.clone(),
+            };
+            Ok((key.clone(), value))
+        })
+        .collect()
+}
+
 fn inject_reference_values(
     values: &mut BTreeMap<String, GenerationInputValue>,
     references: &[SelectedReference],
@@ -1683,8 +1735,8 @@ fn db_error(error: sqlx::Error) -> ProductionOrchestratorError {
 #[cfg(test)]
 mod tests {
     use super::{
-        inject_reference_values, ProductionOrchestratorError, ProductionOrchestratorService,
-        ProductionRunCreateRequest, SelectedReference,
+        diversify_seed_values, inject_reference_values, ProductionOrchestratorError,
+        ProductionOrchestratorService, ProductionRunCreateRequest, SelectedReference,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::GenerationService;
@@ -1698,7 +1750,7 @@ mod tests {
     use crate::application::task_cancellation_service::TaskCancellationService;
     use crate::application::task_execution_registry::TaskExecutionRegistry;
     use crate::application::task_recovery_service::TaskRecoveryService;
-    use crate::domain::{AssetId, InputDefinition};
+    use crate::domain::{AssetId, InputDefinition, SeedValue};
     use crate::infrastructure::database::{
         initialize,
         repositories::{
@@ -1720,6 +1772,117 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../tests/fixtures/simple_t2i/recipe.yaml"
     ));
+
+    fn seed_recipe() -> crate::domain::Recipe {
+        crate::compiler::RecipeParser::parse(SIMPLE_RECIPE_YAML)
+            .expect("seed recipe fixture should parse")
+    }
+
+    fn seed_values(seed: SeedValue) -> BTreeMap<String, GenerationInputValue> {
+        BTreeMap::from([
+            (
+                "prompt".to_owned(),
+                GenerationInputValue::Text("candidate".to_owned()),
+            ),
+            ("seed".to_owned(), GenerationInputValue::Seed(seed)),
+            ("steps".to_owned(), GenerationInputValue::Integer(20)),
+        ])
+    }
+
+    #[test]
+    fn krea2_candidate_seed_keeps_single_fixed_seed() {
+        let values = diversify_seed_values(&seed_values(SeedValue::Fixed(100)), &seed_recipe(), 0)
+            .expect("single candidate should be valid");
+
+        assert_eq!(
+            values.get("seed"),
+            Some(&GenerationInputValue::Seed(SeedValue::Fixed(100)))
+        );
+    }
+
+    #[test]
+    fn krea2_candidate_seed_is_deterministic_and_ordinal_based() {
+        let recipe = seed_recipe();
+        let values = seed_values(SeedValue::Fixed(100));
+        let first = (0..4)
+            .map(|ordinal| diversify_seed_values(&values, &recipe, ordinal).unwrap())
+            .collect::<Vec<_>>();
+        let second = (0..4)
+            .map(|ordinal| diversify_seed_values(&values, &recipe, ordinal).unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first
+                .iter()
+                .map(|values| values.get("seed"))
+                .collect::<Vec<_>>(),
+            vec![
+                Some(&GenerationInputValue::Seed(SeedValue::Fixed(100))),
+                Some(&GenerationInputValue::Seed(SeedValue::Fixed(101))),
+                Some(&GenerationInputValue::Seed(SeedValue::Fixed(102))),
+                Some(&GenerationInputValue::Seed(SeedValue::Fixed(103))),
+            ]
+        );
+    }
+
+    #[test]
+    fn krea2_candidate_seed_rejects_overflow_or_recipe_upper_bound() {
+        let recipe = seed_recipe();
+        let values = seed_values(SeedValue::Fixed(u64::MAX));
+        assert!(diversify_seed_values(&values, &recipe, 1)
+            .expect_err("u64 overflow must be rejected")
+            .to_string()
+            .contains("overflows"));
+
+        let mut bounded = seed_recipe();
+        if let Some(InputDefinition::Seed { max, .. }) = bounded.inputs.get_mut("seed") {
+            *max = Some(100);
+        }
+        let values = seed_values(SeedValue::Fixed(100));
+        assert!(diversify_seed_values(&values, &bounded, 1)
+            .expect_err("candidate above recipe maximum must be rejected")
+            .to_string()
+            .contains("Recipe max"));
+    }
+
+    #[test]
+    fn krea2_candidate_seed_leaves_random_and_non_seed_values_unchanged() {
+        let mut values = seed_values(SeedValue::Random);
+        values.insert("integer".to_owned(), GenerationInputValue::Integer(42));
+        let result = diversify_seed_values(&values, &seed_recipe(), 3)
+            .expect("random candidate should retain queue semantics");
+
+        assert_eq!(result.get("seed"), values.get("seed"));
+        assert_eq!(result.get("integer"), values.get("integer"));
+    }
+
+    #[test]
+    fn krea2_recipe_without_seed_keeps_values_unchanged() {
+        let mut recipe = seed_recipe();
+        recipe.inputs.remove("seed");
+        let mut values = seed_values(SeedValue::Fixed(100));
+        values.remove("seed");
+
+        assert_eq!(
+            diversify_seed_values(&values, &recipe, 3).expect("no-seed recipe should be stable"),
+            values
+        );
+    }
+
+    #[test]
+    fn krea2_retry_keeps_frozen_candidate_seed_in_batch_values() {
+        let values = seed_values(SeedValue::Fixed(101));
+        let retry = diversify_seed_values(&values, &seed_recipe(), 0)
+            .expect("retry should reuse frozen candidate values");
+
+        assert_eq!(
+            retry.get("seed"),
+            Some(&GenerationInputValue::Seed(SeedValue::Fixed(101)))
+        );
+        let json = crate::application::production_queue_service::generation_values_to_json(&retry);
+        assert_eq!(json["seed"]["value"], "101");
+    }
 
     fn asset(id: &str) -> AssetId {
         AssetId::parse(id.to_owned()).expect("test asset id should be valid")
