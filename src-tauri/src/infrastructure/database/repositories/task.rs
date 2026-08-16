@@ -353,7 +353,9 @@ fn validate_event(
 
 fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), RepositoryError> {
     let allowed = match event.event_type {
-        TaskEventType::TaskSubmissionPrepared => task.status == TaskStatus::Preparing,
+        TaskEventType::TaskSubmissionPrepared | TaskEventType::TaskCompiledWorkflowValidated => {
+            task.status == TaskStatus::Preparing
+        }
         TaskEventType::TaskNodeStarted | TaskEventType::TaskProgressUpdated => {
             task.status == TaskStatus::Running
         }

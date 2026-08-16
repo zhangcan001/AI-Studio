@@ -16,7 +16,10 @@ use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::application::workflow_onboarding_service::{
     dynamic_binding_target_labels, CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
 };
-use crate::compiler::{CompileError, RecipeParser, WorkflowCompiler};
+use crate::compiler::{
+    CompileError, CompiledMediaMapping, FinalCompiledWorkflowValidator, RecipeParser,
+    WorkflowCompiler,
+};
 use crate::domain::{
     AssetId, CompileRequest, GenerationSnapshot, ResolvedInputValue, RuntimeProvenance, SeedValue,
     Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
@@ -504,7 +507,12 @@ impl GenerationService {
                     .await);
             }
         };
-        if let Err(error) = reject_internal_workflow_placeholders(&compile_result.workflow) {
+        let media_mappings = compiled_media_mappings(&recipe, &request.values, &prepared);
+        if let Err(error) = FinalCompiledWorkflowValidator::validate(
+            &compile_result.workflow,
+            &recipe,
+            &media_mappings,
+        ) {
             return Err(self
                 .fail_and_preserve(
                     &mut task,
@@ -513,6 +521,29 @@ impl GenerationService {
                 )
                 .await);
         }
+        let compiled_workflow_sha256 =
+            match FinalCompiledWorkflowValidator::sha256(&compile_result.workflow) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Err(self
+                        .fail_and_preserve(
+                            &mut task,
+                            task_error_from_compile(&error),
+                            GenerationServiceError::Compile(error),
+                        )
+                        .await);
+                }
+            };
+        let compiled_event = task.record_compiled_workflow_validated(
+            definition.workflow_sha256.clone(),
+            definition.recipe_sha256.clone(),
+            compiled_workflow_sha256,
+            self.clock.now(),
+        )?;
+        self.task_repository
+            .persist_runtime_update(&task, &compiled_event)
+            .await?;
+        self.task_update_sink.publish(&task);
         if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
             return Ok(task);
         }
@@ -1158,34 +1189,124 @@ fn history_error(history: &ComfyHistory) -> TaskError {
 }
 
 fn task_error_from_compile(error: &CompileError) -> TaskError {
+    let raw = match error {
+        CompileError::CompiledDanglingNodeReference {
+            source_node,
+            input_name,
+            referenced_node,
+            output_index,
+        } => Some(serde_json::json!({
+            "sourceNode": source_node,
+            "inputName": input_name,
+            "referencedNode": referenced_node,
+            "outputIndex": output_index,
+        })),
+        CompileError::CompiledInternalPlaceholder { path, marker } => {
+            Some(serde_json::json!({"path": path, "marker": marker}))
+        }
+        CompileError::CompiledMediaBindingIncomplete {
+            asset_id,
+            media_kind,
+            reference_index,
+            input_key,
+            expected_target,
+            actual_target,
+        } => Some(serde_json::json!({
+            "assetId": asset_id,
+            "mediaKind": media_kind,
+            "referenceIndex": reference_index,
+            "inputKey": input_key,
+            "expectedTarget": expected_target,
+            "actualTarget": actual_target,
+        })),
+        CompileError::CompiledOutputNodeMissing { output_id, node } => {
+            Some(serde_json::json!({"outputId": output_id, "node": node}))
+        }
+        CompileError::CompiledGraphInvalid { message } => {
+            Some(serde_json::json!({"message": message}))
+        }
+        _ => None,
+    };
     TaskError {
         code: error.code().to_owned(),
         message: error.to_string(),
-        raw: None,
+        raw,
     }
 }
 
-const INTERNAL_WORKFLOW_PLACEHOLDER_MARKERS: [&str; 2] =
-    ["__AI_STUDIO_OPTIONAL__", "__aistudio_preflight_image__"];
-
-fn reject_internal_workflow_placeholders(workflow: &Value) -> Result<(), CompileError> {
-    if let Some(marker) = find_internal_workflow_placeholder(workflow) {
-        return Err(CompileError::Internal {
-            message: format!("compiled workflow contains unresolved internal placeholder {marker}"),
+fn compiled_media_mappings(
+    recipe: &crate::domain::Recipe,
+    values: &BTreeMap<String, GenerationInputValue>,
+    prepared: &PreparedGenerationInputs,
+) -> Vec<CompiledMediaMapping> {
+    let mut mappings = Vec::new();
+    for binding in &recipe.bindings {
+        let Some((media_kind, entries)) = prepared_media_entries(&binding.source, values, prepared)
+        else {
+            continue;
+        };
+        let selected = match binding.item_index {
+            Some(index) => entries
+                .get(index)
+                .cloned()
+                .map(|entry| vec![entry])
+                .unwrap_or_default(),
+            None => entries,
+        };
+        if selected.is_empty() {
+            continue;
+        }
+        mappings.push(CompiledMediaMapping {
+            input_key: binding.source.clone(),
+            target_node: binding.target.node.clone(),
+            target_input: binding.target.input.clone(),
+            media_kind,
+            reference_index: binding.item_index,
+            asset_ids: selected
+                .iter()
+                .map(|(asset_id, _)| asset_id.clone())
+                .collect(),
+            uploaded_identities: selected
+                .iter()
+                .map(|(_, identity)| identity.clone())
+                .collect(),
         });
     }
-    Ok(())
+    mappings
 }
 
-fn find_internal_workflow_placeholder(value: &Value) -> Option<&'static str> {
+fn prepared_media_entries(
+    input_key: &str,
+    values: &BTreeMap<String, GenerationInputValue>,
+    prepared: &PreparedGenerationInputs,
+) -> Option<(String, Vec<(String, String)>)> {
+    let value = values.get(input_key)?;
     match value {
-        Value::String(value) => INTERNAL_WORKFLOW_PLACEHOLDER_MARKERS
-            .iter()
-            .copied()
-            .find(|marker| value.contains(marker)),
-        Value::Array(values) => values.iter().find_map(find_internal_workflow_placeholder),
-        Value::Object(values) => values.values().find_map(find_internal_workflow_placeholder),
-        Value::Null | Value::Bool(_) | Value::Number(_) => None,
+        GenerationInputValue::ImageAsset(_) | GenerationInputValue::ImageAssets(_) => {
+            let entries = prepared
+                .images
+                .get(input_key)?
+                .iter()
+                .map(|entry| (entry.asset_id.as_str().to_owned(), entry.comfy.name.clone()));
+            Some(("image".to_owned(), entries.collect()))
+        }
+        GenerationInputValue::VideoAsset(_) | GenerationInputValue::VideoAssets(_) => {
+            let entries = prepared
+                .media
+                .get(input_key)?
+                .iter()
+                .map(|entry| (entry.asset_id.as_str().to_owned(), entry.comfy.name.clone()));
+            Some(("video".to_owned(), entries.collect()))
+        }
+        GenerationInputValue::AudioAsset(_) | GenerationInputValue::AudioAssets(_) => {
+            let entries = prepared
+                .media
+                .get(input_key)?
+                .iter()
+                .map(|entry| (entry.asset_id.as_str().to_owned(), entry.comfy.name.clone()));
+            Some(("audio".to_owned(), entries.collect()))
+        }
+        _ => None,
     }
 }
 
@@ -1482,10 +1603,23 @@ mod tests {
             "24": {"inputs": {"image": "__aistudio_preflight_image__.png"}}
         });
         let resolved = json!({"24": {"inputs": {"image": "ComfyUI_uploaded_1.png"}}});
+        let recipe = RecipeParser::parse(
+            r#"
+schema_version: 1
+id: placeholder_test
+name: Placeholder Test
+workflow:
+  file: workflow.json
+inputs: {}
+bindings: []
+outputs: []
+"#,
+        )
+        .expect("recipe should parse");
 
-        assert!(reject_internal_workflow_placeholders(&optional).is_err());
-        assert!(reject_internal_workflow_placeholders(&preflight).is_err());
-        assert!(reject_internal_workflow_placeholders(&resolved).is_ok());
+        assert!(FinalCompiledWorkflowValidator::validate(&optional, &recipe, &[]).is_err());
+        assert!(FinalCompiledWorkflowValidator::validate(&preflight, &recipe, &[]).is_err());
+        assert!(FinalCompiledWorkflowValidator::validate(&resolved, &recipe, &[]).is_ok());
     }
 
     #[test]

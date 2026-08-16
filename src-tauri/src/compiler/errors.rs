@@ -16,6 +16,31 @@ pub enum CompileError {
         node: String,
         message: String,
     },
+    CompiledDanglingNodeReference {
+        source_node: String,
+        input_name: String,
+        referenced_node: String,
+        output_index: i64,
+    },
+    CompiledInternalPlaceholder {
+        path: String,
+        marker: String,
+    },
+    CompiledMediaBindingIncomplete {
+        asset_id: String,
+        media_kind: String,
+        reference_index: Option<usize>,
+        input_key: String,
+        expected_target: String,
+        actual_target: String,
+    },
+    CompiledOutputNodeMissing {
+        output_id: String,
+        node: String,
+    },
+    CompiledGraphInvalid {
+        message: String,
+    },
     UnknownInput {
         input: String,
     },
@@ -73,6 +98,11 @@ impl CompileError {
             Self::Workflow(error) => error.code(),
             Self::BindingInvalid { .. } => "BINDING_INVALID",
             Self::OutputInvalid { .. } => "OUTPUT_INVALID",
+            Self::CompiledDanglingNodeReference { .. } => "COMPILED_DANGLING_NODE_REFERENCE",
+            Self::CompiledInternalPlaceholder { .. } => "COMPILED_INTERNAL_PLACEHOLDER",
+            Self::CompiledMediaBindingIncomplete { .. } => "COMPILED_MEDIA_BINDING_INCOMPLETE",
+            Self::CompiledOutputNodeMissing { .. } => "COMPILED_OUTPUT_NODE_MISSING",
+            Self::CompiledGraphInvalid { .. } => "COMPILED_GRAPH_INVALID",
             Self::UnknownInput { .. } => "UNKNOWN_INPUT",
             Self::InputRequired { .. } => "INPUT_REQUIRED",
             Self::InputTypeMismatch { .. } => "INPUT_TYPE_MISMATCH",
@@ -151,6 +181,42 @@ impl fmt::Display for CompileError {
                 "{}: input \"{input}\" value {value} must be a multiple of {step}",
                 self.code()
             ),
+            Self::CompiledDanglingNodeReference {
+                source_node,
+                input_name,
+                referenced_node,
+                output_index,
+            } => write!(
+                formatter,
+                "{}: node {source_node} input {input_name} references missing node {referenced_node} output {output_index}",
+                self.code()
+            ),
+            Self::CompiledInternalPlaceholder { path, marker } => write!(
+                formatter,
+                "{}: unresolved internal placeholder {marker} at {path}",
+                self.code()
+            ),
+            Self::CompiledMediaBindingIncomplete {
+                asset_id,
+                media_kind,
+                reference_index,
+                input_key,
+                expected_target,
+                actual_target,
+            } => write!(
+                formatter,
+                "{}: {media_kind} asset {asset_id} reference {:?} for input {input_key} expected {expected_target}, received {actual_target}",
+                self.code(),
+                reference_index
+            ),
+            Self::CompiledOutputNodeMissing { output_id, node } => write!(
+                formatter,
+                "{}: output {output_id} references missing node {node}",
+                self.code()
+            ),
+            Self::CompiledGraphInvalid { message } => {
+                write!(formatter, "{}: {message}", self.code())
+            }
             Self::InputNumberOutOfRange {
                 input,
                 value,

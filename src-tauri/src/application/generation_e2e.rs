@@ -828,11 +828,14 @@ outputs:
                 .find(|event| event.event_type == TaskEventType::TaskCollecting)
                 .unwrap()
                 .created_at,
-            Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 0).unwrap()
+            Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 1).unwrap()
         );
         assert_eq!(
             run.task.finished_at,
-            Some(Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap())
+            Some(
+                Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap()
+                    + chrono::Duration::microseconds(1),
+            )
         );
         let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM generation_snapshots")
             .fetch_one(&run.pool)

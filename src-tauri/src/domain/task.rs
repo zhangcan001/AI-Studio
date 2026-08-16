@@ -501,6 +501,40 @@ impl Task {
         )
     }
 
+    pub fn record_compiled_workflow_validated(
+        &self,
+        template_workflow_sha256: impl Into<String>,
+        recipe_sha256: impl Into<String>,
+        compiled_workflow_sha256: impl Into<String>,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if self.status != TaskStatus::Preparing {
+            return Err(TaskDomainError::invalid_task(
+                "compiled workflow validation requires a PREPARING task",
+            ));
+        }
+        let template_workflow_sha256 = template_workflow_sha256.into();
+        let recipe_sha256 = recipe_sha256.into();
+        let compiled_workflow_sha256 = compiled_workflow_sha256.into();
+        if template_workflow_sha256.trim().is_empty()
+            || recipe_sha256.trim().is_empty()
+            || compiled_workflow_sha256.trim().is_empty()
+        {
+            return Err(TaskDomainError::invalid_task(
+                "compiled workflow validation requires non-empty SHA-256 values",
+            ));
+        }
+        self.new_runtime_event(
+            TaskEventType::TaskCompiledWorkflowValidated,
+            Some(serde_json::json!({
+                "templateWorkflowSha256": template_workflow_sha256,
+                "recipeSha256": recipe_sha256,
+                "compiledWorkflowSha256": compiled_workflow_sha256,
+            })),
+            at,
+        )
+    }
+
     pub fn record_recovery_event(
         &self,
         event_type: TaskEventType,
@@ -665,6 +699,7 @@ pub enum TaskEventType {
     TaskFailed,
     TaskCancelled,
     TaskSubmissionPrepared,
+    TaskCompiledWorkflowValidated,
     TaskNodeStarted,
     TaskProgressUpdated,
     TaskStreamDisconnected,
@@ -689,6 +724,7 @@ impl TaskEventType {
             Self::TaskFailed => "TASK_FAILED",
             Self::TaskCancelled => "TASK_CANCELLED",
             Self::TaskSubmissionPrepared => "TASK_SUBMISSION_PREPARED",
+            Self::TaskCompiledWorkflowValidated => "TASK_COMPILED_WORKFLOW_VALIDATED",
             Self::TaskNodeStarted => "TASK_NODE_STARTED",
             Self::TaskProgressUpdated => "TASK_PROGRESS_UPDATED",
             Self::TaskStreamDisconnected => "TASK_STREAM_DISCONNECTED",
@@ -713,6 +749,7 @@ impl TaskEventType {
             "TASK_FAILED" => Ok(Self::TaskFailed),
             "TASK_CANCELLED" => Ok(Self::TaskCancelled),
             "TASK_SUBMISSION_PREPARED" => Ok(Self::TaskSubmissionPrepared),
+            "TASK_COMPILED_WORKFLOW_VALIDATED" => Ok(Self::TaskCompiledWorkflowValidated),
             "TASK_NODE_STARTED" => Ok(Self::TaskNodeStarted),
             "TASK_PROGRESS_UPDATED" => Ok(Self::TaskProgressUpdated),
             "TASK_STREAM_DISCONNECTED" => Ok(Self::TaskStreamDisconnected),
