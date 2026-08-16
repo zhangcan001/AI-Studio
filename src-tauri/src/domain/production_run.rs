@@ -59,7 +59,7 @@ impl ProductionRunStatus {
                 )
                 | (
                     Self::WaitingForSelection,
-                    Self::Running | Self::Cancelled | Self::Failed
+                    Self::Ready | Self::Running | Self::Cancelled | Self::Failed
                 )
                 | (
                     Self::PartialFailed,
@@ -170,6 +170,9 @@ mod tests {
         );
         assert!(
             ProductionRunStatus::WaitingForSelection.can_transition(ProductionRunStatus::Running)
+        );
+        assert!(
+            ProductionRunStatus::WaitingForSelection.can_transition(ProductionRunStatus::Ready)
         );
         assert!(!ProductionRunStatus::Draft.can_transition(ProductionRunStatus::Succeeded));
     }

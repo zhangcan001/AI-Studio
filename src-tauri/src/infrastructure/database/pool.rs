@@ -88,6 +88,15 @@ mod tests {
 
         assert_eq!(table_count(&pool).await, 32);
         assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT MAX(version) FROM _sqlx_migrations",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("latest migration should be readable"),
+            18
+        );
+        assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
                 .fetch_one(&pool)
                 .await
@@ -370,6 +379,18 @@ mod tests {
             .await
             .expect("orchestrator indexes should be readable"),
             7
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN
+                 ('idx_tasks_project_submission_idempotency', 'idx_production_runs_project_status',
+                  'idx_production_stages_batch', 'idx_production_stage_items_asset',
+                  'idx_production_stage_items_source_asset')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("lineage indexes should be readable"),
+            5
         );
         assert_eq!(
             sqlx::query_scalar::<_, String>(

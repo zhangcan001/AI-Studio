@@ -1897,6 +1897,16 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 
 .production-run-prompt textarea { min-height: 56px; resize: vertical; }
 
+.production-run-template-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ux-muted);
+  font-size: 0.76rem;
+}
+
+.production-run-template-picker select { min-width: 150px; }
+
 .production-run-history,
 .production-run-stages {
   display: grid;
