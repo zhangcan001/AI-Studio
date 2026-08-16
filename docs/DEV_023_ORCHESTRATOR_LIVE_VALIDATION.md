@@ -2,7 +2,7 @@
 
 日期：2026-08-16
 仓库：`zhangcan001/AI-Studio`
-范围：真实本地 ComfyUI、隔离项目 `DEV023 Live Validation`、AI Studio 0.4.0 RC 预备
+范围：真实本地 ComfyUI、隔离项目 `DEV023 Live Validation`、AI Studio 0.4.0 RC
 
 ## Baseline
 
@@ -15,7 +15,7 @@
 
 ## Environment
 
-- AI Studio source version：`0.4.0`（RC build 前）
+- AI Studio source version：`0.4.0`
 - SQLite：实际运行 `app.db` 的 `_sqlx_migrations` 为 `1–18`，全部 `success=1`
 - Foreign keys：应用 SQLx pool 配置与 Rust migration 测试均为 `PRAGMA foreign_keys = 1`
 - Runtime Library：启动时同步 `15` 个 valid packages；Krea2 与 H3 package 均可用
@@ -173,28 +173,49 @@
 
 ## Installer
 
-本节在 source RC commit 固定后回填本地 `pnpm tauri build` 结果。不会创建 tag、GitHub Release 或上传 installer，也不会覆盖 0.3.0 SHA 文件。
+- Source RC SHA：`bed395a6b610e433df03339a2af62b6a6e61eadf`
+- `pnpm tauri build`：PASS
+- Embedded Build Commit：与 Source RC SHA 一致；release executable 中可检索到该 SHA
+- 产物：standalone、MSI、NSIS 均成功生成，逐项 SHA-256 见 `docs/RELEASE_SHA256_0.4.0.txt`
+- 约束：未创建 tag、GitHub Release 或上传 installer；未覆盖 `0.3.0` SHA 文件，也未修改 Runtime Package bytes
 
 ## Clean Install
 
-本节在 0.4.0 RC installer 生成后记录。若无法安全隔离全新用户数据，将明确标记为 `PARTIAL CLEAN SMOKE`，不冒充 full live pass。
+结果：`PARTIAL CLEAN SMOKE`。
+
+- Installer：`AI Studio_0.4.0_x64-setup.exe`
+- 安装命令：NSIS silent install，退出码 `0`
+- 隔离目录：`C:\Users\ADMIN\AppData\Local\Temp\AIStudio_DEV023_0.4.0_install`
+- 启动验证：installed `ai-studio.exe` 正常启动；backend/database `ready`，version `0.4.0`，正式版模式，ComfyUI `CONNECTED`，workflow packages `15/15` valid
+- UI 验证：Production Run tab 可见，面板显示 `Prompt → Krea2 → 选图 → H3`，空状态显示 `暂无 Production Run，请先新建一个运行。`
+- 重启验证：installed app 正常关闭后再次启动，上述 status/diagnostics 保持一致；随后已正常关闭
+- 边界：Windows Tauri LocalDataDir 未提供可用的临时数据根覆盖，因此没有声称 fresh DB clean install；这次是安装/启动/UI smoke，不是 full clean live pass
 
 ## Upgrade
 
-本节在 0.4.0 RC installer 生成后记录。升级测试只使用 v0.3.0 用户数据副本，不操作唯一正式用户数据。
+结果：`PARTIAL UPGRADE SMOKE`，正式用户数据未被改写。
+
+- 已从隔离的 v0.3.0/legacy snapshot 创建临时副本：`C:\Users\ADMIN\AppData\Local\Temp\AIStudio_DEV023_upgrade_20260816\AIStudio\AIStudioData\app.db`
+- 副本起点：migration `015`；projects `9`、tasks `229`、assets `291`、snapshots `215`、production_batches `66`、workflows `9`、workflow_versions `15`、recipes `17`
+- SQLite migration code：fresh/upgrade Rust tests 均通过 `001 → 018`；实际用户 DB 当前为 migration `018`
+- 限制：Windows Tauri `local_data_dir()` 不受本次 `LOCALAPPDATA` 临时环境变量重定向影响，无法让 installer 进程安全地指向上述副本；因此没有把“安装器对复制的 v0.3 数据升级”冒充成 full pass
+- 结论：数据库升级实现 PASS；installer against copied user data 未执行，保留为 post-0.4.0 可重复性工作
 
 ## Known Issues
 
 - BLOCKER：无；基础 Krea2 → Selection → H3 FAST → Video Asset、重启恢复、重复提交保护、lineage 与代码门禁均已通过
 - NON-BLOCKER：REF2VA 本轮未执行，按范围记为 POST-0.4.0；0.4.0 不强制开放复杂 REF2VA UI
-- POST-0.4.0：REF2VA 三图真实 ComfyUI 验证与更完整的 reference_index 审核工作区
+- NON-BLOCKER：fresh DB clean install 与 installer against copied v0.3 data 的完整隔离 smoke 受 Windows Tauri 数据目录不可重定向限制，已完成 partial smoke，不影响已通过的核心 live/code gates
+- POST-0.4.0：REF2VA 三图真实 ComfyUI 验证、更完整的 reference_index 审核工作区，以及可控数据根下的 installer upgrade smoke
 
 ## Final Decision
 
-RC build、artifact hash、安装级启动与升级 smoke 完成后回填最终决定。当前 live/code/migration/backup gates 已满足，0.4.0 不执行正式发布动作。
+`AI STUDIO 0.4.0 RELEASE CANDIDATE PASS`
+
+核心 Krea2 → Selection → H3 FAST → Video Asset live chain、重启恢复、重复提交保护、失败重试、lineage、H3 QUALITY 扩展验证、代码回归、migration、backup 与 RC build gates 均通过。REF2VA 与完整 fresh/upgrade installer isolation 按上文明确保留为 non-blocker/post-0.4.0；本任务不执行 tag、Release 或上传。
 
 ## RC Metadata
 
-- SOURCE_RC_SHA：待 source RC commit 后回填
-- Embedded Build Commit：待 `pnpm tauri build` 后回填
-- Artifact SHA-256：见 `docs/RELEASE_SHA256_0.4.0.txt`（构建后创建）
+- SOURCE_RC_SHA：`bed395a6b610e433df03339a2af62b6a6e61eadf`
+- Embedded Build Commit：`bed395a6b610e433df03339a2af62b6a6e61eadf`
+- Artifact SHA-256：见 `docs/RELEASE_SHA256_0.4.0.txt`

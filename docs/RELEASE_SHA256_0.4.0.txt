@@ -1,0 +1,13 @@
+# AI Studio 0.4.0 RC SHA-256
+
+Source RC SHA: `bed395a6b610e433df03339a2af62b6a6e61eadf`
+Embedded Build Commit: `bed395a6b610e433df03339a2af62b6a6e61eadf`
+App version: `0.4.0`
+
+| filename | bytes | SHA-256 |
+| --- | ---: | --- |
+| `src-tauri/target/release/ai-studio.exe` | 35,956,224 | `D5651BF09FCD3081D112C08F2D08D41FD27EEF3AB9DF3E8CA1001C4F35A48211` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.4.0_x64_en-US.msi` | 12,083,200 | `F208B9DE4AE673192E6A80176CA6BA37C47AE57AB1C9A418E715D2D16D9F0D71` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.4.0_x64-setup.exe` | 8,219,330 | `0E9E9430216F07D29EA693486F697848600A52B1FD8CC6EEDC3650B02DB20AA3` |
+
+These are local RC build artifacts. No tag, GitHub Release, or upload was created.
