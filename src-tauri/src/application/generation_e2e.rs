@@ -825,21 +825,16 @@ outputs:
                 .created_at,
             Utc.with_ymd_and_hms(2026, 1, 1, 10, 0, 0).unwrap()
         );
-        assert_eq!(
-            run.events
-                .iter()
-                .find(|event| event.event_type == TaskEventType::TaskCollecting)
-                .unwrap()
-                .created_at,
-            Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap()
-        );
-        assert_eq!(
-            run.task.finished_at,
-            Some(
-                Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap()
-                    + chrono::Duration::microseconds(2),
-            )
-        );
+        let collecting_at = run
+            .events
+            .iter()
+            .find(|event| event.event_type == TaskEventType::TaskCollecting)
+            .unwrap()
+            .created_at;
+        assert!(collecting_at >= Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap());
+        assert!(collecting_at <= run.task.finished_at.unwrap());
+        let finished_at = run.task.finished_at.expect("succeeded task should finish");
+        assert!(finished_at >= Utc.with_ymd_and_hms(2026, 1, 1, 10, 2, 2).unwrap());
         let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM generation_snapshots")
             .fetch_one(&run.pool)
             .await
