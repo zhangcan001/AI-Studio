@@ -50,6 +50,12 @@ import type {
 } from "../types/settings";
 import type { PresetView } from "../types/preset";
 import type {
+  ProductionRun,
+  ProductionRunCreateRequest,
+  ProductionRunListItem,
+  ProductionRunTemplate,
+} from "../types/productionRun";
+import type {
   PromptEntryView,
   PromptKind,
   PromptLibraryCreateRequest,
@@ -408,6 +414,50 @@ export function queueWorkflowBenchmark(
 
 export function deleteWorkflowBenchmark(projectId: string, experimentId: string): Promise<{ deleted: boolean; experimentId: string }> {
   return invoke<{ deleted: boolean; experimentId: string }>("workflow_benchmark_delete", { projectId, experimentId });
+}
+
+export function createProductionRun(request: ProductionRunCreateRequest): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_create", { request });
+}
+
+export function listProductionRuns(projectId: string, limit = 20): Promise<ProductionRunListItem[]> {
+  return invoke<ProductionRunListItem[]>("production_run_list", { request: { projectId, limit } });
+}
+
+export function getProductionRun(projectId: string, runId: string): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_get", { projectId, runId });
+}
+
+export function runProductionImages(projectId: string, runId: string): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_run_images", { projectId, runId });
+}
+
+export function selectProductionRunAssets(projectId: string, runId: string, assetIds: string[]): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_select_assets", { request: { projectId, runId, assetIds } });
+}
+
+export function runProductionVideo(projectId: string, runId: string): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_run_video", { projectId, runId });
+}
+
+export function retryProductionVideo(projectId: string, runId: string): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_retry_video", { projectId, runId });
+}
+
+export function refreshProductionRun(projectId: string, runId: string): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_refresh", { projectId, runId });
+}
+
+export function cancelProductionRun(projectId: string, runId: string): Promise<ProductionRun> {
+  return invoke<ProductionRun>("production_run_cancel", { projectId, runId });
+}
+
+export function saveProductionRunTemplate(request: Omit<ProductionRunTemplate, "id" | "createdAt" | "updatedAt" | "projectId"> & { projectId: string }): Promise<ProductionRunTemplate> {
+  return invoke<ProductionRunTemplate>("production_run_template_save", { request });
+}
+
+export function listProductionRunTemplates(projectId: string): Promise<ProductionRunTemplate[]> {
+  return invoke<ProductionRunTemplate[]>("production_run_template_list", { projectId });
 }
 
 export function listShots(projectId: string): Promise<ShotView[]> {

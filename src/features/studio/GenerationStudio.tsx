@@ -43,6 +43,7 @@ import { CreationModeHint } from "../runtime/CreationModeHint";
 import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfilePanel";
 import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
 import { WorkflowBenchmarkPanel } from "../experiments/WorkflowBenchmarkPanel";
+import { ProductionRunPanel } from "../production/ProductionRunPanel";
 import { type ExperimentContext, type ExperimentDimension, type ExperimentPlan } from "../experiments/experimentPlanner";
 import { PromptLibraryPanel } from "../prompts/PromptLibraryPanel";
 import type { PromptVersionView } from "../../types/prompt";
@@ -1120,6 +1121,14 @@ export function GenerationStudio({
             )}
             {studioMode === "experiment" && (
               <>
+                <ProductionRunPanel
+                  projectId={projectId}
+                  catalog={catalog}
+                  baseRecipe={selectedWorkflow}
+                  baseValues={values}
+                  onOpenTask={onOpenTask}
+                  onAdmissionChanged={onProductionAdmissionChanged}
+                />
                 <WorkflowBenchmarkPanel
                   projectId={projectId}
                   catalog={catalog}

@@ -8,6 +8,7 @@ pub mod generation_snapshot;
 pub mod preset;
 pub mod production_item_review;
 pub mod production_queue;
+pub mod production_run;
 pub mod project_id;
 pub mod recipe;
 pub mod shot;
@@ -26,6 +27,7 @@ pub use production_queue::{
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
     ProductionQueueDomainError,
 };
+pub use production_run::{ProductionRunStatus, ProductionStageStatus, ProductionStageType};
 pub use project_id::{validate_project_id, ProjectIdValidationError};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,

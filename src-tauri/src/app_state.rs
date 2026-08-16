@@ -11,6 +11,7 @@ use crate::application::h3_local_import_service::H3LocalImportService;
 use crate::application::organization_service::OrganizationService;
 use crate::application::preset_service::PresetService;
 use crate::application::production_item_review_service::ProductionItemReviewService;
+use crate::application::production_orchestrator_service::ProductionOrchestratorService;
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::project_backup_service::ProjectBackupService;
 use crate::application::project_service::ProjectService;
@@ -40,6 +41,7 @@ pub struct AppState {
     pub workflow_onboarding_service: Arc<WorkflowOnboardingService>,
     pub workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
     pub workflow_benchmark_service: Arc<WorkflowBenchmarkService>,
+    pub production_orchestrator_service: Arc<ProductionOrchestratorService>,
     pub generation_catalog_service: Arc<GenerationCatalogService>,
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
@@ -75,6 +77,7 @@ impl AppState {
         workflow_onboarding_service: Arc<WorkflowOnboardingService>,
         workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
         workflow_benchmark_service: Arc<WorkflowBenchmarkService>,
+        production_orchestrator_service: Arc<ProductionOrchestratorService>,
         generation_catalog_service: Arc<GenerationCatalogService>,
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
@@ -108,6 +111,7 @@ impl AppState {
             workflow_onboarding_service,
             workflow_lifecycle_service,
             workflow_benchmark_service,
+            production_orchestrator_service,
             generation_catalog_service,
             task_query_service,
             asset_query_service,
