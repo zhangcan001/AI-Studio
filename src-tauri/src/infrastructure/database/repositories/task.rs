@@ -4,7 +4,8 @@ use super::{
 };
 use crate::application::ports::{RepositoryError, TaskRepository};
 use crate::domain::{
-    NewTaskEvent, StoredTaskEvent, Task, TaskError, TaskEventType, TaskId, TaskProgress, TaskStatus,
+    NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskError, TaskEventType, TaskId,
+    TaskProgress, TaskStatus,
 };
 use async_trait::async_trait;
 use sqlx::SqlitePool;
@@ -39,17 +40,29 @@ impl TaskRepository for SqliteTaskRepository {
         sqlx::query(
             "INSERT INTO tasks (
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
                 created_at, queued_at, started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(task.id.as_str())
         .bind(&task.project_id)
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(values.app_version)
+        .bind(values.build_commit)
+        .bind(values.workflow_version)
+        .bind(values.workflow_sha256)
+        .bind(values.recipe_version)
+        .bind(values.recipe_sha256)
+        .bind(values.package_name)
+        .bind(values.package_source_path)
+        .bind(values.dynamic_binding_targets_json)
         .bind(values.status)
         .bind(values.prompt_id)
         .bind(values.queue_number)
@@ -101,6 +114,9 @@ impl TaskRepository for SqliteTaskRepository {
         let result = sqlx::query(
             "UPDATE tasks SET
                 project_id = ?, workflow_id = ?, workflow_version_id = ?, recipe_id = ?,
+                app_version = ?, build_commit = ?, workflow_version = ?, workflow_sha256 = ?,
+                recipe_version = ?, recipe_sha256 = ?, package_name = ?, package_source_path = ?,
+                dynamic_binding_targets_json = ?,
                 status = ?, prompt_id = ?, queue_number = ?,
                 progress_mode = ?, progress_current = ?, progress_total = ?, current_node_id = ?,
                 error_code = ?, error_message = ?, raw_error_json = ?,
@@ -111,6 +127,15 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(values.app_version)
+        .bind(values.build_commit)
+        .bind(values.workflow_version)
+        .bind(values.workflow_sha256)
+        .bind(values.recipe_version)
+        .bind(values.recipe_sha256)
+        .bind(values.package_name)
+        .bind(values.package_source_path)
+        .bind(values.dynamic_binding_targets_json)
         .bind(values.status)
         .bind(values.prompt_id)
         .bind(values.queue_number)
@@ -154,6 +179,9 @@ impl TaskRepository for SqliteTaskRepository {
         let result = sqlx::query(
             "UPDATE tasks SET
                 project_id = ?, workflow_id = ?, workflow_version_id = ?, recipe_id = ?,
+                app_version = ?, build_commit = ?, workflow_version = ?, workflow_sha256 = ?,
+                recipe_version = ?, recipe_sha256 = ?, package_name = ?, package_source_path = ?,
+                dynamic_binding_targets_json = ?,
                 status = ?, prompt_id = ?, queue_number = ?,
                 progress_mode = ?, progress_current = ?, progress_total = ?, current_node_id = ?,
                 error_code = ?, error_message = ?, raw_error_json = ?,
@@ -164,6 +192,15 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(values.app_version)
+        .bind(values.build_commit)
+        .bind(values.workflow_version)
+        .bind(values.workflow_sha256)
+        .bind(values.recipe_version)
+        .bind(values.recipe_sha256)
+        .bind(values.package_name)
+        .bind(values.package_source_path)
+        .bind(values.dynamic_binding_targets_json)
         .bind(values.status)
         .bind(values.prompt_id)
         .bind(values.queue_number)
@@ -199,6 +236,9 @@ impl TaskRepository for SqliteTaskRepository {
         let row = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
@@ -221,6 +261,9 @@ impl TaskRepository for SqliteTaskRepository {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
@@ -242,6 +285,9 @@ impl TaskRepository for SqliteTaskRepository {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
@@ -349,6 +395,15 @@ fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), Repos
 }
 
 struct TaskDbValues {
+    app_version: Option<String>,
+    build_commit: Option<String>,
+    workflow_version: Option<String>,
+    workflow_sha256: Option<String>,
+    recipe_version: Option<String>,
+    recipe_sha256: Option<String>,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    dynamic_binding_targets_json: Option<String>,
     status: &'static str,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -423,7 +478,28 @@ impl TaskDbValues {
             ),
         };
 
+        let provenance = task.runtime_provenance.as_ref();
+        let dynamic_binding_targets_json = provenance
+            .map(|value| {
+                serde_json::to_string(&value.dynamic_binding_targets).map_err(|error| {
+                    RepositoryError::serialization(
+                        "task dynamic binding targets",
+                        error.to_string(),
+                    )
+                })
+            })
+            .transpose()?;
+
         Ok(Self {
+            app_version: provenance.map(|value| value.app_version.clone()),
+            build_commit: provenance.map(|value| value.build_commit.clone()),
+            workflow_version: provenance.map(|value| value.workflow_version.clone()),
+            workflow_sha256: provenance.map(|value| value.workflow_sha256.clone()),
+            recipe_version: provenance.map(|value| value.recipe_version.clone()),
+            recipe_sha256: provenance.map(|value| value.recipe_sha256.clone()),
+            package_name: provenance.and_then(|value| value.package_name.clone()),
+            package_source_path: provenance.and_then(|value| value.package_source_path.clone()),
+            dynamic_binding_targets_json,
             status: task.status.as_str(),
             prompt_id: task.prompt_id.clone(),
             queue_number: task.queue_number,
@@ -449,6 +525,15 @@ struct TaskRow {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    app_version: Option<String>,
+    build_commit: Option<String>,
+    workflow_version: Option<String>,
+    workflow_sha256: Option<String>,
+    recipe_version: Option<String>,
+    recipe_sha256: Option<String>,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    dynamic_binding_targets_json: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -526,12 +611,72 @@ impl TaskRow {
             }
         };
 
+        let runtime_provenance = match (
+            self.app_version,
+            self.build_commit,
+            self.workflow_version,
+            self.workflow_sha256,
+            self.recipe_version,
+            self.recipe_sha256,
+            self.package_name,
+            self.package_source_path,
+            self.dynamic_binding_targets_json,
+        ) {
+            (None, None, None, None, None, None, None, None, None) => None,
+            (
+                Some(app_version),
+                Some(build_commit),
+                Some(workflow_version),
+                Some(workflow_sha256),
+                Some(recipe_version),
+                Some(recipe_sha256),
+                package_name,
+                package_source_path,
+                Some(dynamic_binding_targets_json),
+            ) => Some(RuntimeProvenance {
+                app_version,
+                build_commit,
+                workflow_id: self.workflow_id.clone(),
+                workflow_version_id: self.workflow_version_id.clone(),
+                workflow_version,
+                workflow_sha256,
+                recipe_id: self.recipe_id.clone(),
+                recipe_version,
+                recipe_sha256,
+                package_name,
+                package_source_path,
+                dynamic_binding_targets: serde_json::from_value(
+                    parse_json(
+                        "task dynamic binding targets",
+                        Some(&dynamic_binding_targets_json),
+                    )?
+                    .ok_or_else(|| {
+                        RepositoryError::integrity(
+                            "task dynamic binding targets must contain a JSON array",
+                        )
+                    })?,
+                )
+                .map_err(|error| {
+                    RepositoryError::serialization(
+                        "task dynamic binding targets",
+                        error.to_string(),
+                    )
+                })?,
+            }),
+            _ => {
+                return Err(RepositoryError::integrity(
+                    "task runtime provenance columns must be complete",
+                ))
+            }
+        };
+
         let task = Task {
             id: TaskId::parse(self.id).map_err(|error| map_domain_error("task id", error))?,
             project_id: self.project_id,
             workflow_id: self.workflow_id,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
+            runtime_provenance,
             status,
             prompt_id: self.prompt_id,
             queue_number: self.queue_number,
@@ -579,7 +724,8 @@ mod tests {
     use super::SqliteTaskRepository;
     use crate::application::ports::TaskRepository;
     use crate::domain::{
-        Task, TaskError, TaskEventType, TaskProgress, TaskStateMachine, TaskStatus,
+        RuntimeProvenance, Task, TaskError, TaskEventType, TaskProgress, TaskStateMachine,
+        TaskStatus,
     };
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use chrono::{Duration, TimeZone, Utc};
@@ -634,6 +780,37 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].sequence, 1);
         assert_eq!(events[0].payload, event.payload);
+    }
+
+    #[tokio::test]
+    async fn runtime_provenance_roundtrips_with_dynamic_binding_targets() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut task = new_task();
+        task.runtime_provenance = Some(RuntimeProvenance {
+            app_version: "0.3.0".to_owned(),
+            build_commit: "abc123".to_owned(),
+            workflow_id: task.workflow_id.clone(),
+            workflow_version_id: task.workflow_version_id.clone(),
+            workflow_version: "2.0.0".to_owned(),
+            workflow_sha256: "workflow-sha".to_owned(),
+            recipe_id: task.recipe_id.clone(),
+            recipe_version: "1.2.0".to_owned(),
+            recipe_sha256: "recipe-sha".to_owned(),
+            package_name: Some("runtime-package".to_owned()),
+            package_source_path: Some("C:/runtime-package".to_owned()),
+            dynamic_binding_targets: vec!["14.first_frame".to_owned(), "24.image".to_owned()],
+        });
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("task should commit");
+
+        let found = repository
+            .find_by_id(&task.id)
+            .await
+            .expect("task lookup should succeed")
+            .expect("task should exist");
+        assert_eq!(found.runtime_provenance, task.runtime_provenance);
     }
 
     #[tokio::test]

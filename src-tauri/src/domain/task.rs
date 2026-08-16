@@ -183,6 +183,27 @@ pub struct TaskError {
     pub raw: Option<Value>,
 }
 
+/// Immutable runtime provenance captured when a Generation Task is created.
+///
+/// A task must remain explainable after the library has moved on to another
+/// package version, so this is copied from the selected generation definition
+/// instead of being resolved again from the current catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeProvenance {
+    pub app_version: String,
+    pub build_commit: String,
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub workflow_version: String,
+    pub workflow_sha256: String,
+    pub recipe_id: String,
+    pub recipe_version: String,
+    pub recipe_sha256: String,
+    pub package_name: Option<String>,
+    pub package_source_path: Option<String>,
+    pub dynamic_binding_targets: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Task {
     pub id: TaskId,
@@ -190,6 +211,7 @@ pub struct Task {
     pub workflow_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    pub runtime_provenance: Option<RuntimeProvenance>,
     pub status: TaskStatus,
     pub prompt_id: Option<String>,
     pub queue_number: Option<i64>,
@@ -216,6 +238,7 @@ impl Task {
             workflow_id: workflow_id.into(),
             workflow_version_id: workflow_version_id.into(),
             recipe_id: recipe_id.into(),
+            runtime_provenance: None,
             status: TaskStatus::Created,
             prompt_id: None,
             queue_number: None,

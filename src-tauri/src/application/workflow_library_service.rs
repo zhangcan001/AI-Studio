@@ -131,6 +131,7 @@ impl WorkflowLibraryService {
         let package = WorkflowPackageRecord {
             workflow_id: manifest.id,
             package_name: files.package_name.clone(),
+            package_source_path: files.package_source_path.clone(),
             name: manifest.name,
             category: manifest.category,
             mode: manifest.mode,
@@ -260,6 +261,7 @@ mod tests {
     fn package() -> WorkflowPackageFiles {
         WorkflowPackageFiles {
             package_name: "simple".to_owned(),
+            package_source_path: None,
             manifest_yaml: "schema_version: 1\nid: wfl_simple\nname: Simple\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: image\nmode: text_to_image\n".to_owned(),
             recipe_yaml: "schema_version: 1\nid: simple\nname: Simple\nworkflow:\n  file: workflow_api.json\ninputs: {}\nbindings: []\noutputs: []\n".to_owned(),
             workflow_json: "{\"3\":{\"inputs\":{},\"class_type\":\"KSampler\"}}".to_owned(),

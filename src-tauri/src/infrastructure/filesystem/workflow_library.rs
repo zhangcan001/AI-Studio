@@ -33,6 +33,7 @@ impl FileSystemWorkflowLibrarySource {
             (Ok(manifest_yaml), Ok(recipe_yaml), Ok(workflow_json)) => {
                 WorkflowPackageLoad::Loaded(WorkflowPackageFiles {
                     package_name,
+                    package_source_path: Some(package_path.to_string_lossy().to_string()),
                     manifest_yaml,
                     recipe_yaml,
                     workflow_json,

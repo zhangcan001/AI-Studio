@@ -262,6 +262,10 @@ export function refreshWorkflowProductionWorkspace(): Promise<WorkflowProduction
   return invoke<WorkflowProductionWorkspaceResponse>("workflow_runtime_workspace_refresh");
 }
 
+export function repairBuiltinWorkflowPackage(packageName: string): Promise<WorkflowProductionWorkspaceResponse> {
+  return invoke<WorkflowProductionWorkspaceResponse>("workflow_repair_builtin_package", { packageName });
+}
+
 export function setWorkflowEnabled(workflowVersionId: string, enabled: boolean): Promise<void> {
   return invoke<void>("workflow_set_enabled", { workflowVersionId, enabled });
 }

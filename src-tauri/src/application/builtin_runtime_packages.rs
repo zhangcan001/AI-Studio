@@ -5,7 +5,13 @@
 //! package directory is absent, then the normal library synchronizer validates
 //! and registers them like every other runtime package.
 
-use std::{fs, path::Path};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 struct BuiltinPackage {
     directory: &'static str,
@@ -130,29 +136,137 @@ pub fn ensure_installed(root: &Path) -> Result<(), String> {
     for package in PACKAGES {
         let directory = root.join(package.directory);
         if directory.exists() {
+            if let Some(mismatch) = audit_package(package, &directory) {
+                return Err(format!(
+                    "BUILTIN_PACKAGE_HASH_MISMATCH: {} expected {} but found {}",
+                    mismatch.package_name, mismatch.expected_sha256, mismatch.actual_sha256
+                ));
+            }
             continue;
         }
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("create builtin runtime package: {error}"))?;
-        if let Err(error) = (|| {
-            fs::write(directory.join("manifest.yaml"), package.manifest)
-                .map_err(|error| format!("write manifest.yaml: {error}"))?;
-            fs::write(directory.join("recipe.yaml"), package.recipe)
-                .map_err(|error| format!("write recipe.yaml: {error}"))?;
-            fs::write(directory.join("workflow_api.json"), package.workflow)
-                .map_err(|error| format!("write workflow_api.json: {error}"))?;
-            Ok::<(), String>(())
-        })() {
-            let _ = fs::remove_dir_all(&directory);
-            return Err(error);
-        }
+        install_package(package, &directory)?;
     }
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinPackageMismatch {
+    pub package_name: String,
+    pub code: String,
+    pub expected_sha256: String,
+    pub actual_sha256: String,
+    pub source_path: String,
+}
+
+pub fn audit_installed(root: &Path) -> Vec<BuiltinPackageMismatch> {
+    PACKAGES
+        .iter()
+        .filter_map(|package| {
+            let directory = root.join(package.directory);
+            directory
+                .exists()
+                .then(|| audit_package(package, &directory))
+                .flatten()
+        })
+        .collect()
+}
+
+/// Explicit repair action. The mismatched directory is moved beside the
+/// library root before the embedded immutable package is installed, so no
+/// user data is silently overwritten and the old bytes remain recoverable.
+pub fn repair_package(root: &Path, package_name: &str) -> Result<(), String> {
+    let package = PACKAGES
+        .iter()
+        .find(|package| package.directory == package_name)
+        .ok_or_else(|| format!("BUILTIN_PACKAGE_NOT_FOUND: {package_name}"))?;
+    let directory = root.join(package.directory);
+    if directory.exists() {
+        if audit_package(package, &directory).is_none() {
+            return Ok(());
+        }
+        let quarantine_root = quarantine_root(root);
+        fs::create_dir_all(&quarantine_root)
+            .map_err(|error| format!("create builtin package quarantine: {error}"))?;
+        let quarantine = quarantine_root.join(format!("{}-{}", package.directory, unique_suffix()));
+        fs::rename(&directory, &quarantine)
+            .map_err(|error| format!("quarantine mismatched builtin package: {error}"))?;
+    }
+    install_package(package, &directory)
+}
+
+fn install_package(package: &BuiltinPackage, directory: &Path) -> Result<(), String> {
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("create builtin runtime package: {error}"))?;
+    if let Err(error) = (|| {
+        fs::write(directory.join("manifest.yaml"), package.manifest)
+            .map_err(|error| format!("write manifest.yaml: {error}"))?;
+        fs::write(directory.join("recipe.yaml"), package.recipe)
+            .map_err(|error| format!("write recipe.yaml: {error}"))?;
+        fs::write(directory.join("workflow_api.json"), package.workflow)
+            .map_err(|error| format!("write workflow_api.json: {error}"))?;
+        Ok::<(), String>(())
+    })() {
+        let _ = fs::remove_dir_all(directory);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn audit_package(package: &BuiltinPackage, directory: &Path) -> Option<BuiltinPackageMismatch> {
+    let expected = package_hash(package.manifest, package.recipe, package.workflow);
+    let actual = match (
+        fs::read(directory.join("manifest.yaml")),
+        fs::read(directory.join("recipe.yaml")),
+        fs::read(directory.join("workflow_api.json")),
+    ) {
+        (Ok(manifest), Ok(recipe), Ok(workflow)) => {
+            package_hash_bytes(&manifest, &recipe, &workflow)
+        }
+        _ => "missing".to_owned(),
+    };
+    (actual != expected).then(|| BuiltinPackageMismatch {
+        package_name: package.directory.to_owned(),
+        code: "BUILTIN_PACKAGE_HASH_MISMATCH".to_owned(),
+        expected_sha256: expected,
+        actual_sha256: actual,
+        source_path: directory.to_string_lossy().to_string(),
+    })
+}
+
+fn package_hash(manifest: &str, recipe: &str, workflow: &str) -> String {
+    package_hash_bytes(manifest.as_bytes(), recipe.as_bytes(), workflow.as_bytes())
+}
+
+fn package_hash_bytes(manifest: &[u8], recipe: &[u8], workflow: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    for bytes in [manifest, recipe, workflow] {
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn quarantine_root(root: &Path) -> PathBuf {
+    let name = root
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "workflow-library".to_owned());
+    root.with_file_name(format!("{name}.builtin-quarantine"))
+}
+
+fn unique_suffix() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos().to_string())
+        .unwrap_or_else(|_| "unknown".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ensure_installed, is_builtin_package_name, PACKAGES};
+    use super::{
+        audit_installed, ensure_installed, is_builtin_package_name, repair_package, PACKAGES,
+    };
     use crate::application::workflow_manifest::WorkflowManifest;
     use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
     use crate::domain::WorkflowDocument;
@@ -176,6 +290,42 @@ mod tests {
         std::fs::write(&sentinel, "keep").expect("sentinel");
         ensure_installed(directory.path()).expect("second install should be a no-op");
         assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "keep");
+    }
+
+    #[test]
+    fn same_version_hash_mismatch_is_reported_without_overwrite_and_has_explicit_repair() {
+        let directory = tempdir().expect("temp directory");
+        ensure_installed(directory.path()).expect("builtin packages should install");
+        let package = directory.path().join("minimax_h3_fl2va_1_0_0");
+        std::fs::write(package.join("recipe.yaml"), "user change").expect("mutate package");
+
+        let mismatches = audit_installed(directory.path());
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].code, "BUILTIN_PACKAGE_HASH_MISMATCH");
+        let error =
+            ensure_installed(directory.path()).expect_err("mismatch must not be overwritten");
+        assert!(error.contains("BUILTIN_PACKAGE_HASH_MISMATCH"));
+        assert_eq!(
+            std::fs::read_to_string(package.join("recipe.yaml")).unwrap(),
+            "user change"
+        );
+
+        repair_package(directory.path(), "minimax_h3_fl2va_1_0_0")
+            .expect("explicit repair should work");
+        assert!(audit_installed(directory.path()).is_empty());
+        assert!(
+            directory
+                .path()
+                .with_file_name(".builtin-quarantine")
+                .exists()
+                || directory
+                    .path()
+                    .with_file_name(format!(
+                        "{}.builtin-quarantine",
+                        directory.path().file_name().unwrap().to_string_lossy()
+                    ))
+                    .exists()
+        );
     }
 
     #[test]

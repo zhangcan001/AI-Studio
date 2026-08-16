@@ -7,6 +7,7 @@ use serde_json::Value;
 pub struct WorkflowPackageRecord {
     pub workflow_id: String,
     pub package_name: String,
+    pub package_source_path: Option<String>,
     pub name: String,
     pub category: String,
     pub mode: String,

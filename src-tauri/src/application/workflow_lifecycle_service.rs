@@ -1,5 +1,5 @@
 use crate::application::{
-    builtin_runtime_packages::is_builtin_package_name,
+    builtin_runtime_packages::{audit_installed, is_builtin_package_name},
     ports::{
         Clock, RuntimeWorkflowVersionRecord, WorkflowLibrarySource, WorkflowPackageBytes,
         WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeRepository,
@@ -9,7 +9,7 @@ use crate::application::{
     workflow_manifest::WorkflowManifest,
     workflow_onboarding_service::{
         read_back_and_validate_package, CapabilityCheckView, CapabilityState,
-        WorkflowOnboardingDraftView, WorkflowOnboardingService,
+        RuntimeWorkflowCapabilityInput, WorkflowOnboardingDraftView, WorkflowOnboardingService,
     },
 };
 use crate::compiler::RecipeParser;
@@ -22,6 +22,7 @@ use std::{
     error::Error,
     fmt,
     io::{Cursor, Read, Write},
+    path::Path,
     sync::Arc,
     time::Instant,
 };
@@ -538,21 +539,35 @@ impl WorkflowLifecycleService {
             let Ok(manifest) = WorkflowManifest::parse(&files.manifest_yaml) else {
                 continue;
             };
+            let Ok(recipe) = RecipeParser::parse(&files.recipe_yaml) else {
+                continue;
+            };
             packages.insert(
-                (manifest.id, manifest.workflow_version),
-                files.workflow_json,
+                (
+                    manifest.id,
+                    manifest.workflow_version,
+                    manifest.recipe_version,
+                ),
+                (files.workflow_json, recipe),
             );
         }
         let workflows = runtime_versions
             .iter()
             .filter_map(|version| {
+                let recipe_version = version
+                    .recipes
+                    .iter()
+                    .max_by(|left, right| compare_versions(&left.version, &right.version))?;
                 packages
                     .get(&(
                         version.workflow_id.clone(),
                         version.workflow_version.clone(),
+                        recipe_version.version.clone(),
                     ))
-                    .map(|workflow_json| {
-                        (version.workflow_version_id.clone(), workflow_json.clone())
+                    .map(|(workflow_json, recipe)| RuntimeWorkflowCapabilityInput {
+                        workflow_version_id: version.workflow_version_id.clone(),
+                        workflow_json: workflow_json.clone(),
+                        recipe: recipe.clone(),
                     })
             })
             .collect::<Vec<_>>();
@@ -1360,6 +1375,25 @@ impl WorkflowLifecycleService {
             .find(|recipe| recipe.version == manifest.recipe_version);
         let recipe_hash = selected_recipe.map(|_| sha256(package.recipe_yaml.as_bytes()));
         let mut diagnostics = Vec::new();
+        if is_builtin_package_name(&package.package_name) {
+            if let Some(source_path) = package.package_source_path.as_deref() {
+                let root = Path::new(source_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new(source_path));
+                if let Some(mismatch) = audit_installed(root)
+                    .into_iter()
+                    .find(|mismatch| mismatch.package_name == package.package_name)
+                {
+                    diagnostics.push(WorkflowDiagnosticView {
+                        code: mismatch.code,
+                        message: format!(
+                            "内置 Runtime Package 与程序内 immutable 内容不一致（expected {}, actual {}）；请执行修复动作。",
+                            mismatch.expected_sha256, mismatch.actual_sha256
+                        ),
+                    });
+                }
+            }
+        }
         if workflow_hash != version.workflow_sha256 {
             diagnostics.push(WorkflowDiagnosticView {
                 code: "WORKFLOW_RUNTIME_HASH_MISMATCH".to_owned(),

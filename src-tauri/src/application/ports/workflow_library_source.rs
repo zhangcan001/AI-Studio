@@ -4,6 +4,7 @@ use std::{error::Error, fmt};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowPackageFiles {
     pub package_name: String,
+    pub package_source_path: Option<String>,
     pub manifest_yaml: String,
     pub recipe_yaml: String,
     pub workflow_json: String,

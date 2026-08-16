@@ -29,6 +29,12 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                 w.id AS workflow_id,
                 wv.id AS workflow_version_id,
                 r.id AS recipe_id,
+                wv.version AS workflow_version,
+                wv.workflow_sha256,
+                wv.package_name,
+                wv.package_source_path,
+                r.version AS recipe_version,
+                r.recipe_sha256,
                 wv.api_workflow_json,
                 r.recipe_yaml
              FROM workflows w
@@ -93,6 +99,12 @@ struct DefinitionRow {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    workflow_version: String,
+    workflow_sha256: String,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    recipe_version: String,
+    recipe_sha256: String,
     api_workflow_json: String,
     recipe_yaml: String,
 }
@@ -126,6 +138,12 @@ impl DefinitionRow {
             workflow_id: self.workflow_id,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
+            workflow_version: self.workflow_version,
+            workflow_sha256: self.workflow_sha256,
+            recipe_version: self.recipe_version,
+            recipe_sha256: self.recipe_sha256,
+            package_name: self.package_name,
+            package_source_path: self.package_source_path,
             workflow_json,
             recipe_yaml: self.recipe_yaml,
         })

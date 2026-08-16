@@ -14,6 +14,7 @@ import {
   inspectWorkflowDeletion,
   listWorkflowProductionWorkspace,
   refreshWorkflowProductionWorkspace,
+  repairBuiltinWorkflowPackage,
   pickApiWorkflow,
   autoConfirmOnboarding,
   autoOnboardWorkflow,
@@ -380,6 +381,17 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       const capability = await recheckWorkflowCapability(item.workflowVersionId);
       await loadWorkspace("fast");
       setNotice(`${item.name ?? item.packageName}: ${formatCapability(capability.state)}`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
+  async function repairBuiltinPackage(item: WorkflowProductionWorkspaceView) {
+    if (!item.builtin || !item.diagnostics.some((diagnostic) => diagnostic.code === "BUILTIN_PACKAGE_HASH_MISMATCH")) return;
+    try {
+      await repairBuiltinWorkflowPackage(item.packageName);
+      await loadWorkspace("refresh");
+      setNotice(`${item.packageName}: 已隔离不一致文件并恢复 immutable 内置包。`);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     }
@@ -961,6 +973,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               {!!item.capabilityIssues.length && <section className="workflow-dependency-diagnostics"><strong>依赖诊断 · 来源：ComfyUI /object_info</strong><IssueList issues={item.capabilityIssues} /></section>}
               {!item.capabilityIssues.length && item.packageStatus === "VALID" && <p className="disabled-note">未发现节点依赖问题。模型或文件依赖只有在运行包明确声明并有可验证来源时才会报告，AI Studio 不猜测未声明依赖。</p>}
               {!!item.diagnostics.length && <ul className="workflow-issue-list">{item.diagnostics.map((diagnostic) => <li key={diagnostic.code}>{toUserMessage({ code: diagnostic.code, message: diagnostic.message })}</li>)}</ul>}
+              {item.diagnostics.some((diagnostic) => diagnostic.code === "BUILTIN_PACKAGE_HASH_MISMATCH") && <button type="button" className="quiet-button danger-button" onClick={() => void repairBuiltinPackage(item)}>修复内置包哈希</button>}
               {!!item.recipes.length && <div className="workflow-recipe-summary">{item.recipes.map((recipe) => <span key={recipe.recipeId}>配方 {recipe.version} · {recipe.inputCount} 个输入 · {recipe.outputCount} 个输出</span>)}</div>}
             </details>
           </article>

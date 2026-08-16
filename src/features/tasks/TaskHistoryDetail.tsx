@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createGeneration, getReusableDraft } from "../../services/tauriClient";
 import { useTaskStore } from "../../stores/taskStore";
 import type { DraftValue } from "../../types/generation";
-import type { ReusableGenerationDraft, TaskDetail, TaskNodeError } from "../../types/history";
+import type { ReusableGenerationDraft, RuntimeProvenance, TaskDetail, TaskNodeError } from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
 import { taskRetryDecision } from "./retryPolicy";
 import { productionInteractionPolicy } from "../studio/productionQueuePolicy";
@@ -100,6 +100,7 @@ export function TaskHistoryDetail({
       {detail.errorCode && (
         <UiErrorNotice error={{ code: detail.errorCode, message: detail.errorMessage ?? "任务未成功完成。" }} className="task-error" />
       )}
+      {detail.runtimeProvenance && <RuntimeDiagnostics provenance={detail.runtimeProvenance} />}
       {detail.errorCode === "WORKFLOW_VALIDATION_FAILED" && (
         <ComfyNodeErrorSection nodeErrors={detail.nodeErrors ?? []} rawError={detail.rawError} />
       )}
@@ -178,6 +179,36 @@ export function TaskHistoryDetail({
         )}
       </section>
     </div>
+  );
+}
+
+function RuntimeDiagnostics({ provenance }: { provenance: RuntimeProvenance }) {
+  return (
+    <section className="detail-section runtime-diagnostics" aria-label="Runtime Diagnostics">
+      <div className="section-heading">
+        <div>
+          <span className="section-label">Runtime Diagnostics</span>
+          <h3>实际运行来源</h3>
+        </div>
+      </div>
+      <div className="detail-facts">
+        <Fact label="App version" value={provenance.appVersion} />
+        <Fact label="Build commit" value={provenance.buildCommit} />
+        <Fact label="Workflow package" value={provenance.packageName ?? "—"} />
+        <Fact label="Workflow ID" value={provenance.workflowId} />
+        <Fact label="Workflow version ID" value={provenance.workflowVersionId} />
+        <Fact label="Workflow version" value={provenance.workflowVersion} />
+        <Fact label="Workflow SHA-256" value={provenance.workflowSha256} />
+        <Fact label="Recipe ID" value={provenance.recipeId} />
+        <Fact label="Recipe version" value={provenance.recipeVersion} />
+        <Fact label="Recipe SHA-256" value={provenance.recipeSha256} />
+        <Fact label="Package source" value={provenance.packageSourcePath ?? "—"} />
+        <Fact
+          label="Dynamic binding targets"
+          value={provenance.dynamicBindingTargets.length ? provenance.dynamicBindingTargets.join(" · ") : "—"}
+        />
+      </div>
+    </section>
   );
 }
 

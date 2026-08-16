@@ -75,8 +75,9 @@ async fn register_package(
             let id = format!("wfv_{}", Uuid::new_v4());
             sqlx::query(
                 "INSERT INTO workflow_versions (
-                    id, workflow_id, version, api_workflow_json, workflow_sha256, package_name, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    id, workflow_id, version, api_workflow_json, workflow_sha256,
+                    package_name, package_source_path, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(&package.workflow_id)
@@ -84,6 +85,7 @@ async fn register_package(
             .bind(package.workflow_json.to_string())
             .bind(&package.workflow_sha256)
             .bind(&package.package_name)
+            .bind(&package.package_source_path)
             .bind(format_datetime(package.created_at))
             .execute(&mut **transaction)
             .await
@@ -92,21 +94,14 @@ async fn register_package(
         }
     };
 
-    sqlx::query("UPDATE workflow_versions SET package_name = ? WHERE id = ?")
-        .bind(&package.package_name)
-        .bind(&workflow_version_id)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sqlx_error)?;
-
     sqlx::query(
-        "UPDATE workflows
-         SET current_version_id = ?, updated_at = ?
+        "UPDATE workflow_versions
+         SET package_name = ?, package_source_path = ?
          WHERE id = ?",
     )
+    .bind(&package.package_name)
+    .bind(&package.package_source_path)
     .bind(&workflow_version_id)
-    .bind(format_datetime(package.created_at))
-    .bind(&package.workflow_id)
     .execute(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
@@ -122,18 +117,20 @@ async fn register_package(
     .await
     .map_err(map_sqlx_error)?;
 
-    match existing_recipe {
+    let registration = match existing_recipe {
         Some(existing) if existing.recipe_sha256 == package.recipe_sha256 => {
-            Ok(if inserted_workflow_version {
+            if inserted_workflow_version {
                 WorkflowPackageRegistration::Inserted
             } else {
                 WorkflowPackageRegistration::Reused
-            })
+            }
         }
-        Some(_) => Err(RepositoryError::recipe_version_conflict(
-            &workflow_version_id,
-            &package.recipe_version,
-        )),
+        Some(_) => {
+            return Err(RepositoryError::recipe_version_conflict(
+                &workflow_version_id,
+                &package.recipe_version,
+            ))
+        }
         None => {
             sqlx::query(
                 "INSERT INTO recipes (
@@ -151,9 +148,71 @@ async fn register_package(
             .execute(&mut **transaction)
             .await
             .map_err(map_sqlx_error)?;
-            Ok(WorkflowPackageRegistration::Inserted)
+            WorkflowPackageRegistration::Inserted
         }
+    };
+
+    select_latest_current_version(transaction, &package.workflow_id, package.created_at).await?;
+    Ok(registration)
+}
+
+async fn select_latest_current_version(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workflow_id: &str,
+    updated_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), RepositoryError> {
+    #[derive(sqlx::FromRow)]
+    struct VersionCandidate {
+        id: String,
+        version: String,
     }
+
+    let versions = sqlx::query_as::<_, VersionCandidate>(
+        "SELECT id, version FROM workflow_versions WHERE workflow_id = ?",
+    )
+    .bind(workflow_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    let Some(latest) = versions.into_iter().max_by(|left, right| {
+        compare_semver(&left.version, &right.version).then_with(|| left.id.cmp(&right.id))
+    }) else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        "UPDATE workflows
+         SET current_version_id = ?, updated_at = ?
+         WHERE id = ?",
+    )
+    .bind(latest.id)
+    .bind(format_datetime(updated_at))
+    .bind(workflow_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
+fn compare_semver(left: &str, right: &str) -> std::cmp::Ordering {
+    let left_parts = left
+        .split('.')
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect::<Vec<_>>();
+    let right_parts = right
+        .split('.')
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect::<Vec<_>>();
+    (0..3)
+        .map(|index| {
+            left_parts
+                .get(index)
+                .copied()
+                .unwrap_or(0)
+                .cmp(&right_parts.get(index).copied().unwrap_or(0))
+        })
+        .find(|ordering| *ordering != std::cmp::Ordering::Equal)
+        .unwrap_or_else(|| left.cmp(right))
 }
 
 #[derive(sqlx::FromRow)]
@@ -195,6 +254,7 @@ mod tests {
         WorkflowPackageRecord {
             workflow_id: "wfl_test".to_owned(),
             package_name: "test-package".to_owned(),
+            package_source_path: None,
             name: "Test Workflow".to_owned(),
             category: "image".to_owned(),
             mode: "text_to_image".to_owned(),
@@ -249,6 +309,33 @@ mod tests {
             .await
             .expect_err("version conflict should be reported");
         assert!(error.to_string().contains("WORKFLOW_VERSION_CONFLICT"));
+    }
+
+    #[tokio::test]
+    async fn selects_highest_semver_as_current_even_when_packages_arrive_out_of_order() {
+        let (_directory, pool, repository) = setup().await;
+        let mut v110 = package("workflow-1.10.0", "recipe-1.10.0");
+        v110.workflow_version = "1.10.0".to_owned();
+        let mut v190 = package("workflow-1.9.0", "recipe-1.9.0");
+        v190.workflow_version = "1.9.0".to_owned();
+
+        repository.register_package(&v110).await.unwrap();
+        repository.register_package(&v190).await.unwrap();
+
+        let current = sqlx::query_scalar::<_, String>(
+            "SELECT current_version_id FROM workflows WHERE id = ?",
+        )
+        .bind("wfl_test")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let current_version =
+            sqlx::query_scalar::<_, String>("SELECT version FROM workflow_versions WHERE id = ?")
+                .bind(current)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(current_version, "1.10.0");
     }
 
     #[tokio::test]

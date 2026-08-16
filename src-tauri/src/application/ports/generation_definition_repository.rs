@@ -7,6 +7,12 @@ pub struct GenerationDefinition {
     pub workflow_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    pub workflow_version: String,
+    pub workflow_sha256: String,
+    pub recipe_version: String,
+    pub recipe_sha256: String,
+    pub package_name: Option<String>,
+    pub package_source_path: Option<String>,
     pub workflow_json: Value,
     pub recipe_yaml: String,
 }

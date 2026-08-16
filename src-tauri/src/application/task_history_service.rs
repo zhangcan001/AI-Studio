@@ -6,8 +6,8 @@ use crate::application::ports::{
 };
 use crate::compiler::RecipeParser;
 use crate::domain::{
-    AssetType, InputDefinition, Recipe, TaskId, GENERATED_VIDEO_CATEGORY, SOURCE_AUDIO_CATEGORY,
-    SOURCE_VIDEO_CATEGORY,
+    AssetType, InputDefinition, Recipe, RuntimeProvenance, TaskId, GENERATED_VIDEO_CATEGORY,
+    SOURCE_AUDIO_CATEGORY, SOURCE_VIDEO_CATEGORY,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -109,6 +109,11 @@ impl TaskHistoryService {
             workflow_id: record.task.workflow_id.clone(),
             workflow_version_id: record.task.workflow_version_id.clone(),
             recipe_id: record.task.recipe_id.clone(),
+            runtime_provenance: record
+                .task
+                .runtime_provenance
+                .as_ref()
+                .map(RuntimeProvenanceView::from),
             workflow_name: record.workflow_name,
             status: record.task.status.as_str().to_owned(),
             created_at: record.task.created_at,
@@ -393,6 +398,7 @@ pub struct TaskDetailView {
     pub workflow_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    pub runtime_provenance: Option<RuntimeProvenanceView>,
     pub workflow_name: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
@@ -409,6 +415,42 @@ pub struct TaskDetailView {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeProvenanceView {
+    pub app_version: String,
+    pub build_commit: String,
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub workflow_version: String,
+    pub workflow_sha256: String,
+    pub recipe_id: String,
+    pub recipe_version: String,
+    pub recipe_sha256: String,
+    pub package_name: Option<String>,
+    pub package_source_path: Option<String>,
+    pub dynamic_binding_targets: Vec<String>,
+}
+
+impl From<&RuntimeProvenance> for RuntimeProvenanceView {
+    fn from(value: &RuntimeProvenance) -> Self {
+        Self {
+            app_version: value.app_version.clone(),
+            build_commit: value.build_commit.clone(),
+            workflow_id: value.workflow_id.clone(),
+            workflow_version_id: value.workflow_version_id.clone(),
+            workflow_version: value.workflow_version.clone(),
+            workflow_sha256: value.workflow_sha256.clone(),
+            recipe_id: value.recipe_id.clone(),
+            recipe_version: value.recipe_version.clone(),
+            recipe_sha256: value.recipe_sha256.clone(),
+            package_name: value.package_name.clone(),
+            package_source_path: value.package_source_path.clone(),
+            dynamic_binding_targets: value.dynamic_binding_targets.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskNodeErrorView {
     pub node_id: String,
     pub node_type: Option<String>,
@@ -421,7 +463,7 @@ pub struct TaskNodeErrorView {
 }
 
 fn structured_node_errors(raw: Option<&Value>) -> Vec<TaskNodeErrorView> {
-    let Some(nodes) = raw.and_then(Value::as_object) else {
+    let Some(nodes) = raw.and_then(|value| value.get("nodes").unwrap_or(value).as_object()) else {
         return Vec::new();
     };
     let mut result = Vec::new();
@@ -1041,6 +1083,7 @@ outputs: []
             workflow_id: "workflow".to_owned(),
             workflow_version_id: "workflow-version".to_owned(),
             recipe_id: "recipe".to_owned(),
+            runtime_provenance: None,
             workflow_name: "Demo".to_owned(),
             status: "FAILED".to_owned(),
             created_at: chrono::Utc::now(),

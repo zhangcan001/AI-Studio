@@ -399,6 +399,8 @@ impl ProjectBackupService {
             .ok_or_else(|| AppError::project_not_found(project_id.to_owned()))?;
         let db_tasks = sqlx::query_as::<_, DbTask>(
             "SELECT id, project_id, workflow_id, workflow_version_id, recipe_id, status,
+             app_version, build_commit, workflow_version, workflow_sha256, recipe_version,
+             recipe_sha256, package_name, package_source_path, dynamic_binding_targets_json,
              prompt_id, queue_number, progress_mode, progress_current, progress_total,
              current_node_id, error_code, error_message, raw_error_json, created_at,
              queued_at, started_at, finished_at FROM tasks WHERE project_id = ? ORDER BY created_at, id",
@@ -884,6 +886,15 @@ struct BackupTask {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    app_version: Option<String>,
+    build_commit: Option<String>,
+    workflow_version: Option<String>,
+    workflow_sha256: Option<String>,
+    recipe_version: Option<String>,
+    recipe_sha256: Option<String>,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    dynamic_binding_targets: Option<Value>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -1121,6 +1132,15 @@ struct DbTask {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    app_version: Option<String>,
+    build_commit: Option<String>,
+    workflow_version: Option<String>,
+    workflow_sha256: Option<String>,
+    recipe_version: Option<String>,
+    recipe_sha256: Option<String>,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    dynamic_binding_targets_json: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -1146,6 +1166,18 @@ impl TryFrom<DbTask> for BackupTask {
             workflow_id: task.workflow_id,
             workflow_version_id: task.workflow_version_id,
             recipe_id: task.recipe_id,
+            app_version: task.app_version,
+            build_commit: task.build_commit,
+            workflow_version: task.workflow_version,
+            workflow_sha256: task.workflow_sha256,
+            recipe_version: task.recipe_version,
+            recipe_sha256: task.recipe_sha256,
+            package_name: task.package_name,
+            package_source_path: task.package_source_path,
+            dynamic_binding_targets: parse_optional_value(
+                task.dynamic_binding_targets_json.as_deref(),
+                "task dynamic binding targets",
+            )?,
             status: task.status,
             prompt_id: task.prompt_id,
             queue_number: task.queue_number,
@@ -3046,16 +3078,27 @@ async fn restore_rows_in_transaction(
             Some(Utc::now().to_rfc3339())
         };
         sqlx::query(
-            "INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id, status,
+            "INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id,
+             app_version, build_commit, workflow_version, workflow_sha256, recipe_version,
+             recipe_sha256, package_name, package_source_path, dynamic_binding_targets_json, status,
              prompt_id, queue_number, progress_mode, progress_current, progress_total, current_node_id,
              error_code, error_message, raw_error_json, created_at, queued_at, started_at, finished_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(new_task_id)
         .bind(&project.id)
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(&task.app_version)
+        .bind(&task.build_commit)
+        .bind(&task.workflow_version)
+        .bind(&task.workflow_sha256)
+        .bind(&task.recipe_version)
+        .bind(&task.recipe_sha256)
+        .bind(&task.package_name)
+        .bind(&task.package_source_path)
+        .bind(task.dynamic_binding_targets.as_ref().map(|value| value.to_string()))
         .bind(status)
         .bind(&task.prompt_id)
         .bind(task.queue_number)
@@ -4808,6 +4851,15 @@ mod tests {
                 workflow_id: "workflow-1".to_owned(),
                 workflow_version_id: "workflow-version-1".to_owned(),
                 recipe_id: "recipe-1".to_owned(),
+                app_version: None,
+                build_commit: None,
+                workflow_version: None,
+                workflow_sha256: None,
+                recipe_version: None,
+                recipe_sha256: None,
+                package_name: None,
+                package_source_path: None,
+                dynamic_binding_targets: None,
                 status: "SUCCEEDED".to_owned(),
                 prompt_id: None,
                 queue_number: None,

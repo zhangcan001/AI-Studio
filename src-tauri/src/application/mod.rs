@@ -3,6 +3,7 @@ pub mod asset_import_service;
 pub mod asset_library_service;
 pub mod asset_query_service;
 pub mod asset_video_prompt_service;
+pub mod build_info;
 pub mod builtin_runtime_packages;
 #[cfg(test)]
 mod cancellation_e2e;

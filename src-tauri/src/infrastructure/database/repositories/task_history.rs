@@ -7,7 +7,7 @@ use crate::application::ports::{
     RepositoryError, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,
     TaskHistoryTimeFilter, TaskHistoryWorkflowOption,
 };
-use crate::domain::{Task, TaskError, TaskId, TaskProgress, TaskStatus};
+use crate::domain::{RuntimeProvenance, Task, TaskError, TaskId, TaskProgress, TaskStatus};
 use async_trait::async_trait;
 use chrono::{DateTime, Local, LocalResult, NaiveDate, TimeZone, Utc};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
@@ -25,6 +25,9 @@ impl SqliteTaskHistoryRepository {
 
 const TASK_HISTORY_SELECT: &str = "SELECT
     t.id, t.project_id, t.workflow_id, t.workflow_version_id, t.recipe_id,
+    t.app_version, t.build_commit, t.workflow_version, t.workflow_sha256,
+    t.recipe_version, t.recipe_sha256, t.package_name, t.package_source_path,
+    t.dynamic_binding_targets_json,
     t.status, t.prompt_id, t.queue_number,
     t.progress_mode, t.progress_current, t.progress_total, t.current_node_id,
     t.error_code, t.error_message, t.raw_error_json,
@@ -230,6 +233,15 @@ struct TaskHistoryRow {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    app_version: Option<String>,
+    build_commit: Option<String>,
+    workflow_version: Option<String>,
+    workflow_sha256: Option<String>,
+    recipe_version: Option<String>,
+    recipe_sha256: Option<String>,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    dynamic_binding_targets_json: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -317,6 +329,65 @@ impl TaskHistoryRow {
             }
         };
 
+        let runtime_provenance = match (
+            self.app_version,
+            self.build_commit,
+            self.workflow_version,
+            self.workflow_sha256,
+            self.recipe_version,
+            self.recipe_sha256,
+            self.package_name,
+            self.package_source_path,
+            self.dynamic_binding_targets_json,
+        ) {
+            (None, None, None, None, None, None, None, None, None) => None,
+            (
+                Some(app_version),
+                Some(build_commit),
+                Some(workflow_version),
+                Some(workflow_sha256),
+                Some(recipe_version),
+                Some(recipe_sha256),
+                package_name,
+                package_source_path,
+                Some(dynamic_binding_targets_json),
+            ) => Some(RuntimeProvenance {
+                app_version,
+                build_commit,
+                workflow_id: self.workflow_id.clone(),
+                workflow_version_id: self.workflow_version_id.clone(),
+                workflow_version,
+                workflow_sha256,
+                recipe_id: self.recipe_id.clone(),
+                recipe_version,
+                recipe_sha256,
+                package_name,
+                package_source_path,
+                dynamic_binding_targets: serde_json::from_value(
+                    parse_json(
+                        "task history dynamic binding targets",
+                        Some(&dynamic_binding_targets_json),
+                    )?
+                    .ok_or_else(|| {
+                        RepositoryError::integrity(
+                            "task history dynamic binding targets must contain a JSON array",
+                        )
+                    })?,
+                )
+                .map_err(|error| {
+                    RepositoryError::serialization(
+                        "task history dynamic binding targets",
+                        error.to_string(),
+                    )
+                })?,
+            }),
+            _ => {
+                return Err(RepositoryError::integrity(
+                    "task history runtime provenance columns must be complete",
+                ))
+            }
+        };
+
         let task = Task {
             id: TaskId::parse(self.id)
                 .map_err(|error| map_domain_error("task history id", error))?,
@@ -324,6 +395,7 @@ impl TaskHistoryRow {
             workflow_id: self.workflow_id,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
+            runtime_provenance,
             status,
             prompt_id: self.prompt_id,
             queue_number: self.queue_number,

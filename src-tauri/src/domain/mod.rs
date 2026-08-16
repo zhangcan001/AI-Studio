@@ -36,7 +36,7 @@ pub use shot::{
     ShotViewStatus,
 };
 pub use task::{
-    NewTaskEvent, StoredTaskEvent, Task, TaskDomainError, TaskError, TaskEventType, TaskId,
-    TaskProgress, TaskStateMachine, TaskStatus,
+    NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskDomainError, TaskError,
+    TaskEventType, TaskId, TaskProgress, TaskStateMachine, TaskStatus,
 };
 pub use workflow::{WorkflowDocument, WorkflowError};

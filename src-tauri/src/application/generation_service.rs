@@ -1,4 +1,5 @@
 use crate::application::asset_import_service::{AssetImportError, AssetImportService};
+use crate::application::build_info;
 use crate::application::generation_input_preparer::{
     image_snapshot_value, images_snapshot_value, media_list_snapshot_value, media_snapshot_value,
     GenerationInputPrepareError, GenerationInputPreparer, GenerationInputValue,
@@ -13,12 +14,12 @@ use crate::application::ports::{
 };
 use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::application::workflow_onboarding_service::{
-    CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
+    dynamic_binding_target_labels, CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
 };
 use crate::compiler::{CompileError, RecipeParser, WorkflowCompiler};
 use crate::domain::{
-    AssetId, CompileRequest, GenerationSnapshot, ResolvedInputValue, SeedValue, Task,
-    TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
+    AssetId, CompileRequest, GenerationSnapshot, ResolvedInputValue, RuntimeProvenance, SeedValue,
+    Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
 };
 use serde_json::{Map, Number, Value};
 use std::{
@@ -305,13 +306,30 @@ impl GenerationService {
                 recipe_id: request.recipe_id.clone(),
             })?;
         let created_at = self.clock.now();
-        let task = Task::new(
+        let mut task = Task::new(
             request.project_id.clone(),
             definition.workflow_id.clone(),
             definition.workflow_version_id.clone(),
             definition.recipe_id.clone(),
             created_at,
         );
+        let dynamic_binding_targets = RecipeParser::parse(&definition.recipe_yaml)
+            .map(|recipe| dynamic_binding_target_labels(&recipe))
+            .unwrap_or_default();
+        task.runtime_provenance = Some(RuntimeProvenance {
+            app_version: build_info::APP_VERSION.to_owned(),
+            build_commit: build_info::BUILD_COMMIT.to_owned(),
+            workflow_id: definition.workflow_id.clone(),
+            workflow_version_id: definition.workflow_version_id.clone(),
+            workflow_version: definition.workflow_version.clone(),
+            workflow_sha256: definition.workflow_sha256.clone(),
+            recipe_id: definition.recipe_id.clone(),
+            recipe_version: definition.recipe_version.clone(),
+            recipe_sha256: definition.recipe_sha256.clone(),
+            package_name: definition.package_name.clone(),
+            package_source_path: definition.package_source_path.clone(),
+            dynamic_binding_targets,
+        });
         let created_event = task.created_event();
         self.task_repository.create(&task, &created_event).await?;
         self.task_update_sink.publish(&task);
@@ -1024,9 +1042,10 @@ impl GenerationService {
     async fn fail_and_preserve(
         &self,
         task: &mut Task,
-        error: TaskError,
+        mut error: TaskError,
         original: GenerationServiceError,
     ) -> GenerationServiceError {
+        attach_runtime_diagnostics(&mut error, task.runtime_provenance.as_ref());
         let previous_status = task.status;
         let event = match task.fail(error, self.clock.now()) {
             Ok(event) => event,
@@ -1310,6 +1329,37 @@ fn capability_node_errors(capability: &CapabilityCheckView) -> Value {
         }
     }
     Value::Object(nodes)
+}
+
+fn attach_runtime_diagnostics(error: &mut TaskError, provenance: Option<&RuntimeProvenance>) {
+    if error.code != "WORKFLOW_VALIDATION_FAILED" {
+        return;
+    }
+    let Some(provenance) = provenance else {
+        return;
+    };
+    let nodes = error
+        .raw
+        .take()
+        .and_then(|raw| raw.get("nodes").cloned().or(Some(raw)))
+        .unwrap_or_else(|| serde_json::json!({}));
+    error.raw = Some(serde_json::json!({
+        "runtime": {
+            "appVersion": provenance.app_version,
+            "buildCommit": provenance.build_commit,
+            "workflowId": provenance.workflow_id,
+            "workflowVersionId": provenance.workflow_version_id,
+            "workflowVersion": provenance.workflow_version,
+            "workflowSha256": provenance.workflow_sha256,
+            "recipeId": provenance.recipe_id,
+            "recipeVersion": provenance.recipe_version,
+            "recipeSha256": provenance.recipe_sha256,
+            "packageName": provenance.package_name,
+            "packageSourcePath": provenance.package_source_path,
+            "dynamicBindingTargets": provenance.dynamic_binding_targets,
+        },
+        "nodes": nodes,
+    }));
 }
 
 fn input_values_to_json(values: &BTreeMap<String, GenerationInputValue>) -> Value {

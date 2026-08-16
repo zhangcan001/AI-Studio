@@ -716,6 +716,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_lifecycle::workflow_runtime_workspace_list,
             commands::workflow_lifecycle::workflow_runtime_workspace_refresh,
             commands::workflow_lifecycle::workflow_runtime_diagnostics,
+            commands::workflow_lifecycle::workflow_repair_builtin_package,
             commands::workflow_lifecycle::workflow_set_enabled,
             commands::workflow_lifecycle::workflow_recheck_capability,
             commands::workflow_lifecycle::workflow_recheck_all_capabilities,

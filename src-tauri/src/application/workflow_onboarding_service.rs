@@ -253,6 +253,13 @@ pub struct CapabilityCheckView {
     pub issues: Vec<CapabilityIssueView>,
 }
 
+#[derive(Clone, Debug)]
+pub struct RuntimeWorkflowCapabilityInput {
+    pub workflow_version_id: String,
+    pub workflow_json: String,
+    pub recipe: Recipe,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityIssueView {
@@ -1267,6 +1274,7 @@ impl WorkflowOnboardingService {
             .0)
     }
 
+    #[allow(dead_code)]
     pub fn check_runtime_workflow_with_object_info(
         &self,
         workflow_json: &str,
@@ -1280,12 +1288,32 @@ impl WorkflowOnboardingService {
         Ok(evaluate_capability(&workflow, &nodes, object_info))
     }
 
+    pub fn check_runtime_workflow_with_recipe_and_object_info(
+        &self,
+        workflow_json: &str,
+        recipe: &Recipe,
+        object_info: &Value,
+    ) -> Result<CapabilityCheckView, WorkflowOnboardingError> {
+        let workflow =
+            validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
+            })?)?;
+        let nodes = inspect_workflow(&workflow)?;
+        let dynamic_binding_targets = dynamic_binding_targets(recipe);
+        Ok(evaluate_capability_with_dynamic_targets(
+            &workflow,
+            &nodes,
+            object_info,
+            &dynamic_binding_targets,
+        ))
+    }
+
     /// Check several runtime graphs against one already fetched ComfyUI
     /// object_info document. This is the only batch capability path and keeps
     /// the network request count at one.
     pub async fn check_runtime_workflows(
         &self,
-        workflows: &[(String, String)],
+        workflows: &[RuntimeWorkflowCapabilityInput],
     ) -> Result<Vec<(String, CapabilityCheckView)>, WorkflowOnboardingError> {
         if workflows.is_empty() {
             return Ok(Vec::new());
@@ -1293,11 +1321,14 @@ impl WorkflowOnboardingService {
         let object_info = self.comfy_adapter.get_object_info().await;
         workflows
             .iter()
-            .map(|(workflow_version_id, workflow_json)| {
+            .map(|input| {
                 let capability = match &object_info {
-                    Ok(object) if object.is_object() => {
-                        self.check_runtime_workflow_with_object_info(workflow_json, object)?
-                    }
+                    Ok(object) if object.is_object() => self
+                        .check_runtime_workflow_with_recipe_and_object_info(
+                            &input.workflow_json,
+                            &input.recipe,
+                            object,
+                        )?,
                     Ok(_) => CapabilityCheckView {
                         state: CapabilityState::IncompatibleInputValues,
                         checked_at: Some(self.clock.now().to_rfc3339()),
@@ -1332,7 +1363,7 @@ impl WorkflowOnboardingService {
                         }],
                     },
                 };
-                Ok((workflow_version_id.clone(), capability))
+                Ok((input.workflow_version_id.clone(), capability))
             })
             .collect()
     }
@@ -3464,6 +3495,13 @@ fn dynamic_binding_targets(recipe: &Recipe) -> BTreeSet<(String, String)> {
     targets
 }
 
+pub fn dynamic_binding_target_labels(recipe: &Recipe) -> Vec<String> {
+    dynamic_binding_targets(recipe)
+        .into_iter()
+        .map(|(node, input)| format!("{node}.{input}"))
+        .collect()
+}
+
 fn evaluate_capability(
     workflow: &WorkflowDocument,
     nodes: &[WorkflowNodeView],
@@ -5042,8 +5080,16 @@ outputs: []
             "2":{"inputs":{"image":["1",0]},"class_type":"SaveImage"}
         }"#
         .to_owned();
+        let recipe = RecipeParser::parse(
+            "schema_version: 1\nid: batch\nname: Batch\nworkflow:\n  file: workflow_api.json\ninputs: {}\nbindings: []\noutputs: []\n",
+        )
+        .unwrap();
         let workflows = (0..10)
-            .map(|index| (format!("version_{index}"), workflow.clone()))
+            .map(|index| RuntimeWorkflowCapabilityInput {
+                workflow_version_id: format!("version_{index}"),
+                workflow_json: workflow.clone(),
+                recipe: recipe.clone(),
+            })
             .collect::<Vec<_>>();
 
         let checked = service.check_runtime_workflows(&workflows).await.unwrap();

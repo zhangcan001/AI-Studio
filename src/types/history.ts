@@ -58,12 +58,28 @@ export interface TaskNodeError {
   expectedConfig?: unknown;
 }
 
+export interface RuntimeProvenance {
+  appVersion: string;
+  buildCommit: string;
+  workflowId: string;
+  workflowVersionId: string;
+  workflowVersion: string;
+  workflowSha256: string;
+  recipeId: string;
+  recipeVersion: string;
+  recipeSha256: string;
+  packageName?: string;
+  packageSourcePath?: string;
+  dynamicBindingTargets: string[];
+}
+
 export interface TaskDetail {
   id: string;
   projectId: string;
   workflowId: string;
   workflowVersionId: string;
   recipeId: string;
+  runtimeProvenance?: RuntimeProvenance;
   workflowName: string;
   status: TaskStatus;
   createdAt: string;

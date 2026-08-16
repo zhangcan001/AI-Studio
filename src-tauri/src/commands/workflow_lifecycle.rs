@@ -48,6 +48,23 @@ pub async fn workflow_runtime_diagnostics(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_repair_builtin_package(
+    state: State<'_, AppState>,
+    package_name: String,
+) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
+    crate::application::builtin_runtime_packages::repair_package(
+        &state.data_dirs.workflow_library,
+        &package_name,
+    )
+    .map_err(AppError::workflow_onboarding)?;
+    state
+        .workflow_lifecycle_service
+        .refresh_workspace()
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_recheck_all_capabilities(
     state: State<'_, AppState>,
 ) -> Result<
