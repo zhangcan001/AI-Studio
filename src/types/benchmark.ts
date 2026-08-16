@@ -36,6 +36,16 @@ export interface WorkflowBenchmarkCandidatePreview {
   assetIds: string[];
 }
 
+export interface WorkflowBenchmarkTelemetry {
+  compiledWorkflowSha256?: string;
+  runtimeProfile?: string;
+  queueWaitMs?: number;
+  prepareMs?: number;
+  comfyExecutionMs?: number;
+  collectionMs?: number;
+  totalMs?: number;
+}
+
 export interface WorkflowBenchmarkCandidateView extends WorkflowBenchmarkCandidatePreview {
   productionBatchItemId?: string;
   taskId?: string;
@@ -44,6 +54,7 @@ export interface WorkflowBenchmarkCandidateView extends WorkflowBenchmarkCandida
   taskStartedAt?: string;
   taskFinishedAt?: string;
   executionDurationMs?: number;
+  telemetry?: WorkflowBenchmarkTelemetry;
   outputAssetIds: string[];
   reviewStatus?: string;
   reviewNote?: string;

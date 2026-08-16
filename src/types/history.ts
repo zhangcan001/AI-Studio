@@ -73,6 +73,25 @@ export interface RuntimeProvenance {
   dynamicBindingTargets: string[];
 }
 
+export interface TaskTelemetry {
+  generationExecutionId?: string;
+  compiledWorkflowSha256?: string;
+  runtimeProfile?: string;
+  concurrencyClass?: string;
+  prepareStartedAt?: string;
+  preparedAt?: string;
+  submittedAt?: string;
+  executionStartedAt?: string;
+  executionFinishedAt?: string;
+  collectionFinishedAt?: string;
+  queueWaitMs?: number;
+  prepareMs?: number;
+  submitMs?: number;
+  comfyExecutionMs?: number;
+  collectionMs?: number;
+  totalMs?: number;
+}
+
 export interface TaskDetail {
   id: string;
   projectId: string;
@@ -80,6 +99,7 @@ export interface TaskDetail {
   workflowVersionId: string;
   recipeId: string;
   runtimeProvenance?: RuntimeProvenance;
+  telemetry?: TaskTelemetry;
   workflowName: string;
   status: TaskStatus;
   createdAt: string;

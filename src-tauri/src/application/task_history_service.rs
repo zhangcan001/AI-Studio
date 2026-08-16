@@ -114,6 +114,7 @@ impl TaskHistoryService {
                 .runtime_provenance
                 .as_ref()
                 .map(RuntimeProvenanceView::from),
+            telemetry: TaskTelemetryView::from_task(&record.task),
             workflow_name: record.workflow_name,
             status: record.task.status.as_str().to_owned(),
             created_at: record.task.created_at,
@@ -399,6 +400,7 @@ pub struct TaskDetailView {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub runtime_provenance: Option<RuntimeProvenanceView>,
+    pub telemetry: TaskTelemetryView,
     pub workflow_name: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
@@ -411,6 +413,51 @@ pub struct TaskDetailView {
     pub raw_error: Option<Value>,
     pub output_assets: Vec<AssetSummaryView>,
     pub reusable_draft: ReusableDraftAvailabilityView,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTelemetryView {
+    pub generation_execution_id: Option<String>,
+    pub compiled_workflow_sha256: Option<String>,
+    pub runtime_profile: Option<String>,
+    pub concurrency_class: Option<String>,
+    pub prepare_started_at: Option<DateTime<Utc>>,
+    pub prepared_at: Option<DateTime<Utc>>,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub execution_started_at: Option<DateTime<Utc>>,
+    pub execution_finished_at: Option<DateTime<Utc>>,
+    pub collection_finished_at: Option<DateTime<Utc>>,
+    pub queue_wait_ms: Option<i64>,
+    pub prepare_ms: Option<i64>,
+    pub submit_ms: Option<i64>,
+    pub comfy_execution_ms: Option<i64>,
+    pub collection_ms: Option<i64>,
+    pub total_ms: Option<i64>,
+}
+
+impl TaskTelemetryView {
+    fn from_task(task: &crate::domain::Task) -> Self {
+        let durations = task.telemetry.durations(task.created_at, task.queued_at);
+        Self {
+            generation_execution_id: task.telemetry.generation_execution_id.clone(),
+            compiled_workflow_sha256: task.telemetry.compiled_workflow_sha256.clone(),
+            runtime_profile: task.telemetry.runtime_profile.clone(),
+            concurrency_class: task.telemetry.concurrency_class.clone(),
+            prepare_started_at: task.telemetry.prepare_started_at,
+            prepared_at: task.telemetry.prepared_at,
+            submitted_at: task.telemetry.submitted_at,
+            execution_started_at: task.telemetry.execution_started_at,
+            execution_finished_at: task.telemetry.execution_finished_at,
+            collection_finished_at: task.telemetry.collection_finished_at,
+            queue_wait_ms: durations.queue_wait_ms,
+            prepare_ms: durations.prepare_ms,
+            submit_ms: durations.submit_ms,
+            comfy_execution_ms: durations.comfy_execution_ms,
+            collection_ms: durations.collection_ms,
+            total_ms: durations.total_ms,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -1084,6 +1131,24 @@ outputs: []
             workflow_version_id: "workflow-version".to_owned(),
             recipe_id: "recipe".to_owned(),
             runtime_provenance: None,
+            telemetry: super::TaskTelemetryView {
+                generation_execution_id: None,
+                compiled_workflow_sha256: None,
+                runtime_profile: None,
+                concurrency_class: None,
+                prepare_started_at: None,
+                prepared_at: None,
+                submitted_at: None,
+                execution_started_at: None,
+                execution_finished_at: None,
+                collection_finished_at: None,
+                queue_wait_ms: None,
+                prepare_ms: None,
+                submit_ms: None,
+                comfy_execution_ms: None,
+                collection_ms: None,
+                total_ms: None,
+            },
             workflow_name: "Demo".to_owned(),
             status: "FAILED".to_owned(),
             created_at: chrono::Utc::now(),

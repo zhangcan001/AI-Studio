@@ -32,6 +32,7 @@ pub mod project_bootstrap;
 pub mod project_service;
 pub mod project_template_service;
 pub mod prompt_library_service;
+pub mod scheduler;
 pub mod settings_service;
 pub mod shot_batch_service;
 pub mod shot_service;

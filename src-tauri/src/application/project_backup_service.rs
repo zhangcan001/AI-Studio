@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 7;
+const BACKUP_VERSION: u32 = 8;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -401,6 +401,9 @@ impl ProjectBackupService {
             "SELECT id, project_id, workflow_id, workflow_version_id, recipe_id, status,
              app_version, build_commit, workflow_version, workflow_sha256, recipe_version,
              recipe_sha256, package_name, package_source_path, dynamic_binding_targets_json,
+             generation_execution_id, compiled_workflow_sha256, runtime_profile,
+             concurrency_class, prepare_started_at, prepared_at, submitted_at,
+             execution_started_at, execution_finished_at, collection_finished_at,
              prompt_id, queue_number, progress_mode, progress_current, progress_total,
              current_node_id, error_code, error_message, raw_error_json, created_at,
              queued_at, started_at, finished_at FROM tasks WHERE project_id = ? ORDER BY created_at, id",
@@ -895,6 +898,26 @@ struct BackupTask {
     package_name: Option<String>,
     package_source_path: Option<String>,
     dynamic_binding_targets: Option<Value>,
+    #[serde(default)]
+    generation_execution_id: Option<String>,
+    #[serde(default)]
+    compiled_workflow_sha256: Option<String>,
+    #[serde(default)]
+    runtime_profile: Option<String>,
+    #[serde(default)]
+    concurrency_class: Option<String>,
+    #[serde(default)]
+    prepare_started_at: Option<String>,
+    #[serde(default)]
+    prepared_at: Option<String>,
+    #[serde(default)]
+    submitted_at: Option<String>,
+    #[serde(default)]
+    execution_started_at: Option<String>,
+    #[serde(default)]
+    execution_finished_at: Option<String>,
+    #[serde(default)]
+    collection_finished_at: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -1141,6 +1164,16 @@ struct DbTask {
     package_name: Option<String>,
     package_source_path: Option<String>,
     dynamic_binding_targets_json: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    prepare_started_at: Option<String>,
+    prepared_at: Option<String>,
+    submitted_at: Option<String>,
+    execution_started_at: Option<String>,
+    execution_finished_at: Option<String>,
+    collection_finished_at: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -1178,6 +1211,16 @@ impl TryFrom<DbTask> for BackupTask {
                 task.dynamic_binding_targets_json.as_deref(),
                 "task dynamic binding targets",
             )?,
+            generation_execution_id: task.generation_execution_id,
+            compiled_workflow_sha256: task.compiled_workflow_sha256,
+            runtime_profile: task.runtime_profile,
+            concurrency_class: task.concurrency_class,
+            prepare_started_at: task.prepare_started_at,
+            prepared_at: task.prepared_at,
+            submitted_at: task.submitted_at,
+            execution_started_at: task.execution_started_at,
+            execution_finished_at: task.execution_finished_at,
+            collection_finished_at: task.collection_finished_at,
             status: task.status,
             prompt_id: task.prompt_id,
             queue_number: task.queue_number,
@@ -2200,7 +2243,9 @@ fn inspect_archive(
         return Err(AppError::backup_invalid("备份必须先包含 manifest.json"));
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
-    if manifest.format != BACKUP_FORMAT || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7) {
+    if manifest.format != BACKUP_FORMAT
+        || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8)
+    {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
     let document: BackupDocument = read_zip_json(&mut archive, "project.json")?;
@@ -3113,6 +3158,29 @@ async fn restore_rows_in_transaction(
         .bind(&task.queued_at)
         .bind(&task.started_at)
         .bind(finished_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        sqlx::query(
+            "UPDATE tasks SET
+                generation_execution_id = ?, compiled_workflow_sha256 = ?,
+                runtime_profile = ?, concurrency_class = ?,
+                prepare_started_at = ?, prepared_at = ?, submitted_at = ?,
+                execution_started_at = ?, execution_finished_at = ?,
+                collection_finished_at = ?
+             WHERE id = ?",
+        )
+        .bind(&task.generation_execution_id)
+        .bind(&task.compiled_workflow_sha256)
+        .bind(&task.runtime_profile)
+        .bind(&task.concurrency_class)
+        .bind(&task.prepare_started_at)
+        .bind(&task.prepared_at)
+        .bind(&task.submitted_at)
+        .bind(&task.execution_started_at)
+        .bind(&task.execution_finished_at)
+        .bind(&task.collection_finished_at)
+        .bind(new_task_id)
         .execute(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
@@ -4141,6 +4209,18 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "UPDATE tasks SET
+                generation_execution_id = 'gen_backup', compiled_workflow_sha256 = 'compiled-backup',
+                runtime_profile = 'H3_QUALITY', concurrency_class = 'GPU_HEAVY_SERIAL',
+                prepare_started_at = '2026-01-01T00:00:01Z', prepared_at = '2026-01-01T00:00:02Z',
+                submitted_at = '2026-01-01T00:00:03Z', execution_started_at = '2026-01-01T00:00:04Z',
+                execution_finished_at = '2026-01-01T00:00:05Z', collection_finished_at = '2026-01-01T00:00:06Z'
+             WHERE id = 'tsk_backup'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let bytes = b"backup-image-bytes";
         let digest = Sha256::digest(bytes);
         let sha = digest
@@ -4303,7 +4383,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 7);
+        assert_eq!(manifest.version, 8);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -4334,6 +4414,28 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
+        let restored_telemetry: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                        collection_finished_at FROM tasks WHERE id = ?",
+        )
+        .bind(&restored_task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            restored_telemetry,
+            (
+                Some("gen_backup".to_owned()),
+                Some("compiled-backup".to_owned()),
+                Some("H3_QUALITY".to_owned()),
+                Some("2026-01-01T00:00:06Z".to_owned())
+            )
+        );
         let restored_asset_id: String =
             sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ? AND type = 'image' AND original_name = '图像.png'")
                 .bind(&restored.id)
@@ -4860,6 +4962,16 @@ mod tests {
                 package_name: None,
                 package_source_path: None,
                 dynamic_binding_targets: None,
+                generation_execution_id: None,
+                compiled_workflow_sha256: None,
+                runtime_profile: None,
+                concurrency_class: None,
+                prepare_started_at: None,
+                prepared_at: None,
+                submitted_at: None,
+                execution_started_at: None,
+                execution_finished_at: None,
+                collection_finished_at: None,
                 status: "SUCCEEDED".to_owned(),
                 prompt_id: None,
                 queue_number: None,

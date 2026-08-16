@@ -37,6 +37,7 @@ pub use shot::{
 };
 pub use task::{
     NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskDomainError, TaskError,
-    TaskEventType, TaskId, TaskProgress, TaskStateMachine, TaskStatus,
+    TaskEventType, TaskId, TaskProgress, TaskStateMachine, TaskStatus, TaskTelemetry,
+    TaskTelemetryDurations, TaskTelemetryPatch,
 };
 pub use workflow::{WorkflowDocument, WorkflowError};

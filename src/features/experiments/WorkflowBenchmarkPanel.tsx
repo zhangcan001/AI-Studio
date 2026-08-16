@@ -550,7 +550,7 @@ export function WorkflowBenchmarkPanel({
                 <article className={`workflow-benchmark-result-card${isWinner ? " workflow-benchmark-result-card-winner" : ""}`} key={candidate.id}>
                   <div className="workflow-benchmark-result-card-main">
                     <div className="workflow-benchmark-result-card-title"><strong>#{candidate.position + 1} · {candidate.label}</strong><span className={compatibilityClass(candidate.compatibility)}>{compatibilityLabels[candidate.compatibility]}</span></div>
-                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {formatDuration(candidate.executionDurationMs)} · 审片：{reviewLabel(candidate.reviewStatus)}</small>
+                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {formatDuration(candidate.executionDurationMs)} · {candidate.telemetry?.runtimeProfile ?? "—"} · 审片：{reviewLabel(candidate.reviewStatus)}</small>
                     {isWinner && <span className="workflow-benchmark-winner-mark">显式胜者</span>}
                     {isFastest && <span className="workflow-benchmark-fastest-mark">最快完成</span>}
                     {candidate.outputAssetIds.length > 0 && (

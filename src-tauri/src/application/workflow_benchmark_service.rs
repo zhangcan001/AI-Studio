@@ -79,9 +79,22 @@ pub struct WorkflowBenchmarkCandidateView {
     pub task_started_at: Option<String>,
     pub task_finished_at: Option<String>,
     pub execution_duration_ms: Option<i64>,
+    pub telemetry: Option<WorkflowBenchmarkTelemetryView>,
     pub output_asset_ids: Vec<String>,
     pub review_status: Option<String>,
     pub review_note: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkTelemetryView {
+    pub compiled_workflow_sha256: Option<String>,
+    pub runtime_profile: Option<String>,
+    pub queue_wait_ms: Option<i64>,
+    pub prepare_ms: Option<i64>,
+    pub comfy_execution_ms: Option<i64>,
+    pub collection_ms: Option<i64>,
+    pub total_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -919,7 +932,12 @@ impl WorkflowBenchmarkService {
                 sqlx::query_as::<_, BenchmarkItemRuntimeRow>(
                     "SELECT i.task_id, i.status AS item_status,
                             t.status AS task_status, t.created_at AS task_created_at,
-                            t.started_at AS task_started_at, t.finished_at AS task_finished_at
+                            t.queued_at AS task_queued_at, t.started_at AS task_started_at,
+                            t.finished_at AS task_finished_at,
+                            t.compiled_workflow_sha256, t.runtime_profile,
+                            t.prepare_started_at, t.prepared_at, t.submitted_at,
+                            t.execution_started_at, t.execution_finished_at,
+                            t.collection_finished_at
                      FROM production_batch_items i
                      LEFT JOIN tasks t ON t.id = i.task_id
                      WHERE i.id = ?",
@@ -998,6 +1016,7 @@ impl WorkflowBenchmarkService {
                         runtime.task_finished_at.as_deref(),
                     )
                 }),
+                telemetry: runtime.as_ref().and_then(benchmark_telemetry),
                 output_asset_ids,
                 review_status: review.as_ref().map(|review| review.review_status.clone()),
                 review_note: review.map(|review| review.review_note),
@@ -1074,8 +1093,17 @@ struct BenchmarkItemRuntimeRow {
     item_status: String,
     task_status: Option<String>,
     task_created_at: Option<String>,
+    task_queued_at: Option<String>,
     task_started_at: Option<String>,
     task_finished_at: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    prepare_started_at: Option<String>,
+    prepared_at: Option<String>,
+    submitted_at: Option<String>,
+    execution_started_at: Option<String>,
+    execution_finished_at: Option<String>,
+    collection_finished_at: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1493,6 +1521,50 @@ fn execution_duration_ms(
     (duration >= 0).then_some(duration)
 }
 
+fn benchmark_telemetry(
+    runtime: &BenchmarkItemRuntimeRow,
+) -> Option<WorkflowBenchmarkTelemetryView> {
+    let has_metadata = runtime.compiled_workflow_sha256.is_some()
+        || runtime.runtime_profile.is_some()
+        || runtime.prepare_started_at.is_some()
+        || runtime.prepared_at.is_some()
+        || runtime.submitted_at.is_some()
+        || runtime.execution_started_at.is_some()
+        || runtime.execution_finished_at.is_some()
+        || runtime.collection_finished_at.is_some();
+    has_metadata.then(|| WorkflowBenchmarkTelemetryView {
+        compiled_workflow_sha256: runtime.compiled_workflow_sha256.clone(),
+        runtime_profile: runtime.runtime_profile.clone(),
+        queue_wait_ms: duration_between(
+            runtime.task_queued_at.as_deref(),
+            runtime.execution_started_at.as_deref(),
+        ),
+        prepare_ms: duration_between(
+            runtime.prepare_started_at.as_deref(),
+            runtime.prepared_at.as_deref(),
+        ),
+        comfy_execution_ms: duration_between(
+            runtime.execution_started_at.as_deref(),
+            runtime.execution_finished_at.as_deref(),
+        ),
+        collection_ms: duration_between(
+            runtime.execution_finished_at.as_deref(),
+            runtime.collection_finished_at.as_deref(),
+        ),
+        total_ms: duration_between(
+            runtime.task_created_at.as_deref(),
+            runtime.collection_finished_at.as_deref(),
+        ),
+    })
+}
+
+fn duration_between(start: Option<&str>, finish: Option<&str>) -> Option<i64> {
+    let start = DateTime::parse_from_rfc3339(start?).ok()?;
+    let finish = DateTime::parse_from_rfc3339(finish?).ok()?;
+    let duration = finish.signed_duration_since(start).num_milliseconds();
+    (duration >= 0).then_some(duration)
+}
+
 fn db_error(error: sqlx::Error) -> WorkflowBenchmarkError {
     WorkflowBenchmarkError::Repository(RepositoryError::database(error.to_string()))
 }
@@ -1506,8 +1578,9 @@ impl From<ProductionQueueError> for WorkflowBenchmarkError {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_asset_ids, derive_experiment_status, effective_candidate_status,
-        is_benchmark_controlled_key, merge_candidate_values, output_matches_media,
+        benchmark_telemetry, collect_asset_ids, derive_experiment_status,
+        effective_candidate_status, is_benchmark_controlled_key, merge_candidate_values,
+        output_matches_media, BenchmarkItemRuntimeRow,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::domain::{InputDefinition, Recipe, SeedDefault, SeedValue, WorkflowRef};
@@ -1732,6 +1805,38 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_telemetry_hook_reads_compiled_sha_profile_and_timings() {
+        let runtime = BenchmarkItemRuntimeRow {
+            task_id: Some("tsk_benchmark".to_owned()),
+            item_status: "SUCCEEDED".to_owned(),
+            task_status: Some("SUCCEEDED".to_owned()),
+            task_created_at: Some("2026-01-01T00:00:00Z".to_owned()),
+            task_queued_at: Some("2026-01-01T00:00:05Z".to_owned()),
+            task_started_at: Some("2026-01-01T00:00:07Z".to_owned()),
+            task_finished_at: Some("2026-01-01T00:00:19Z".to_owned()),
+            compiled_workflow_sha256: Some("compiled-sha".to_owned()),
+            runtime_profile: Some("H3_FAST".to_owned()),
+            prepare_started_at: Some("2026-01-01T00:00:01Z".to_owned()),
+            prepared_at: Some("2026-01-01T00:00:03Z".to_owned()),
+            submitted_at: Some("2026-01-01T00:00:04Z".to_owned()),
+            execution_started_at: Some("2026-01-01T00:00:07Z".to_owned()),
+            execution_finished_at: Some("2026-01-01T00:00:17Z".to_owned()),
+            collection_finished_at: Some("2026-01-01T00:00:19Z".to_owned()),
+        };
+        let telemetry = benchmark_telemetry(&runtime).expect("telemetry should be exposed");
+        assert_eq!(
+            telemetry.compiled_workflow_sha256.as_deref(),
+            Some("compiled-sha")
+        );
+        assert_eq!(telemetry.runtime_profile.as_deref(), Some("H3_FAST"));
+        assert_eq!(telemetry.queue_wait_ms, Some(2_000));
+        assert_eq!(telemetry.prepare_ms, Some(2_000));
+        assert_eq!(telemetry.comfy_execution_ms, Some(10_000));
+        assert_eq!(telemetry.collection_ms, Some(2_000));
+        assert_eq!(telemetry.total_ms, Some(19_000));
+    }
+
+    #[test]
     fn status_is_partial_when_one_candidate_fails() {
         let mut first = super::WorkflowBenchmarkCandidateView {
             id: "a".to_owned(),
@@ -1752,6 +1857,7 @@ mod tests {
             task_started_at: None,
             task_finished_at: None,
             execution_duration_ms: Some(10),
+            telemetry: None,
             output_asset_ids: Vec::new(),
             review_status: None,
             review_note: None,
@@ -1789,6 +1895,7 @@ mod tests {
             task_started_at: None,
             task_finished_at: None,
             execution_duration_ms: None,
+            telemetry: None,
             output_asset_ids: Vec::new(),
             review_status: None,
             review_note: None,

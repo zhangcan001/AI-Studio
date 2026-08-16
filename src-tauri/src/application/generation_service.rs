@@ -12,6 +12,7 @@ use crate::application::ports::{
     MonotonicEventClock, NoopTaskUpdateSink, ProjectRepository, RepositoryError, TaskRepository,
     TaskUpdateSink,
 };
+use crate::application::scheduler::scheduler_decision;
 use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::application::workflow_onboarding_service::{
     dynamic_binding_target_labels, CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
@@ -22,7 +23,7 @@ use crate::compiler::{
 };
 use crate::domain::{
     AssetId, CompileRequest, GenerationSnapshot, ResolvedInputValue, RuntimeProvenance, SeedValue,
-    Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
+    Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus, TaskTelemetryPatch,
 };
 use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
@@ -518,6 +519,14 @@ impl GenerationService {
 
         self.transition_and_persist(&mut task, TaskStatus::Preparing)
             .await?;
+        self.persist_telemetry(
+            &mut task,
+            TaskTelemetryPatch {
+                prepare_started_at: Some(self.clock.now()),
+                ..TaskTelemetryPatch::default()
+            },
+        )
+        .await?;
         if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
             return Ok(task);
         }
@@ -583,6 +592,7 @@ impl GenerationService {
             };
         let generation_execution_id =
             build_generation_execution_id(&task, &definition, &compiled_workflow_sha256);
+        let scheduler = scheduler_decision(&definition, &recipe);
         let submission_idempotency_key = request
             .submission_idempotency_key
             .as_deref()
@@ -590,6 +600,18 @@ impl GenerationService {
             .filter(|key| !key.is_empty())
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| generation_execution_id.clone());
+        self.persist_telemetry(
+            &mut task,
+            TaskTelemetryPatch {
+                generation_execution_id: Some(generation_execution_id.clone()),
+                compiled_workflow_sha256: Some(compiled_workflow_sha256.clone()),
+                runtime_profile: Some(scheduler.profile.as_str().to_owned()),
+                concurrency_class: Some(scheduler.concurrency_class.as_str().to_owned()),
+                prepared_at: Some(self.clock.now()),
+                ..TaskTelemetryPatch::default()
+            },
+        )
+        .await?;
         let compiled_event = task.record_compiled_workflow_validated(
             definition.workflow_sha256.clone(),
             definition.recipe_sha256.clone(),
@@ -758,6 +780,14 @@ impl GenerationService {
                 ));
             }
         }
+        self.persist_telemetry(
+            &mut task,
+            TaskTelemetryPatch {
+                submitted_at: Some(self.clock.now()),
+                ..TaskTelemetryPatch::default()
+            },
+        )
+        .await?;
         drop(submission_permit);
 
         let mut cancel_action_sent = false;
@@ -857,6 +887,18 @@ impl GenerationService {
                         self.transition_and_persist(&mut task, TaskStatus::Running)
                             .await?;
                     }
+                    if task.telemetry.execution_started_at.is_none()
+                        && task.status == TaskStatus::Running
+                    {
+                        self.persist_telemetry(
+                            &mut task,
+                            TaskTelemetryPatch {
+                                execution_started_at: Some(self.clock.now()),
+                                ..TaskTelemetryPatch::default()
+                            },
+                        )
+                        .await?;
+                    }
                 }
                 ComfyExecutionEvent::NodeStarted { node_id, .. } => {
                     if task.status == TaskStatus::Running {
@@ -900,6 +942,7 @@ impl GenerationService {
                     if task.status != TaskStatus::Running {
                         continue;
                     }
+                    self.persist_execution_finished(&mut task).await?;
                     return self
                         .complete_success(&mut task, &recipe, &project_id, &prompt_id, None)
                         .await;
@@ -911,6 +954,7 @@ impl GenerationService {
                     ..
                 } => {
                     self.refresh_task_from_database(&mut task).await?;
+                    self.persist_execution_finished(&mut task).await?;
                     let message = if let Some(node_id) = node_id {
                         format!("node {node_id}: {message}")
                     } else {
@@ -934,6 +978,7 @@ impl GenerationService {
                 }
                 ComfyExecutionEvent::ExecutionInterrupted { node_id, raw, .. } => {
                     self.refresh_task_from_database(&mut task).await?;
+                    self.persist_execution_finished(&mut task).await?;
                     if task.status == TaskStatus::CancelRequested {
                         self.cancel_checkpoint(&mut task, &cancel_signal).await?;
                         return Ok(task);
@@ -1127,6 +1172,15 @@ impl GenerationService {
             }
         }
 
+        self.persist_telemetry(
+            task,
+            TaskTelemetryPatch {
+                collection_finished_at: Some(self.clock.now()),
+                ..TaskTelemetryPatch::default()
+            },
+        )
+        .await?;
+
         let previous_status = task.status;
         let event = task.succeed(self.clock.now())?;
         if let Err(error) = self
@@ -1143,6 +1197,38 @@ impl GenerationService {
         }
         self.task_update_sink.publish(task);
         Ok(task.clone())
+    }
+
+    async fn persist_execution_finished(
+        &self,
+        task: &mut Task,
+    ) -> Result<(), GenerationServiceError> {
+        if task.telemetry.execution_finished_at.is_none()
+            && task.telemetry.execution_started_at.is_some()
+        {
+            self.persist_telemetry(
+                task,
+                TaskTelemetryPatch {
+                    execution_finished_at: Some(self.clock.now()),
+                    ..TaskTelemetryPatch::default()
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn persist_telemetry(
+        &self,
+        task: &mut Task,
+        patch: TaskTelemetryPatch,
+    ) -> Result<(), GenerationServiceError> {
+        let event = task.record_telemetry_update(patch, self.clock.now())?;
+        self.task_repository
+            .persist_runtime_update(task, &event)
+            .await?;
+        self.task_update_sink.publish(task);
+        Ok(())
     }
 
     async fn transition_and_persist(

@@ -204,6 +204,192 @@ pub struct RuntimeProvenance {
     pub dynamic_binding_targets: Vec<String>,
 }
 
+/// Optional timing and execution metadata for a generation attempt.
+///
+/// These values are deliberately nullable. A task may stop before a phase is
+/// observable (for example, before a remote prompt is accepted), and callers
+/// must see that as unavailable rather than a fabricated zero duration.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TaskTelemetry {
+    pub generation_execution_id: Option<String>,
+    pub compiled_workflow_sha256: Option<String>,
+    pub runtime_profile: Option<String>,
+    pub concurrency_class: Option<String>,
+    pub prepare_started_at: Option<DateTime<Utc>>,
+    pub prepared_at: Option<DateTime<Utc>>,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub execution_started_at: Option<DateTime<Utc>>,
+    pub execution_finished_at: Option<DateTime<Utc>>,
+    pub collection_finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TaskTelemetryPatch {
+    pub generation_execution_id: Option<String>,
+    pub compiled_workflow_sha256: Option<String>,
+    pub runtime_profile: Option<String>,
+    pub concurrency_class: Option<String>,
+    pub prepare_started_at: Option<DateTime<Utc>>,
+    pub prepared_at: Option<DateTime<Utc>>,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub execution_started_at: Option<DateTime<Utc>>,
+    pub execution_finished_at: Option<DateTime<Utc>>,
+    pub collection_finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TaskTelemetryDurations {
+    pub queue_wait_ms: Option<i64>,
+    pub prepare_ms: Option<i64>,
+    pub submit_ms: Option<i64>,
+    pub comfy_execution_ms: Option<i64>,
+    pub collection_ms: Option<i64>,
+    pub total_ms: Option<i64>,
+}
+
+impl TaskTelemetry {
+    pub fn durations(
+        &self,
+        created_at: DateTime<Utc>,
+        queued_at: Option<DateTime<Utc>>,
+    ) -> TaskTelemetryDurations {
+        TaskTelemetryDurations {
+            queue_wait_ms: diff_ms(queued_at, self.execution_started_at),
+            prepare_ms: diff_ms(self.prepare_started_at, self.prepared_at),
+            submit_ms: diff_ms(self.prepared_at, self.submitted_at),
+            comfy_execution_ms: diff_ms(self.execution_started_at, self.execution_finished_at),
+            collection_ms: diff_ms(self.execution_finished_at, self.collection_finished_at),
+            total_ms: diff_ms(Some(created_at), self.collection_finished_at),
+        }
+    }
+
+    fn apply_patch(
+        &mut self,
+        patch: TaskTelemetryPatch,
+        created_at: DateTime<Utc>,
+        queued_at: Option<DateTime<Utc>>,
+    ) -> Result<(), TaskDomainError> {
+        for (field, value) in [
+            (
+                "generation_execution_id",
+                patch.generation_execution_id.as_deref(),
+            ),
+            (
+                "compiled_workflow_sha256",
+                patch.compiled_workflow_sha256.as_deref(),
+            ),
+            ("runtime_profile", patch.runtime_profile.as_deref()),
+            ("concurrency_class", patch.concurrency_class.as_deref()),
+        ] {
+            if value.is_some_and(|value| value.trim().is_empty()) {
+                return Err(TaskDomainError::invalid_task(format!(
+                    "{field} must not be empty when present"
+                )));
+            }
+        }
+        if let Some(value) = patch.generation_execution_id {
+            self.generation_execution_id = Some(value);
+        }
+        if let Some(value) = patch.compiled_workflow_sha256 {
+            self.compiled_workflow_sha256 = Some(value);
+        }
+        if let Some(value) = patch.runtime_profile {
+            self.runtime_profile = Some(value);
+        }
+        if let Some(value) = patch.concurrency_class {
+            self.concurrency_class = Some(value);
+        }
+        if let Some(value) = patch.prepare_started_at {
+            self.prepare_started_at = Some(value);
+        }
+        if let Some(value) = patch.prepared_at {
+            self.prepared_at = Some(value);
+        }
+        if let Some(value) = patch.submitted_at {
+            self.submitted_at = Some(value);
+        }
+        if let Some(value) = patch.execution_started_at {
+            self.execution_started_at = Some(value);
+        }
+        if let Some(value) = patch.execution_finished_at {
+            self.execution_finished_at = Some(value);
+        }
+        if let Some(value) = patch.collection_finished_at {
+            self.collection_finished_at = Some(value);
+        }
+        self.validate(created_at, queued_at)
+    }
+
+    pub fn validate(
+        &self,
+        created_at: DateTime<Utc>,
+        queued_at: Option<DateTime<Utc>>,
+    ) -> Result<(), TaskDomainError> {
+        let timestamps = [
+            ("prepare_started_at", self.prepare_started_at),
+            ("prepared_at", self.prepared_at),
+            ("submitted_at", self.submitted_at),
+            ("execution_started_at", self.execution_started_at),
+            ("execution_finished_at", self.execution_finished_at),
+            ("collection_finished_at", self.collection_finished_at),
+        ];
+        if timestamps
+            .iter()
+            .any(|(_, value)| value.is_some_and(|value| value < created_at))
+        {
+            return Err(TaskDomainError::invalid_timestamp(
+                "telemetry timestamps must not precede created_at",
+            ));
+        }
+        if let (Some(start), Some(end)) = (self.prepare_started_at, self.prepared_at) {
+            if end < start {
+                return Err(TaskDomainError::invalid_timestamp(
+                    "prepared_at must not precede prepare_started_at",
+                ));
+            }
+        }
+        if let (Some(start), Some(end)) = (self.prepared_at, self.submitted_at) {
+            if end < start {
+                return Err(TaskDomainError::invalid_timestamp(
+                    "submitted_at must not precede prepared_at",
+                ));
+            }
+        }
+        if let (Some(start), Some(end)) = (self.execution_started_at, self.execution_finished_at) {
+            if end < start {
+                return Err(TaskDomainError::invalid_timestamp(
+                    "execution_finished_at must not precede execution_started_at",
+                ));
+            }
+        }
+        if let (Some(start), Some(end)) = (self.execution_finished_at, self.collection_finished_at)
+        {
+            if end < start {
+                return Err(TaskDomainError::invalid_timestamp(
+                    "collection_finished_at must not precede execution_finished_at",
+                ));
+            }
+        }
+        if let (Some(queued_at), Some(execution_started_at)) =
+            (queued_at, self.execution_started_at)
+        {
+            if execution_started_at < queued_at {
+                return Err(TaskDomainError::invalid_timestamp(
+                    "execution_started_at must not precede queued_at",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn diff_ms(start: Option<DateTime<Utc>>, end: Option<DateTime<Utc>>) -> Option<i64> {
+    let (Some(start), Some(end)) = (start, end) else {
+        return None;
+    };
+    (end >= start).then(|| (end - start).num_milliseconds())
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Task {
     pub id: TaskId,
@@ -222,6 +408,7 @@ pub struct Task {
     pub queued_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+    pub telemetry: TaskTelemetry,
 }
 
 impl Task {
@@ -249,6 +436,7 @@ impl Task {
             queued_at: None,
             started_at: None,
             finished_at: None,
+            telemetry: TaskTelemetry::default(),
         }
     }
 
@@ -613,6 +801,44 @@ impl Task {
         )
     }
 
+    pub fn record_telemetry_update(
+        &mut self,
+        patch: TaskTelemetryPatch,
+        at: DateTime<Utc>,
+    ) -> Result<NewTaskEvent, TaskDomainError> {
+        if self.status.is_terminal() {
+            return Err(TaskDomainError::invalid_task(
+                "telemetry cannot be updated after task completion",
+            ));
+        }
+        if at < self.created_at {
+            return Err(TaskDomainError::invalid_timestamp(
+                "telemetry event time must not precede created_at",
+            ));
+        }
+        let mut next = self.clone();
+        next.telemetry
+            .apply_patch(patch, next.created_at, next.queued_at)?;
+        next.validate()?;
+        *self = next;
+        self.new_runtime_event(
+            TaskEventType::TaskTelemetryUpdated,
+            Some(serde_json::json!({
+                "generationExecutionId": self.telemetry.generation_execution_id,
+                "compiledWorkflowSha256": self.telemetry.compiled_workflow_sha256,
+                "runtimeProfile": self.telemetry.runtime_profile,
+                "concurrencyClass": self.telemetry.concurrency_class,
+                "prepareStartedAt": self.telemetry.prepare_started_at,
+                "preparedAt": self.telemetry.prepared_at,
+                "submittedAt": self.telemetry.submitted_at,
+                "executionStartedAt": self.telemetry.execution_started_at,
+                "executionFinishedAt": self.telemetry.execution_finished_at,
+                "collectionFinishedAt": self.telemetry.collection_finished_at,
+            })),
+            at,
+        )
+    }
+
     pub fn record_recovery_event(
         &self,
         event_type: TaskEventType,
@@ -702,6 +928,8 @@ impl Task {
             ));
         }
 
+        self.telemetry.validate(self.created_at, self.queued_at)?;
+
         if let (Some(queued_at), Some(started_at)) = (self.queued_at, self.started_at) {
             if started_at < queued_at {
                 return Err(TaskDomainError::invalid_timestamp(
@@ -779,6 +1007,7 @@ pub enum TaskEventType {
     TaskSubmissionPrepared,
     TaskSubmissionConfirmed,
     TaskCompiledWorkflowValidated,
+    TaskTelemetryUpdated,
     TaskNodeStarted,
     TaskProgressUpdated,
     TaskStreamDisconnected,
@@ -805,6 +1034,7 @@ impl TaskEventType {
             Self::TaskSubmissionPrepared => "TASK_SUBMISSION_PREPARED",
             Self::TaskSubmissionConfirmed => "TASK_SUBMISSION_CONFIRMED",
             Self::TaskCompiledWorkflowValidated => "TASK_COMPILED_WORKFLOW_VALIDATED",
+            Self::TaskTelemetryUpdated => "TASK_TELEMETRY_UPDATED",
             Self::TaskNodeStarted => "TASK_NODE_STARTED",
             Self::TaskProgressUpdated => "TASK_PROGRESS_UPDATED",
             Self::TaskStreamDisconnected => "TASK_STREAM_DISCONNECTED",
@@ -831,6 +1061,7 @@ impl TaskEventType {
             "TASK_SUBMISSION_PREPARED" => Ok(Self::TaskSubmissionPrepared),
             "TASK_SUBMISSION_CONFIRMED" => Ok(Self::TaskSubmissionConfirmed),
             "TASK_COMPILED_WORKFLOW_VALIDATED" => Ok(Self::TaskCompiledWorkflowValidated),
+            "TASK_TELEMETRY_UPDATED" => Ok(Self::TaskTelemetryUpdated),
             "TASK_NODE_STARTED" => Ok(Self::TaskNodeStarted),
             "TASK_PROGRESS_UPDATED" => Ok(Self::TaskProgressUpdated),
             "TASK_STREAM_DISCONNECTED" => Ok(Self::TaskStreamDisconnected),
@@ -1060,7 +1291,8 @@ impl Error for TaskDomainError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        Task, TaskDomainError, TaskError, TaskEventType, TaskProgress, TaskStateMachine, TaskStatus,
+        Task, TaskDomainError, TaskError, TaskEventType, TaskProgress, TaskStateMachine,
+        TaskStatus, TaskTelemetry, TaskTelemetryPatch,
     };
     use chrono::{Duration, TimeZone, Utc};
 
@@ -1146,6 +1378,86 @@ mod tests {
         assert!(task
             .prepare_submission("prompt-2", "client-2", base + Duration::seconds(5))
             .is_err());
+    }
+
+    #[test]
+    fn telemetry_timestamps_are_monotonic_and_missing_phases_stay_null() {
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut task = created_task();
+        TaskStateMachine::transition(
+            &mut task,
+            TaskStatus::Validating,
+            base + Duration::seconds(1),
+        )
+        .unwrap();
+        TaskStateMachine::transition(
+            &mut task,
+            TaskStatus::Preparing,
+            base + Duration::seconds(2),
+        )
+        .unwrap();
+
+        let event = task
+            .record_telemetry_update(
+                TaskTelemetryPatch {
+                    generation_execution_id: Some("gen_telemetry".to_owned()),
+                    runtime_profile: Some("H3_QUALITY".to_owned()),
+                    prepare_started_at: Some(base + Duration::seconds(3)),
+                    prepared_at: Some(base + Duration::seconds(5)),
+                    ..TaskTelemetryPatch::default()
+                },
+                base + Duration::seconds(5),
+            )
+            .unwrap();
+        assert_eq!(event.event_type, TaskEventType::TaskTelemetryUpdated);
+        assert_eq!(
+            task.telemetry.prepare_started_at,
+            Some(base + Duration::seconds(3))
+        );
+        assert_eq!(
+            task.telemetry.prepared_at,
+            Some(base + Duration::seconds(5))
+        );
+        assert!(task.telemetry.submitted_at.is_none());
+
+        let durations = task.telemetry.durations(task.created_at, None);
+        assert_eq!(durations.prepare_ms, Some(2_000));
+        assert_eq!(durations.submit_ms, None);
+        assert_eq!(durations.total_ms, None);
+
+        let error = task
+            .record_telemetry_update(
+                TaskTelemetryPatch {
+                    submitted_at: Some(base + Duration::seconds(4)),
+                    ..TaskTelemetryPatch::default()
+                },
+                base + Duration::seconds(4),
+            )
+            .expect_err("telemetry timestamps must not move backwards");
+        assert!(error
+            .to_string()
+            .contains("submitted_at must not precede prepared_at"));
+    }
+
+    #[test]
+    fn telemetry_duration_derivation_is_deterministic() {
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let telemetry = TaskTelemetry {
+            prepare_started_at: Some(base + Duration::seconds(1)),
+            prepared_at: Some(base + Duration::seconds(3)),
+            submitted_at: Some(base + Duration::seconds(4)),
+            execution_started_at: Some(base + Duration::seconds(7)),
+            execution_finished_at: Some(base + Duration::seconds(17)),
+            collection_finished_at: Some(base + Duration::seconds(19)),
+            ..TaskTelemetry::default()
+        };
+        let durations = telemetry.durations(base, Some(base + Duration::seconds(5)));
+        assert_eq!(durations.queue_wait_ms, Some(2_000));
+        assert_eq!(durations.prepare_ms, Some(2_000));
+        assert_eq!(durations.submit_ms, Some(1_000));
+        assert_eq!(durations.comfy_execution_ms, Some(10_000));
+        assert_eq!(durations.collection_ms, Some(2_000));
+        assert_eq!(durations.total_ms, Some(19_000));
     }
 
     #[test]

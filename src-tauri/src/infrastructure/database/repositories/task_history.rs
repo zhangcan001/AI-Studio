@@ -7,7 +7,9 @@ use crate::application::ports::{
     RepositoryError, TaskHistoryQuery, TaskHistoryRecord, TaskHistoryRepository,
     TaskHistoryTimeFilter, TaskHistoryWorkflowOption,
 };
-use crate::domain::{RuntimeProvenance, Task, TaskError, TaskId, TaskProgress, TaskStatus};
+use crate::domain::{
+    RuntimeProvenance, Task, TaskError, TaskId, TaskProgress, TaskStatus, TaskTelemetry,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Local, LocalResult, NaiveDate, TimeZone, Utc};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
@@ -28,6 +30,9 @@ const TASK_HISTORY_SELECT: &str = "SELECT
     t.app_version, t.build_commit, t.workflow_version, t.workflow_sha256,
     t.recipe_version, t.recipe_sha256, t.package_name, t.package_source_path,
     t.dynamic_binding_targets_json,
+    t.generation_execution_id, t.compiled_workflow_sha256, t.runtime_profile,
+    t.concurrency_class, t.prepare_started_at, t.prepared_at, t.submitted_at,
+    t.execution_started_at, t.execution_finished_at, t.collection_finished_at,
     t.status, t.prompt_id, t.queue_number,
     t.progress_mode, t.progress_current, t.progress_total, t.current_node_id,
     t.error_code, t.error_message, t.raw_error_json,
@@ -242,6 +247,16 @@ struct TaskHistoryRow {
     package_name: Option<String>,
     package_source_path: Option<String>,
     dynamic_binding_targets_json: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    prepare_started_at: Option<String>,
+    prepared_at: Option<String>,
+    submitted_at: Option<String>,
+    execution_started_at: Option<String>,
+    execution_finished_at: Option<String>,
+    collection_finished_at: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -396,6 +411,36 @@ impl TaskHistoryRow {
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             runtime_provenance,
+            telemetry: TaskTelemetry {
+                generation_execution_id: self.generation_execution_id,
+                compiled_workflow_sha256: self.compiled_workflow_sha256,
+                runtime_profile: self.runtime_profile,
+                concurrency_class: self.concurrency_class,
+                prepare_started_at: parse_optional_datetime(
+                    "task history prepare_started_at",
+                    self.prepare_started_at.as_deref(),
+                )?,
+                prepared_at: parse_optional_datetime(
+                    "task history prepared_at",
+                    self.prepared_at.as_deref(),
+                )?,
+                submitted_at: parse_optional_datetime(
+                    "task history submitted_at",
+                    self.submitted_at.as_deref(),
+                )?,
+                execution_started_at: parse_optional_datetime(
+                    "task history execution_started_at",
+                    self.execution_started_at.as_deref(),
+                )?,
+                execution_finished_at: parse_optional_datetime(
+                    "task history execution_finished_at",
+                    self.execution_finished_at.as_deref(),
+                )?,
+                collection_finished_at: parse_optional_datetime(
+                    "task history collection_finished_at",
+                    self.collection_finished_at.as_deref(),
+                )?,
+            },
             status,
             prompt_id: self.prompt_id,
             queue_number: self.queue_number,

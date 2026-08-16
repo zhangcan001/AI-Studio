@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { createGeneration, getReusableDraft } from "../../services/tauriClient";
 import { useTaskStore } from "../../stores/taskStore";
 import type { DraftValue } from "../../types/generation";
-import type { ReusableGenerationDraft, RuntimeProvenance, TaskDetail, TaskNodeError } from "../../types/history";
+import type {
+  ReusableGenerationDraft,
+  RuntimeProvenance,
+  TaskDetail,
+  TaskNodeError,
+  TaskTelemetry,
+} from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
 import { taskRetryDecision } from "./retryPolicy";
 import { productionInteractionPolicy } from "../studio/productionQueuePolicy";
@@ -100,7 +106,9 @@ export function TaskHistoryDetail({
       {detail.errorCode && (
         <UiErrorNotice error={{ code: detail.errorCode, message: detail.errorMessage ?? "任务未成功完成。" }} className="task-error" />
       )}
-      {detail.runtimeProvenance && <RuntimeDiagnostics provenance={detail.runtimeProvenance} />}
+      {(detail.runtimeProvenance || detail.telemetry) && (
+        <RuntimeDiagnostics provenance={detail.runtimeProvenance} telemetry={detail.telemetry} />
+      )}
       {detail.errorCode === "WORKFLOW_VALIDATION_FAILED" && (
         <ComfyNodeErrorSection nodeErrors={detail.nodeErrors ?? []} rawError={detail.rawError} />
       )}
@@ -182,7 +190,14 @@ export function TaskHistoryDetail({
   );
 }
 
-function RuntimeDiagnostics({ provenance }: { provenance: RuntimeProvenance }) {
+function RuntimeDiagnostics({
+  provenance,
+  telemetry,
+}: {
+  provenance?: RuntimeProvenance;
+  telemetry?: TaskTelemetry;
+}) {
+  telemetry = telemetry ?? {};
   return (
     <section className="detail-section runtime-diagnostics" aria-label="Runtime Diagnostics">
       <div className="section-heading">
@@ -191,25 +206,45 @@ function RuntimeDiagnostics({ provenance }: { provenance: RuntimeProvenance }) {
           <h3>实际运行来源</h3>
         </div>
       </div>
+      {provenance && (
+        <div className="detail-facts">
+          <Fact label="App version" value={provenance.appVersion} />
+          <Fact label="Build commit" value={provenance.buildCommit} />
+          <Fact label="Workflow package" value={provenance.packageName ?? "—"} />
+          <Fact label="Workflow ID" value={provenance.workflowId} />
+          <Fact label="Workflow version ID" value={provenance.workflowVersionId} />
+          <Fact label="Workflow version" value={provenance.workflowVersion} />
+          <Fact label="Workflow SHA-256" value={provenance.workflowSha256} />
+          <Fact label="Recipe ID" value={provenance.recipeId} />
+          <Fact label="Recipe version" value={provenance.recipeVersion} />
+          <Fact label="Recipe SHA-256" value={provenance.recipeSha256} />
+          <Fact label="Package source" value={provenance.packageSourcePath ?? "—"} />
+          <Fact
+            label="Dynamic binding targets"
+            value={provenance.dynamicBindingTargets.length ? provenance.dynamicBindingTargets.join(" · ") : "—"}
+          />
+        </div>
+      )}
       <div className="detail-facts">
-        <Fact label="App version" value={provenance.appVersion} />
-        <Fact label="Build commit" value={provenance.buildCommit} />
-        <Fact label="Workflow package" value={provenance.packageName ?? "—"} />
-        <Fact label="Workflow ID" value={provenance.workflowId} />
-        <Fact label="Workflow version ID" value={provenance.workflowVersionId} />
-        <Fact label="Workflow version" value={provenance.workflowVersion} />
-        <Fact label="Workflow SHA-256" value={provenance.workflowSha256} />
-        <Fact label="Recipe ID" value={provenance.recipeId} />
-        <Fact label="Recipe version" value={provenance.recipeVersion} />
-        <Fact label="Recipe SHA-256" value={provenance.recipeSha256} />
-        <Fact label="Package source" value={provenance.packageSourcePath ?? "—"} />
-        <Fact
-          label="Dynamic binding targets"
-          value={provenance.dynamicBindingTargets.length ? provenance.dynamicBindingTargets.join(" · ") : "—"}
-        />
+        <Fact label="Generation execution" value={telemetry.generationExecutionId ?? "—"} />
+        <Fact label="Compiled workflow SHA-256" value={telemetry.compiledWorkflowSha256 ?? "—"} />
+        <Fact label="Runtime profile" value={telemetry.runtimeProfile ?? "—"} />
+        <Fact label="Concurrency class" value={telemetry.concurrencyClass ?? "—"} />
+        <Fact label="Total" value={formatDuration(telemetry.totalMs)} />
+        <Fact label="Queue" value={formatDuration(telemetry.queueWaitMs)} />
+        <Fact label="Prepare" value={formatDuration(telemetry.prepareMs)} />
+        <Fact label="Submit" value={formatDuration(telemetry.submitMs)} />
+        <Fact label="Comfy" value={formatDuration(telemetry.comfyExecutionMs)} />
+        <Fact label="Collect" value={formatDuration(telemetry.collectionMs)} />
       </div>
     </section>
   );
+}
+
+function formatDuration(milliseconds?: number): string {
+  if (milliseconds === undefined) return "—";
+  if (milliseconds < 1000) return `${milliseconds}ms`;
+  return `${(milliseconds / 1000).toFixed(1)}s`;
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

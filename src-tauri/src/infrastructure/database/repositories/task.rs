@@ -5,7 +5,7 @@ use super::{
 use crate::application::ports::{RepositoryError, TaskRepository};
 use crate::domain::{
     NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskError, TaskEventType, TaskId,
-    TaskProgress, TaskStatus,
+    TaskProgress, TaskStatus, TaskTelemetry,
 };
 use async_trait::async_trait;
 use sqlx::SqlitePool;
@@ -156,6 +156,31 @@ impl TaskRepository for SqliteTaskRepository {
         .await
         .map_err(map_sqlx_error)?;
 
+        sqlx::query(
+            "UPDATE tasks SET
+                generation_execution_id = ?, compiled_workflow_sha256 = ?,
+                runtime_profile = ?, concurrency_class = ?,
+                prepare_started_at = ?, prepared_at = ?, submitted_at = ?,
+                execution_started_at = ?, execution_finished_at = ?,
+                collection_finished_at = ?
+             WHERE id = ? AND status = ?",
+        )
+        .bind(&task.telemetry.generation_execution_id)
+        .bind(&task.telemetry.compiled_workflow_sha256)
+        .bind(&task.telemetry.runtime_profile)
+        .bind(&task.telemetry.concurrency_class)
+        .bind(task.telemetry.prepare_started_at.map(format_datetime))
+        .bind(task.telemetry.prepared_at.map(format_datetime))
+        .bind(task.telemetry.submitted_at.map(format_datetime))
+        .bind(task.telemetry.execution_started_at.map(format_datetime))
+        .bind(task.telemetry.execution_finished_at.map(format_datetime))
+        .bind(task.telemetry.collection_finished_at.map(format_datetime))
+        .bind(task.id.as_str())
+        .bind(task.status.as_str())
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+
         if result.rows_affected() == 0 {
             return Err(RepositoryError::integrity(
                 "stale task transition or task does not exist",
@@ -221,6 +246,31 @@ impl TaskRepository for SqliteTaskRepository {
         .await
         .map_err(map_sqlx_error)?;
 
+        sqlx::query(
+            "UPDATE tasks SET
+                generation_execution_id = ?, compiled_workflow_sha256 = ?,
+                runtime_profile = ?, concurrency_class = ?,
+                prepare_started_at = ?, prepared_at = ?, submitted_at = ?,
+                execution_started_at = ?, execution_finished_at = ?,
+                collection_finished_at = ?
+             WHERE id = ? AND status = ?",
+        )
+        .bind(&task.telemetry.generation_execution_id)
+        .bind(&task.telemetry.compiled_workflow_sha256)
+        .bind(&task.telemetry.runtime_profile)
+        .bind(&task.telemetry.concurrency_class)
+        .bind(task.telemetry.prepare_started_at.map(format_datetime))
+        .bind(task.telemetry.prepared_at.map(format_datetime))
+        .bind(task.telemetry.submitted_at.map(format_datetime))
+        .bind(task.telemetry.execution_started_at.map(format_datetime))
+        .bind(task.telemetry.execution_finished_at.map(format_datetime))
+        .bind(task.telemetry.collection_finished_at.map(format_datetime))
+        .bind(task.id.as_str())
+        .bind(task.status.as_str())
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+
         if result.rows_affected() == 0 {
             return Err(RepositoryError::integrity(
                 "stale task runtime update or task does not exist",
@@ -239,6 +289,9 @@ impl TaskRepository for SqliteTaskRepository {
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
+                generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                concurrency_class, prepare_started_at, prepared_at, submitted_at,
+                execution_started_at, execution_finished_at, collection_finished_at,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
@@ -264,6 +317,9 @@ impl TaskRepository for SqliteTaskRepository {
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
+                generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                concurrency_class, prepare_started_at, prepared_at, submitted_at,
+                execution_started_at, execution_finished_at, collection_finished_at,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
@@ -288,6 +344,9 @@ impl TaskRepository for SqliteTaskRepository {
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
+                generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                concurrency_class, prepare_started_at, prepared_at, submitted_at,
+                execution_started_at, execution_finished_at, collection_finished_at,
                 status, prompt_id, queue_number,
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
@@ -355,10 +414,13 @@ fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), Repos
     let allowed = match event.event_type {
         TaskEventType::TaskSubmissionPrepared
         | TaskEventType::TaskSubmissionConfirmed
-        | TaskEventType::TaskCompiledWorkflowValidated => {
+        | TaskEventType::TaskCompiledWorkflowValidated
+        | TaskEventType::TaskTelemetryUpdated => {
             task.status == TaskStatus::Preparing
                 || (event.event_type == TaskEventType::TaskSubmissionConfirmed
                     && task.status == TaskStatus::CancelRequested)
+                || (event.event_type == TaskEventType::TaskTelemetryUpdated
+                    && !task.status.is_terminal())
         }
         TaskEventType::TaskNodeStarted | TaskEventType::TaskProgressUpdated => {
             task.status == TaskStatus::Running
@@ -540,6 +602,16 @@ struct TaskRow {
     package_name: Option<String>,
     package_source_path: Option<String>,
     dynamic_binding_targets_json: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    prepare_started_at: Option<String>,
+    prepared_at: Option<String>,
+    submitted_at: Option<String>,
+    execution_started_at: Option<String>,
+    execution_finished_at: Option<String>,
+    collection_finished_at: Option<String>,
     status: String,
     prompt_id: Option<String>,
     queue_number: Option<i64>,
@@ -683,6 +755,36 @@ impl TaskRow {
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             runtime_provenance,
+            telemetry: TaskTelemetry {
+                generation_execution_id: self.generation_execution_id,
+                compiled_workflow_sha256: self.compiled_workflow_sha256,
+                runtime_profile: self.runtime_profile,
+                concurrency_class: self.concurrency_class,
+                prepare_started_at: parse_optional_datetime(
+                    "task prepare_started_at",
+                    self.prepare_started_at.as_deref(),
+                )?,
+                prepared_at: parse_optional_datetime(
+                    "task prepared_at",
+                    self.prepared_at.as_deref(),
+                )?,
+                submitted_at: parse_optional_datetime(
+                    "task submitted_at",
+                    self.submitted_at.as_deref(),
+                )?,
+                execution_started_at: parse_optional_datetime(
+                    "task execution_started_at",
+                    self.execution_started_at.as_deref(),
+                )?,
+                execution_finished_at: parse_optional_datetime(
+                    "task execution_finished_at",
+                    self.execution_finished_at.as_deref(),
+                )?,
+                collection_finished_at: parse_optional_datetime(
+                    "task collection_finished_at",
+                    self.collection_finished_at.as_deref(),
+                )?,
+            },
             status,
             prompt_id: self.prompt_id,
             queue_number: self.queue_number,
@@ -731,7 +833,7 @@ mod tests {
     use crate::application::ports::TaskRepository;
     use crate::domain::{
         RuntimeProvenance, Task, TaskError, TaskEventType, TaskProgress, TaskStateMachine,
-        TaskStatus,
+        TaskStatus, TaskTelemetryPatch,
     };
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use chrono::{Duration, TimeZone, Utc};
@@ -757,6 +859,47 @@ mod tests {
             "recipe-1",
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         )
+    }
+
+    #[tokio::test]
+    async fn telemetry_roundtrips_and_legacy_task_columns_remain_nullable() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("task should be created");
+        let event = task
+            .record_telemetry_update(
+                TaskTelemetryPatch {
+                    generation_execution_id: Some("gen_repo".to_owned()),
+                    compiled_workflow_sha256: Some("compiled-sha".to_owned()),
+                    runtime_profile: Some("KREA2_IMAGE".to_owned()),
+                    concurrency_class: Some("GPU_HEAVY_SERIAL".to_owned()),
+                    ..TaskTelemetryPatch::default()
+                },
+                task.created_at,
+            )
+            .unwrap();
+        repository
+            .persist_runtime_update(&task, &event)
+            .await
+            .expect("telemetry should persist");
+
+        let restored = repository
+            .find_by_id(&task.id)
+            .await
+            .expect("task should load")
+            .expect("task should exist");
+        assert_eq!(
+            restored.telemetry.generation_execution_id.as_deref(),
+            Some("gen_repo")
+        );
+        assert_eq!(
+            restored.telemetry.compiled_workflow_sha256.as_deref(),
+            Some("compiled-sha")
+        );
+        assert!(restored.telemetry.prepare_started_at.is_none());
     }
 
     #[tokio::test]

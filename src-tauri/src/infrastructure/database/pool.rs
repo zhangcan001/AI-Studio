@@ -124,6 +124,17 @@ mod tests {
         .await
         .expect("workflow archive metadata should be readable");
         assert_eq!(runtime_state_columns, vec!["archived", "archived_at"]);
+        let telemetry_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('tasks') WHERE name IN
+             ('generation_execution_id', 'compiled_workflow_sha256', 'runtime_profile',
+              'concurrency_class', 'prepare_started_at', 'prepared_at', 'submitted_at',
+              'execution_started_at', 'execution_finished_at', 'collection_finished_at')
+             ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("task telemetry metadata should be readable");
+        assert_eq!(telemetry_columns.len(), 10);
 
         sqlx::query(
             "INSERT INTO projects (id, name, root_path, created_at, updated_at)
@@ -182,7 +193,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adding_migrations_011_to_015_preserves_existing_project_runtime_rows() {
+    async fn adding_migrations_011_to_016_preserves_existing_project_runtime_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-app.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -262,11 +273,12 @@ mod tests {
             include_str!("../../../migrations/013_workflow_archive_and_package_metadata.sql"),
             include_str!("../../../migrations/014_workflow_benchmark.sql"),
             include_str!("../../../migrations/015_runtime_provenance.sql"),
+            include_str!("../../../migrations/016_generation_telemetry.sql"),
         ] {
             sqlx::raw_sql(migration)
                 .execute(&pool)
                 .await
-                .expect("migrations 012-015 should apply to the 011 database");
+                .expect("migrations 012-016 should apply to the 011 database");
         }
 
         let after: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
@@ -320,6 +332,18 @@ mod tests {
             .await
             .expect("task runtime provenance columns should be readable"),
             9
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name IN
+                 ('generation_execution_id', 'compiled_workflow_sha256', 'runtime_profile',
+                  'concurrency_class', 'prepare_started_at', 'prepared_at', 'submitted_at',
+                  'execution_started_at', 'execution_finished_at', 'collection_finished_at')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("task telemetry columns should be readable"),
+            10
         );
         let preserved_rows: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT
