@@ -255,3 +255,33 @@
 - 当前 v0.4.0 tag：不存在；GitHub Release：不存在；v0.3.0、Runtime Packages、migration 018、BACKUP_VERSION 9 未修改。
 - Final gate：`FAIL — H3 quick smoke CUDA OOM after standard retry`。
 - Publish result：未创建 `v0.4.0` tag，未创建 GitHub Release，未上传 artifacts。
+
+## DEV-024B H3 Clean Restart Validation
+
+本节是 DEV-024B 当前 clean-restart 结果；上节的两次 H3 OOM 失败记录保留为历史证据，没有被覆盖。
+
+### GPU and ComfyUI clean state
+
+- AI Studio 与 ComfyUI 均先正常关闭；仅终止了明确属于本次 ComfyUI 的残留进程 `D:\ComfyUI-WorkFisher-V2\python\python.exe main.py`，未终止其它用户 GPU 进程。
+- fresh ComfyUI restart：PID `22308`；`/system_stats=200`；`/object_info=200`。
+- ComfyUI：`0.33.0`；Python `3.12.10`；PyTorch `2.9.0+cu130`；GPU `cuda:0 NVIDIA GeForce RTX 5060 Ti : cudaMallocAsync`；启动参数与既有环境一致：`--force-upcast-attention --use-pytorch-cross-attention --listen 127.0.0.1 --port 8188`。
+- restart 后空闲 VRAM：`15,875,309,568 / 17,102,864,384` bytes；成功执行后观察到 free `1,635,206,120` bytes（`nvidia-smi` 同时显示 used `14,516 MiB` / free `1,535 MiB`）。本轮没有 GPU peak telemetry 字段，因此只记录可观测值，不虚构 peak。
+
+### Direct H3 FAST clean smoke
+
+- 复用既有 Krea2 Image Asset：`ast_f93c35c1-fe39-4147-953d-c4164ab41a8d`；没有重跑 Krea2。
+- ProductionRun：`prun_cb3dc1f3f1234a779d3092539efdc832`；H3 Stage：`prst_08ac46f4af91406f97778d02bdae8f61`；本轮新 Batch：`pbt_98c20a90c6674a9c89358c0b1402601c`；Stage 保留此前失败 attempts，Run 最终显示 `PARTIAL_FAILED`，不掩盖历史失败。
+- Workflow：`wfl_minimax_h3_fl2va`；Workflow Version：`wfv_e5d5098a-5c7e-40ce-a15e-7b10c53b135a`；Recipe：`rcp_84e7adbd-c80c-40fc-9746-b5da500ce2f4` version `1.0.0`；Runtime Package：`minimax_h3_fl2va_1_0_0`。
+- Frozen parameters：`H3_FAST` / `FL2VA` / `1s` / `864×480` / seed `42030`；未修改 workflow、steps、model、offload policy、resolution 或并发策略。
+- Task：`tsk_0d0819a6-8182-452c-b99f-88d64d48eb78`；prompt：`59e2ffe6-abfa-4429-ba8c-76f276b27211`；Snapshot：`snp_76037110-8273-441e-9457-4ed2e9b395e8`。
+- generation execution：`gen_58464bcee3ec0bdd4b7c7861b9968fab907df67b22ce19cdc97a65e192683b7b`；compiled workflow SHA：`07a095b17ef984c02c07242d73843cbe7b9ce8a2d73ddd2feaeed5129e3af221`；runtime provenance build commit：`94918f6322ce690ff7b1630961abb56b8a31ed11`；concurrency：`GPU_STANDARD_SERIAL`。
+- Video Asset：`ast_017c5e5b-127e-4e7b-9b43-bcc699539a47`；MP4 `146262` bytes；SHA-256 `3f2bda5246d4a9df3df5a480d6c664f36624f448e127c52bb5b642341c53f0c5`；`ffprobe`：H.264 + AAC、`864×480`、`1.625s`；thumbnail 存在。
+- Clean smoke result：Task `SUCCEEDED`，Video Asset 存在，playback valid；`H3 clean smoke PASS`。
+- OOM conclusion：`TRANSIENT ENVIRONMENT ISSUE`。干净重启后同一 frozen H3 配置成功，证明前两次 OOM 是 ComfyUI/GPU 状态瞬态问题；没有修改产品代码或 Runtime Package。
+
+### DEV-024B final gates
+
+- Final regression：`cargo fmt --all -- --check` PASS；`cargo check --manifest-path src-tauri/Cargo.toml` PASS；Rust `464 passed / 0 failed / 0 ignored`；`pnpm test` `46 files / 152 tests passed`；`pnpm build` PASS；`git diff --check` PASS。
+- Freeze：Source RC 仍为 `94918f6322ce690ff7b1630961abb56b8a31ed11`；migration `018`；无 migration `019`；BACKUP_VERSION `9`；Runtime Package bytes unchanged；v0.3.0 unchanged。
+- Candidate artifacts：未重新构建；本地三件产物 hash 与 `docs/RELEASE_SHA256_0.4.0.txt` 一致，embedded build commit 匹配 Source RC。
+- Current conclusion：`AI STUDIO 0.4.0 FINAL RELEASE GATE PASS`，进入 tag / GitHub Release 流程；旧 OOM 失败证据继续保留。
