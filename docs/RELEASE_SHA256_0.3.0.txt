@@ -1,8 +1,10 @@
-AI Studio 0.3.0 local release candidate artifacts
-Generated: 2026-08-12
-Status: STALE AFTER POST-GATE SOURCE CHANGES; local only; no upload, tag, or GitHub Release
+AI Studio 0.3.0 release candidate artifacts
+Generated: 2026-08-16
+Status: NOT BUILT — DEV-017B final gate blocked before `pnpm tauri build`; no current RC artifact hashes exist.
+Previous local artifact hashes were removed from the release-candidate list because they do not correspond to the evaluated source RC SHA.
+No upload, tag, or GitHub Release.
 
 SHA-256                                    Bytes       Artifact
-6DDA820FAA5CA6B00C4871E8105DB643F9A61F123BCFB58128FBEEF763512757  31424512  src-tauri/target/release/ai-studio.exe
-2C9CCCBEF05C07FEF015B6111BAEBFF6E9FA09F4A6821B20589617309E012682  7422990   src-tauri/target/release/bundle/nsis/AI Studio_0.3.0_x64-setup.exe
-3277658787E4FE926EB2B095DEE4F0AD824C7AE990A6B66BC79D0B1D837984A0  10870784  src-tauri/target/release/bundle/msi/AI Studio_0.3.0_x64_en-US.msi
+NOT RECORDED                               —           ai-studio.exe
+NOT RECORDED                               —           NSIS setup.exe
+NOT RECORDED                               —           MSI
