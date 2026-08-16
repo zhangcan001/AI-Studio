@@ -83,6 +83,32 @@ After the restart attempt in this run, the new application instance did not expo
 - Status：`SUCCEEDED`
 - Output asset：`ast_11b549f1-a592-444c-9ad2-7536364fa225`, MP4, 864×480, about 5 seconds
 
+## DEV-016D — H3 QUALITY 20-Step Live Validation
+
+**PASS — evidence recovered from the current Task, Snapshot, Task Events and Asset rows.**
+
+- Task：`tsk_496106ce-44f3-4d74-8395-6deb6bb3ee40`
+- Status：`SUCCEEDED`
+- ComfyUI prompt ID：`3d64394e-eb8e-4b84-8232-bf4588ebcf30`
+- Workflow ID：`wfl_minimax_h3_fl2va_first_last_quality`
+- Workflow version ID：`wfv_05eb0fc3-04dd-47b9-a7fe-11077800a35c`
+- Workflow version：`2.0.0`
+- Workflow SHA-256：`96d98f74684cc3f76d028a182829a6f2a7ac3c0d37173a6182edc68b63ced992`
+- Recipe ID：`rcp_0da72110-47a5-4a90-96d1-4f601d11b0d0`
+- Recipe version：`2.0.0`
+- Recipe SHA-256：`761760bb34f7ffd30e448e28ebc5ea43ecaac110c6cbf5ebf932aaf5bc3636ab`
+- Package：`minimax_h3_fl2va_first_last_quality_2_0_0`
+- Parameters：fixed seed `398926132886102`, `1` second, `736×416`
+- Sampling：compiled node `23` recorded `steps = 20`
+- Dynamic targets：`14.first_frame`, `14.height`, `14.last_frame`, `14.prompt`, `14.width`, `15.noise_seed`, `22.value`, `24.image`, `28.image`
+- Snapshot：`snp_0781a464-8a41-4e20-a845-f1d604ae206f`
+- Output Asset：`ast_fba9ae5d-7a74-40bb-8291-386473d7325d`, MP4, `736×416`, `1625 ms`
+- Task Events：submission prompt ID, node execution, progress `1/20` through `20/20`, collection and success are all present
+- Compiled workflow: first/last frame inputs were concrete task-scoped uploaded identities; internal optional placeholders were absent
+- Runtime Provenance：app `0.3.0`, build `d8dabc9a104f7b14cfd041cbc62c5cfde53678ac`, package/workflow/recipe hashes and dynamic targets persisted
+
+This is a QUALITY first/last-frame validation record. It does not satisfy the separate DEV-016C exact target of three reference images using FAST at 5 seconds and 864×480.
+
 ## Native playback
 
 **PASS for Case 3 output.** The task detail opened the generated video in AI Studio's native preview. After clicking the native `播放` control, the accessibility state changed to `暂停`, confirming playback started inside AI Studio.
