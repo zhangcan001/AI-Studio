@@ -27,6 +27,7 @@ impl SqliteTaskHistoryRepository {
 
 const TASK_HISTORY_SELECT: &str = "SELECT
     t.id, t.project_id, t.workflow_id, t.workflow_version_id, t.recipe_id,
+    t.submission_idempotency_key, t.submission_attempt, t.parent_task_id,
     t.app_version, t.build_commit, t.workflow_version, t.workflow_sha256,
     t.recipe_version, t.recipe_sha256, t.package_name, t.package_source_path,
     t.dynamic_binding_targets_json,
@@ -238,6 +239,9 @@ struct TaskHistoryRow {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    submission_idempotency_key: Option<String>,
+    submission_attempt: Option<i64>,
+    parent_task_id: Option<String>,
     app_version: Option<String>,
     build_commit: Option<String>,
     workflow_version: Option<String>,
@@ -403,64 +407,81 @@ impl TaskHistoryRow {
             }
         };
 
-        let task = Task {
-            id: TaskId::parse(self.id)
-                .map_err(|error| map_domain_error("task history id", error))?,
-            project_id: self.project_id,
-            workflow_id: self.workflow_id,
-            workflow_version_id: self.workflow_version_id,
-            recipe_id: self.recipe_id,
-            runtime_provenance,
-            telemetry: TaskTelemetry {
-                generation_execution_id: self.generation_execution_id,
-                compiled_workflow_sha256: self.compiled_workflow_sha256,
-                runtime_profile: self.runtime_profile,
-                concurrency_class: self.concurrency_class,
-                prepare_started_at: parse_optional_datetime(
-                    "task history prepare_started_at",
-                    self.prepare_started_at.as_deref(),
+        let task =
+            Task {
+                id: TaskId::parse(self.id)
+                    .map_err(|error| map_domain_error("task history id", error))?,
+                project_id: self.project_id,
+                workflow_id: self.workflow_id,
+                workflow_version_id: self.workflow_version_id,
+                recipe_id: self.recipe_id,
+                submission_idempotency_key: self.submission_idempotency_key,
+                submission_attempt: self.submission_attempt.unwrap_or(1).try_into().map_err(
+                    |_| {
+                        RepositoryError::serialization(
+                            "task history submission_attempt",
+                            "value is outside the valid u32 range",
+                        )
+                    },
                 )?,
-                prepared_at: parse_optional_datetime(
-                    "task history prepared_at",
-                    self.prepared_at.as_deref(),
+                parent_task_id: self
+                    .parent_task_id
+                    .map(|value| {
+                        TaskId::parse(value)
+                            .map_err(|error| map_domain_error("task history parent_task_id", error))
+                    })
+                    .transpose()?,
+                runtime_provenance,
+                telemetry: TaskTelemetry {
+                    generation_execution_id: self.generation_execution_id,
+                    compiled_workflow_sha256: self.compiled_workflow_sha256,
+                    runtime_profile: self.runtime_profile,
+                    concurrency_class: self.concurrency_class,
+                    prepare_started_at: parse_optional_datetime(
+                        "task history prepare_started_at",
+                        self.prepare_started_at.as_deref(),
+                    )?,
+                    prepared_at: parse_optional_datetime(
+                        "task history prepared_at",
+                        self.prepared_at.as_deref(),
+                    )?,
+                    submitted_at: parse_optional_datetime(
+                        "task history submitted_at",
+                        self.submitted_at.as_deref(),
+                    )?,
+                    execution_started_at: parse_optional_datetime(
+                        "task history execution_started_at",
+                        self.execution_started_at.as_deref(),
+                    )?,
+                    execution_finished_at: parse_optional_datetime(
+                        "task history execution_finished_at",
+                        self.execution_finished_at.as_deref(),
+                    )?,
+                    collection_finished_at: parse_optional_datetime(
+                        "task history collection_finished_at",
+                        self.collection_finished_at.as_deref(),
+                    )?,
+                },
+                status,
+                prompt_id: self.prompt_id,
+                queue_number: self.queue_number,
+                progress,
+                current_node_id: self.current_node_id,
+                error,
+                created_at: parse_datetime("task history created_at", &self.created_at)?,
+                queued_at: parse_optional_datetime(
+                    "task history queued_at",
+                    self.queued_at.as_deref(),
                 )?,
-                submitted_at: parse_optional_datetime(
-                    "task history submitted_at",
-                    self.submitted_at.as_deref(),
+                started_at: parse_optional_datetime(
+                    "task history started_at",
+                    self.started_at.as_deref(),
                 )?,
-                execution_started_at: parse_optional_datetime(
-                    "task history execution_started_at",
-                    self.execution_started_at.as_deref(),
+                finished_at: parse_optional_datetime(
+                    "task history finished_at",
+                    self.finished_at.as_deref(),
                 )?,
-                execution_finished_at: parse_optional_datetime(
-                    "task history execution_finished_at",
-                    self.execution_finished_at.as_deref(),
-                )?,
-                collection_finished_at: parse_optional_datetime(
-                    "task history collection_finished_at",
-                    self.collection_finished_at.as_deref(),
-                )?,
-            },
-            status,
-            prompt_id: self.prompt_id,
-            queue_number: self.queue_number,
-            progress,
-            current_node_id: self.current_node_id,
-            error,
-            created_at: parse_datetime("task history created_at", &self.created_at)?,
-            queued_at: parse_optional_datetime(
-                "task history queued_at",
-                self.queued_at.as_deref(),
-            )?,
-            started_at: parse_optional_datetime(
-                "task history started_at",
-                self.started_at.as_deref(),
-            )?,
-            finished_at: parse_optional_datetime(
-                "task history finished_at",
-                self.finished_at.as_deref(),
-            )?,
-        };
+            };
         task.validate()
             .map_err(|error| map_domain_error("task history integrity", error))?;
 

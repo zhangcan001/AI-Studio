@@ -391,6 +391,8 @@ mod tests {
             ]),
             reference_manifest: None,
             submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
         };
         let result = if non_blocking {
             let returned_task = service
@@ -657,6 +659,8 @@ outputs:
             values,
             reference_manifest: None,
             submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
         };
         let outcome = service.execute(request).await.map(|_| ());
         let task = task_repository
@@ -755,6 +759,8 @@ outputs:
                     ]),
                     reference_manifest: None,
                     submission_idempotency_key: None,
+                    submission_attempt: None,
+                    parent_task_id: None,
                 },
                 |_task| async { Err(RepositoryError::integrity("simulated Shot binding failure")) },
             )

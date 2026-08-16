@@ -47,6 +47,10 @@ pub struct CreateGenerationRequest {
     /// A caller-owned idempotency boundary. Reusing it returns the original Task
     /// instead of creating another remote execution attempt.
     pub submission_idempotency_key: Option<String>,
+    /// Explicit retry lineage. The initial submission defaults to attempt 1;
+    /// retries create a new Task and point back to the previous Task.
+    pub submission_attempt: Option<u32>,
+    pub parent_task_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -364,6 +368,25 @@ impl GenerationService {
             definition.recipe_id.clone(),
             created_at,
         );
+        task.submission_idempotency_key = request
+            .submission_idempotency_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(ToOwned::to_owned);
+        task.submission_attempt = request.submission_attempt.unwrap_or(1);
+        task.parent_task_id = request
+            .parent_task_id
+            .as_deref()
+            .map(|value| {
+                crate::domain::TaskId::parse(value.to_owned()).map_err(|error| {
+                    GenerationServiceError::Domain(TaskDomainError::InvalidTask {
+                        message: format!("parent_task_id is invalid: {error}"),
+                    })
+                })
+            })
+            .transpose()?;
+        task.validate()?;
         let dynamic_binding_targets = RecipeParser::parse(&definition.recipe_yaml)
             .map(|recipe| dynamic_binding_target_labels(&recipe))
             .unwrap_or_default();

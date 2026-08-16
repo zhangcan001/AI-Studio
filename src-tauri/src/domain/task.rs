@@ -397,6 +397,11 @@ pub struct Task {
     pub workflow_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    /// Caller-owned identity for the original submission attempt. Legacy
+    /// tasks may have no key; the attempt number still normalizes to 1.
+    pub submission_idempotency_key: Option<String>,
+    pub submission_attempt: u32,
+    pub parent_task_id: Option<TaskId>,
     pub runtime_provenance: Option<RuntimeProvenance>,
     pub status: TaskStatus,
     pub prompt_id: Option<String>,
@@ -425,6 +430,9 @@ impl Task {
             workflow_id: workflow_id.into(),
             workflow_version_id: workflow_version_id.into(),
             recipe_id: recipe_id.into(),
+            submission_idempotency_key: None,
+            submission_attempt: 1,
+            parent_task_id: None,
             runtime_provenance: None,
             status: TaskStatus::Created,
             prompt_id: None,
@@ -911,6 +919,20 @@ impl Task {
         {
             return Err(TaskDomainError::invalid_task(
                 "prompt_id must not be empty when present",
+            ));
+        }
+        if self
+            .submission_idempotency_key
+            .as_deref()
+            .is_some_and(|key| key.trim().is_empty())
+        {
+            return Err(TaskDomainError::invalid_task(
+                "submission_idempotency_key must not be empty when present",
+            ));
+        }
+        if self.submission_attempt == 0 {
+            return Err(TaskDomainError::invalid_task(
+                "submission_attempt must be at least 1",
             ));
         }
         if self.queue_number.is_some_and(|number| number < 0) {

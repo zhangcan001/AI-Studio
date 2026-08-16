@@ -933,6 +933,8 @@ impl ProductionQueueService {
                         continue;
                     }
                 };
+                let (submission_attempt, parent_task_id) =
+                    self.retry_identity(&detail, next).await?;
                 let item_id = next.id.as_str().to_owned();
                 let shot_batch_repository = Arc::clone(&self.shot_batch_repository);
                 let queue_repository = Arc::clone(&self.repository);
@@ -950,6 +952,8 @@ impl ProductionQueueService {
                                 "production-item:{}",
                                 next.id.as_str()
                             )),
+                            submission_attempt,
+                            parent_task_id,
                         },
                         move |task| {
                             let item_id = item_id.clone();
@@ -1030,6 +1034,48 @@ impl ProductionQueueService {
 
             sleep(Duration::from_millis(750)).await;
         }
+    }
+
+    async fn retry_identity(
+        &self,
+        detail: &ProductionBatchDetail,
+        item: &ProductionBatchItem,
+    ) -> Result<(Option<u32>, Option<String>), ProductionQueueError> {
+        let Some(source_item_id) = item.retry_of_item_id.as_deref() else {
+            return Ok((None, None));
+        };
+        let source_item = detail
+            .items
+            .iter()
+            .find(|candidate| candidate.id.as_str() == source_item_id)
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidState(format!(
+                    "retry source production item {source_item_id} is missing"
+                ))
+            })?;
+        let parent_task_id = source_item.task_id.as_deref().ok_or_else(|| {
+            ProductionQueueError::InvalidState(format!(
+                "retry source production item {source_item_id} has no parent task"
+            ))
+        })?;
+        let parent_task_id_parsed = TaskId::parse(parent_task_id.to_owned())
+            .map_err(|error| ProductionQueueError::InvalidState(error.to_string()))?;
+        let parent_task = self
+            .task_repository
+            .find_by_id(&parent_task_id_parsed)
+            .await?
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidState(format!(
+                    "retry parent task {parent_task_id} is missing"
+                ))
+            })?;
+        let attempt = parent_task
+            .submission_attempt
+            .checked_add(1)
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidState("submission attempt overflow".to_owned())
+            })?;
+        Ok((Some(attempt), Some(parent_task_id.to_owned())))
     }
 }
 

@@ -528,6 +528,8 @@ impl ShotService {
             values,
             reference_manifest,
             submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
         };
         let repository = Arc::clone(&self.repository);
         let project_id = request.project_id.clone();

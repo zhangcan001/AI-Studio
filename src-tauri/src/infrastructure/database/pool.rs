@@ -135,6 +135,32 @@ mod tests {
         .await
         .expect("task telemetry metadata should be readable");
         assert_eq!(telemetry_columns.len(), 10);
+        let idempotency_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('tasks') WHERE name IN
+             ('submission_idempotency_key', 'submission_attempt', 'parent_task_id')
+             ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("submission identity metadata should be readable");
+        assert_eq!(
+            idempotency_columns,
+            vec![
+                "submission_idempotency_key",
+                "submission_attempt",
+                "parent_task_id"
+            ]
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_tasks_project_submission_idempotency'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("submission identity index should be readable"),
+            1
+        );
 
         sqlx::query(
             "INSERT INTO projects (id, name, root_path, created_at, updated_at)
@@ -193,7 +219,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adding_migrations_011_to_016_preserves_existing_project_runtime_rows() {
+    async fn adding_migrations_011_to_017_preserves_existing_project_runtime_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-app.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -238,6 +264,20 @@ mod tests {
             .execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id, status, created_at) VALUES ('legacy-task', 'legacy-project', 'legacy-workflow', 'legacy-version', 'legacy-recipe', 'SUCCEEDED', '2026-01-01T00:00:00Z')")
             .execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO task_events
+             (id, task_id, sequence, event_type, payload_json, created_at)
+             VALUES (
+                'legacy-submission-event', 'legacy-task', 1,
+                'TASK_SUBMISSION_PREPARED',
+                ?,
+                '2026-01-01T00:00:01Z'
+             )",
+        )
+        .bind(r#"{"submissionIdempotencyKey":"legacy-request"}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at) VALUES ('legacy-asset', 'legacy-project', 'image', 'source_image', 'Legacy', 'legacy.png', 'C:/legacy/legacy.png', 'sha', 'image/png', 1, 1, 1, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
             .execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, created_at, updated_at) VALUES ('legacy-batch', 'legacy-project', 'Legacy', 'COMPLETED', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
@@ -274,11 +314,12 @@ mod tests {
             include_str!("../../../migrations/014_workflow_benchmark.sql"),
             include_str!("../../../migrations/015_runtime_provenance.sql"),
             include_str!("../../../migrations/016_generation_telemetry.sql"),
+            include_str!("../../../migrations/017_submission_idempotency.sql"),
         ] {
             sqlx::raw_sql(migration)
                 .execute(&pool)
                 .await
-                .expect("migrations 012-016 should apply to the 011 database");
+                .expect("migrations 012-017 should apply to the 011 database");
         }
 
         let after: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
@@ -344,6 +385,24 @@ mod tests {
             .await
             .expect("task telemetry columns should be readable"),
             10
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT submission_idempotency_key FROM tasks WHERE id = 'legacy-task'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("legacy submission key should be backfilled"),
+            "legacy-request"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT submission_attempt FROM tasks WHERE id = 'legacy-task'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("legacy submission attempt should be normalized"),
+            1
         );
         let preserved_rows: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT

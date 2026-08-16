@@ -509,6 +509,8 @@ impl Harness {
             values,
             reference_manifest: None,
             submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
         }
     }
 }

@@ -40,6 +40,7 @@ impl TaskRepository for SqliteTaskRepository {
         sqlx::query(
             "INSERT INTO tasks (
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
@@ -47,13 +48,16 @@ impl TaskRepository for SqliteTaskRepository {
                 progress_mode, progress_current, progress_total, current_node_id,
                 error_code, error_message, raw_error_json,
                 created_at, queued_at, started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(task.id.as_str())
         .bind(&task.project_id)
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(&values.submission_idempotency_key)
+        .bind(values.submission_attempt)
+        .bind(&values.parent_task_id)
         .bind(values.app_version)
         .bind(values.build_commit)
         .bind(values.workflow_version)
@@ -114,6 +118,7 @@ impl TaskRepository for SqliteTaskRepository {
         let result = sqlx::query(
             "UPDATE tasks SET
                 project_id = ?, workflow_id = ?, workflow_version_id = ?, recipe_id = ?,
+                submission_idempotency_key = ?, submission_attempt = ?, parent_task_id = ?,
                 app_version = ?, build_commit = ?, workflow_version = ?, workflow_sha256 = ?,
                 recipe_version = ?, recipe_sha256 = ?, package_name = ?, package_source_path = ?,
                 dynamic_binding_targets_json = ?,
@@ -127,6 +132,9 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(&values.submission_idempotency_key)
+        .bind(values.submission_attempt)
+        .bind(&values.parent_task_id)
         .bind(values.app_version)
         .bind(values.build_commit)
         .bind(values.workflow_version)
@@ -204,6 +212,7 @@ impl TaskRepository for SqliteTaskRepository {
         let result = sqlx::query(
             "UPDATE tasks SET
                 project_id = ?, workflow_id = ?, workflow_version_id = ?, recipe_id = ?,
+                submission_idempotency_key = ?, submission_attempt = ?, parent_task_id = ?,
                 app_version = ?, build_commit = ?, workflow_version = ?, workflow_sha256 = ?,
                 recipe_version = ?, recipe_sha256 = ?, package_name = ?, package_source_path = ?,
                 dynamic_binding_targets_json = ?,
@@ -217,6 +226,9 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(&task.workflow_id)
         .bind(&task.workflow_version_id)
         .bind(&task.recipe_id)
+        .bind(&values.submission_idempotency_key)
+        .bind(values.submission_attempt)
+        .bind(&values.parent_task_id)
         .bind(values.app_version)
         .bind(values.build_commit)
         .bind(values.workflow_version)
@@ -286,6 +298,7 @@ impl TaskRepository for SqliteTaskRepository {
         let row = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
@@ -306,6 +319,38 @@ impl TaskRepository for SqliteTaskRepository {
         row.map(TaskRow::try_into_domain).transpose()
     }
 
+    async fn find_by_submission_idempotency_key(
+        &self,
+        project_id: &str,
+        key: &str,
+    ) -> Result<Option<Task>, RepositoryError> {
+        let row = sqlx::query_as::<_, TaskRow>(
+            "SELECT
+                id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
+                generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                concurrency_class, prepare_started_at, prepared_at, submitted_at,
+                execution_started_at, execution_finished_at, collection_finished_at,
+                status, prompt_id, queue_number,
+                progress_mode, progress_current, progress_total, current_node_id,
+                error_code, error_message, raw_error_json,
+                created_at, queued_at, started_at, finished_at
+             FROM tasks
+             WHERE project_id = ? AND submission_idempotency_key = ?
+             LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        row.map(TaskRow::try_into_domain).transpose()
+    }
+
     async fn list_recent(
         &self,
         project_id: &str,
@@ -314,6 +359,7 @@ impl TaskRepository for SqliteTaskRepository {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
@@ -341,6 +387,7 @@ impl TaskRepository for SqliteTaskRepository {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT
                 id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
                 app_version, build_commit, workflow_version, workflow_sha256,
                 recipe_version, recipe_sha256, package_name, package_source_path,
                 dynamic_binding_targets_json,
@@ -463,6 +510,9 @@ fn validate_runtime_event(task: &Task, event: &NewTaskEvent) -> Result<(), Repos
 }
 
 struct TaskDbValues {
+    submission_idempotency_key: Option<String>,
+    submission_attempt: Option<i64>,
+    parent_task_id: Option<String>,
     app_version: Option<String>,
     build_commit: Option<String>,
     workflow_version: Option<String>,
@@ -559,6 +609,12 @@ impl TaskDbValues {
             .transpose()?;
 
         Ok(Self {
+            submission_idempotency_key: task.submission_idempotency_key.clone(),
+            submission_attempt: Some(i64::from(task.submission_attempt)),
+            parent_task_id: task
+                .parent_task_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned()),
             app_version: provenance.map(|value| value.app_version.clone()),
             build_commit: provenance.map(|value| value.build_commit.clone()),
             workflow_version: provenance.map(|value| value.workflow_version.clone()),
@@ -593,6 +649,9 @@ struct TaskRow {
     workflow_id: String,
     workflow_version_id: String,
     recipe_id: String,
+    submission_idempotency_key: Option<String>,
+    submission_attempt: Option<i64>,
+    parent_task_id: Option<String>,
     app_version: Option<String>,
     build_commit: Option<String>,
     workflow_version: Option<String>,
@@ -748,12 +807,36 @@ impl TaskRow {
             }
         };
 
+        let submission_attempt = match self.submission_attempt {
+            None => 1,
+            Some(value) => u32::try_from(value).map_err(|_| {
+                RepositoryError::serialization(
+                    "task submission_attempt",
+                    format!("value {value} is outside the valid u32 range"),
+                )
+            })?,
+        };
+        if submission_attempt == 0 {
+            return Err(RepositoryError::integrity(
+                "task submission_attempt must be at least 1",
+            ));
+        }
+        let parent_task_id = self
+            .parent_task_id
+            .map(|value| {
+                TaskId::parse(value).map_err(|error| map_domain_error("task parent_task_id", error))
+            })
+            .transpose()?;
+
         let task = Task {
             id: TaskId::parse(self.id).map_err(|error| map_domain_error("task id", error))?,
             project_id: self.project_id,
             workflow_id: self.workflow_id,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
+            submission_idempotency_key: self.submission_idempotency_key,
+            submission_attempt,
+            parent_task_id,
             runtime_provenance,
             telemetry: TaskTelemetry {
                 generation_execution_id: self.generation_execution_id,
@@ -830,7 +913,7 @@ impl EventRow {
 #[cfg(test)]
 mod tests {
     use super::SqliteTaskRepository;
-    use crate::application::ports::TaskRepository;
+    use crate::application::ports::{RepositoryError, TaskRepository};
     use crate::domain::{
         RuntimeProvenance, Task, TaskError, TaskEventType, TaskProgress, TaskStateMachine,
         TaskStatus, TaskTelemetryPatch,
@@ -1447,6 +1530,7 @@ mod tests {
     async fn submission_idempotency_lookup_survives_repository_reload() {
         let (_directory, _pool, repository) = setup().await;
         let mut task = new_task();
+        task.submission_idempotency_key = Some("request-idempotent".to_owned());
         repository
             .create(&task, &task.created_event())
             .await
@@ -1498,5 +1582,134 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn same_project_and_same_key_are_rejected_by_the_database() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut first = new_task();
+        first.submission_idempotency_key = Some("same-project-key".to_owned());
+        repository
+            .create(&first, &first.created_event())
+            .await
+            .expect("first task should create");
+
+        let mut duplicate = new_task();
+        duplicate.submission_idempotency_key = Some("same-project-key".to_owned());
+        let result = repository
+            .create(&duplicate, &duplicate.created_event())
+            .await;
+        assert!(matches!(result, Err(RepositoryError::Integrity { .. })));
+    }
+
+    #[tokio::test]
+    async fn different_projects_may_reuse_the_same_key() {
+        let (_directory, pool, repository) = setup().await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Project 2', 'C:/project-2',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("second project should exist");
+        let mut first = new_task();
+        first.submission_idempotency_key = Some("cross-project-key".to_owned());
+        repository
+            .create(&first, &first.created_event())
+            .await
+            .expect("first task should create");
+
+        let mut second = Task::new(
+            "project-2",
+            "workflow-1",
+            "workflow-version-1",
+            "recipe-1",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap(),
+        );
+        second.submission_idempotency_key = Some("cross-project-key".to_owned());
+        repository
+            .create(&second, &second.created_event())
+            .await
+            .expect("same key should be allowed in another project");
+    }
+
+    #[tokio::test]
+    async fn concurrent_same_key_inserts_have_one_database_winner() {
+        let (_directory, _pool, repository) = setup().await;
+        let repository = std::sync::Arc::new(repository);
+        let mut first = new_task();
+        first.submission_idempotency_key = Some("concurrent-key".to_owned());
+        let mut second = new_task();
+        second.submission_idempotency_key = Some("concurrent-key".to_owned());
+        let first_event = first.created_event();
+        let second_event = second.created_event();
+        let (first_result, second_result) = tokio::join!(
+            repository.create(&first, &first_event),
+            repository.create(&second, &second_event)
+        );
+        assert_eq!(
+            [first_result.is_ok(), second_result.is_ok()]
+                .into_iter()
+                .filter(|value| *value)
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_null_identity_remains_readable() {
+        let (_directory, _pool, repository) = setup().await;
+        let task = new_task();
+        repository
+            .create(&task, &task.created_event())
+            .await
+            .expect("legacy-compatible task should create");
+        let restored = repository
+            .find_by_id(&task.id)
+            .await
+            .unwrap()
+            .expect("legacy-compatible task should load");
+        assert!(restored.submission_idempotency_key.is_none());
+        assert_eq!(restored.submission_attempt, 1);
+        assert!(restored.parent_task_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn retry_identity_round_trips_without_mutating_parent_task() {
+        let (_directory, _pool, repository) = setup().await;
+        let mut parent = new_task();
+        parent.submission_idempotency_key = Some("attempt-1".to_owned());
+        repository
+            .create(&parent, &parent.created_event())
+            .await
+            .expect("parent task should create");
+
+        let mut retry = new_task();
+        retry.submission_idempotency_key = Some("attempt-2".to_owned());
+        retry.submission_attempt = 2;
+        retry.parent_task_id = Some(parent.id.clone());
+        repository
+            .create(&retry, &retry.created_event())
+            .await
+            .expect("retry task should create");
+
+        let restored = repository
+            .find_by_id(&retry.id)
+            .await
+            .unwrap()
+            .expect("retry task should load");
+        assert_eq!(restored.submission_attempt, 2);
+        assert_eq!(restored.parent_task_id, Some(parent.id.clone()));
+        let parent_restored = repository
+            .find_by_id(&parent.id)
+            .await
+            .unwrap()
+            .expect("parent task should remain");
+        assert_eq!(parent_restored.submission_attempt, 1);
+        assert_eq!(
+            parent_restored.submission_idempotency_key.as_deref(),
+            Some("attempt-1")
+        );
     }
 }

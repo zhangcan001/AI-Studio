@@ -212,6 +212,8 @@ impl GenerationCreateRequest {
             values,
             reference_manifest: None,
             submission_idempotency_key: self.submission_idempotency_key,
+            submission_attempt: None,
+            parent_task_id: None,
         })
     }
 }
@@ -231,6 +233,8 @@ impl GenerationBatchItemRequest {
             values,
             reference_manifest: None,
             submission_idempotency_key: None,
+            submission_attempt: None,
+            parent_task_id: None,
         })
     }
 }
