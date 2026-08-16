@@ -2,7 +2,7 @@
 
 日期：2026-08-16
 仓库：`zhangcan001/AI-Studio`
-范围：真实本地 ComfyUI、隔离项目 `DEV023 Live Validation`、AI Studio 0.4.0 RC
+范围：真实本地 ComfyUI、隔离项目 `DEV023 Live Validation`、AI Studio 0.4.0 RC；后续 DEV-023E + DEV-024 预发布硬化证据见文末
 
 ## Baseline
 
@@ -208,14 +208,50 @@
 - NON-BLOCKER：fresh DB clean install 与 installer against copied v0.3 data 的完整隔离 smoke 受 Windows Tauri 数据目录不可重定向限制，已完成 partial smoke，不影响已通过的核心 live/code gates
 - POST-0.4.0：REF2VA 三图真实 ComfyUI 验证、更完整的 reference_index 审核工作区，以及可控数据根下的 installer upgrade smoke
 
-## Final Decision
+## DEV-023 Historical Final Decision
 
 `AI STUDIO 0.4.0 RELEASE CANDIDATE PASS`
 
 核心 Krea2 → Selection → H3 FAST → Video Asset live chain、重启恢复、重复提交保护、失败重试、lineage、H3 QUALITY 扩展验证、代码回归、migration、backup 与 RC build gates 均通过。REF2VA 与完整 fresh/upgrade installer isolation 按上文明确保留为 non-blocker/post-0.4.0；本任务不执行 tag、Release 或上传。
 
-## RC Metadata
+## DEV-023 Historical RC Metadata
 
 - SOURCE_RC_SHA：`bed395a6b610e433df03339a2af62b6a6e61eadf`
 - Embedded Build Commit：`bed395a6b610e433df03339a2af62b6a6e61eadf`
 - Artifact SHA-256：见 `docs/RELEASE_SHA256_0.4.0.txt`
+
+## DEV-023E + DEV-024 Pre-Publish Candidate Seed Hardening
+
+本节记录历史 DEV-023 RC 之后的当前产品代码与条件发布门禁。历史 RC 的 `bed395a6...` 代码/产物已作废；当前 Source RC 为 `94918f...`。
+
+### Seed contract and fix
+
+- 真实 Krea2 seed input：recipe `rcp_0575fb13-6bfb-41cb-ba10-eba2719a793c` 的 typed `InputDefinition::Seed`，值为 `GenerationInputValue::Seed(SeedValue::Fixed(u64))`；合法范围为 `0..=1125899906842624`。
+- Root cause：`ProductionOrchestratorService::run_images` 为 `image_count` 个 BatchItem 复用了同一份 `values`，因此 fixed seed 没有按 candidate ordinal 派生。
+- Fix：在创建 BatchItem 前按 typed recipe metadata 派生 `S + ordinal`；使用 checked arithmetic 和 recipe max 校验；无 seed、Random、非 seed integer 均保持不变。最终 seed 写入每个 BatchItem/StageItem frozen values，retry 复用该 frozen seed。
+- Product commit / Source RC：`94918f6322ce690ff7b1630961abb56b8a31ed11` (`fix: diversify krea2 production run candidate seeds`)
+
+### Targeted Krea2 live validation
+
+- 隔离项目：`prj_450db6d6-30bd-4cc6-b8ad-384d26aff827` (`DEV024 Candidate Seed Validation`)
+- 两图 Run：`prun_cb3dc1f3f1234a779d3092539efdc832`；Krea2 Stage `prst_13e1a04b071749889b863195b726cfe1`；Batch `pbt_fc66746839f5484bbea97444139ad165`；Stage/Run 的 Krea2 结果为 `SUCCEEDED` / `WAITING_FOR_SELECTION`。
+- Candidate 1：seed `42030`；Task `tsk_43e8e32e-43de-4ba3-b353-194a19f147fc`；Snapshot `snp_c07e2a7b-09b9-4aa3-b08f-5c099041e2d6`；Asset `ast_f93c35c1-fe39-4147-953d-c4164ab41a8d`；`949875` bytes；SHA-256 `b602cd7f172cf2919181b84d9897c37df76c3b30f356e639bc58d2d687f9924f`。
+- Candidate 2：seed `42031`；Task `tsk_59616500-5f17-4b60-b6c9-b7127ce8e2a6`；Snapshot `snp_aab4f086-41ea-4442-8729-322a459c64c7`；Asset `ast_71e6b635-2c44-4864-93f1-1bf13d46afb4`；`922535` bytes；SHA-256 `a3b9171bf2ce37d3fd9ee5c1a82ffff1a5344891aabdd7720da923e2330ef794`。
+- Diversity gates：seeds different `PASS`；independently verified image hashes different `PASS`。
+- 单图兼容 Run：`prun_bd3f9b7ac0184e1d9da5387db5a5e761`；Stage `prst_f36a1d1efa6244d3b4195b4f0ca6520e`；Task `tsk_e92dce77-7201-4414-a3ab-bcf5f59b49ce`；Snapshot `snp_163bd59c-1792-4aea-8baa-9a798b8ce2b1`；Asset `ast_13c04d4c-a336-4166-963d-7f8e18040fbd`；resolved seed `42040`；结果 `SUCCEEDED`。
+
+### H3 quick smoke gate
+
+- 选择 Asset：`ast_f93c35c1-fe39-4147-953d-c4164ab41a8d`；Selection 已 `SUCCEEDED`，H3 first-frame/source mapping 保持 `source_asset_id` 与 `reference_index=0`。
+- H3 参数保持最低 smoke 配置：`H3_FAST` / `FL2VA` / `1s` / `864×480` / seed `42030`；未降低参数、未改 workflow、未启用并发或多 GPU。
+- 原始 attempt：Stage `prst_08ac46f4af91406f97778d02bdae8f61`；Task `tsk_80a11eca-1c54-4221-8c7a-77bcb3248411`；Snapshot `snp_72bc9057-c765-49ca-ad5f-489a2aa3752e`；prompt `14c23d44-181d-4afa-9a57-b820b78bdcd6`；`EXECUTION_ERROR`，ComfyUI node 3 `SamplerCustomAdvanced` CUDA out of memory；无 Video Asset。
+- Retry attempt：Task `tsk_f1d66ba8-5bf5-475d-8fd1-9f8381395d7b`；Snapshot `snp_37b910d8-4ba2-4572-9f77-817516d0224a`；prompt `ef98af85-b727-4c7a-bd57-002fa44bfb65`；同样为 `EXECUTION_ERROR` / node 3 CUDA out of memory；冻结参数仍为 `1s / 864×480 / 42030`，无 Video Asset。
+- Retry 前已调用 ComfyUI 官方 `/free`（unload models + free memory），随后重试仍失败；原始失败证据保留在 Run 中，Run/Stage 最终均为 `FAILED`。
+- H3 smoke gate：`FAIL`。因此不执行 tag、GitHub Release 或上传。
+
+### Current conditional publish decision
+
+- Current candidate artifacts and hashes：见 `docs/RELEASE_SHA256_0.4.0.txt`；旧 `bed395a6...` artifacts 已明确标记 `STALE — DO NOT PUBLISH`。
+- 当前 v0.4.0 tag：不存在；GitHub Release：不存在；v0.3.0、Runtime Packages、migration 018、BACKUP_VERSION 9 未修改。
+- Final gate：`FAIL — H3 quick smoke CUDA OOM after standard retry`。
+- Publish result：未创建 `v0.4.0` tag，未创建 GitHub Release，未上传 artifacts。

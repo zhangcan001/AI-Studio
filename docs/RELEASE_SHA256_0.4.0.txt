@@ -1,13 +1,24 @@
-# AI Studio 0.4.0 RC SHA-256
+# AI Studio 0.4.0 Pre-Publish Candidate SHA-256
 
-Source RC SHA: `bed395a6b610e433df03339a2af62b6a6e61eadf`
-Embedded Build Commit: `bed395a6b610e433df03339a2af62b6a6e61eadf`
+Publish status: `BLOCKED — FINAL RELEASE GATE FAIL (H3 FAST CUDA OOM after standard retry)`
+Source RC SHA: `94918f6322ce690ff7b1630961abb56b8a31ed11`
+Embedded Build Commit: `94918f6322ce690ff7b1630961abb56b8a31ed11`
 App version: `0.4.0`
 
 | filename | bytes | SHA-256 |
 | --- | ---: | --- |
-| `src-tauri/target/release/ai-studio.exe` | 35,956,224 | `D5651BF09FCD3081D112C08F2D08D41FD27EEF3AB9DF3E8CA1001C4F35A48211` |
-| `src-tauri/target/release/bundle/msi/AI Studio_0.4.0_x64_en-US.msi` | 12,083,200 | `F208B9DE4AE673192E6A80176CA6BA37C47AE57AB1C9A418E715D2D16D9F0D71` |
-| `src-tauri/target/release/bundle/nsis/AI Studio_0.4.0_x64-setup.exe` | 8,219,330 | `0E9E9430216F07D29EA693486F697848600A52B1FD8CC6EEDC3650B02DB20AA3` |
+| `src-tauri/target/release/ai-studio.exe` | 36,426,752 | `2A2642C657B96396852FED03375F7F174F78680A5D6F8AB96521D3EA13373E0B` |
+| `src-tauri/target/release/bundle/msi/AI Studio_0.4.0_x64_en-US.msi` | 12,185,600 | `AB0B7EE760C310EA6E507B8A8460F44F62E103F5EAD23BF981EE4736A5CCADCA` |
+| `src-tauri/target/release/bundle/nsis/AI Studio_0.4.0_x64-setup.exe` | 8,283,719 | `5587B79AAB0F71D8C8121ABDAC16CF063D256CB175249485A5B0C95A42702067` |
 
-These are local RC build artifacts. No tag, GitHub Release, or upload was created.
+These are local pre-publish candidate artifacts. No `v0.4.0` tag, GitHub Release, or upload was created.
+
+## Superseded RC artifacts
+
+The prior RC source `bed395a6b610e433df03339a2af62b6a6e61eadf` and its artifacts are **STALE — DO NOT PUBLISH**:
+
+| filename | superseded SHA-256 |
+| --- | --- |
+| `ai-studio.exe` | `D5651BF09FCD3081D112C08F2D08D41FD27EEF3AB9DF3E8CA1001C4F35A48211` |
+| `AI Studio_0.4.0_x64_en-US.msi` | `F208B9DE4AE673192E6A80176CA6BA37C47AE57AB1C9A418E715D2D16D9F0D71` |
+| `AI Studio_0.4.0_x64-setup.exe` | `0E9E9430216F07D29EA693486F697848600A52B1FD8CC6EEDC3650B02DB20AA3` |
