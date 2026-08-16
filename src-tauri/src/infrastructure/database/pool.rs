@@ -88,12 +88,10 @@ mod tests {
 
         assert_eq!(table_count(&pool).await, 32);
         assert_eq!(
-            sqlx::query_scalar::<_, i64>(
-                "SELECT MAX(version) FROM _sqlx_migrations",
-            )
-            .fetch_one(&pool)
-            .await
-            .expect("latest migration should be readable"),
+            sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
+                .fetch_one(&pool)
+                .await
+                .expect("latest migration should be readable"),
             18
         );
         assert_eq!(

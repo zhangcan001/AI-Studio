@@ -171,9 +171,7 @@ mod tests {
         assert!(
             ProductionRunStatus::WaitingForSelection.can_transition(ProductionRunStatus::Running)
         );
-        assert!(
-            ProductionRunStatus::WaitingForSelection.can_transition(ProductionRunStatus::Ready)
-        );
+        assert!(ProductionRunStatus::WaitingForSelection.can_transition(ProductionRunStatus::Ready));
         assert!(!ProductionRunStatus::Draft.can_transition(ProductionRunStatus::Succeeded));
     }
 
