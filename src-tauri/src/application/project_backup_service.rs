@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 8;
+const BACKUP_VERSION: u32 = 9;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -60,6 +60,7 @@ pub struct ProjectBackupPreviewView {
     pub presets: usize,
     pub production_queues: usize,
     pub benchmarks: usize,
+    pub production_runs: usize,
     pub prompt_entries: usize,
     pub shots: usize,
     pub missing_workflows: Vec<String>,
@@ -187,6 +188,7 @@ impl ProjectBackupService {
             presets: document.presets.len(),
             production_queues: document.batches.len(),
             benchmarks: document.benchmark_experiments.len(),
+            production_runs: document.production_runs.len(),
             prompt_entries: document.prompt_entries.len(),
             shots: document.shots.len(),
             missing_workflows,
@@ -279,6 +281,38 @@ impl ProjectBackupService {
                 format!("bmc_{}", Uuid::new_v4().simple()),
             );
         }
+        let mut production_run_ids = HashMap::new();
+        for run in &document.production_runs {
+            production_run_ids.insert(run.id.clone(), format!("prun_{}", Uuid::new_v4().simple()));
+        }
+        let mut production_stage_ids = HashMap::new();
+        for stage in &document.production_stages {
+            production_stage_ids.insert(
+                stage.id.clone(),
+                format!("prst_{}", Uuid::new_v4().simple()),
+            );
+        }
+        let mut production_stage_item_ids = HashMap::new();
+        for item in &document.production_stage_items {
+            production_stage_item_ids
+                .insert(item.id.clone(), format!("prsi_{}", Uuid::new_v4().simple()));
+        }
+        let mut production_run_template_ids = HashMap::new();
+        for template in &document.production_run_templates {
+            production_run_template_ids.insert(
+                template.id.clone(),
+                format!("prt_{}", Uuid::new_v4().simple()),
+            );
+        }
+        let mut benchmark_run_ids = HashMap::new();
+        for run in &document.benchmark_runs {
+            benchmark_run_ids.insert(run.id.clone(), format!("bmr_{}", Uuid::new_v4().simple()));
+        }
+        let mut benchmark_quality_score_ids = HashMap::new();
+        for score in &document.benchmark_quality_scores {
+            benchmark_quality_score_ids
+                .insert(score.id.clone(), format!("bmq_{}", Uuid::new_v4().simple()));
+        }
         let mut shot_ids = HashMap::new();
         for shot in &document.shots {
             shot_ids.insert(shot.id.clone(), format!("sht_{}", Uuid::new_v4()));
@@ -327,6 +361,12 @@ impl ProjectBackupService {
                 &item_ids,
                 &benchmark_experiment_ids,
                 &benchmark_candidate_ids,
+                &production_run_ids,
+                &production_stage_ids,
+                &production_stage_item_ids,
+                &production_run_template_ids,
+                &benchmark_run_ids,
+                &benchmark_quality_score_ids,
                 &tag_ids,
                 &shot_ids,
                 &shot_generation_link_ids,
@@ -432,6 +472,16 @@ impl ProjectBackupService {
             .filter(|task| !excluded_tasks.contains(&task.id))
             .map(|task| task.id.clone())
             .collect::<HashSet<_>>();
+        let included_asset_ids = db_assets
+            .iter()
+            .filter(|asset| {
+                asset
+                    .source_task_id
+                    .as_ref()
+                    .is_none_or(|task_id| !excluded_tasks.contains(task_id))
+            })
+            .map(|asset| asset.id.as_str())
+            .collect::<HashSet<_>>();
         let tasks = db_tasks
             .into_iter()
             .filter(|task| included_task_ids.contains(&task.id))
@@ -458,6 +508,59 @@ impl ProjectBackupService {
                 candidate.task_id = None;
             }
         }
+        let production_runs = query_production_runs(&mut transaction, project_id).await?;
+        let production_stages = query_production_stages(&mut transaction, &production_runs).await?;
+        let mut production_stage_items =
+            query_production_stage_items(&mut transaction, &production_stages).await?;
+        for item in &mut production_stage_items {
+            if item
+                .task_id
+                .as_ref()
+                .is_some_and(|task_id| !included_task_ids.contains(task_id))
+            {
+                item.task_id = None;
+            }
+            if item
+                .asset_id
+                .as_ref()
+                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
+            {
+                item.asset_id = None;
+            }
+            if item
+                .source_asset_id
+                .as_ref()
+                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
+            {
+                item.source_asset_id = None;
+            }
+        }
+        let production_run_templates =
+            query_production_run_templates(&mut transaction, project_id).await?;
+        let mut benchmark_runs = query_benchmark_runs(&mut transaction, project_id).await?;
+        for run in &mut benchmark_runs {
+            if run
+                .task_id
+                .as_ref()
+                .is_some_and(|task_id| !included_task_ids.contains(task_id))
+            {
+                run.task_id = None;
+            }
+            if run.snapshot_id.as_ref().is_some_and(|snapshot_id| {
+                !snapshots.iter().any(|snapshot| snapshot.id == *snapshot_id)
+            }) {
+                run.snapshot_id = None;
+            }
+            if run
+                .output_asset_id
+                .as_ref()
+                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
+            {
+                run.output_asset_id = None;
+            }
+        }
+        let benchmark_quality_scores =
+            query_benchmark_quality_scores(&mut transaction, project_id).await?;
         let mut production_item_reviews =
             query_production_item_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
@@ -694,6 +797,12 @@ impl ProjectBackupService {
             production_item_reviews,
             benchmark_experiments,
             benchmark_candidates,
+            production_runs,
+            production_stages,
+            production_stage_items,
+            production_run_templates,
+            benchmark_runs,
+            benchmark_quality_scores,
             shots,
             shot_stage_configs,
             shot_reference_assets,
@@ -716,6 +825,12 @@ impl ProjectBackupService {
         item_ids: &HashMap<String, String>,
         benchmark_experiment_ids: &HashMap<String, String>,
         benchmark_candidate_ids: &HashMap<String, String>,
+        production_run_ids: &HashMap<String, String>,
+        production_stage_ids: &HashMap<String, String>,
+        production_stage_item_ids: &HashMap<String, String>,
+        production_run_template_ids: &HashMap<String, String>,
+        benchmark_run_ids: &HashMap<String, String>,
+        benchmark_quality_score_ids: &HashMap<String, String>,
         tag_ids: &HashMap<String, String>,
         shot_ids: &HashMap<String, String>,
         shot_generation_link_ids: &HashMap<String, String>,
@@ -741,6 +856,12 @@ impl ProjectBackupService {
             item_ids,
             benchmark_experiment_ids,
             benchmark_candidate_ids,
+            production_run_ids,
+            production_stage_ids,
+            production_stage_item_ids,
+            production_run_template_ids,
+            benchmark_run_ids,
+            benchmark_quality_score_ids,
             tag_ids,
             shot_ids,
             shot_generation_link_ids,
@@ -811,6 +932,18 @@ struct BackupDocument {
     benchmark_experiments: Vec<BackupBenchmarkExperiment>,
     #[serde(default)]
     benchmark_candidates: Vec<BackupBenchmarkCandidate>,
+    #[serde(default)]
+    production_runs: Vec<BackupProductionRun>,
+    #[serde(default)]
+    production_stages: Vec<BackupProductionStage>,
+    #[serde(default)]
+    production_stage_items: Vec<BackupProductionStageItem>,
+    #[serde(default)]
+    production_run_templates: Vec<BackupProductionRunTemplate>,
+    #[serde(default)]
+    benchmark_runs: Vec<BackupBenchmarkRun>,
+    #[serde(default)]
+    benchmark_quality_scores: Vec<BackupBenchmarkQualityScore>,
     #[serde(default)]
     shots: Vec<BackupShot>,
     #[serde(default)]
@@ -1062,6 +1195,125 @@ struct BackupBenchmarkCandidate {
     production_batch_item_id: Option<String>,
     task_id: Option<String>,
     created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionRun {
+    id: String,
+    project_id: String,
+    name: String,
+    status: String,
+    current_stage_ordinal: i64,
+    template_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionStage {
+    id: String,
+    run_id: String,
+    ordinal: i64,
+    stage_type: String,
+    status: String,
+    workflow_version_id: Option<String>,
+    recipe_id: Option<String>,
+    production_batch_id: Option<String>,
+    frozen_config: Value,
+    prompt: Option<String>,
+    created_at: String,
+    updated_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionStageItem {
+    id: String,
+    stage_id: String,
+    ordinal: i64,
+    status: String,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    asset_id: Option<String>,
+    source_asset_id: Option<String>,
+    reference_index: Option<i64>,
+    attempt: i64,
+    submission_idempotency_key: Option<String>,
+    parent_stage_item_id: Option<String>,
+    frozen_values: Value,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionRunTemplate {
+    id: String,
+    project_id: String,
+    name: String,
+    krea2_workflow_version_id: Option<String>,
+    krea2_recipe_id: Option<String>,
+    krea2_preset_id: Option<String>,
+    default_image_count: i64,
+    h3_workflow_version_id: Option<String>,
+    h3_recipe_id: Option<String>,
+    h3_profile: Option<String>,
+    default_duration_seconds: Option<i64>,
+    default_width: Option<i64>,
+    default_height: Option<i64>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupBenchmarkRun {
+    id: String,
+    experiment_id: String,
+    candidate_id: String,
+    run_number: i64,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    snapshot_id: Option<String>,
+    output_asset_id: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    queue_wait_ms: Option<i64>,
+    prepare_ms: Option<i64>,
+    submit_ms: Option<i64>,
+    comfy_execution_ms: Option<i64>,
+    collect_ms: Option<i64>,
+    total_ms: Option<i64>,
+    status: Option<String>,
+    error_code: Option<String>,
+    output_file_size: Option<i64>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupBenchmarkQualityScore {
+    id: String,
+    candidate_id: String,
+    prompt_adherence: Option<i64>,
+    visual_quality: Option<i64>,
+    motion_quality: Option<i64>,
+    reference_consistency: Option<i64>,
+    overall: Option<i64>,
+    note: Option<String>,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1378,6 +1630,119 @@ struct DbBenchmarkCandidate {
     production_batch_item_id: Option<String>,
     task_id: Option<String>,
     created_at: String,
+}
+
+#[derive(FromRow)]
+struct DbProductionRun {
+    id: String,
+    project_id: String,
+    name: String,
+    status: String,
+    current_stage_ordinal: i64,
+    template_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+#[derive(FromRow)]
+struct DbProductionStage {
+    id: String,
+    run_id: String,
+    ordinal: i64,
+    stage_type: String,
+    status: String,
+    workflow_version_id: Option<String>,
+    recipe_id: Option<String>,
+    production_batch_id: Option<String>,
+    frozen_config_json: String,
+    prompt: Option<String>,
+    created_at: String,
+    updated_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+#[derive(FromRow)]
+struct DbProductionStageItem {
+    id: String,
+    stage_id: String,
+    ordinal: i64,
+    status: String,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    asset_id: Option<String>,
+    source_asset_id: Option<String>,
+    reference_index: Option<i64>,
+    attempt: i64,
+    submission_idempotency_key: Option<String>,
+    parent_stage_item_id: Option<String>,
+    frozen_values_json: String,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbProductionRunTemplate {
+    id: String,
+    project_id: String,
+    name: String,
+    krea2_workflow_version_id: Option<String>,
+    krea2_recipe_id: Option<String>,
+    krea2_preset_id: Option<String>,
+    default_image_count: i64,
+    h3_workflow_version_id: Option<String>,
+    h3_recipe_id: Option<String>,
+    h3_profile: Option<String>,
+    default_duration_seconds: Option<i64>,
+    default_width: Option<i64>,
+    default_height: Option<i64>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbBenchmarkRun {
+    id: String,
+    experiment_id: String,
+    candidate_id: String,
+    run_number: i64,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    snapshot_id: Option<String>,
+    output_asset_id: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    queue_wait_ms: Option<i64>,
+    prepare_ms: Option<i64>,
+    submit_ms: Option<i64>,
+    comfy_execution_ms: Option<i64>,
+    collect_ms: Option<i64>,
+    total_ms: Option<i64>,
+    status: Option<String>,
+    error_code: Option<String>,
+    output_file_size: Option<i64>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbBenchmarkQualityScore {
+    id: String,
+    candidate_id: String,
+    prompt_adherence: Option<i64>,
+    visual_quality: Option<i64>,
+    motion_quality: Option<i64>,
+    reference_consistency: Option<i64>,
+    overall: Option<i64>,
+    note: Option<String>,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(FromRow)]
@@ -1815,6 +2180,239 @@ async fn query_benchmark_candidates(
         .collect()
 }
 
+async fn query_production_runs(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProductionRun>, AppError> {
+    let rows = sqlx::query_as::<_, DbProductionRun>(
+        "SELECT id, project_id, name, status, current_stage_ordinal, template_id,
+                created_at, updated_at, started_at, finished_at
+         FROM production_runs WHERE project_id = ? ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupProductionRun {
+            id: row.id,
+            project_id: row.project_id,
+            name: row.name,
+            status: row.status,
+            current_stage_ordinal: row.current_stage_ordinal,
+            template_id: row.template_id,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+        })
+        .collect())
+}
+
+async fn query_production_stages(
+    transaction: &mut Transaction<'_, Sqlite>,
+    runs: &[BackupProductionRun],
+) -> Result<Vec<BackupProductionStage>, AppError> {
+    let mut result = Vec::new();
+    for run in runs {
+        let rows = sqlx::query_as::<_, DbProductionStage>(
+            "SELECT id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id,
+                    production_batch_id, frozen_config_json, prompt, created_at, updated_at,
+                    started_at, finished_at
+             FROM production_stages WHERE run_id = ? ORDER BY ordinal, id",
+        )
+        .bind(&run.id)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        result.extend(rows.into_iter().map(|row| {
+            Ok(BackupProductionStage {
+                id: row.id,
+                run_id: row.run_id,
+                ordinal: row.ordinal,
+                stage_type: row.stage_type,
+                status: row.status,
+                workflow_version_id: row.workflow_version_id,
+                recipe_id: row.recipe_id,
+                production_batch_id: row.production_batch_id,
+                frozen_config: parse_value(Some(&row.frozen_config_json), "Production Stage 配置")?,
+                prompt: row.prompt,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                started_at: row.started_at,
+                finished_at: row.finished_at,
+            })
+        }));
+    }
+    result.into_iter().collect()
+}
+
+async fn query_production_stage_items(
+    transaction: &mut Transaction<'_, Sqlite>,
+    stages: &[BackupProductionStage],
+) -> Result<Vec<BackupProductionStageItem>, AppError> {
+    let mut result = Vec::new();
+    for stage in stages {
+        let rows = sqlx::query_as::<_, DbProductionStageItem>(
+            "SELECT id, stage_id, ordinal, status, production_batch_item_id, task_id,
+                    asset_id, source_asset_id, reference_index, attempt,
+                    submission_idempotency_key, parent_stage_item_id, frozen_values_json,
+                    error_code, error_message, created_at, updated_at
+             FROM production_stage_items WHERE stage_id = ? ORDER BY ordinal, id",
+        )
+        .bind(&stage.id)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        result.extend(rows.into_iter().map(|row| {
+            Ok(BackupProductionStageItem {
+                id: row.id,
+                stage_id: row.stage_id,
+                ordinal: row.ordinal,
+                status: row.status,
+                production_batch_item_id: row.production_batch_item_id,
+                task_id: row.task_id,
+                asset_id: row.asset_id,
+                source_asset_id: row.source_asset_id,
+                reference_index: row.reference_index,
+                attempt: row.attempt,
+                submission_idempotency_key: row.submission_idempotency_key,
+                parent_stage_item_id: row.parent_stage_item_id,
+                frozen_values: parse_value(
+                    Some(&row.frozen_values_json),
+                    "Production Stage Item 输入",
+                )?,
+                error_code: row.error_code,
+                error_message: row.error_message,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            })
+        }));
+    }
+    result.into_iter().collect()
+}
+
+async fn query_production_run_templates(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProductionRunTemplate>, AppError> {
+    let rows = sqlx::query_as::<_, DbProductionRunTemplate>(
+        "SELECT id, project_id, name, krea2_workflow_version_id, krea2_recipe_id,
+                krea2_preset_id, default_image_count, h3_workflow_version_id, h3_recipe_id,
+                h3_profile, default_duration_seconds, default_width, default_height,
+                created_at, updated_at
+         FROM production_run_templates WHERE project_id = ? ORDER BY updated_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupProductionRunTemplate {
+            id: row.id,
+            project_id: row.project_id,
+            name: row.name,
+            krea2_workflow_version_id: row.krea2_workflow_version_id,
+            krea2_recipe_id: row.krea2_recipe_id,
+            krea2_preset_id: row.krea2_preset_id,
+            default_image_count: row.default_image_count,
+            h3_workflow_version_id: row.h3_workflow_version_id,
+            h3_recipe_id: row.h3_recipe_id,
+            h3_profile: row.h3_profile,
+            default_duration_seconds: row.default_duration_seconds,
+            default_width: row.default_width,
+            default_height: row.default_height,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
+}
+
+async fn query_benchmark_runs(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupBenchmarkRun>, AppError> {
+    let rows = sqlx::query_as::<_, DbBenchmarkRun>(
+        "SELECT r.id, r.experiment_id, r.candidate_id, r.run_number,
+                r.production_batch_item_id, r.task_id, r.snapshot_id, r.output_asset_id,
+                r.generation_execution_id, r.compiled_workflow_sha256, r.runtime_profile,
+                r.concurrency_class, r.queue_wait_ms, r.prepare_ms, r.submit_ms,
+                r.comfy_execution_ms, r.collect_ms, r.total_ms, r.status, r.error_code,
+                r.output_file_size, r.created_at, r.updated_at
+         FROM benchmark_runs r
+         JOIN benchmark_experiments e ON e.id = r.experiment_id
+         WHERE e.project_id = ? ORDER BY r.experiment_id, r.candidate_id, r.run_number, r.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupBenchmarkRun {
+            id: row.id,
+            experiment_id: row.experiment_id,
+            candidate_id: row.candidate_id,
+            run_number: row.run_number,
+            production_batch_item_id: row.production_batch_item_id,
+            task_id: row.task_id,
+            snapshot_id: row.snapshot_id,
+            output_asset_id: row.output_asset_id,
+            generation_execution_id: row.generation_execution_id,
+            compiled_workflow_sha256: row.compiled_workflow_sha256,
+            runtime_profile: row.runtime_profile,
+            concurrency_class: row.concurrency_class,
+            queue_wait_ms: row.queue_wait_ms,
+            prepare_ms: row.prepare_ms,
+            submit_ms: row.submit_ms,
+            comfy_execution_ms: row.comfy_execution_ms,
+            collect_ms: row.collect_ms,
+            total_ms: row.total_ms,
+            status: row.status,
+            error_code: row.error_code,
+            output_file_size: row.output_file_size,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
+}
+
+async fn query_benchmark_quality_scores(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupBenchmarkQualityScore>, AppError> {
+    let rows = sqlx::query_as::<_, DbBenchmarkQualityScore>(
+        "SELECT q.id, q.candidate_id, q.prompt_adherence, q.visual_quality,
+                q.motion_quality, q.reference_consistency, q.overall, q.note,
+                q.created_at, q.updated_at
+         FROM benchmark_quality_scores q
+         JOIN benchmark_candidates c ON c.id = q.candidate_id
+         JOIN benchmark_experiments e ON e.id = c.experiment_id
+         WHERE e.project_id = ? ORDER BY q.candidate_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupBenchmarkQualityScore {
+            id: row.id,
+            candidate_id: row.candidate_id,
+            prompt_adherence: row.prompt_adherence,
+            visual_quality: row.visual_quality,
+            motion_quality: row.motion_quality,
+            reference_consistency: row.reference_consistency,
+            overall: row.overall,
+            note: row.note,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
+}
+
 async fn query_benchmark_workflow_refs(
     transaction: &mut Transaction<'_, Sqlite>,
     project_id: &str,
@@ -2244,7 +2842,7 @@ fn inspect_archive(
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
     if manifest.format != BACKUP_FORMAT
-        || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8)
+        || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9)
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
@@ -2291,8 +2889,223 @@ fn validate_document_entries(
     validate_organization_document(document)?;
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
+    validate_production_orchestrator_document(document)?;
     validate_shot_document(document)?;
     Ok(())
+}
+
+fn validate_production_orchestrator_document(document: &BackupDocument) -> Result<(), AppError> {
+    use crate::domain::{ProductionRunStatus, ProductionStageStatus, ProductionStageType};
+
+    let run_ids = document
+        .production_runs
+        .iter()
+        .map(|run| run.id.as_str())
+        .collect::<HashSet<_>>();
+    if run_ids.len() != document.production_runs.len() {
+        return Err(AppError::backup_invalid("Production Run ID 重复"));
+    }
+    let template_ids = document
+        .production_run_templates
+        .iter()
+        .map(|template| template.id.as_str())
+        .collect::<HashSet<_>>();
+    if template_ids.len() != document.production_run_templates.len() {
+        return Err(AppError::backup_invalid("Production Run 模板 ID 重复"));
+    }
+    for template in &document.production_run_templates {
+        if template.project_id != document.project.id
+            || template.name.trim().is_empty()
+            || template.name.chars().count() > 120
+            || !(1..=100).contains(&template.default_image_count)
+            || template
+                .default_duration_seconds
+                .is_some_and(|value| !(1..=15).contains(&value))
+        {
+            return Err(AppError::backup_invalid("Production Run 模板无效"));
+        }
+    }
+    for run in &document.production_runs {
+        if run.project_id != document.project.id
+            || run.id.trim().is_empty()
+            || run.name.trim().is_empty()
+            || run.name.chars().count() > 120
+            || run.current_stage_ordinal < 0
+            || ProductionRunStatus::parse(&run.status).is_none()
+            || run
+                .template_id
+                .as_ref()
+                .is_some_and(|id| !template_ids.contains(id.as_str()))
+        {
+            return Err(AppError::backup_invalid("Production Run 元数据无效"));
+        }
+    }
+    let mut stage_ids = HashSet::new();
+    let mut stage_keys = HashSet::new();
+    for stage in &document.production_stages {
+        if stage.id.trim().is_empty()
+            || !stage_ids.insert(stage.id.as_str())
+            || !run_ids.contains(stage.run_id.as_str())
+            || stage.ordinal < 0
+            || !stage_keys.insert((stage.run_id.as_str(), stage.ordinal))
+            || ProductionStageType::parse(&stage.stage_type).is_none()
+            || ProductionStageStatus::parse(&stage.status).is_none()
+            || stage
+                .production_batch_id
+                .as_ref()
+                .is_some_and(|id| !document.batches.iter().any(|batch| batch.id == *id))
+            || !stage.frozen_config.is_object()
+            || contains_external_absolute_path(&stage.frozen_config)
+        {
+            return Err(AppError::backup_invalid("Production Stage 元数据无效"));
+        }
+        if stage.workflow_version_id.is_some() != stage.recipe_id.is_some() {
+            return Err(AppError::backup_invalid(
+                "Production Stage Workflow / Recipe 引用不完整",
+            ));
+        }
+    }
+    let mut stage_item_ids = HashSet::new();
+    let stage_id_set = stage_ids.clone();
+    let item_ids = document
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<HashSet<_>>();
+    let task_ids = document
+        .tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<HashSet<_>>();
+    let asset_ids = document
+        .assets
+        .iter()
+        .map(|asset| asset.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut parent_ids = HashSet::new();
+    for item in &document.production_stage_items {
+        if item.id.trim().is_empty()
+            || !stage_item_ids.insert(item.id.as_str())
+            || !stage_id_set.contains(item.stage_id.as_str())
+            || item.ordinal < 0
+            || item.attempt < 1
+            || !item.frozen_values.is_object()
+            || contains_external_absolute_path(&item.frozen_values)
+            || !ProductionStageStatus::parse(&item.status).is_some()
+            || item
+                .production_batch_item_id
+                .as_ref()
+                .is_some_and(|id| !item_ids.contains(id.as_str()))
+            || item
+                .task_id
+                .as_ref()
+                .is_some_and(|id| !task_ids.contains(id.as_str()))
+            || item
+                .asset_id
+                .as_ref()
+                .is_some_and(|id| !asset_ids.contains(id.as_str()))
+            || item
+                .source_asset_id
+                .as_ref()
+                .is_some_and(|id| !asset_ids.contains(id.as_str()))
+        {
+            return Err(AppError::backup_invalid("Production Stage Item 元数据无效"));
+        }
+        if let Some(parent_id) = &item.parent_stage_item_id {
+            if !stage_item_ids.contains(parent_id.as_str()) {
+                parent_ids.insert(parent_id.clone());
+            }
+        }
+    }
+    if parent_ids
+        .iter()
+        .any(|id| !stage_item_ids.contains(id.as_str()))
+    {
+        return Err(AppError::backup_invalid(
+            "Production Stage Item 父级引用无效",
+        ));
+    }
+
+    let experiment_ids = document
+        .benchmark_experiments
+        .iter()
+        .map(|experiment| experiment.id.as_str())
+        .collect::<HashSet<_>>();
+    let candidate_ids = document
+        .benchmark_candidates
+        .iter()
+        .map(|candidate| (candidate.id.as_str(), candidate.experiment_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let snapshot_ids = document
+        .snapshots
+        .iter()
+        .map(|snapshot| snapshot.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut benchmark_run_ids = HashSet::new();
+    for run in &document.benchmark_runs {
+        if run.id.trim().is_empty()
+            || !benchmark_run_ids.insert(run.id.as_str())
+            || !experiment_ids.contains(run.experiment_id.as_str())
+            || candidate_ids.get(run.candidate_id.as_str()).copied()
+                != Some(run.experiment_id.as_str())
+            || run.run_number < 1
+            || run
+                .production_batch_item_id
+                .as_ref()
+                .is_some_and(|id| !item_ids.contains(id.as_str()))
+            || run
+                .task_id
+                .as_ref()
+                .is_some_and(|id| !task_ids.contains(id.as_str()))
+            || run
+                .snapshot_id
+                .as_ref()
+                .is_some_and(|id| !snapshot_ids.contains(id.as_str()))
+            || run
+                .output_asset_id
+                .as_ref()
+                .is_some_and(|id| !asset_ids.contains(id.as_str()))
+            || run.output_file_size.is_some_and(|value| value < 0)
+        {
+            return Err(AppError::backup_invalid("Benchmark Run 元数据无效"));
+        }
+    }
+    let mut quality_ids = HashSet::new();
+    let mut scored_candidates = HashSet::new();
+    for score in &document.benchmark_quality_scores {
+        if score.id.trim().is_empty()
+            || !quality_ids.insert(score.id.as_str())
+            || !candidate_ids.contains_key(score.candidate_id.as_str())
+            || !scored_candidates.insert(score.candidate_id.as_str())
+            || !valid_score(score.prompt_adherence)
+            || !valid_score(score.visual_quality)
+            || !valid_score(score.motion_quality)
+            || !valid_score(score.reference_consistency)
+            || !valid_score(score.overall)
+        {
+            return Err(AppError::backup_invalid(
+                "Benchmark Quality Score 元数据无效",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn valid_score(value: Option<i64>) -> bool {
+    value.is_none_or(|value| (1..=5).contains(&value))
+}
+
+fn contains_external_absolute_path(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().any(contains_external_absolute_path),
+        Value::Object(values) => values.values().any(contains_external_absolute_path),
+        Value::String(value) => {
+            value.starts_with('/')
+                || value.starts_with('\\')
+                || value.as_bytes().get(1) == Some(&b':')
+        }
+        Value::Bool(_) | Value::Number(_) | Value::Null => false,
+    }
 }
 
 fn validate_benchmark_document(document: &BackupDocument) -> Result<(), AppError> {
@@ -3031,6 +3844,12 @@ async fn restore_rows_in_transaction(
     item_ids: &HashMap<String, String>,
     benchmark_experiment_ids: &HashMap<String, String>,
     benchmark_candidate_ids: &HashMap<String, String>,
+    production_run_ids: &HashMap<String, String>,
+    production_stage_ids: &HashMap<String, String>,
+    production_stage_item_ids: &HashMap<String, String>,
+    production_run_template_ids: &HashMap<String, String>,
+    benchmark_run_ids: &HashMap<String, String>,
+    benchmark_quality_score_ids: &HashMap<String, String>,
     tag_ids: &HashMap<String, String>,
     shot_ids: &HashMap<String, String>,
     shot_generation_link_ids: &HashMap<String, String>,
@@ -3386,6 +4205,191 @@ async fn restore_rows_in_transaction(
             .bind(item_id).bind(batch_id).bind(item.ordinal).bind(&item.workflow_version_id).bind(&item.recipe_id).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
             .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
     }
+    for template in &document.production_run_templates {
+        let Some(template_id) = production_run_template_ids.get(&template.id) else {
+            continue;
+        };
+        if let (Some(workflow_version_id), Some(recipe_id)) = (
+            template.krea2_workflow_version_id.as_deref(),
+            template.krea2_recipe_id.as_deref(),
+        ) {
+            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
+        }
+        if let (Some(workflow_version_id), Some(recipe_id)) = (
+            template.h3_workflow_version_id.as_deref(),
+            template.h3_recipe_id.as_deref(),
+        ) {
+            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
+        }
+        sqlx::query(
+            "INSERT INTO production_run_templates
+             (id, project_id, name, krea2_workflow_version_id, krea2_recipe_id, krea2_preset_id,
+              default_image_count, h3_workflow_version_id, h3_recipe_id, h3_profile,
+              default_duration_seconds, default_width, default_height, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(template_id)
+        .bind(&project.id)
+        .bind(&template.name)
+        .bind(&template.krea2_workflow_version_id)
+        .bind(&template.krea2_recipe_id)
+        .bind(
+            template
+                .krea2_preset_id
+                .as_ref()
+                .and_then(|id| preset_ids.get(id)),
+        )
+        .bind(template.default_image_count)
+        .bind(&template.h3_workflow_version_id)
+        .bind(&template.h3_recipe_id)
+        .bind(&template.h3_profile)
+        .bind(template.default_duration_seconds)
+        .bind(template.default_width)
+        .bind(template.default_height)
+        .bind(&template.created_at)
+        .bind(&template.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for run in &document.production_runs {
+        let Some(run_id) = production_run_ids.get(&run.id) else {
+            continue;
+        };
+        let status = if run.status == "RUNNING" {
+            "FAILED"
+        } else {
+            &run.status
+        };
+        sqlx::query(
+            "INSERT INTO production_runs
+             (id, project_id, name, status, current_stage_ordinal, template_id,
+              created_at, updated_at, started_at, finished_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(run_id)
+        .bind(&project.id)
+        .bind(&run.name)
+        .bind(status)
+        .bind(run.current_stage_ordinal)
+        .bind(
+            run.template_id
+                .as_ref()
+                .and_then(|id| production_run_template_ids.get(id)),
+        )
+        .bind(&run.created_at)
+        .bind(&run.updated_at)
+        .bind(&run.started_at)
+        .bind(&run.finished_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for stage in &document.production_stages {
+        let (Some(stage_id), Some(run_id)) = (
+            production_stage_ids.get(&stage.id),
+            production_run_ids.get(&stage.run_id),
+        ) else {
+            continue;
+        };
+        if let (Some(workflow_version_id), Some(recipe_id)) = (
+            stage.workflow_version_id.as_deref(),
+            stage.recipe_id.as_deref(),
+        ) {
+            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
+        }
+        let status = if stage.status == "RUNNING" {
+            "FAILED"
+        } else {
+            &stage.status
+        };
+        let mut frozen_config = stage.frozen_config.clone();
+        remap_snapshot_asset_references(&mut frozen_config, asset_ids);
+        sqlx::query(
+            "INSERT INTO production_stages
+             (id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id,
+              production_batch_id, frozen_config_json, prompt, created_at, updated_at,
+              started_at, finished_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(stage_id)
+        .bind(run_id)
+        .bind(stage.ordinal)
+        .bind(&stage.stage_type)
+        .bind(status)
+        .bind(&stage.workflow_version_id)
+        .bind(&stage.recipe_id)
+        .bind(
+            stage
+                .production_batch_id
+                .as_ref()
+                .and_then(|id| batch_ids.get(id)),
+        )
+        .bind(frozen_config.to_string())
+        .bind(&stage.prompt)
+        .bind(&stage.created_at)
+        .bind(&stage.updated_at)
+        .bind(&stage.started_at)
+        .bind(&stage.finished_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for item in &document.production_stage_items {
+        let (Some(item_id), Some(stage_id)) = (
+            production_stage_item_ids.get(&item.id),
+            production_stage_ids.get(&item.stage_id),
+        ) else {
+            continue;
+        };
+        let status = if matches!(item.status.as_str(), "PENDING" | "READY" | "RUNNING") {
+            "FAILED"
+        } else {
+            &item.status
+        };
+        let mut frozen_values = item.frozen_values.clone();
+        remap_snapshot_asset_references(&mut frozen_values, asset_ids);
+        sqlx::query(
+            "INSERT INTO production_stage_items
+             (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
+              source_asset_id, reference_index, attempt, submission_idempotency_key,
+              parent_stage_item_id, frozen_values_json, error_code, error_message,
+              created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(item_id)
+        .bind(stage_id)
+        .bind(item.ordinal)
+        .bind(status)
+        .bind(
+            item.production_batch_item_id
+                .as_ref()
+                .and_then(|id| item_ids.get(id)),
+        )
+        .bind(item.task_id.as_ref().and_then(|id| task_ids.get(id)))
+        .bind(item.asset_id.as_ref().and_then(|id| asset_ids.get(id)))
+        .bind(
+            item.source_asset_id
+                .as_ref()
+                .and_then(|id| asset_ids.get(id)),
+        )
+        .bind(item.reference_index)
+        .bind(item.attempt)
+        .bind(&item.submission_idempotency_key)
+        .bind(
+            item.parent_stage_item_id
+                .as_ref()
+                .and_then(|id| production_stage_item_ids.get(id)),
+        )
+        .bind(frozen_values.to_string())
+        .bind(&item.error_code)
+        .bind(&item.error_message)
+        .bind(&item.created_at)
+        .bind(&item.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for review in &document.production_item_reviews {
         let (Some(item_id), Some(batch_id)) = (
             item_ids.get(&review.production_batch_item_id),
@@ -3537,6 +4541,85 @@ async fn restore_rows_in_transaction(
         )
         .bind(candidate.task_id.as_ref().and_then(|id| task_ids.get(id)))
         .bind(&candidate.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for run in &document.benchmark_runs {
+        let (Some(run_id), Some(experiment_id), Some(candidate_id)) = (
+            benchmark_run_ids.get(&run.id),
+            benchmark_experiment_ids.get(&run.experiment_id),
+            benchmark_candidate_ids.get(&run.candidate_id),
+        ) else {
+            continue;
+        };
+        sqlx::query(
+            "INSERT INTO benchmark_runs
+             (id, experiment_id, candidate_id, run_number, production_batch_item_id, task_id,
+              snapshot_id, output_asset_id, generation_execution_id, compiled_workflow_sha256,
+              runtime_profile, concurrency_class, queue_wait_ms, prepare_ms, submit_ms,
+              comfy_execution_ms, collect_ms, total_ms, status, error_code, output_file_size,
+              created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(run_id)
+        .bind(experiment_id)
+        .bind(candidate_id)
+        .bind(run.run_number)
+        .bind(
+            run.production_batch_item_id
+                .as_ref()
+                .and_then(|id| item_ids.get(id)),
+        )
+        .bind(run.task_id.as_ref().and_then(|id| task_ids.get(id)))
+        .bind(run.snapshot_id.as_ref().and_then(|id| snapshot_ids.get(id)))
+        .bind(
+            run.output_asset_id
+                .as_ref()
+                .and_then(|id| asset_ids.get(id)),
+        )
+        .bind(&run.generation_execution_id)
+        .bind(&run.compiled_workflow_sha256)
+        .bind(&run.runtime_profile)
+        .bind(&run.concurrency_class)
+        .bind(run.queue_wait_ms)
+        .bind(run.prepare_ms)
+        .bind(run.submit_ms)
+        .bind(run.comfy_execution_ms)
+        .bind(run.collect_ms)
+        .bind(run.total_ms)
+        .bind(&run.status)
+        .bind(&run.error_code)
+        .bind(run.output_file_size)
+        .bind(&run.created_at)
+        .bind(&run.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for score in &document.benchmark_quality_scores {
+        let (Some(score_id), Some(candidate_id)) = (
+            benchmark_quality_score_ids.get(&score.id),
+            benchmark_candidate_ids.get(&score.candidate_id),
+        ) else {
+            continue;
+        };
+        sqlx::query(
+            "INSERT INTO benchmark_quality_scores
+             (id, candidate_id, prompt_adherence, visual_quality, motion_quality,
+              reference_consistency, overall, note, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(score_id)
+        .bind(candidate_id)
+        .bind(score.prompt_adherence)
+        .bind(score.visual_quality)
+        .bind(score.motion_quality)
+        .bind(score.reference_consistency)
+        .bind(score.overall)
+        .bind(&score.note)
+        .bind(&score.created_at)
+        .bind(&score.updated_at)
         .execute(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
@@ -3964,6 +5047,12 @@ mod tests {
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
+            production_runs: Vec::new(),
+            production_stages: Vec::new(),
+            production_stage_items: Vec::new(),
+            production_run_templates: Vec::new(),
+            benchmark_runs: Vec::new(),
+            benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -4325,6 +5414,30 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query("INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at) VALUES ('pbt_h3_backup', 'project-backup', 'H3 成片批次', 'COMPLETED', 1, NULL, '2026-01-01T00:03:10Z', '2026-01-01T00:03:10Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at) VALUES ('pbi_h3_backup', 'pbt_h3_backup', 0, 'workflow-version-1', 'recipe-1', '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}', 'SUCCEEDED', 'tsk_backup', NULL, NULL, NULL, '2026-01-01T00:03:10Z', '2026-01-01T00:03:10Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO production_run_templates (id, project_id, name, krea2_workflow_version_id, krea2_recipe_id, krea2_preset_id, default_image_count, h3_workflow_version_id, h3_recipe_id, h3_profile, default_duration_seconds, default_width, default_height, created_at, updated_at) VALUES ('prt_backup', 'project-backup', '默认生产模板', 'workflow-version-1', 'recipe-1', NULL, 2, 'workflow-version-1', 'recipe-1', 'H3_FAST', 5, 864, 480, '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO production_runs (id, project_id, name, status, current_stage_ordinal, template_id, created_at, updated_at, started_at, finished_at) VALUES ('prun_backup', 'project-backup', '批量成片 Run', 'SUCCEEDED', 2, 'prt_backup', '2026-01-01T00:03:00Z', '2026-01-01T00:04:00Z', '2026-01-01T00:03:00Z', '2026-01-01T00:04:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO production_stages (id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id, production_batch_id, frozen_config_json, prompt, created_at, updated_at, started_at, finished_at) VALUES ('prst_backup_image', 'prun_backup', 0, 'KREA2_IMAGE_GENERATION', 'SUCCEEDED', 'workflow-version-1', 'recipe-1', 'pbt_backup', '{\"imageCount\":1,\"values\":{\"prompt\":\"image\"}}', NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:30Z', '2026-01-01T00:03:00Z', '2026-01-01T00:03:30Z'), ('prst_backup_selection', 'prun_backup', 1, 'ASSET_SELECTION', 'SUCCEEDED', NULL, NULL, NULL, '{\"selectionMode\":\"MANUAL\"}', NULL, '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z', '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z'), ('prst_backup_h3', 'prun_backup', 2, 'H3_VIDEO_GENERATION', 'SUCCEEDED', 'workflow-version-1', 'recipe-1', 'pbt_h3_backup', '{\"values\":{\"prompt\":\"video\"}}', 'video prompt', '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z', '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO production_stage_items (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id, source_asset_id, reference_index, attempt, submission_idempotency_key, parent_stage_item_id, frozen_values_json, error_code, error_message, created_at, updated_at) VALUES ('prsi_backup_image', 'prst_backup_image', 0, 'SUCCEEDED', 'pbi_backup', 'tsk_backup', 'ast_backup', NULL, NULL, 1, 'production-stage-item:prsi_backup_image:attempt:1', NULL, '{\"assetId\":\"ast_backup\"}', NULL, NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:30Z'), ('prsi_backup_selection', 'prst_backup_selection', 0, 'SUCCEEDED', NULL, NULL, 'ast_backup', 'ast_backup', 0, 1, 'production-stage-item:prsi_backup_selection:attempt:1', NULL, '{\"assetId\":\"ast_backup\",\"referenceIndex\":0}', NULL, NULL, '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z'), ('prsi_backup_h3', 'prst_backup_h3', 0, 'SUCCEEDED', 'pbi_h3_backup', 'tsk_backup', 'ast_video', 'ast_backup', 0, 1, 'production-stage-item:prsi_backup_h3:attempt:1', NULL, '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}', NULL, NULL, '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO benchmark_experiments
              (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
@@ -4364,6 +5477,14 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query("INSERT INTO benchmark_runs (id, experiment_id, candidate_id, run_number, production_batch_item_id, task_id, snapshot_id, output_asset_id, generation_execution_id, compiled_workflow_sha256, runtime_profile, concurrency_class, queue_wait_ms, prepare_ms, submit_ms, comfy_execution_ms, collect_ms, total_ms, status, error_code, output_file_size, created_at, updated_at) VALUES ('bmr_backup', 'bmk_backup', 'bmc_backup_2', 1, 'pbi_backup', 'tsk_backup', 'snp_backup', 'ast_video', 'gen_backup', 'compiled-backup', 'H3_FAST', 'GPU_HEAVY_SERIAL', 10, 20, 30, 40, 5, 105, 'SUCCEEDED', NULL, 17, '2026-01-01T00:04:00Z', '2026-01-01T00:04:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO benchmark_quality_scores (id, candidate_id, prompt_adherence, visual_quality, motion_quality, reference_consistency, overall, note, created_at, updated_at) VALUES ('bmq_backup', 'bmc_backup_2', 5, 4, 4, 5, 4, '稳定且符合预期', '2026-01-01T00:04:00Z', '2026-01-01T00:04:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO shot_generation_links (id, shot_id, stage, task_id, production_batch_item_id, created_at) VALUES ('sgl_backup', 'sht_backup', 'image', 'tsk_backup', 'pbi_backup', '2026-01-01T00:03:00Z')")
             .execute(&pool)
             .await
@@ -4383,7 +5504,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 8);
+        assert_eq!(manifest.version, 9);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -4400,6 +5521,33 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(restored_count, 3);
+        let production_counts: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT
+                (SELECT COUNT(*) FROM production_runs WHERE project_id = ?),
+                (SELECT COUNT(*) FROM production_stages WHERE run_id IN (SELECT id FROM production_runs WHERE project_id = ?)),
+                (SELECT COUNT(*) FROM production_stage_items WHERE stage_id IN (SELECT id FROM production_stages WHERE run_id IN (SELECT id FROM production_runs WHERE project_id = ?))),
+                (SELECT COUNT(*) FROM production_run_templates WHERE project_id = ?),
+                (SELECT COUNT(*) FROM benchmark_runs WHERE experiment_id IN (SELECT id FROM benchmark_experiments WHERE project_id = ?)),
+                (SELECT COUNT(*) FROM benchmark_quality_scores WHERE candidate_id IN (SELECT id FROM benchmark_candidates WHERE experiment_id IN (SELECT id FROM benchmark_experiments WHERE project_id = ?)))",
+        )
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(production_counts, (1, 3, 3, 1, 1, 1));
+        let restored_reference_index: i64 = sqlx::query_scalar(
+            "SELECT reference_index FROM production_stage_items WHERE stage_id = (SELECT id FROM production_stages WHERE run_id = (SELECT id FROM production_runs WHERE project_id = ?) AND ordinal = 1)",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_reference_index, 0);
         let restored_path = sqlx::query_scalar::<_, String>(
             "SELECT storage_path FROM assets WHERE project_id = ? AND type = 'image' AND original_name = '图像.png'",
         )
@@ -4844,7 +5992,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_v5_and_v6_fixtures_restore_with_empty_later_data() {
+    async fn fixed_v5_through_v8_fixtures_restore_with_empty_later_data() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
@@ -4854,7 +6002,7 @@ mod tests {
             data_dirs.cache.clone(),
         );
 
-        for version in [5_u32, 6_u32] {
+        for version in [5_u32, 6_u32, 7_u32, 8_u32] {
             let project_id = format!("legacy-v{version}-project");
             let project_name = format!("旧项目 v{version}");
             let archive_path = directory.path().join(format!("legacy-v{version}.zip"));
@@ -5056,6 +6204,12 @@ mod tests {
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
+            production_runs: Vec::new(),
+            production_stages: Vec::new(),
+            production_stage_items: Vec::new(),
+            production_run_templates: Vec::new(),
+            benchmark_runs: Vec::new(),
+            benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -5091,6 +6245,12 @@ mod tests {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -5188,6 +6348,12 @@ mod tests {
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
+            production_runs: Vec::new(),
+            production_stages: Vec::new(),
+            production_stage_items: Vec::new(),
+            production_run_templates: Vec::new(),
+            benchmark_runs: Vec::new(),
+            benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_reference_assets: Vec::new(),
