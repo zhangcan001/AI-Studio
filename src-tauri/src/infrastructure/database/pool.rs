@@ -68,7 +68,9 @@ mod tests {
                'asset_favorites', 'project_templates', 'prompt_entries', 'prompt_versions',
                'shots', 'shot_stage_configs', 'shot_reference_assets', 'shot_generation_links',
                'asset_video_prompts', 'production_item_reviews', 'benchmark_experiments',
-               'benchmark_candidates')",
+               'benchmark_candidates', 'benchmark_runs', 'benchmark_quality_scores',
+               'production_runs', 'production_stages', 'production_stage_items',
+               'production_run_templates')",
         )
         .fetch_one(pool)
         .await
@@ -84,7 +86,7 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 26);
+        assert_eq!(table_count(&pool).await, 32);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
                 .fetch_one(&pool)
@@ -214,12 +216,12 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 26);
+        assert_eq!(table_count(&second_pool).await, 32);
         second_pool.close().await;
     }
 
     #[tokio::test]
-    async fn adding_migrations_011_to_017_preserves_existing_project_runtime_rows() {
+    async fn adding_migrations_011_to_018_preserves_existing_project_runtime_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-app.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -315,11 +317,12 @@ mod tests {
             include_str!("../../../migrations/015_runtime_provenance.sql"),
             include_str!("../../../migrations/016_generation_telemetry.sql"),
             include_str!("../../../migrations/017_submission_idempotency.sql"),
+            include_str!("../../../migrations/018_production_orchestrator.sql"),
         ] {
             sqlx::raw_sql(migration)
                 .execute(&pool)
                 .await
-                .expect("migrations 012-017 should apply to the 011 database");
+                .expect("migrations 012-018 should apply to the 011 database");
         }
 
         let after: (i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
@@ -346,12 +349,27 @@ mod tests {
         assert_eq!(
             sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
-                 ('production_item_reviews', 'benchmark_experiments', 'benchmark_candidates')",
+                ('production_item_reviews', 'benchmark_experiments', 'benchmark_candidates',
+                 'benchmark_runs', 'benchmark_quality_scores', 'production_runs',
+                 'production_stages', 'production_stage_items', 'production_run_templates')",
             )
             .fetch_one(&pool)
             .await
             .expect("post-011 tables should be readable"),
-            3
+            9
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN
+                 ('idx_benchmark_runs_experiment_candidate', 'idx_benchmark_runs_task',
+                  'idx_benchmark_quality_candidate', 'idx_production_runs_project_updated',
+                  'idx_production_stages_run_status', 'idx_production_stage_items_task',
+                  'idx_production_run_templates_project')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("orchestrator indexes should be readable"),
+            7
         );
         assert_eq!(
             sqlx::query_scalar::<_, String>(

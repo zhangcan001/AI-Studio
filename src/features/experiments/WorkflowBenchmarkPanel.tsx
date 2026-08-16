@@ -9,7 +9,9 @@ import {
   listWorkflowBenchmarks,
   previewWorkflowBenchmark,
   queueWorkflowBenchmark,
+  saveWorkflowBenchmarkQuality,
   setProductionReviewStatus,
+  setWorkflowBenchmarkRecommendation,
   setWorkflowBenchmarkWinner,
 } from "../../services/tauriClient";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -24,6 +26,7 @@ import type {
   WorkflowBenchmarkCandidateRequest,
   WorkflowBenchmarkCandidateView,
   WorkflowBenchmarkCreateRequest,
+  WorkflowBenchmarkQuality,
   WorkflowBenchmarkSummary,
   WorkflowBenchmarkView,
 } from "../../types/benchmark";
@@ -98,6 +101,14 @@ function formatDuration(duration?: number): string {
   return `${(duration / 1000).toFixed(1)} s`;
 }
 
+function formatMetric(duration?: number): string {
+  return duration === undefined ? "—" : formatDuration(duration);
+}
+
+function formatRate(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
 function mediaTypeForRecipe(recipe?: RecipeViewModel): BenchmarkMediaType {
   return recipe?.outputTypes?.includes("video") ? "VIDEO" : "IMAGE";
 }
@@ -157,6 +168,7 @@ export function WorkflowBenchmarkPanel({
   const [name, setName] = useState("工作流横向 Benchmark");
   const [candidates, setCandidates] = useState<CandidateDraft[]>(() => initialCandidates(catalog, baseRecipe, mediaType));
   const [seedMode, setSeedMode] = useState<BenchmarkSeedMode>("FIXED");
+  const [repeatCount, setRepeatCount] = useState<1 | 3 | 5 | 10>(3);
   const [fixedSeed, setFixedSeed] = useState(() => {
     const seed = Object.values(baseValues).find((value) => value.type === "seed_fixed");
     return seed?.type === "seed_fixed" ? seed.value : "";
@@ -170,6 +182,7 @@ export function WorkflowBenchmarkPanel({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [previewAsset, setPreviewAsset] = useState<AssetView>();
+  const [qualityDrafts, setQualityDrafts] = useState<Record<string, WorkflowBenchmarkQuality>>({});
 
   const availableRecipes = useMemo(() => mediaRecipes(catalog, mediaType), [catalog, mediaType]);
   useEffect(() => {
@@ -247,6 +260,7 @@ export function WorkflowBenchmarkPanel({
       candidates: candidateRequests(candidates),
       seedMode,
       fixedSeed: fixedSeed.trim() || undefined,
+      repeatCount,
       autoStart: false,
     };
   }
@@ -333,6 +347,43 @@ export function WorkflowBenchmarkPanel({
     }
   }
 
+  function qualityFor(candidate: WorkflowBenchmarkCandidateView): WorkflowBenchmarkQuality {
+    return qualityDrafts[candidate.id] ?? candidate.quality ?? {};
+  }
+
+  function updateQuality(candidateId: string, patch: Partial<WorkflowBenchmarkQuality>) {
+    setQualityDrafts((current) => ({ ...current, [candidateId]: { ...current[candidateId], ...patch } }));
+  }
+
+  async function saveQuality(candidate: WorkflowBenchmarkCandidateView) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const updated = await saveWorkflowBenchmarkQuality(projectId, selected.id, candidate.id, qualityFor(candidate));
+      setSelected(updated);
+      setQualityDrafts((current) => ({ ...current, [candidate.id]: updated.candidates.find((item) => item.id === candidate.id)?.quality ?? {} }));
+      setNotice("人工质量评分已保存，不影响性能统计。 ");
+    } catch (qualityError: unknown) {
+      setError(toUserMessage(qualityError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markRecommendation(kind: string, candidateId?: string) {
+    if (!selected || !candidateId) return;
+    setBusy(true);
+    try {
+      const updated = await setWorkflowBenchmarkRecommendation(projectId, selected.id, kind);
+      setSelected(updated);
+      setNotice(`已记录 ${kind} 推荐：${updated.candidates.find((candidate) => candidate.id === candidateId)?.label ?? "候选"}。`);
+    } catch (recommendationError: unknown) {
+      setError(toUserMessage(recommendationError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function markReview(candidate: WorkflowBenchmarkCandidateView, status: "STARRED" | "APPROVED" | "REJECTED") {
     if (!selected?.productionBatchId || !candidate.productionBatchItemId) return;
     setBusy(true);
@@ -413,7 +464,7 @@ export function WorkflowBenchmarkPanel({
           <h3>横向比较 Workflow / Recipe / Preset</h3>
           <p>相同基础输入、素材和 Seed，候选只通过现有 Production Queue 串行执行；结果由人审，不自动选胜者。</p>
         </div>
-        <span className="workflow-benchmark-badge">v1 · 2–8 候选</span>
+          <span className="workflow-benchmark-badge">v2 · 2–8 候选 · 串行重复</span>
       </div>
 
       <div className="workflow-benchmark-create-grid">
@@ -441,6 +492,12 @@ export function WorkflowBenchmarkPanel({
             <input value={fixedSeed} inputMode="numeric" onChange={(event) => setFixedSeed(event.target.value.replace(/[^0-9]/g, ""))} placeholder="留空则沿用基础输入" />
           </label>
         )}
+        <label>
+          <span>每候选运行次数</span>
+          <select value={repeatCount} onChange={(event) => setRepeatCount(Number(event.target.value) as 1 | 3 | 5 | 10)}>
+            {[1, 3, 5, 10].map((count) => <option value={count} key={count}>{count} 次 · 严格串行</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="workflow-benchmark-candidate-toolbar">
@@ -515,7 +572,7 @@ export function WorkflowBenchmarkPanel({
         {history.map((item) => (
           <button type="button" className={`workflow-benchmark-history-row${selected?.id === item.id ? " workflow-benchmark-history-row-active" : ""}`} key={item.id} onClick={() => void openHistory(item.id)}>
             <span><strong>{item.name}</strong><small>{item.mediaType} · {statusLabel(item.status)}</small></span>
-            <span>{item.succeededCount}/{item.candidateCount} 完成</span>
+            <span>{item.succeededCount}/{item.candidateCount} 候选 · {item.repeatCount} 次/候选</span>
             <span>{item.winnerCandidateId ? "已指定胜者" : "未指定胜者"}</span>
           </button>
         ))}
@@ -528,7 +585,7 @@ export function WorkflowBenchmarkPanel({
             <div>
               <span className="section-label">结果审阅</span>
               <h4>{selected.name}</h4>
-              <p>{selected.mediaType} · {statusLabel(selected.status)} · {selected.summary.succeededCount}/{selected.summary.candidateCount} 完成 · 最快：{selected.summary.fastestCandidateId ? formatDuration(selected.summary.fastestDurationMs) : "—"}</p>
+              <p>{selected.mediaType} · {statusLabel(selected.status)} · {selected.summary.succeededCount}/{selected.summary.candidateCount} 候选完成 · {selected.summary.repeatCount} 次/候选 · 最快：{selected.summary.fastestCandidateId ? formatDuration(selected.summary.fastestDurationMs) : "—"}</p>
             </div>
             <div className="workflow-benchmark-result-actions">
               <button type="button" className="quiet-button" onClick={() => void refreshSelected()} disabled={busy}>刷新</button>
@@ -542,6 +599,19 @@ export function WorkflowBenchmarkPanel({
               <button type="button" className="quiet-button" onClick={() => void deleteSelected()} disabled={busy}>删除历史</button>
             </div>
           </div>
+          <div className="workflow-benchmark-comparison" role="status">
+            <strong>可比性与推荐</strong>
+            <span>{selected.comparison.directlyComparable ? `可直接比较 · Seed ${selected.summary.seedStrategy}` : selected.comparison.reason ?? "暂不可比较"}</span>
+            {selected.comparison.recommendations.map((recommendation) => {
+              const candidate = selected.candidates.find((item) => item.id === recommendation.candidateId);
+              return (
+                <div key={recommendation.kind} className="workflow-benchmark-recommendation">
+                  <span><b>{recommendation.kind}</b> · {candidate?.label ?? "暂无"} · {recommendation.rationale}</span>
+                  {candidate && <button type="button" className="quiet-button" onClick={() => void markRecommendation(recommendation.kind, candidate.id)} disabled={busy}>{selected.summary.recommendationType === recommendation.kind ? "已记录" : "记录推荐"}</button>}
+                </div>
+              );
+            })}
+          </div>
           <div className="workflow-benchmark-result-list">
             {selected.candidates.map((candidate) => {
               const isWinner = selected.winnerCandidateId === candidate.id;
@@ -550,7 +620,8 @@ export function WorkflowBenchmarkPanel({
                 <article className={`workflow-benchmark-result-card${isWinner ? " workflow-benchmark-result-card-winner" : ""}`} key={candidate.id}>
                   <div className="workflow-benchmark-result-card-main">
                     <div className="workflow-benchmark-result-card-title"><strong>#{candidate.position + 1} · {candidate.label}</strong><span className={compatibilityClass(candidate.compatibility)}>{compatibilityLabels[candidate.compatibility]}</span></div>
-                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {formatDuration(candidate.executionDurationMs)} · {candidate.telemetry?.runtimeProfile ?? "—"} · 审片：{reviewLabel(candidate.reviewStatus)}</small>
+                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {candidate.aggregate.runsSuccess}/{candidate.aggregate.runsTotal} runs · 成功率 {formatRate(candidate.aggregate.successRate)} · 中位总耗时 {formatMetric(candidate.aggregate.totalMs.median)} · P95 {formatMetric(candidate.aggregate.totalMs.p95)} · Comfy 中位 {formatMetric(candidate.aggregate.comfyExecutionMs.median)} · 输出 {candidate.aggregate.outputSizeMean ?? "—"} bytes · {candidate.runtimeProfile ?? candidate.telemetry?.runtimeProfile ?? "—"} · 审片：{reviewLabel(candidate.reviewStatus)}</small>
+                    <small>Workflow SHA {candidate.workflowSha256 ?? "—"} · Recipe SHA {candidate.recipeSha256 ?? "—"} · Compiled SHA {candidate.runs.find((run) => run.compiledWorkflowSha256)?.compiledWorkflowSha256 ?? "—"}</small>
                     {isWinner && <span className="workflow-benchmark-winner-mark">显式胜者</span>}
                     {isFastest && <span className="workflow-benchmark-fastest-mark">最快完成</span>}
                     {candidate.outputAssetIds.length > 0 && (
@@ -565,6 +636,15 @@ export function WorkflowBenchmarkPanel({
                     <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "APPROVED")} disabled={!candidate.productionBatchItemId || busy}>可用</button>
                     <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "REJECTED")} disabled={!candidate.productionBatchItemId || busy}>不推荐</button>
                     <button type="button" onClick={() => void markWinner(isWinner ? undefined : candidate.id)} disabled={busy}>{isWinner ? "取消胜者" : "指定胜者"}</button>
+                  </div>
+                  <div className="workflow-benchmark-quality-editor">
+                    <span>人工质量（可选）</span>
+                    <label>Prompt <select value={qualityFor(candidate).promptAdherence ?? ""} onChange={(event) => updateQuality(candidate.id, { promptAdherence: event.target.value ? Number(event.target.value) : undefined })}><option value="">—</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                    <label>Visual <select value={qualityFor(candidate).visualQuality ?? ""} onChange={(event) => updateQuality(candidate.id, { visualQuality: event.target.value ? Number(event.target.value) : undefined })}><option value="">—</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                    {selected.mediaType === "VIDEO" && <label>Motion <select value={qualityFor(candidate).motionQuality ?? ""} onChange={(event) => updateQuality(candidate.id, { motionQuality: event.target.value ? Number(event.target.value) : undefined })}><option value="">—</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
+                    <label>Reference <select value={qualityFor(candidate).referenceConsistency ?? ""} onChange={(event) => updateQuality(candidate.id, { referenceConsistency: event.target.value ? Number(event.target.value) : undefined })}><option value="">—</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                    <label>Overall <select value={qualityFor(candidate).overall ?? ""} onChange={(event) => updateQuality(candidate.id, { overall: event.target.value ? Number(event.target.value) : undefined })}><option value="">—</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                    <button type="button" className="quiet-button" onClick={() => void saveQuality(candidate)} disabled={busy}>保存评分</button>
                   </div>
                 </article>
               );

@@ -3,7 +3,7 @@ use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::workflow_benchmark_service::{
     WorkflowBenchmarkCandidatePreviewView, WorkflowBenchmarkCandidateRequest,
     WorkflowBenchmarkCreateRequest, WorkflowBenchmarkDeleteView, WorkflowBenchmarkError,
-    WorkflowBenchmarkSummaryView, WorkflowBenchmarkView,
+    WorkflowBenchmarkQualityRequest, WorkflowBenchmarkSummaryView, WorkflowBenchmarkView,
 };
 use crate::commands::generation::InputValueDto;
 use crate::error::AppError;
@@ -34,6 +34,8 @@ pub struct WorkflowBenchmarkCreateRequestDto {
     pub seed_mode: String,
     #[serde(default)]
     pub fixed_seed: Option<String>,
+    #[serde(default = "default_repeat_count")]
+    pub repeat_count: u32,
     #[serde(default)]
     pub auto_start: bool,
 }
@@ -73,6 +75,35 @@ pub struct WorkflowBenchmarkQueueExistingRequest {
     pub auto_start: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkRecommendationRequest {
+    pub project_id: String,
+    pub experiment_id: String,
+    #[serde(default)]
+    pub recommendation_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkQualityRequestDto {
+    pub project_id: String,
+    pub experiment_id: String,
+    pub candidate_id: String,
+    #[serde(default)]
+    pub prompt_adherence: Option<i64>,
+    #[serde(default)]
+    pub visual_quality: Option<i64>,
+    #[serde(default)]
+    pub motion_quality: Option<i64>,
+    #[serde(default)]
+    pub reference_consistency: Option<i64>,
+    #[serde(default)]
+    pub overall: Option<i64>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowBenchmarkPreviewResponse {
@@ -85,6 +116,10 @@ fn default_seed_mode() -> String {
 
 fn default_limit() -> u32 {
     20
+}
+
+fn default_repeat_count() -> u32 {
+    3
 }
 
 impl WorkflowBenchmarkCreateRequestDto {
@@ -121,6 +156,7 @@ impl WorkflowBenchmarkCreateRequestDto {
                 .collect(),
             seed_mode: self.seed_mode.to_ascii_uppercase(),
             fixed_seed,
+            repeat_count: self.repeat_count,
             auto_start: self.auto_start,
         })
     }
@@ -192,6 +228,48 @@ pub async fn workflow_benchmark_set_winner(
             &request.project_id,
             &request.experiment_id,
             request.candidate_id.as_deref(),
+        )
+        .await
+        .map_err(map_benchmark_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_benchmark_set_recommendation(
+    state: State<'_, AppState>,
+    request: WorkflowBenchmarkRecommendationRequest,
+) -> Result<WorkflowBenchmarkView, AppError> {
+    super::validate_project_id(&request.project_id)?;
+    state
+        .workflow_benchmark_service
+        .set_recommendation(
+            &request.project_id,
+            &request.experiment_id,
+            request.recommendation_type.as_deref(),
+        )
+        .await
+        .map_err(map_benchmark_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_benchmark_save_quality(
+    state: State<'_, AppState>,
+    request: WorkflowBenchmarkQualityRequestDto,
+) -> Result<WorkflowBenchmarkView, AppError> {
+    super::validate_project_id(&request.project_id)?;
+    state
+        .workflow_benchmark_service
+        .save_quality(
+            &request.project_id,
+            &request.experiment_id,
+            &request.candidate_id,
+            WorkflowBenchmarkQualityRequest {
+                prompt_adherence: request.prompt_adherence,
+                visual_quality: request.visual_quality,
+                motion_quality: request.motion_quality,
+                reference_consistency: request.reference_consistency,
+                overall: request.overall,
+                note: request.note,
+            },
         )
         .await
         .map_err(map_benchmark_error)

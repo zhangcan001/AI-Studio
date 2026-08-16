@@ -26,6 +26,7 @@ import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type {
   WorkflowBenchmarkCreateRequest,
   WorkflowBenchmarkCandidatePreview,
+  WorkflowBenchmarkQuality,
   WorkflowBenchmarkSummary,
   WorkflowBenchmarkView,
 } from "../types/benchmark";
@@ -344,6 +345,27 @@ export function previewWorkflowBenchmark(
 
 export function createWorkflowBenchmark(request: WorkflowBenchmarkCreateRequest): Promise<WorkflowBenchmarkView> {
   return invoke<WorkflowBenchmarkView>("workflow_benchmark_create", { request });
+}
+
+export function setWorkflowBenchmarkRecommendation(
+  projectId: string,
+  experimentId: string,
+  recommendationType?: string,
+): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_set_recommendation", {
+    request: { projectId, experimentId, recommendationType },
+  });
+}
+
+export function saveWorkflowBenchmarkQuality(
+  projectId: string,
+  experimentId: string,
+  candidateId: string,
+  quality: WorkflowBenchmarkQuality,
+): Promise<WorkflowBenchmarkView> {
+  return invoke<WorkflowBenchmarkView>("workflow_benchmark_save_quality", {
+    request: { projectId, experimentId, candidateId, ...quality },
+  });
 }
 
 export function listWorkflowBenchmarks(projectId: string, limit = 20): Promise<WorkflowBenchmarkSummary[]> {

@@ -734,6 +734,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_benchmark::workflow_benchmark_list,
             commands::workflow_benchmark::workflow_benchmark_get,
             commands::workflow_benchmark::workflow_benchmark_set_winner,
+            commands::workflow_benchmark::workflow_benchmark_set_recommendation,
+            commands::workflow_benchmark::workflow_benchmark_save_quality,
             commands::workflow_benchmark::workflow_benchmark_clone,
             commands::workflow_benchmark::workflow_benchmark_queue_existing,
             commands::workflow_benchmark::workflow_benchmark_delete,

@@ -6,6 +6,7 @@ use crate::application::production_queue_service::{
     generation_values_from_json, generation_values_to_json, CreateProductionBatchItem,
     CreateProductionBatchRequest, ProductionQueueError, ProductionQueueService,
 };
+use crate::application::scheduler::scheduler_decision;
 use crate::compiler::{RecipeParser, RecipeValidator};
 use crate::domain::{InputDefinition, OutputType, PresetId, Recipe, SeedValue};
 use chrono::DateTime;
@@ -39,6 +40,7 @@ pub struct WorkflowBenchmarkCreateRequest {
     pub candidates: Vec<WorkflowBenchmarkCandidateRequest>,
     pub seed_mode: String,
     pub fixed_seed: Option<u64>,
+    pub repeat_count: u32,
     pub auto_start: bool,
 }
 
@@ -56,6 +58,13 @@ pub struct WorkflowBenchmarkCandidatePreviewView {
     pub compatibility_reasons: Vec<String>,
     pub frozen_values: Value,
     pub asset_ids: Vec<String>,
+    pub workflow_id: Option<String>,
+    pub workflow_version: Option<String>,
+    pub workflow_sha256: Option<String>,
+    pub recipe_version: Option<String>,
+    pub recipe_sha256: Option<String>,
+    pub runtime_package: Option<String>,
+    pub runtime_profile: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -72,6 +81,13 @@ pub struct WorkflowBenchmarkCandidateView {
     pub compatibility_reasons: Vec<String>,
     pub frozen_values: Value,
     pub asset_ids: Vec<String>,
+    pub workflow_id: Option<String>,
+    pub workflow_version: Option<String>,
+    pub workflow_sha256: Option<String>,
+    pub recipe_version: Option<String>,
+    pub recipe_sha256: Option<String>,
+    pub runtime_package: Option<String>,
+    pub runtime_profile: Option<String>,
     pub production_batch_item_id: Option<String>,
     pub task_id: Option<String>,
     pub task_status: Option<String>,
@@ -80,6 +96,9 @@ pub struct WorkflowBenchmarkCandidateView {
     pub task_finished_at: Option<String>,
     pub execution_duration_ms: Option<i64>,
     pub telemetry: Option<WorkflowBenchmarkTelemetryView>,
+    pub runs: Vec<WorkflowBenchmarkRunView>,
+    pub aggregate: WorkflowBenchmarkAggregateView,
+    pub quality: Option<WorkflowBenchmarkQualityView>,
     pub output_asset_ids: Vec<String>,
     pub review_status: Option<String>,
     pub review_note: Option<String>,
@@ -99,6 +118,93 @@ pub struct WorkflowBenchmarkTelemetryView {
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkRunView {
+    pub id: String,
+    pub candidate_id: String,
+    pub run_number: u32,
+    pub production_batch_item_id: Option<String>,
+    pub task_id: Option<String>,
+    pub snapshot_id: Option<String>,
+    pub output_asset_id: Option<String>,
+    pub generation_execution_id: Option<String>,
+    pub compiled_workflow_sha256: Option<String>,
+    pub runtime_profile: Option<String>,
+    pub concurrency_class: Option<String>,
+    pub queue_wait_ms: Option<i64>,
+    pub prepare_ms: Option<i64>,
+    pub submit_ms: Option<i64>,
+    pub comfy_execution_ms: Option<i64>,
+    pub collect_ms: Option<i64>,
+    pub total_ms: Option<i64>,
+    pub status: Option<String>,
+    pub error_code: Option<String>,
+    pub output_file_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkMetricSummaryView {
+    pub min: Option<i64>,
+    pub median: Option<i64>,
+    pub mean: Option<i64>,
+    pub p95: Option<i64>,
+    pub max: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkAggregateView {
+    pub runs_total: u32,
+    pub runs_success: u32,
+    pub runs_failed: u32,
+    pub success_rate: f64,
+    pub total_ms: WorkflowBenchmarkMetricSummaryView,
+    pub comfy_execution_ms: WorkflowBenchmarkMetricSummaryView,
+    pub prepare_ms_mean: Option<i64>,
+    pub collect_ms_mean: Option<i64>,
+    pub output_size_mean: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkQualityView {
+    pub prompt_adherence: Option<i64>,
+    pub visual_quality: Option<i64>,
+    pub motion_quality: Option<i64>,
+    pub reference_consistency: Option<i64>,
+    pub overall: Option<i64>,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkflowBenchmarkQualityRequest {
+    pub prompt_adherence: Option<i64>,
+    pub visual_quality: Option<i64>,
+    pub motion_quality: Option<i64>,
+    pub reference_consistency: Option<i64>,
+    pub overall: Option<i64>,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkRecommendationView {
+    pub kind: String,
+    pub candidate_id: Option<String>,
+    pub label: Option<String>,
+    pub rationale: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBenchmarkComparisonView {
+    pub directly_comparable: bool,
+    pub reason: Option<String>,
+    pub recommendations: Vec<WorkflowBenchmarkRecommendationView>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkflowBenchmarkSummaryView {
     pub id: String,
     pub project_id: String,
@@ -107,6 +213,9 @@ pub struct WorkflowBenchmarkSummaryView {
     pub status: String,
     pub winner_candidate_id: Option<String>,
     pub production_batch_id: Option<String>,
+    pub repeat_count: u32,
+    pub seed_strategy: String,
+    pub recommendation_type: Option<String>,
     pub candidate_count: usize,
     pub succeeded_count: usize,
     pub failed_count: usize,
@@ -132,6 +241,7 @@ pub struct WorkflowBenchmarkView {
     pub updated_at: String,
     pub candidates: Vec<WorkflowBenchmarkCandidateView>,
     pub summary: WorkflowBenchmarkSummaryView,
+    pub comparison: WorkflowBenchmarkComparisonView,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -155,6 +265,13 @@ struct CandidateDraft {
     values: BTreeMap<String, GenerationInputValue>,
     values_json: Value,
     asset_ids: Vec<String>,
+    workflow_id: String,
+    workflow_version: String,
+    workflow_sha256: String,
+    recipe_version: String,
+    recipe_sha256: String,
+    runtime_package: Option<String>,
+    runtime_profile: String,
 }
 
 #[derive(Debug)]
@@ -258,6 +375,7 @@ impl WorkflowBenchmarkService {
         self.insert_draft(
             &experiment_id,
             &request,
+            normalized_seed_strategy(&request.seed_mode),
             &base_values_json,
             &asset_ids_json,
             &now,
@@ -265,18 +383,22 @@ impl WorkflowBenchmarkService {
         )
         .await?;
 
-        let queue_request = CreateProductionBatchRequest {
-            project_id: request.project_id.clone(),
-            name: format!("Benchmark · {}", request.name.trim()),
-            continue_on_failure: true,
-            items: drafts
-                .iter()
-                .map(|candidate| CreateProductionBatchItem {
+        let queue_items = drafts
+            .iter()
+            .flat_map(|candidate| {
+                std::iter::repeat_with(|| CreateProductionBatchItem {
                     workflow_version_id: candidate.workflow_version_id.clone(),
                     recipe_id: candidate.recipe_id.clone(),
                     values: candidate.values.clone(),
                 })
-                .collect(),
+                .take(request.repeat_count as usize)
+            })
+            .collect::<Vec<_>>();
+        let queue_request = CreateProductionBatchRequest {
+            project_id: request.project_id.clone(),
+            name: format!("Benchmark · {}", request.name.trim()),
+            continue_on_failure: true,
+            items: queue_items,
         };
         let queue = match self.production_queue_service.create(queue_request).await {
             Ok(queue) => queue,
@@ -288,7 +410,12 @@ impl WorkflowBenchmarkService {
         };
 
         if let Err(error) = self
-            .link_queue(&experiment_id, queue.batch.id.as_str(), &queue.items)
+            .link_queue(
+                &experiment_id,
+                queue.batch.id.as_str(),
+                &queue.items,
+                request.repeat_count,
+            )
             .await
         {
             if let Err(compensation_error) = self
@@ -330,6 +457,7 @@ impl WorkflowBenchmarkService {
         let rows = sqlx::query_as::<_, BenchmarkExperimentRow>(
             "SELECT id, project_id, name, media_type, status, base_values_json,
                     asset_ids_json, winner_candidate_id, production_batch_id,
+                    seed_strategy, fixed_seed, repeat_count, recommendation_type,
                     created_at, updated_at
              FROM benchmark_experiments
              WHERE project_id = ?
@@ -368,6 +496,7 @@ impl WorkflowBenchmarkService {
             self.set_experiment_status(&row.id, &status).await?;
         }
         let summary = summary_from_candidates(&row, status.clone(), &candidates);
+        let comparison = build_comparison(&row, &candidates);
         Ok(WorkflowBenchmarkView {
             id: row.id,
             project_id: row.project_id,
@@ -382,6 +511,7 @@ impl WorkflowBenchmarkService {
             updated_at: row.updated_at,
             candidates,
             summary,
+            comparison,
         })
     }
 
@@ -431,6 +561,119 @@ impl WorkflowBenchmarkService {
         self.get(project_id, experiment_id).await
     }
 
+    pub async fn set_recommendation(
+        &self,
+        project_id: &str,
+        experiment_id: &str,
+        recommendation_type: Option<&str>,
+    ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
+        validate_project_id(project_id)?;
+        if let Some(kind) = recommendation_type {
+            if !matches!(
+                kind,
+                "FASTEST" | "MOST_STABLE" | "BEST_QUALITY" | "BEST_BALANCE"
+            ) {
+                return Err(WorkflowBenchmarkError::InvalidInput(
+                    "Benchmark 推荐类型无效。".to_owned(),
+                ));
+            }
+        }
+        let result = sqlx::query(
+            "UPDATE benchmark_experiments SET recommendation_type = ?, updated_at = ?
+             WHERE id = ? AND project_id = ?",
+        )
+        .bind(recommendation_type)
+        .bind(self.clock.now().to_rfc3339())
+        .bind(experiment_id)
+        .bind(project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        if result.rows_affected() == 0 {
+            return Err(WorkflowBenchmarkError::NotFound(experiment_id.to_owned()));
+        }
+        self.get(project_id, experiment_id).await
+    }
+
+    pub async fn save_quality(
+        &self,
+        project_id: &str,
+        experiment_id: &str,
+        candidate_id: &str,
+        request: WorkflowBenchmarkQualityRequest,
+    ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
+        validate_project_id(project_id)?;
+        for (label, value) in [
+            ("Prompt Adherence", request.prompt_adherence),
+            ("Visual Quality", request.visual_quality),
+            ("Motion Quality", request.motion_quality),
+            ("Reference Consistency", request.reference_consistency),
+            ("Overall", request.overall),
+        ] {
+            if let Some(value) = value {
+                if !(1..=5).contains(&value) {
+                    return Err(WorkflowBenchmarkError::InvalidInput(format!(
+                        "{label} 评分必须在 1–5 之间。"
+                    )));
+                }
+            }
+        }
+        if request
+            .note
+            .as_deref()
+            .is_some_and(|note| note.chars().count() > 2000)
+        {
+            return Err(WorkflowBenchmarkError::InvalidInput(
+                "质量评分备注不能超过 2000 个字符。".to_owned(),
+            ));
+        }
+        let belongs = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM benchmark_candidates c
+             INNER JOIN benchmark_experiments e ON e.id = c.experiment_id
+             WHERE c.id = ? AND e.id = ? AND e.project_id = ?",
+        )
+        .bind(candidate_id)
+        .bind(experiment_id)
+        .bind(project_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?;
+        if belongs == 0 {
+            return Err(WorkflowBenchmarkError::InvalidInput(
+                "质量评分候选不属于当前实验。".to_owned(),
+            ));
+        }
+        let now = self.clock.now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO benchmark_quality_scores
+             (id, candidate_id, prompt_adherence, visual_quality, motion_quality,
+              reference_consistency, overall, note, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(candidate_id) DO UPDATE SET
+                prompt_adherence = excluded.prompt_adherence,
+                visual_quality = excluded.visual_quality,
+                motion_quality = excluded.motion_quality,
+                reference_consistency = excluded.reference_consistency,
+                overall = excluded.overall,
+                note = excluded.note,
+                updated_at = excluded.updated_at",
+        )
+        .bind(format!("bqs_{}", Uuid::new_v4().simple()))
+        .bind(candidate_id)
+        .bind(request.prompt_adherence)
+        .bind(request.visual_quality)
+        .bind(request.motion_quality)
+        .bind(request.reference_consistency)
+        .bind(request.overall)
+        .bind(request.note)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        self.get(project_id, experiment_id).await
+    }
+
     pub async fn clone_experiment(
         &self,
         project_id: &str,
@@ -455,12 +698,14 @@ impl WorkflowBenchmarkService {
             ));
         }
         let now = self.clock.now().to_rfc3339();
+        let repeat_count = u32::try_from(row.repeat_count).unwrap_or(3).clamp(1, 10);
         let mut transaction = self.pool.begin().await.map_err(db_error)?;
         sqlx::query(
             "INSERT INTO benchmark_experiments
              (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
-              winner_candidate_id, production_batch_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, NULL, NULL, ?, ?)",
+              winner_candidate_id, production_batch_id, seed_strategy, fixed_seed,
+              repeat_count, recommendation_type, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, NULL, NULL, ?, ?, ?, NULL, ?, ?)",
         )
         .bind(&new_id)
         .bind(project_id)
@@ -468,6 +713,9 @@ impl WorkflowBenchmarkService {
         .bind(&row.media_type)
         .bind(&row.base_values_json)
         .bind(&row.asset_ids_json)
+        .bind(&row.seed_strategy)
+        .bind(&row.fixed_seed)
+        .bind(i64::from(repeat_count))
         .bind(&now)
         .bind(&now)
         .execute(&mut *transaction)
@@ -479,10 +727,11 @@ impl WorkflowBenchmarkService {
                 "INSERT INTO benchmark_candidates
                  (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
                   preset_name, label, values_json, asset_ids_json, production_batch_item_id,
-                  task_id, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+                  task_id, workflow_id, workflow_version, workflow_sha256, recipe_version,
+                  recipe_sha256, runtime_package, runtime_profile, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
-            .bind(id)
+            .bind(&id)
             .bind(&new_id)
             .bind(candidate.position)
             .bind(&candidate.workflow_version_id)
@@ -492,10 +741,33 @@ impl WorkflowBenchmarkService {
             .bind(&candidate.label)
             .bind(&candidate.values_json)
             .bind(&candidate.asset_ids_json)
+            .bind(&candidate.workflow_id)
+            .bind(&candidate.workflow_version)
+            .bind(&candidate.workflow_sha256)
+            .bind(&candidate.recipe_version)
+            .bind(&candidate.recipe_sha256)
+            .bind(&candidate.runtime_package)
+            .bind(&candidate.runtime_profile)
             .bind(&now)
             .execute(&mut *transaction)
             .await
             .map_err(db_error)?;
+            for run_number in 1..=repeat_count {
+                sqlx::query(
+                    "INSERT INTO benchmark_runs
+                     (id, experiment_id, candidate_id, run_number, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                )
+                .bind(format!("bmr_{}", Uuid::new_v4().simple()))
+                .bind(&new_id)
+                .bind(&id)
+                .bind(i64::from(run_number))
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *transaction)
+                .await
+                .map_err(db_error)?;
+            }
         }
         transaction.commit().await.map_err(db_error)?;
         self.get(project_id, &new_id).await
@@ -526,7 +798,8 @@ impl WorkflowBenchmarkService {
             ));
         }
 
-        let mut items = Vec::with_capacity(candidate_rows.len());
+        let repeat_count = u32::try_from(row.repeat_count).unwrap_or(3).clamp(1, 10);
+        let mut items = Vec::with_capacity(candidate_rows.len() * repeat_count as usize);
         for candidate in candidate_rows {
             let available_definition = available.iter().find(|definition| {
                 definition.workflow_version_id == candidate.workflow_version_id
@@ -543,11 +816,13 @@ impl WorkflowBenchmarkService {
                 .map_err(WorkflowBenchmarkError::InvalidInput)?;
             self.verify_frozen_assets(project_id, &candidate.asset_ids_json, &values)
                 .await?;
-            items.push(CreateProductionBatchItem {
-                workflow_version_id: candidate.workflow_version_id,
-                recipe_id: candidate.recipe_id,
-                values,
-            });
+            for _ in 0..repeat_count {
+                items.push(CreateProductionBatchItem {
+                    workflow_version_id: candidate.workflow_version_id.clone(),
+                    recipe_id: candidate.recipe_id.clone(),
+                    values: values.clone(),
+                });
+            }
         }
 
         let queue = match self
@@ -569,7 +844,12 @@ impl WorkflowBenchmarkService {
         };
 
         if let Err(error) = self
-            .link_queue(experiment_id, queue.batch.id.as_str(), &queue.items)
+            .link_queue(
+                experiment_id,
+                queue.batch.id.as_str(),
+                &queue.items,
+                u32::try_from(row.repeat_count).unwrap_or(1),
+            )
             .await
         {
             if let Err(compensation_error) = self
@@ -647,7 +927,17 @@ impl WorkflowBenchmarkService {
                         candidate.workflow_version_id, candidate.recipe_id
                     ))
                 })?;
-            let recipe = RecipeParser::parse(&definition.recipe_yaml)
+            let frozen_definition = self
+                .definition_repository
+                .find(&candidate.workflow_version_id, &candidate.recipe_id)
+                .await?
+                .ok_or_else(|| {
+                    WorkflowBenchmarkError::InvalidInput(format!(
+                        "Workflow / Recipe disappeared while freezing candidate: {} / {}",
+                        candidate.workflow_version_id, candidate.recipe_id
+                    ))
+                })?;
+            let recipe = RecipeParser::parse(&frozen_definition.recipe_yaml)
                 .map_err(|error| WorkflowBenchmarkError::InvalidRecipe(error.to_string()))?;
             RecipeValidator::validate(&recipe)
                 .map_err(|error| WorkflowBenchmarkError::InvalidRecipe(error.to_string()))?;
@@ -688,6 +978,10 @@ impl WorkflowBenchmarkService {
                     "候选显示名不能超过 120 个字符。".to_owned(),
                 ));
             }
+            let runtime_profile = scheduler_decision(&frozen_definition, &recipe)
+                .profile
+                .as_str()
+                .to_owned();
             drafts.push(CandidateDraft {
                 id: format!("bmc_{}", Uuid::new_v4().simple()),
                 position: u32::try_from(index).expect("benchmark candidate index fits u32"),
@@ -701,6 +995,13 @@ impl WorkflowBenchmarkService {
                 values_json: generation_values_to_json(&values),
                 asset_ids: collect_asset_ids(&values),
                 values,
+                workflow_id: frozen_definition.workflow_id,
+                workflow_version: frozen_definition.workflow_version,
+                workflow_sha256: frozen_definition.workflow_sha256,
+                recipe_version: frozen_definition.recipe_version,
+                recipe_sha256: frozen_definition.recipe_sha256,
+                runtime_package: frozen_definition.package_name.clone(),
+                runtime_profile,
             });
         }
         Ok(drafts)
@@ -737,6 +1038,7 @@ impl WorkflowBenchmarkService {
         &self,
         experiment_id: &str,
         request: &WorkflowBenchmarkCreateRequest,
+        seed_strategy: &str,
         base_values_json: &Value,
         asset_ids_json: &str,
         now: &str,
@@ -746,8 +1048,9 @@ impl WorkflowBenchmarkService {
         sqlx::query(
             "INSERT INTO benchmark_experiments
              (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
-              winner_candidate_id, production_batch_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, NULL, NULL, ?, ?)",
+              winner_candidate_id, production_batch_id, seed_strategy, fixed_seed,
+              repeat_count, recommendation_type, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, ?, ?)",
         )
         .bind(experiment_id)
         .bind(&request.project_id)
@@ -755,6 +1058,9 @@ impl WorkflowBenchmarkService {
         .bind(&request.media_type)
         .bind(base_values_json.to_string())
         .bind(asset_ids_json)
+        .bind(seed_strategy)
+        .bind(request.fixed_seed.map(|seed| seed.to_string()))
+        .bind(i64::from(request.repeat_count))
         .bind(now)
         .bind(now)
         .execute(&mut *transaction)
@@ -763,10 +1069,11 @@ impl WorkflowBenchmarkService {
         for draft in drafts {
             sqlx::query(
                 "INSERT INTO benchmark_candidates
-                 (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
+                (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
                   preset_name, label, values_json, asset_ids_json, production_batch_item_id,
-                  task_id, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+                  task_id, workflow_id, workflow_version, workflow_sha256, recipe_version,
+                  recipe_sha256, runtime_package, runtime_profile, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&draft.id)
             .bind(experiment_id)
@@ -781,10 +1088,33 @@ impl WorkflowBenchmarkService {
                 serde_json::to_string(&draft.asset_ids)
                     .map_err(|error| WorkflowBenchmarkError::Serialization(error.to_string()))?,
             )
+            .bind(&draft.workflow_id)
+            .bind(&draft.workflow_version)
+            .bind(&draft.workflow_sha256)
+            .bind(&draft.recipe_version)
+            .bind(&draft.recipe_sha256)
+            .bind(&draft.runtime_package)
+            .bind(&draft.runtime_profile)
             .bind(now)
             .execute(&mut *transaction)
             .await
             .map_err(db_error)?;
+            for run_number in 1..=request.repeat_count {
+                sqlx::query(
+                    "INSERT INTO benchmark_runs
+                     (id, experiment_id, candidate_id, run_number, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                )
+                .bind(format!("bmr_{}", Uuid::new_v4().simple()))
+                .bind(experiment_id)
+                .bind(&draft.id)
+                .bind(i64::from(run_number))
+                .bind(now)
+                .bind(now)
+                .execute(&mut *transaction)
+                .await
+                .map_err(db_error)?;
+            }
         }
         transaction.commit().await.map_err(db_error)
     }
@@ -794,6 +1124,7 @@ impl WorkflowBenchmarkService {
         experiment_id: &str,
         batch_id: &str,
         items: &[crate::domain::ProductionBatchItem],
+        repeat_count: u32,
     ) -> Result<(), WorkflowBenchmarkError> {
         let mut transaction = self.pool.begin().await.map_err(db_error)?;
         sqlx::query(
@@ -805,7 +1136,11 @@ impl WorkflowBenchmarkService {
         .execute(&mut *transaction)
         .await
         .map_err(db_error)?;
-        for item in items {
+        for (index, item) in items.iter().enumerate() {
+            let candidate_position = i64::try_from(index / repeat_count as usize)
+                .map_err(|_| WorkflowBenchmarkError::InvalidInput("候选序号溢出。".to_owned()))?;
+            let run_number = i64::try_from(index % repeat_count as usize + 1)
+                .map_err(|_| WorkflowBenchmarkError::InvalidInput("运行序号溢出。".to_owned()))?;
             sqlx::query(
                 "UPDATE benchmark_candidates
                  SET production_batch_item_id = ?, values_json = ?
@@ -814,7 +1149,24 @@ impl WorkflowBenchmarkService {
             .bind(item.id.as_str())
             .bind(item.values_json.to_string())
             .bind(experiment_id)
-            .bind(item.ordinal)
+            .bind(candidate_position)
+            .execute(&mut *transaction)
+            .await
+            .map_err(db_error)?;
+            sqlx::query(
+                "UPDATE benchmark_runs
+                 SET production_batch_item_id = ?, task_id = NULL, updated_at = ?
+                 WHERE experiment_id = ? AND candidate_id = (
+                    SELECT id FROM benchmark_candidates
+                    WHERE experiment_id = ? AND position = ?
+                 ) AND run_number = ?",
+            )
+            .bind(item.id.as_str())
+            .bind(self.clock.now().to_rfc3339())
+            .bind(experiment_id)
+            .bind(experiment_id)
+            .bind(candidate_position)
+            .bind(run_number)
             .execute(&mut *transaction)
             .await
             .map_err(db_error)?;
@@ -892,6 +1244,7 @@ impl WorkflowBenchmarkService {
         sqlx::query_as::<_, BenchmarkExperimentRow>(
             "SELECT id, project_id, name, media_type, status, base_values_json,
                     asset_ids_json, winner_candidate_id, production_batch_id,
+                    seed_strategy, fixed_seed, repeat_count, recommendation_type,
                     created_at, updated_at
              FROM benchmark_experiments WHERE project_id = ? AND id = ?",
         )
@@ -909,7 +1262,9 @@ impl WorkflowBenchmarkService {
         sqlx::query_as::<_, BenchmarkCandidateRow>(
             "SELECT id, position, workflow_version_id, recipe_id,
                     preset_id, preset_name, label, values_json, asset_ids_json,
-                    production_batch_item_id, task_id
+                    production_batch_item_id, task_id, workflow_id, workflow_version,
+                    workflow_sha256, recipe_version, recipe_sha256, runtime_package,
+                    runtime_profile
              FROM benchmark_candidates
              WHERE experiment_id = ? ORDER BY position ASC",
         )
@@ -924,46 +1279,124 @@ impl WorkflowBenchmarkService {
         experiment: &BenchmarkExperimentRow,
     ) -> Result<Vec<WorkflowBenchmarkCandidateView>, WorkflowBenchmarkError> {
         let rows = self.load_candidate_rows(&experiment.id).await?;
+        sqlx::query(
+            "UPDATE benchmark_runs AS r
+             SET task_id = COALESCE((SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id), r.task_id),
+                 snapshot_id = COALESCE((SELECT s.id FROM generation_snapshots s WHERE s.task_id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.snapshot_id),
+                 output_asset_id = COALESCE((SELECT MIN(oa.asset_id) FROM task_output_assets oa WHERE oa.task_id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.output_asset_id),
+                 generation_execution_id = COALESCE((SELECT t.generation_execution_id FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.generation_execution_id),
+                 compiled_workflow_sha256 = COALESCE((SELECT t.compiled_workflow_sha256 FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.compiled_workflow_sha256),
+                 runtime_profile = COALESCE((SELECT t.runtime_profile FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.runtime_profile),
+                 concurrency_class = COALESCE((SELECT t.concurrency_class FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.concurrency_class),
+                 queue_wait_ms = COALESCE((SELECT CAST((julianday(t.execution_started_at) - julianday(t.queued_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.queued_at IS NOT NULL AND t.execution_started_at IS NOT NULL), r.queue_wait_ms),
+                 prepare_ms = COALESCE((SELECT CAST((julianday(t.prepared_at) - julianday(t.prepare_started_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.prepare_started_at IS NOT NULL AND t.prepared_at IS NOT NULL), r.prepare_ms),
+                 submit_ms = COALESCE((SELECT CAST((julianday(t.submitted_at) - julianday(t.prepared_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.prepared_at IS NOT NULL AND t.submitted_at IS NOT NULL), r.submit_ms),
+                 comfy_execution_ms = COALESCE((SELECT CAST((julianday(t.execution_finished_at) - julianday(t.execution_started_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.execution_started_at IS NOT NULL AND t.execution_finished_at IS NOT NULL), r.comfy_execution_ms),
+                 collect_ms = COALESCE((SELECT CAST((julianday(t.collection_finished_at) - julianday(t.execution_finished_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.execution_finished_at IS NOT NULL AND t.collection_finished_at IS NOT NULL), r.collect_ms),
+                 total_ms = COALESCE((SELECT CAST((julianday(t.collection_finished_at) - julianday(t.created_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.created_at IS NOT NULL AND t.collection_finished_at IS NOT NULL), r.total_ms),
+                 status = COALESCE((SELECT t.status FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), (SELECT i.status FROM production_batch_items i WHERE i.id = r.production_batch_item_id), r.status),
+                 error_code = COALESCE((SELECT t.error_code FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), (SELECT i.error_code FROM production_batch_items i WHERE i.id = r.production_batch_item_id), r.error_code),
+                 output_file_size = COALESCE(r.output_file_size, (SELECT MAX(a.file_size) FROM task_output_assets oa INNER JOIN assets a ON a.id = oa.asset_id WHERE oa.task_id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)))),
+                 updated_at = ?
+             WHERE r.experiment_id = ?",
+        )
+        .bind(self.clock.now().to_rfc3339())
+        .bind(&experiment.id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        let run_rows = sqlx::query_as::<_, BenchmarkRunRow>(
+            "SELECT r.id, r.candidate_id, r.run_number, r.production_batch_item_id,
+                    COALESCE(r.task_id, i.task_id) AS task_id,
+                    COALESCE(r.snapshot_id, s.id) AS snapshot_id,
+                    COALESCE(r.output_asset_id, (
+                        SELECT MIN(oa.asset_id) FROM task_output_assets oa
+                        WHERE oa.task_id = COALESCE(r.task_id, i.task_id)
+                    )) AS output_asset_id,
+                    COALESCE(r.generation_execution_id, t.generation_execution_id) AS generation_execution_id,
+                    COALESCE(r.compiled_workflow_sha256, t.compiled_workflow_sha256) AS compiled_workflow_sha256,
+                    COALESCE(r.runtime_profile, t.runtime_profile) AS runtime_profile,
+                    COALESCE(r.concurrency_class, t.concurrency_class) AS concurrency_class,
+                    COALESCE(r.queue_wait_ms,
+                        CASE WHEN t.queued_at IS NOT NULL AND t.execution_started_at IS NOT NULL
+                             THEN CAST((julianday(t.execution_started_at) - julianday(t.queued_at)) * 86400000 AS INTEGER)
+                        END) AS queue_wait_ms,
+                    COALESCE(r.prepare_ms,
+                        CASE WHEN t.prepare_started_at IS NOT NULL AND t.prepared_at IS NOT NULL
+                             THEN CAST((julianday(t.prepared_at) - julianday(t.prepare_started_at)) * 86400000 AS INTEGER)
+                        END) AS prepare_ms,
+                    COALESCE(r.submit_ms,
+                        CASE WHEN t.prepared_at IS NOT NULL AND t.submitted_at IS NOT NULL
+                             THEN CAST((julianday(t.submitted_at) - julianday(t.prepared_at)) * 86400000 AS INTEGER)
+                        END) AS submit_ms,
+                    COALESCE(r.comfy_execution_ms,
+                        CASE WHEN t.execution_started_at IS NOT NULL AND t.execution_finished_at IS NOT NULL
+                             THEN CAST((julianday(t.execution_finished_at) - julianday(t.execution_started_at)) * 86400000 AS INTEGER)
+                        END) AS comfy_execution_ms,
+                    COALESCE(r.collect_ms,
+                        CASE WHEN t.execution_finished_at IS NOT NULL AND t.collection_finished_at IS NOT NULL
+                             THEN CAST((julianday(t.collection_finished_at) - julianday(t.execution_finished_at)) * 86400000 AS INTEGER)
+                        END) AS collect_ms,
+                    COALESCE(r.total_ms,
+                        CASE WHEN t.created_at IS NOT NULL AND t.collection_finished_at IS NOT NULL
+                             THEN CAST((julianday(t.collection_finished_at) - julianday(t.created_at)) * 86400000 AS INTEGER)
+                        END) AS total_ms,
+                    COALESCE(t.status, i.status, r.status) AS status,
+                    COALESCE(r.error_code, t.error_code, i.error_code) AS error_code,
+                    COALESCE(r.output_file_size, (
+                        SELECT MAX(a.file_size) FROM task_output_assets oa
+                        INNER JOIN assets a ON a.id = oa.asset_id
+                        WHERE oa.task_id = COALESCE(r.task_id, i.task_id)
+                    )) AS output_file_size
+             FROM benchmark_runs r
+             LEFT JOIN production_batch_items i ON i.id = r.production_batch_item_id
+             LEFT JOIN tasks t ON t.id = COALESCE(r.task_id, i.task_id)
+             LEFT JOIN generation_snapshots s ON s.task_id = COALESCE(r.task_id, i.task_id)
+             WHERE r.experiment_id = ?
+             ORDER BY r.candidate_id ASC, r.run_number ASC",
+        )
+        .bind(&experiment.id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        let mut runs_by_candidate: BTreeMap<String, Vec<WorkflowBenchmarkRunView>> =
+            BTreeMap::new();
+        for run in run_rows {
+            let status = effective_candidate_status(run.status.as_deref(), None);
+            runs_by_candidate
+                .entry(run.candidate_id.clone())
+                .or_default()
+                .push(run.into_view(status));
+        }
+        let quality_rows = sqlx::query_as::<_, BenchmarkQualityRow>(
+            "SELECT q.candidate_id, q.prompt_adherence, q.visual_quality,
+                    q.motion_quality, q.reference_consistency, q.overall, q.note
+             FROM benchmark_quality_scores q
+             INNER JOIN benchmark_candidates c ON c.id = q.candidate_id
+             WHERE c.experiment_id = ?",
+        )
+        .bind(&experiment.id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        let mut quality_by_candidate = quality_rows
+            .into_iter()
+            .map(|row| (row.candidate_id.clone(), row.into_view()))
+            .collect::<BTreeMap<_, _>>();
         let mut views = Vec::with_capacity(rows.len());
         for row in rows {
+            let candidate_id = row.id.clone();
             let values = parse_json_value(&row.values_json)?;
             let asset_ids = parse_string_array(&row.asset_ids_json)?;
-            let runtime = if let Some(item_id) = row.production_batch_item_id.as_deref() {
-                sqlx::query_as::<_, BenchmarkItemRuntimeRow>(
-                    "SELECT i.task_id, i.status AS item_status,
-                            t.status AS task_status, t.created_at AS task_created_at,
-                            t.queued_at AS task_queued_at, t.started_at AS task_started_at,
-                            t.finished_at AS task_finished_at,
-                            t.compiled_workflow_sha256, t.runtime_profile,
-                            t.prepare_started_at, t.prepared_at, t.submitted_at,
-                            t.execution_started_at, t.execution_finished_at,
-                            t.collection_finished_at
-                     FROM production_batch_items i
-                     LEFT JOIN tasks t ON t.id = i.task_id
-                     WHERE i.id = ?",
-                )
-                .bind(item_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(db_error)?
-            } else {
-                None
-            };
-            let task_id = runtime
-                .as_ref()
-                .and_then(|runtime| runtime.task_id.clone())
+            let runs = runs_by_candidate.remove(&row.id).unwrap_or_default();
+            let first_run = runs.first();
+            let task_id = first_run
+                .and_then(|run| run.task_id.clone())
                 .or(row.task_id.clone());
-            let output_asset_ids = if let Some(task_id) = task_id.as_deref() {
-                sqlx::query_scalar::<_, String>(
-                    "SELECT asset_id FROM task_output_assets WHERE task_id = ? ORDER BY output_id ASC, ordinal ASC",
-                )
-                .bind(task_id)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(db_error)?
-            } else {
-                Vec::new()
-            };
+            let output_asset_ids = runs
+                .iter()
+                .filter_map(|run| run.output_asset_id.clone())
+                .collect::<Vec<_>>();
             let review = if let Some(item_id) = row.production_batch_item_id.as_deref() {
                 sqlx::query_as::<_, BenchmarkReviewRow>(
                     "SELECT review_status, review_note FROM production_item_reviews
@@ -976,21 +1409,12 @@ impl WorkflowBenchmarkService {
             } else {
                 None
             };
-            let (task_status, task_created_at, task_started_at, task_finished_at) = runtime
-                .as_ref()
-                .map(|runtime| {
-                    let task_status = effective_candidate_status(
-                        runtime.task_status.as_deref(),
-                        Some(runtime.item_status.as_str()),
-                    );
-                    (
-                        task_status,
-                        runtime.task_created_at.clone(),
-                        runtime.task_started_at.clone(),
-                        runtime.task_finished_at.clone(),
-                    )
-                })
-                .unwrap_or((None, None, None, None));
+            let task_status = candidate_status_from_runs(&runs, row.task_id.as_deref());
+            let task_created_at = None;
+            let task_started_at = None;
+            let task_finished_at = None;
+            let aggregate = aggregate_runs(&runs);
+            let telemetry = runs.first().and_then(telemetry_from_run);
             views.push(WorkflowBenchmarkCandidateView {
                 id: row.id,
                 position: u32::try_from(row.position).unwrap_or_default(),
@@ -1003,20 +1427,24 @@ impl WorkflowBenchmarkService {
                 compatibility_reasons: Vec::new(),
                 frozen_values: values,
                 asset_ids,
+                workflow_id: row.workflow_id,
+                workflow_version: row.workflow_version,
+                workflow_sha256: row.workflow_sha256,
+                recipe_version: row.recipe_version,
+                recipe_sha256: row.recipe_sha256,
+                runtime_package: row.runtime_package,
+                runtime_profile: row.runtime_profile,
                 production_batch_item_id: row.production_batch_item_id,
                 task_id,
                 task_status,
                 task_created_at,
                 task_started_at,
                 task_finished_at,
-                execution_duration_ms: runtime.as_ref().and_then(|runtime| {
-                    execution_duration_ms(
-                        runtime.task_created_at.as_deref(),
-                        runtime.task_started_at.as_deref(),
-                        runtime.task_finished_at.as_deref(),
-                    )
-                }),
-                telemetry: runtime.as_ref().and_then(benchmark_telemetry),
+                execution_duration_ms: aggregate.total_ms.median,
+                telemetry,
+                runs,
+                aggregate,
+                quality: quality_by_candidate.remove(&candidate_id),
                 output_asset_ids,
                 review_status: review.as_ref().map(|review| review.review_status.clone()),
                 review_note: review.map(|review| review.review_note),
@@ -1053,6 +1481,13 @@ impl CandidateDraft {
             compatibility_reasons: self.compatibility_reasons,
             frozen_values: self.values_json,
             asset_ids: self.asset_ids,
+            workflow_id: Some(self.workflow_id),
+            workflow_version: Some(self.workflow_version),
+            workflow_sha256: Some(self.workflow_sha256),
+            recipe_version: Some(self.recipe_version),
+            recipe_sha256: Some(self.recipe_sha256),
+            runtime_package: self.runtime_package,
+            runtime_profile: Some(self.runtime_profile),
         }
     }
 }
@@ -1068,6 +1503,10 @@ struct BenchmarkExperimentRow {
     asset_ids_json: String,
     winner_candidate_id: Option<String>,
     production_batch_id: Option<String>,
+    seed_strategy: String,
+    fixed_seed: Option<String>,
+    repeat_count: i64,
+    recommendation_type: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -1085,6 +1524,13 @@ struct BenchmarkCandidateRow {
     asset_ids_json: String,
     production_batch_item_id: Option<String>,
     task_id: Option<String>,
+    workflow_id: Option<String>,
+    workflow_version: Option<String>,
+    workflow_sha256: Option<String>,
+    recipe_version: Option<String>,
+    recipe_sha256: Option<String>,
+    runtime_package: Option<String>,
+    runtime_profile: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1104,6 +1550,81 @@ struct BenchmarkItemRuntimeRow {
     execution_started_at: Option<String>,
     execution_finished_at: Option<String>,
     collection_finished_at: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct BenchmarkRunRow {
+    id: String,
+    candidate_id: String,
+    run_number: i64,
+    production_batch_item_id: Option<String>,
+    task_id: Option<String>,
+    snapshot_id: Option<String>,
+    output_asset_id: Option<String>,
+    generation_execution_id: Option<String>,
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    concurrency_class: Option<String>,
+    queue_wait_ms: Option<i64>,
+    prepare_ms: Option<i64>,
+    submit_ms: Option<i64>,
+    comfy_execution_ms: Option<i64>,
+    collect_ms: Option<i64>,
+    total_ms: Option<i64>,
+    status: Option<String>,
+    error_code: Option<String>,
+    output_file_size: Option<i64>,
+}
+
+impl BenchmarkRunRow {
+    fn into_view(self, status: Option<String>) -> WorkflowBenchmarkRunView {
+        WorkflowBenchmarkRunView {
+            id: self.id,
+            candidate_id: self.candidate_id,
+            run_number: u32::try_from(self.run_number).unwrap_or(1),
+            production_batch_item_id: self.production_batch_item_id,
+            task_id: self.task_id,
+            snapshot_id: self.snapshot_id,
+            output_asset_id: self.output_asset_id,
+            generation_execution_id: self.generation_execution_id,
+            compiled_workflow_sha256: self.compiled_workflow_sha256,
+            runtime_profile: self.runtime_profile,
+            concurrency_class: self.concurrency_class,
+            queue_wait_ms: self.queue_wait_ms,
+            prepare_ms: self.prepare_ms,
+            submit_ms: self.submit_ms,
+            comfy_execution_ms: self.comfy_execution_ms,
+            collect_ms: self.collect_ms,
+            total_ms: self.total_ms,
+            status,
+            error_code: self.error_code,
+            output_file_size: self.output_file_size,
+        }
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct BenchmarkQualityRow {
+    candidate_id: String,
+    prompt_adherence: Option<i64>,
+    visual_quality: Option<i64>,
+    motion_quality: Option<i64>,
+    reference_consistency: Option<i64>,
+    overall: Option<i64>,
+    note: Option<String>,
+}
+
+impl BenchmarkQualityRow {
+    fn into_view(self) -> WorkflowBenchmarkQualityView {
+        WorkflowBenchmarkQualityView {
+            prompt_adherence: self.prompt_adherence,
+            visual_quality: self.visual_quality,
+            motion_quality: self.motion_quality,
+            reference_consistency: self.reference_consistency,
+            overall: self.overall,
+            note: self.note,
+        }
+    }
 }
 
 #[derive(Debug, FromRow)]
@@ -1133,9 +1654,17 @@ fn validate_request_shape(
             MAX_BENCHMARK_CANDIDATES
         )));
     }
-    if !matches!(request.seed_mode.as_str(), "FIXED" | "EXPLORATION") {
+    if !matches!(
+        request.seed_mode.as_str(),
+        "FIXED" | "EXPLORATION" | "FIXED_SEED" | "RANDOM_SEED"
+    ) {
         return Err(WorkflowBenchmarkError::InvalidInput(
-            "Seed 模式必须是 FIXED 或 EXPLORATION。".to_owned(),
+            "Seed 模式必须是 FIXED_SEED 或 RANDOM_SEED。".to_owned(),
+        ));
+    }
+    if !matches!(request.repeat_count, 1 | 3 | 5 | 10) {
+        return Err(WorkflowBenchmarkError::InvalidInput(
+            "Benchmark 重复次数只能是 1、3、5 或 10。".to_owned(),
         ));
     }
     if request.seed_mode == "FIXED" {
@@ -1148,6 +1677,13 @@ fn validate_request_shape(
         }
     }
     Ok(())
+}
+
+fn normalized_seed_strategy(seed_mode: &str) -> &'static str {
+    match seed_mode {
+        "EXPLORATION" | "RANDOM_SEED" => "RANDOM_SEED",
+        _ => "FIXED_SEED",
+    }
 }
 
 fn validate_project_id(project_id: &str) -> Result<(), WorkflowBenchmarkError> {
@@ -1214,7 +1750,7 @@ fn merge_candidate_values(
             reasons.push(format!("缺少必填参数 {key}。"));
         }
         if matches!(definition, InputDefinition::Seed { .. })
-            && seed_mode == "FIXED"
+            && matches!(seed_mode, "FIXED" | "FIXED_SEED")
             && fixed_seed.is_none()
             && !matches!(
                 values.get(key),
@@ -1402,10 +1938,7 @@ fn derive_experiment_status(
         return "QUEUED".to_owned();
     }
     let status_for = |candidate: &WorkflowBenchmarkCandidateView| {
-        candidate
-            .task_status
-            .as_deref()
-            .map(ToOwned::to_owned)
+        candidate_status_from_runs(candidate.runs.as_slice(), candidate.task_status.as_deref())
             .unwrap_or_else(|| "QUEUED".to_owned())
     };
     if candidates
@@ -1427,7 +1960,7 @@ fn derive_experiment_status(
     let terminal = candidates.iter().all(|candidate| {
         matches!(
             status_for(candidate).as_str(),
-            "SUCCEEDED" | "FAILED" | "CANCELLED" | "SKIPPED"
+            "SUCCEEDED" | "FAILED" | "PARTIAL" | "CANCELLED" | "SKIPPED"
         )
     });
     if !terminal {
@@ -1444,6 +1977,37 @@ fn derive_experiment_status(
     } else {
         "PARTIAL".to_owned()
     }
+}
+
+fn candidate_status_from_runs(
+    runs: &[WorkflowBenchmarkRunView],
+    fallback_task_status: Option<&str>,
+) -> Option<String> {
+    if runs.is_empty() {
+        return fallback_task_status
+            .and_then(|status| effective_candidate_status(Some(status), None))
+            .or_else(|| Some("QUEUED".to_owned()));
+    }
+    let statuses = runs
+        .iter()
+        .filter_map(|run| run.status.as_deref())
+        .collect::<Vec<_>>();
+    if statuses.iter().any(|status| *status == "RUNNING") {
+        return Some("RUNNING".to_owned());
+    }
+    if statuses.iter().any(|status| *status == "QUEUED") || statuses.len() < runs.len() {
+        return Some("QUEUED".to_owned());
+    }
+    if statuses.iter().all(|status| *status == "SUCCEEDED") {
+        return Some("SUCCEEDED".to_owned());
+    }
+    if statuses
+        .iter()
+        .all(|status| matches!(*status, "FAILED" | "CANCELLED" | "SKIPPED" | "SUCCEEDED"))
+    {
+        return Some("PARTIAL".to_owned());
+    }
+    Some("QUEUED".to_owned())
 }
 
 fn effective_candidate_status(
@@ -1471,23 +2035,32 @@ fn summary_from_candidates(
 ) -> WorkflowBenchmarkSummaryView {
     let succeeded_count = candidates
         .iter()
-        .filter(|candidate| candidate.task_status.as_deref() == Some("SUCCEEDED"))
+        .filter(|candidate| {
+            candidate_status_from_runs(&candidate.runs, candidate.task_status.as_deref()).as_deref()
+                == Some("SUCCEEDED")
+        })
         .count();
     let failed_count = candidates
         .iter()
         .filter(|candidate| {
             matches!(
-                candidate.task_status.as_deref(),
-                Some("FAILED") | Some("CANCELLED") | Some("SKIPPED")
+                candidate_status_from_runs(&candidate.runs, candidate.task_status.as_deref())
+                    .as_deref(),
+                Some("FAILED") | Some("PARTIAL") | Some("CANCELLED") | Some("SKIPPED")
             )
         })
         .count();
     let fastest = candidates
         .iter()
-        .filter(|candidate| candidate.task_status.as_deref() == Some("SUCCEEDED"))
+        .filter(|candidate| {
+            candidate_status_from_runs(&candidate.runs, candidate.task_status.as_deref()).as_deref()
+                == Some("SUCCEEDED")
+        })
         .filter_map(|candidate| {
             candidate
-                .execution_duration_ms
+                .aggregate
+                .total_ms
+                .median
                 .map(|duration| (candidate, duration))
         })
         .min_by_key(|(_, duration)| *duration);
@@ -1499,6 +2072,9 @@ fn summary_from_candidates(
         status,
         winner_candidate_id: row.winner_candidate_id.clone(),
         production_batch_id: row.production_batch_id.clone(),
+        repeat_count: u32::try_from(row.repeat_count).unwrap_or(1),
+        seed_strategy: row.seed_strategy.clone(),
+        recommendation_type: row.recommendation_type.clone(),
         candidate_count: candidates.len(),
         succeeded_count,
         failed_count,
@@ -1506,6 +2082,231 @@ fn summary_from_candidates(
         fastest_duration_ms: fastest.map(|(_, duration)| duration),
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
+    }
+}
+
+fn metric_summary(values: impl Iterator<Item = i64>) -> WorkflowBenchmarkMetricSummaryView {
+    let mut values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        return WorkflowBenchmarkMetricSummaryView::default();
+    }
+    values.sort_unstable();
+    let sum = values.iter().copied().sum::<i64>();
+    let median = if values.len() % 2 == 0 {
+        (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2
+    } else {
+        values[values.len() / 2]
+    };
+    let p95_index = ((values.len() as f64 * 0.95).ceil() as usize)
+        .saturating_sub(1)
+        .min(values.len() - 1);
+    WorkflowBenchmarkMetricSummaryView {
+        min: values.first().copied(),
+        median: Some(median),
+        mean: Some(sum / i64::try_from(values.len()).unwrap_or(1)),
+        p95: values.get(p95_index).copied(),
+        max: values.last().copied(),
+    }
+}
+
+fn mean_metric(values: impl Iterator<Item = i64>) -> Option<i64> {
+    let values = values.collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.iter().copied().sum::<i64>() / values.len() as i64)
+}
+
+fn aggregate_runs(runs: &[WorkflowBenchmarkRunView]) -> WorkflowBenchmarkAggregateView {
+    let runs_success = runs
+        .iter()
+        .filter(|run| run.status.as_deref() == Some("SUCCEEDED"))
+        .count() as u32;
+    let runs_failed = runs
+        .iter()
+        .filter(|run| {
+            matches!(
+                run.status.as_deref(),
+                Some("FAILED") | Some("CANCELLED") | Some("SKIPPED")
+            )
+        })
+        .count() as u32;
+    WorkflowBenchmarkAggregateView {
+        runs_total: runs.len() as u32,
+        runs_success,
+        runs_failed,
+        success_rate: if runs.is_empty() {
+            0.0
+        } else {
+            runs_success as f64 / runs.len() as f64
+        },
+        total_ms: metric_summary(runs.iter().filter_map(|run| run.total_ms)),
+        comfy_execution_ms: metric_summary(runs.iter().filter_map(|run| run.comfy_execution_ms)),
+        prepare_ms_mean: mean_metric(runs.iter().filter_map(|run| run.prepare_ms)),
+        collect_ms_mean: mean_metric(runs.iter().filter_map(|run| run.collect_ms)),
+        output_size_mean: mean_metric(runs.iter().filter_map(|run| run.output_file_size)),
+    }
+}
+
+fn telemetry_from_run(run: &WorkflowBenchmarkRunView) -> Option<WorkflowBenchmarkTelemetryView> {
+    let has_metadata = run.compiled_workflow_sha256.is_some()
+        || run.runtime_profile.is_some()
+        || run.queue_wait_ms.is_some()
+        || run.prepare_ms.is_some()
+        || run.comfy_execution_ms.is_some()
+        || run.collect_ms.is_some()
+        || run.total_ms.is_some();
+    has_metadata.then(|| WorkflowBenchmarkTelemetryView {
+        compiled_workflow_sha256: run.compiled_workflow_sha256.clone(),
+        runtime_profile: run.runtime_profile.clone(),
+        queue_wait_ms: run.queue_wait_ms,
+        prepare_ms: run.prepare_ms,
+        comfy_execution_ms: run.comfy_execution_ms,
+        collection_ms: run.collect_ms,
+        total_ms: run.total_ms,
+    })
+}
+
+fn build_comparison(
+    experiment: &BenchmarkExperimentRow,
+    candidates: &[WorkflowBenchmarkCandidateView],
+) -> WorkflowBenchmarkComparisonView {
+    if candidates.len() < 2 {
+        return WorkflowBenchmarkComparisonView {
+            directly_comparable: false,
+            reason: Some("至少需要两个候选才能比较。".to_owned()),
+            recommendations: Vec::new(),
+        };
+    }
+    let first_signature = comparison_signature(&candidates[0], experiment.seed_strategy.as_str());
+    let mismatch = candidates.iter().skip(1).find_map(|candidate| {
+        (comparison_signature(candidate, experiment.seed_strategy.as_str()) != first_signature)
+            .then(|| candidate.label.clone())
+    });
+    if let Some(label) = mismatch {
+        return WorkflowBenchmarkComparisonView {
+            directly_comparable: false,
+            reason: Some(format!(
+                "NOT_DIRECTLY_COMPARABLE：候选 {label} 与基准的 Prompt、分辨率、时长或 Seed 不一致。"
+            )),
+            recommendations: Vec::new(),
+        };
+    }
+    let mut recommendations = Vec::new();
+    let successful = candidates
+        .iter()
+        .filter(|candidate| candidate.aggregate.runs_success > 0);
+    let fastest = successful
+        .clone()
+        .filter_map(|candidate| {
+            candidate
+                .aggregate
+                .total_ms
+                .median
+                .map(|value| (candidate, value))
+        })
+        .min_by_key(|(_, value)| *value);
+    recommendations.push(recommendation(
+        "FASTEST",
+        fastest.map(|(candidate, _)| candidate),
+        "在已完成运行中位总耗时最低。",
+    ));
+    let stable = candidates.iter().max_by(|left, right| {
+        left.aggregate
+            .success_rate
+            .partial_cmp(&right.aggregate.success_rate)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                compare_optional_i64(
+                    left.aggregate.total_ms.median,
+                    right.aggregate.total_ms.median,
+                )
+                .reverse()
+            })
+    });
+    recommendations.push(recommendation(
+        "MOST_STABLE",
+        stable,
+        "成功率最高；相同成功率时取中位总耗时更低者。",
+    ));
+    let quality = candidates
+        .iter()
+        .filter_map(|candidate| {
+            candidate
+                .quality
+                .as_ref()
+                .and_then(|quality| quality.overall)
+                .map(|score| (candidate, score))
+        })
+        .max_by_key(|(_, score)| *score);
+    let has_quality = quality.is_some();
+    recommendations.push(recommendation(
+        "BEST_QUALITY",
+        quality.map(|(candidate, _)| candidate),
+        if has_quality {
+            "人工质量评分最高。"
+        } else {
+            "尚未录入人工质量评分。"
+        },
+    ));
+    let balanced = candidates.iter().max_by(|left, right| {
+        left.aggregate
+            .success_rate
+            .partial_cmp(&right.aggregate.success_rate)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| quality_score(left).cmp(&quality_score(right)))
+            .then_with(|| {
+                compare_optional_i64(
+                    right.aggregate.total_ms.median,
+                    left.aggregate.total_ms.median,
+                )
+            })
+    });
+    recommendations.push(recommendation(
+        "BEST_BALANCE",
+        balanced,
+        "综合成功率、人工质量评分和中位总耗时。",
+    ));
+    WorkflowBenchmarkComparisonView {
+        directly_comparable: true,
+        reason: None,
+        recommendations,
+    }
+}
+
+fn comparison_signature(candidate: &WorkflowBenchmarkCandidateView, seed_strategy: &str) -> String {
+    let mut values = BTreeMap::new();
+    if let Value::Object(object) = &candidate.frozen_values {
+        for (key, value) in object {
+            if is_benchmark_controlled_key(key)
+                && (seed_strategy != "RANDOM_SEED" || !key.eq_ignore_ascii_case("seed"))
+            {
+                values.insert(key.to_ascii_lowercase().replace('-', "_"), value.clone());
+            }
+        }
+    }
+    serde_json::to_string(&values).unwrap_or_default()
+}
+
+fn quality_score(candidate: &WorkflowBenchmarkCandidateView) -> i64 {
+    candidate
+        .quality
+        .as_ref()
+        .and_then(|quality| quality.overall)
+        .unwrap_or(0)
+}
+
+fn compare_optional_i64(left: Option<i64>, right: Option<i64>) -> std::cmp::Ordering {
+    left.unwrap_or(i64::MAX).cmp(&right.unwrap_or(i64::MAX))
+}
+
+fn recommendation(
+    kind: &str,
+    candidate: Option<&WorkflowBenchmarkCandidateView>,
+    rationale: &str,
+) -> WorkflowBenchmarkRecommendationView {
+    WorkflowBenchmarkRecommendationView {
+        kind: kind.to_owned(),
+        candidate_id: candidate.map(|candidate| candidate.id.clone()),
+        label: candidate.map(|candidate| candidate.label.clone()),
+        rationale: rationale.to_owned(),
     }
 }
 
@@ -1578,9 +2379,9 @@ impl From<ProductionQueueError> for WorkflowBenchmarkError {
 #[cfg(test)]
 mod tests {
     use super::{
-        benchmark_telemetry, collect_asset_ids, derive_experiment_status,
+        aggregate_runs, benchmark_telemetry, collect_asset_ids, derive_experiment_status,
         effective_candidate_status, is_benchmark_controlled_key, merge_candidate_values,
-        output_matches_media, BenchmarkItemRuntimeRow,
+        output_matches_media, BenchmarkItemRuntimeRow, WorkflowBenchmarkRunView,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::domain::{InputDefinition, Recipe, SeedDefault, SeedValue, WorkflowRef};
@@ -1836,6 +2637,58 @@ mod tests {
         assert_eq!(telemetry.total_ms, Some(19_000));
     }
 
+    fn benchmark_run(
+        status: &str,
+        total_ms: i64,
+        comfy_execution_ms: i64,
+    ) -> WorkflowBenchmarkRunView {
+        WorkflowBenchmarkRunView {
+            id: format!("run-{total_ms}"),
+            candidate_id: "candidate".to_owned(),
+            run_number: 1,
+            production_batch_item_id: None,
+            task_id: None,
+            snapshot_id: None,
+            output_asset_id: None,
+            generation_execution_id: None,
+            compiled_workflow_sha256: None,
+            runtime_profile: None,
+            concurrency_class: None,
+            queue_wait_ms: None,
+            prepare_ms: Some(3),
+            submit_ms: None,
+            comfy_execution_ms: Some(comfy_execution_ms),
+            collect_ms: Some(4),
+            total_ms: Some(total_ms),
+            status: Some(status.to_owned()),
+            error_code: None,
+            output_file_size: Some(100),
+        }
+    }
+
+    #[test]
+    fn benchmark_aggregate_uses_deterministic_median_and_p95() {
+        let runs = vec![
+            benchmark_run("SUCCEEDED", 100, 70),
+            benchmark_run("SUCCEEDED", 200, 80),
+            benchmark_run("FAILED", 300, 90),
+            benchmark_run("SUCCEEDED", 400, 100),
+            benchmark_run("SUCCEEDED", 500, 110),
+        ];
+        let aggregate = aggregate_runs(&runs);
+        assert_eq!(aggregate.runs_total, 5);
+        assert_eq!(aggregate.runs_success, 4);
+        assert_eq!(aggregate.runs_failed, 1);
+        assert_eq!(aggregate.success_rate, 0.8);
+        assert_eq!(aggregate.total_ms.median, Some(300));
+        assert_eq!(aggregate.total_ms.mean, Some(300));
+        assert_eq!(aggregate.total_ms.p95, Some(500));
+        assert_eq!(aggregate.comfy_execution_ms.median, Some(90));
+        assert_eq!(aggregate.prepare_ms_mean, Some(3));
+        assert_eq!(aggregate.collect_ms_mean, Some(4));
+        assert_eq!(aggregate.output_size_mean, Some(100));
+    }
+
     #[test]
     fn status_is_partial_when_one_candidate_fails() {
         let mut first = super::WorkflowBenchmarkCandidateView {
@@ -1850,6 +2703,13 @@ mod tests {
             compatibility_reasons: Vec::new(),
             frozen_values: serde_json::json!({}),
             asset_ids: Vec::new(),
+            workflow_id: None,
+            workflow_version: None,
+            workflow_sha256: None,
+            recipe_version: None,
+            recipe_sha256: None,
+            runtime_package: None,
+            runtime_profile: None,
             production_batch_item_id: Some("i1".to_owned()),
             task_id: Some("t1".to_owned()),
             task_status: Some("SUCCEEDED".to_owned()),
@@ -1858,6 +2718,9 @@ mod tests {
             task_finished_at: None,
             execution_duration_ms: Some(10),
             telemetry: None,
+            runs: Vec::new(),
+            aggregate: super::WorkflowBenchmarkAggregateView::default(),
+            quality: None,
             output_asset_ids: Vec::new(),
             review_status: None,
             review_note: None,
@@ -1888,6 +2751,13 @@ mod tests {
             compatibility_reasons: Vec::new(),
             frozen_values: serde_json::json!({}),
             asset_ids: Vec::new(),
+            workflow_id: None,
+            workflow_version: None,
+            workflow_sha256: None,
+            recipe_version: None,
+            recipe_sha256: None,
+            runtime_package: None,
+            runtime_profile: None,
             production_batch_item_id: Some("item".to_owned()),
             task_id: None,
             task_status: status.map(ToOwned::to_owned),
@@ -1896,6 +2766,9 @@ mod tests {
             task_finished_at: None,
             execution_duration_ms: None,
             telemetry: None,
+            runs: Vec::new(),
+            aggregate: super::WorkflowBenchmarkAggregateView::default(),
+            quality: None,
             output_asset_ids: Vec::new(),
             review_status: None,
             review_note: None,
