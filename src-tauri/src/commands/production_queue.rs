@@ -2,6 +2,7 @@ use crate::{
     app_state::AppState,
     application::production_queue_service::{
         CreateProductionBatchItem, CreateProductionBatchRequest, ProductionAdmissionView,
+        ProductionPartialResumeEntry, ProductionPartialResumePlan, ProductionPartialResumeResult,
         ProductionQueueError, ProductionQueueOverview,
     },
     domain::{ProductionBatch, ProductionBatchDetail, ProductionBatchItem},
@@ -117,6 +118,46 @@ pub struct ProductionAdmissionStatusView {
     pub project_id: Option<String>,
     pub batch_name: Option<String>,
     pub active_task_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionPartialResumeEntryView {
+    pub root_item_id: String,
+    pub leaf_item_id: String,
+    pub ordinal: u32,
+    pub attempt_count: usize,
+    pub status: String,
+    pub task_id: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub eligibility: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionPartialResumePlanView {
+    pub batch_id: String,
+    pub logical_total: usize,
+    pub attempt_total: usize,
+    pub resolved: usize,
+    pub auto_resumable: usize,
+    pub review_required: usize,
+    pub pending: usize,
+    pub active: usize,
+    pub can_resume: bool,
+    pub entries: Vec<ProductionPartialResumeEntryView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionPartialResumeResultView {
+    pub detail: ProductionBatchDetailView,
+    pub requested_count: usize,
+    pub created_count: usize,
+    pub already_prepared_count: usize,
+    pub created_item_ids: Vec<String>,
+    pub existing_retry_item_ids: Vec<String>,
 }
 
 #[tauri::command]
@@ -321,6 +362,35 @@ pub async fn production_queue_requeue_item_by_item(
         .map_err(map_queue_error)
 }
 
+#[tauri::command]
+pub async fn production_queue_partial_resume_plan(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+) -> Result<ProductionPartialResumePlanView, AppError> {
+    state
+        .production_queue_service
+        .partial_resume_plan(&project_id, &batch_id)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
+#[tauri::command]
+pub async fn production_queue_partial_resume(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+    selected_leaf_item_ids: Vec<String>,
+) -> Result<ProductionPartialResumeResultView, AppError> {
+    state
+        .production_queue_service
+        .partial_resume(&project_id, &batch_id, &selected_leaf_item_ids)
+        .await
+        .map(Into::into)
+        .map_err(map_queue_error)
+}
+
 impl From<ProductionBatch> for ProductionBatchSummaryView {
     fn from(batch: ProductionBatch) -> Self {
         Self {
@@ -439,6 +509,52 @@ impl From<ProductionAdmissionView> for ProductionAdmissionStatusView {
             project_id: admission.project_id,
             batch_name: admission.batch_name,
             active_task_id: admission.active_task_id,
+        }
+    }
+}
+
+impl From<ProductionPartialResumeEntry> for ProductionPartialResumeEntryView {
+    fn from(entry: ProductionPartialResumeEntry) -> Self {
+        Self {
+            root_item_id: entry.root_item_id,
+            leaf_item_id: entry.leaf_item_id,
+            ordinal: entry.ordinal,
+            attempt_count: entry.attempt_count,
+            status: entry.status,
+            task_id: entry.task_id,
+            error_code: entry.error_code,
+            error_message: entry.error_message,
+            eligibility: entry.eligibility,
+        }
+    }
+}
+
+impl From<ProductionPartialResumePlan> for ProductionPartialResumePlanView {
+    fn from(plan: ProductionPartialResumePlan) -> Self {
+        Self {
+            batch_id: plan.batch_id,
+            logical_total: plan.logical_total,
+            attempt_total: plan.attempt_total,
+            resolved: plan.resolved,
+            auto_resumable: plan.auto_resumable,
+            review_required: plan.review_required,
+            pending: plan.pending,
+            active: plan.active,
+            can_resume: plan.can_resume,
+            entries: plan.entries.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<ProductionPartialResumeResult> for ProductionPartialResumeResultView {
+    fn from(result: ProductionPartialResumeResult) -> Self {
+        Self {
+            detail: result.detail.into(),
+            requested_count: result.requested_count,
+            created_count: result.created_count,
+            already_prepared_count: result.already_prepared_count,
+            created_item_ids: result.created_item_ids,
+            existing_retry_item_ids: result.existing_retry_item_ids,
         }
     }
 }

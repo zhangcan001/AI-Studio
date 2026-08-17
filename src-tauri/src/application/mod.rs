@@ -11,6 +11,8 @@ pub mod comfy_memory_service;
 pub mod comfy_service;
 #[cfg(test)]
 mod dev027_e2e;
+#[cfg(test)]
+mod dev031_e2e;
 pub mod diagnostics_service;
 pub mod generation_catalog_service;
 #[cfg(test)]

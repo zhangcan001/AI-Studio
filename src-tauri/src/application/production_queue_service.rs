@@ -68,6 +68,52 @@ pub struct ProductionAdmissionView {
     pub active_task_id: Option<String>,
 }
 
+pub const PRODUCTION_RETRY_LINEAGE_INVALID: &str = "PRODUCTION_RETRY_LINEAGE_INVALID";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetryLineage {
+    pub root_item_id: String,
+    pub leaf_item_id: String,
+    pub attempt_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionPartialResumeEntry {
+    pub root_item_id: String,
+    pub leaf_item_id: String,
+    pub ordinal: u32,
+    pub attempt_count: usize,
+    pub status: String,
+    pub task_id: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub eligibility: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionPartialResumePlan {
+    pub batch_id: String,
+    pub logical_total: usize,
+    pub attempt_total: usize,
+    pub resolved: usize,
+    pub auto_resumable: usize,
+    pub review_required: usize,
+    pub pending: usize,
+    pub active: usize,
+    pub can_resume: bool,
+    pub entries: Vec<ProductionPartialResumeEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductionPartialResumeResult {
+    pub detail: ProductionBatchDetail,
+    pub requested_count: usize,
+    pub created_count: usize,
+    pub already_prepared_count: usize,
+    pub created_item_ids: Vec<String>,
+    pub existing_retry_item_ids: Vec<String>,
+}
+
 pub struct ProductionQueueService {
     repository: Arc<dyn ProductionQueueRepository>,
     task_repository: Arc<dyn TaskRepository>,
@@ -569,6 +615,152 @@ impl ProductionQueueService {
             .await
     }
 
+    pub async fn partial_resume_plan(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<ProductionPartialResumePlan, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
+        let detail = self
+            .repository
+            .find_detail(project_id, &batch_id)
+            .await?
+            .ok_or_else(|| ProductionQueueError::NotFound(batch_id.as_str().to_owned()))?;
+        build_partial_resume_plan(&detail).map_err(ProductionQueueError::InvalidState)
+    }
+
+    pub async fn partial_resume(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        selected_leaf_item_ids: &[String],
+    ) -> Result<ProductionPartialResumeResult, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
+        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
+        let detail = self
+            .repository
+            .find_detail(project_id, &batch_id)
+            .await?
+            .ok_or_else(|| ProductionQueueError::NotFound(batch_id.as_str().to_owned()))?;
+        if detail.batch.archived_at.is_some() {
+            return Err(ProductionQueueError::InvalidState(
+                "restore the archived production batch before partial resume".to_owned(),
+            ));
+        }
+        if selected_leaf_item_ids.is_empty() {
+            return Err(ProductionQueueError::InvalidInput(
+                "partial resume requires at least one selected leaf item".to_owned(),
+            ));
+        }
+        let plan =
+            build_partial_resume_plan(&detail).map_err(ProductionQueueError::InvalidState)?;
+        if plan.logical_total > MAX_PRODUCTION_BATCH_ITEMS {
+            return Err(ProductionQueueError::InvalidState(format!(
+                "production batch contains more than the maximum {MAX_PRODUCTION_BATCH_ITEMS} logical items"
+            )));
+        }
+
+        let items_by_id = detail
+            .items
+            .iter()
+            .map(|item| (item.id.as_str(), item))
+            .collect::<HashMap<_, _>>();
+        let mut selected = HashSet::new();
+        let mut sources = Vec::with_capacity(selected_leaf_item_ids.len());
+        let mut existing_retry_item_ids = Vec::new();
+        for selected_id in selected_leaf_item_ids {
+            if !selected.insert(selected_id.as_str()) {
+                return Err(ProductionQueueError::InvalidInput(format!(
+                    "partial resume selection contains duplicate item {selected_id}"
+                )));
+            }
+            let source = items_by_id
+                .get(selected_id.as_str())
+                .copied()
+                .ok_or_else(|| ProductionQueueError::NotFound(selected_id.clone()))?;
+            if let Some(existing) = find_retry_item(&detail.items, source.id.as_str()) {
+                existing_retry_item_ids.push(existing.id.as_str().to_owned());
+                continue;
+            }
+            let entry = plan
+                .entries
+                .iter()
+                .find(|entry| entry.leaf_item_id == selected_id.as_str())
+                .ok_or_else(|| {
+                    ProductionQueueError::InvalidState(format!(
+                        "selected item {selected_id} is not a current retry leaf"
+                    ))
+                })?;
+            if entry.eligibility != PARTIAL_ELIGIBILITY_AUTO_RESUMABLE {
+                return Err(ProductionQueueError::InvalidState(format!(
+                    "selected item {selected_id} is review-required and cannot be auto-resumed"
+                )));
+            }
+            sources.push(source);
+        }
+
+        if plan.pending > 0
+            || plan.active > 0
+            || detail.batch.status == ProductionBatchStatus::Running
+        {
+            if sources.is_empty() {
+                return Ok(ProductionPartialResumeResult {
+                    detail,
+                    requested_count: selected_leaf_item_ids.len(),
+                    created_count: 0,
+                    already_prepared_count: existing_retry_item_ids.len(),
+                    created_item_ids: Vec::new(),
+                    existing_retry_item_ids,
+                });
+            }
+            return Err(ProductionQueueError::InvalidState(
+                "partial resume is blocked while a retry leaf is pending or active".to_owned(),
+            ));
+        }
+
+        let next_ordinal = detail
+            .items
+            .iter()
+            .map(|item| item.ordinal)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidState("production queue ordinal overflow".to_owned())
+            })?;
+        let now = self.clock.now();
+        let mut retry_items = Vec::with_capacity(sources.len());
+        for (offset, source) in sources.iter().enumerate() {
+            let ordinal = next_ordinal
+                .checked_add(u32::try_from(offset).map_err(|_| {
+                    ProductionQueueError::InvalidState(
+                        "production queue ordinal overflow".to_owned(),
+                    )
+                })?)
+                .ok_or_else(|| {
+                    ProductionQueueError::InvalidState(
+                        "production queue ordinal overflow".to_owned(),
+                    )
+                })?;
+            retry_items.push(build_retry_item(source, &batch_id, ordinal, now));
+        }
+
+        let (created_item_ids, mut repository_existing_retry_item_ids) = self
+            .shot_batch_repository
+            .append_requeue_items_with_bindings(&retry_items, now)
+            .await?;
+        existing_retry_item_ids.append(&mut repository_existing_retry_item_ids);
+        let detail = self.get(project_id, batch_id.as_str()).await?;
+        Ok(ProductionPartialResumeResult {
+            detail,
+            requested_count: selected_leaf_item_ids.len(),
+            created_count: created_item_ids.len(),
+            already_prepared_count: existing_retry_item_ids.len(),
+            created_item_ids,
+            existing_retry_item_ids,
+        })
+    }
+
     async fn requeue_item_internal(
         &self,
         project_id: &str,
@@ -589,9 +781,12 @@ impl ProductionQueueService {
             ));
         }
         ensure_batch_not_active(&detail, "requeue an item in")?;
-        if detail.items.len() >= MAX_PRODUCTION_BATCH_ITEMS {
+        let logical_total = build_retry_lineages(&detail.items)
+            .map_err(ProductionQueueError::InvalidState)?
+            .len();
+        if logical_total > MAX_PRODUCTION_BATCH_ITEMS {
             return Err(ProductionQueueError::InvalidState(format!(
-                "production batch already contains the maximum {MAX_PRODUCTION_BATCH_ITEMS} items"
+                "production batch contains more than the maximum {MAX_PRODUCTION_BATCH_ITEMS} logical items"
             )));
         }
         let source = detail
@@ -1244,6 +1439,199 @@ fn find_retry_item<'a>(
         .find(|item| item.retry_of_item_id.as_deref() == Some(source_item_id))
 }
 
+const PARTIAL_STATUS_RESOLVED: &str = "RESOLVED";
+const PARTIAL_STATUS_AUTO_RESUMABLE: &str = "AUTO_RESUMABLE";
+const PARTIAL_STATUS_REVIEW_REQUIRED: &str = "REVIEW_REQUIRED";
+const PARTIAL_STATUS_PENDING: &str = "PENDING";
+const PARTIAL_STATUS_ACTIVE: &str = "ACTIVE";
+const PARTIAL_ELIGIBILITY_NONE: &str = "NONE";
+const PARTIAL_ELIGIBILITY_AUTO_RESUMABLE: &str = "AUTO_RESUMABLE";
+const PARTIAL_ELIGIBILITY_REVIEW_REQUIRED: &str = "REVIEW_REQUIRED";
+const PARTIAL_ELIGIBILITY_BLOCKED: &str = "BLOCKED";
+
+pub(crate) fn build_retry_lineages(
+    items: &[ProductionBatchItem],
+) -> Result<Vec<RetryLineage>, String> {
+    let mut items_by_id = HashMap::with_capacity(items.len());
+    for item in items {
+        if items_by_id.insert(item.id.as_str(), item).is_some() {
+            return Err(retry_lineage_error("duplicate item id"));
+        }
+    }
+
+    let mut children = HashMap::with_capacity(items.len());
+    for item in items {
+        let Some(parent_id) = item.retry_of_item_id.as_deref() else {
+            continue;
+        };
+        if !items_by_id.contains_key(parent_id) {
+            return Err(retry_lineage_error(format!(
+                "missing parent {parent_id} for {}",
+                item.id.as_str()
+            )));
+        }
+        if children.insert(parent_id, item.id.as_str()).is_some() {
+            return Err(retry_lineage_error(format!(
+                "multiple children for parent {parent_id}"
+            )));
+        }
+    }
+
+    let mut roots = items
+        .iter()
+        .filter(|item| item.retry_of_item_id.is_none())
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    roots.sort_by_key(|id| items_by_id.get(id).map(|item| item.ordinal));
+    if !items.is_empty() && roots.is_empty() {
+        return Err(retry_lineage_error("no root item"));
+    }
+
+    let mut visited = HashSet::with_capacity(items.len());
+    let mut lineages = Vec::with_capacity(roots.len());
+    for root_id in roots {
+        let mut current_id = root_id;
+        let mut attempt_count = 0;
+        loop {
+            if !visited.insert(current_id) {
+                return Err(retry_lineage_error(format!(
+                    "cycle detected at {current_id}"
+                )));
+            }
+            attempt_count += 1;
+            let Some(child_id) = children.get(current_id).copied() else {
+                break;
+            };
+            current_id = child_id;
+        }
+        lineages.push(RetryLineage {
+            root_item_id: root_id.to_owned(),
+            leaf_item_id: current_id.to_owned(),
+            attempt_count,
+        });
+    }
+    if visited.len() != items.len() {
+        return Err(retry_lineage_error("unreachable item or cycle detected"));
+    }
+    Ok(lineages)
+}
+
+pub(crate) fn build_partial_resume_plan(
+    detail: &ProductionBatchDetail,
+) -> Result<ProductionPartialResumePlan, String> {
+    let lineages = build_retry_lineages(&detail.items)?;
+    let items_by_id = detail
+        .items
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect::<HashMap<_, _>>();
+    let mut resolved = 0;
+    let mut auto_resumable = 0;
+    let mut review_required = 0;
+    let mut pending = 0;
+    let mut active = 0;
+    let mut entries = Vec::with_capacity(lineages.len());
+
+    for lineage in lineages {
+        let root = items_by_id
+            .get(lineage.root_item_id.as_str())
+            .ok_or_else(|| retry_lineage_error("root item disappeared while building plan"))?;
+        let leaf = items_by_id
+            .get(lineage.leaf_item_id.as_str())
+            .ok_or_else(|| retry_lineage_error("leaf item disappeared while building plan"))?;
+        let (status, eligibility) = partial_resume_state(leaf);
+        match status {
+            PARTIAL_STATUS_RESOLVED => resolved += 1,
+            PARTIAL_STATUS_AUTO_RESUMABLE => auto_resumable += 1,
+            PARTIAL_STATUS_REVIEW_REQUIRED => review_required += 1,
+            PARTIAL_STATUS_PENDING => pending += 1,
+            PARTIAL_STATUS_ACTIVE => active += 1,
+            _ => unreachable!("partial resume state is closed over"),
+        }
+        entries.push(ProductionPartialResumeEntry {
+            root_item_id: lineage.root_item_id,
+            leaf_item_id: lineage.leaf_item_id,
+            ordinal: root.ordinal,
+            attempt_count: lineage.attempt_count,
+            status: status.to_owned(),
+            task_id: leaf.task_id.clone(),
+            error_code: leaf.error_code.clone(),
+            error_message: leaf.error_message.clone(),
+            eligibility: eligibility.to_owned(),
+        });
+    }
+
+    Ok(ProductionPartialResumePlan {
+        batch_id: detail.batch.id.as_str().to_owned(),
+        logical_total: entries.len(),
+        attempt_total: detail.items.len(),
+        resolved,
+        auto_resumable,
+        review_required,
+        pending,
+        active,
+        can_resume: detail.batch.archived_at.is_none()
+            && detail.batch.status != ProductionBatchStatus::Running
+            && pending == 0
+            && active == 0
+            && auto_resumable > 0,
+        entries,
+    })
+}
+
+fn partial_resume_state(item: &ProductionBatchItem) -> (&'static str, &'static str) {
+    match item.status {
+        ProductionBatchItemStatus::Succeeded => (PARTIAL_STATUS_RESOLVED, PARTIAL_ELIGIBILITY_NONE),
+        ProductionBatchItemStatus::Pending => (PARTIAL_STATUS_PENDING, PARTIAL_ELIGIBILITY_BLOCKED),
+        ProductionBatchItemStatus::Dispatching | ProductionBatchItemStatus::Dispatched => {
+            (PARTIAL_STATUS_ACTIVE, PARTIAL_ELIGIBILITY_BLOCKED)
+        }
+        ProductionBatchItemStatus::Failed
+        | ProductionBatchItemStatus::Cancelled
+        | ProductionBatchItemStatus::Skipped
+            if is_safe_requeue_source(item) =>
+        {
+            (
+                PARTIAL_STATUS_AUTO_RESUMABLE,
+                PARTIAL_ELIGIBILITY_AUTO_RESUMABLE,
+            )
+        }
+        ProductionBatchItemStatus::Failed
+        | ProductionBatchItemStatus::Cancelled
+        | ProductionBatchItemStatus::Skipped => (
+            PARTIAL_STATUS_REVIEW_REQUIRED,
+            PARTIAL_ELIGIBILITY_REVIEW_REQUIRED,
+        ),
+    }
+}
+
+fn build_retry_item(
+    source: &ProductionBatchItem,
+    batch_id: &ProductionBatchId,
+    ordinal: u32,
+    now: chrono::DateTime<chrono::Utc>,
+) -> ProductionBatchItem {
+    ProductionBatchItem {
+        id: ProductionBatchItemId::new(),
+        batch_id: batch_id.clone(),
+        ordinal,
+        workflow_version_id: source.workflow_version_id.clone(),
+        recipe_id: source.recipe_id.clone(),
+        values_json: source.values_json.clone(),
+        status: ProductionBatchItemStatus::Pending,
+        task_id: None,
+        retry_of_item_id: Some(source.id.as_str().to_owned()),
+        error_code: None,
+        error_message: None,
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+fn retry_lineage_error(reason: impl AsRef<str>) -> String {
+    format!("{PRODUCTION_RETRY_LINEAGE_INVALID}: {}", reason.as_ref())
+}
+
 fn is_transient_requeue_error(code: &str) -> bool {
     matches!(
         code,
@@ -1547,18 +1935,18 @@ impl From<RepositoryError> for ProductionQueueError {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_admission_blocker, find_retry_item, freeze_random_seed_values,
-        generation_start_error_code, generation_values_from_json, generation_values_to_json,
-        is_transient_requeue_error, reference_manifest_for_values, select_recovery,
-        should_pause_after_terminal,
+        build_partial_resume_plan, build_retry_item, build_retry_lineages, find_admission_blocker,
+        find_retry_item, freeze_random_seed_values, generation_start_error_code,
+        generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
+        reference_manifest_for_values, select_recovery, should_pause_after_terminal,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::GenerationServiceError;
     use crate::application::ports::{ActiveProductionItem, ComfyAdapterError};
     use crate::domain::{
-        AssetId, InputDefinition, ProductionBatch, ProductionBatchId, ProductionBatchItem,
-        ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, Recipe,
-        SeedDefault, SeedValue, WorkflowRef,
+        AssetId, InputDefinition, ProductionBatch, ProductionBatchDetail, ProductionBatchId,
+        ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
+        ProductionBatchStatus, Recipe, SeedDefault, SeedValue, WorkflowRef,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -1819,6 +2207,185 @@ mod tests {
             find_retry_item(&items, source_id.as_str()).map(|item| item.id.as_str()),
             Some(retry_id.as_str())
         );
+    }
+
+    #[test]
+    fn retry_lineage_reduces_each_root_to_its_current_leaf() {
+        let batch_id = ProductionBatchId::new();
+        let first = test_item(&batch_id, 0, ProductionBatchItemStatus::Failed, None);
+        let second = test_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Failed,
+            Some(first.id.as_str()),
+        );
+        let third = test_item(
+            &batch_id,
+            2,
+            ProductionBatchItemStatus::Pending,
+            Some(second.id.as_str()),
+        );
+
+        let lineages = build_retry_lineages(&[first.clone(), second, third.clone()]).unwrap();
+
+        assert_eq!(lineages.len(), 1);
+        assert_eq!(lineages[0].root_item_id, first.id.as_str());
+        assert_eq!(lineages[0].leaf_item_id, third.id.as_str());
+        assert_eq!(lineages[0].attempt_count, 3);
+    }
+
+    #[test]
+    fn corrupt_retry_lineage_fails_closed_with_one_error_code() {
+        let batch_id = ProductionBatchId::new();
+        let missing_parent = test_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Failed,
+            Some("pbi_missing"),
+        );
+        let missing_error = build_retry_lineages(&[missing_parent]).unwrap_err();
+        assert!(missing_error.starts_with("PRODUCTION_RETRY_LINEAGE_INVALID"));
+
+        let second_id = ProductionBatchItemId::new();
+        let cycle_first = test_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Failed,
+            Some(second_id.as_str()),
+        );
+        let first_id = cycle_first.id.clone();
+        let cycle_second = ProductionBatchItem {
+            id: second_id,
+            batch_id: batch_id.clone(),
+            ordinal: 1,
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values_json: json!({}),
+            status: ProductionBatchItemStatus::Failed,
+            task_id: None,
+            retry_of_item_id: Some(first_id.as_str().to_owned()),
+            error_code: Some("COMFY_TIMEOUT".to_owned()),
+            error_message: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let cycle_error = build_retry_lineages(&[cycle_first, cycle_second]).unwrap_err();
+        assert!(cycle_error.starts_with("PRODUCTION_RETRY_LINEAGE_INVALID"));
+
+        let parent = test_item(&batch_id, 0, ProductionBatchItemStatus::Failed, None);
+        let child_a = test_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Failed,
+            Some(parent.id.as_str()),
+        );
+        let child_b = test_item(
+            &batch_id,
+            2,
+            ProductionBatchItemStatus::Failed,
+            Some(parent.id.as_str()),
+        );
+        let duplicate_error = build_retry_lineages(&[parent, child_a, child_b]).unwrap_err();
+        assert!(duplicate_error.starts_with("PRODUCTION_RETRY_LINEAGE_INVALID"));
+    }
+
+    #[test]
+    fn partial_resume_plan_counts_safe_unsafe_pending_and_active_leaves() {
+        let batch_id = ProductionBatchId::new();
+        let items = vec![
+            test_item(&batch_id, 0, ProductionBatchItemStatus::Succeeded, None),
+            test_item_with_error(
+                &batch_id,
+                1,
+                ProductionBatchItemStatus::Failed,
+                None,
+                "COMFY_TIMEOUT",
+            ),
+            test_item_with_error(
+                &batch_id,
+                2,
+                ProductionBatchItemStatus::Failed,
+                None,
+                "EXECUTION_ERROR",
+            ),
+            test_item(&batch_id, 3, ProductionBatchItemStatus::Pending, None),
+            test_item(&batch_id, 4, ProductionBatchItemStatus::Dispatched, None),
+        ];
+        let detail = ProductionBatchDetail {
+            batch: batch("project-a", "Partial resume", ProductionBatchStatus::Paused),
+            items,
+        };
+
+        let plan = build_partial_resume_plan(&detail).unwrap();
+
+        assert_eq!(plan.logical_total, 5);
+        assert_eq!(plan.attempt_total, 5);
+        assert_eq!(plan.resolved, 1);
+        assert_eq!(plan.auto_resumable, 1);
+        assert_eq!(plan.review_required, 1);
+        assert_eq!(plan.pending, 1);
+        assert_eq!(plan.active, 1);
+        assert!(!plan.can_resume);
+    }
+
+    #[test]
+    fn partial_resume_retry_item_clones_frozen_values_from_the_selected_leaf() {
+        let batch_id = ProductionBatchId::new();
+        let source = test_item_with_error(
+            &batch_id,
+            7,
+            ProductionBatchItemStatus::Failed,
+            None,
+            "COMFY_TIMEOUT",
+        );
+        let now = Utc::now();
+
+        let retry = build_retry_item(&source, &batch_id, 8, now);
+
+        assert_eq!(retry.workflow_version_id, source.workflow_version_id);
+        assert_eq!(retry.recipe_id, source.recipe_id);
+        assert_eq!(retry.values_json, source.values_json);
+        assert_eq!(retry.retry_of_item_id.as_deref(), Some(source.id.as_str()));
+        assert_eq!(retry.status, ProductionBatchItemStatus::Pending);
+        assert_eq!(retry.ordinal, 8);
+    }
+
+    fn test_item(
+        batch_id: &ProductionBatchId,
+        ordinal: u32,
+        status: ProductionBatchItemStatus,
+        retry_of_item_id: Option<&str>,
+    ) -> ProductionBatchItem {
+        ProductionBatchItem {
+            id: ProductionBatchItemId::new(),
+            batch_id: batch_id.clone(),
+            ordinal,
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values_json: json!({
+                "prompt": {"type": "string", "value": "frozen"},
+                "seed": {"type": "seed_fixed", "value": "42"}
+            }),
+            status,
+            task_id: None,
+            retry_of_item_id: retry_of_item_id.map(ToOwned::to_owned),
+            error_code: None,
+            error_message: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn test_item_with_error(
+        batch_id: &ProductionBatchId,
+        ordinal: u32,
+        status: ProductionBatchItemStatus,
+        retry_of_item_id: Option<&str>,
+        error_code: &str,
+    ) -> ProductionBatchItem {
+        let mut item = test_item(batch_id, ordinal, status, retry_of_item_id);
+        item.error_code = Some(error_code.to_owned());
+        item
     }
 
     #[test]

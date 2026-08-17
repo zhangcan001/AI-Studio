@@ -42,6 +42,15 @@ pub trait ShotBatchRepository: Send + Sync {
         updated_at: DateTime<Utc>,
     ) -> Result<bool, RepositoryError>;
 
+    /// Appends retry attempts for one batch in one transaction. The returned
+    /// tuple contains newly-created item ids followed by ids already prepared
+    /// for an idempotent source retry.
+    async fn append_requeue_items_with_bindings(
+        &self,
+        items: &[ProductionBatchItem],
+        updated_at: DateTime<Utc>,
+    ) -> Result<(Vec<String>, Vec<String>), RepositoryError>;
+
     async fn has_active_shot_binding(
         &self,
         project_id: &str,

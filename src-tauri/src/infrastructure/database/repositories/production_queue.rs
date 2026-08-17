@@ -14,6 +14,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
+const MAX_LOGICAL_PRODUCTION_BATCH_ITEMS: usize = 100;
+
 #[derive(Clone)]
 pub struct SqliteProductionQueueRepository {
     pool: SqlitePool,
@@ -682,6 +684,140 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
         Ok(true)
     }
 
+    async fn append_requeue_items_with_bindings(
+        &self,
+        items: &[ProductionBatchItem],
+        updated_at: DateTime<Utc>,
+    ) -> Result<(Vec<String>, Vec<String>), RepositoryError> {
+        let Some(first_item) = items.first() else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+        if items
+            .iter()
+            .any(|item| item.batch_id != first_item.batch_id)
+        {
+            return Err(RepositoryError::integrity(
+                "bulk retry items must belong to one production batch",
+            ));
+        }
+        if items.iter().any(|item| item.retry_of_item_id.is_none()) {
+            return Err(RepositoryError::integrity(
+                "bulk retry items must reference their source item",
+            ));
+        }
+
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let batch_exists =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches WHERE id = ?")
+                .bind(first_item.batch_id.as_str())
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(map_sqlx_error)?;
+        if batch_exists == 0 {
+            return Err(RepositoryError::not_found(
+                "production batch",
+                first_item.batch_id.as_str(),
+            ));
+        }
+
+        let mut created_item_ids = Vec::new();
+        let mut existing_retry_item_ids = Vec::new();
+        for item in items {
+            let source_item_id = item.retry_of_item_id.as_deref().ok_or_else(|| {
+                RepositoryError::integrity("bulk retry items must reference their source item")
+            })?;
+            let source = sqlx::query_as::<_, (String, String, String, String)>(
+                "SELECT batch_id, workflow_version_id, recipe_id, values_json
+                 FROM production_batch_items WHERE id = ?",
+            )
+            .bind(source_item_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?
+            .ok_or_else(|| RepositoryError::not_found("production batch item", source_item_id))?;
+            if source.0 != item.batch_id.as_str() {
+                return Err(RepositoryError::integrity(
+                    "bulk retry item and source item must belong to the same production batch",
+                ));
+            }
+
+            if let Some(existing_id) = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM production_batch_items
+                 WHERE batch_id = ? AND retry_of_item_id = ?
+                 ORDER BY ordinal ASC, id ASC LIMIT 1",
+            )
+            .bind(item.batch_id.as_str())
+            .bind(source_item_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?
+            {
+                existing_retry_item_ids.push(existing_id);
+                continue;
+            }
+
+            let links = sqlx::query_as::<_, (String, String)>(
+                "SELECT shot_id, stage FROM shot_generation_links
+                 WHERE production_batch_item_id = ?",
+            )
+            .bind(source_item_id)
+            .fetch_all(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if links.len() > 1 {
+                return Err(RepositoryError::integrity(
+                    "production batch item has multiple Shot generation links",
+                ));
+            }
+
+            let source_values = parse_json("production batch item values", Some(&source.3))?
+                .ok_or_else(|| {
+                    RepositoryError::serialization("production batch item values", "missing value")
+                })?;
+            let mut frozen_item = item.clone();
+            frozen_item.workflow_version_id = source.1;
+            frozen_item.recipe_id = source.2;
+            frozen_item.values_json = source_values;
+            insert_requeue_item_record(&mut transaction, &frozen_item).await?;
+
+            if let Some((shot_id, stage)) = links.first() {
+                let stage = ShotStage::try_from_str(stage)
+                    .map_err(|error| map_domain_error("Shot generation stage", error))?;
+                sqlx::query(
+                    "INSERT INTO shot_generation_links
+                     (id, shot_id, stage, task_id, production_batch_item_id, created_at)
+                     VALUES (?, ?, ?, NULL, ?, ?)",
+                )
+                .bind(format!("sgl_{}", uuid::Uuid::new_v4()))
+                .bind(shot_id)
+                .bind(stage.as_str())
+                .bind(frozen_item.id.as_str())
+                .bind(format_datetime(frozen_item.created_at))
+                .execute(&mut *transaction)
+                .await
+                .map_err(map_sqlx_error)?;
+            }
+            created_item_ids.push(frozen_item.id.as_str().to_owned());
+        }
+
+        let batch_update = sqlx::query(
+            "UPDATE production_batches
+             SET status = 'PAUSED', archived_at = NULL, updated_at = ? WHERE id = ?",
+        )
+        .bind(format_datetime(updated_at))
+        .bind(first_item.batch_id.as_str())
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if batch_update.rows_affected() != 1 {
+            return Err(RepositoryError::integrity(
+                "bulk retry items could not pause their production batch",
+            ));
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok((created_item_ids, existing_retry_item_ids))
+    }
+
     async fn has_active_shot_binding(
         &self,
         project_id: &str,
@@ -709,6 +845,15 @@ async fn insert_batch_records(
     batch: &ProductionBatch,
     items: &[ProductionBatchItem],
 ) -> Result<(), RepositoryError> {
+    let logical_item_count = items
+        .iter()
+        .filter(|item| item.retry_of_item_id.is_none())
+        .count();
+    if logical_item_count > MAX_LOGICAL_PRODUCTION_BATCH_ITEMS {
+        return Err(RepositoryError::integrity(format!(
+            "production batch must contain at most {MAX_LOGICAL_PRODUCTION_BATCH_ITEMS} logical items"
+        )));
+    }
     sqlx::query(
         "INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -924,7 +1069,7 @@ impl ItemRow {
 mod tests {
     use super::SqliteProductionQueueRepository;
     use crate::application::ports::{
-        ProductionQueueRepository, ShotBatchBinding, ShotBatchRepository,
+        ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
     };
     use crate::domain::{
         ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
@@ -933,7 +1078,7 @@ mod tests {
     use crate::infrastructure::database::{
         pool::initialize, repositories::test_support::seed_task_dependencies,
     };
-    use chrono::{TimeZone, Utc};
+    use chrono::{DateTime, TimeZone, Utc};
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -1569,5 +1714,390 @@ mod tests {
             0
         );
         pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn bulk_requeue_copies_frozen_source_and_shot_binding() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("bulk-requeue-binding.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        sqlx::query(
+            "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, created_at, updated_at)
+             VALUES ('sht_bulk_retry', 'project-1', 0, '批量恢复', 'REF2VA', ?, ?)",
+        )
+        .bind("2026-08-17T01:00:00Z")
+        .bind("2026-08-17T01:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 17, 1, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let source_id = ProductionBatchItemId::new();
+        let frozen_values = json!({
+            "prompt": {"type": "string", "value": "冻结 prompt"},
+            "seed": {"type": "seed", "value": 42},
+            "reference_images": {"type": "image_assets", "assetIds": ["B", "A", "C"]}
+        });
+        let source = ProductionBatchItem {
+            id: source_id.clone(),
+            batch_id: batch_id.clone(),
+            ordinal: 0,
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values_json: frozen_values.clone(),
+            status: ProductionBatchItemStatus::Failed,
+            task_id: None,
+            retry_of_item_id: None,
+            error_code: Some("COMFY_TIMEOUT".to_owned()),
+            error_message: Some("transient".to_owned()),
+            created_at: now,
+            updated_at: now,
+        };
+        repository
+            .insert_batch_with_bindings(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Paused, now),
+                std::slice::from_ref(&source),
+                &[ShotBatchBinding {
+                    shot_id: "sht_bulk_retry".to_owned(),
+                    stage: ShotStage::Video,
+                    production_batch_item_id: source_id.as_str().to_owned(),
+                }],
+            )
+            .await
+            .unwrap();
+
+        let mut retry = fixture_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Pending,
+            Some(source_id.as_str()),
+            json!({"prompt": {"type": "string", "value": "should be ignored"}}),
+        );
+        retry.workflow_version_id = "wrong-workflow".to_owned();
+        retry.recipe_id = "wrong-recipe".to_owned();
+        let result = repository
+            .append_requeue_items_with_bindings(std::slice::from_ref(&retry), now)
+            .await
+            .unwrap();
+
+        assert_eq!(result.0, vec![retry.id.as_str().to_owned()]);
+        assert!(result.1.is_empty());
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Paused);
+        assert_eq!(detail.items.len(), 2);
+        assert_eq!(detail.items[1].workflow_version_id, "workflow-version-1");
+        assert_eq!(detail.items[1].recipe_id, "recipe-1");
+        assert_eq!(detail.items[1].values_json, frozen_values);
+        assert_eq!(
+            detail.items[1].retry_of_item_id.as_deref(),
+            Some(source_id.as_str())
+        );
+        let binding: (String, String, Option<String>) = sqlx::query_as(
+            "SELECT shot_id, stage, task_id FROM shot_generation_links
+             WHERE production_batch_item_id = ?",
+        )
+        .bind(retry.id.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(binding.0, "sht_bulk_retry");
+        assert_eq!(binding.1, "video");
+        assert_eq!(binding.2, None);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn bulk_requeue_rolls_back_items_and_bindings_when_a_later_source_fails() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("bulk-requeue-rollback.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 17, 1, 15, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let source_id = ProductionBatchItemId::new();
+        let mut source = fixture_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Failed,
+            None,
+            json!({"prompt": "source"}),
+        );
+        source.id = source_id.clone();
+        repository
+            .insert(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Ready, now),
+                &[source],
+            )
+            .await
+            .unwrap();
+
+        let first = fixture_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Pending,
+            Some(source_id.as_str()),
+            json!({"prompt": "candidate"}),
+        );
+        let second = fixture_item(
+            &batch_id,
+            2,
+            ProductionBatchItemStatus::Pending,
+            Some("pbi_missing_source"),
+            json!({"prompt": "invalid"}),
+        );
+        assert!(repository
+            .append_requeue_items_with_bindings(&[first, second], now)
+            .await
+            .is_err());
+
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_batch_items WHERE batch_id = ?",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id IN (
+                    SELECT id FROM production_batch_items WHERE batch_id = ?
+                )",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn bulk_requeue_is_idempotent_and_retries_from_the_current_leaf() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("bulk-requeue-idempotent.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 17, 1, 30, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let source_id = ProductionBatchItemId::new();
+        repository
+            .insert(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Ready, now),
+                &[ProductionBatchItem {
+                    id: source_id.clone(),
+                    batch_id: batch_id.clone(),
+                    ordinal: 0,
+                    workflow_version_id: "workflow-version-1".to_owned(),
+                    recipe_id: "recipe-1".to_owned(),
+                    values_json: json!({"prompt": "frozen"}),
+                    status: ProductionBatchItemStatus::Failed,
+                    task_id: None,
+                    retry_of_item_id: None,
+                    error_code: Some("COMFY_TIMEOUT".to_owned()),
+                    error_message: Some("timeout".to_owned()),
+                    created_at: now,
+                    updated_at: now,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let first = fixture_item(
+            &batch_id,
+            1,
+            ProductionBatchItemStatus::Pending,
+            Some(source_id.as_str()),
+            json!({"prompt": "ignored"}),
+        );
+        let first_result = repository
+            .append_requeue_items_with_bindings(std::slice::from_ref(&first), now)
+            .await
+            .unwrap();
+        assert_eq!(first_result.0, vec![first.id.as_str().to_owned()]);
+
+        let duplicate = fixture_item(
+            &batch_id,
+            2,
+            ProductionBatchItemStatus::Pending,
+            Some(source_id.as_str()),
+            json!({"prompt": "duplicate"}),
+        );
+        let duplicate_result = repository
+            .append_requeue_items_with_bindings(std::slice::from_ref(&duplicate), now)
+            .await
+            .unwrap();
+        assert!(duplicate_result.0.is_empty());
+        assert_eq!(duplicate_result.1, vec![first.id.as_str().to_owned()]);
+
+        let second = fixture_item(
+            &batch_id,
+            2,
+            ProductionBatchItemStatus::Pending,
+            Some(first.id.as_str()),
+            json!({"prompt": "second round"}),
+        );
+        let second_result = repository
+            .append_requeue_items_with_bindings(std::slice::from_ref(&second), now)
+            .await
+            .unwrap();
+        assert_eq!(second_result.0, vec![second.id.as_str().to_owned()]);
+        let detail = repository
+            .find_detail("project-1", &batch_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.items.len(), 3);
+        assert_eq!(
+            detail.items[2].retry_of_item_id.as_deref(),
+            Some(first.id.as_str())
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn initial_batch_limit_counts_logical_roots_not_retry_attempts() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("bulk-requeue-boundary.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 17, 1, 45, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let roots = (0..100)
+            .map(|ordinal| {
+                fixture_item(
+                    &batch_id,
+                    ordinal,
+                    ProductionBatchItemStatus::Failed,
+                    None,
+                    json!({"ordinal": ordinal}),
+                )
+            })
+            .collect::<Vec<_>>();
+        repository
+            .insert(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Ready, now),
+                &roots,
+            )
+            .await
+            .unwrap();
+        let retry = fixture_item(
+            &batch_id,
+            100,
+            ProductionBatchItemStatus::Pending,
+            Some(roots[0].id.as_str()),
+            json!({"retry": true}),
+        );
+        repository
+            .append_requeue_items_with_bindings(std::slice::from_ref(&retry), now)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_batch_items WHERE batch_id = ?",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            101
+        );
+
+        let overflow_batch_id = ProductionBatchId::new();
+        let overflow_items = (0..101)
+            .map(|ordinal| {
+                fixture_item(
+                    &overflow_batch_id,
+                    ordinal,
+                    ProductionBatchItemStatus::Failed,
+                    None,
+                    json!({"ordinal": ordinal}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let error = repository
+            .insert(
+                &fixture_batch(&overflow_batch_id, ProductionBatchStatus::Ready, now),
+                &overflow_items,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            RepositoryError::Integrity { message } if message.contains("100")
+        ));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches WHERE id = ?")
+                .bind(overflow_batch_id.as_str())
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        pool.close().await;
+    }
+
+    fn fixture_batch(
+        id: &ProductionBatchId,
+        status: ProductionBatchStatus,
+        now: DateTime<Utc>,
+    ) -> ProductionBatch {
+        ProductionBatch {
+            id: id.clone(),
+            project_id: "project-1".to_owned(),
+            name: "DEV-031 fixture".to_owned(),
+            status,
+            continue_on_failure: true,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn fixture_item(
+        batch_id: &ProductionBatchId,
+        ordinal: u32,
+        status: ProductionBatchItemStatus,
+        retry_of_item_id: Option<&str>,
+        values_json: serde_json::Value,
+    ) -> ProductionBatchItem {
+        ProductionBatchItem {
+            id: ProductionBatchItemId::new(),
+            batch_id: batch_id.clone(),
+            ordinal,
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            values_json,
+            status,
+            task_id: None,
+            retry_of_item_id: retry_of_item_id.map(str::to_owned),
+            error_code: None,
+            error_message: None,
+            created_at: Utc.with_ymd_and_hms(2026, 8, 17, 1, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 8, 17, 1, 0, 0).unwrap(),
+        }
     }
 }
