@@ -76,3 +76,50 @@ export interface ProductionBatchCreateItem {
   recipeId: string;
   values: GenerationValues;
 }
+
+export type ProductionPartialResumeState =
+  | "RESOLVED"
+  | "AUTO_RESUMABLE"
+  | "REVIEW_REQUIRED"
+  | "PENDING"
+  | "ACTIVE";
+
+export type ProductionPartialResumeEligibility =
+  | "NONE"
+  | "BLOCKED"
+  | "AUTO_RESUMABLE"
+  | "REVIEW_REQUIRED";
+
+export interface ProductionPartialResumeEntry {
+  rootItemId: string;
+  leafItemId: string;
+  ordinal: number;
+  attemptCount: number;
+  status: ProductionPartialResumeState;
+  taskId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  eligibility: ProductionPartialResumeEligibility;
+}
+
+export interface ProductionPartialResumePlan {
+  batchId: string;
+  logicalTotal: number;
+  attemptTotal: number;
+  resolved: number;
+  autoResumable: number;
+  reviewRequired: number;
+  pending: number;
+  active: number;
+  canResume: boolean;
+  entries: ProductionPartialResumeEntry[];
+}
+
+export interface ProductionPartialResumeResult {
+  detail: ProductionBatchDetail;
+  requestedCount: number;
+  createdCount: number;
+  alreadyPreparedCount: number;
+  createdItemIds: string[];
+  existingRetryItemIds: string[];
+}

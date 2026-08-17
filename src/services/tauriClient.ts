@@ -69,6 +69,8 @@ import type {
   ProductionBatchDetail,
   ProductionBatchSummary,
   ProductionAdmissionStatus,
+  ProductionPartialResumePlan,
+  ProductionPartialResumeResult,
   ProductionQueueOverview,
 } from "../types/productionQueue";
 import type {
@@ -687,6 +689,25 @@ export function requeueProductionQueueItem(
 
 export function requeueProductionQueueItemByItem(projectId: string, itemId: string): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_requeue_item_by_item", { projectId, itemId });
+}
+
+export function getProductionPartialResumePlan(
+  projectId: string,
+  batchId: string,
+): Promise<ProductionPartialResumePlan> {
+  return invoke<ProductionPartialResumePlan>("production_queue_partial_resume_plan", { projectId, batchId });
+}
+
+export function partialResumeProductionQueue(
+  projectId: string,
+  batchId: string,
+  selectedLeafItemIds: string[],
+): Promise<ProductionPartialResumeResult> {
+  return invoke<ProductionPartialResumeResult>("production_queue_partial_resume", {
+    projectId,
+    batchId,
+    selectedLeafItemIds,
+  });
 }
 
 export function getProductionBatchReview(projectId: string, batchId: string): Promise<ProductionBatchReview> {

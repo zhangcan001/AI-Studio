@@ -37,6 +37,7 @@ import { ExperimentResultGrid } from "../experiments/ExperimentResultGrid";
 import type { ExperimentContext } from "../experiments/experimentPlanner";
 import { ProductionAssetPreview } from "./ProductionAssetPreview";
 import { ProductionBatchReviewWorkspace } from "./ProductionBatchReviewWorkspace";
+import { ProductionPartialResumePanel } from "./ProductionPartialResumePanel";
 import { hasReviewableVideoOutput } from "./productionQueueReview";
 import {
   readStoredProductionQueueId,
@@ -238,6 +239,17 @@ export function ProductionQueuePanel({
     setQueueDetail(updated);
     setNotice(message);
     void refreshQueues(false);
+  }
+
+  async function commitPartialResume(updated: ProductionBatchDetail) {
+    mergeSummary(updated);
+    setQueueDetail(updated);
+    await refreshQueues(false);
+    try {
+      await onAdmissionChanged();
+    } catch {
+      // The partial-resume mutation is persisted; admission status can refresh later.
+    }
   }
 
   async function saveQueue() {
@@ -647,6 +659,12 @@ export function ProductionQueuePanel({
             <span>已取消 <strong>{detail.cancelled}</strong></span>
             <span>已跳过 <strong>{detail.skipped}</strong></span>
           </div>
+          <ProductionPartialResumePanel
+            projectId={projectId}
+            batchId={detail.id}
+            disabled={busy || Boolean(detail.archivedAt)}
+            onBatchChanged={commitPartialResume}
+          />
           {inline && <div className="production-inline-queue-label">
             <span className="section-label">项目列表</span>
             <span>点击一项查看生成图和操作</span>
