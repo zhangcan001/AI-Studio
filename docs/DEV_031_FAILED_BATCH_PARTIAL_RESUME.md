@@ -47,7 +47,13 @@ focused repository regression 通过：100 个 logical roots 可以追加 physic
 
 ## 10. Krea2 Live smoke
 
-未形成 PASS。初始检查确认 `127.0.0.1:18188` 无 listener；本机已有 ComfyUI Desktop 启动后仍无 backend listener。直接使用已有 ComfyUI 源码启动时，当前 Python 环境先出现 `torchvision::nms` 二进制不兼容；兼容性 shim 后又缺少 `torchsde`。未安装或升级依赖，未调用 `/prompt`，未产生 Krea2 source/retry/Task/Asset，因此没有伪造 offline→resume→success 证据。
+DEV-031B 已形成完整 PASS。严格复用已验证 runtime：`D:\ComfyUI-WorkFisher-V2\python\python.exe`、ComfyUI `0.33.0`、Python `3.12.10`、PyTorch `2.9.0+cu130`、NVIDIA `RTX 5060 Ti`；`http://127.0.0.1:8188` 的 `/system_stats` 与 `/object_info` 均为 200，Krea2 节点可用。验证使用隔离 `AI_STUDIO_DATA_ROOT`，正式 Project/Batch/Catalog/Settings/Queue/Task/Snapshot/Asset 服务链，不操作 UI，不调用 `/prompt` 作为 harness 手工动作，不使用 H3/REF2VA/质量候选。
+
+- `127.0.0.1:18188` 无 listener；创建 1 个 logical Krea2 item 后正常启动队列，真实 source item `pbi_e47b07f33912432eb9addc911dd7d4fd` 创建 source Task `tsk_8152e360-dc56-4086-a7e6-6c929f396f46`，失败码为 `COMFY_OFFLINE`，Batch 自动暂停，source snapshot 已落库。
+- 离线前 plan：`logical=1 / attempts=1 / resolved=0 / auto=1 / review=0 / pending=0 / active=0 / can_resume=true`。
+- 首次 `partial_resume`：`created=1 / existing=0`；retry item `pbi_a3ed3a9a5f1142b88ee56c173632b634` 的 `retry_of_item_id` 指向 source，workflow、recipe、冻结 values 完全相同。对同一旧 source 再提交一次：`created=0 / existing=1`，无重复。
+- 通过正常 `SettingsService.save_and_apply` 切换到 `http://127.0.0.1:8188` 后，只启动这一条最低成本 Krea2。retry Task `tsk_460fb9bc-542b-4e53-9423-da9a88b95203` 成功，retry snapshot `snp_e037d22e-1ff7-4387-90cc-168c9472fd8a`，生成 Asset `1` 个。
+- 最终 plan：`logical=1 / attempts=2 / resolved=1 / auto=0 / review=0 / pending=0 / active=0`；source values == retry values。验证期间发现初始 WebSocket connect failure 的错误分类缺口，已做最小修复：连接拒绝归类为 `COMFY_OFFLINE`，已连接后的 WebSocket 中断仍保持 `COMFY_STREAM_DISCONNECTED`。
 
 ## 11. Regression
 
@@ -60,10 +66,10 @@ focused repository regression 通过：100 个 logical roots 可以追加 physic
 
 ## 12. Known limitations
 
-只剩环境项：恢复已验证的 ComfyUI/Python 依赖后，需要按 DEV-031 低成本流程重新做一次 18188 offline → 8188 Krea2 success，并记录 source item、retry child、旧 error、新 Task、新 Asset 和最终 logical state。没有 H3、REF2VA 或 installer 测试。
+本轮范围只覆盖 DEV-031B 的单条 Krea2 live gate；没有 H3、REF2VA 或 installer 测试，也没有新增 migration、Backup schema 或 queue/executor。
 
 ## 13. Final decision
 
-代码闭环、No-GPU、边界、重启/Backup regression 和前端交付通过；Krea2 Live Gate 为环境阻塞，故本轮为 **CONDITIONAL PASS**，不是完整 Live PASS。
+代码闭环、No-GPU、边界、重启/Backup regression、前端交付和 Krea2 Live Gate 全部通过，本轮为 **FULL PASS**。
 
 提交：backend `7dad514`；frontend `f21189a`。四个子任务均已关闭，`ACTIVE_SUBAGENTS=0`。

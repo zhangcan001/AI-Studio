@@ -688,7 +688,7 @@ impl ComfyAdapter for ComfyHttpAdapter {
     ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
         let url = self.config.websocket_url(client_id);
         let (stream, _) = connect_async(&url).await.map_err(|error| {
-            ComfyAdapterError::StreamDisconnected(format!("connect {url}: {error}"))
+            ComfyAdapterError::Offline(format!("connect {url}: {error}"))
         })?;
         Ok(Box::new(ComfyWsEventSubscription { stream }))
     }
