@@ -1,4 +1,48 @@
-use crate::{app_state::AppState, application::ports::RuntimeParameterProfile, error::AppError};
+use crate::{
+    app_state::AppState,
+    application::ports::{ComfyEnvironmentProfile, RuntimeParameterProfile},
+    error::AppError,
+};
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn comfy_environment_profiles_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ComfyEnvironmentProfile>, AppError> {
+    Ok(state.settings_service.comfy_environment_profiles())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn comfy_environment_profile_save(
+    state: tauri::State<'_, AppState>,
+    profile: ComfyEnvironmentProfile,
+) -> Result<ComfyEnvironmentProfile, AppError> {
+    state
+        .settings_service
+        .save_comfy_environment_profile(profile)
+        .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn comfy_environment_profile_delete(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), AppError> {
+    state
+        .settings_service
+        .delete_comfy_environment_profile(&profile_id)
+        .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn comfy_environment_profile_apply(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<crate::application::settings_service::SettingsView, AppError> {
+    state
+        .settings_service
+        .apply_comfy_environment_profile(&profile_id)
+        .await
+}
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn runtime_profiles_list(

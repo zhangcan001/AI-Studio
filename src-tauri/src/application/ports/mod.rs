@@ -71,7 +71,8 @@ pub use prompt_library_repository::{
 };
 pub use repository_error::RepositoryError;
 pub use settings_store::{
-    AppSettings, ComfySettings, LoadedSettings, RuntimeParameterProfile, SettingsStore,
+    AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,
+    SettingsStore,
 };
 pub use shot_batch_repository::{ShotBatchBinding, ShotBatchRepository};
 pub use shot_bulk_repository::{ShotBulkData, ShotBulkRepository, ShotStagePromptRecord};

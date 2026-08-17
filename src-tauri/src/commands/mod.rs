@@ -5,6 +5,7 @@ pub mod diagnostics;
 pub mod generation;
 pub mod h3_local_import;
 pub mod organization;
+pub mod preflight;
 pub mod preset;
 pub mod production_item_review;
 pub mod production_orchestrator;

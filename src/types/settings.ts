@@ -4,6 +4,62 @@ export interface ComfySettingsView {
   warning?: string | null;
 }
 
+export interface ComfyEnvironmentProfile {
+  id: string;
+  name: string;
+  endpoint: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ComfyPreflightStatus = "READY" | "WARNING" | "BLOCKED";
+
+export type ComfyPreflightIssueSeverity = "ERROR" | "WARNING" | "INFO";
+
+export interface ComfyPreflightIssue {
+  severity: ComfyPreflightIssueSeverity;
+  code: string;
+  title: string;
+  detail: string;
+  workflowId?: string | null;
+  workflowVersionId?: string | null;
+  missingNodes?: string[];
+  suggestedAction?: string | null;
+}
+
+export interface ComfyPreflightWorkflowItem {
+  name: string;
+  version?: string | null;
+  status: "READY" | "BLOCKED" | "DISABLED" | string;
+  missingNodes?: string[];
+  reason?: string | null;
+}
+
+export interface ComfyPreflightWorkflowSummary {
+  workflowTotal: number;
+  workflowReady: number;
+  workflowBlocked: number;
+  items?: ComfyPreflightWorkflowItem[];
+}
+
+export interface ComfyPreflightReport {
+  endpoint: string;
+  status: ComfyPreflightStatus;
+  checkedAt: string;
+  connection: "CONNECTED" | "OFFLINE" | "INCOMPATIBLE";
+  comfyuiVersion?: string | null;
+  pythonVersion?: string | null;
+  gpu?: string | null;
+  vramTotal?: number | null;
+  vramFree?: number | null;
+  nodeCount?: number | null;
+  runtimeBusy: boolean;
+  activeTaskCount: number;
+  productionBusy: boolean;
+  workflowSummary: ComfyPreflightWorkflowSummary;
+  issues: ComfyPreflightIssue[];
+}
+
 export interface ComfyEndpointTest {
   connected: boolean;
   endpoint: string;

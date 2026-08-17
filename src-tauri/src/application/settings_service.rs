@@ -3,7 +3,7 @@ use crate::application::{
     diagnostics_service::{DiagnosticsService, RuntimeActivityStatusView},
     ports::{
         AppSettings, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory, ComfyConnectionConfig,
-        RuntimeParameterProfile, SettingsStore,
+        ComfyEnvironmentProfile, RuntimeParameterProfile, SettingsStore,
     },
     production_queue_service::ProductionQueueService,
 };
@@ -136,6 +136,14 @@ impl SettingsService {
             .clone()
     }
 
+    pub fn comfy_environment_profiles(&self) -> Vec<ComfyEnvironmentProfile> {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .comfy_environment_profiles
+            .clone()
+    }
+
     pub fn production_queue_name_presets(&self) -> Vec<String> {
         self.settings
             .read()
@@ -251,6 +259,112 @@ impl SettingsService {
         Ok(())
     }
 
+    pub async fn save_comfy_environment_profile(
+        &self,
+        mut profile: ComfyEnvironmentProfile,
+    ) -> Result<ComfyEnvironmentProfile, AppError> {
+        profile.id = profile.id.trim().to_owned();
+        profile.name = profile.name.trim().to_owned();
+        profile.endpoint = parse_endpoint(&profile.endpoint)?.endpoint();
+        profile.created_at = profile.created_at.trim().to_owned();
+        profile.updated_at = profile.updated_at.trim().to_owned();
+        validate_comfy_environment_profile(&profile)?;
+
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        if let Some(existing) = next_settings
+            .comfy_environment_profiles
+            .iter()
+            .find(|current| current.id == profile.id)
+        {
+            profile.created_at = existing.created_at.clone();
+        }
+        if next_settings
+            .comfy_environment_profiles
+            .iter()
+            .any(|current| {
+                current.id != profile.id && current.name.eq_ignore_ascii_case(&profile.name)
+            })
+        {
+            return Err(AppError::invalid_input("ComfyUI 环境档案名称不能重复。"));
+        }
+        if next_settings
+            .comfy_environment_profiles
+            .iter()
+            .any(|current| {
+                current.id != profile.id
+                    && normalize_endpoint(&current.endpoint)
+                        == normalize_endpoint(&profile.endpoint)
+            })
+        {
+            return Err(AppError::invalid_input("ComfyUI 环境档案地址不能重复。"));
+        }
+
+        next_settings
+            .comfy_environment_profiles
+            .retain(|current| current.id != profile.id);
+        next_settings
+            .comfy_environment_profiles
+            .insert(0, profile.clone());
+        next_settings.comfy_environment_profiles.truncate(20);
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(profile)
+    }
+
+    pub async fn delete_comfy_environment_profile(&self, profile_id: &str) -> Result<(), AppError> {
+        let profile_id = profile_id.trim();
+        if profile_id.is_empty() {
+            return Err(AppError::invalid_input("ComfyUI 环境档案 ID 不能为空。"));
+        }
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings
+            .comfy_environment_profiles
+            .retain(|profile| profile.id != profile_id);
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(())
+    }
+
+    pub async fn apply_comfy_environment_profile(
+        &self,
+        profile_id: &str,
+    ) -> Result<SettingsView, AppError> {
+        let profile_id = profile_id.trim();
+        if profile_id.is_empty() {
+            return Err(AppError::invalid_input("ComfyUI 环境档案 ID 不能为空。"));
+        }
+        let endpoint = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .comfy_environment_profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+            .map(|profile| profile.endpoint.clone())
+            .ok_or_else(|| AppError::invalid_input("ComfyUI 环境档案不存在。"))?;
+        self.save_and_apply(&endpoint).await
+    }
+
     pub async fn set_preferred_preset(
         &self,
         project_id: &str,
@@ -341,6 +455,12 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .production_queue_name_presets
             .clone();
+        let comfy_environment_profiles = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .comfy_environment_profiles
+            .clone();
         let next_settings = AppSettings {
             schema_version: 1,
             comfy: crate::application::ports::ComfySettings {
@@ -349,6 +469,7 @@ impl SettingsService {
             preferred_presets,
             runtime_profiles,
             production_queue_name_presets,
+            comfy_environment_profiles,
         };
         self.store
             .save(&next_settings)
@@ -420,6 +541,27 @@ fn validate_runtime_profile(profile: &RuntimeParameterProfile) -> Result<(), App
     Ok(())
 }
 
+fn validate_comfy_environment_profile(profile: &ComfyEnvironmentProfile) -> Result<(), AppError> {
+    if profile.id.is_empty() {
+        return Err(AppError::invalid_input("ComfyUI 环境档案 ID 不能为空。"));
+    }
+    if profile.name.is_empty() || profile.name.contains(['\r', '\n']) {
+        return Err(AppError::invalid_input(
+            "ComfyUI 环境档案名称必须是单行非空文本。",
+        ));
+    }
+    if profile.name.chars().count() > 80 {
+        return Err(AppError::invalid_input(
+            "ComfyUI 环境档案名称最多 80 个字符。",
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_endpoint(endpoint: &str) -> String {
+    endpoint.to_ascii_lowercase()
+}
+
 async fn test_adapter(
     adapter: &dyn ComfyAdapter,
     endpoint: String,
@@ -462,7 +604,11 @@ fn sum_devices(
 
 fn endpoint_test_error(error: ComfyAdapterError) -> AppError {
     tracing::warn!(error_type = error.kind(), "ComfyUI endpoint test failed");
-    AppError::comfy_endpoint_test_failed(ENDPOINT_TEST_FAILED_MESSAGE)
+    match error {
+        ComfyAdapterError::Offline(message) => AppError::comfy_offline(message),
+        ComfyAdapterError::Timeout(message) => AppError::comfy_timeout(message),
+        _ => AppError::comfy_endpoint_test_failed(ENDPOINT_TEST_FAILED_MESSAGE),
+    }
 }
 
 #[cfg(test)]
@@ -470,9 +616,9 @@ mod tests {
     use super::*;
     use crate::application::diagnostics_service::RuntimeActivityStatusView;
     use crate::application::ports::{
-        AppSettings, ComfyConnectionConfig, ComfyEventSubscription, ComfyHealth, ComfyHistory,
-        ComfyOutputData, ComfyOutputFile, LoadedSettings, PromptSubmission,
-        RuntimeParameterProfile, SettingsStore, SystemStats,
+        AppSettings, ComfyConnectionConfig, ComfyEnvironmentProfile, ComfyEventSubscription,
+        ComfyHealth, ComfyHistory, ComfyOutputData, ComfyOutputFile, LoadedSettings,
+        PromptSubmission, RuntimeParameterProfile, SettingsStore, SystemStats,
     };
     use async_trait::async_trait;
     use serde_json::Value;
@@ -657,6 +803,16 @@ mod tests {
         ))
     }
 
+    fn environment_profile(id: &str, name: &str, endpoint: &str) -> ComfyEnvironmentProfile {
+        ComfyEnvironmentProfile {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            endpoint: endpoint.to_owned(),
+            created_at: "2026-08-17T00:00:00Z".to_owned(),
+            updated_at: "2026-08-17T00:00:00Z".to_owned(),
+        }
+    }
+
     async fn assert_busy_change_is_rejected(status: RuntimeActivityStatusView) {
         let adapter = BlockingAdapter::new();
         let activity = Arc::new(TestActivityProvider {
@@ -766,6 +922,129 @@ mod tests {
             .unwrap()
             .runtime_profiles
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn comfy_environment_profiles_support_crud_validation_and_deduplication() {
+        let adapter = BlockingAdapter::new();
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore::default());
+        let service = test_settings_service(activity, admission, store, adapter);
+
+        let saved = service
+            .save_comfy_environment_profile(environment_profile(
+                "env-1",
+                " WorkFisher ",
+                " http://localhost:8188/ ",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(saved.name, "WorkFisher");
+        assert_eq!(saved.endpoint, "http://localhost:8188");
+        assert_eq!(service.comfy_environment_profiles(), vec![saved.clone()]);
+
+        let duplicate_name = service
+            .save_comfy_environment_profile(environment_profile(
+                "env-2",
+                "workfisher",
+                "http://localhost:8189",
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(duplicate_name.code(), "INVALID_INPUT");
+
+        let duplicate_endpoint = service
+            .save_comfy_environment_profile(environment_profile(
+                "env-2",
+                "Other",
+                "http://LOCALHOST:8188",
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(duplicate_endpoint.code(), "INVALID_INPUT");
+
+        let invalid_endpoint = service
+            .save_comfy_environment_profile(environment_profile(
+                "env-2",
+                "Other",
+                "ws://localhost:8189",
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(invalid_endpoint.code(), "COMFY_ENDPOINT_INVALID");
+
+        let mut updated = saved.clone();
+        updated.name = "WorkFisher Updated".to_owned();
+        updated.endpoint = "http://localhost:8190".to_owned();
+        updated.updated_at = "2026-08-17T01:00:00Z".to_owned();
+        let updated = service
+            .save_comfy_environment_profile(updated)
+            .await
+            .unwrap();
+        assert_eq!(updated.created_at, saved.created_at);
+        assert_eq!(service.comfy_environment_profiles(), vec![updated]);
+
+        service
+            .delete_comfy_environment_profile(" env-1 ")
+            .await
+            .unwrap();
+        assert!(service.comfy_environment_profiles().is_empty());
+    }
+
+    #[tokio::test]
+    async fn applying_environment_profile_reuses_endpoint_apply_and_preserves_settings() {
+        let adapter = BlockingAdapter::new();
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore::default());
+        let service = test_settings_service(activity, admission, store.clone(), adapter.clone());
+        let profile = service
+            .save_comfy_environment_profile(environment_profile(
+                "env-1",
+                "WorkFisher",
+                "http://localhost:8188",
+            ))
+            .await
+            .unwrap();
+
+        let service_for_apply = service.clone();
+        let running = tokio::spawn(async move {
+            service_for_apply
+                .apply_comfy_environment_profile(&profile.id)
+                .await
+        });
+        adapter.health_started.notified().await;
+        adapter.allow_first_health.notify_one();
+        let settings = running.await.unwrap().unwrap();
+
+        assert_eq!(settings.endpoint, "http://localhost:8188");
+        assert_eq!(service.comfy_environment_profiles().len(), 1);
+        assert_eq!(
+            store
+                .saved
+                .lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .comfy_environment_profiles
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

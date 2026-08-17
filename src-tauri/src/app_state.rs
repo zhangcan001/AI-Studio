@@ -3,6 +3,7 @@ use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
 use crate::application::asset_video_prompt_service::AssetVideoPromptService;
 use crate::application::comfy_memory_service::ComfyMemoryService;
+use crate::application::comfy_preflight_service::ComfyPreflightService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
@@ -66,6 +67,7 @@ pub struct AppState {
     pub production_queue_service: Arc<ProductionQueueService>,
     pub production_item_review_service: Arc<ProductionItemReviewService>,
     pub diagnostics_service: Arc<DiagnosticsService>,
+    pub comfy_preflight_service: Arc<ComfyPreflightService>,
     pub settings_service: Arc<SettingsService>,
 }
 
@@ -103,6 +105,7 @@ impl AppState {
         production_queue_service: Arc<ProductionQueueService>,
         production_item_review_service: Arc<ProductionItemReviewService>,
         diagnostics_service: Arc<DiagnosticsService>,
+        comfy_preflight_service: Arc<ComfyPreflightService>,
         settings_service: Arc<SettingsService>,
     ) -> Self {
         Self {
@@ -138,6 +141,7 @@ impl AppState {
             production_queue_service,
             production_item_review_service,
             diagnostics_service,
+            comfy_preflight_service,
             settings_service,
         }
     }

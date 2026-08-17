@@ -17,6 +17,10 @@ describe("设置与诊断界面", () => {
     expect(html).toMatch(/刷新诊断|正在刷新/);
     expect(html).toContain("导出诊断包");
     expect(html).toContain("释放显存/内存");
+    expect(html).toContain("已保存环境");
+    expect(html).toContain("保存环境");
+    expect(html).toContain("运行预检");
+    expect(html).toContain("立即预检");
     expect(html).toContain("模型文件不会删除");
     expect(html).toContain("接口地址");
     expect(html).not.toContain("AppData");

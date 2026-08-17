@@ -191,6 +191,7 @@ mod tests {
             .load()
             .await;
         assert_eq!(loaded.settings.comfy.endpoint, "http://localhost:8188");
+        assert!(loaded.settings.comfy_environment_profiles.is_empty());
         assert!(loaded.warning.is_none());
     }
 
@@ -218,11 +219,33 @@ mod tests {
             preferred_presets: std::collections::BTreeMap::new(),
             runtime_profiles: Vec::new(),
             production_queue_name_presets: Vec::new(),
+            comfy_environment_profiles: Vec::new(),
         };
         store.save(&settings).await.unwrap();
         assert!(directory.path().join("settings.json").is_file());
         assert_eq!(store.load().await.settings, settings);
         assert!(!directory.path().join("settings.tmp").exists());
+    }
+
+    #[tokio::test]
+    async fn environment_profiles_round_trip_without_schema_bump() {
+        let directory = tempdir().unwrap();
+        let store = JsonSettingsStore::new(directory.path().to_owned());
+        let profile = crate::application::ports::ComfyEnvironmentProfile {
+            id: "env-1".to_owned(),
+            name: "WorkFisher".to_owned(),
+            endpoint: "http://127.0.0.1:8188".to_owned(),
+            created_at: "2026-08-17T00:00:00Z".to_owned(),
+            updated_at: "2026-08-17T00:00:00Z".to_owned(),
+        };
+        let mut settings = AppSettings::default();
+        settings.comfy_environment_profiles = vec![profile.clone()];
+
+        store.save(&settings).await.unwrap();
+
+        let loaded = store.load().await;
+        assert_eq!(loaded.settings.schema_version, 1);
+        assert_eq!(loaded.settings.comfy_environment_profiles, vec![profile]);
     }
 
     #[tokio::test]
@@ -238,6 +261,7 @@ mod tests {
             preferred_presets: std::collections::BTreeMap::new(),
             runtime_profiles: Vec::new(),
             production_queue_name_presets: Vec::new(),
+            comfy_environment_profiles: Vec::new(),
         };
         store.save(&old).await.unwrap();
         store.save(&new).await.unwrap();

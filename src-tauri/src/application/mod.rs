@@ -8,6 +8,7 @@ pub mod builtin_runtime_packages;
 #[cfg(test)]
 mod cancellation_e2e;
 pub mod comfy_memory_service;
+pub mod comfy_preflight_service;
 pub mod comfy_service;
 #[cfg(test)]
 mod dev027_e2e;

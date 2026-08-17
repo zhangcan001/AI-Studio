@@ -14,6 +14,8 @@ pub struct AppSettings {
     pub runtime_profiles: Vec<RuntimeParameterProfile>,
     #[serde(default)]
     pub production_queue_name_presets: Vec<String>,
+    #[serde(default)]
+    pub comfy_environment_profiles: Vec<ComfyEnvironmentProfile>,
 }
 
 impl Default for AppSettings {
@@ -29,6 +31,7 @@ impl Default for AppSettings {
                 "角色测试".to_owned(),
                 "场景实验".to_owned(),
             ],
+            comfy_environment_profiles: Vec::new(),
         }
     }
 }
@@ -41,6 +44,16 @@ pub struct RuntimeParameterProfile {
     pub recipe_id: String,
     pub name: String,
     pub values: BTreeMap<String, i64>,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ComfyEnvironmentProfile {
+    pub id: String,
+    pub name: String,
+    pub endpoint: String,
+    pub created_at: String,
     pub updated_at: String,
 }
 

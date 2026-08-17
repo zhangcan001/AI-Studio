@@ -45,6 +45,8 @@ import type {
 } from "../types/project";
 import type {
   ComfyEndpointTest,
+  ComfyEnvironmentProfile,
+  ComfyPreflightReport,
   ComfySettingsView,
   RuntimeParameterProfile,
 } from "../types/settings";
@@ -164,6 +166,26 @@ export function testComfyConnection(endpoint: string): Promise<ComfyEndpointTest
 
 export function saveComfyEndpoint(endpoint: string): Promise<ComfySettingsView> {
   return invoke<ComfySettingsView>("comfy_save_endpoint", { endpoint });
+}
+
+export function listComfyEnvironmentProfiles(): Promise<ComfyEnvironmentProfile[]> {
+  return invoke<ComfyEnvironmentProfile[]>("comfy_environment_profiles_list");
+}
+
+export function saveComfyEnvironmentProfile(profile: ComfyEnvironmentProfile): Promise<ComfyEnvironmentProfile> {
+  return invoke<ComfyEnvironmentProfile>("comfy_environment_profile_save", { profile });
+}
+
+export function deleteComfyEnvironmentProfile(profileId: string): Promise<void> {
+  return invoke<void>("comfy_environment_profile_delete", { profileId });
+}
+
+export function applyComfyEnvironmentProfile(profileId: string): Promise<ComfySettingsView> {
+  return invoke<ComfySettingsView>("comfy_environment_profile_apply", { profileId });
+}
+
+export function getComfyPreflight(): Promise<ComfyPreflightReport> {
+  return invoke<ComfyPreflightReport>("comfy_preflight_current");
 }
 
 export function freeComfyMemory(): Promise<ComfyMemoryReleaseResult> {

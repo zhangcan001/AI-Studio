@@ -28,6 +28,7 @@ use application::{
     asset_query_service::AssetQueryService,
     asset_video_prompt_service::AssetVideoPromptService,
     comfy_memory_service::ComfyMemoryService,
+    comfy_preflight_service::ComfyPreflightService,
     comfy_service::{ComfyRuntime, ComfyService},
     diagnostics_service::DiagnosticsService,
     generation_catalog_service::GenerationCatalogService,
@@ -494,6 +495,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_queue_service.clone(),
                 adapter_factory,
             ));
+            let comfy_preflight_service = Arc::new(ComfyPreflightService::new(
+                comfy_service.clone(),
+                diagnostics_service.clone(),
+                workflow_lifecycle_service.clone(),
+            ));
             let project_service = Arc::new(ProjectService::new(
                 project_repository.clone(),
                 project_directory_store,
@@ -595,6 +601,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_queue_service,
                 production_item_review_service,
                 diagnostics_service,
+                comfy_preflight_service,
                 settings_service,
             ));
 
@@ -722,6 +729,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::comfy::comfy_test_connection,
             commands::comfy::comfy_save_endpoint,
             commands::comfy::comfy_free_memory,
+            commands::preflight::comfy_preflight_current,
+            commands::settings::comfy_environment_profiles_list,
+            commands::settings::comfy_environment_profile_save,
+            commands::settings::comfy_environment_profile_delete,
+            commands::settings::comfy_environment_profile_apply,
             commands::settings::runtime_profiles_list,
             commands::settings::runtime_profiles_save,
             commands::settings::runtime_profiles_delete,
