@@ -9,6 +9,8 @@ pub mod builtin_runtime_packages;
 mod cancellation_e2e;
 pub mod comfy_memory_service;
 pub mod comfy_service;
+#[cfg(test)]
+mod dev027_e2e;
 pub mod diagnostics_service;
 pub mod generation_catalog_service;
 #[cfg(test)]
@@ -37,6 +39,7 @@ pub mod prompt_library_service;
 pub mod scheduler;
 pub mod settings_service;
 pub mod shot_batch_service;
+pub mod shot_bulk_service;
 pub mod shot_service;
 pub mod source_asset_import_service;
 pub mod task_cancellation_service;

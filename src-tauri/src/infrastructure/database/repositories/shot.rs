@@ -1,7 +1,8 @@
 use super::{format_datetime, map_domain_error, map_sqlx_error, parse_datetime, parse_json};
 use crate::application::ports::{
-    RepositoryError, ShotData, ShotGenerationLinkRecord, ShotRecord, ShotReferenceAssetRecord,
-    ShotRepository, ShotStageConfigRecord,
+    RepositoryError, ShotBulkData, ShotBulkRepository, ShotData, ShotGenerationLinkRecord,
+    ShotRecord, ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord,
+    ShotStagePromptRecord,
 };
 use crate::domain::{validate_scalar_values, ShotStage};
 use async_trait::async_trait;
@@ -432,6 +433,201 @@ impl ShotRepository for SqliteShotRepository {
     }
 }
 
+#[async_trait]
+impl ShotBulkRepository for SqliteShotRepository {
+    async fn list_bulk_data(&self, project_id: &str) -> Result<Vec<ShotBulkData>, RepositoryError> {
+        let shots = self.list(project_id).await?;
+        let prompt_rows = sqlx::query_as::<_, ShotStagePromptRow>(
+            "SELECT p.shot_id, p.stage, p.prompt_text, p.prompt_entry_id,
+                    p.prompt_version_id, p.updated_at
+             FROM shot_stage_prompts p
+             JOIN shots s ON s.id = p.shot_id
+             WHERE s.project_id = ?
+             ORDER BY p.shot_id, p.stage",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let mut prompts_by_shot =
+            std::collections::HashMap::<String, Vec<ShotStagePromptRecord>>::new();
+        for row in prompt_rows {
+            let prompt = row.try_into_domain()?;
+            prompts_by_shot
+                .entry(prompt.shot_id.clone())
+                .or_default()
+                .push(prompt);
+        }
+        Ok(shots
+            .into_iter()
+            .map(|data| {
+                let mut stage_prompts = prompts_by_shot.remove(&data.shot.id).unwrap_or_default();
+                // Direct legacy fixtures may insert a Shot after migration 019
+                // without inserting stage rows. Keep them readable using the
+                // old snapshot as a compatibility fallback.
+                if stage_prompts.is_empty() {
+                    stage_prompts = [ShotStage::Image, ShotStage::Video]
+                        .into_iter()
+                        .map(|stage| ShotStagePromptRecord {
+                            shot_id: data.shot.id.clone(),
+                            stage,
+                            prompt_text: data.shot.prompt_text.clone(),
+                            prompt_entry_id: data.shot.prompt_entry_id.clone(),
+                            prompt_version_id: data.shot.prompt_version_id.clone(),
+                            updated_at: data.shot.updated_at,
+                        })
+                        .collect();
+                }
+                ShotBulkData {
+                    shot: data.shot,
+                    stage_configs: data.stage_configs,
+                    stage_prompts,
+                }
+            })
+            .collect())
+    }
+
+    async fn insert_shots_atomic(
+        &self,
+        project_id: &str,
+        shots: &[ShotRecord],
+        stage_prompts: &[ShotStagePromptRecord],
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let mut shot_ids = HashSet::new();
+        for shot in shots {
+            if shot.project_id != project_id || !shot_ids.insert(shot.id.clone()) {
+                return Err(RepositoryError::integrity(
+                    "bulk shot insert contains an invalid or duplicate shot",
+                ));
+            }
+            sqlx::query(
+                "INSERT INTO shots
+                 (id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
+                  selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&shot.id)
+            .bind(&shot.project_id)
+            .bind(shot.ordinal)
+            .bind(&shot.name)
+            .bind(&shot.prompt_text)
+            .bind(&shot.prompt_entry_id)
+            .bind(&shot.prompt_version_id)
+            .bind(&shot.selected_image_asset_id)
+            .bind(&shot.selected_video_asset_id)
+            .bind(format_datetime(shot.created_at))
+            .bind(format_datetime(shot.updated_at))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+        insert_stage_prompts(&mut transaction, project_id, stage_prompts).await?;
+        transaction.commit().await.map_err(map_sqlx_error)
+    }
+
+    async fn update_stage_prompts_atomic(
+        &self,
+        project_id: &str,
+        updates: &[ShotStagePromptRecord],
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        insert_stage_prompts(&mut transaction, project_id, updates).await?;
+        transaction.commit().await.map_err(map_sqlx_error)
+    }
+
+    async fn upsert_stage_configs_atomic(
+        &self,
+        project_id: &str,
+        configs: &[ShotStageConfigRecord],
+        prompt_updates: &[ShotStagePromptRecord],
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        for config in configs {
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shots WHERE id = ? AND project_id = ?",
+            )
+            .bind(&config.shot_id)
+            .bind(project_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if exists == 0 {
+                return Err(RepositoryError::not_found("shot", &config.shot_id));
+            }
+            validate_scalar_values(&config.scalar_values)
+                .map_err(|error| map_domain_error("shot scalar values", error))?;
+            sqlx::query(
+                "INSERT INTO shot_stage_configs
+                 (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(shot_id, stage) DO UPDATE SET
+                   workflow_version_id = excluded.workflow_version_id,
+                   recipe_id = excluded.recipe_id,
+                   scalar_values_json = excluded.scalar_values_json,
+                   updated_at = excluded.updated_at",
+            )
+            .bind(&config.shot_id)
+            .bind(config.stage.as_str())
+            .bind(&config.workflow_version_id)
+            .bind(&config.recipe_id)
+            .bind(config.scalar_values.to_string())
+            .bind(format_datetime(config.updated_at))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+        insert_stage_prompts(&mut transaction, project_id, prompt_updates).await?;
+        transaction.commit().await.map_err(map_sqlx_error)
+    }
+}
+
+async fn insert_stage_prompts(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    project_id: &str,
+    prompts: &[ShotStagePromptRecord],
+) -> Result<(), RepositoryError> {
+    let mut seen = HashSet::new();
+    for prompt in prompts {
+        if !seen.insert((prompt.shot_id.clone(), prompt.stage)) {
+            return Err(RepositoryError::integrity(
+                "bulk stage prompt updates must not contain duplicate shot/stage pairs",
+            ));
+        }
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM shots WHERE id = ? AND project_id = ?",
+        )
+        .bind(&prompt.shot_id)
+        .bind(project_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if exists == 0 {
+            return Err(RepositoryError::not_found("shot", &prompt.shot_id));
+        }
+        sqlx::query(
+            "INSERT INTO shot_stage_prompts
+             (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(shot_id, stage) DO UPDATE SET
+               prompt_text = excluded.prompt_text,
+               prompt_entry_id = excluded.prompt_entry_id,
+               prompt_version_id = excluded.prompt_version_id,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&prompt.shot_id)
+        .bind(prompt.stage.as_str())
+        .bind(&prompt.prompt_text)
+        .bind(&prompt.prompt_entry_id)
+        .bind(&prompt.prompt_version_id)
+        .bind(format_datetime(prompt.updated_at))
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+    }
+    Ok(())
+}
+
 async fn select_asset(
     pool: &SqlitePool,
     project_id: &str,
@@ -556,6 +752,30 @@ struct ShotReferenceRow {
     stage: String,
     asset_id: String,
     ordinal: i64,
+}
+
+#[derive(FromRow)]
+struct ShotStagePromptRow {
+    shot_id: String,
+    stage: String,
+    prompt_text: String,
+    prompt_entry_id: Option<String>,
+    prompt_version_id: Option<String>,
+    updated_at: String,
+}
+
+impl ShotStagePromptRow {
+    fn try_into_domain(self) -> Result<ShotStagePromptRecord, RepositoryError> {
+        Ok(ShotStagePromptRecord {
+            shot_id: self.shot_id,
+            stage: ShotStage::try_from_str(&self.stage)
+                .map_err(|error| map_domain_error("shot prompt stage", error))?,
+            prompt_text: self.prompt_text,
+            prompt_entry_id: self.prompt_entry_id,
+            prompt_version_id: self.prompt_version_id,
+            updated_at: parse_datetime("shot stage prompt updated_at", &self.updated_at)?,
+        })
+    }
 }
 
 impl ShotReferenceRow {

@@ -6,8 +6,8 @@ use crate::application::ordered_reference_binding::{
 };
 use crate::application::ports::{
     AssetRepository, AvailableGenerationDefinition, Clock, GenerationDefinitionRepository,
-    ProjectRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository, ShotData,
-    ShotRepository, TaskRepository,
+    ProjectRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository, ShotBulkRepository,
+    ShotData, ShotRepository, TaskRepository,
 };
 use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::production_queue_service::{
@@ -85,6 +85,7 @@ pub struct ShotBatchService {
     definition_repository: Arc<dyn GenerationDefinitionRepository>,
     project_repository: Arc<dyn ProjectRepository>,
     clock: Arc<dyn Clock>,
+    stage_prompt_repository: Option<Arc<dyn ShotBulkRepository>>,
 }
 
 impl ShotBatchService {
@@ -106,7 +107,13 @@ impl ShotBatchService {
             definition_repository,
             project_repository,
             clock,
+            stage_prompt_repository: None,
         }
+    }
+
+    pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
+        self.stage_prompt_repository = Some(repository);
+        self
     }
 
     pub async fn plan(
@@ -289,8 +296,27 @@ impl ShotBatchService {
                             .is_some_and(|status| !status.is_terminal())
                 })
             });
+        let stage_prompts = if let Some(repository) = &self.stage_prompt_repository {
+            repository
+                .list_bulk_data(project_id)
+                .await?
+                .into_iter()
+                .map(|item| {
+                    let prompt = item
+                        .stage_prompts
+                        .into_iter()
+                        .find(|prompt| prompt.stage == stage)
+                        .map(|prompt| prompt.prompt_text)
+                        .unwrap_or(item.shot.prompt_text);
+                    (item.shot.id, prompt)
+                })
+                .collect::<HashMap<_, _>>()
+        } else {
+            HashMap::new()
+        };
         let mut result = Vec::with_capacity(shots.len());
         for data in shots {
+            let stage_prompt = stage_prompts.get(&data.shot.id).map(String::as_str);
             result.push(
                 self.inspect_shot(
                     project_id,
@@ -300,6 +326,7 @@ impl ShotBatchService {
                     &missing_tasks,
                     &available_definitions,
                     active_video_task,
+                    stage_prompt,
                 )
                 .await?,
             );
@@ -316,6 +343,7 @@ impl ShotBatchService {
         missing_tasks: &HashSet<String>,
         available_definitions: &HashMap<(String, String), AvailableGenerationDefinition>,
         active_video_task: bool,
+        stage_prompt: Option<&str>,
     ) -> Result<PlannedShot, ShotBatchServiceError> {
         let config = data
             .stage_configs
@@ -501,7 +529,9 @@ impl ShotBatchService {
         }) {
             values.insert(
                 prompt_key.clone(),
-                GenerationInputValue::Text(data.shot.prompt_text.clone()),
+                GenerationInputValue::Text(
+                    stage_prompt.unwrap_or(&data.shot.prompt_text).to_owned(),
+                ),
             );
         }
 

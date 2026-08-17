@@ -543,6 +543,64 @@ export function createShotBatch(request: {
   return invoke<ProductionBatchDetail>("shot_batch_create", { request });
 }
 
+export interface ShotBulkImportRowPreview {
+  rowNumber: number;
+  name: string;
+  description: string;
+  imagePrompt?: string;
+  videoPrompt?: string;
+  errors: Array<{ code: string; message: string; rowNumber?: number; shotId?: string }>;
+  warnings: Array<{ code: string; message: string; rowNumber?: number; shotId?: string }>;
+}
+
+export interface ShotBulkImportPreview {
+  total: number;
+  valid: number;
+  invalid: number;
+  warnings: number;
+  rows: ShotBulkImportRowPreview[];
+}
+
+export interface ShotBulkImportRequest {
+  projectId: string;
+  format: "tsv" | "json";
+  content: string;
+}
+
+export function previewShotBulkImport(request: ShotBulkImportRequest): Promise<ShotBulkImportPreview> {
+  return invoke<ShotBulkImportPreview>("preview_shot_bulk_import", { request });
+}
+
+export function commitShotBulkImport(request: ShotBulkImportRequest): Promise<{ projectId: string; created: Array<{ shotId: string; ordinal: number; name: string }> }> {
+  return invoke("commit_shot_bulk_import", { request });
+}
+
+export type BulkPromptSource =
+  | { type: "text"; text: string }
+  | { type: "promptLibraryVersion"; promptEntryId: string; promptVersionId: string }
+  | { type: "clearProvenance" };
+
+export function bulkAssignShotPrompt(request: {
+  projectId: string;
+  stage: ShotStage;
+  shotIds: string[];
+  source: BulkPromptSource;
+}): Promise<{ projectId: string; stage: ShotStage; updatedShotIds: string[] }> {
+  return invoke("bulk_assign_shot_prompt", { request });
+}
+
+export function bulkSetShotStageConfig(request: {
+  projectId: string;
+  stage: ShotStage;
+  shotIds: string[];
+  workflowVersionId: string;
+  recipeId: string;
+  values: ShotInputValues;
+  prompt?: BulkPromptSource;
+}): Promise<{ projectId: string; stage: ShotStage; configuredShotIds: string[]; promptUpdatedShotIds: string[] }> {
+  return invoke("bulk_set_shot_stage_config", { request });
+}
+
 export interface GenerationBatchItemRequest {
   workflowVersionId: string;
   recipeId: string;

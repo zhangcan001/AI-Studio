@@ -12,7 +12,7 @@ import {
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
 import { useProjectStore } from "../stores/projectStore";
-import type { RecipeViewModel } from "../types/generation";
+import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
@@ -22,6 +22,7 @@ import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
+import { ShotWorkspace } from "../features/shots/ShotWorkspace";
 import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
@@ -35,11 +36,12 @@ import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import "./App.css";
 
-type Workspace = "studio" | "video" | "assets" | "tasks" | "projects" | "workflows" | "settings";
+type Workspace = "studio" | "video" | "shots" | "assets" | "tasks" | "projects" | "workflows" | "settings";
 
 const workspaceLabels: Record<Workspace, string> = {
   studio: "批量图片",
   video: "批量视频",
+  shots: "镜头生产",
   assets: "资产库",
   tasks: "任务",
   projects: "项目",
@@ -50,6 +52,7 @@ const workspaceLabels: Record<Workspace, string> = {
 const workspaceDescriptions: Record<Workspace, string> = {
   studio: "用 Prompt 列表串行生产图片，并在当前工作区追踪结果。",
   video: "为图片资产配置 MiniMax H3 视频参数，并串行生成。",
+  shots: "批量导入、配置、生产并人工复核项目内全部 Shot。",
   assets: "集中浏览、筛选和继续使用当前项目的媒体资产。",
   tasks: "查看任务状态、输入快照和生成结果。",
   projects: "管理项目、模板和本地备份。",
@@ -561,6 +564,26 @@ function App() {
           }}
         />
       )}
+      {activeProject && workspace === "shots" && (
+        <WorkspaceErrorBoundary
+          resetKey={activeProject.id}
+          onBackToAssets={() => setWorkspace("assets")}
+          onRetry={() => setWorkspace("shots")}
+        >
+          <ShotWorkspace
+            projectId={activeProject.id}
+            catalog={catalog}
+            onOpenInStudio={(shot, stage, recipe) => {
+              useStudioStore.getState().loadDraft(recipe, (shot.stageConfigs.find((config) => config.stage === stage)?.scalarValues ?? {}) as GenerationValues);
+              setWorkspace(stage === "image" ? "studio" : "video");
+            }}
+            onOpenTask={(taskId) => {
+              setFocusedTaskId(taskId);
+              setWorkspace("tasks");
+            }}
+          />
+        </WorkspaceErrorBoundary>
+      )}
       {activeProject && workspace === "video" && (
         <WorkspaceErrorBoundary
           resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
@@ -647,6 +670,7 @@ function WorkspaceGlyph({ name }: { name: Workspace }) {
   const paths: Record<Workspace, string> = {
     studio: "M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v10a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3v-3H5.5A1.5 1.5 0 0 1 4 15.5z M8 8h8 M8 12h5",
     video: "M4.5 6.5A2.5 2.5 0 0 1 7 4h8a2.5 2.5 0 0 1 2.5 2.5v1L21 6v12l-3.5-1.5v1A2.5 2.5 0 0 1 15 20H7a2.5 2.5 0 0 1-2.5-2.5z M10 9l5 3-5 3z",
+    shots: "M4 5h16v14H4z M7 8h10 M7 12h6 M7 16h8",
     assets: "M3.5 7h6l2 2h9v10h-17z M3.5 7V5.5A1.5 1.5 0 0 1 5 4h5l2 2h7.5A1.5 1.5 0 0 1 21 7.5V9",
     tasks: "M6 4h12v16H6z M9 8h6 M9 12h6 M9 16h4",
     projects: "M3.5 8h7l2 2h8v9h-17z M5 8V5.5A1.5 1.5 0 0 1 6.5 4h4l1.5 2H19A1.5 1.5 0 0 1 20.5 7.5V10",

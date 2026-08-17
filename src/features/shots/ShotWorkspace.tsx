@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createShot,
+  bulkAssignShotPrompt,
+  bulkSetShotStageConfig,
   deleteShot,
   generateShot,
   getAsset,
@@ -25,9 +27,9 @@ import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { deriveShotStatus, recentShotFailure, shotStatusLabels } from "./shotDomain";
-import { ShotBatchPlanner } from "./ShotBatchPlanner";
 import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
-import { ShotProgressDashboard } from "./ShotProgressDashboard";
+import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
+import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import {
   filterProductionRuntimeCatalog,
   h3FamilyForWorkflowId,
@@ -69,6 +71,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const currentDraft = stageDrafts[stage];
@@ -385,6 +388,28 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const hasFrozenQueueLink = Boolean(selectedShot?.generationLinks.some((link) => link.productionBatchItemId));
   const recentFailure = selectedShot ? recentShotFailure(selectedShot, stage) : undefined;
 
+  async function configureBulkStage(nextStage: ShotStage, shotIds: string[]) {
+    const recipe = preferredStageRecipe(productCatalog, nextStage);
+    if (!recipe) throw new Error(`当前没有可用的${nextStage === "image" ? "Krea2 图片" : "MiniMax H3 视频"} Recipe。`);
+    await bulkSetShotStageConfig({
+      projectId,
+      stage: nextStage,
+      shotIds,
+      workflowVersionId: recipe.workflowVersionId,
+      recipeId: recipe.recipeId,
+      values: defaultScalarValues(recipe),
+    });
+  }
+
+  async function assignBulkPrompt(nextStage: ShotStage, shotIds: string[], text: string) {
+    await bulkAssignShotPrompt({
+      projectId,
+      stage: nextStage,
+      shotIds,
+      source: { type: "text", text },
+    });
+  }
+
   if (loading) return <section className="workspace-panel shot-workspace"><p className="project-loading">正在加载镜头制作...</p></section>;
 
   return (
@@ -397,16 +422,23 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         </div>
         <div className="shot-toolbar">
           <button type="button" onClick={() => void addShot()} disabled={busy}>新建镜头</button>
+          <button type="button" className="quiet-button" onClick={() => setBulkImportOpen((open) => !open)} disabled={busy}>{bulkImportOpen ? "收起批量导入" : "批量导入镜头"}</button>
           <button type="button" className="quiet-button" onClick={() => void reload()} disabled={busy}>刷新</button>
         </div>
       </div>
-      <ShotProgressDashboard shots={shots} />
-      <ShotBatchPlanner
+      {bulkImportOpen && <ShotBulkImportPanel
+        projectId={projectId}
+        onImported={async () => { await reload(); setBulkImportOpen(false); }}
+        onCancel={() => setBulkImportOpen(false)}
+      />}
+      <ProjectProductionPipeline
         projectId={projectId}
         shots={shots}
         onRefresh={reload}
         onNotice={(message) => setNotice(message)}
         onError={(message) => setError(message)}
+        onConfigureStage={configureBulkStage}
+        onBulkPrompt={assignBulkPrompt}
       />
       <div className="shot-workspace-grid">
         <aside className="shot-list-pane" aria-label="镜头列表">

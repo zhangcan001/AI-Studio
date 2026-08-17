@@ -17,6 +17,14 @@ export interface ShotStageConfig {
   updatedAt: string;
 }
 
+export interface ShotStagePrompt {
+  stage: ShotStage;
+  promptText: string;
+  promptEntryId?: string;
+  promptVersionId?: string;
+  updatedAt: string;
+}
+
 export interface ShotReferenceAsset {
   stage: ShotStage;
   assetId: string;
@@ -40,6 +48,7 @@ export interface ShotView {
   promptText: string;
   promptEntryId?: string;
   promptVersionId?: string;
+  stagePrompts?: ShotStagePrompt[];
   selectedImageAssetId?: string;
   selectedVideoAssetId?: string;
   createdAt: string;

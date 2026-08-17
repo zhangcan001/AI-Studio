@@ -19,6 +19,7 @@ pub mod prompt_library_repository;
 pub mod repository_error;
 pub mod settings_store;
 pub mod shot_batch_repository;
+pub mod shot_bulk_repository;
 pub mod shot_repository;
 pub mod task_history_repository;
 pub mod task_repository;
@@ -73,6 +74,7 @@ pub use settings_store::{
     AppSettings, ComfySettings, LoadedSettings, RuntimeParameterProfile, SettingsStore,
 };
 pub use shot_batch_repository::{ShotBatchBinding, ShotBatchRepository};
+pub use shot_bulk_repository::{ShotBulkData, ShotBulkRepository, ShotStagePromptRecord};
 pub use shot_repository::{
     ShotData, ShotGenerationLinkRecord, ShotRecord, ShotReferenceAssetRecord, ShotRepository,
     ShotStageConfigRecord,

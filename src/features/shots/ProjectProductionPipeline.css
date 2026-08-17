@@ -1,0 +1,311 @@
+.project-production-pipeline,
+.shot-bulk-config-panel {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--ux-border);
+  border-radius: 14px;
+  background: var(--ux-surface-1);
+}
+
+.project-production-pipeline {
+  background: color-mix(in srgb, var(--ux-accent) 3%, var(--ux-surface-1));
+}
+
+.pipeline-section-heading,
+.pipeline-selection-toolbar,
+.pipeline-review-actions,
+.pipeline-action-grid,
+.pipeline-stage-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pipeline-section-heading,
+.pipeline-review-actions {
+  justify-content: space-between;
+}
+
+.pipeline-section-heading h2,
+.pipeline-section-heading h3 {
+  margin: 3px 0 0;
+}
+
+.pipeline-muted,
+.pipeline-selection-toolbar,
+.pipeline-selection-count,
+.pipeline-completion-count {
+  color: var(--ux-muted);
+}
+
+.pipeline-muted {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+}
+
+.pipeline-completion-count,
+.pipeline-selection-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pipeline-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+}
+
+.pipeline-summary-metric {
+  display: grid;
+  gap: 6px;
+  min-height: 62px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--ux-border);
+  border-radius: 8px;
+  background: var(--ux-surface-2);
+}
+
+.pipeline-summary-metric span {
+  color: var(--ux-muted);
+  font-size: 0.74rem;
+}
+
+.pipeline-summary-metric strong {
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pipeline-summary-metric-active { border-left-color: var(--ux-accent); }
+.pipeline-summary-metric-review { border-left-color: #d9a441; }
+.pipeline-summary-metric-success { border-left-color: #4fba8f; }
+.pipeline-summary-metric-danger,
+.pipeline-summary-metric-warning { border-left-color: #d06b72; }
+
+.pipeline-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ux-surface-2);
+}
+
+.pipeline-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ux-accent);
+  transition: width 160ms ease;
+}
+
+.pipeline-stage-list {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(100px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pipeline-stage {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--ux-border);
+  border-radius: 9px;
+  background: var(--ux-surface-2);
+}
+
+.pipeline-stage-review {
+  border-color: color-mix(in srgb, #d9a441 60%, var(--ux-border));
+}
+
+.pipeline-stage-index {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ux-muted);
+  background: var(--ux-surface-1);
+  font-size: 0.72rem;
+}
+
+.pipeline-stage-copy,
+.pipeline-stage-copy strong,
+.pipeline-stage-copy small {
+  display: block;
+}
+
+.pipeline-stage-copy {
+  min-width: 0;
+}
+
+.pipeline-stage-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.pipeline-stage-copy small {
+  margin-top: 4px;
+  color: var(--ux-muted);
+  font-size: 0.72rem;
+}
+
+.pipeline-stage-review-badge {
+  grid-column: 1 / -1;
+  color: #d9a441;
+  font-size: 0.68rem;
+}
+
+.pipeline-review-actions {
+  flex-wrap: wrap;
+  padding: 11px 12px;
+  border-left: 3px solid #d9a441;
+  background: color-mix(in srgb, #d9a441 7%, var(--ux-surface-2));
+}
+
+.pipeline-review-actions p {
+  margin-bottom: 0;
+}
+
+.pipeline-action-grid {
+  flex-wrap: wrap;
+}
+
+.pipeline-action-grid button {
+  white-space: nowrap;
+}
+
+.pipeline-stage-tabs {
+  justify-content: flex-start;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--ux-surface-2);
+}
+
+.pipeline-stage-tabs button {
+  min-width: 130px;
+  border: 0;
+  color: var(--ux-muted);
+  background: transparent;
+}
+
+.pipeline-stage-tabs button.active {
+  color: var(--ux-text);
+  background: var(--ux-surface-1);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
+}
+
+.pipeline-selection-toolbar {
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.pipeline-selection-toolbar > span {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.pipeline-shot-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--ux-border);
+  border-radius: 10px;
+}
+
+.pipeline-shot-table {
+  width: 100%;
+  min-width: 840px;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.pipeline-shot-table th,
+.pipeline-shot-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ux-border) 72%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.pipeline-shot-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--ux-muted);
+  background: var(--ux-surface-2);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.pipeline-shot-table td > strong,
+.pipeline-shot-table td > small,
+.pipeline-shot-table td > span + small {
+  display: block;
+}
+
+.pipeline-shot-table td small {
+  margin-top: 4px;
+  color: var(--ux-muted);
+}
+
+.pipeline-shot-row-selected {
+  background: color-mix(in srgb, var(--ux-accent) 7%, transparent);
+}
+
+.pipeline-prompt-preview {
+  display: block;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipeline-status-chip {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--ux-muted);
+  background: var(--ux-surface-2);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.pipeline-human-review-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--ux-accent);
+  color: var(--ux-muted);
+  background: var(--ux-surface-2);
+  font-size: 0.78rem;
+}
+
+.pipeline-human-review-note strong {
+  color: var(--ux-text);
+}
+
+@media (max-width: 1100px) {
+  .pipeline-stage-list {
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .pipeline-section-heading,
+  .pipeline-review-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pipeline-stage-list {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}

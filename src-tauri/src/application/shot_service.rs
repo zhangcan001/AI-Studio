@@ -7,8 +7,9 @@ use crate::application::ordered_reference_binding::{
 };
 use crate::application::ports::{
     AssetRepository, Clock, GenerationDefinitionRepository, PromptLibraryRepository,
-    RepositoryError, ShotBatchRepository, ShotData, ShotRecord, ShotReferenceAssetRecord,
-    ShotRepository, ShotStageConfigRecord, TaskRepository, TaskUpdatePayload,
+    RepositoryError, ShotBatchRepository, ShotBulkRepository, ShotData, ShotRecord,
+    ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord, TaskRepository,
+    TaskUpdatePayload,
 };
 use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::prompt_library_service::canonical_prompt_text;
@@ -41,6 +42,16 @@ pub struct ShotStageConfigView {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ShotStagePromptView {
+    pub stage: String,
+    pub prompt_text: String,
+    pub prompt_entry_id: Option<String>,
+    pub prompt_version_id: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ShotReferenceAssetView {
     pub stage: String,
     pub asset_id: String,
@@ -68,6 +79,7 @@ pub struct ShotView {
     pub prompt_text: String,
     pub prompt_entry_id: Option<String>,
     pub prompt_version_id: Option<String>,
+    pub stage_prompts: Vec<ShotStagePromptView>,
     pub selected_image_asset_id: Option<String>,
     pub selected_video_asset_id: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -119,6 +131,7 @@ pub struct ShotService {
     generation_service: Arc<GenerationService>,
     shot_batch_repository: Arc<dyn ShotBatchRepository>,
     clock: Arc<dyn Clock>,
+    stage_prompt_repository: Option<Arc<dyn ShotBulkRepository>>,
 }
 
 impl ShotService {
@@ -144,7 +157,13 @@ impl ShotService {
             generation_service,
             shot_batch_repository,
             clock,
+            stage_prompt_repository: None,
         }
+    }
+
+    pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
+        self.stage_prompt_repository = Some(repository);
+        self
     }
 
     pub async fn list(&self, project_id: &str) -> Result<Vec<ShotView>, ShotServiceError> {
@@ -257,27 +276,8 @@ impl ShotService {
             .ok_or_else(|| {
                 ShotServiceError::InvalidInput("所选工作流版本或 Recipe 当前不可用".to_owned())
             })?;
-        let recipe = RecipeParser::parse(&definition.recipe_yaml)
-            .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
-        let expected_output = match request.stage {
-            ShotStage::Image => OutputType::Image,
-            ShotStage::Video => OutputType::Video,
-        };
-        if !recipe
-            .outputs
-            .iter()
-            .any(|output| output.output_type == expected_output)
-        {
-            return Err(ShotServiceError::InvalidInput(format!(
-                "{} 阶段需要兼容的 {} 输出",
-                request.stage.as_str(),
-                expected_output_label(expected_output)
-            )));
-        }
-        if request.stage == ShotStage::Video {
-            validate_video_recipe(&definition.workflow_id, &recipe)?;
-        }
-        let scalar_values = scalar_values_to_json(&recipe.inputs, &request.values)?;
+        let scalar_values =
+            validate_stage_config_values(request.stage, &definition, &request.values)?;
         self.repository
             .upsert_stage_config(
                 &request.project_id,
@@ -421,10 +421,15 @@ impl ShotService {
         if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
             matches!(input, InputDefinition::TextArea { .. }).then_some(key)
         }) {
-            values.insert(
-                prompt_key.clone(),
-                GenerationInputValue::Text(data.shot.prompt_text.clone()),
-            );
+            let prompt = self
+                .stage_prompt_text(
+                    &request.project_id,
+                    &request.shot_id,
+                    request.stage,
+                    &data.shot,
+                )
+                .await?;
+            values.insert(prompt_key.clone(), GenerationInputValue::Text(prompt));
         }
         let image_input = recipe.inputs.iter().find_map(|(key, input)| match input {
             InputDefinition::Image { .. } => Some((key, false)),
@@ -628,6 +633,27 @@ impl ShotService {
         Ok(())
     }
 
+    async fn stage_prompt_text(
+        &self,
+        project_id: &str,
+        shot_id: &str,
+        stage: ShotStage,
+        shot: &ShotRecord,
+    ) -> Result<String, ShotServiceError> {
+        let Some(repository) = &self.stage_prompt_repository else {
+            return Ok(shot.prompt_text.clone());
+        };
+        let data = repository.find_bulk_data(project_id, shot_id).await?;
+        Ok(data
+            .and_then(|item| {
+                item.stage_prompts
+                    .into_iter()
+                    .find(|prompt| prompt.stage == stage)
+                    .map(|prompt| prompt.prompt_text)
+            })
+            .unwrap_or_else(|| shot.prompt_text.clone()))
+    }
+
     async fn views(&self, data: Vec<ShotData>) -> Result<Vec<ShotView>, ShotServiceError> {
         let mut result = Vec::with_capacity(data.len());
         for item in data {
@@ -637,6 +663,15 @@ impl ShotService {
     }
 
     async fn view(&self, data: ShotData) -> Result<ShotView, ShotServiceError> {
+        let stage_prompts = if let Some(repository) = &self.stage_prompt_repository {
+            repository
+                .find_bulk_data(&data.shot.project_id, &data.shot.id)
+                .await?
+                .map(|item| item.stage_prompts)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut task_statuses = HashMap::new();
         let mut generation_links = Vec::with_capacity(data.generation_links.len());
         for link in &data.generation_links {
@@ -707,6 +742,16 @@ impl ShotService {
             prompt_text: data.shot.prompt_text,
             prompt_entry_id: data.shot.prompt_entry_id,
             prompt_version_id: data.shot.prompt_version_id,
+            stage_prompts: stage_prompts
+                .into_iter()
+                .map(|prompt| ShotStagePromptView {
+                    stage: prompt.stage.as_str().to_owned(),
+                    prompt_text: prompt.prompt_text,
+                    prompt_entry_id: prompt.prompt_entry_id,
+                    prompt_version_id: prompt.prompt_version_id,
+                    updated_at: prompt.updated_at,
+                })
+                .collect(),
             selected_image_asset_id: data.shot.selected_image_asset_id,
             selected_video_asset_id: data.shot.selected_video_asset_id,
             created_at: data.shot.created_at,
@@ -737,6 +782,46 @@ impl ShotService {
             generation_links,
         })
     }
+}
+
+/// Validate a stage configuration using the same runtime, output, Recipe and
+/// scalar rules as the normal ShotService path, without writing it.
+///
+/// Bulk configuration uses this preflight for every selected Shot before its
+/// repository transaction begins.  Keeping the helper here prevents a second
+/// REF2VA/I2V decision tree from drifting away from the single-shot path.
+pub(crate) fn validate_stage_config_values(
+    stage: ShotStage,
+    definition: &crate::application::ports::GenerationDefinition,
+    values: &BTreeMap<String, GenerationInputValue>,
+) -> Result<Value, ShotServiceError> {
+    if production_runtime_for_stage(stage, &definition.workflow_id).is_none() {
+        return Err(ShotServiceError::InvalidInput(match stage {
+            ShotStage::Image => "图片阶段仅支持正式 Krea2 运行时".to_owned(),
+            ShotStage::Video => "视频阶段仅支持 MiniMax H3 运行时".to_owned(),
+        }));
+    }
+    let recipe = RecipeParser::parse(&definition.recipe_yaml)
+        .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
+    let expected_output = match stage {
+        ShotStage::Image => OutputType::Image,
+        ShotStage::Video => OutputType::Video,
+    };
+    if !recipe
+        .outputs
+        .iter()
+        .any(|output| output.output_type == expected_output)
+    {
+        return Err(ShotServiceError::InvalidInput(format!(
+            "{} 阶段需要兼容的 {} 输出",
+            stage.as_str(),
+            expected_output_label(expected_output)
+        )));
+    }
+    if stage == ShotStage::Video {
+        validate_video_recipe(&definition.workflow_id, &recipe)?;
+    }
+    scalar_values_to_json(&recipe.inputs, values)
 }
 
 fn overall_status(

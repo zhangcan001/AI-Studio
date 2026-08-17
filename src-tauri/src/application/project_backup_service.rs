@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 9;
+const BACKUP_VERSION: u32 = 10;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -565,6 +565,7 @@ impl ProjectBackupService {
             query_production_item_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
         let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
+        let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
         let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
         let mut shot_generation_links = query_shot_generation_links(&mut transaction).await?;
         let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
@@ -634,6 +635,7 @@ impl ProjectBackupService {
             }
         }
         shot_stage_configs.retain(|config| included_shot_ids.contains(config.shot_id.as_str()));
+        shot_stage_prompts.retain(|prompt| included_shot_ids.contains(prompt.shot_id.as_str()));
         shot_reference_assets.retain(|reference| {
             included_shot_ids.contains(reference.shot_id.as_str())
                 && included_asset_ids.contains(reference.asset_id.as_str())
@@ -805,6 +807,7 @@ impl ProjectBackupService {
             benchmark_quality_scores,
             shots,
             shot_stage_configs,
+            shot_stage_prompts,
             shot_reference_assets,
             shot_generation_links,
         };
@@ -948,6 +951,8 @@ struct BackupDocument {
     shots: Vec<BackupShot>,
     #[serde(default)]
     shot_stage_configs: Vec<BackupShotStageConfig>,
+    #[serde(default)]
+    shot_stage_prompts: Vec<BackupShotStagePrompt>,
     #[serde(default)]
     shot_reference_assets: Vec<BackupShotReferenceAsset>,
     #[serde(default)]
@@ -1360,6 +1365,17 @@ struct BackupShotStageConfig {
     workflow_version_id: String,
     recipe_id: String,
     scalar_values: Value,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotStagePrompt {
+    shot_id: String,
+    stage: String,
+    prompt_text: String,
+    prompt_entry_id: Option<String>,
+    prompt_version_id: Option<String>,
     updated_at: String,
 }
 
@@ -2502,6 +2518,16 @@ struct DbShotStageConfig {
 }
 
 #[derive(FromRow)]
+struct DbShotStagePrompt {
+    shot_id: String,
+    stage: String,
+    prompt_text: String,
+    prompt_entry_id: Option<String>,
+    prompt_version_id: Option<String>,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
 struct DbShotReferenceAsset {
     shot_id: String,
     stage: String,
@@ -2576,6 +2602,35 @@ async fn query_shot_stage_configs(
             })
         })
         .collect()
+}
+
+async fn query_shot_stage_prompts(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupShotStagePrompt>, AppError> {
+    let rows = sqlx::query_as::<_, DbShotStagePrompt>(
+        "SELECT p.shot_id, p.stage, p.prompt_text, p.prompt_entry_id,
+                p.prompt_version_id, p.updated_at
+         FROM shot_stage_prompts p
+         JOIN shots s ON s.id = p.shot_id
+         WHERE s.project_id = ?
+         ORDER BY p.shot_id, p.stage",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupShotStagePrompt {
+            shot_id: row.shot_id,
+            stage: row.stage,
+            prompt_text: row.prompt_text,
+            prompt_entry_id: row.prompt_entry_id,
+            prompt_version_id: row.prompt_version_id,
+            updated_at: row.updated_at,
+        })
+        .collect())
 }
 
 async fn query_shot_reference_assets(
@@ -2842,7 +2897,7 @@ fn inspect_archive(
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
     if manifest.format != BACKUP_FORMAT
-        || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9)
+        || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10)
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
@@ -4696,6 +4751,35 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    for prompt in &document.shot_stage_prompts {
+        let shot_id = shot_ids
+            .get(&prompt.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("镜头阶段 Prompt 缺少镜头映射"))?;
+        let prompt_entry_id = prompt
+            .prompt_entry_id
+            .as_ref()
+            .and_then(|id| prompt_ids.get(id))
+            .map(String::as_str);
+        let prompt_version_id = prompt
+            .prompt_version_id
+            .as_ref()
+            .and_then(|id| prompt_version_ids.get(id))
+            .map(String::as_str);
+        sqlx::query(
+            "INSERT INTO shot_stage_prompts
+             (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(shot_id)
+        .bind(&prompt.stage)
+        .bind(&prompt.prompt_text)
+        .bind(prompt_entry_id)
+        .bind(prompt_version_id)
+        .bind(&prompt.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for reference in &document.shot_reference_assets {
         let shot_id = shot_ids
             .get(&reference.shot_id)
@@ -5055,6 +5139,7 @@ mod tests {
             benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
+            shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
             shot_generation_links: Vec::new(),
         }
@@ -5426,6 +5511,15 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_stage_prompts
+             (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
+             VALUES ('sht_backup', 'image', '图片阶段快照', 'prm_backup', 'prv_backup_1', '2026-01-01T00:03:00Z'),
+                    ('sht_backup', 'video', '视频阶段快照', 'prm_backup', 'prv_backup_2', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal) VALUES ('sht_backup', 'image', 'ast_backup', 0), ('sht_backup', 'video', 'ast_backup', 0)")
             .execute(&pool)
             .await
@@ -5535,7 +5629,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 9);
+        assert_eq!(manifest.version, 10);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -5872,6 +5966,29 @@ mod tests {
             .unwrap(),
             2
         );
+        let restored_stage_prompts: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT stage, prompt_text, prompt_entry_id, prompt_version_id
+             FROM shot_stage_prompts
+             WHERE shot_id = ?
+             ORDER BY stage",
+        )
+        .bind(&restored_shot.0)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_stage_prompts.len(), 2);
+        assert_eq!(
+            restored_stage_prompts
+                .iter()
+                .map(|(stage, text, _, _)| (stage.as_str(), text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("image", "图片阶段快照"), ("video", "视频阶段快照")]
+        );
+        assert!(restored_stage_prompts
+            .iter()
+            .all(|(_, _, entry_id, version_id)| entry_id != "prm_backup"
+                && version_id != "prv_backup_1"
+                && version_id != "prv_backup_2"));
         assert_eq!(
             sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM shot_generation_links WHERE shot_id = ?"
@@ -6082,7 +6199,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_v5_through_v8_fixtures_restore_with_empty_later_data() {
+    async fn fixed_v5_through_v9_fixtures_restore_with_empty_later_data() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
@@ -6092,7 +6209,7 @@ mod tests {
             data_dirs.cache.clone(),
         );
 
-        for version in [5_u32, 6_u32, 7_u32, 8_u32] {
+        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32] {
             let project_id = format!("legacy-v{version}-project");
             let project_name = format!("旧项目 v{version}");
             let archive_path = directory.path().join(format!("legacy-v{version}.zip"));
@@ -6302,6 +6419,7 @@ mod tests {
             benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
+            shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
             shot_generation_links: Vec::new(),
         };
@@ -6446,6 +6564,7 @@ mod tests {
             benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
             shot_stage_configs: Vec::new(),
+            shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
             shot_generation_links: Vec::new(),
         };

@@ -47,6 +47,7 @@ use application::{
     prompt_library_service::PromptLibraryService,
     settings_service::SettingsService,
     shot_batch_service::ShotBatchService,
+    shot_bulk_service::ShotBulkService,
     shot_service::ShotService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
@@ -233,9 +234,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let prompt_library_repository: Arc<dyn application::ports::PromptLibraryRepository> = Arc::new(
                 infrastructure::database::SqlitePromptLibraryRepository::new(database_pool.clone()),
             );
-            let shot_repository: Arc<dyn application::ports::ShotRepository> = Arc::new(
+            let shot_repository_impl = Arc::new(
                 infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
             );
+            let shot_repository: Arc<dyn application::ports::ShotRepository> =
+                shot_repository_impl.clone();
+            let shot_bulk_repository: Arc<dyn application::ports::ShotBulkRepository> =
+                shot_repository_impl.clone();
             let production_queue_repository_impl = Arc::new(
                 infrastructure::database::SqliteProductionQueueRepository::new(database_pool.clone()),
             );
@@ -519,17 +524,24 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 prompt_library_repository.clone(),
                 clock.clone(),
             ));
+            let shot_bulk_service = Arc::new(ShotBulkService::new(
+                shot_bulk_repository.clone(),
+                definition_repository.clone(),
+                prompt_library_repository.clone(),
+                clock.clone(),
+            ));
             let shot_service = Arc::new(ShotService::new(
                 shot_repository.clone(),
                 task_repository.clone(),
                 asset_repository.clone(),
                 definition_repository.clone(),
-                prompt_library_repository,
+                prompt_library_repository.clone(),
                 task_query_service.clone(),
                 generation_service.clone(),
                 shot_batch_repository.clone(),
                 clock.clone(),
-            ));
+            )
+            .with_stage_prompt_repository(shot_bulk_repository.clone()));
             let shot_batch_service = Arc::new(ShotBatchService::new(
                 shot_repository,
                 shot_batch_repository,
@@ -538,7 +550,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 definition_repository.clone(),
                 project_repository.clone(),
                 clock.clone(),
-            ));
+            )
+            .with_stage_prompt_repository(shot_bulk_repository));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
                 *slot = Some(Arc::new(MediaProtocolService::new(
                     asset_repository.clone(),
@@ -575,6 +588,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 prompt_library_service,
                 shot_service,
                 shot_batch_service,
+                shot_bulk_service,
                 organization_service,
                 project_template_service,
                 production_queue_service,
@@ -814,6 +828,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::shot::shot_generate,
             commands::shot_batch::shot_batch_plan,
             commands::shot_batch::shot_batch_create,
+            commands::shot_bulk::preview_shot_bulk_import,
+            commands::shot_bulk::commit_shot_bulk_import,
+            commands::shot_bulk::bulk_assign_shot_prompt,
+            commands::shot_bulk::bulk_set_shot_stage_config,
             commands::organization::project_template_list,
             commands::organization::project_template_create,
             commands::organization::project_template_update,
