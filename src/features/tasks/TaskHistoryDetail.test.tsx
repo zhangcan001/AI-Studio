@@ -1,8 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TaskHistoryDetail } from "./TaskHistoryDetail";
+import { taskRetrySubmissionKey } from "./retryPolicy";
 
 describe("任务历史 ComfyUI 校验详情", () => {
+  it("uses a stable idempotency key for retry submissions", () => {
+    expect(taskRetrySubmissionKey("tsk_failed")).toBe("task-retry:tsk_failed");
+    expect(taskRetrySubmissionKey("tsk_failed")).toBe(taskRetrySubmissionKey("tsk_failed"));
+  });
+
   it("renders structured node errors and preserves the raw payload", () => {
     const html = renderToStaticMarkup(
       <TaskHistoryDetail

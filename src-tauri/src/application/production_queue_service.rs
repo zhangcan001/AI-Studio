@@ -355,6 +355,7 @@ impl ProductionQueueService {
         batch_id: &str,
     ) -> Result<(), ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
+        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
         let detail = self
             .repository
             .find_detail(project_id, &batch_id)
@@ -576,6 +577,7 @@ impl ProductionQueueService {
         require_safe_source: bool,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
+        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
         let detail = self
             .repository
             .find_detail(project_id, &batch_id)
@@ -597,6 +599,9 @@ impl ProductionQueueService {
             .iter()
             .find(|item| item.id.as_str() == item_id)
             .ok_or_else(|| ProductionQueueError::NotFound(item_id.to_owned()))?;
+        if find_retry_item(&detail.items, source.id.as_str()).is_some() {
+            return Ok(detail);
+        }
         if require_safe_source && !is_safe_requeue_source(source) {
             return Err(ProductionQueueError::InvalidState(
                 "this production item is not safe to requeue automatically; review the failure and inputs instead"
@@ -1230,6 +1235,15 @@ fn is_safe_requeue_source(item: &ProductionBatchItem) -> bool {
     }
 }
 
+fn find_retry_item<'a>(
+    items: &'a [ProductionBatchItem],
+    source_item_id: &str,
+) -> Option<&'a ProductionBatchItem> {
+    items
+        .iter()
+        .find(|item| item.retry_of_item_id.as_deref() == Some(source_item_id))
+}
+
 fn is_transient_requeue_error(code: &str) -> bool {
     matches!(
         code,
@@ -1533,9 +1547,10 @@ impl From<RepositoryError> for ProductionQueueError {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_admission_blocker, freeze_random_seed_values, generation_start_error_code,
-        generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
-        reference_manifest_for_values, select_recovery, should_pause_after_terminal,
+        find_admission_blocker, find_retry_item, freeze_random_seed_values,
+        generation_start_error_code, generation_values_from_json, generation_values_to_json,
+        is_transient_requeue_error, reference_manifest_for_values, select_recovery,
+        should_pause_after_terminal,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::GenerationServiceError;
@@ -1759,6 +1774,51 @@ mod tests {
         assert!(is_transient_requeue_error("COMFY_STREAM_DISCONNECTED"));
         assert!(!is_transient_requeue_error("EXECUTION_ERROR"));
         assert!(!is_transient_requeue_error("QUEUE_DISPATCH_UNCERTAIN"));
+    }
+
+    #[test]
+    fn repeated_retry_finds_the_existing_child_instead_of_appending_another() {
+        let batch_id = ProductionBatchId::new();
+        let source_id = ProductionBatchItemId::new();
+        let retry_id = ProductionBatchItemId::new();
+        let now = Utc::now();
+        let items = vec![
+            ProductionBatchItem {
+                id: source_id.clone(),
+                batch_id: batch_id.clone(),
+                ordinal: 0,
+                workflow_version_id: "workflow-version-1".to_owned(),
+                recipe_id: "recipe-1".to_owned(),
+                values_json: json!({}),
+                status: ProductionBatchItemStatus::Failed,
+                task_id: None,
+                retry_of_item_id: None,
+                error_code: Some("COMFY_TIMEOUT".to_owned()),
+                error_message: None,
+                created_at: now,
+                updated_at: now,
+            },
+            ProductionBatchItem {
+                id: retry_id.clone(),
+                batch_id,
+                ordinal: 1,
+                workflow_version_id: "workflow-version-1".to_owned(),
+                recipe_id: "recipe-1".to_owned(),
+                values_json: json!({}),
+                status: ProductionBatchItemStatus::Pending,
+                task_id: None,
+                retry_of_item_id: Some(source_id.as_str().to_owned()),
+                error_code: None,
+                error_message: None,
+                created_at: now,
+                updated_at: now,
+            },
+        ];
+
+        assert_eq!(
+            find_retry_item(&items, source_id.as_str()).map(|item| item.id.as_str()),
+            Some(retry_id.as_str())
+        );
     }
 
     #[test]

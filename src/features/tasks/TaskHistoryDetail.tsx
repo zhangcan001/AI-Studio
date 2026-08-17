@@ -10,7 +10,7 @@ import type {
   TaskTelemetry,
 } from "../../types/history";
 import { AssetCard } from "../assets/AssetCard";
-import { taskRetryDecision } from "./retryPolicy";
+import { taskRetryDecision, taskRetrySubmissionKey } from "./retryPolicy";
 import { productionInteractionPolicy } from "../studio/productionQueuePolicy";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { fieldLabel, formatDateTime, taskStatusLabel, workflowDisplayName } from "../../i18n/statusLabels";
@@ -76,6 +76,7 @@ export function TaskHistoryDetail({
         workflowVersionId: draft.workflowVersionId,
         recipeId: draft.recipeId,
         values: draft.values,
+        submissionIdempotencyKey: taskRetrySubmissionKey(detail.id),
       });
       useTaskStore.getState().adoptCreatedTask(task);
       setRetryCreatedTaskId(task.id);

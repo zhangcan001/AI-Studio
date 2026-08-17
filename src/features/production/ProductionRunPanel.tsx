@@ -487,7 +487,12 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       adoptRun(updated);
       setRuns((current) => current.map((run) => run.id === updated.id ? updated : run));
       await refreshAssets(productionRunGeneratedAssetIds(updated)).catch(() => undefined);
-      await onAdmissionChanged?.();
+      try {
+        await onAdmissionChanged?.();
+      } catch {
+        setNotice(`${message}（状态刷新失败，请手动刷新。）`);
+        return;
+      }
       setNotice(message);
     } catch (actionError: unknown) { setError(toUserMessage(actionError)); }
     finally { setBusy(false); }

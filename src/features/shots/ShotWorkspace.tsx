@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createShot,
   bulkAssignShotPrompt,
@@ -72,6 +72,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const reloadGeneration = useRef(0);
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const currentDraft = stageDrafts[stage];
@@ -109,6 +110,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   }, []);
 
   const reload = useCallback(async () => {
+    const generation = ++reloadGeneration.current;
     setLoading(true);
     setError(undefined);
     try {
@@ -117,14 +119,16 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         listRecentAssets(projectId, 80),
         listPromptLibrary(projectId, { kind: "prompt", limit: 100 }),
       ]);
+      if (generation !== reloadGeneration.current) return;
       setShots(nextShots);
       setAssets(nextAssets);
       setPromptEntries(promptPage.items);
       setSelectedShotId((current) => current && nextShots.some((shot) => shot.id === current) ? current : nextShots[0]?.id);
     } catch (loadError: unknown) {
+      if (generation !== reloadGeneration.current) return;
       setError(toUserMessage(loadError));
     } finally {
-      setLoading(false);
+      if (generation === reloadGeneration.current) setLoading(false);
     }
   }, [projectId]);
 

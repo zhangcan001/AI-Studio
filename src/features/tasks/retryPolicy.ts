@@ -14,6 +14,10 @@ export interface RetryDecision {
   reason?: string;
 }
 
+export function taskRetrySubmissionKey(taskId: string): string {
+  return `task-retry:${taskId}`;
+}
+
 export function taskRetryDecision(detail: TaskDetail, comfyConnected: boolean): RetryDecision {
   if (detail.status !== "FAILED") {
     return { allowed: false, reason: "只有失败的任务可以重试。" };
