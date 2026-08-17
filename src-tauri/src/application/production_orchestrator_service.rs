@@ -1,5 +1,8 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::ports::{Clock, GenerationDefinitionRepository};
+use crate::application::product_runtime_scope::{
+    MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID, MINIMAX_H3_WORKFLOW_ID,
+};
 use crate::application::production_queue_service::{
     generation_values_from_json, generation_values_to_json, CreateProductionBatchItem,
     CreateProductionBatchRequest, ProductionQueueError, ProductionQueueService,
@@ -287,7 +290,7 @@ impl ProductionOrchestratorService {
             ProductionStageStatus::Pending,
             None,
             None,
-            &json!({"selectionMode":"MANUAL","maxAssets":8}),
+            &json!({"selectionMode":"MANUAL"}),
             None,
             &now,
         )
@@ -523,6 +526,7 @@ impl ProductionOrchestratorService {
                 None,
                 None,
                 None,
+                None,
                 1,
                 None,
                 &item.values_json,
@@ -546,6 +550,7 @@ impl ProductionOrchestratorService {
         run_id: &str,
         asset_ids: Vec<String>,
     ) -> Result<ProductionRunView, ProductionOrchestratorError> {
+        let _trigger_gate = self.stage_trigger_gate.lock().await;
         validate_project_id(project_id)?;
         let run = self.load_run(project_id, run_id).await?;
         if run.status == ProductionRunStatus::Cancelled.as_str()
@@ -564,25 +569,71 @@ impl ProductionOrchestratorService {
                 "Krea2 尚未完成，当前没有可选图片。".to_owned(),
             ));
         }
-        let mut unique_assets = asset_ids
+        let unique_assets = asset_ids
             .into_iter()
             .map(|id| id.trim().to_owned())
             .filter(|id| !id.is_empty())
             .collect::<Vec<_>>();
         let mut seen_assets = std::collections::HashSet::new();
-        unique_assets.retain(|asset_id| seen_assets.insert(asset_id.clone()));
-        if unique_assets.is_empty() || unique_assets.len() > 8 {
+        if unique_assets
+            .iter()
+            .any(|asset_id| !seen_assets.insert(asset_id.clone()))
+        {
             return Err(ProductionOrchestratorError::InvalidInput(
-                "至少选择 1 个、最多选择 8 个图片资产。".to_owned(),
+                "REF2VA reference_images 不能包含重复的图片资产。".to_owned(),
+            ));
+        }
+        let h3 = self.load_stage(run_id, 2).await?;
+        if h3.production_batch_id.is_some() {
+            return Err(ProductionOrchestratorError::InvalidState(
+                "H3 已创建批次，参考图顺序已冻结。".to_owned(),
+            ));
+        }
+        let ref2va_bounds = match (h3.workflow_version_id, h3.recipe_id) {
+            (Some(workflow_version_id), Some(recipe_id)) => {
+                let definition = self
+                    .definition_repository
+                    .find(&workflow_version_id, &recipe_id)
+                    .await
+                    .map_err(|error| ProductionOrchestratorError::Repository(error.to_string()))?
+                    .ok_or_else(|| {
+                        ProductionOrchestratorError::InvalidInput(
+                            "H3 Workflow / Recipe 不可用。".to_owned(),
+                        )
+                    })?;
+                let recipe = RecipeParser::parse(&definition.recipe_yaml).map_err(|error| {
+                    ProductionOrchestratorError::InvalidInput(error.to_string())
+                })?;
+                ref2va_image_bounds(&definition.workflow_id, &recipe)?
+            }
+            _ => None,
+        };
+        if unique_assets.is_empty() {
+            return Err(ProductionOrchestratorError::InvalidInput(
+                "至少选择 1 个图片资产。".to_owned(),
+            ));
+        }
+        if let Some((min_items, max_items)) = ref2va_bounds {
+            if unique_assets.len() < min_items || unique_assets.len() > max_items {
+                return Err(ProductionOrchestratorError::InvalidInput(format!(
+                    "REF2VA reference_images 数量必须在 {min_items}–{max_items} 之间。"
+                )));
+            }
+        } else if unique_assets.len() != 1 {
+            return Err(ProductionOrchestratorError::InvalidInput(
+                "I2V 只能选择 1 个图片资产。".to_owned(),
             ));
         }
         let mut valid_query = QueryBuilder::<Sqlite>::new(
             "SELECT DISTINCT si.asset_id FROM production_stage_items si
+             INNER JOIN assets a ON a.id = si.asset_id
              WHERE si.stage_id = ",
         );
         valid_query
             .push_bind(&stage0.id)
-            .push(" AND si.asset_id IN (");
+            .push(" AND si.status = 'SUCCEEDED' AND a.project_id = ")
+            .push_bind(project_id)
+            .push(" AND a.type = 'image' AND si.asset_id IN (");
         {
             let mut separated = valid_query.separated(", ");
             for asset_id in &unique_assets {
@@ -620,6 +671,7 @@ impl ProductionOrchestratorService {
                 None,
                 Some(asset_id),
                 Some(asset_id),
+                Some(u32::try_from(ordinal).unwrap_or_default()),
                 1,
                 None,
                 &json!({"assetId": asset_id, "referenceIndex": ordinal}),
@@ -696,8 +748,9 @@ impl ProductionOrchestratorService {
                 return self.get(project_id, run_id).await;
             }
             if retry && stage.status == ProductionStageStatus::Failed.as_str() {
-                // Keep the failed batch and its Task lineage.  A retry below
-                // creates a new normal ProductionBatch and a new attempt.
+                return self
+                    .retry_h3_in_existing_batch(project_id, run_id, &stage, batch_id)
+                    .await;
             } else {
                 return Err(ProductionOrchestratorError::InvalidState(
                     "H3 Stage 已经创建批次，重复触发不会创建第二个任务。".to_owned(),
@@ -745,7 +798,24 @@ impl ProductionOrchestratorService {
             })?;
         let recipe = RecipeParser::parse(&definition.recipe_yaml)
             .map_err(|error| ProductionOrchestratorError::InvalidInput(error.to_string()))?;
-        inject_reference_values(&mut values, &references, &recipe.inputs);
+        let ref2va_bounds = ref2va_image_bounds(&definition.workflow_id, &recipe)?;
+        validate_ordered_references(
+            &references,
+            ref2va_bounds.map(|(min_items, _)| min_items),
+            ref2va_bounds.map(|(_, max_items)| max_items),
+        )?;
+        inject_reference_values(&mut values, &references, &recipe.inputs)?;
+        let attempt = 1;
+        let now = self.clock.now().to_rfc3339();
+        let next_ordinal = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(ordinal) FROM production_stage_items WHERE stage_id = ?",
+        )
+        .bind(&stage.id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?
+        .unwrap_or(-1)
+        .saturating_add(1);
         let queue = self
             .production_queue_service
             .create(CreateProductionBatchRequest {
@@ -759,41 +829,6 @@ impl ProductionOrchestratorService {
                 }],
             })
             .await?;
-        let now = self.clock.now().to_rfc3339();
-        let next_ordinal = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT MAX(ordinal) FROM production_stage_items WHERE stage_id = ?",
-        )
-        .bind(&stage.id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(db_error)?
-        .unwrap_or(-1)
-        .saturating_add(1);
-        let previous_parent = if retry {
-            sqlx::query_scalar::<_, Option<String>>(
-                "SELECT id FROM production_stage_items WHERE stage_id = ? ORDER BY ordinal ASC LIMIT 1",
-            )
-            .bind(&stage.id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_error)?
-            .flatten()
-        } else {
-            None
-        };
-        let attempt = if retry {
-            sqlx::query_scalar::<_, Option<i64>>(
-                "SELECT MAX(attempt) FROM production_stage_items WHERE stage_id = ?",
-            )
-            .bind(&stage.id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(db_error)?
-            .unwrap_or(0)
-            .saturating_add(1)
-        } else {
-            1
-        };
         let mut transaction = self.pool.begin().await.map_err(db_error)?;
         sqlx::query(
             "UPDATE production_stages SET production_batch_id = ?, status = 'READY', updated_at = ?
@@ -823,7 +858,7 @@ impl ProductionOrchestratorService {
             .bind(i64::try_from(reference.reference_index).unwrap_or_default())
             .bind(attempt)
             .bind(&key)
-            .bind(&previous_parent)
+            .bind(None::<&str>)
             .bind(queue.items[0].values_json.to_string())
             .bind(&now)
             .bind(&now)
@@ -857,6 +892,178 @@ impl ProductionOrchestratorService {
             .map_err(db_error)?;
             return Err(error.into());
         }
+        self.mark_stage_running(run_id, 2).await?;
+        self.get(project_id, run_id).await
+    }
+
+    async fn retry_h3_in_existing_batch(
+        &self,
+        project_id: &str,
+        run_id: &str,
+        stage: &ProductionStageRow,
+        batch_id: &str,
+    ) -> Result<ProductionRunView, ProductionOrchestratorError> {
+        let selection = self.load_stage(run_id, 1).await?;
+        let references = self.load_selected_assets(&selection.id).await?;
+        if references.is_empty() {
+            return Err(ProductionOrchestratorError::InvalidState(
+                "H3 Stage 没有选中的图片资产。".to_owned(),
+            ));
+        }
+        let workflow_version_id = stage.workflow_version_id.clone().ok_or_else(|| {
+            ProductionOrchestratorError::InvalidState("H3 Workflow 未冻结。".to_owned())
+        })?;
+        let recipe_id = stage.recipe_id.clone().ok_or_else(|| {
+            ProductionOrchestratorError::InvalidState("H3 Recipe 未冻结。".to_owned())
+        })?;
+        let definition = self
+            .definition_repository
+            .find(&workflow_version_id, &recipe_id)
+            .await
+            .map_err(|error| ProductionOrchestratorError::Repository(error.to_string()))?
+            .ok_or_else(|| {
+                ProductionOrchestratorError::InvalidInput(
+                    "H3 Workflow / Recipe 不可用。".to_owned(),
+                )
+            })?;
+        let recipe = RecipeParser::parse(&definition.recipe_yaml)
+            .map_err(|error| ProductionOrchestratorError::InvalidInput(error.to_string()))?;
+        let ref2va_bounds = ref2va_image_bounds(&definition.workflow_id, &recipe)?;
+        validate_ordered_references(
+            &references,
+            ref2va_bounds.map(|(min_items, _)| min_items),
+            ref2va_bounds.map(|(_, max_items)| max_items),
+        )?;
+
+        let source_item_id = sqlx::query_scalar::<_, String>(
+            "SELECT production_batch_item_id FROM production_stage_items
+             WHERE stage_id = ? AND production_batch_item_id IN (
+                 SELECT id FROM production_batch_items WHERE batch_id = ?
+             )
+             ORDER BY attempt DESC, ordinal ASC LIMIT 1",
+        )
+        .bind(&stage.id)
+        .bind(batch_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| {
+            ProductionOrchestratorError::InvalidState(
+                "H3 retry 缺少失败的 ProductionBatchItem。".to_owned(),
+            )
+        })?;
+        let source_queue = self
+            .production_queue_service
+            .get(project_id, batch_id)
+            .await?;
+        let source_item = source_queue
+            .items
+            .iter()
+            .find(|item| item.id.as_str() == source_item_id)
+            .ok_or_else(|| {
+                ProductionOrchestratorError::Repository(
+                    "H3 retry 源 ProductionBatchItem 不可用。".to_owned(),
+                )
+            })?;
+        let source_values = generation_values_from_json(&source_item.values_json)
+            .map_err(ProductionOrchestratorError::InvalidInput)?;
+        let mut expected_values = source_values.clone();
+        inject_reference_values(&mut expected_values, &references, &recipe.inputs)?;
+        if generation_values_to_json(&expected_values) != source_item.values_json {
+            return Err(ProductionOrchestratorError::InvalidState(
+                "H3 retry 未保持原始冻结参考图顺序或输入值。".to_owned(),
+            ));
+        }
+        let queue = self
+            .production_queue_service
+            .retry_item(project_id, batch_id, &source_item_id)
+            .await?;
+        let retry_item = queue
+            .items
+            .iter()
+            .find(|item| item.retry_of_item_id.as_deref() == Some(source_item_id.as_str()))
+            .ok_or_else(|| {
+                ProductionOrchestratorError::Repository(
+                    "H3 retry ProductionBatchItem 未持久化。".to_owned(),
+                )
+            })?;
+        if retry_item.values_json != source_item.values_json {
+            return Err(ProductionOrchestratorError::InvalidState(
+                "H3 retry 未保持原始冻结参考图顺序或输入值。".to_owned(),
+            ));
+        }
+        let attempt = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(attempt) FROM production_stage_items WHERE stage_id = ?",
+        )
+        .bind(&stage.id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?
+        .unwrap_or(0)
+        .saturating_add(1);
+        let next_ordinal = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(ordinal) FROM production_stage_items WHERE stage_id = ?",
+        )
+        .bind(&stage.id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?
+        .unwrap_or(-1)
+        .saturating_add(1);
+        let now = self.clock.now().to_rfc3339();
+        let mut transaction = self.pool.begin().await.map_err(db_error)?;
+        for (reference_offset, reference) in references.iter().enumerate() {
+            let parent_stage_item_id = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM production_stage_items
+                 WHERE stage_id = ? AND reference_index = ?
+                 ORDER BY attempt DESC, ordinal DESC LIMIT 1",
+            )
+            .bind(&stage.id)
+            .bind(i64::from(reference.reference_index))
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| {
+                ProductionOrchestratorError::InvalidState(format!(
+                    "H3 retry 缺少 reference_index {} 的父 StageItem。",
+                    reference.reference_index
+                ))
+            })?;
+            let item_id = format!("prsi_{}", Uuid::new_v4().simple());
+            let key = format!("production-stage-item:{item_id}:attempt:{attempt}");
+            sqlx::query(
+                "INSERT INTO production_stage_items
+                 (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
+                  source_asset_id, reference_index, attempt, submission_idempotency_key,
+                  parent_stage_item_id, frozen_values_json, created_at, updated_at)
+                 VALUES (?, ?, ?, 'PENDING', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&item_id)
+            .bind(&stage.id)
+            .bind(next_ordinal + i64::try_from(reference_offset).unwrap_or_default())
+            .bind(retry_item.id.as_str())
+            .bind(&reference.asset_id)
+            .bind(i64::from(reference.reference_index))
+            .bind(attempt)
+            .bind(&key)
+            .bind(parent_stage_item_id)
+            .bind(retry_item.values_json.to_string())
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut *transaction)
+            .await
+            .map_err(db_error)?;
+        }
+        sqlx::query("UPDATE production_stages SET status = 'READY', updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(&stage.id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(db_error)?;
+        transaction.commit().await.map_err(db_error)?;
+        self.production_queue_service
+            .start(project_id, batch_id)
+            .await?;
         self.mark_stage_running(run_id, 2).await?;
         self.get(project_id, run_id).await
     }
@@ -1083,7 +1290,7 @@ impl ProductionOrchestratorService {
         &self,
         selection_stage_id: &str,
     ) -> Result<Vec<SelectedReference>, ProductionOrchestratorError> {
-        sqlx::query_as::<_, SelectedReferenceRow>(
+        let rows = sqlx::query_as::<_, SelectedReferenceRow>(
             "SELECT asset_id, COALESCE(reference_index, ordinal) AS reference_index
              FROM production_stage_items WHERE stage_id = ? AND status = 'SUCCEEDED'
              AND asset_id IS NOT NULL ORDER BY COALESCE(reference_index, ordinal), ordinal",
@@ -1091,17 +1298,28 @@ impl ProductionOrchestratorService {
         .bind(selection_stage_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(db_error)
-        .map(|rows| {
-            rows.into_iter()
-                .filter_map(|row| {
-                    row.asset_id.map(|asset_id| SelectedReference {
-                        asset_id,
-                        reference_index: u32::try_from(row.reference_index).unwrap_or_default(),
-                    })
+        .map_err(db_error)?;
+        let references = rows
+            .into_iter()
+            .map(|row| {
+                let asset_id = row.asset_id.ok_or_else(|| {
+                    ProductionOrchestratorError::InvalidInput(
+                        "REF2VA selection 缺少 source asset。".to_owned(),
+                    )
+                })?;
+                let reference_index = u32::try_from(row.reference_index).map_err(|_| {
+                    ProductionOrchestratorError::InvalidInput(
+                        "REF2VA reference_index 必须为非负整数。".to_owned(),
+                    )
+                })?;
+                Ok(SelectedReference {
+                    asset_id,
+                    reference_index,
                 })
-                .collect()
-        })
+            })
+            .collect::<Result<Vec<_>, ProductionOrchestratorError>>()?;
+        validate_ordered_references(&references, None, None)?;
+        Ok(references)
     }
 
     async fn mark_stage_running(
@@ -1174,7 +1392,12 @@ impl ProductionOrchestratorService {
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
-            let stats = stage_stats(&self.pool, &stage0.id).await?;
+            let stats = stage_stats(
+                &self.pool,
+                &stage0.id,
+                stage0.production_batch_id.as_deref(),
+            )
+            .await?;
             if batch_status.as_deref() == Some("READY") && stats.active == 0 && stats.terminal == 0
             {
                 self.set_stage_status(run_id, 0, ProductionStageStatus::Ready)
@@ -1218,7 +1441,7 @@ impl ProductionOrchestratorService {
             }
         }
         if let Some(_batch_id) = h3.production_batch_id.as_deref() {
-            let stats = stage_stats(&self.pool, &h3.id).await?;
+            let stats = stage_stats(&self.pool, &h3.id, h3.production_batch_id.as_deref()).await?;
             if stats.pending > 0 || stats.active > 0 {
                 self.set_stage_status(run_id, 2, ProductionStageStatus::Running)
                     .await?;
@@ -1488,6 +1711,7 @@ struct StageStats {
 async fn stage_stats(
     pool: &SqlitePool,
     stage_id: &str,
+    batch_id: Option<&str>,
 ) -> Result<StageStats, ProductionOrchestratorError> {
     sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
         "SELECT COUNT(*),
@@ -1495,9 +1719,23 @@ async fn stage_stats(
                 COALESCE(SUM(CASE WHEN status IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED') THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN status IN ('PENDING', 'READY') THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN status IN ('RUNNING', 'DISPATCHING', 'DISPATCHED') THEN 1 ELSE 0 END), 0)
-         FROM production_stage_items WHERE stage_id = ?",
+         FROM production_stage_items
+         WHERE stage_id = ?
+           AND (? IS NULL OR production_batch_item_id IN (
+               SELECT id FROM production_batch_items WHERE batch_id = ?
+           ))
+           AND (
+               reference_index IS NULL OR attempt = (
+                   SELECT MAX(latest.attempt)
+                   FROM production_stage_items latest
+                   WHERE latest.stage_id = production_stage_items.stage_id
+                     AND latest.reference_index = production_stage_items.reference_index
+               )
+           )",
     )
     .bind(stage_id)
+    .bind(batch_id)
+    .bind(batch_id)
     .fetch_one(pool)
     .await
     .map(|(total, succeeded, terminal, pending, active)| StageStats {
@@ -1556,6 +1794,7 @@ async fn insert_stage_item(
     task_id: Option<&str>,
     asset_id: Option<&str>,
     source_asset_id: Option<&str>,
+    reference_index: Option<u32>,
     attempt: u32,
     parent_stage_item_id: Option<&str>,
     frozen_values: &Value,
@@ -1568,9 +1807,9 @@ async fn insert_stage_item(
     sqlx::query(
         "INSERT INTO production_stage_items
          (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
-          source_asset_id, attempt, submission_idempotency_key, parent_stage_item_id,
+          source_asset_id, reference_index, attempt, submission_idempotency_key, parent_stage_item_id,
           frozen_values_json, error_code, error_message, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
     .bind(stage_id)
@@ -1580,6 +1819,7 @@ async fn insert_stage_item(
     .bind(task_id)
     .bind(asset_id)
     .bind(source_asset_id)
+    .bind(reference_index.map(i64::from))
     .bind(i64::from(attempt))
     .bind(Some(key))
     .bind(parent_stage_item_id)
@@ -1641,12 +1881,37 @@ fn inject_reference_values(
     values: &mut BTreeMap<String, GenerationInputValue>,
     references: &[SelectedReference],
     inputs: &BTreeMap<String, InputDefinition>,
-) {
+) -> Result<(), ProductionOrchestratorError> {
+    let strict_reference_images =
+        inputs
+            .get("reference_images")
+            .map(|definition| match definition {
+                InputDefinition::Images {
+                    min_items,
+                    max_items,
+                    ..
+                } => Ok((*min_items, *max_items)),
+                _ => Err(ProductionOrchestratorError::InvalidInput(
+                    "REF2VA recipe input reference_images 必须是 images。".to_owned(),
+                )),
+            });
+    if let Some(bounds) = strict_reference_images.transpose()? {
+        let asset_ids = validate_ordered_references(references, Some(bounds.0), Some(bounds.1))?;
+        values.insert(
+            "reference_images".to_owned(),
+            GenerationInputValue::ImageAssets(asset_ids),
+        );
+        return Ok(());
+    }
     let asset_ids = references
         .iter()
-        .map(|reference| crate::domain::AssetId::parse(reference.asset_id.clone()).ok())
-        .flatten()
-        .collect::<Vec<_>>();
+        .map(|reference| crate::domain::AssetId::parse(reference.asset_id.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            ProductionOrchestratorError::InvalidInput(format!(
+                "reference asset id is invalid: {error}"
+            ))
+        })?;
     let normalized_key = |key: &str| key.to_ascii_lowercase().replace('-', "_");
     let mut image_inputs = Vec::new();
     let mut reference_images = None;
@@ -1673,7 +1938,7 @@ fn inject_reference_values(
                 key.clone(),
                 GenerationInputValue::ImageAssets(asset_ids.clone()),
             );
-            return;
+            return Ok(());
         }
     }
     if let (Some(first_key), Some(first)) = (first_frame, asset_ids.first()) {
@@ -1687,7 +1952,7 @@ fn inject_reference_values(
                 GenerationInputValue::ImageAsset(last.clone()),
             );
         }
-        return;
+        return Ok(());
     }
     if let Some((key, definition)) = image_inputs.first() {
         if matches!(definition, InputDefinition::Images { .. }) {
@@ -1699,6 +1964,99 @@ fn inject_reference_values(
             );
         }
     }
+    Ok(())
+}
+
+fn ref2va_image_bounds(
+    workflow_id: &str,
+    recipe: &Recipe,
+) -> Result<Option<(usize, usize)>, ProductionOrchestratorError> {
+    let is_ref2va = matches!(
+        workflow_id,
+        MINIMAX_H3_WORKFLOW_ID | MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID
+    );
+    let Some(definition) = recipe.inputs.get("reference_images") else {
+        return if is_ref2va {
+            Err(ProductionOrchestratorError::InvalidInput(
+                "REF2VA recipe 缺少 plural reference_images input。".to_owned(),
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    let InputDefinition::Images {
+        min_items,
+        max_items,
+        ..
+    } = definition
+    else {
+        return Err(ProductionOrchestratorError::InvalidInput(
+            "REF2VA recipe input reference_images 必须是 images。".to_owned(),
+        ));
+    };
+    if min_items > max_items {
+        return Err(ProductionOrchestratorError::InvalidInput(
+            "REF2VA recipe reference_images min_items 不能大于 max_items。".to_owned(),
+        ));
+    }
+    if is_ref2va {
+        Ok(Some(((*min_items).max(2), *max_items)))
+    } else {
+        Ok(None)
+    }
+}
+
+fn validate_ordered_references(
+    references: &[SelectedReference],
+    min_items: Option<usize>,
+    max_items: Option<usize>,
+) -> Result<Vec<crate::domain::AssetId>, ProductionOrchestratorError> {
+    if let Some(min_items) = min_items {
+        if references.len() < min_items {
+            return Err(ProductionOrchestratorError::InvalidInput(format!(
+                "REF2VA reference_images 至少需要 {min_items} 个图片资产。"
+            )));
+        }
+    }
+    if let Some(max_items) = max_items {
+        if references.len() > max_items {
+            return Err(ProductionOrchestratorError::InvalidInput(format!(
+                "REF2VA reference_images 最多允许 {max_items} 个图片资产。"
+            )));
+        }
+    }
+    let mut seen_indices = std::collections::HashSet::new();
+    let mut seen_assets = std::collections::HashSet::new();
+    references
+        .iter()
+        .enumerate()
+        .map(|(position, reference)| {
+            let expected_index = u32::try_from(position).map_err(|_| {
+                ProductionOrchestratorError::InvalidInput(
+                    "REF2VA reference_index 超出支持范围。".to_owned(),
+                )
+            })?;
+            if reference.reference_index != expected_index
+                || !seen_indices.insert(reference.reference_index)
+            {
+                return Err(ProductionOrchestratorError::InvalidInput(
+                    "REF2VA reference_index 必须连续且唯一，从 0 开始。".to_owned(),
+                ));
+            }
+            let asset_id =
+                crate::domain::AssetId::parse(reference.asset_id.clone()).map_err(|error| {
+                    ProductionOrchestratorError::InvalidInput(format!(
+                        "reference asset id is invalid: {error}"
+                    ))
+                })?;
+            if !seen_assets.insert(asset_id.as_str().to_owned()) {
+                return Err(ProductionOrchestratorError::InvalidInput(
+                    "REF2VA reference_images 不能包含重复的图片资产。".to_owned(),
+                ));
+            }
+            Ok(asset_id)
+        })
+        .collect()
 }
 
 fn frozen_string(config: &Value, key: &str) -> Option<String> {
@@ -1744,9 +2102,8 @@ mod tests {
         Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyHealth, ComfyHistory,
         ComfyOutputData, ComfyOutputFile, NoopTaskUpdateSink, PromptSubmission, SystemStats,
     };
-    use crate::application::production_queue_service::{
-        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueService,
-    };
+    use crate::application::product_runtime_scope::MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID;
+    use crate::application::production_queue_service::ProductionQueueService;
     use crate::application::task_cancellation_service::TaskCancellationService;
     use crate::application::task_execution_registry::TaskExecutionRegistry;
     use crate::application::task_recovery_service::TaskRecoveryService;
@@ -1762,7 +2119,6 @@ mod tests {
     use crate::infrastructure::filesystem::FileSystemAssetStore;
     use crate::infrastructure::time::SystemClock;
     use async_trait::async_trait;
-    use serde_json::json;
     use sqlx::SqlitePool;
     use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
@@ -1771,6 +2127,51 @@ mod tests {
     const SIMPLE_RECIPE_YAML: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../tests/fixtures/simple_t2i/recipe.yaml"
+    ));
+    const REF2VA_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: ref2va_test
+name: REF2VA Test
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_images:
+    type: images
+    label: Reference Images
+    required: true
+    min_items: 3
+    max_items: 3
+  seed:
+    type: seed
+    label: Seed
+    default: random
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+  - source: reference_images
+    target:
+      node: "10"
+      input: image
+  - source: seed
+    target:
+      node: "3"
+      input: seed
+outputs:
+  - id: generated_video
+    type: video
+    node: "9"
+    required: true
+"#;
+    const REF2VA_WORKFLOW_JSON: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/simple_i2i/workflow_api.json"
     ));
 
     fn seed_recipe() -> crate::domain::Recipe {
@@ -1911,7 +2312,8 @@ mod tests {
             },
         ];
 
-        inject_reference_values(&mut values, &references, &inputs);
+        inject_reference_values(&mut values, &references, &inputs)
+            .expect("REF2VA references should inject");
 
         assert_eq!(
             values.get("reference_images"),
@@ -1920,6 +2322,56 @@ mod tests {
                 asset("ast_first"),
             ]))
         );
+    }
+
+    #[test]
+    fn ref2va_rejects_non_contiguous_reference_indices() {
+        let mut values = BTreeMap::new();
+        let inputs = BTreeMap::from([(
+            "reference_images".to_owned(),
+            InputDefinition::Images {
+                label: "References".to_owned(),
+                required: false,
+                min_items: 1,
+                max_items: 9,
+            },
+        )]);
+        let references = vec![SelectedReference {
+            asset_id: "ast_first".to_owned(),
+            reference_index: 1,
+        }];
+
+        let error = inject_reference_values(&mut values, &references, &inputs)
+            .expect_err("non-contiguous reference indices must fail");
+        assert!(error.to_string().contains("连续且唯一"));
+    }
+
+    #[test]
+    fn ref2va_rejects_reference_count_outside_recipe_bounds() {
+        let mut values = BTreeMap::new();
+        let inputs = BTreeMap::from([(
+            "reference_images".to_owned(),
+            InputDefinition::Images {
+                label: "References".to_owned(),
+                required: false,
+                min_items: 1,
+                max_items: 1,
+            },
+        )]);
+        let references = vec![
+            SelectedReference {
+                asset_id: "ast_first".to_owned(),
+                reference_index: 0,
+            },
+            SelectedReference {
+                asset_id: "ast_second".to_owned(),
+                reference_index: 1,
+            },
+        ];
+
+        let error = inject_reference_values(&mut values, &references, &inputs)
+            .expect_err("recipe max_items must be enforced");
+        assert!(error.to_string().contains("最多允许 1"));
     }
 
     #[test]
@@ -1952,7 +2404,8 @@ mod tests {
             },
         ];
 
-        inject_reference_values(&mut values, &references, &inputs);
+        inject_reference_values(&mut values, &references, &inputs)
+            .expect("FL2VA references should inject");
 
         assert_eq!(
             values.get("first_frame"),
@@ -1990,7 +2443,8 @@ mod tests {
             reference_index: 0,
         }];
 
-        inject_reference_values(&mut values, &references, &inputs);
+        inject_reference_values(&mut values, &references, &inputs)
+            .expect("optional frame references should inject");
 
         assert!(values.contains_key("first_frame"));
         assert!(!values.contains_key("last_frame"));
@@ -2123,10 +2577,14 @@ mod tests {
         let video_root = project_root.join("assets/generated/video");
         std::fs::create_dir_all(&image_root).expect("image asset directory should exist");
         std::fs::create_dir_all(&video_root).expect("video asset directory should exist");
-        std::fs::write(image_root.join("asset-krea-e2e.png"), b"image")
-            .expect("image asset fixture should exist");
-        std::fs::write(video_root.join("asset-video-e2e.mp4"), b"video")
-            .expect("video asset fixture should exist");
+        std::fs::write(image_root.join("krea-b.png"), b"image b")
+            .expect("B image asset fixture should exist");
+        std::fs::write(image_root.join("krea-a.png"), b"image a")
+            .expect("A image asset fixture should exist");
+        std::fs::write(image_root.join("krea-c.png"), b"image c")
+            .expect("C image asset fixture should exist");
+        std::fs::write(video_root.join("asset-video-retry.mp4"), b"retry video")
+            .expect("retry video asset fixture should exist");
 
         let pool = initialize(&directory.path().join("orchestrator.db"))
             .await
@@ -2141,11 +2599,44 @@ mod tests {
             .execute(&pool)
             .await
             .expect("test project root should update");
+        let now = "2026-08-16T00:00:00Z";
         sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
             .bind(SIMPLE_RECIPE_YAML)
             .execute(&pool)
             .await
             .expect("valid test Recipe should persist");
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES (?, 'REF2VA Test', 'video', 'video', 'workflow-version-ref2va', ?, ?)",
+        )
+        .bind(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("REF2VA workflow should persist");
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('workflow-version-ref2va', ?, '1', ?, 'sha-ref2va', ?)",
+        )
+        .bind(MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)
+        .bind(REF2VA_WORKFLOW_JSON)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("REF2VA workflow version should persist");
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('recipe-ref2va', 'workflow-version-ref2va', '1', 1, ?, 'sha-ref2va', ?)",
+        )
+        .bind(REF2VA_RECIPE_YAML)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("REF2VA Recipe should persist");
 
         let asset_repository = Arc::new(SqliteAssetRepository::new(pool.clone()));
         let project_repository = Arc::new(SqliteProjectRepository::new(pool.clone()));
@@ -2218,10 +2709,10 @@ mod tests {
                 krea2_recipe_id: "recipe-1".to_owned(),
                 krea2_preset_id: None,
                 krea2_values: krea_values.clone(),
-                image_count: 1,
-                h3_workflow_version_id: Some("workflow-version-1".to_owned()),
-                h3_recipe_id: Some("recipe-1".to_owned()),
-                h3_profile: Some("H3_TEST".to_owned()),
+                image_count: 3,
+                h3_workflow_version_id: Some("workflow-version-ref2va".to_owned()),
+                h3_recipe_id: Some("recipe-ref2va".to_owned()),
+                h3_profile: Some("H3_REF2VA".to_owned()),
                 h3_values: h3_values.clone(),
                 template_id: None,
             })
@@ -2230,82 +2721,63 @@ mod tests {
         assert_eq!(created.stages.len(), 3);
         assert_eq!(created.status, "READY");
 
-        let stage0 = created
-            .stages
-            .iter()
-            .find(|stage| stage.ordinal == 0)
-            .expect("Krea2 stage should exist");
         let selection_stage = created
             .stages
             .iter()
             .find(|stage| stage.ordinal == 1)
             .expect("selection stage should exist");
-        let h3_stage = created
-            .stages
-            .iter()
-            .find(|stage| stage.ordinal == 2)
-            .expect("H3 stage should exist");
 
-        let krea_batch = queue
-            .create(CreateProductionBatchRequest {
-                project_id: "prj_default".to_owned(),
-                name: "No-GPU lifecycle · Krea2".to_owned(),
-                continue_on_failure: true,
-                items: vec![CreateProductionBatchItem {
-                    workflow_version_id: "workflow-version-1".to_owned(),
-                    recipe_id: "recipe-1".to_owned(),
-                    values: krea_values,
-                }],
-            })
+        let started_images = orchestrator
+            .run_images("prj_default", &created.id)
             .await
-            .expect("Krea2 ProductionBatch should be created");
-        let krea_batch_id = krea_batch.batch.id.as_str().to_owned();
-        let krea_item_id = krea_batch.items[0].id.as_str().to_owned();
-        let now = "2026-08-16T00:00:00Z";
+            .expect("Krea2 stage should start through the orchestrator");
+        let krea_batch_id = started_images.stages[0]
+            .production_batch_id
+            .clone()
+            .expect("Krea2 batch should be linked");
+        let krea_batch = queue
+            .get("prj_default", &krea_batch_id)
+            .await
+            .expect("Krea2 batch should be readable");
+        assert_eq!(krea_batch.items.len(), 3);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        for (item, task_id, asset_id, storage_path) in [
+            (
+                &krea_batch.items[0],
+                "task-krea-b",
+                "ast_krea_b",
+                "assets/generated/image/krea-b.png",
+            ),
+            (
+                &krea_batch.items[1],
+                "task-krea-a",
+                "ast_krea_a",
+                "assets/generated/image/krea-a.png",
+            ),
+            (
+                &krea_batch.items[2],
+                "task-krea-c",
+                "ast_krea_c",
+                "assets/generated/image/krea-c.png",
+            ),
+        ] {
+            insert_succeeded_output(&pool, task_id, asset_id, "image", storage_path).await;
+            sqlx::query(
+                "UPDATE production_batch_items
+                 SET status = 'SUCCEEDED', task_id = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(task_id)
+            .bind(now)
+            .bind(item.id.as_str())
+            .execute(&pool)
+            .await
+            .expect("Krea2 item truth should persist");
+        }
         sqlx::query(
-            "UPDATE production_stages SET production_batch_id = ?, status = 'RUNNING', updated_at = ?
-             WHERE id = ?",
+            "UPDATE production_batches SET status = 'COMPLETED', updated_at = ? WHERE id = ?",
         )
+        .bind(now)
         .bind(&krea_batch_id)
-        .bind(now)
-        .bind(&stage0.id)
-        .execute(&pool)
-        .await
-        .expect("Krea2 stage should link to its batch");
-        sqlx::query(
-            "INSERT INTO production_stage_items
-             (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
-              source_asset_id, reference_index, attempt, submission_idempotency_key,
-              frozen_values_json, created_at, updated_at)
-             VALUES ('prsi-e2e-krea', ?, 0, 'PENDING', ?, NULL, NULL, NULL, NULL, 1,
-                     'production-stage-item:prsi-e2e-krea:attempt:1', ?, ?, ?)",
-        )
-        .bind(&stage0.id)
-        .bind(&krea_item_id)
-        .bind(krea_batch.items[0].values_json.to_string())
-        .bind(now)
-        .bind(now)
-        .execute(&pool)
-        .await
-        .expect("Krea2 stage item should persist");
-        insert_succeeded_output(
-            &pool,
-            "task-krea-e2e",
-            "asset-krea-e2e",
-            "image",
-            "assets/generated/image/asset-krea-e2e.png",
-        )
-        .await;
-        sqlx::query(
-            "UPDATE production_batches SET status = 'COMPLETED', updated_at = ? WHERE id = ?;
-             UPDATE production_batch_items
-             SET status = 'SUCCEEDED', task_id = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(now)
-        .bind(&krea_batch_id)
-        .bind("task-krea-e2e")
-        .bind(now)
-        .bind(&krea_item_id)
         .execute(&pool)
         .await
         .expect("Krea2 batch truth should persist");
@@ -2320,21 +2792,36 @@ mod tests {
             after_images.stages[0].production_batch_id.as_deref(),
             Some(krea_batch_id.as_str())
         );
+        assert_eq!(after_images.stages[0].items.len(), 3);
         assert_eq!(
-            after_images.stages[0].items[0].task_id.as_deref(),
-            Some("task-krea-e2e")
-        );
-        assert_eq!(
-            after_images.stages[0].items[0].asset_id.as_deref(),
-            Some("asset-krea-e2e")
+            after_images.stages[0]
+                .items
+                .iter()
+                .map(|item| item.asset_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("ast_krea_b"), Some("ast_krea_a"), Some("ast_krea_c")]
         );
         assert_eq!(after_images.stages[1].status, "WAITING");
+
+        let duplicate_selection = orchestrator
+            .select_assets(
+                "prj_default",
+                &created.id,
+                vec!["ast_krea_b".to_owned(), "ast_krea_b".to_owned()],
+            )
+            .await
+            .expect_err("duplicate selection must be rejected");
+        assert!(duplicate_selection.to_string().contains("不能包含重复"));
 
         let after_selection = orchestrator
             .select_assets(
                 "prj_default",
                 &created.id,
-                vec!["asset-krea-e2e".to_owned()],
+                vec![
+                    "ast_krea_b".to_owned(),
+                    "ast_krea_a".to_owned(),
+                    "ast_krea_c".to_owned(),
+                ],
             )
             .await
             .expect("asset selection should persist in original order");
@@ -2345,80 +2832,141 @@ mod tests {
             after_selection.stages[1].items[0]
                 .source_asset_id
                 .as_deref(),
-            Some("asset-krea-e2e")
+            Some("ast_krea_b")
+        );
+        assert_eq!(after_selection.stages[1].items[0].reference_index, Some(0));
+        assert_eq!(
+            after_selection.stages[1]
+                .items
+                .iter()
+                .map(|item| (item.reference_index, item.source_asset_id.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(0), Some("ast_krea_b")),
+                (Some(1), Some("ast_krea_a")),
+                (Some(2), Some("ast_krea_c")),
+            ]
         );
 
-        let h3_batch = queue
-            .create(CreateProductionBatchRequest {
-                project_id: "prj_default".to_owned(),
-                name: "No-GPU lifecycle · H3".to_owned(),
-                continue_on_failure: true,
-                items: vec![CreateProductionBatchItem {
-                    workflow_version_id: "workflow-version-1".to_owned(),
-                    recipe_id: "recipe-1".to_owned(),
-                    values: h3_values,
-                }],
-            })
+        let started_video = orchestrator
+            .run_video("prj_default", &created.id)
             .await
-            .expect("H3 ProductionBatch should be created");
-        let h3_batch_id = h3_batch.batch.id.as_str().to_owned();
+            .expect("H3 REF2VA stage should start through the orchestrator");
+        let h3_batch_id = started_video.stages[2]
+            .production_batch_id
+            .clone()
+            .expect("H3 batch should be linked");
+        let h3_batch = queue
+            .get("prj_default", &h3_batch_id)
+            .await
+            .expect("H3 batch should be readable");
+        assert_eq!(h3_batch.items.len(), 1);
         let h3_item_id = h3_batch.items[0].id.as_str().to_owned();
-        let frozen_h3_values = json!({
-            "reference_image": {"type": "image_asset", "assetId": "asset-krea-e2e"},
-            "duration_seconds": {"type": "integer", "value": 1}
-        });
+        assert_eq!(started_video.stages[2].items.len(), 3);
+        assert_eq!(
+            started_video.stages[2]
+                .items
+                .iter()
+                .map(|item| (item.reference_index, item.source_asset_id.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(0), Some("ast_krea_b")),
+                (Some(1), Some("ast_krea_a")),
+                (Some(2), Some("ast_krea_c")),
+            ]
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         sqlx::query(
-            "UPDATE production_stages SET production_batch_id = ?, status = 'RUNNING', updated_at = ?
-             WHERE id = ?",
+            "UPDATE production_batches SET status = 'PAUSED', updated_at = ? WHERE id = ?;
+             UPDATE production_batch_items
+             SET status = 'FAILED', error_code = 'COMFY_ERROR', error_message = 'test failure', updated_at = ? WHERE id = ?;
+             UPDATE production_runs SET status = 'FAILED', updated_at = ? WHERE id = ?",
         )
+        .bind(now)
         .bind(&h3_batch_id)
         .bind(now)
-        .bind(&h3_stage.id)
-        .execute(&pool)
-        .await
-        .expect("H3 stage should link to its batch");
-        sqlx::query(
-            "INSERT INTO production_stage_items
-             (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
-              source_asset_id, reference_index, attempt, submission_idempotency_key,
-              frozen_values_json, created_at, updated_at)
-             VALUES ('prsi-e2e-h3', ?, 0, 'PENDING', ?, NULL, NULL, 'asset-krea-e2e', 0, 1,
-                     'production-stage-item:prsi-e2e-h3:attempt:1', ?, ?, ?)",
-        )
-        .bind(&h3_stage.id)
         .bind(&h3_item_id)
-        .bind(frozen_h3_values.to_string())
         .bind(now)
         .bind(now)
+        .bind(&created.id)
         .execute(&pool)
         .await
-        .expect("H3 stage item should persist");
+        .expect("H3 failure truth should persist");
+        let failed = orchestrator
+            .refresh("prj_default", &created.id)
+            .await
+            .expect("H3 failure should synchronize");
+        assert_eq!(failed.status, "FAILED");
+        assert_eq!(failed.stages[2].status, "FAILED");
+
+        let retry_view = orchestrator
+            .retry_video("prj_default", &created.id)
+            .await
+            .expect("H3 retry should reuse the existing batch");
+        assert_eq!(
+            retry_view.stages[2].production_batch_id.as_deref(),
+            Some(h3_batch_id.as_str())
+        );
+        let retry_batch = queue
+            .get("prj_default", &h3_batch_id)
+            .await
+            .expect("H3 retry batch should be readable");
+        let retry_item = retry_batch
+            .items
+            .iter()
+            .find(|item| item.retry_of_item_id.as_deref() == Some(h3_item_id.as_str()))
+            .expect("H3 retry item should link to the failed item");
+        let retry_item_id = retry_item.id.as_str().to_owned();
+        assert_eq!(retry_batch.items.len(), 2);
+        assert_eq!(retry_item.values_json, h3_batch.items[0].values_json);
+        assert_eq!(
+            retry_view.stages[2]
+                .items
+                .iter()
+                .filter(|item| item.attempt == 2)
+                .map(|item| (item.reference_index, item.source_asset_id.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(0), Some("ast_krea_b")),
+                (Some(1), Some("ast_krea_a")),
+                (Some(2), Some("ast_krea_c")),
+            ]
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
         insert_succeeded_output(
             &pool,
-            "task-h3-e2e",
-            "asset-video-e2e",
+            "task-h3-retry",
+            "ast_video_retry",
             "video",
-            "assets/generated/video/asset-video-e2e.mp4",
+            "assets/generated/video/asset-video-retry.mp4",
         )
         .await;
         sqlx::query(
             "UPDATE production_batches SET status = 'COMPLETED', updated_at = ? WHERE id = ?;
              UPDATE production_batch_items
-             SET status = 'SUCCEEDED', task_id = ?, updated_at = ? WHERE id = ?",
+             SET status = 'SUCCEEDED', task_id = ?, updated_at = ? WHERE id = ?;
+             UPDATE production_stage_items
+             SET status = 'SUCCEEDED', task_id = ?, asset_id = ?, updated_at = ?
+             WHERE production_batch_item_id = ?",
         )
         .bind(now)
         .bind(&h3_batch_id)
-        .bind("task-h3-e2e")
+        .bind("task-h3-retry")
         .bind(now)
-        .bind(&h3_item_id)
+        .bind(&retry_item_id)
+        .bind("task-h3-retry")
+        .bind("ast_video_retry")
+        .bind(now)
+        .bind(&retry_item_id)
         .execute(&pool)
         .await
-        .expect("H3 batch truth should persist");
+        .expect("H3 retry success truth should persist");
 
         let finished = orchestrator
             .refresh("prj_default", &created.id)
             .await
-            .expect("H3 stage should synchronize");
+            .expect("H3 retried stage should synchronize");
         assert_eq!(finished.status, "SUCCEEDED");
         assert_eq!(finished.current_stage_ordinal, 2);
         assert_eq!(finished.stages[0].status, "SUCCEEDED");
@@ -2429,16 +2977,28 @@ mod tests {
             Some(h3_batch_id.as_str())
         );
         assert_eq!(
-            finished.stages[2].items[0].task_id.as_deref(),
-            Some("task-h3-e2e")
+            finished.stages[2]
+                .items
+                .iter()
+                .find(|item| item.task_id.as_deref() == Some("task-h3-retry"))
+                .and_then(|item| item.task_id.as_deref()),
+            Some("task-h3-retry")
         );
         assert_eq!(
-            finished.stages[2].items[0].asset_id.as_deref(),
-            Some("asset-video-e2e")
+            finished.stages[2]
+                .items
+                .iter()
+                .find(|item| item.task_id.as_deref() == Some("task-h3-retry"))
+                .and_then(|item| item.asset_id.as_deref()),
+            Some("ast_video_retry")
         );
         assert_eq!(
-            finished.stages[2].items[0].source_asset_id.as_deref(),
-            Some("asset-krea-e2e")
+            finished.stages[2]
+                .items
+                .iter()
+                .find(|item| item.task_id.as_deref() == Some("task-h3-retry"))
+                .and_then(|item| item.source_asset_id.as_deref()),
+            Some("ast_krea_b")
         );
 
         let batch_count: i64 = sqlx::query_scalar(
@@ -2450,13 +3010,41 @@ mod tests {
         assert_eq!(batch_count, 2, "one normal batch per generation stage");
         let lineage_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM production_stage_items
-             WHERE task_id IN ('task-krea-e2e', 'task-h3-e2e')
+             WHERE task_id IN ('task-krea-b', 'task-krea-a', 'task-krea-c', 'task-h3-retry')
                AND asset_id IS NOT NULL",
         )
         .fetch_one(&pool)
         .await
         .expect("stage lineage should be readable");
-        assert_eq!(lineage_count, 2);
+        assert_eq!(
+            lineage_count, 6,
+            "all three source references and three H3 lineage rows remain queryable"
+        );
+        let retry_lineage: (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(MIN(attempt), 0) FROM production_stage_items
+             WHERE production_batch_item_id = ? AND parent_stage_item_id IS NOT NULL",
+        )
+        .bind(&retry_item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("H3 retry lineage should be readable");
+        assert_eq!(retry_lineage, (3, 2));
+        let retry_references: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT reference_index, source_asset_id FROM production_stage_items
+             WHERE production_batch_item_id = ? ORDER BY reference_index ASC",
+        )
+        .bind(&retry_item_id)
+        .fetch_all(&pool)
+        .await
+        .expect("H3 retry reference order should be readable");
+        assert_eq!(
+            retry_references,
+            vec![
+                (0, "ast_krea_b".to_owned()),
+                (1, "ast_krea_a".to_owned()),
+                (2, "ast_krea_c".to_owned()),
+            ]
+        );
         assert!(matches!(
             orchestrator
                 .get("prj_00000000-0000-0000-0000-000000000001", &created.id)

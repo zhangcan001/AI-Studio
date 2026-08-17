@@ -1,5 +1,22 @@
 use crate::error::AppError;
-use std::{fs, path::PathBuf};
+use std::{ffi::OsString, fs, path::PathBuf};
+
+const DATA_ROOT_ENV: &str = "AI_STUDIO_DATA_ROOT";
+
+pub fn configured_data_root() -> Option<PathBuf> {
+    resolve_data_root_from(std::env::var_os(DATA_ROOT_ENV))
+}
+
+pub fn resolve_data_root(default_root: PathBuf) -> PathBuf {
+    configured_data_root().unwrap_or(default_root)
+}
+
+fn resolve_data_root_from(value: Option<OsString>) -> Option<PathBuf> {
+    value
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppDataDirs {
@@ -52,7 +69,9 @@ impl AppDataDirs {
 
 #[cfg(test)]
 mod tests {
-    use super::AppDataDirs;
+    use super::{resolve_data_root_from, AppDataDirs};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -87,5 +106,21 @@ mod tests {
         assert!(directories.logs.is_dir());
         assert!(directories.config.is_dir());
         assert!(!directories.database.exists());
+    }
+
+    #[test]
+    fn data_root_override_accepts_only_non_empty_absolute_paths() {
+        let override_root = PathBuf::from("C:/isolated/AIStudioData");
+
+        assert_eq!(
+            resolve_data_root_from(Some(override_root.as_os_str().to_os_string())),
+            Some(override_root.clone())
+        );
+        assert_eq!(resolve_data_root_from(Some(OsString::new())), None);
+        assert_eq!(
+            resolve_data_root_from(Some(OsString::from("relative-data-root"))),
+            None
+        );
+        assert_eq!(resolve_data_root_from(None), None);
     }
 }

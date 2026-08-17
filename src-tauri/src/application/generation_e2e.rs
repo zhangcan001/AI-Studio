@@ -2,7 +2,7 @@
 mod tests {
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::{
-        CreateGenerationRequest, GenerationService, GenerationServiceError,
+        CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
     };
     use crate::application::ports::{
         AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError,
@@ -58,6 +58,7 @@ mod tests {
         image_bytes: Vec<u8>,
         actions: Arc<Mutex<Vec<String>>>,
         upload_names: Arc<Mutex<Vec<String>>>,
+        echo_upload_names: bool,
     }
 
     struct FakeSubscription {
@@ -93,9 +94,15 @@ mod tests {
             upload: ComfyImageUpload,
         ) -> Result<ComfyUploadedImage, ComfyAdapterError> {
             self.actions.lock().unwrap().push("upload_image".to_owned());
-            self.upload_names.lock().unwrap().push(upload.upload_name);
+            let upload_name = upload.upload_name;
+            let returned_name = if self.echo_upload_names {
+                upload_name.clone()
+            } else {
+                "server_returned.png".to_owned()
+            };
+            self.upload_names.lock().unwrap().push(upload_name);
             Ok(ComfyUploadedImage {
-                name: "server_returned.png".to_owned(),
+                name: returned_name,
                 subfolder: String::new(),
                 folder_type: "input".to_owned(),
             })
@@ -351,6 +358,7 @@ mod tests {
             image_bytes: png_bytes(),
             actions: Arc::new(Mutex::new(Vec::new())),
             upload_names: Arc::new(Mutex::new(Vec::new())),
+            echo_upload_names: false,
         });
         let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
         let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
@@ -471,6 +479,8 @@ mod tests {
                 ),
             ]),
             &[("ast_i2i_source", "reference.png")],
+            None,
+            false,
         )
         .await;
         (run, actions)
@@ -493,8 +503,8 @@ inputs:
     type: images
     label: Reference Images
     required: true
-    min_items: 2
-    max_items: 2
+    min_items: 3
+    max_items: 3
   seed:
     type: seed
     label: Seed
@@ -533,8 +543,9 @@ outputs:
                 (
                     "reference_images".to_owned(),
                     GenerationInputValue::ImageAssets(vec![
-                        AssetId::parse("ast_multi_first").unwrap(),
-                        AssetId::parse("ast_multi_second").unwrap(),
+                        AssetId::parse("ast_ref_b").unwrap(),
+                        AssetId::parse("ast_ref_a").unwrap(),
+                        AssetId::parse("ast_ref_c").unwrap(),
                     ]),
                 ),
                 (
@@ -543,15 +554,25 @@ outputs:
                 ),
             ]),
             &[
-                ("ast_multi_first", "first.png"),
-                ("ast_multi_second", "second.png"),
+                ("ast_ref_b", "b.png"),
+                ("ast_ref_a", "a.png"),
+                ("ast_ref_c", "c.png"),
             ],
+            Some(ReferenceManifest {
+                input_key: "reference_images".to_owned(),
+                asset_ids: ["ast_ref_b", "ast_ref_a", "ast_ref_c"]
+                    .into_iter()
+                    .map(|id| AssetId::parse(id).unwrap())
+                    .collect(),
+            }),
+            true,
         )
         .await;
         let names = upload_names.lock().unwrap().clone();
-        assert_eq!(names.len(), 2);
-        assert!(names[0].contains("multi_first_01.png"));
-        assert!(names[1].contains("multi_second_02.png"));
+        assert_eq!(names.len(), 3);
+        assert!(names[0].contains("ref_b_01.png"));
+        assert!(names[1].contains("ref_a_02.png"));
+        assert!(names[2].contains("ref_c_03.png"));
         (run, upload_names)
     }
 
@@ -560,6 +581,8 @@ outputs:
         recipe_yaml: &str,
         values: BTreeMap<String, GenerationInputValue>,
         source_ids: &[(&str, &str)],
+        reference_manifest: Option<ReferenceManifest>,
+        echo_upload_names: bool,
     ) -> (Run, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
         let directory = tempdir().expect("temporary directory");
         let root = directory.path().join("project");
@@ -635,6 +658,7 @@ outputs:
             image_bytes: png_bytes(),
             actions: actions.clone(),
             upload_names: upload_names.clone(),
+            echo_upload_names,
         });
         let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
         let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
@@ -657,7 +681,7 @@ outputs:
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
             values,
-            reference_manifest: None,
+            reference_manifest,
             submission_idempotency_key: None,
             submission_attempt: None,
             parent_task_id: None,
@@ -723,6 +747,7 @@ outputs:
             image_bytes: png_bytes(),
             actions: actions.clone(),
             upload_names: Arc::new(Mutex::new(Vec::new())),
+            echo_upload_names: false,
         });
         let task_repository = Arc::new(SqliteTaskRepository::new(pool.clone()));
         let snapshot_repository = Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
@@ -887,7 +912,7 @@ outputs:
     }
 
     #[tokio::test]
-    async fn backend_multi_image_mock_e2e_preserves_ordered_uploads_and_snapshot() {
+    async fn backend_ref2va_three_image_mock_e2e_preserves_b_a_c_compiled_order_and_snapshot() {
         let (run, upload_names) = run_multi_image_input_success().await;
         run.outcome
             .as_ref()
@@ -904,20 +929,34 @@ outputs:
         let resolved_inputs: Value = serde_json::from_str(&snapshot.1).unwrap();
         assert_eq!(
             user_inputs["reference_images"]["assetIds"],
-            json!(["ast_multi_first", "ast_multi_second"])
+            json!(["ast_ref_b", "ast_ref_a", "ast_ref_c"])
         );
         assert_eq!(
-            resolved_inputs["reference_images"][0]["assetId"],
-            "ast_multi_first"
-        );
-        assert_eq!(
-            resolved_inputs["reference_images"][1]["assetId"],
-            "ast_multi_second"
+            resolved_inputs["reference_images"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value["assetId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["ast_ref_b", "ast_ref_a", "ast_ref_c"]
         );
         let upload_names = upload_names.lock().unwrap();
-        assert_eq!(upload_names.len(), 2);
-        assert!(upload_names[0].ends_with("multi_first_01.png"));
-        assert!(upload_names[1].ends_with("multi_second_02.png"));
+        assert_eq!(upload_names.len(), 3);
+        assert!(upload_names[0].ends_with("ref_b_01.png"));
+        assert!(upload_names[1].ends_with("ref_a_02.png"));
+        assert!(upload_names[2].ends_with("ref_c_03.png"));
+
+        let workflow_json: String =
+            sqlx::query_scalar("SELECT workflow_json FROM generation_snapshots WHERE task_id = ?")
+                .bind(run.task.id.as_str())
+                .fetch_one(&run.pool)
+                .await
+                .unwrap();
+        let workflow: Value = serde_json::from_str(&workflow_json).unwrap();
+        assert_eq!(
+            workflow["10"]["inputs"]["image"],
+            json!(upload_names.as_slice())
+        );
     }
 
     #[tokio::test]

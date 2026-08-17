@@ -5352,6 +5352,30 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        for (asset_id, original_name, bytes) in [
+            ("ast_ref_b", "ref-b.png", b"backup-reference-b".as_slice()),
+            ("ast_ref_c", "ref-c.png", b"backup-reference-c".as_slice()),
+        ] {
+            let digest = Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            let path = project_root.join(original_name);
+            std::fs::write(&path, bytes).unwrap();
+            sqlx::query("INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at) VALUES (?, ?, 'image', 'source_image', ?, ?, ?, ?, 'image/png', 1, 1, ?, '{}', ?, ?)")
+                .bind(asset_id)
+                .bind("project-backup")
+                .bind(asset_id)
+                .bind(original_name)
+                .bind(path.to_string_lossy().to_string())
+                .bind(digest)
+                .bind(bytes.len() as i64)
+                .bind("2026-01-01T00:01:45Z")
+                .bind("2026-01-01T00:01:45Z")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
         sqlx::query(
             "INSERT INTO asset_video_prompts (asset_id, project_id, prompt_text, updated_at)
              VALUES ('ast_backup', 'project-backup', 'generated image camera orbit', '2026-01-01T00:02:00Z'),
@@ -5367,8 +5391,8 @@ mod tests {
         .bind("tsk_backup")
         .bind("{}")
         .bind("schema_version: 1\ninputs: {}\n")
-        .bind(r#"{"reference_image":{"type":"image_asset","assetId":"ast_backup"}}"#)
-        .bind(r#"{"reference_image":{"type":"image_asset","assetId":"ast_backup"}}"#)
+        .bind(r#"{"reference_images":{"type":"image_assets","assetIds":["ast_ref_b","ast_backup","ast_ref_c"]}}"#)
+        .bind(r#"{"reference_images":{"type":"image_assets","assetIds":["ast_ref_b","ast_backup","ast_ref_c"]}}"#)
         .bind("2026-01-01T00:01:00Z")
         .execute(&pool)
         .await
@@ -5418,7 +5442,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at) VALUES ('pbi_h3_backup', 'pbt_h3_backup', 0, 'workflow-version-1', 'recipe-1', '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}', 'SUCCEEDED', 'tsk_backup', NULL, NULL, NULL, '2026-01-01T00:03:10Z', '2026-01-01T00:03:10Z')")
+        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at) VALUES ('pbi_h3_backup', 'pbt_h3_backup', 0, 'workflow-version-1', 'recipe-1', '{\"reference_images\":{\"type\":\"image_assets\",\"assetIds\":[\"ast_ref_b\",\"ast_backup\",\"ast_ref_c\"]}}', 'SUCCEEDED', 'tsk_backup', NULL, NULL, NULL, '2026-01-01T00:03:10Z', '2026-01-01T00:03:10Z')")
             .execute(&pool)
             .await
             .unwrap();
@@ -5434,7 +5458,14 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO production_stage_items (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id, source_asset_id, reference_index, attempt, submission_idempotency_key, parent_stage_item_id, frozen_values_json, error_code, error_message, created_at, updated_at) VALUES ('prsi_backup_image', 'prst_backup_image', 0, 'SUCCEEDED', 'pbi_backup', 'tsk_backup', 'ast_backup', NULL, NULL, 1, 'production-stage-item:prsi_backup_image:attempt:1', NULL, '{\"assetId\":\"ast_backup\"}', NULL, NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:30Z'), ('prsi_backup_selection', 'prst_backup_selection', 0, 'SUCCEEDED', NULL, NULL, 'ast_backup', 'ast_backup', 0, 1, 'production-stage-item:prsi_backup_selection:attempt:1', NULL, '{\"assetId\":\"ast_backup\",\"referenceIndex\":0}', NULL, NULL, '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z'), ('prsi_backup_h3', 'prst_backup_h3', 0, 'SUCCEEDED', 'pbi_h3_backup', 'tsk_backup', 'ast_video', 'ast_backup', 0, 1, 'production-stage-item:prsi_backup_h3:attempt:1', NULL, '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}', NULL, NULL, '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z')")
+        sqlx::query("INSERT INTO production_stage_items (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id, source_asset_id, reference_index, attempt, submission_idempotency_key, parent_stage_item_id, frozen_values_json, error_code, error_message, created_at, updated_at) VALUES
+            ('prsi_backup_image', 'prst_backup_image', 0, 'SUCCEEDED', 'pbi_backup', 'tsk_backup', 'ast_backup', NULL, NULL, 1, 'production-stage-item:prsi_backup_image:attempt:1', NULL, '{\"assetId\":\"ast_backup\"}', NULL, NULL, '2026-01-01T00:03:00Z', '2026-01-01T00:03:30Z'),
+            ('prsi_backup_selection_b', 'prst_backup_selection', 0, 'SUCCEEDED', NULL, NULL, 'ast_ref_b', 'ast_ref_b', 0, 1, 'production-stage-item:prsi_backup_selection_b:attempt:1', NULL, '{\"assetId\":\"ast_ref_b\",\"referenceIndex\":0}', NULL, NULL, '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z'),
+            ('prsi_backup_selection_a', 'prst_backup_selection', 1, 'SUCCEEDED', NULL, NULL, 'ast_backup', 'ast_backup', 1, 1, 'production-stage-item:prsi_backup_selection_a:attempt:1', NULL, '{\"assetId\":\"ast_backup\",\"referenceIndex\":1}', NULL, NULL, '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z'),
+            ('prsi_backup_selection_c', 'prst_backup_selection', 2, 'SUCCEEDED', NULL, NULL, 'ast_ref_c', 'ast_ref_c', 2, 1, 'production-stage-item:prsi_backup_selection_c:attempt:1', NULL, '{\"assetId\":\"ast_ref_c\",\"referenceIndex\":2}', NULL, NULL, '2026-01-01T00:03:30Z', '2026-01-01T00:03:40Z'),
+            ('prsi_backup_h3_b', 'prst_backup_h3', 0, 'SUCCEEDED', 'pbi_h3_backup', 'tsk_backup', 'ast_video', 'ast_ref_b', 0, 1, 'production-stage-item:prsi_backup_h3_b:attempt:1', NULL, '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_ref_b\"}}', NULL, NULL, '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z'),
+            ('prsi_backup_h3_a', 'prst_backup_h3', 1, 'SUCCEEDED', 'pbi_h3_backup', 'tsk_backup', 'ast_video', 'ast_backup', 1, 1, 'production-stage-item:prsi_backup_h3_a:attempt:1', NULL, '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_backup\"}}', NULL, NULL, '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z'),
+            ('prsi_backup_h3_c', 'prst_backup_h3', 2, 'SUCCEEDED', 'pbi_h3_backup', 'tsk_backup', 'ast_video', 'ast_ref_c', 2, 1, 'production-stage-item:prsi_backup_h3_c:attempt:1', NULL, '{\"reference_image\":{\"type\":\"image_asset\",\"assetId\":\"ast_ref_c\"}}', NULL, NULL, '2026-01-01T00:03:40Z', '2026-01-01T00:04:00Z')")
             .execute(&pool)
             .await
             .unwrap();
@@ -5510,7 +5541,7 @@ mod tests {
         assert!(!names.contains("workflow_api.json"));
         assert!(!names.contains("recipe.yaml"));
         let preview = service.inspect(archive_path).await.unwrap();
-        assert_eq!(preview.image_count, 2);
+        assert_eq!(preview.image_count, 4);
         assert_eq!(preview.shots, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, "project-backup");
@@ -5520,7 +5551,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(restored_count, 3);
+        assert_eq!(restored_count, 5);
         let production_counts: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT
                 (SELECT COUNT(*) FROM production_runs WHERE project_id = ?),
@@ -5539,15 +5570,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(production_counts, (1, 3, 3, 1, 1, 1));
-        let restored_reference_index: i64 = sqlx::query_scalar(
-            "SELECT reference_index FROM production_stage_items WHERE stage_id = (SELECT id FROM production_stages WHERE run_id = (SELECT id FROM production_runs WHERE project_id = ?) AND ordinal = 1)",
-        )
-        .bind(&restored.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(restored_reference_index, 0);
+        assert_eq!(production_counts, (1, 3, 7, 1, 1, 1));
         let restored_path = sqlx::query_scalar::<_, String>(
             "SELECT storage_path FROM assets WHERE project_id = ? AND type = 'image' AND original_name = '图像.png'",
         )
@@ -5590,6 +5613,73 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
+        let restored_ref_b_id: String = sqlx::query_scalar(
+            "SELECT id FROM assets WHERE project_id = ? AND original_name = 'ref-b.png'",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let restored_ref_c_id: String = sqlx::query_scalar(
+            "SELECT id FROM assets WHERE project_id = ? AND original_name = 'ref-c.png'",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let expected_reference_ids = vec![
+            restored_ref_b_id.clone(),
+            restored_asset_id.clone(),
+            restored_ref_c_id.clone(),
+        ];
+        for stage_ordinal in [1_i64, 2_i64] {
+            let restored_references: Vec<(Option<i64>, Option<String>, String)> =
+                sqlx::query_as(
+                    "SELECT reference_index, source_asset_id, frozen_values_json
+                     FROM production_stage_items
+                     WHERE stage_id = (SELECT id FROM production_stages WHERE run_id = (SELECT id FROM production_runs WHERE project_id = ?) AND ordinal = ?)
+                     ORDER BY reference_index",
+                )
+                .bind(&restored.id)
+                .bind(stage_ordinal)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                restored_references
+                    .iter()
+                    .map(|(reference_index, _, _)| *reference_index)
+                    .collect::<Vec<_>>(),
+                vec![Some(0), Some(1), Some(2)]
+            );
+            assert_eq!(
+                restored_references
+                    .iter()
+                    .map(|(_, source_asset_id, _)| source_asset_id.clone().unwrap())
+                    .collect::<Vec<_>>(),
+                expected_reference_ids
+            );
+            for ((reference_index, source_asset_id, frozen_values), expected_asset_id) in
+                restored_references.iter().zip(&expected_reference_ids)
+            {
+                let frozen_values: serde_json::Value = serde_json::from_str(frozen_values).unwrap();
+                let frozen_asset_id = if stage_ordinal == 1 {
+                    frozen_values["assetId"].as_str().unwrap()
+                } else {
+                    frozen_values["reference_image"]["assetId"]
+                        .as_str()
+                        .unwrap()
+                };
+                assert_eq!(frozen_asset_id, expected_asset_id);
+                if stage_ordinal == 1 {
+                    assert_eq!(
+                        frozen_values["referenceIndex"],
+                        json!(reference_index.unwrap())
+                    );
+                }
+                assert_eq!(source_asset_id.as_deref(), Some(expected_asset_id.as_str()));
+            }
+        }
         let restored_project_id: String =
             sqlx::query_scalar("SELECT project_id FROM assets WHERE id = ?")
                 .bind(&restored_asset_id)
@@ -5607,12 +5697,12 @@ mod tests {
         let user_inputs: serde_json::Value = serde_json::from_str(&snapshot.0).unwrap();
         let resolved_inputs: serde_json::Value = serde_json::from_str(&snapshot.1).unwrap();
         assert_eq!(
-            user_inputs["reference_image"]["assetId"],
-            restored_asset_id.as_str()
+            user_inputs["reference_images"]["assetIds"],
+            json!(expected_reference_ids)
         );
         assert_eq!(
-            resolved_inputs["reference_image"]["assetId"],
-            restored_asset_id.as_str()
+            resolved_inputs["reference_images"]["assetIds"],
+            json!(expected_reference_ids)
         );
         assert_ne!(restored_asset_id, "ast_backup");
         let restored_prompts: Vec<(String, String, String)> = sqlx::query_as(

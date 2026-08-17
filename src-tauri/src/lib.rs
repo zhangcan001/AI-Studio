@@ -65,8 +65,9 @@ use infrastructure::{
     comfy::ComfyHttpAdapterFactory,
     database,
     filesystem::{
-        AppDataDirs, FileSystemAssetStore, FileSystemProjectDirectoryStore,
-        FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore,
+        configured_data_root, resolve_data_root, AppDataDirs, FileSystemAssetStore,
+        FileSystemProjectDirectoryStore, FileSystemWorkflowLibrarySource,
+        FileSystemWorkflowPackageStore,
     },
     settings::JsonSettingsStore,
     tauri::TauriTaskUpdateSink,
@@ -96,6 +97,9 @@ fn initialize_logging() -> LoggingStatus {
 }
 
 fn default_logs_dir() -> Option<PathBuf> {
+    if let Some(root) = configured_data_root() {
+        return Some(root.join("logs"));
+    }
     std::env::var_os("LOCALAPPDATA")
         .or_else(|| std::env::var_os("XDG_DATA_HOME"))
         .or_else(|| std::env::var_os("HOME"))
@@ -178,12 +182,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
         )
         .setup(move |app| {
             let result = (|| -> Result<(), AppError> {
-            let data_root = app
+            let default_data_root = app
                 .path()
                 .local_data_dir()
                 .map_err(|_| AppError::initialization("failed to resolve local data directory"))?
                 .join("AIStudio")
                 .join("AIStudioData");
+            let data_root = resolve_data_root(default_data_root);
 
             let data_dirs = AppDataDirs::initialize(data_root)?;
             tracing::info!("application data directory initialized");

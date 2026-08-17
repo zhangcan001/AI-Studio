@@ -1997,6 +1997,35 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .production-run-asset span { color: var(--ux-accent); font-weight: 700; }
 .production-run-asset small { color: var(--ux-muted); font-size: 0.7rem; }
 .production-run-asset-active { border-color: var(--ux-accent); box-shadow: inset 3px 0 0 var(--ux-accent); }
+.production-run-selection-heading,
+.production-run-reference-heading,
+.production-run-reference-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.production-run-selection-heading > div,
+.production-run-reference-heading strong { display: grid; gap: 2px; }
+.production-run-selection-heading > span,
+.production-run-reference-heading span { margin-left: auto; color: var(--ux-muted); font-size: 0.72rem; }
+.production-run-asset-order { min-height: 1.2em; }
+.production-run-asset .asset-library-card { height: 100%; }
+.production-run-reference-list { display: grid; gap: 5px; }
+.production-run-reference-row {
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--ux-border);
+  border-radius: 7px;
+  background: var(--ux-surface-0);
+}
+.production-run-reference-index { min-width: 58px; color: var(--ux-accent); font-weight: 700; }
+.production-run-reference-name { min-width: 120px; }
+.production-run-reference-row small { margin-right: auto; color: var(--ux-muted); }
+.production-run-reference-empty { color: var(--ux-muted); font-size: 0.75rem; }
+.production-run-final-video { display: grid; gap: 8px; }
+.production-run-final-video-item { display: grid; gap: 5px; }
+.production-run-final-video-item video { width: min(100%, 640px); max-height: 420px; border-radius: 8px; background: #000; }
+.production-run-final-video-item small { color: var(--ux-muted); }
 
 .workflow-benchmark-comparison,
 .workflow-benchmark-quality-editor {

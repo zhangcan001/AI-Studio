@@ -1,6 +1,6 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::generation_service::{
-    CreateGenerationRequest, GenerationService, GenerationServiceError,
+    CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
 };
 use crate::application::ports::{
     ActiveProductionItem, Clock, GenerationDefinitionRepository, ProductionQueueRepository,
@@ -200,6 +200,16 @@ impl ProductionQueueService {
             generation_values_from_json(values_json).map_err(ProductionQueueError::InvalidInput)?;
         let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
         freeze_random_seed_values(values, &recipe).map_err(ProductionQueueError::InvalidInput)
+    }
+
+    async fn prepare_reference_manifest(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        values: &BTreeMap<String, GenerationInputValue>,
+    ) -> Result<Option<ReferenceManifest>, ProductionQueueError> {
+        let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
+        reference_manifest_for_values(&recipe, values)
     }
 
     pub async fn list(
@@ -541,6 +551,27 @@ impl ProductionQueueService {
         batch_id: &str,
         item_id: &str,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        self.requeue_item_internal(project_id, batch_id, item_id, true)
+            .await
+    }
+
+    pub async fn retry_item(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        item_id: &str,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        self.requeue_item_internal(project_id, batch_id, item_id, false)
+            .await
+    }
+
+    async fn requeue_item_internal(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        item_id: &str,
+        require_safe_source: bool,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
@@ -563,7 +594,7 @@ impl ProductionQueueService {
             .iter()
             .find(|item| item.id.as_str() == item_id)
             .ok_or_else(|| ProductionQueueError::NotFound(item_id.to_owned()))?;
-        if !is_safe_requeue_source(source) {
+        if require_safe_source && !is_safe_requeue_source(source) {
             return Err(ProductionQueueError::InvalidState(
                 "this production item is not safe to requeue automatically; review the failure and inputs instead"
                     .to_owned(),
@@ -933,6 +964,36 @@ impl ProductionQueueService {
                         continue;
                     }
                 };
+                let reference_manifest = match self
+                    .prepare_reference_manifest(&next.workflow_version_id, &next.recipe_id, &values)
+                    .await
+                {
+                    Ok(manifest) => manifest,
+                    Err(error) => {
+                        let message = error.to_string();
+                        self.repository
+                            .finish_item(
+                                &next.id,
+                                ProductionBatchItemStatus::Failed,
+                                Some("QUEUE_VALUES_INVALID"),
+                                Some(&message),
+                                self.clock.now(),
+                            )
+                            .await?;
+                        if !detail.batch.continue_on_failure {
+                            self.repository
+                                .set_batch_status(
+                                    project_id,
+                                    batch_id,
+                                    ProductionBatchStatus::Paused,
+                                    self.clock.now(),
+                                )
+                                .await?;
+                            return Ok(());
+                        }
+                        continue;
+                    }
+                };
                 let (submission_attempt, parent_task_id) =
                     self.retry_identity(&detail, next).await?;
                 let item_id = next.id.as_str().to_owned();
@@ -947,7 +1008,7 @@ impl ProductionQueueService {
                             workflow_version_id: next.workflow_version_id.clone(),
                             recipe_id: next.recipe_id.clone(),
                             values,
-                            reference_manifest: None,
+                            reference_manifest,
                             submission_idempotency_key: Some(format!(
                                 "production-item:{}",
                                 next.id.as_str()
@@ -1176,6 +1237,48 @@ fn is_transient_requeue_error(code: &str) -> bool {
             | "COMFY_INPUT_UPLOAD_FAILED"
             | "EXECUTION_INTERRUPTED"
     )
+}
+
+fn reference_manifest_for_values(
+    recipe: &Recipe,
+    values: &BTreeMap<String, GenerationInputValue>,
+) -> Result<Option<ReferenceManifest>, ProductionQueueError> {
+    let Some(value) = values.get("reference_images") else {
+        return Ok(None);
+    };
+    let Some(InputDefinition::Images {
+        min_items,
+        max_items,
+        ..
+    }) = recipe.inputs.get("reference_images")
+    else {
+        return Err(ProductionQueueError::InvalidInput(
+            "REF2VA recipe input reference_images must be plural images".to_owned(),
+        ));
+    };
+    let GenerationInputValue::ImageAssets(asset_ids) = value else {
+        return Err(ProductionQueueError::InvalidInput(
+            "REF2VA reference_images must be an ordered image asset array".to_owned(),
+        ));
+    };
+    if asset_ids.len() < *min_items || asset_ids.len() > *max_items {
+        return Err(ProductionQueueError::InvalidInput(format!(
+            "REF2VA reference_images count must be between {min_items} and {max_items}"
+        )));
+    }
+    let mut seen = HashSet::new();
+    if asset_ids
+        .iter()
+        .any(|asset_id| !seen.insert(asset_id.as_str().to_owned()))
+    {
+        return Err(ProductionQueueError::InvalidInput(
+            "REF2VA reference_images cannot contain duplicate assets".to_owned(),
+        ));
+    }
+    Ok(Some(ReferenceManifest {
+        input_key: "reference_images".to_owned(),
+        asset_ids: asset_ids.clone(),
+    }))
 }
 
 fn should_pause_after_terminal(
@@ -1425,8 +1528,8 @@ impl From<RepositoryError> for ProductionQueueError {
 mod tests {
     use super::{
         find_admission_blocker, freeze_random_seed_values, generation_values_from_json,
-        generation_values_to_json, is_transient_requeue_error, select_recovery,
-        should_pause_after_terminal,
+        generation_values_to_json, is_transient_requeue_error, reference_manifest_for_values,
+        select_recovery, should_pause_after_terminal,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::ActiveProductionItem;
@@ -1457,6 +1560,53 @@ mod tests {
         );
         let json = generation_values_to_json(&values);
         assert_eq!(generation_values_from_json(&json).unwrap(), values);
+    }
+
+    #[test]
+    fn reference_manifest_preserves_ordered_image_array() {
+        let recipe = Recipe {
+            schema_version: 1,
+            id: "ref2va_recipe".to_owned(),
+            name: "REF2VA".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: [(
+                "reference_images".to_owned(),
+                InputDefinition::Images {
+                    label: "References".to_owned(),
+                    required: false,
+                    min_items: 1,
+                    max_items: 9,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            bindings: Vec::new(),
+            outputs: Vec::new(),
+        };
+        let values = [(
+            "reference_images".to_owned(),
+            GenerationInputValue::ImageAssets(vec![
+                AssetId::parse("ast_second".to_owned()).unwrap(),
+                AssetId::parse("ast_first".to_owned()).unwrap(),
+            ]),
+        )]
+        .into_iter()
+        .collect();
+
+        let manifest = reference_manifest_for_values(&recipe, &values)
+            .expect("manifest should be valid")
+            .expect("image array should produce a manifest");
+        assert_eq!(manifest.input_key, "reference_images");
+        assert_eq!(
+            manifest
+                .asset_ids
+                .iter()
+                .map(|asset_id| asset_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ast_second", "ast_first"]
+        );
     }
 
     #[test]
