@@ -1,6 +1,9 @@
 use crate::application::generation_input_preparer::{
     GenerationInputPreparer, GenerationInputValue,
 };
+use crate::application::ordered_reference_binding::{
+    ref2va_image_bounds, validate_ordered_reference_ids,
+};
 use crate::application::ports::{
     AssetRepository, AvailableGenerationDefinition, Clock, GenerationDefinitionRepository,
     ProjectRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository, ShotData,
@@ -50,6 +53,10 @@ pub struct ShotBatchPlanRow {
     pub current_status: String,
     pub selected_image_asset_id: Option<String>,
     pub selected_video_asset_id: Option<String>,
+    pub video_mode: Option<String>,
+    pub reference_count: usize,
+    pub reference_min: Option<usize>,
+    pub reference_max: Option<usize>,
     pub eligible: bool,
     pub blocking_reasons: Vec<String>,
 }
@@ -196,7 +203,7 @@ impl ShotBatchService {
                     shot.row.name
                 ))
             })?;
-            let values = freeze_random_seed_values(shot.values.clone(), recipe)
+            let values = freeze_shot_batch_values(request.stage, shot.values.clone(), recipe)
                 .map_err(ShotBatchServiceError::InvalidInput)?;
             items.push(ProductionBatchItem {
                 id: item_id.clone(),
@@ -363,6 +370,10 @@ impl ShotBatchService {
             current_status: current_status.as_str().to_owned(),
             selected_image_asset_id: data.shot.selected_image_asset_id.clone(),
             selected_video_asset_id: data.shot.selected_video_asset_id.clone(),
+            video_mode: None,
+            reference_count: 0,
+            reference_min: None,
+            reference_max: None,
             eligible: false,
             blocking_reasons: Vec::new(),
         };
@@ -437,22 +448,44 @@ impl ShotBatchService {
             InputDefinition::Images { .. } => Some((key.clone(), true)),
             _ => None,
         });
-        if stage == ShotStage::Video {
-            let image_inputs = recipe
-                .inputs
-                .values()
-                .filter(|input| {
-                    matches!(
-                        input,
-                        InputDefinition::Image { .. } | InputDefinition::Images { .. }
-                    )
-                })
-                .count();
-            if image_inputs != 1 {
-                reasons.push("视频 Recipe 必须有且只有一个 Reference Image 输入".to_owned());
+        let ref2va_bounds = if stage == ShotStage::Video {
+            match ref2va_image_bounds(&definition.workflow_id, &recipe) {
+                Ok(bounds) => bounds,
+                Err(error) => {
+                    reasons.push(error);
+                    None
+                }
             }
-            if data.shot.selected_image_asset_id.is_none() {
-                reasons.push("请先选择当前项目的关键帧图片".to_owned());
+        } else {
+            None
+        };
+        if stage == ShotStage::Video {
+            row.video_mode = Some(if ref2va_bounds.is_some() {
+                "REF2VA".to_owned()
+            } else {
+                "I2V".to_owned()
+            });
+            row.reference_count = if ref2va_bounds.is_some() {
+                data.reference_assets
+                    .iter()
+                    .filter(|reference| reference.stage == stage)
+                    .count()
+            } else {
+                usize::from(data.shot.selected_image_asset_id.is_some())
+            };
+            if let Some((min_items, max_items)) = ref2va_bounds {
+                row.reference_min = Some(min_items);
+                row.reference_max = Some(max_items);
+            }
+            match (image_input.as_ref(), ref2va_bounds) {
+                (Some((_, true)), Some(_)) | (Some((_, false)), None) => {}
+                (Some((_, true)), None) => reasons.push(
+                    "I2V Recipe 必须使用单个 image 输入；多图输入仅支持 H3 REF2VA".to_owned(),
+                ),
+                (Some((_, false)), Some(_)) => {
+                    reasons.push("REF2VA Recipe 必须使用 plural reference_images 输入".to_owned())
+                }
+                (None, _) => reasons.push("当前 Recipe 没有可用的图片输入".to_owned()),
             }
         }
 
@@ -473,54 +506,51 @@ impl ShotBatchService {
         }
 
         if stage == ShotStage::Video {
-            if let Some(selected_id) = data.shot.selected_image_asset_id.as_deref() {
-                match AssetId::parse(selected_id.to_owned()) {
-                    Ok(asset_id) => {
-                        if let Err(reason) = self
-                            .validate_asset(project_id, &asset_id, AssetType::Image)
-                            .await
-                        {
-                            reasons.push(reason);
-                        }
-                        if let Some((key, multiple)) = &image_input {
-                            let mut references = vec![asset_id.clone()];
-                            for reference in data
-                                .reference_assets
-                                .iter()
-                                .filter(|reference| reference.stage == stage)
+            match (image_input.as_ref(), ref2va_bounds) {
+                (Some((key, true)), Some(bounds)) => {
+                    match ordered_reference_asset_ids(&data, stage) {
+                        Ok(references) => {
+                            if let Err(error) =
+                                validate_ordered_reference_ids(&references, Some(bounds))
                             {
-                                match AssetId::parse(reference.asset_id.clone()) {
-                                    Ok(reference_id) if references.contains(&reference_id) => {}
-                                    Ok(reference_id) => {
-                                        if let Err(reason) = self
-                                            .validate_asset(
-                                                project_id,
-                                                &reference_id,
-                                                AssetType::Image,
-                                            )
-                                            .await
-                                        {
-                                            reasons.push(reason);
-                                        }
-                                        references.push(reference_id);
-                                    }
-                                    Err(error) => {
-                                        reasons.push(format!("Reference 素材 ID 无效：{error}"))
-                                    }
+                                reasons.push(error);
+                            }
+                            for asset_id in &references {
+                                if let Err(reason) = self
+                                    .validate_asset(project_id, asset_id, AssetType::Image)
+                                    .await
+                                {
+                                    reasons.push(reason);
                                 }
                             }
-                            values.insert(
-                                key.clone(),
-                                if *multiple {
-                                    GenerationInputValue::ImageAssets(references)
-                                } else {
-                                    GenerationInputValue::ImageAsset(asset_id)
-                                },
-                            );
+                            values
+                                .insert(key.clone(), GenerationInputValue::ImageAssets(references));
                         }
+                        Err(error) => reasons.push(error),
                     }
-                    Err(error) => reasons.push(format!("关键帧素材 ID 无效：{error}")),
                 }
+                (Some((key, false)), None) => {
+                    if let Some(selected_id) = data.shot.selected_image_asset_id.as_deref() {
+                        match AssetId::parse(selected_id.to_owned()) {
+                            Ok(asset_id) => {
+                                if let Err(reason) = self
+                                    .validate_asset(project_id, &asset_id, AssetType::Image)
+                                    .await
+                                {
+                                    reasons.push(reason);
+                                }
+                                values.insert(
+                                    key.clone(),
+                                    GenerationInputValue::ImageAsset(asset_id),
+                                );
+                            }
+                            Err(error) => reasons.push(format!("关键帧素材 ID 无效：{error}")),
+                        }
+                    } else {
+                        reasons.push("I2V 请先选择当前项目的关键帧图片".to_owned());
+                    }
+                }
+                _ => {}
             }
         } else {
             let references = data
@@ -606,6 +636,74 @@ impl ShotBatchService {
     }
 }
 
+fn ordered_reference_asset_ids(data: &ShotData, stage: ShotStage) -> Result<Vec<AssetId>, String> {
+    let mut references = data
+        .reference_assets
+        .iter()
+        .filter(|reference| reference.stage == stage)
+        .collect::<Vec<_>>();
+    references.sort_by(|left, right| {
+        left.ordinal
+            .cmp(&right.ordinal)
+            .then_with(|| left.asset_id.cmp(&right.asset_id))
+    });
+
+    let mut seen = HashSet::new();
+    references
+        .into_iter()
+        .map(|reference| {
+            let asset_id = AssetId::parse(reference.asset_id.clone())
+                .map_err(|error| format!("Reference 素材 ID 无效：{error}"))?;
+            if !seen.insert(asset_id.clone()) {
+                return Err("参考图重复".to_owned());
+            }
+            Ok(asset_id)
+        })
+        .collect()
+}
+
+/// A batch item stores its complete input map in `values_json`. For plural
+/// image inputs that map is also the durable reference manifest: vector order
+/// is the user-visible reference order and must not be rebuilt from the Shot
+/// when the queue later runs or retries the item.
+fn freeze_shot_batch_values(
+    stage: ShotStage,
+    values: BTreeMap<String, GenerationInputValue>,
+    recipe: &Recipe,
+) -> Result<BTreeMap<String, GenerationInputValue>, String> {
+    let values = freeze_random_seed_values(values, recipe)?;
+    if stage != ShotStage::Video {
+        return Ok(values);
+    }
+
+    for (key, definition) in &recipe.inputs {
+        let InputDefinition::Images {
+            min_items,
+            max_items,
+            ..
+        } = definition
+        else {
+            continue;
+        };
+        let Some(GenerationInputValue::ImageAssets(asset_ids)) = values.get(key) else {
+            continue;
+        };
+        if asset_ids.len() < *min_items || asset_ids.len() > *max_items {
+            return Err(format!(
+                "REF2VA 参考图数量必须在 {min_items}–{max_items} 张之间，当前为 {} 张",
+                asset_ids.len()
+            ));
+        }
+        let mut seen = HashSet::new();
+        for asset_id in asset_ids {
+            if !seen.insert(asset_id.as_str()) {
+                return Err(format!("REF2VA 参考图重复：{}", asset_id.as_str()));
+            }
+        }
+    }
+    Ok(values)
+}
+
 fn validate_project(project_id: &str) -> Result<(), ShotBatchServiceError> {
     crate::domain::validate_project_id(project_id)
         .map_err(|error| ShotBatchServiceError::InvalidInput(error.to_string()))
@@ -638,10 +736,197 @@ impl From<RepositoryError> for ShotBatchServiceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ShotBatchPlanRow, MAX_SHOT_BATCH_ITEMS};
-    use crate::application::ports::AvailableGenerationDefinition;
+    use super::{
+        ordered_reference_asset_ids, CreateShotBatchRequest, ShotBatchPlanRow, ShotBatchService,
+        MAX_SHOT_BATCH_ITEMS,
+    };
+    use crate::application::ports::{
+        AvailableGenerationDefinition, ShotData, ShotRecord, ShotReferenceAssetRecord,
+        ShotRepository, ShotStageConfigRecord,
+    };
     use crate::application::product_runtime_scope::production_runtime_for_stage;
     use crate::domain::ShotStage;
+    use crate::infrastructure::database::{
+        initialize,
+        repositories::{
+            test_support, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
+            SqliteProductionQueueRepository, SqliteProjectRepository, SqliteShotRepository,
+            SqliteTaskRepository,
+        },
+    };
+    use crate::infrastructure::time::SystemClock;
+    use chrono::Utc;
+    use serde_json::json;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    const REF2VA_TEST_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: ref2va_test
+name: REF2VA Test
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  reference_images:
+    type: images
+    label: Reference Images
+    required: true
+    min_items: 3
+    max_items: 3
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+  - source: reference_images
+    target:
+      node: "10"
+      input: image
+outputs:
+  - id: generated_video
+    type: video
+    node: "9"
+    required: true
+"#;
+
+    const REF2VA_TEST_WORKFLOW_JSON: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/simple_i2i/workflow_api.json"
+    ));
+
+    const I2V_TEST_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: i2v_test
+name: I2V Test
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  first_frame:
+    type: image
+    label: First frame
+    required: false
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+  - source: first_frame
+    target:
+      node: "10"
+      input: image
+outputs:
+  - id: generated_video
+    type: video
+    node: "9"
+    required: true
+"#;
+
+    fn shot_data_with_references(
+        selected_image_asset_id: Option<&str>,
+        references: &[(&str, i64)],
+    ) -> ShotData {
+        let now = Utc::now();
+        ShotData {
+            shot: ShotRecord {
+                id: "sht_test".to_owned(),
+                project_id: "prj_default".to_owned(),
+                ordinal: 0,
+                name: "Test Shot".to_owned(),
+                prompt_text: "test prompt".to_owned(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+                selected_image_asset_id: selected_image_asset_id.map(str::to_owned),
+                selected_video_asset_id: None,
+                created_at: now,
+                updated_at: now,
+            },
+            stage_configs: Vec::new(),
+            reference_assets: references
+                .iter()
+                .map(|(asset_id, ordinal)| ShotReferenceAssetRecord {
+                    shot_id: "sht_test".to_owned(),
+                    stage: ShotStage::Video,
+                    asset_id: (*asset_id).to_owned(),
+                    ordinal: *ordinal,
+                })
+                .collect(),
+            generation_links: Vec::new(),
+        }
+    }
+
+    async fn insert_image_asset(pool: &sqlx::SqlitePool, asset_id: &str) {
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path, sha256,
+              mime_type, width, height, file_size, metadata_json, created_at, updated_at)
+             VALUES (?, 'prj_default', 'image', 'source_image', ?, ?, ?, 'sha', 'image/png',
+                     1, 1, 1, '{}', '2026-08-17T00:00:00Z', '2026-08-17T00:00:00Z')",
+        )
+        .bind(asset_id)
+        .bind(asset_id)
+        .bind(asset_id)
+        .bind(format!("assets/{asset_id}.png"))
+        .execute(pool)
+        .await
+        .expect("image asset fixture should insert");
+    }
+
+    async fn insert_video_definition(
+        pool: &sqlx::SqlitePool,
+        workflow_id: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        recipe_yaml: &str,
+    ) {
+        let now = "2026-08-17T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES (?, ?, 'video', 'video', ?, ?, ?)",
+        )
+        .bind(workflow_id)
+        .bind(workflow_id)
+        .bind(workflow_version_id)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("video workflow fixture should insert");
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES (?, ?, '1', ?, 'sha', ?)",
+        )
+        .bind(workflow_version_id)
+        .bind(workflow_id)
+        .bind(REF2VA_TEST_WORKFLOW_JSON)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("video workflow version fixture should insert");
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES (?, ?, '1', 1, ?, 'sha', ?)",
+        )
+        .bind(recipe_id)
+        .bind(workflow_version_id)
+        .bind(recipe_yaml)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("video recipe fixture should insert");
+    }
 
     #[test]
     fn planner_limits_match_pack_contract() {
@@ -657,6 +942,10 @@ mod tests {
             current_status: "DRAFT".to_owned(),
             selected_image_asset_id: None,
             selected_video_asset_id: None,
+            video_mode: Some("I2V".to_owned()),
+            reference_count: 0,
+            reference_min: None,
+            reference_max: None,
             eligible: false,
             blocking_reasons: vec!["尚未配置当前阶段工作流".to_owned()],
         };
@@ -716,5 +1005,453 @@ mod tests {
             .workflow_id
         )
         .is_none());
+    }
+
+    #[test]
+    fn ref2va_references_are_sorted_by_persisted_ordinal_and_reject_duplicates() {
+        let data =
+            shot_data_with_references(Some("ast_a"), &[("ast_c", 2), ("ast_a", 1), ("ast_b", 0)]);
+        let ordered = ordered_reference_asset_ids(&data, ShotStage::Video).unwrap();
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|asset| asset.as_str())
+                .collect::<Vec<_>>(),
+            ["ast_b", "ast_a", "ast_c"]
+        );
+
+        let duplicate = shot_data_with_references(None, &[("ast_b", 0), ("ast_b", 1)]);
+        assert_eq!(
+            ordered_reference_asset_ids(&duplicate, ShotStage::Video).unwrap_err(),
+            "参考图重复"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_freezes_ref2va_order_and_new_batch_reads_updated_shot_order() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let pool = initialize(&directory.path().join("shot-batch.db"))
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET id = 'prj_default' WHERE id = 'project-1'")
+            .execute(&pool)
+            .await
+            .expect("test project id should update");
+
+        let now = "2026-08-17T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES ('wfl_minimax_h3_reference_video_quality', 'H3 REF2VA', 'video', 'video',
+                     'wfv-dev026-ref2va', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("REF2VA workflow fixture should insert");
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('wfv-dev026-ref2va', 'wfl_minimax_h3_reference_video_quality', '1', ?, 'sha', ?)" ,
+        )
+        .bind(REF2VA_TEST_WORKFLOW_JSON)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("REF2VA workflow version fixture should insert");
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('rcp-dev026-ref2va', 'wfv-dev026-ref2va', '1', 1, ?, 'sha', ?)" ,
+        )
+        .bind(REF2VA_TEST_RECIPE_YAML)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("REF2VA recipe fixture should insert");
+
+        for asset_id in ["ast_b", "ast_a", "ast_c"] {
+            insert_image_asset(&pool, asset_id).await;
+        }
+        let shot_repository = Arc::new(SqliteShotRepository::new(pool.clone()));
+        shot_repository
+            .insert(&ShotRecord {
+                id: "sht_dev026".to_owned(),
+                project_id: "prj_default".to_owned(),
+                ordinal: 0,
+                name: "DEV-026 REF2VA".to_owned(),
+                prompt_text: "shot prompt".to_owned(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+                selected_image_asset_id: Some("ast_a".to_owned()),
+                selected_video_asset_id: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .await
+            .expect("Shot fixture should insert");
+        shot_repository
+            .upsert_stage_config(
+                "prj_default",
+                &ShotStageConfigRecord {
+                    shot_id: "sht_dev026".to_owned(),
+                    stage: ShotStage::Video,
+                    workflow_version_id: "wfv-dev026-ref2va".to_owned(),
+                    recipe_id: "rcp-dev026-ref2va".to_owned(),
+                    scalar_values: json!({}),
+                    updated_at: Utc::now(),
+                },
+            )
+            .await
+            .expect("Shot video config should persist");
+        shot_repository
+            .replace_reference_assets(
+                "prj_default",
+                "sht_dev026",
+                ShotStage::Video,
+                &["ast_b".to_owned(), "ast_a".to_owned(), "ast_c".to_owned()],
+            )
+            .await
+            .expect("initial reference order should persist");
+
+        let service = ShotBatchService::new(
+            shot_repository.clone(),
+            Arc::new(SqliteProductionQueueRepository::new(pool.clone())),
+            Arc::new(SqliteTaskRepository::new(pool.clone())),
+            Arc::new(SqliteAssetRepository::new(pool.clone())),
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone())),
+            Arc::new(SqliteProjectRepository::new(pool.clone())),
+            Arc::new(SystemClock),
+        );
+        let old_batch = service
+            .create(CreateShotBatchRequest {
+                project_id: "prj_default".to_owned(),
+                stage: ShotStage::Video,
+                shot_ids: vec!["sht_dev026".to_owned()],
+            })
+            .await
+            .expect("initial Shot batch should be created");
+        assert_eq!(
+            old_batch.items[0].values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+
+        shot_repository
+            .replace_reference_assets(
+                "prj_default",
+                "sht_dev026",
+                ShotStage::Video,
+                &["ast_c".to_owned(), "ast_b".to_owned(), "ast_a".to_owned()],
+            )
+            .await
+            .expect("updated reference order should persist");
+        let new_batch = service
+            .create(CreateShotBatchRequest {
+                project_id: "prj_default".to_owned(),
+                stage: ShotStage::Video,
+                shot_ids: vec!["sht_dev026".to_owned()],
+            })
+            .await
+            .expect("new Shot batch should be created");
+
+        assert_eq!(
+            old_batch.items[0].values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+        assert_eq!(
+            new_batch.items[0].values_json["reference_images"]["assetIds"],
+            json!(["ast_c", "ast_b", "ast_a"])
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn no_gpu_three_shot_video_batch_freezes_modes_order_retry_and_restart() {
+        use crate::application::ports::{ProductionQueueRepository, ShotBatchRepository};
+        use crate::domain::{
+            ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
+        };
+
+        let directory = tempdir().expect("temporary directory should exist");
+        let database_path = directory.path().join("shot-batch-three-shot.db");
+        let pool = initialize(&database_path)
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET id = 'prj_default' WHERE id = 'project-1'")
+            .execute(&pool)
+            .await
+            .expect("test project id should update");
+
+        insert_video_definition(
+            &pool,
+            "wfl_minimax_h3_fl2va_i2v_quality",
+            "wfv-dev026-i2v",
+            "rcp-dev026-i2v",
+            I2V_TEST_RECIPE_YAML,
+        )
+        .await;
+        insert_video_definition(
+            &pool,
+            "wfl_minimax_h3_reference_video_quality",
+            "wfv-dev026-ref2va",
+            "rcp-dev026-ref2va",
+            REF2VA_TEST_RECIPE_YAML,
+        )
+        .await;
+        for asset_id in ["ast_a", "ast_b", "ast_c", "ast_d", "ast_e", "ast_f"] {
+            insert_image_asset(&pool, asset_id).await;
+        }
+
+        let shot_repository = Arc::new(SqliteShotRepository::new(pool.clone()));
+        let now = Utc::now();
+        for (shot_id, ordinal, selected_image_asset_id, workflow_version_id, recipe_id) in [
+            (
+                "sht_dev026_01",
+                0,
+                Some("ast_a"),
+                "wfv-dev026-i2v",
+                "rcp-dev026-i2v",
+            ),
+            (
+                "sht_dev026_02",
+                1,
+                None,
+                "wfv-dev026-ref2va",
+                "rcp-dev026-ref2va",
+            ),
+            (
+                "sht_dev026_03",
+                2,
+                None,
+                "wfv-dev026-ref2va",
+                "rcp-dev026-ref2va",
+            ),
+        ] {
+            shot_repository
+                .insert(&ShotRecord {
+                    id: shot_id.to_owned(),
+                    project_id: "prj_default".to_owned(),
+                    ordinal,
+                    name: format!("DEV-026 Shot {}", ordinal + 1),
+                    prompt_text: format!("shot {}", ordinal + 1),
+                    prompt_entry_id: None,
+                    prompt_version_id: None,
+                    selected_image_asset_id: selected_image_asset_id.map(str::to_owned),
+                    selected_video_asset_id: None,
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await
+                .expect("Shot fixture should insert");
+            shot_repository
+                .upsert_stage_config(
+                    "prj_default",
+                    &ShotStageConfigRecord {
+                        shot_id: shot_id.to_owned(),
+                        stage: ShotStage::Video,
+                        workflow_version_id: workflow_version_id.to_owned(),
+                        recipe_id: recipe_id.to_owned(),
+                        scalar_values: json!({}),
+                        updated_at: now,
+                    },
+                )
+                .await
+                .expect("Shot video config should persist");
+        }
+        shot_repository
+            .replace_reference_assets(
+                "prj_default",
+                "sht_dev026_02",
+                ShotStage::Video,
+                &["ast_b".to_owned(), "ast_a".to_owned(), "ast_c".to_owned()],
+            )
+            .await
+            .expect("Shot02 reference order should persist");
+        shot_repository
+            .replace_reference_assets(
+                "prj_default",
+                "sht_dev026_03",
+                ShotStage::Video,
+                &["ast_d".to_owned(), "ast_e".to_owned(), "ast_f".to_owned()],
+            )
+            .await
+            .expect("Shot03 reference order should persist");
+
+        let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
+        let service = ShotBatchService::new(
+            shot_repository.clone(),
+            queue_repository.clone(),
+            Arc::new(SqliteTaskRepository::new(pool.clone())),
+            Arc::new(SqliteAssetRepository::new(pool.clone())),
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone())),
+            Arc::new(SqliteProjectRepository::new(pool.clone())),
+            Arc::new(SystemClock),
+        );
+        let plan = service
+            .plan("prj_default", ShotStage::Video)
+            .await
+            .expect("three-shot plan should build");
+        assert_eq!(plan.eligible_count, 3);
+        assert_eq!(plan.rows[0].video_mode.as_deref(), Some("I2V"));
+        assert_eq!(plan.rows[0].reference_count, 1);
+        assert_eq!(plan.rows[1].video_mode.as_deref(), Some("REF2VA"));
+        assert_eq!(plan.rows[1].reference_count, 3);
+        assert_eq!(plan.rows[1].reference_min, Some(3));
+        assert_eq!(plan.rows[2].reference_count, 3);
+
+        let old_batch = service
+            .create(CreateShotBatchRequest {
+                project_id: "prj_default".to_owned(),
+                stage: ShotStage::Video,
+                shot_ids: vec![
+                    "sht_dev026_01".to_owned(),
+                    "sht_dev026_02".to_owned(),
+                    "sht_dev026_03".to_owned(),
+                ],
+            })
+            .await
+            .expect("three-shot batch should be created");
+        assert_eq!(old_batch.items.len(), 3);
+        assert_eq!(
+            old_batch.items[0].values_json["first_frame"]["assetId"],
+            json!("ast_a")
+        );
+        assert_eq!(
+            old_batch.items[1].values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+        assert_eq!(
+            old_batch.items[2].values_json["reference_images"]["assetIds"],
+            json!(["ast_d", "ast_e", "ast_f"])
+        );
+
+        shot_repository
+            .replace_reference_assets(
+                "prj_default",
+                "sht_dev026_02",
+                ShotStage::Video,
+                &["ast_c".to_owned(), "ast_b".to_owned(), "ast_a".to_owned()],
+            )
+            .await
+            .expect("Shot02 updated order should persist");
+        let new_batch = service
+            .create(CreateShotBatchRequest {
+                project_id: "prj_default".to_owned(),
+                stage: ShotStage::Video,
+                shot_ids: vec!["sht_dev026_02".to_owned()],
+            })
+            .await
+            .expect("new Shot02 batch should be created");
+        assert_eq!(
+            old_batch.items[1].values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+        assert_eq!(
+            new_batch.items[0].values_json["reference_images"]["assetIds"],
+            json!(["ast_c", "ast_b", "ast_a"])
+        );
+
+        assert!(queue_repository
+            .set_item_dispatching(&old_batch.items[1].id, now)
+            .await
+            .expect("source Shot02 item should enter dispatching"));
+        assert!(queue_repository
+            .finish_item(
+                &old_batch.items[1].id,
+                ProductionBatchItemStatus::Failed,
+                Some("COMFY_TIMEOUT"),
+                Some("deterministic no-GPU failure"),
+                now,
+            )
+            .await
+            .expect("source Shot02 item should fail"));
+        let retry_id = ProductionBatchItemId::new();
+        queue_repository
+            .append_requeue_item_with_binding(
+                &ProductionBatchItem {
+                    id: retry_id.clone(),
+                    batch_id: old_batch.batch.id.clone(),
+                    ordinal: 3,
+                    workflow_version_id: "wrong-workflow".to_owned(),
+                    recipe_id: "wrong-recipe".to_owned(),
+                    values_json: json!({
+                        "reference_images": {
+                            "type": "image_assets",
+                            "assetIds": ["ast_a", "ast_b", "ast_c"]
+                        }
+                    }),
+                    status: ProductionBatchItemStatus::Pending,
+                    task_id: None,
+                    retry_of_item_id: Some(old_batch.items[1].id.as_str().to_owned()),
+                    error_code: None,
+                    error_message: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                old_batch.items[1].id.as_str(),
+                now,
+            )
+            .await
+            .expect("Shot02 retry should be appended");
+
+        let before_restart = queue_repository
+            .find_detail("prj_default", &old_batch.batch.id)
+            .await
+            .expect("old batch should be readable")
+            .expect("old batch should exist");
+        let retry = before_restart
+            .items
+            .iter()
+            .find(|item| item.id == retry_id)
+            .expect("retry item should exist");
+        assert_eq!(
+            retry.values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+        assert_eq!(
+            retry.retry_of_item_id.as_deref(),
+            Some(old_batch.items[1].id.as_str())
+        );
+        assert_eq!(
+            before_restart.items[1].status,
+            ProductionBatchItemStatus::Failed
+        );
+        pool.close().await;
+
+        let restarted_pool = initialize(&database_path)
+            .await
+            .expect("database should restart");
+        let restarted_queue = SqliteProductionQueueRepository::new(restarted_pool.clone());
+        let restored_old = restarted_queue
+            .find_detail("prj_default", &old_batch.batch.id)
+            .await
+            .expect("old batch should restore")
+            .expect("old batch should remain present");
+        let restored_new = restarted_queue
+            .find_detail("prj_default", &new_batch.batch.id)
+            .await
+            .expect("new batch should restore")
+            .expect("new batch should remain present");
+        assert_eq!(
+            restored_old.items[1].values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+        assert_eq!(
+            restored_old
+                .items
+                .iter()
+                .find(|item| item.id == retry_id)
+                .expect("retry should restore")
+                .values_json["reference_images"]["assetIds"],
+            json!(["ast_b", "ast_a", "ast_c"])
+        );
+        assert_eq!(
+            restored_new.items[0].values_json["reference_images"]["assetIds"],
+            json!(["ast_c", "ast_b", "ast_a"])
+        );
+        restarted_pool.close().await;
     }
 }

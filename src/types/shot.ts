@@ -79,6 +79,10 @@ export interface ShotBatchPlanRow {
   currentStatus: string;
   selectedImageAssetId?: string;
   selectedVideoAssetId?: string;
+  videoMode?: "I2V" | "REF2VA";
+  referenceCount: number;
+  referenceMin?: number;
+  referenceMax?: number;
   eligible: boolean;
   blockingReasons: string[];
 }

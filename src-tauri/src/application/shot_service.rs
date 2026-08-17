@@ -2,17 +2,21 @@ use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
 };
+use crate::application::ordered_reference_binding::{
+    ref2va_image_bounds, reference_manifest, validate_ordered_reference_ids,
+};
 use crate::application::ports::{
     AssetRepository, Clock, GenerationDefinitionRepository, PromptLibraryRepository,
-    RepositoryError, ShotBatchRepository, ShotData, ShotRecord, ShotRepository,
-    ShotStageConfigRecord, TaskRepository, TaskUpdatePayload,
+    RepositoryError, ShotBatchRepository, ShotData, ShotRecord, ShotReferenceAssetRecord,
+    ShotRepository, ShotStageConfigRecord, TaskRepository, TaskUpdatePayload,
 };
+use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::prompt_library_service::canonical_prompt_text;
 use crate::application::task_query_service::TaskQueryService;
 use crate::compiler::RecipeParser;
 use crate::domain::{
-    canonical_shot_name, derive_stage_status, validate_project_id, AssetType, InputDefinition,
-    OutputType, SeedValue, ShotStage, ShotViewStatus, TaskId,
+    canonical_shot_name, derive_stage_status, validate_project_id, AssetId, AssetType,
+    InputDefinition, OutputType, Recipe, SeedValue, ShotStage, ShotViewStatus, TaskId,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -271,21 +275,7 @@ impl ShotService {
             )));
         }
         if request.stage == ShotStage::Video {
-            let image_inputs = recipe
-                .inputs
-                .values()
-                .filter(|input| {
-                    matches!(
-                        input,
-                        InputDefinition::Image { .. } | InputDefinition::Images { .. }
-                    )
-                })
-                .count();
-            if image_inputs != 1 {
-                return Err(ShotServiceError::InvalidInput(
-                    "视频阶段必须有且只有一个图片输入用于 Reference Image".to_owned(),
-                ));
-            }
+            validate_video_recipe(&definition.workflow_id, &recipe)?;
         }
         let scalar_values = scalar_values_to_json(&recipe.inputs, &request.values)?;
         self.repository
@@ -316,6 +306,20 @@ impl ShotService {
             return Err(ShotServiceError::InvalidInput(
                 "一个阶段最多保留 20 个 Reference Asset".to_owned(),
             ));
+        }
+        let parsed_asset_ids = asset_ids
+            .iter()
+            .map(|asset_id| {
+                AssetId::parse(asset_id.clone()).map_err(|error| {
+                    ShotServiceError::InvalidInput(format!("参考图素材 ID 无效：{error}"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        validate_ordered_reference_ids(&parsed_asset_ids, None)
+            .map_err(ShotServiceError::InvalidInput)?;
+        for asset_id in &parsed_asset_ids {
+            self.validate_image_asset(project_id, asset_id, "参考图")
+                .await?;
         }
         self.repository
             .replace_reference_assets(project_id, shot_id, stage, &asset_ids)
@@ -397,27 +401,6 @@ impl ShotService {
             .iter()
             .find(|config| config.stage == request.stage)
             .ok_or_else(|| ShotServiceError::InvalidInput("请先配置当前阶段工作流".to_owned()))?;
-        if request.stage == ShotStage::Video {
-            let selected = data
-                .shot
-                .selected_image_asset_id
-                .as_deref()
-                .ok_or_else(|| ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned()))?;
-            let asset = self
-                .asset_repository
-                .find_by_id(&crate::domain::AssetId::parse(selected.to_owned()).map_err(
-                    |error| ShotServiceError::InvalidInput(format!("关键帧素材 ID 无效：{error}")),
-                )?)
-                .await?
-                .ok_or_else(|| ShotServiceError::InvalidInput("关键帧素材不存在".to_owned()))?;
-            if asset.project_id != request.project_id || asset.asset_type != AssetType::Image {
-                return Err(ShotServiceError::InvalidInput(
-                    "关键帧必须是当前项目的图片素材".to_owned(),
-                ));
-            }
-            self.ensure_no_active_video_tasks(&request.project_id)
-                .await?;
-        }
 
         let definition = self
             .definition_repository
@@ -426,6 +409,11 @@ impl ShotService {
             .ok_or_else(|| ShotServiceError::InvalidInput("当前阶段工作流已不可用".to_owned()))?;
         let recipe = RecipeParser::parse(&definition.recipe_yaml)
             .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
+        let ref2va_bounds = if request.stage == ShotStage::Video {
+            validate_video_recipe(&definition.workflow_id, &recipe)?
+        } else {
+            None
+        };
         let _ = scalar_values_to_json(&recipe.inputs, &request.values)?;
         let mut values = scalar_values_from_json(&config.scalar_values)?;
         values.extend(request.values);
@@ -444,53 +432,41 @@ impl ShotService {
             _ => None,
         });
         if request.stage == ShotStage::Video {
-            let (key, multiple) = image_input.ok_or_else(|| {
-                ShotServiceError::InvalidInput("视频 Recipe 没有可用的图片输入".to_owned())
-            })?;
-            let selected = data
-                .shot
-                .selected_image_asset_id
-                .as_ref()
-                .expect("video stage selected image is validated above");
-            let selected = crate::domain::AssetId::parse(selected.clone())
-                .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
-            let mut references = vec![selected.clone()];
-            for reference in data
-                .reference_assets
-                .iter()
-                .filter(|reference| reference.stage == request.stage)
-            {
-                let asset_id = crate::domain::AssetId::parse(reference.asset_id.clone())
-                    .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
-                if references.contains(&asset_id) {
-                    continue;
-                }
-                let asset = self
-                    .asset_repository
-                    .find_by_id(&asset_id)
-                    .await?
-                    .ok_or_else(|| {
-                        ShotServiceError::InvalidInput("Reference 素材不存在".to_owned())
+            let (_, input) = video_image_input(&recipe)?;
+            let selected = match input {
+                InputDefinition::Image { .. } => {
+                    let selected = data.shot.selected_image_asset_id.as_ref().ok_or_else(|| {
+                        ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned())
                     })?;
-                if asset.project_id != request.project_id || asset.asset_type != AssetType::Image {
-                    return Err(ShotServiceError::InvalidInput(
-                        "Reference 必须是当前项目的图片素材".to_owned(),
-                    ));
+                    let selected = AssetId::parse(selected.clone()).map_err(|error| {
+                        ShotServiceError::InvalidInput(format!("关键帧素材 ID 无效：{error}"))
+                    })?;
+                    self.validate_image_asset(&request.project_id, &selected, "关键帧")
+                        .await?;
+                    Some(selected)
                 }
-                references.push(asset_id);
-            }
-            values.insert(
-                key.clone(),
-                if multiple {
-                    reference_manifest = Some(ReferenceManifest {
-                        input_key: key.clone(),
-                        asset_ids: references.clone(),
-                    });
-                    GenerationInputValue::ImageAssets(references)
-                } else {
-                    GenerationInputValue::ImageAsset(selected)
-                },
-            );
+                InputDefinition::Images { .. } => None,
+                _ => unreachable!("video_image_input only returns image inputs"),
+            };
+            let references = if matches!(input, InputDefinition::Images { .. }) {
+                let references =
+                    ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
+                validate_ordered_reference_ids(&references, None)
+                    .map_err(ShotServiceError::InvalidInput)?;
+                for asset_id in &references {
+                    self.validate_image_asset(&request.project_id, asset_id, "参考图")
+                        .await?;
+                }
+                references
+            } else {
+                Vec::new()
+            };
+            let (key, image_value, manifest) =
+                build_video_input(&recipe, selected, references, ref2va_bounds)?;
+            values.insert(key, image_value);
+            reference_manifest = manifest;
+            self.ensure_no_active_video_tasks(&request.project_id)
+                .await?;
         } else {
             let references = data
                 .reference_assets
@@ -565,6 +541,34 @@ impl ShotService {
             .view(task)
             .await
             .map_err(|error| ShotServiceError::TaskView(error.to_string()))
+    }
+
+    async fn validate_image_asset(
+        &self,
+        project_id: &str,
+        asset_id: &AssetId,
+        label: &str,
+    ) -> Result<(), ShotServiceError> {
+        let asset = self
+            .asset_repository
+            .find_by_id(asset_id)
+            .await?
+            .ok_or_else(|| {
+                ShotServiceError::InvalidInput(format!("{label}不存在：{}", asset_id.as_str()))
+            })?;
+        if asset.project_id != project_id {
+            return Err(ShotServiceError::InvalidInput(format!(
+                "{label}必须属于当前项目：{}",
+                asset_id.as_str()
+            )));
+        }
+        if asset.asset_type != AssetType::Image {
+            return Err(ShotServiceError::InvalidInput(format!(
+                "{label}必须是图片素材：{}",
+                asset_id.as_str()
+            )));
+        }
+        Ok(())
     }
 
     async fn ensure_no_active_video_tasks(&self, project_id: &str) -> Result<(), ShotServiceError> {
@@ -781,6 +785,107 @@ fn expected_output_label(output: OutputType) -> &'static str {
     }
 }
 
+fn video_image_input(recipe: &Recipe) -> Result<(&str, &InputDefinition), ShotServiceError> {
+    let mut inputs = recipe.inputs.iter().filter(|(_, input)| {
+        matches!(
+            input,
+            InputDefinition::Image { .. } | InputDefinition::Images { .. }
+        )
+    });
+    let Some((key, input)) = inputs.next() else {
+        return Err(ShotServiceError::InvalidInput(
+            "视频 Recipe 必须声明一个 image 或 images 输入".to_owned(),
+        ));
+    };
+    if inputs.next().is_some() {
+        return Err(ShotServiceError::InvalidInput(
+            "视频 Recipe 只能声明一个 image 或 images 输入".to_owned(),
+        ));
+    }
+    Ok((key.as_str(), input))
+}
+
+fn ordered_reference_asset_ids(
+    references: &[ShotReferenceAssetRecord],
+    stage: ShotStage,
+) -> Result<Vec<AssetId>, ShotServiceError> {
+    let mut references = references
+        .iter()
+        .filter(|reference| reference.stage == stage)
+        .collect::<Vec<_>>();
+    references.sort_by(|left, right| {
+        left.ordinal
+            .cmp(&right.ordinal)
+            .then_with(|| left.asset_id.cmp(&right.asset_id))
+    });
+    references
+        .into_iter()
+        .map(|reference| {
+            AssetId::parse(reference.asset_id.clone()).map_err(|error| {
+                ShotServiceError::InvalidInput(format!("参考图素材 ID 无效：{error}"))
+            })
+        })
+        .collect()
+}
+
+fn validate_video_recipe(
+    workflow_id: &str,
+    recipe: &Recipe,
+) -> Result<Option<(usize, usize)>, ShotServiceError> {
+    if production_runtime_for_stage(ShotStage::Video, workflow_id).is_none() {
+        return Err(ShotServiceError::InvalidInput(
+            "视频阶段仅支持 MiniMax H3 运行时".to_owned(),
+        ));
+    }
+    let (_, input) = video_image_input(recipe)?;
+    let ref2va_bounds =
+        ref2va_image_bounds(workflow_id, recipe).map_err(ShotServiceError::InvalidInput)?;
+    if ref2va_bounds.is_some() && !matches!(input, InputDefinition::Images { .. }) {
+        return Err(ShotServiceError::InvalidInput(
+            "REF2VA Recipe 必须声明 plural reference_images 输入".to_owned(),
+        ));
+    }
+    if ref2va_bounds.is_none() && !matches!(input, InputDefinition::Image { .. }) {
+        return Err(ShotServiceError::InvalidInput(
+            "I2V Recipe 必须声明单个 image 输入".to_owned(),
+        ));
+    }
+    Ok(ref2va_bounds)
+}
+
+fn build_video_input(
+    recipe: &Recipe,
+    selected_image_asset_id: Option<AssetId>,
+    references: Vec<AssetId>,
+    ref2va_bounds: Option<(usize, usize)>,
+) -> Result<(String, GenerationInputValue, Option<ReferenceManifest>), ShotServiceError> {
+    let (key, input) = video_image_input(recipe)?;
+    match input {
+        InputDefinition::Image { .. } => {
+            let selected = selected_image_asset_id
+                .ok_or_else(|| ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned()))?;
+            Ok((
+                key.to_owned(),
+                GenerationInputValue::ImageAsset(selected),
+                None,
+            ))
+        }
+        InputDefinition::Images { .. } => {
+            let bounds = ref2va_bounds.ok_or_else(|| {
+                ShotServiceError::InvalidInput("视频多图输入仅支持 H3 REF2VA Recipe".to_owned())
+            })?;
+            validate_ordered_reference_ids(&references, Some(bounds))
+                .map_err(ShotServiceError::InvalidInput)?;
+            Ok((
+                key.to_owned(),
+                GenerationInputValue::ImageAssets(references.clone()),
+                Some(reference_manifest(key, &references)),
+            ))
+        }
+        _ => unreachable!("video_image_input only returns image inputs"),
+    }
+}
+
 pub(crate) fn scalar_values_to_json(
     inputs: &std::collections::BTreeMap<String, InputDefinition>,
     values: &BTreeMap<String, GenerationInputValue>,
@@ -913,5 +1018,148 @@ impl From<RepositoryError> for ShotServiceError {
 impl From<crate::domain::ShotDomainError> for ShotServiceError {
     fn from(error: crate::domain::ShotDomainError) -> Self {
         Self::InvalidInput(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_video_input, ordered_reference_asset_ids, ShotServiceError};
+    use crate::application::generation_input_preparer::GenerationInputValue;
+    use crate::application::generation_service::ReferenceManifest;
+    use crate::application::ports::ShotReferenceAssetRecord;
+    use crate::domain::{
+        AssetId, Binding, InputDefinition, OutputDefinition, OutputType, Recipe, ShotStage,
+        WorkflowRef,
+    };
+    use std::collections::BTreeMap;
+
+    fn asset_id(value: &str) -> AssetId {
+        AssetId::parse(format!("ast_{value}")).expect("test asset id")
+    }
+
+    fn video_recipe(input: InputDefinition) -> Recipe {
+        Recipe {
+            schema_version: 1,
+            id: "rcp_test_video".to_owned(),
+            name: "Test video".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: BTreeMap::from([("reference_images".to_owned(), input)]),
+            bindings: Vec::<Binding>::new(),
+            outputs: vec![OutputDefinition {
+                id: "generated_video".to_owned(),
+                output_type: OutputType::Video,
+                node: "1".to_owned(),
+                required: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn video_input_keeps_selected_image_for_i2v() {
+        let selected = asset_id("keyframe");
+        let (key, value, manifest) = build_video_input(
+            &video_recipe(InputDefinition::Image {
+                label: "Keyframe".to_owned(),
+                required: true,
+            }),
+            Some(selected.clone()),
+            Vec::new(),
+            None,
+        )
+        .expect("I2V input should be valid");
+
+        assert_eq!(key, "reference_images");
+        assert_eq!(value, GenerationInputValue::ImageAsset(selected));
+        assert_eq!(manifest, None);
+    }
+
+    #[test]
+    fn video_input_preserves_persisted_ref2va_order_and_manifest() {
+        let persisted = vec![
+            ShotReferenceAssetRecord {
+                shot_id: "sht_test".to_owned(),
+                stage: ShotStage::Video,
+                asset_id: "ast_c".to_owned(),
+                ordinal: 2,
+            },
+            ShotReferenceAssetRecord {
+                shot_id: "sht_test".to_owned(),
+                stage: ShotStage::Video,
+                asset_id: "ast_b".to_owned(),
+                ordinal: 0,
+            },
+            ShotReferenceAssetRecord {
+                shot_id: "sht_test".to_owned(),
+                stage: ShotStage::Video,
+                asset_id: "ast_a".to_owned(),
+                ordinal: 1,
+            },
+        ];
+        let ordered = ordered_reference_asset_ids(&persisted, ShotStage::Video)
+            .expect("persisted reference order should be readable");
+        let (key, value, manifest) = build_video_input(
+            &video_recipe(InputDefinition::Images {
+                label: "References".to_owned(),
+                required: true,
+                min_items: 2,
+                max_items: 3,
+            }),
+            None,
+            ordered.clone(),
+            Some((2, 3)),
+        )
+        .expect("REF2VA input should be valid without a selected keyframe");
+
+        assert_eq!(key, "reference_images");
+        assert_eq!(value, GenerationInputValue::ImageAssets(ordered.clone()));
+        assert_eq!(
+            manifest,
+            Some(ReferenceManifest {
+                input_key: "reference_images".to_owned(),
+                asset_ids: ordered,
+            })
+        );
+    }
+
+    #[test]
+    fn ref2va_validation_errors_name_the_recipe_limit_and_duplicate() {
+        let recipe = video_recipe(InputDefinition::Images {
+            label: "References".to_owned(),
+            required: true,
+            min_items: 2,
+            max_items: 3,
+        });
+        let error =
+            build_video_input(&recipe, None, vec![asset_id("a")], Some((2, 3))).unwrap_err();
+        assert!(matches!(
+            error,
+            ShotServiceError::InvalidInput(message) if message.contains("至少需要 2")
+        ));
+
+        let error = build_video_input(
+            &recipe,
+            None,
+            vec![asset_id("a"), asset_id("b"), asset_id("c"), asset_id("d")],
+            Some((2, 3)),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ShotServiceError::InvalidInput(message) if message.contains("最多允许 3")
+        ));
+
+        let error = build_video_input(
+            &recipe,
+            None,
+            vec![asset_id("a"), asset_id("a")],
+            Some((2, 3)),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ShotServiceError::InvalidInput(message) if message.contains("参考图重复")
+        ));
     }
 }

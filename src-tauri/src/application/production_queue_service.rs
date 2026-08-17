@@ -2,6 +2,9 @@ use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
 };
+use crate::application::ordered_reference_binding::{
+    ref2va_image_bounds, reference_manifest, validate_ordered_reference_ids,
+};
 use crate::application::ports::{
     ActiveProductionItem, Clock, GenerationDefinitionRepository, ProductionQueueRepository,
     RepositoryError, ShotBatchRepository, TaskRepository,
@@ -209,7 +212,7 @@ impl ProductionQueueService {
         values: &BTreeMap<String, GenerationInputValue>,
     ) -> Result<Option<ReferenceManifest>, ProductionQueueError> {
         let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
-        reference_manifest_for_values(&recipe, values)
+        reference_manifest_for_values(workflow_version_id, &recipe, values)
     }
 
     pub async fn list(
@@ -1240,6 +1243,7 @@ fn is_transient_requeue_error(code: &str) -> bool {
 }
 
 fn reference_manifest_for_values(
+    workflow_id: &str,
     recipe: &Recipe,
     values: &BTreeMap<String, GenerationInputValue>,
 ) -> Result<Option<ReferenceManifest>, ProductionQueueError> {
@@ -1261,24 +1265,12 @@ fn reference_manifest_for_values(
             "REF2VA reference_images must be an ordered image asset array".to_owned(),
         ));
     };
-    if asset_ids.len() < *min_items || asset_ids.len() > *max_items {
-        return Err(ProductionQueueError::InvalidInput(format!(
-            "REF2VA reference_images count must be between {min_items} and {max_items}"
-        )));
-    }
-    let mut seen = HashSet::new();
-    if asset_ids
-        .iter()
-        .any(|asset_id| !seen.insert(asset_id.as_str().to_owned()))
-    {
-        return Err(ProductionQueueError::InvalidInput(
-            "REF2VA reference_images cannot contain duplicate assets".to_owned(),
-        ));
-    }
-    Ok(Some(ReferenceManifest {
-        input_key: "reference_images".to_owned(),
-        asset_ids: asset_ids.clone(),
-    }))
+    let bounds = ref2va_image_bounds(workflow_id, recipe)
+        .map_err(ProductionQueueError::InvalidInput)?
+        .unwrap_or((*min_items, *max_items));
+    validate_ordered_reference_ids(asset_ids, Some(bounds))
+        .map_err(ProductionQueueError::InvalidInput)?;
+    Ok(Some(reference_manifest("reference_images", asset_ids)))
 }
 
 fn should_pause_after_terminal(
@@ -1595,7 +1587,7 @@ mod tests {
         .into_iter()
         .collect();
 
-        let manifest = reference_manifest_for_values(&recipe, &values)
+        let manifest = reference_manifest_for_values("wfl_other", &recipe, &values)
             .expect("manifest should be valid")
             .expect("image array should produce a manifest");
         assert_eq!(manifest.input_key, "reference_images");

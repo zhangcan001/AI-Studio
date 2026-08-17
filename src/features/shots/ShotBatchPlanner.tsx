@@ -123,18 +123,20 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
           {loading ? <p className="project-loading">正在检查当前工作流、素材与任务状态…</p> : (
             <div className="shot-batch-table-wrap">
               <table className="shot-batch-table">
-                <thead><tr><th aria-label="选择" /><th>Shot</th><th>当前状态</th><th>工作流 / Recipe</th><th>资格与阻塞原因</th></tr></thead>
+                <thead><tr><th aria-label="选择" /><th>Shot</th><th>模式</th><th>参考数量</th><th>当前状态</th><th>工作流 / Recipe</th><th>资格与阻塞原因</th></tr></thead>
                 <tbody>
                   {(plan?.rows ?? []).map((row) => (
                     <tr key={row.shotId} className={row.eligible ? "" : "shot-batch-row-blocked"}>
                       <td><input type="checkbox" checked={selectedIds.has(row.shotId)} onChange={() => toggleShot(row.shotId)} disabled={!row.eligible || creating} aria-label={`选择${row.name}`} /></td>
                       <td><strong>{String(row.ordinal + 1).padStart(2, "0")} · {row.name}</strong><small>{stageLabel(stage)}</small></td>
+                      <td><strong>{shotVideoMode(row)}</strong><small>{row.stage === "video" ? "H3" : "图片生成"}</small></td>
+                      <td><strong>{shotReferenceCount(row)}</strong><small>{row.stage === "video" ? "有序参考" : "—"}</small></td>
                       <td><span className={`shot-status-chip shot-status-${row.currentStatus.toLowerCase()}`}>{shotStatusLabels[row.currentStatus as keyof typeof shotStatusLabels] ?? row.currentStatus}</span></td>
                       <td><strong>{row.recipeName ?? "未配置"}</strong><small>{row.workflowVersionId ? "当前版本 · 入队时冻结" : "等待配置"}</small></td>
-                      <td>{row.eligible ? <span className="shot-batch-ready">可加入批次</span> : <span className="shot-batch-reasons">{row.blockingReasons.join("；")}</span>}</td>
+                      <td>{row.eligible ? <span className="shot-batch-ready">READY · 可加入批次</span> : <span className="shot-batch-reasons">BLOCKED · {row.blockingReasons.join("；")}</span>}</td>
                     </tr>
                   ))}
-                  {!plan?.rows.length && <tr><td colSpan={5}><p className="empty-state">当前项目还没有 Shot。</p></td></tr>}
+                  {!plan?.rows.length && <tr><td colSpan={7}><p className="empty-state">当前项目还没有 Shot。</p></td></tr>}
                 </tbody>
               </table>
             </div>
@@ -143,4 +145,17 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
       )}
     </section>
   );
+}
+
+function shotVideoMode(row: ShotBatchPlan["rows"][number]): string {
+  if (row.stage !== "video") return "图片";
+  return row.videoMode ?? "I2V";
+}
+
+function shotReferenceCount(row: ShotBatchPlan["rows"][number]): string {
+  if (row.stage !== "video") return "—";
+  if (row.videoMode === "REF2VA" && row.referenceMin !== undefined && row.referenceMax !== undefined) {
+    return `${row.referenceCount}/${row.referenceMin}–${row.referenceMax}`;
+  }
+  return String(row.referenceCount);
 }

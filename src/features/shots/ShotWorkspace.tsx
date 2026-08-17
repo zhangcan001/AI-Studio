@@ -30,6 +30,7 @@ import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ShotProgressDashboard } from "./ShotProgressDashboard";
 import {
   filterProductionRuntimeCatalog,
+  h3FamilyForWorkflowId,
   h3QualityProfileForWorkflowId,
   isProductionRuntimeForStage,
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
@@ -57,7 +58,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const [stage, setStage] = useState<ShotStage>("image");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
-  const [references, setReferences] = useState<Record<ShotStage, Set<string>>>({ image: new Set(), video: new Set() });
+  const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState("");
@@ -84,7 +85,13 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
       recipe.recipeId === currentDraft?.recipeId &&
       isProductionRuntimeForStage(stage, recipe.workflowId),
   );
-  const currentReferences = references[stage] ?? new Set<string>();
+  const currentReferences = references[stage] ?? [];
+  const ref2vaMode = stage === "video" && isRef2vaRecipe(currentRecipe);
+  const ref2vaImageField = ref2vaMode ? referenceImagesField(currentRecipe) : undefined;
+  const ref2vaMinItems = ref2vaMode ? Math.max(2, ref2vaImageField?.minItems ?? 0) : undefined;
+  const referenceValidation = ref2vaMode
+    ? validateRef2vaReferences(ref2vaImageField, currentReferences)
+    : undefined;
   const imageAssets = assets.filter(isImageAsset);
   const videoAssets = assets.filter(isVideoAsset);
 
@@ -156,15 +163,18 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
     }
     setStageDrafts(nextDrafts);
     setDirtyStages(new Set());
+    const imageReferences = orderedShotReferences(selectedShot, "image");
+    const videoReferences = orderedShotReferences(selectedShot, "video");
     setReferences({
-      image: new Set(selectedShot.referenceAssets.filter((item) => item.stage === "image").map((item) => item.assetId)),
-      video: new Set(selectedShot.referenceAssets.filter((item) => item.stage === "video").map((item) => item.assetId)),
+      image: imageReferences,
+      video: videoReferences,
     });
   }, [productCatalog, selectedShot]);
 
   useEffect(() => {
     const linkedIds = selectedShot?.generationLinks.flatMap((link) => link.task?.outputAssetIds ?? []) ?? [];
-    const missing = [...new Set([...linkedIds, selectedShot?.selectedImageAssetId, selectedShot?.selectedVideoAssetId].filter(Boolean) as string[])]
+    const referenceIds = selectedShot?.referenceAssets.map((reference) => reference.assetId) ?? [];
+    const missing = [...new Set([...linkedIds, ...referenceIds, selectedShot?.selectedImageAssetId, selectedShot?.selectedVideoAssetId].filter(Boolean) as string[])]
       .filter((id) => !assets.some((asset) => asset.id === id));
     if (!missing.length) return;
     let active = true;
@@ -183,6 +193,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   function changeStageRecipe(recipeId: string) {
     const recipe = stageRecipes.find((item) => item.recipeId === recipeId);
     if (!recipe) return;
+    const wasRef2va = stage === "video" && isRef2vaRecipe(currentRecipe);
     setStageDrafts((current) => ({
       ...current,
       [stage]: {
@@ -191,6 +202,17 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         values: defaultScalarValues(recipe),
       },
     }));
+    if (stage === "video" && isRef2vaRecipe(recipe) && !wasRef2va) {
+      setReferences((current) => ({
+        ...current,
+        video: ensurePrimaryReference(current.video, selectedShot?.selectedImageAssetId),
+      }));
+      if (selectedShot?.selectedImageAssetId) {
+        setNotice("已将当前关键帧放到 REF2VA 的 @图片1；其余参考图顺序保持不变。 ");
+      }
+    } else if (stage === "video" && isRef2vaRecipe(currentRecipe)) {
+      setNotice("已切回 I2V；当前已选关键帧保持不变，不会被参考图顺序覆盖。 ");
+    }
     markStageDirty(stage);
   }
 
@@ -267,9 +289,13 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
 
   async function replaceReferences() {
     if (!selectedShot) return;
+    if (ref2vaMode && referenceValidation) {
+      setError(referenceValidation);
+      return;
+    }
     setBusy(true); setError(undefined);
     try {
-      const next = await replaceShotReferences({ projectId, shotId: selectedShot.id, stage, assetIds: [...currentReferences] });
+      const next = await replaceShotReferences({ projectId, shotId: selectedShot.id, stage, assetIds: currentReferences });
       applyShot(next);
       setNotice("Reference 素材已保存为关系；不会复制素材文件。");
     } catch (referenceError: unknown) { setError(toUserMessage(referenceError)); }
@@ -286,8 +312,22 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
 
   async function generate() {
     if (!selectedShot || !currentDraft) return;
+    if (stage === "video") {
+      if (!ref2vaMode && !selectedShot.selectedImageAssetId) {
+        setError("请先选择关键帧图片");
+        return;
+      }
+      if (referenceValidation) {
+        setError(referenceValidation);
+        return;
+      }
+    }
     setBusy(true); setError(undefined); setNotice(undefined);
     try {
+      if (ref2vaMode && !sameReferenceOrder(currentReferences, orderedShotReferences(selectedShot, "video"))) {
+        const next = await replaceShotReferences({ projectId, shotId: selectedShot.id, stage: "video", assetIds: currentReferences });
+        applyShot(next);
+      }
       const task = await generateShot({ projectId, shotId: selectedShot.id, stage, values: currentDraft.values });
       setNotice(`任务 ${task.id} 已创建；Shot 状态由任务和候选素材派生。不会自动跳过候选选择。`);
       applyShot(await getShot(projectId, selectedShot.id));
@@ -411,14 +451,42 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
                 </div>
                 {hasFrozenQueueLink && <p className="shot-frozen-config-warning"><strong>已有生产队列快照</strong>：本次配置编辑只影响后续新批次，已入队的任务继续使用冻结配置。</p>}
                 <label><span>{stage === "image" ? "图片阶段 Recipe" : "视频阶段 Recipe"}</span><select value={currentDraft?.recipeId ?? ""} onChange={(event) => changeStageRecipe(event.target.value)}><option value="">选择兼容输出</option>{stageRecipes.map((recipe) => <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={recipe.recipeId}>{recipe.name} · {recipe.mode}</option>)}</select></label>
-                {currentRecipe && <p className="shot-recipe-hint">按精确产品运行时和输出能力筛选；不会根据显示名称判断运行时。视频阶段只在配置了视频 Recipe 且已选择关键帧后可生成。</p>}
+                {currentRecipe && <p className="shot-recipe-hint">按精确产品运行时和输出能力筛选；不会根据显示名称判断运行时。{ref2vaMode ? `REF2VA 参考图 ${ref2vaMinItems ?? 2}～${ref2vaImageField?.maxItems ?? 9} 张，按 @图片顺序提交。` : "I2V 使用当前已选关键帧，不会维护多图列表。"}</p>}
                 {currentRecipe?.fields.filter(isScalarField).map((field) => <ScalarControl key={field.key} field={field} value={currentDraft?.values[field.key]} onChange={(value) => changeScalar(field, value)} />)}
-                <button type="button" className="shot-primary-action" onClick={() => void generate()} disabled={busy || !currentDraft || (stage === "video" && !selectedShot.selectedImageAssetId)}>{stage === "image" ? "生成关键帧" : "生成视频"}</button>
+                <button type="button" className="shot-primary-action" onClick={() => void generate()} disabled={busy || !currentDraft || (stage === "video" && ((!ref2vaMode && !selectedShot.selectedImageAssetId) || Boolean(referenceValidation)))}>{stage === "image" ? "生成关键帧" : "生成视频"}</button>
                 <button type="button" className="quiet-button" onClick={() => currentRecipe && onOpenInStudio(selectedShot, stage, currentRecipe)}>在创作中打开</button>
-                {stage === "video" && <p className="shot-inline-note">生成视频时会自动把已选关键帧作为 H3 Reference Image；不会在图片成功后自动提交视频任务。</p>}
+                {stage === "video" && <p className="shot-inline-note">{referenceValidation ?? "生成视频时会保留当前关键帧选择；不会在图片成功后自动提交视频任务。"}</p>}
               </div>
               <div className="shot-results-column">
-                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Reference</span><h4>参考素材关系</h4></div><button type="button" className="quiet-button" onClick={() => void replaceReferences()} disabled={busy}>保存关系</button></div><p className="shot-inline-note">仅保存当前项目素材 ID，不复制文件。图片阶段可选多个；视频阶段由关键帧自动映射。</p><div className="shot-asset-checklist">{(stage === "image" ? imageAssets : imageAssets).slice(0, 24).map((asset) => <label key={asset.id}><input type="checkbox" checked={currentReferences.has(asset.id)} onChange={() => setReferences((current) => { const next = new Set(current[stage]); if (next.has(asset.id)) next.delete(asset.id); else next.add(asset.id); return { ...current, [stage]: next }; })} /><AssetThumb projectId={projectId} asset={asset} /><span>{asset.name}</span></label>)}{imageAssets.length === 0 && <span className="empty-state">当前项目暂无图片素材。</span>}</div></section>
+                <section className="shot-panel-block">
+                  <div className="shot-block-heading">
+                    <div><span className="section-label">Reference</span><h4>{ref2vaMode ? "有序参考图" : "参考素材关系"}</h4></div>
+                    {(stage === "image" || ref2vaMode) && <button type="button" className="quiet-button" onClick={() => void replaceReferences()} disabled={busy}>保存关系</button>}
+                  </div>
+                  {stage === "image" ? (
+                    <>
+                      <p className="shot-inline-note">仅保存当前项目素材 ID，不复制文件。图片阶段可选多个。</p>
+                      <div className="shot-asset-checklist">{imageAssets.slice(0, 24).map((asset) => <label key={asset.id}><input type="checkbox" checked={currentReferences.includes(asset.id)} onChange={() => setReferences((current) => ({ ...current, image: toggleOrderedReference(current.image, asset.id) }))} /><AssetThumb projectId={projectId} asset={asset} /><span>{asset.name}</span></label>)}{imageAssets.length === 0 && <span className="empty-state">当前项目暂无图片素材。</span>}</div>
+                    </>
+                  ) : ref2vaMode ? (
+                    <>
+                      <p className="shot-inline-note">按顺序提交给 H3；切换到 REF2VA 时已选关键帧会明确显示为 @图片1。达到 Recipe 上限后不能继续添加。</p>
+                      <div className="shot-asset-checklist">
+                        {currentReferences.map((assetId, index) => {
+                          const asset = imageAssets.find((item) => item.id === assetId);
+                          return <label key={assetId}><span>@图片{index + 1}</span>{asset ? <AssetThumb projectId={projectId} asset={asset} /> : <span className="shot-thumb">图片</span>}<span>{asset?.name ?? assetId}</span><button type="button" className="quiet-button" onClick={() => setReferences((current) => ({ ...current, video: moveOrderedReference(current.video, index, -1) }))} disabled={busy || index === 0}>上移</button><button type="button" className="quiet-button" onClick={() => setReferences((current) => ({ ...current, video: moveOrderedReference(current.video, index, 1) }))} disabled={busy || index === currentReferences.length - 1}>下移</button><button type="button" className="quiet-button" onClick={() => setReferences((current) => ({ ...current, video: removeOrderedReference(current.video, assetId) }))} disabled={busy}>移除</button></label>;
+                        })}
+                        {!currentReferences.length && <span className="empty-state">尚未添加参考图。</span>}
+                      </div>
+                      <div className="shot-asset-checklist">{imageAssets.filter((asset) => !currentReferences.includes(asset.id)).slice(0, 24).map((asset) => <label key={asset.id}><AssetThumb projectId={projectId} asset={asset} /><span>{asset.name}</span><button type="button" className="quiet-button" onClick={() => setReferences((current) => ({ ...current, video: addOrderedReference(current.video, asset.id, ref2vaImageField?.maxItems) }))} disabled={busy || currentReferences.length >= (ref2vaImageField?.maxItems ?? 0)}>添加为 @图片{currentReferences.length + 1}</button></label>)}</div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="shot-inline-note">I2V 使用当前已选关键帧；切回 I2V 不会静默覆盖该选择。</p>
+                      {selectedShot.selectedImageAssetId ? <div className="shot-asset-checklist"><label><span>@图片1 · 当前关键帧</span>{imageAssets.find((asset) => asset.id === selectedShot.selectedImageAssetId) ? <AssetThumb projectId={projectId} asset={imageAssets.find((asset) => asset.id === selectedShot.selectedImageAssetId)!} /> : <span className="shot-thumb">图片</span>}<span>{selectedShot.selectedImageAssetId}</span></label></div> : <p className="empty-state">请先在关键帧图片阶段选择图片。</p>}
+                    </>
+                  )}
+                </section>
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Candidates</span><h4>{stage === "image" ? "图片候选" : "视频候选"}</h4></div></div><div className="shot-candidate-grid">{stageCandidates.map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, true)} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}{stageCandidates.length === 0 && <p className="empty-state">暂无该阶段任务候选；生成后结果会出现在这里。</p>}</div></section>
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">History</span><h4>生成历史</h4></div></div>{recentFailure && <div className="shot-recent-failure"><strong>最近失败记录（辅助信息）</strong><span>{recentFailure.error?.message ?? "任务失败"}</span>{onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(recentFailure.id)}>查看任务详情</button>}</div>}<div className="shot-history-list">{stageLinks.slice(0, 8).map((link) => <div key={link.id} className="shot-history-item"><span>{formatDateTime(link.createdAt)}</span><strong>{link.task?.status ?? "关联中"}</strong><small>{link.task?.id ?? link.id}</small></div>)}{stageLinks.length === 0 && <p className="empty-state">尚无生成任务。</p>}</div></section>
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Project assets</span><h4>当前项目素材</h4></div></div><div className="shot-manual-assets">{manualAssets.slice(0, 12).map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, false)} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}</div></section>
@@ -441,6 +509,65 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
       {error && <p className="error-message">{error}</p>}
     </section>
   );
+}
+
+export function isRef2vaRecipe(recipe?: RecipeViewModel): boolean {
+  return recipe ? h3FamilyForWorkflowId(recipe.workflowId) === "REF2VA" : false;
+}
+
+export function referenceImagesField(recipe?: RecipeViewModel): Extract<RecipeField, { type: "images" }> | undefined {
+  return recipe?.fields.find((field): field is Extract<RecipeField, { type: "images" }> => field.type === "images");
+}
+
+export function validateRef2vaReferences(
+  field: Extract<RecipeField, { type: "images" }> | undefined,
+  assetIds: string[],
+): string | undefined {
+  if (!field) return "REF2VA Recipe 缺少多图参考输入";
+  const minItems = Math.max(2, field.minItems);
+  if (new Set(assetIds).size !== assetIds.length) return "REF2VA 参考图不能重复";
+  if (assetIds.length < minItems) return `REF2VA 至少需要 ${minItems} 张参考图`;
+  if (assetIds.length > field.maxItems) return `REF2VA 最多允许 ${field.maxItems} 张参考图`;
+  return undefined;
+}
+
+export function ensurePrimaryReference(assetIds: string[], selectedAssetId?: string): string[] {
+  if (!selectedAssetId || assetIds[0] === selectedAssetId) return assetIds;
+  return [selectedAssetId, ...assetIds.filter((assetId) => assetId !== selectedAssetId)];
+}
+
+export function addOrderedReference(assetIds: string[], assetId: string, maxItems?: number): string[] {
+  if (assetIds.includes(assetId) || (maxItems !== undefined && assetIds.length >= maxItems)) return assetIds;
+  return [...assetIds, assetId];
+}
+
+export function toggleOrderedReference(assetIds: string[], assetId: string, maxItems?: number): string[] {
+  return assetIds.includes(assetId)
+    ? removeOrderedReference(assetIds, assetId)
+    : addOrderedReference(assetIds, assetId, maxItems);
+}
+
+export function removeOrderedReference(assetIds: string[], assetId: string): string[] {
+  return assetIds.filter((current) => current !== assetId);
+}
+
+export function moveOrderedReference(assetIds: string[], index: number, delta: -1 | 1): string[] {
+  const target = index + delta;
+  if (index < 0 || index >= assetIds.length || target < 0 || target >= assetIds.length) return assetIds;
+  const next = [...assetIds];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+function orderedShotReferences(shot: ShotView, stage: ShotStage): string[] {
+  return shot.referenceAssets
+    .filter((reference) => reference.stage === stage)
+    .sort((left, right) => left.ordinal - right.ordinal)
+    .map((reference) => reference.assetId);
+}
+
+function sameReferenceOrder(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((assetId, index) => assetId === right[index]);
 }
 
 function isImageAsset(asset: AssetView): boolean {

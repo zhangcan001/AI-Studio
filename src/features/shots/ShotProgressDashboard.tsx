@@ -1,16 +1,22 @@
 import type { ShotView } from "../../types/shot";
+import { deriveStageStatus } from "./shotDomain";
 import { shotProgressSummary } from "./shotBatchDomain";
+
+export function shotImagesReady(shots: ShotView[]): number {
+  return shots.filter((shot) => ["IMAGE_REVIEW", "IMAGE_SELECTED"].includes(deriveStageStatus(shot, "image"))).length;
+}
 
 export function ShotProgressDashboard({ shots }: { shots: ShotView[] }) {
   const summary = shotProgressSummary(shots);
+  const imagesReady = shotImagesReady(shots);
   const metrics = [
     ["总镜头", summary.total, "neutral"],
-    ["待关键帧", summary.pendingKeyframes, "muted"],
-    ["关键帧已选", summary.keyframesSelected, "success"],
+    ["图片已就绪", imagesReady, "muted"],
+    ["图片已选", summary.keyframesSelected, "success"],
     ["视频生成中", summary.videoGenerating, "active"],
-    ["待视频确认", summary.pendingVideoReview, "review"],
+    ["视频已就绪", summary.pendingVideoReview, "review"],
     ["已完成", summary.completed, "success"],
-    ["失败 / 需处理", summary.needsAttention, "danger"],
+    ["失败", summary.needsAttention, "danger"],
   ] as const;
   return (
     <section className="shot-progress-dashboard" aria-label="Shot 生产进度">
