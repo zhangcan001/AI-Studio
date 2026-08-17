@@ -10,13 +10,14 @@ interface Props {
   shots: ShotView[];
   assets: AssetView[];
   stage: ShotStage;
+  busy: boolean;
   onAssetsLoaded: (assets: AssetView[]) => void;
   onSelect: (shotId: string, stage: ShotStage, assetId: string, fromLinkedTask: boolean) => void;
   onRetry: (shotId: string, stage: ShotStage) => void;
   onOpenTask?: (taskId: string) => void;
 }
 
-export function ShotBatchReviewBoard({ projectId, shots, assets, stage, onAssetsLoaded, onSelect, onRetry, onOpenTask }: Props) {
+export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask }: Props) {
   const candidateIds = useMemo(() => [...new Set(shots.flatMap((shot) => shot.generationLinks.filter((link) => link.stage === stage).flatMap((link) => link.task?.outputAssetIds ?? [])))] , [shots, stage]);
   useEffect(() => {
     const missing = candidateIds.filter((id) => !assets.some((asset) => asset.id === id));
@@ -42,8 +43,8 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, onAssets
           return (
             <article key={shot.id} className="shot-batch-review-card">
               <div className="shot-batch-review-card-heading"><div><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shotStatusLabels[status]}</small></div>{selectedId && <span className="shot-batch-selected-badge">已选择</span>}</div>
-              {candidates.length > 0 ? <div className="shot-batch-review-candidates">{candidates.map((asset) => <div key={asset.id} className={`shot-batch-review-candidate${selectedId === asset.id ? " selected" : ""}`}><ReviewAssetMedia projectId={projectId} asset={asset} stage={stage} /><div><strong>{asset.name}</strong><small>{selectedId === asset.id ? "当前选择" : "候选结果"}</small></div><button type="button" onClick={() => onSelect(shot.id, stage, asset.id, true)}>{selectedId === asset.id ? "已选" : stage === "image" ? "设为关键帧" : "设为最终视频"}</button></div>)}</div> : <p className="empty-state">{status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO" ? "任务运行中，等待结果…" : "暂无候选结果"}</p>}
-              {failure && <div className="shot-batch-review-failure"><strong>最近一次任务失败</strong><span>{failure.error?.message ?? "生成任务失败，需要处理"}</span><div><button type="button" className="quiet-button" onClick={() => onRetry(shot.id, stage)}>重新加入队列</button>{onOpenTask && <button type="button" className="quiet-button" onClick={() => failure.id && onOpenTask(failure.id)}>查看任务详情</button>}</div></div>}
+              {candidates.length > 0 ? <div className="shot-batch-review-candidates">{candidates.map((asset) => <div key={asset.id} className={`shot-batch-review-candidate${selectedId === asset.id ? " selected" : ""}`}><ReviewAssetMedia projectId={projectId} asset={asset} stage={stage} /><div><strong>{asset.name}</strong><small>{selectedId === asset.id ? "当前选择" : "候选结果"}</small></div><button type="button" disabled={busy || selectedId === asset.id} onClick={() => onSelect(shot.id, stage, asset.id, true)}>{selectedId === asset.id ? "已选" : stage === "image" ? "设为关键帧" : "设为最终视频"}</button></div>)}</div> : <p className="empty-state">{status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO" ? "任务运行中，等待结果…" : "暂无候选结果"}</p>}
+              {failure && <div className="shot-batch-review-failure"><strong>最近一次任务失败</strong><span>{failure.error?.message ?? "生成任务失败，需要处理"}</span><div><button type="button" className="quiet-button" disabled={busy} onClick={() => onRetry(shot.id, stage)}>重新加入队列</button>{onOpenTask && <button type="button" className="quiet-button" disabled={busy} onClick={() => failure.id && onOpenTask(failure.id)}>查看任务详情</button>}</div></div>}
             </article>
           );
         })}

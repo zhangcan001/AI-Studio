@@ -541,7 +541,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 shot_batch_repository.clone(),
                 clock.clone(),
             )
-            .with_stage_prompt_repository(shot_bulk_repository.clone()));
+            .with_stage_prompt_repository(shot_bulk_repository.clone())
+            .with_generation_snapshot_repository(snapshot_repository.clone()));
             let shot_batch_service = Arc::new(ShotBatchService::new(
                 shot_repository,
                 shot_batch_repository,

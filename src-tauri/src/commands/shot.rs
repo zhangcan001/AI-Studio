@@ -74,6 +74,7 @@ pub struct ShotGenerateRequestDto {
     #[serde(default)]
     pub values: BTreeMap<String, super::generation::InputValueDto>,
     pub production_batch_item_id: Option<String>,
+    pub retry_task_id: Option<String>,
 }
 
 #[tauri::command]
@@ -239,6 +240,7 @@ pub async fn shot_generate(
             stage,
             values,
             production_batch_item_id: request.production_batch_item_id,
+            retry_task_id: request.retry_task_id,
         })
         .await
         .map_err(map_shot_error)

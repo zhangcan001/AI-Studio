@@ -641,7 +641,7 @@ fn prompt_for_shot(
             .iter()
             .find(|prompt| prompt.stage == stage)
             .map(|prompt| prompt.prompt_text.clone())
-            .unwrap_or_default(),
+            .unwrap_or_else(|| data.shot.prompt_text.clone()),
         prompt_entry_id: None,
         prompt_version_id: None,
     }
@@ -911,10 +911,11 @@ fn transaction_error(code: &'static str, error: RepositoryError) -> ShotBulkServ
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_import, BulkPromptAssignmentRequest, BulkPromptSource, ShotBulkImportRequest,
-        ShotBulkInputFormat, ShotBulkService, MAX_BULK_SHOT_IMPORT,
+        parse_import, prompt_for_shot, BulkPromptAssignmentRequest, BulkPromptSource,
+        ResolvedPrompt, ShotBulkImportRequest, ShotBulkInputFormat, ShotBulkService,
+        MAX_BULK_SHOT_IMPORT,
     };
-    use crate::application::ports::{ShotBulkRepository, ShotRepository};
+    use crate::application::ports::{ShotBulkData, ShotBulkRepository, ShotRecord, ShotRepository};
     use crate::application::prompt_library_service::PromptLibraryService;
     use crate::infrastructure::database::{
         initialize,
@@ -963,6 +964,40 @@ mod tests {
             .errors
             .iter()
             .any(|issue| issue.code == "BULK_IMPORT_DUPLICATE_SHOT"));
+    }
+
+    #[test]
+    fn clear_provenance_falls_back_to_legacy_prompt_for_partial_stage_rows() {
+        let data = ShotBulkData {
+            shot: ShotRecord {
+                id: "sht_partial".to_owned(),
+                project_id: "prj_default".to_owned(),
+                ordinal: 1,
+                name: "Partial".to_owned(),
+                prompt_text: "legacy prompt".to_owned(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+                selected_image_asset_id: None,
+                selected_video_asset_id: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            },
+            stage_configs: Vec::new(),
+            stage_prompts: Vec::new(),
+        };
+        let resolved = prompt_for_shot(
+            &BulkPromptSource::ClearProvenance,
+            crate::domain::ShotStage::Image,
+            &data,
+            &ResolvedPrompt {
+                text: String::new(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+            },
+        );
+        assert_eq!(resolved.text, "legacy prompt");
+        assert_eq!(resolved.prompt_entry_id, None);
+        assert_eq!(resolved.prompt_version_id, None);
     }
 
     #[tokio::test]

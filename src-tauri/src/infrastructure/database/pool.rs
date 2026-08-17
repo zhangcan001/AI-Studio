@@ -458,4 +458,164 @@ mod tests {
         assert_eq!(preserved_rows, before);
         pool.close().await;
     }
+
+    #[tokio::test]
+    async fn migration_019_backfills_both_stages_and_preserves_fk_cascade_behavior() {
+        let temporary_directory = tempdir().expect("temporary directory should be created");
+        let database_path = temporary_directory.path().join("legacy-018.db");
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("018 database should connect");
+
+        for migration in [
+            include_str!("../../../migrations/001_initial.sql"),
+            include_str!("../../../migrations/002_browse_indexes.sql"),
+            include_str!("../../../migrations/003_presets.sql"),
+            include_str!("../../../migrations/004_video_outputs.sql"),
+            include_str!("../../../migrations/005_workflow_runtime_state.sql"),
+            include_str!("../../../migrations/006_production_queue.sql"),
+            include_str!("../../../migrations/007_production_queue_operations.sql"),
+            include_str!("../../../migrations/008_organization.sql"),
+            include_str!("../../../migrations/009_prompt_library.sql"),
+            include_str!("../../../migrations/010_shot_production.sql"),
+            include_str!("../../../migrations/011_asset_video_prompt.sql"),
+            include_str!("../../../migrations/012_production_item_review.sql"),
+            include_str!("../../../migrations/013_workflow_archive_and_package_metadata.sql"),
+            include_str!("../../../migrations/014_workflow_benchmark.sql"),
+            include_str!("../../../migrations/015_runtime_provenance.sql"),
+            include_str!("../../../migrations/016_generation_telemetry.sql"),
+            include_str!("../../../migrations/017_submission_idempotency.sql"),
+            include_str!("../../../migrations/018_production_orchestrator.sql"),
+        ] {
+            sqlx::raw_sql(migration)
+                .execute(&pool)
+                .await
+                .expect("018 migrations should apply");
+        }
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .expect("foreign keys should be enabled");
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('migration-project', 'Migration', 'C:/migration', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO prompt_entries
+             (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
+             VALUES ('migration-entry', 'migration-project', 'prompt', 'Legacy', 'legacy', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO prompt_versions
+             (id, prompt_id, version, text, created_at)
+             VALUES ('migration-version', 'migration-entry', 1, 'legacy prompt', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (id, name, prompt, entry_id, version_id, ordinal) in [
+            (
+                "migration-shot-a",
+                "Shot A",
+                "legacy prompt",
+                Some("migration-entry"),
+                Some("migration-version"),
+                0_i64,
+            ),
+            ("migration-shot-b", "Shot B", "", None, None, 1_i64),
+            (
+                "migration-shot-c",
+                "Shot C",
+                "no provenance",
+                None,
+                None,
+                2_i64,
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO shots
+                 (id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id, created_at, updated_at)
+                 VALUES (?, 'migration-project', ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(id)
+            .bind(ordinal)
+            .bind(name)
+            .bind(prompt)
+            .bind(entry_id)
+            .bind(version_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/019_shot_stage_prompts.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration 019 should apply to an 018 database");
+
+        let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT shot_id, stage, prompt_entry_id, prompt_version_id
+             FROM shot_stage_prompts ORDER BY shot_id, stage",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.0 == "migration-shot-a")
+                .map(|row| (row.1.as_str(), row.2.as_deref(), row.3.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("image", Some("migration-entry"), Some("migration-version")),
+                ("video", Some("migration-entry"), Some("migration-version")),
+            ]
+        );
+        assert!(rows
+            .iter()
+            .filter(|row| row.0 == "migration-shot-b")
+            .all(|row| row.2.is_none() && row.3.is_none()));
+
+        sqlx::query("DELETE FROM prompt_entries WHERE id = 'migration-entry'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT prompt_entry_id, prompt_version_id
+             FROM shot_stage_prompts WHERE shot_id = 'migration-shot-a' ORDER BY stage",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .all(|row| row.0.is_none() && row.1.is_none()));
+
+        sqlx::query("DELETE FROM shots WHERE id = 'migration-shot-c'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_stage_prompts WHERE shot_id = 'migration-shot-c'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+    }
 }

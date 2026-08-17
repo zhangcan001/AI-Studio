@@ -1290,7 +1290,21 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
         GenerationServiceError::InputPrepare(error) => error.code(),
         GenerationServiceError::Snapshot(_) => "SNAPSHOT_ERROR",
         GenerationServiceError::Domain(_) => "TASK_DOMAIN_ERROR",
-        GenerationServiceError::Comfy(_) => "COMFY_ERROR",
+        GenerationServiceError::Comfy(error) => match error.kind() {
+            "OFFLINE" => "COMFY_OFFLINE",
+            "TIMEOUT" => "COMFY_TIMEOUT",
+            "INCOMPATIBLE" => "COMFY_INCOMPATIBLE",
+            "PROTOCOL_ERROR" => "COMFY_PROTOCOL_ERROR",
+            "WORKFLOW_VALIDATION" => "WORKFLOW_VALIDATION_FAILED",
+            "STREAM_DISCONNECTED" => "COMFY_STREAM_DISCONNECTED",
+            "HISTORY_NOT_FOUND" => "HISTORY_NOT_FOUND",
+            "OUTPUT_DOWNLOAD_FAILED" => "OUTPUT_DOWNLOAD_FAILED",
+            "OUTPUT_TOO_LARGE" => "OUTPUT_TOO_LARGE",
+            "IMAGE_UPLOAD_FAILED" => "COMFY_IMAGE_UPLOAD_FAILED",
+            "INPUT_UPLOAD_FAILED" => "COMFY_INPUT_UPLOAD_FAILED",
+            "INPUT_UPLOAD_TOO_LARGE" => "COMFY_INPUT_UPLOAD_TOO_LARGE",
+            _ => "COMFY_ERROR",
+        },
         GenerationServiceError::StreamDisconnected(_) => "COMFY_STREAM_DISCONNECTED",
         GenerationServiceError::OutputCollection(_) => "OUTPUT_COLLECTION_ERROR",
         GenerationServiceError::AssetImport(_) => "ASSET_IMPORT_ERROR",
@@ -1519,12 +1533,13 @@ impl From<RepositoryError> for ProductionQueueError {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_admission_blocker, freeze_random_seed_values, generation_values_from_json,
-        generation_values_to_json, is_transient_requeue_error, reference_manifest_for_values,
-        select_recovery, should_pause_after_terminal,
+        find_admission_blocker, freeze_random_seed_values, generation_start_error_code,
+        generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
+        reference_manifest_for_values, select_recovery, should_pause_after_terminal,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
-    use crate::application::ports::ActiveProductionItem;
+    use crate::application::generation_service::GenerationServiceError;
+    use crate::application::ports::{ActiveProductionItem, ComfyAdapterError};
     use crate::domain::{
         AssetId, InputDefinition, ProductionBatch, ProductionBatchId, ProductionBatchItem,
         ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, Recipe,
@@ -1552,6 +1567,24 @@ mod tests {
         );
         let json = generation_values_to_json(&values);
         assert_eq!(generation_values_from_json(&json).unwrap(), values);
+    }
+
+    #[test]
+    fn queue_keeps_structured_comfy_preflight_error_codes() {
+        let error = GenerationServiceError::Comfy(ComfyAdapterError::WorkflowValidation {
+            message: "required node is missing".to_owned(),
+            node_errors: json!({"missing": ["NBH3HyperStepSimple"]}),
+        });
+        assert_eq!(
+            generation_start_error_code(&error),
+            "WORKFLOW_VALIDATION_FAILED"
+        );
+        assert_eq!(
+            generation_start_error_code(&GenerationServiceError::Comfy(
+                ComfyAdapterError::Incompatible("required model is missing".to_owned())
+            )),
+            "COMFY_INCOMPATIBLE"
+        );
     }
 
     #[test]

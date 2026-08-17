@@ -158,7 +158,7 @@ impl ProjectBackupService {
 
     pub async fn inspect(&self, source: PathBuf) -> Result<ProjectBackupPreviewView, AppError> {
         let (manifest, document, entry_names) = inspect_archive(&source)?;
-        validate_document_entries(&document, &entry_names)?;
+        validate_document_entries(&document, &entry_names, manifest.version)?;
         let missing_workflows = self.find_missing_workflows(&document).await?;
         fs::create_dir_all(&self.inspection_dir)
             .map_err(|error| AppError::filesystem(error.to_string()))?;
@@ -211,7 +211,7 @@ impl ProjectBackupService {
     pub async fn restore(&self, inspection_id: &str) -> Result<RestoredProjectView, AppError> {
         let inspection = self.take_inspection(inspection_id)?;
         let (manifest, document, entry_names) = inspect_archive(&inspection.archive_path)?;
-        validate_document_entries(&document, &entry_names)?;
+        validate_document_entries(&document, &entry_names, manifest.version)?;
 
         let new_project_id = format!("prj_{}", Uuid::new_v4());
         let final_root = self.projects_dir.join(&new_project_id);
@@ -2928,6 +2928,7 @@ fn read_zip_json<T: for<'de> Deserialize<'de>>(
 fn validate_document_entries(
     document: &BackupDocument,
     entry_names: &HashSet<String>,
+    version: u32,
 ) -> Result<(), AppError> {
     for asset in &document.assets {
         if !safe_zip_path(&asset.content_path) || !entry_names.contains(&asset.content_path) {
@@ -2945,7 +2946,7 @@ fn validate_document_entries(
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
     validate_production_orchestrator_document(document)?;
-    validate_shot_document(document)?;
+    validate_shot_document(document, version)?;
     Ok(())
 }
 
@@ -3366,7 +3367,8 @@ fn validate_asset_video_prompt_document(document: &BackupDocument) -> Result<(),
     Ok(())
 }
 
-fn validate_shot_document(document: &BackupDocument) -> Result<(), AppError> {
+fn validate_shot_document(document: &BackupDocument, version: u32) -> Result<(), AppError> {
+    use crate::application::prompt_library_service::canonical_prompt_text;
     use crate::domain::{canonical_shot_name, validate_scalar_values, ShotStage};
 
     let mut shot_ids = HashSet::new();
@@ -3435,6 +3437,51 @@ fn validate_shot_document(document: &BackupDocument) -> Result<(), AppError> {
         .any(|(index, ordinal)| *ordinal != index as i64)
     {
         return Err(AppError::backup_invalid("备份镜头序号必须从 0 连续排列"));
+    }
+
+    let mut stage_prompts = HashSet::new();
+    let mut stage_prompt_counts = HashMap::<&str, usize>::new();
+    for prompt in &document.shot_stage_prompts {
+        if !shot_ids.contains(prompt.shot_id.as_str())
+            || ShotStage::try_from_str(&prompt.stage).is_err()
+            || !stage_prompts.insert((prompt.shot_id.as_str(), prompt.stage.as_str()))
+        {
+            return Err(AppError::backup_invalid("备份镜头阶段 Prompt 无效或重复"));
+        }
+        let canonical = canonical_prompt_text(&prompt.prompt_text)
+            .map_err(|error| AppError::backup_invalid(format!("阶段 Prompt 无效：{error}")))?;
+        if canonical != prompt.prompt_text {
+            return Err(AppError::backup_invalid("备份镜头阶段 Prompt 未规范化"));
+        }
+        if prompt.prompt_entry_id.is_some() != prompt.prompt_version_id.is_some() {
+            return Err(AppError::backup_invalid(
+                "备份镜头阶段 Prompt provenance 不完整",
+            ));
+        }
+        if let (Some(entry_id), Some(version_id)) =
+            (&prompt.prompt_entry_id, &prompt.prompt_version_id)
+        {
+            if !prompt_entry_ids.contains(entry_id.as_str())
+                || prompt_versions.get(version_id.as_str()).copied() != Some(entry_id.as_str())
+            {
+                return Err(AppError::backup_invalid(
+                    "备份镜头阶段 Prompt provenance 引用无效",
+                ));
+            }
+        }
+        *stage_prompt_counts
+            .entry(prompt.shot_id.as_str())
+            .or_default() += 1;
+    }
+    if version >= 10
+        && document
+            .shots
+            .iter()
+            .any(|shot| stage_prompt_counts.get(shot.id.as_str()).copied() != Some(2))
+    {
+        return Err(AppError::backup_invalid(
+            "v10 备份必须为每个镜头保存 image/video 阶段 Prompt",
+        ));
     }
 
     let mut stage_configs = HashSet::new();

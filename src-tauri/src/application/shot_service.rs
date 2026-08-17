@@ -6,10 +6,10 @@ use crate::application::ordered_reference_binding::{
     ref2va_image_bounds, reference_manifest, validate_ordered_reference_ids,
 };
 use crate::application::ports::{
-    AssetRepository, Clock, GenerationDefinitionRepository, PromptLibraryRepository,
-    RepositoryError, ShotBatchRepository, ShotBulkRepository, ShotData, ShotRecord,
-    ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord, TaskRepository,
-    TaskUpdatePayload,
+    AssetRepository, Clock, GenerationDefinitionRepository, GenerationSnapshotRepository,
+    PromptLibraryRepository, RepositoryError, ShotBatchRepository, ShotBulkRepository, ShotData,
+    ShotRecord, ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord,
+    ShotStagePromptRecord, TaskRepository, TaskUpdatePayload,
 };
 use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::prompt_library_service::canonical_prompt_text;
@@ -17,7 +17,7 @@ use crate::application::task_query_service::TaskQueryService;
 use crate::compiler::RecipeParser;
 use crate::domain::{
     canonical_shot_name, derive_stage_status, validate_project_id, AssetId, AssetType,
-    InputDefinition, OutputType, Recipe, SeedValue, ShotStage, ShotViewStatus, TaskId,
+    InputDefinition, OutputType, Recipe, SeedValue, ShotStage, ShotViewStatus, TaskId, TaskStatus,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -119,6 +119,7 @@ pub struct ShotGenerationRequest {
     pub stage: ShotStage,
     pub values: BTreeMap<String, GenerationInputValue>,
     pub production_batch_item_id: Option<String>,
+    pub retry_task_id: Option<String>,
 }
 
 pub struct ShotService {
@@ -132,6 +133,7 @@ pub struct ShotService {
     shot_batch_repository: Arc<dyn ShotBatchRepository>,
     clock: Arc<dyn Clock>,
     stage_prompt_repository: Option<Arc<dyn ShotBulkRepository>>,
+    generation_snapshot_repository: Option<Arc<dyn GenerationSnapshotRepository>>,
 }
 
 impl ShotService {
@@ -158,11 +160,20 @@ impl ShotService {
             shot_batch_repository,
             clock,
             stage_prompt_repository: None,
+            generation_snapshot_repository: None,
         }
     }
 
     pub fn with_stage_prompt_repository(mut self, repository: Arc<dyn ShotBulkRepository>) -> Self {
         self.stage_prompt_repository = Some(repository);
+        self
+    }
+
+    pub fn with_generation_snapshot_repository(
+        mut self,
+        repository: Arc<dyn GenerationSnapshotRepository>,
+    ) -> Self {
+        self.generation_snapshot_repository = Some(repository);
         self
     }
 
@@ -213,6 +224,9 @@ impl ShotService {
             .await?
             .ok_or_else(|| ShotServiceError::NotFound(request.shot_id.clone()))?
             .shot;
+        let previous_prompt = shot.prompt_text.clone();
+        let previous_prompt_entry_id = shot.prompt_entry_id.clone();
+        let previous_prompt_version_id = shot.prompt_version_id.clone();
         shot.name = canonical_shot_name(&request.name)?;
         shot.prompt_text =
             canonical_prompt_text(&request.prompt_text).map_err(ShotServiceError::InvalidInput)?;
@@ -227,6 +241,32 @@ impl ShotService {
         shot.updated_at = self.clock.now();
         if !self.repository.update(&shot).await? {
             return Err(ShotServiceError::NotFound(request.shot_id));
+        }
+        if let Some(stage_prompt_repository) = &self.stage_prompt_repository {
+            let inherited_updates = stage_prompt_repository
+                .find_bulk_data(&shot.project_id, &shot.id)
+                .await?
+                .into_iter()
+                .flat_map(|data| data.stage_prompts)
+                .filter(|prompt| {
+                    prompt.prompt_text == previous_prompt
+                        && prompt.prompt_entry_id == previous_prompt_entry_id
+                        && prompt.prompt_version_id == previous_prompt_version_id
+                })
+                .map(|prompt| ShotStagePromptRecord {
+                    shot_id: prompt.shot_id,
+                    stage: prompt.stage,
+                    prompt_text: shot.prompt_text.clone(),
+                    prompt_entry_id: shot.prompt_entry_id.clone(),
+                    prompt_version_id: shot.prompt_version_id.clone(),
+                    updated_at: shot.updated_at,
+                })
+                .collect::<Vec<_>>();
+            if !inherited_updates.is_empty() {
+                stage_prompt_repository
+                    .update_stage_prompts_atomic(&shot.project_id, &inherited_updates)
+                    .await?;
+            }
         }
         self.get(&shot.project_id, &shot.id).await
     }
@@ -396,15 +436,58 @@ impl ShotService {
             .find(&request.project_id, &request.shot_id)
             .await?
             .ok_or_else(|| ShotServiceError::NotFound(request.shot_id.clone()))?;
+        let retry_task = if let Some(retry_task_id) = request.retry_task_id.as_deref() {
+            let task_id = TaskId::parse(retry_task_id.to_owned())
+                .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
+            let task = self
+                .task_repository
+                .find_by_id(&task_id)
+                .await?
+                .ok_or_else(|| ShotServiceError::NotFound(retry_task_id.to_owned()))?;
+            if task.project_id != request.project_id
+                || task.status != TaskStatus::Failed
+                || !data.generation_links.iter().any(|link| {
+                    link.stage == request.stage && link.task_id.as_deref() == Some(retry_task_id)
+                })
+            {
+                return Err(ShotServiceError::InvalidInput(
+                    "只能从当前 Shot 的失败任务创建重试".to_owned(),
+                ));
+            }
+            let snapshot_repository =
+                self.generation_snapshot_repository
+                    .as_ref()
+                    .ok_or_else(|| {
+                        ShotServiceError::InvalidInput("当前运行时不支持快照重试".to_owned())
+                    })?;
+            let snapshot = snapshot_repository
+                .find_by_task_id(&task_id)
+                .await?
+                .ok_or_else(|| {
+                    ShotServiceError::InvalidInput(
+                        "失败任务缺少不可变生成快照，无法安全重试".to_owned(),
+                    )
+                })?;
+            Some((task, snapshot))
+        } else {
+            None
+        };
         let config = data
             .stage_configs
             .iter()
-            .find(|config| config.stage == request.stage)
-            .ok_or_else(|| ShotServiceError::InvalidInput("请先配置当前阶段工作流".to_owned()))?;
+            .find(|config| config.stage == request.stage);
+        let (workflow_version_id, recipe_id) = if let Some((task, _)) = retry_task.as_ref() {
+            (task.workflow_version_id.clone(), task.recipe_id.clone())
+        } else {
+            let config = config.ok_or_else(|| {
+                ShotServiceError::InvalidInput("请先配置当前阶段工作流".to_owned())
+            })?;
+            (config.workflow_version_id.clone(), config.recipe_id.clone())
+        };
 
         let definition = self
             .definition_repository
-            .find(&config.workflow_version_id, &config.recipe_id)
+            .find(&workflow_version_id, &recipe_id)
             .await?
             .ok_or_else(|| ShotServiceError::InvalidInput("当前阶段工作流已不可用".to_owned()))?;
         let recipe = RecipeParser::parse(&definition.recipe_yaml)
@@ -414,22 +497,37 @@ impl ShotService {
         } else {
             None
         };
-        let _ = scalar_values_to_json(&recipe.inputs, &request.values)?;
-        let mut values = scalar_values_from_json(&config.scalar_values)?;
-        values.extend(request.values);
+        let frozen_values = retry_task
+            .as_ref()
+            .map(|(_, snapshot)| input_values_from_snapshot(&snapshot.user_inputs_json, &recipe))
+            .transpose()?;
+        let is_frozen_retry = frozen_values.is_some();
+        let mut values = if let Some(values) = frozen_values {
+            values
+        } else {
+            let config = config.ok_or_else(|| {
+                ShotServiceError::InvalidInput("请先配置当前阶段工作流".to_owned())
+            })?;
+            let _ = scalar_values_to_json(&recipe.inputs, &request.values)?;
+            let mut values = scalar_values_from_json(&config.scalar_values)?;
+            values.extend(request.values);
+            values
+        };
         let mut reference_manifest = None;
-        if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
-            matches!(input, InputDefinition::TextArea { .. }).then_some(key)
-        }) {
-            let prompt = self
-                .stage_prompt_text(
-                    &request.project_id,
-                    &request.shot_id,
-                    request.stage,
-                    &data.shot,
-                )
-                .await?;
-            values.insert(prompt_key.clone(), GenerationInputValue::Text(prompt));
+        if !is_frozen_retry {
+            if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
+                matches!(input, InputDefinition::TextArea { .. }).then_some(key)
+            }) {
+                let prompt = self
+                    .stage_prompt_text(
+                        &request.project_id,
+                        &request.shot_id,
+                        request.stage,
+                        &data.shot,
+                    )
+                    .await?;
+                values.insert(prompt_key.clone(), GenerationInputValue::Text(prompt));
+            }
         }
         let image_input = recipe.inputs.iter().find_map(|(key, input)| match input {
             InputDefinition::Image { .. } => Some((key, false)),
@@ -438,33 +536,53 @@ impl ShotService {
         });
         if request.stage == ShotStage::Video {
             let (_, input) = video_image_input(&recipe)?;
-            let selected = match input {
-                InputDefinition::Image { .. } => {
-                    let selected = data.shot.selected_image_asset_id.as_ref().ok_or_else(|| {
-                        ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned())
-                    })?;
-                    let selected = AssetId::parse(selected.clone()).map_err(|error| {
-                        ShotServiceError::InvalidInput(format!("关键帧素材 ID 无效：{error}"))
-                    })?;
-                    self.validate_image_asset(&request.project_id, &selected, "关键帧")
-                        .await?;
-                    Some(selected)
+            let (selected, references) = if is_frozen_retry {
+                let (key, _) = video_image_input(&recipe)?;
+                match (input, values.get(key).cloned()) {
+                    (InputDefinition::Image { .. }, Some(GenerationInputValue::ImageAsset(id))) => {
+                        (Some(id), Vec::new())
+                    }
+                    (
+                        InputDefinition::Images { .. },
+                        Some(GenerationInputValue::ImageAssets(ids)),
+                    ) => (None, ids),
+                    _ => {
+                        return Err(ShotServiceError::InvalidInput(
+                            "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
+                        ));
+                    }
                 }
-                InputDefinition::Images { .. } => None,
-                _ => unreachable!("video_image_input only returns image inputs"),
-            };
-            let references = if matches!(input, InputDefinition::Images { .. }) {
-                let references =
-                    ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
-                validate_ordered_reference_ids(&references, None)
-                    .map_err(ShotServiceError::InvalidInput)?;
-                for asset_id in &references {
-                    self.validate_image_asset(&request.project_id, asset_id, "参考图")
-                        .await?;
-                }
-                references
             } else {
-                Vec::new()
+                let selected = match input {
+                    InputDefinition::Image { .. } => {
+                        let selected =
+                            data.shot.selected_image_asset_id.as_ref().ok_or_else(|| {
+                                ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned())
+                            })?;
+                        let selected = AssetId::parse(selected.clone()).map_err(|error| {
+                            ShotServiceError::InvalidInput(format!("关键帧素材 ID 无效：{error}"))
+                        })?;
+                        self.validate_image_asset(&request.project_id, &selected, "关键帧")
+                            .await?;
+                        Some(selected)
+                    }
+                    InputDefinition::Images { .. } => None,
+                    _ => unreachable!("video_image_input only returns image inputs"),
+                };
+                let references = if matches!(input, InputDefinition::Images { .. }) {
+                    let references =
+                        ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
+                    validate_ordered_reference_ids(&references, None)
+                        .map_err(ShotServiceError::InvalidInput)?;
+                    for asset_id in &references {
+                        self.validate_image_asset(&request.project_id, asset_id, "参考图")
+                            .await?;
+                    }
+                    references
+                } else {
+                    Vec::new()
+                };
+                (selected, references)
             };
             let (key, image_value, manifest) =
                 build_video_input(&recipe, selected, references, ref2va_bounds)?;
@@ -472,7 +590,7 @@ impl ShotService {
             reference_manifest = manifest;
             self.ensure_no_active_video_tasks(&request.project_id)
                 .await?;
-        } else {
+        } else if !is_frozen_retry {
             let references = data
                 .reference_assets
                 .iter()
@@ -504,8 +622,8 @@ impl ShotService {
 
         let generation_request = CreateGenerationRequest {
             project_id: request.project_id.clone(),
-            workflow_version_id: config.workflow_version_id.clone(),
-            recipe_id: config.recipe_id.clone(),
+            workflow_version_id,
+            recipe_id,
             values,
             reference_manifest,
             submission_idempotency_key: None,
@@ -913,6 +1031,125 @@ fn ordered_reference_asset_ids(
         .collect()
 }
 
+fn input_values_from_snapshot(
+    snapshot: &Value,
+    recipe: &Recipe,
+) -> Result<BTreeMap<String, GenerationInputValue>, ShotServiceError> {
+    let values = snapshot.as_object().ok_or_else(|| {
+        ShotServiceError::InvalidInput("失败任务快照的输入必须是 JSON object".to_owned())
+    })?;
+    let mut restored = BTreeMap::new();
+    for (key, value) in values {
+        let input = recipe.inputs.get(key).ok_or_else(|| {
+            ShotServiceError::InvalidInput(format!("失败任务快照包含未知 Recipe 参数 {key}"))
+        })?;
+        let restored_value = match input {
+            InputDefinition::TextArea { .. } => value
+                .as_str()
+                .map(|value| GenerationInputValue::Text(value.to_owned()))
+                .ok_or_else(|| ShotServiceError::InvalidInput(format!("快照参数 {key} 无效")))?,
+            InputDefinition::Integer { .. } => {
+                GenerationInputValue::Integer(value.as_i64().ok_or_else(|| {
+                    ShotServiceError::InvalidInput(format!("快照参数 {key} 无效"))
+                })?)
+            }
+            InputDefinition::Number { .. } => {
+                let value = value.as_f64().ok_or_else(|| {
+                    ShotServiceError::InvalidInput(format!("快照参数 {key} 无效"))
+                })?;
+                if !value.is_finite() {
+                    return Err(ShotServiceError::InvalidInput(format!(
+                        "快照参数 {key} 无效"
+                    )));
+                }
+                GenerationInputValue::Number(value)
+            }
+            InputDefinition::Seed { .. } => match value {
+                Value::String(value) if value == "random" => {
+                    GenerationInputValue::Seed(SeedValue::Random)
+                }
+                Value::Number(value) => {
+                    GenerationInputValue::Seed(SeedValue::Fixed(value.as_u64().ok_or_else(
+                        || ShotServiceError::InvalidInput(format!("快照参数 {key} 无效")),
+                    )?))
+                }
+                _ => {
+                    return Err(ShotServiceError::InvalidInput(format!(
+                        "快照参数 {key} 无效"
+                    )))
+                }
+            },
+            InputDefinition::Image { .. } => {
+                GenerationInputValue::ImageAsset(snapshot_asset_id(value, "image_asset", key)?)
+            }
+            InputDefinition::Images { .. } => {
+                GenerationInputValue::ImageAssets(snapshot_asset_ids(value, "image_assets", key)?)
+            }
+            InputDefinition::Video { .. } => {
+                GenerationInputValue::VideoAsset(snapshot_asset_id(value, "video_asset", key)?)
+            }
+            InputDefinition::Audio { .. } => {
+                GenerationInputValue::AudioAsset(snapshot_asset_id(value, "audio_asset", key)?)
+            }
+            InputDefinition::Videos { .. } => {
+                GenerationInputValue::VideoAssets(snapshot_asset_ids(value, "video_assets", key)?)
+            }
+            InputDefinition::Audios { .. } => {
+                GenerationInputValue::AudioAssets(snapshot_asset_ids(value, "audio_assets", key)?)
+            }
+        };
+        restored.insert(key.clone(), restored_value);
+    }
+    Ok(restored)
+}
+
+fn snapshot_asset_id(
+    value: &Value,
+    expected_type: &str,
+    key: &str,
+) -> Result<AssetId, ShotServiceError> {
+    let actual_type = value.get("type").and_then(Value::as_str);
+    if actual_type != Some(expected_type) {
+        return Err(ShotServiceError::InvalidInput(format!(
+            "快照参数 {key} 的素材类型无效"
+        )));
+    }
+    let asset_id = value
+        .get("assetId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ShotServiceError::InvalidInput(format!("快照参数 {key} 缺少素材 ID")))?;
+    AssetId::parse(asset_id.to_owned()).map_err(|error| {
+        ShotServiceError::InvalidInput(format!("快照参数 {key} 的素材 ID 无效：{error}"))
+    })
+}
+
+fn snapshot_asset_ids(
+    value: &Value,
+    expected_type: &str,
+    key: &str,
+) -> Result<Vec<AssetId>, ShotServiceError> {
+    let actual_type = value.get("type").and_then(Value::as_str);
+    if actual_type != Some(expected_type) {
+        return Err(ShotServiceError::InvalidInput(format!(
+            "快照参数 {key} 的素材类型无效"
+        )));
+    }
+    value
+        .get("assetIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ShotServiceError::InvalidInput(format!("快照参数 {key} 缺少素材 ID")))?
+        .iter()
+        .map(|value| {
+            let asset_id = value.as_str().ok_or_else(|| {
+                ShotServiceError::InvalidInput(format!("快照参数 {key} 的素材 ID 无效"))
+            })?;
+            AssetId::parse(asset_id.to_owned()).map_err(|error| {
+                ShotServiceError::InvalidInput(format!("快照参数 {key} 的素材 ID 无效：{error}"))
+            })
+        })
+        .collect()
+}
+
 fn validate_video_recipe(
     workflow_id: &str,
     recipe: &Recipe,
@@ -1108,18 +1345,89 @@ impl From<crate::domain::ShotDomainError> for ShotServiceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_video_input, ordered_reference_asset_ids, ShotServiceError};
+    use super::{
+        build_video_input, input_values_from_snapshot, ordered_reference_asset_ids,
+        ShotServiceError,
+    };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::ReferenceManifest;
     use crate::application::ports::ShotReferenceAssetRecord;
     use crate::domain::{
-        AssetId, Binding, InputDefinition, OutputDefinition, OutputType, Recipe, ShotStage,
-        WorkflowRef,
+        AssetId, Binding, InputDefinition, OutputDefinition, OutputType, Recipe, SeedDefault,
+        ShotStage, WorkflowRef,
     };
+    use serde_json::json;
     use std::collections::BTreeMap;
 
     fn asset_id(value: &str) -> AssetId {
         AssetId::parse(format!("ast_{value}")).expect("test asset id")
+    }
+
+    #[test]
+    fn retry_snapshot_restores_prompt_seed_and_reference_order() {
+        let recipe = Recipe {
+            schema_version: 1,
+            id: "rcp_retry".to_owned(),
+            name: "Retry".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow_api.json".to_owned(),
+            },
+            inputs: BTreeMap::from([
+                (
+                    "prompt".to_owned(),
+                    InputDefinition::TextArea {
+                        label: "Prompt".to_owned(),
+                        required: true,
+                        default: None,
+                    },
+                ),
+                (
+                    "seed".to_owned(),
+                    InputDefinition::Seed {
+                        label: "Seed".to_owned(),
+                        default: SeedDefault::Random,
+                        min: Some(0),
+                        max: Some(1000),
+                    },
+                ),
+                (
+                    "reference_images".to_owned(),
+                    InputDefinition::Images {
+                        label: "References".to_owned(),
+                        required: true,
+                        min_items: 2,
+                        max_items: 3,
+                    },
+                ),
+            ]),
+            bindings: Vec::new(),
+            outputs: Vec::new(),
+        };
+        let values = input_values_from_snapshot(
+            &json!({
+                "prompt": "P1",
+                "seed": 777,
+                "reference_images": {
+                    "type": "image_assets",
+                    "assetIds": ["ast_b", "ast_a", "ast_c"]
+                }
+            }),
+            &recipe,
+        )
+        .expect("retry snapshot should restore typed values");
+
+        assert_eq!(
+            values["prompt"],
+            GenerationInputValue::Text("P1".to_owned())
+        );
+        assert_eq!(
+            values["seed"],
+            GenerationInputValue::Seed(crate::domain::SeedValue::Fixed(777))
+        );
+        assert_eq!(
+            values["reference_images"],
+            GenerationInputValue::ImageAssets(vec![asset_id("b"), asset_id("a"), asset_id("c")])
+        );
     }
 
     fn video_recipe(input: InputDefinition) -> Recipe {

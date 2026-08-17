@@ -361,7 +361,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         await startProductionQueue(projectId, detail.id);
         setNotice("已创建新的普通队列项并开始处理；原失败任务和关联记录已保留。新队列仍按阶段严格串行。 ");
       } else {
-        const task = await generateShot({ projectId, shotId, stage: retryStage });
+        const task = await generateShot({ projectId, shotId, stage: retryStage, retryTaskId: failedLink.task?.id });
         setNotice(`已创建新的普通任务 ${task.id}；原失败任务仍保留。`);
       }
       await reload();
@@ -439,6 +439,12 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         onError={(message) => setError(message)}
         onConfigureStage={configureBulkStage}
         onBulkPrompt={assignBulkPrompt}
+        busy={busy}
+        onOpenReview={(reviewStage, shotIds) => {
+          if (busy || !shotIds.length) return;
+          setStage(reviewStage);
+          setSelectedShotId(shotIds[0]);
+        }}
       />
       <div className="shot-workspace-grid">
         <aside className="shot-list-pane" aria-label="镜头列表">
@@ -519,9 +525,9 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
                     </>
                   )}
                 </section>
-                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Candidates</span><h4>{stage === "image" ? "图片候选" : "视频候选"}</h4></div></div><div className="shot-candidate-grid">{stageCandidates.map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, true)} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}{stageCandidates.length === 0 && <p className="empty-state">暂无该阶段任务候选；生成后结果会出现在这里。</p>}</div></section>
+                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Candidates</span><h4>{stage === "image" ? "图片候选" : "视频候选"}</h4></div></div><div className="shot-candidate-grid">{stageCandidates.map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, true)} disabled={busy} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}{stageCandidates.length === 0 && <p className="empty-state">暂无该阶段任务候选；生成后结果会出现在这里。</p>}</div></section>
                 <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">History</span><h4>生成历史</h4></div></div>{recentFailure && <div className="shot-recent-failure"><strong>最近失败记录（辅助信息）</strong><span>{recentFailure.error?.message ?? "任务失败"}</span>{onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(recentFailure.id)}>查看任务详情</button>}</div>}<div className="shot-history-list">{stageLinks.slice(0, 8).map((link) => <div key={link.id} className="shot-history-item"><span>{formatDateTime(link.createdAt)}</span><strong>{link.task?.status ?? "关联中"}</strong><small>{link.task?.id ?? link.id}</small></div>)}{stageLinks.length === 0 && <p className="empty-state">尚无生成任务。</p>}</div></section>
-                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Project assets</span><h4>当前项目素材</h4></div></div><div className="shot-manual-assets">{manualAssets.slice(0, 12).map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, false)} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}</div></section>
+                <section className="shot-panel-block"><div className="shot-block-heading"><div><span className="section-label">Project assets</span><h4>当前项目素材</h4></div></div><div className="shot-manual-assets">{manualAssets.slice(0, 12).map((asset) => <CandidateCard key={asset.id} projectId={projectId} asset={asset} selected={stage === "image" ? selectedShot.selectedImageAssetId === asset.id : selectedShot.selectedVideoAssetId === asset.id} onSelect={() => void selectResult(asset.id, false)} disabled={busy} label={stage === "image" ? "设为关键帧" : "设为最终视频"} />)}</div></section>
               </div>
             </div>
           </div>
@@ -532,6 +538,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         shots={shots}
         assets={assets}
         stage={stage}
+        busy={busy}
         onAssetsLoaded={(loaded) => setAssets((current) => [...current, ...loaded.filter((asset) => !current.some((item) => item.id === asset.id))])}
         onSelect={(shotId, reviewStage, assetId, fromLinkedTask) => void selectBatchResult(shotId, reviewStage, assetId, fromLinkedTask)}
         onRetry={(shotId, reviewStage) => void retryShot(shotId, reviewStage)}
@@ -654,7 +661,7 @@ function AssetThumb({ projectId, asset }: { projectId: string; asset: AssetView 
   return <span className="shot-thumb">{url ? <img src={url} alt="" /> : <span>图片</span>}</span>;
 }
 
-function CandidateCard({ projectId, asset, selected, onSelect, label }: { projectId: string; asset: AssetView; selected: boolean; onSelect: () => void; label: string }) {
+function CandidateCard({ projectId, asset, selected, onSelect, disabled = false, label }: { projectId: string; asset: AssetView; selected: boolean; onSelect: () => void; disabled?: boolean; label: string }) {
   const isVideo = isVideoAsset(asset);
-  return <article className={`shot-candidate-card${selected ? " shot-candidate-card-selected" : ""}`}><AssetThumb projectId={projectId} asset={asset} /><div><strong>{asset.name}</strong><small>{asset.id}</small></div><button type="button" onClick={onSelect}>{selected ? "已选" : label}</button>{isVideo && <small>视频候选</small>}</article>;
+  return <article className={`shot-candidate-card${selected ? " shot-candidate-card-selected" : ""}`}><AssetThumb projectId={projectId} asset={asset} /><div><strong>{asset.name}</strong><small>{asset.id}</small></div><button type="button" disabled={disabled || selected} onClick={onSelect}>{selected ? "已选" : label}</button>{isVideo && <small>视频候选</small>}</article>;
 }

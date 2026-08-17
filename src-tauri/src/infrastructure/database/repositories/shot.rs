@@ -495,10 +495,25 @@ impl ShotBulkRepository for SqliteShotRepository {
     ) -> Result<(), RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         let mut shot_ids = HashSet::new();
+        let existing_names =
+            sqlx::query_scalar::<_, String>("SELECT name FROM shots WHERE project_id = ?")
+                .bind(project_id)
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(map_sqlx_error)?;
+        let mut shot_names = existing_names
+            .into_iter()
+            .map(|name| name.trim().to_lowercase())
+            .collect::<HashSet<_>>();
         for shot in shots {
             if shot.project_id != project_id || !shot_ids.insert(shot.id.clone()) {
                 return Err(RepositoryError::integrity(
                     "bulk shot insert contains an invalid or duplicate shot",
+                ));
+            }
+            if !shot_names.insert(shot.name.trim().to_lowercase()) {
+                return Err(RepositoryError::integrity(
+                    "bulk shot insert contains a duplicate shot name",
                 ));
             }
             sqlx::query(
@@ -817,7 +832,9 @@ impl ShotGenerationLinkRow {
 #[cfg(test)]
 mod tests {
     use super::SqliteShotRepository;
-    use crate::application::ports::{ShotRecord, ShotRepository, ShotStageConfigRecord};
+    use crate::application::ports::{
+        ShotBulkRepository, ShotRecord, ShotRepository, ShotStageConfigRecord,
+    };
     use crate::domain::ShotStage;
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use chrono::Utc;
@@ -1012,5 +1029,29 @@ mod tests {
             )
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn atomic_bulk_insert_rejects_existing_names_inside_transaction() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = SqliteShotRepository::new(pool.clone());
+
+        let mut first = shot("sht-1", "project-1", 0);
+        first.name = "  Same Name  ".to_owned();
+        repository
+            .insert_shots_atomic("project-1", &[first], &[])
+            .await
+            .unwrap();
+
+        let mut duplicate = shot("sht-2", "project-1", 1);
+        duplicate.name = "same name".to_owned();
+        let error = repository
+            .insert_shots_atomic("project-1", &[duplicate], &[])
+            .await
+            .expect_err("duplicate name should be rejected by the repository transaction");
+        assert!(error.to_string().contains("duplicate shot name"));
+        assert_eq!(repository.list("project-1").await.unwrap().len(), 1);
     }
 }

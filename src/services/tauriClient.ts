@@ -527,6 +527,7 @@ export function generateShot(request: {
   stage: ShotStage;
   values?: ShotInputValues;
   productionBatchItemId?: string;
+  retryTaskId?: string;
 }): Promise<TaskView> {
   return invoke<TaskView>("shot_generate", { request });
 }

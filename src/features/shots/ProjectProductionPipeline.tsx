@@ -112,6 +112,7 @@ export function reviewShotIds(shots: ShotView[], stage: ShotStage): string[] {
 
 export interface ProjectProductionPipelineProps extends ShotBulkConfigPanelProps {
   onOpenReview?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
+  busy?: boolean;
 }
 
 const METRICS: ReadonlyArray<{
@@ -144,7 +145,7 @@ const STAGE_LABELS: Record<ProjectPipelineStage, string> = {
   COMPLETED: "Completed",
 };
 
-export function ProjectProductionPipeline({ onOpenReview, ...bulkProps }: ProjectProductionPipelineProps) {
+export function ProjectProductionPipeline({ onOpenReview, busy = false, ...bulkProps }: ProjectProductionPipelineProps) {
   const summary = useMemo(() => deriveProjectPipelineSummary(bulkProps.shots), [bulkProps.shots]);
   const completionPercent = projectCompletionPercent(summary);
   const imageReviewIds = useMemo(() => reviewShotIds(bulkProps.shots, "image"), [bulkProps.shots]);
@@ -205,8 +206,8 @@ export function ProjectProductionPipeline({ onOpenReview, ...bulkProps }: Projec
           <p className="pipeline-muted">生成结果不会自动成为 selected asset；REF2VA 的 ordered references 也继续由用户配置。</p>
         </div>
         <div className="pipeline-action-grid">
-          <button type="button" onClick={() => void openReview("image", imageReviewIds)} disabled={!onOpenReview || !imageReviewIds.length}>Review 图片 ({imageReviewIds.length})</button>
-          <button type="button" onClick={() => void openReview("video", videoReviewIds)} disabled={!onOpenReview || !videoReviewIds.length}>Review 视频 ({videoReviewIds.length})</button>
+          <button type="button" onClick={() => void openReview("image", imageReviewIds)} disabled={busy || !onOpenReview || !imageReviewIds.length}>Review 图片 ({imageReviewIds.length})</button>
+          <button type="button" onClick={() => void openReview("video", videoReviewIds)} disabled={busy || !onOpenReview || !videoReviewIds.length}>Review 视频 ({videoReviewIds.length})</button>
         </div>
       </div>
 

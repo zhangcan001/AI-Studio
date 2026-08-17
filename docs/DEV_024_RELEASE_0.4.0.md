@@ -1,6 +1,6 @@
 # DEV-024B AI Studio 0.4.0 Publication Evidence
 
-日期：2026-08-16 23:18 Asia/Shanghai  
+日期：2026-08-16 23:18 Asia/Shanghai
 仓库：`zhangcan001/AI-Studio`
 
 ## Publication identity
