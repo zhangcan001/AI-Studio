@@ -6,6 +6,7 @@ import {
   projectPipelineStageCount,
   reviewShotIds,
 } from "./ProjectProductionPipeline";
+import { buildShotListView, defaultShotListControls } from "./shotListQuery";
 
 const baseShot = (id: string, ordinal: number, overrides: Partial<ShotView> = {}): ShotView => ({
   id,
@@ -96,5 +97,13 @@ describe("Project production pipeline derivation", () => {
     expect(summary.total).toBe(0);
     expect(projectCompletionPercent(summary)).toBe(0);
     expect(projectPipelineStageCount(summary, "SHOTS")).toBe(0);
+  });
+
+  it("keeps full-project pipeline totals when the workspace list is filtered", () => {
+    const shots = Array.from({ length: 500 }, (_, index) => baseShot(`shot-${index + 1}`, index));
+    const listView = buildShotListView(shots, { ...defaultShotListControls(), query: "shot-499" });
+
+    expect(listView.pageShots).toHaveLength(1);
+    expect(deriveProjectPipelineSummary(shots).total).toBe(500);
   });
 });

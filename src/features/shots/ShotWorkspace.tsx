@@ -30,6 +30,14 @@ import { deriveShotStatus, recentShotFailure, shotStatusLabels } from "./shotDom
 import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
+import { ShotListToolbar } from "./ShotListToolbar";
+import {
+  buildShotListView,
+  defaultShotListControls,
+  isShotListReorderDisabled,
+  updateShotListControls,
+  type ShotListControls,
+} from "./shotListQuery";
 import {
   filterProductionRuntimeCatalog,
   h3FamilyForWorkflowId,
@@ -72,9 +80,11 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [shotListControls, setShotListControls] = useState<ShotListControls>(defaultShotListControls);
   const reloadGeneration = useRef(0);
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
+  const shotList = useMemo(() => buildShotListView(shots, shotListControls), [shots, shotListControls]);
   const currentDraft = stageDrafts[stage];
   const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
   const stageRecipes = useMemo(
@@ -133,6 +143,11 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   }, [projectId]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  useEffect(() => {
+    if (shotList.page === shotListControls.page) return;
+    setShotListControls((current) => ({ ...current, page: shotList.page }));
+  }, [shotList.page, shotListControls.page]);
 
   useEffect(() => {
     if (!selectedShot) return;
@@ -282,7 +297,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   }
 
   async function moveShot(delta: -1 | 1) {
-    if (!selectedShot) return;
+    if (!selectedShot || isShotListReorderDisabled(shotListControls)) return;
     const index = shots.findIndex((shot) => shot.id === selectedShot.id);
     const target = index + delta;
     if (index < 0 || target < 0 || target >= shots.length) return;
@@ -452,9 +467,23 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
       />
       <div className="shot-workspace-grid">
         <aside className="shot-list-pane" aria-label="镜头列表">
-          <div className="shot-pane-heading"><strong>镜头列表</strong><span>{shots.length}</span></div>
+          <div className="shot-pane-heading"><strong>镜头列表</strong><span>{shotList.filteredCount} / {shots.length}</span></div>
+          <ShotListToolbar
+            controls={shotListControls}
+            filteredCount={shotList.filteredCount}
+            totalCount={shots.length}
+            pageStart={shotList.pageStart}
+            pageEnd={shotList.pageEnd}
+            pageCount={shotList.pageCount}
+            onQueryChange={(query) => setShotListControls((current) => updateShotListControls(current, { query }))}
+            onStatusChange={(status) => setShotListControls((current) => updateShotListControls(current, { status }))}
+            onPageSizeChange={(pageSize) => setShotListControls((current) => updateShotListControls(current, { pageSize }))}
+            onPageChange={(page) => setShotListControls((current) => ({ ...current, page: Math.max(1, Math.min(page, shotList.pageCount)) }))}
+          />
+          {selectedShot && shotList.isFiltered && !shotList.filteredShots.some((shot) => shot.id === selectedShot.id) && <p className="shot-selection-filter-note">当前详情仍显示已选镜头；清除筛选后可在列表中定位。</p>}
           {shots.length === 0 && <p className="empty-state">还没有镜头，先新建一个。</p>}
-          {shots.map((item) => {
+          {shots.length > 0 && !shotList.filteredCount && <p className="empty-state">没有匹配的镜头，请清除搜索或状态筛选。</p>}
+          {shotList.pageShots.map((item) => {
             const derived = deriveShotStatus(item);
             return (
               <button key={item.id} type="button" className={`shot-list-item${item.id === selectedShotId ? " shot-list-item-active" : ""}`} onClick={() => setSelectedShotId(item.id)}>
@@ -472,12 +501,13 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
             <div className="shot-editor-header">
               <div><span className="section-label">镜头 {String(selectedShot.ordinal + 1).padStart(2, "0")}</span><h3>{selectedShot.name}</h3></div>
               <div className="shot-editor-actions">
-                <button type="button" className="quiet-button" onClick={() => void moveShot(-1)} disabled={busy || selectedShot.ordinal === 0}>上移</button>
-                <button type="button" className="quiet-button" onClick={() => void moveShot(1)} disabled={busy || selectedShot.ordinal === shots.length - 1}>下移</button>
+                <button type="button" className="quiet-button" onClick={() => void moveShot(-1)} disabled={busy || isShotListReorderDisabled(shotListControls) || selectedShot.ordinal === 0}>上移</button>
+                <button type="button" className="quiet-button" onClick={() => void moveShot(1)} disabled={busy || isShotListReorderDisabled(shotListControls) || selectedShot.ordinal === shots.length - 1}>下移</button>
                 <button type="button" className="quiet-button danger-button" onClick={() => void removeShot()} disabled={busy}>删除镜头</button>
                 <button type="button" onClick={() => void save()} disabled={busy}>保存镜头</button>
               </div>
             </div>
+            {shotList.isFiltered && <p className="shot-reorder-filter-note">清除筛选后可调整全局顺序。</p>}
             <div className="shot-editor-body">
               <div className="shot-settings-column">
                 <label><span>镜头名称</span><input value={name} onChange={(event) => setName(event.target.value)} /></label>

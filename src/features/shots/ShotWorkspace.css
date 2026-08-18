@@ -305,6 +305,68 @@
   border-bottom: 1px solid var(--ux-border);
 }
 
+.shot-list-controls {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--ux-border);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.shot-list-control-row,
+.shot-list-pagination {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.shot-list-control-row label:first-of-type {
+  flex: 1;
+}
+
+.shot-list-search input,
+.shot-list-control-row select {
+  width: 100%;
+  min-width: 0;
+}
+
+.shot-list-pagination {
+  flex-wrap: wrap;
+  color: var(--ux-muted);
+  font-size: 0.72rem;
+}
+
+.shot-list-pagination span:first-child {
+  flex: 1 1 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.shot-reorder-filter-note {
+  margin: 0;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--ux-border);
+  color: var(--ux-muted);
+  background: color-mix(in srgb, var(--ux-accent) 6%, var(--ux-surface-1));
+  font-size: 0.78rem;
+}
+
+.shot-selection-filter-note {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--ux-muted);
+  font-size: 0.72rem;
+}
+
 .shot-list-item {
   width: 100%;
   gap: 10px;
