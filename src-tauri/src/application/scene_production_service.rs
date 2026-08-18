@@ -84,21 +84,32 @@ impl SceneProductionService {
         stage: ShotStage,
     ) -> Result<SceneProductionPlan, SceneProductionError> {
         let scene = self.scene(project_id, scene_id).await?;
-        let shot_ids = scene.shot_ids.clone();
+        self.plan_scope(project_id, scene_id, &scene.name, &scene.shot_ids, stage)
+            .await
+    }
+
+    pub(crate) async fn plan_scope(
+        &self,
+        project_id: &str,
+        scene_id: &str,
+        scene_name: &str,
+        shot_ids: &[String],
+        stage: ShotStage,
+    ) -> Result<SceneProductionPlan, SceneProductionError> {
         let batch_plan = self
             .shot_batch_service
-            .plan_for_shots(project_id, stage, &shot_ids)
+            .plan_for_shots(project_id, stage, shot_ids)
             .await?;
         let active_bindings = self
             .shot_batch_service
-            .list_active_shot_bindings(project_id, stage, &shot_ids)
+            .list_active_shot_bindings(project_id, stage, shot_ids)
             .await?;
         Ok(make_plan(
             project_id,
             scene_id,
-            &scene.name,
+            scene_name,
             stage,
-            &shot_ids,
+            shot_ids,
             batch_plan.rows,
             active_bindings
                 .into_iter()
@@ -114,10 +125,33 @@ impl SceneProductionService {
         stage: ShotStage,
         allow_partial: bool,
     ) -> Result<SceneProductionPrepareResult, SceneProductionError> {
+        let scene = self.scene(project_id, scene_id).await?;
+        self.prepare_scope(
+            project_id,
+            scene_id,
+            &scene.name,
+            &scene.shot_ids,
+            stage,
+            allow_partial,
+        )
+        .await
+    }
+
+    pub(crate) async fn prepare_scope(
+        &self,
+        project_id: &str,
+        scene_id: &str,
+        scene_name: &str,
+        shot_ids: &[String],
+        stage: ShotStage,
+        allow_partial: bool,
+    ) -> Result<SceneProductionPrepareResult, SceneProductionError> {
         // The lock only covers plan -> active recheck -> existing ShotBatchService::create.
         // Queue admission still belongs to ProductionQueueService::start.
         let _guard = self.prepare_gate.lock().await;
-        let plan = self.plan(project_id, scene_id, stage).await?;
+        let plan = self
+            .plan_scope(project_id, scene_id, scene_name, shot_ids, stage)
+            .await?;
         if plan.eligible > MAX_SHOT_BATCH_ITEMS {
             return Err(SceneProductionError::TooLarge {
                 eligible: plan.eligible,

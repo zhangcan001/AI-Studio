@@ -7,6 +7,7 @@ use crate::application::comfy_memory_service::ComfyMemoryService;
 use crate::application::comfy_preflight_service::ComfyPreflightService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::diagnostics_service::DiagnosticsService;
+use crate::application::episode_production_service::EpisodeProductionService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
 use crate::application::h3_local_import_service::H3LocalImportService;
@@ -87,6 +88,7 @@ pub struct AppState {
     pub settings_service: Arc<SettingsService>,
     pub batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
     pub scene_production_service: Arc<SceneProductionService>,
+    pub episode_production_service: Arc<EpisodeProductionService>,
 }
 
 impl AppState {
@@ -134,6 +136,7 @@ impl AppState {
         settings_service: Arc<SettingsService>,
         batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
         scene_production_service: Arc<SceneProductionService>,
+        episode_production_service: Arc<EpisodeProductionService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -179,6 +182,7 @@ impl AppState {
             settings_service,
             batch_workflow_preset_service,
             scene_production_service,
+            episode_production_service,
         }
     }
 }

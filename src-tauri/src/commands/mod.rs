@@ -3,6 +3,7 @@ pub mod batch_workflow_preset;
 pub mod catalog;
 pub mod comfy;
 pub mod diagnostics;
+pub mod episode_production;
 pub mod generation;
 pub mod h3_local_import;
 pub mod organization;

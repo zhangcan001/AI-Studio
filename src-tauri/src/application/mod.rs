@@ -18,6 +18,7 @@ mod dev031_e2e;
 #[cfg(test)]
 mod dev036_compatibility;
 pub mod diagnostics_service;
+pub mod episode_production_service;
 pub mod generation_catalog_service;
 #[cfg(test)]
 mod generation_e2e;

@@ -33,6 +33,7 @@ use application::{
     comfy_preflight_service::ComfyPreflightService,
     comfy_service::{ComfyRuntime, ComfyService},
     diagnostics_service::DiagnosticsService,
+    episode_production_service::EpisodeProductionService,
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
     h3_local_import_service::H3LocalImportService,
@@ -614,6 +615,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_structure_service.clone(),
                 shot_batch_service.clone(),
             ));
+            let episode_production_service = Arc::new(EpisodeProductionService::new(
+                production_structure_service.clone(),
+                scene_production_service.clone(),
+            ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
                 *slot = Some(Arc::new(MediaProtocolService::new(
                     asset_repository.clone(),
@@ -667,6 +672,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 settings_service,
                 batch_workflow_preset_service,
                 scene_production_service,
+                episode_production_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -946,6 +952,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::shot_batch::shot_batch_create,
             commands::scene_production::scene_production_plan,
             commands::scene_production::scene_production_prepare,
+            commands::episode_production::episode_production_plan,
+            commands::episode_production::episode_production_prepare,
             commands::shot_bulk::preview_shot_bulk_import,
             commands::shot_bulk::commit_shot_bulk_import,
             commands::shot_bulk::bulk_assign_shot_prompt,

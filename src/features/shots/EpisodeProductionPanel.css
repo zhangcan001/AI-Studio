@@ -1,0 +1,37 @@
+.episode-production-panel { display: grid; gap: 16px; margin: 16px 0; padding: 20px; border: 1px solid var(--border-subtle, #d9d9d9); border-radius: 14px; background: var(--surface, #fff); }
+.episode-production-header, .episode-production-toolbar, .episode-production-card-heading, .episode-production-selection-actions { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.episode-production-header h3, .episode-production-card h4 { margin: 3px 0; }
+.episode-production-header p, .episode-production-hint { margin: 0; color: var(--text-muted, #6a6a6a); font-size: .88rem; }
+.episode-production-safety { color: #16734b; font-size: .78rem; }
+.episode-production-toolbar { justify-content: flex-start; flex-wrap: wrap; }
+.episode-production-toolbar label, .episode-production-card > label { display: grid; gap: 5px; min-width: 220px; }
+.episode-production-toolbar label > span, .episode-production-card > label > span { color: var(--text-muted, #6a6a6a); font-size: .8rem; }
+.episode-production-toolbar select, .episode-production-card select { min-width: 220px; }
+.episode-production-stage-tabs, .episode-production-filter-tabs, .episode-production-actions, .episode-production-select-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.episode-production-stage-tabs button.active, .episode-production-filter-tabs button.active { color: #fff; background: #2b5aa6; }
+.episode-production-summary { display: grid; grid-template-columns: repeat(8, minmax(80px, 1fr)); gap: 8px; }
+.episode-production-summary > div { display: grid; gap: 4px; min-height: 58px; padding: 9px 10px; border-left: 3px solid var(--ux-border, #d9d9d9); border-radius: 8px; background: var(--surface-raised, #fafafa); }
+.episode-production-summary span { color: var(--text-muted, #6a6a6a); font-size: .74rem; }
+.episode-production-summary strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.episode-production-summary > div:nth-child(5) { border-left-color: #39705a; } .episode-production-summary > div:nth-child(6) { border-left-color: #6b5e9b; } .episode-production-summary > div:nth-child(7) { border-left-color: #276aa2; } .episode-production-summary > div:nth-child(8) { border-left-color: #a23d2e; }
+.episode-production-card { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border-subtle, #e1e1e1); border-radius: 12px; background: var(--surface-raised, #fafafa); }
+.episode-production-selection-actions { align-items: flex-start; flex-wrap: wrap; }
+.episode-production-table-wrap { overflow-x: auto; }
+.episode-production-table-wrap table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.episode-production-table-wrap th, .episode-production-table-wrap td { padding: 8px; border-bottom: 1px solid var(--border-subtle, #e6e6e6); text-align: left; vertical-align: top; }
+.episode-production-table-wrap td strong, .episode-production-table-wrap td small { display: block; } .episode-production-table-wrap td small { color: var(--text-muted, #6a6a6a); }
+.episode-production-table-wrap td small.episode-production-blocker-reason { color: #a23d2e; }
+.episode-production-status { display: inline-block; padding: 3px 7px; border-radius: 99px; font-size: .74rem; white-space: nowrap; }
+.episode-production-status-done { background: #e3f1e9; color: #286b4d; } .episode-production-status-prepared { background: #eeeafb; color: #5c4d92; } .episode-production-status-ready { background: #e5f0fb; color: #1e5e92; } .episode-production-status-partial { background: #fff2d9; color: #8b641c; } .episode-production-status-blocked { background: #fde9e5; color: #9c392b; } .episode-production-status-empty { background: #eeeeee; color: #666; }
+.episode-production-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.episode-production-card select, .episode-production-card input { box-sizing: border-box; width: 100%; }
+.episode-production-anchor-list, .episode-production-custom-values { display: grid; gap: 7px; } .episode-production-anchor-list { max-height: 120px; overflow: auto; padding: 8px; border-radius: 8px; background: var(--surface, #fff); } .episode-production-anchor-list > span { color: var(--text-muted, #6a6a6a); font-size: .8rem; }
+.episode-production-anchor-list label, .episode-production-partial-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: .85rem; } .episode-production-anchor-list input, .episode-production-partial-toggle input, .episode-production-table-wrap input { width: auto; }
+.episode-production-custom-values { grid-template-columns: repeat(2, minmax(0, 1fr)); } .episode-production-custom-values label { display: grid; gap: 5px; } .episode-production-custom-values span { color: var(--text-muted, #6a6a6a); font-size: .8rem; }
+.episode-production-inline-success, .episode-production-inline-error { margin: 0; font-size: .86rem; } .episode-production-inline-success { color: #16734b; } .episode-production-inline-error { color: #a23d2e; }
+.episode-production-prepare { background: color-mix(in srgb, var(--ux-accent, #2b5aa6) 4%, var(--surface-raised, #fafafa)); } .episode-production-primary-action { width: 100%; }
+.episode-production-result, .episode-production-error, .episode-production-notice { display: grid; gap: 7px; padding: 12px; border-radius: 9px; } .episode-production-result-success, .episode-production-result-noop { color: #205f45; background: #eaf7ef; } .episode-production-result-partial { color: #76551a; background: #fff5dd; } .episode-production-result-blocked, .episode-production-error { color: #8d2e23; background: #fff0ed; } .episode-production-notice { color: #205f45; background: #eaf7ef; }
+.episode-production-result p { margin: 0; } .episode-production-blockers { display: grid; gap: 6px; } .episode-production-blockers > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.episode-production-empty, .episode-production-loading { display: grid; gap: 4px; padding: 18px; color: var(--text-muted, #6a6a6a); text-align: center; }
+.episode-production-error details { font-size: .8rem; } .episode-production-error code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 1000px) { .episode-production-summary { grid-template-columns: repeat(4, minmax(80px, 1fr)); } .episode-production-grid { grid-template-columns: 1fr; } .episode-production-header { align-items: flex-start; flex-direction: column; } }

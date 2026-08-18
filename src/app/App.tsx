@@ -646,6 +646,7 @@ function App() {
               setFocusedTaskId(taskId);
               navigateToWorkspace("tasks");
             }}
+            onOpenProductionQueue={() => navigateToWorkspace("studio")}
           />
         </WorkspaceErrorBoundary>
       )}

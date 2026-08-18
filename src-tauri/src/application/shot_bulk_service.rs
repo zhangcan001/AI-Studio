@@ -23,6 +23,8 @@ use std::{
 use uuid::Uuid;
 
 pub const MAX_BULK_SHOT_IMPORT: usize = 500;
+pub const MAX_BULK_SHOT_SCOPE: usize = MAX_BULK_SHOT_IMPORT;
+pub const EPISODE_BULK_SCOPE_TOO_LARGE: &str = "EPISODE_BULK_SCOPE_TOO_LARGE";
 const PREVIEW_TEXT_LIMIT: usize = 240;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -524,6 +526,31 @@ impl ShotBulkService {
         })
     }
 
+    /// Resolve the shots belonging to the selected Scene scopes once, then
+    /// reuse the existing bulk config contract. Scene membership is supplied
+    /// by the trusted production-structure caller; this service owns the
+    /// project membership, dedupe, global ordinal ordering, and hard limit.
+    pub async fn set_stage_config_for_scenes(
+        &self,
+        mut request: BulkStageConfigRequest,
+        scene_shot_ids: &[Vec<String>],
+    ) -> Result<BulkStageConfigResult, ShotBulkServiceError> {
+        request.shot_ids = self
+            .collect_scene_shot_ids(&request.project_id, scene_shot_ids)
+            .await?;
+        self.set_stage_config(request).await
+    }
+
+    pub async fn collect_scene_shot_ids(
+        &self,
+        project_id: &str,
+        scene_shot_ids: &[Vec<String>],
+    ) -> Result<Vec<String>, ShotBulkServiceError> {
+        validate_project(project_id)?;
+        let data = self.repository.list_bulk_data(project_id).await?;
+        order_scene_shot_ids(scene_shot_ids, &data).map_err(scene_scope_error)
+    }
+
     async fn select_shots(
         &self,
         project_id: &str,
@@ -645,6 +672,67 @@ fn prompt_for_shot(
         prompt_entry_id: None,
         prompt_version_id: None,
     }
+}
+
+pub(crate) fn order_scene_shot_ids(
+    scene_shot_ids: &[Vec<String>],
+    data: &[ShotBulkData],
+) -> Result<Vec<String>, String> {
+    if scene_shot_ids.is_empty() {
+        return Err(
+            "EPISODE_SCENE_SELECTION_INVALID: at least one Scene scope is required".to_owned(),
+        );
+    }
+
+    let by_id = data
+        .iter()
+        .map(|item| (item.shot.id.as_str(), item))
+        .collect::<HashMap<_, _>>();
+    let mut first_seen = HashMap::<String, usize>::new();
+    for shot_ids in scene_shot_ids {
+        for shot_id in shot_ids {
+            if shot_id.trim().is_empty() {
+                return Err(
+                    "EPISODE_SCENE_SELECTION_INVALID: Scene scope contains an empty Shot ID"
+                        .to_owned(),
+                );
+            }
+            let position = first_seen.len();
+            first_seen.entry(shot_id.clone()).or_insert(position);
+        }
+    }
+    if first_seen.is_empty() {
+        return Err("EPISODE_SCENE_SELECTION_INVALID: selected Scenes contain no Shots".to_owned());
+    }
+    if first_seen.len() > MAX_BULK_SHOT_SCOPE {
+        return Err(format!(
+            "{EPISODE_BULK_SCOPE_TOO_LARGE}: {} unique Shots exceeds the {}-Shot limit",
+            first_seen.len(),
+            MAX_BULK_SHOT_SCOPE
+        ));
+    }
+
+    let mut ordered = first_seen
+        .into_iter()
+        .map(|(shot_id, first_seen)| {
+            let data = by_id.get(shot_id.as_str()).ok_or_else(|| {
+                format!(
+                    "BULK_ASSIGNMENT_INVALID_SHOT: Shot does not belong to the current project: {shot_id}"
+                )
+            })?;
+            Ok((shot_id, data.shot.ordinal, first_seen))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    ordered.sort_by_key(|(_, ordinal, first_seen)| (*ordinal, *first_seen));
+    Ok(ordered.into_iter().map(|(shot_id, _, _)| shot_id).collect())
+}
+
+fn scene_scope_error(message: String) -> ShotBulkServiceError {
+    let (code, message) = message.split_once(": ").map_or(
+        ("EPISODE_SCENE_SELECTION_INVALID", message.as_str()),
+        |parts| parts,
+    );
+    ShotBulkServiceError::InvalidInput(BulkIssue::new(code, message))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -911,11 +999,12 @@ fn transaction_error(code: &'static str, error: RepositoryError) -> ShotBulkServ
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_import, prompt_for_shot, BulkPromptAssignmentRequest, BulkPromptSource,
-        ResolvedPrompt, ShotBulkImportRequest, ShotBulkInputFormat, ShotBulkService,
-        MAX_BULK_SHOT_IMPORT,
+        order_scene_shot_ids, parse_import, prompt_for_shot, BulkPromptAssignmentRequest,
+        BulkPromptSource, BulkStageConfigRequest, ResolvedPrompt, ShotBulkData,
+        ShotBulkImportRequest, ShotBulkInputFormat, ShotBulkService, MAX_BULK_SHOT_IMPORT,
+        MAX_BULK_SHOT_SCOPE,
     };
-    use crate::application::ports::{ShotBulkData, ShotBulkRepository, ShotRecord, ShotRepository};
+    use crate::application::ports::{ShotBulkRepository, ShotRecord, ShotRepository};
     use crate::application::prompt_library_service::PromptLibraryService;
     use crate::infrastructure::database::{
         initialize,
@@ -942,6 +1031,57 @@ mod tests {
             Arc::new(SqlitePromptLibraryRepository::new(pool.clone())),
             Arc::new(SystemClock),
         )
+    }
+
+    fn bulk_data(id: &str, ordinal: i64) -> ShotBulkData {
+        ShotBulkData {
+            shot: ShotRecord {
+                id: id.to_owned(),
+                project_id: "prj_default".to_owned(),
+                ordinal,
+                name: id.to_owned(),
+                prompt_text: String::new(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+                selected_image_asset_id: None,
+                selected_video_asset_id: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            },
+            stage_configs: Vec::new(),
+            stage_prompts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn episode_scope_dedupes_and_orders_by_project_global_ordinal() {
+        let data = vec![
+            bulk_data("shot-3", 30),
+            bulk_data("shot-1", 10),
+            bulk_data("shot-2", 20),
+        ];
+        let ordered = order_scene_shot_ids(
+            &[
+                vec!["shot-3".to_owned(), "shot-1".to_owned()],
+                vec!["shot-2".to_owned(), "shot-1".to_owned()],
+            ],
+            &data,
+        )
+        .unwrap();
+        assert_eq!(ordered, vec!["shot-1", "shot-2", "shot-3"]);
+    }
+
+    #[test]
+    fn episode_scope_rejects_more_than_500_unique_shots_without_chunking() {
+        let data = (0..=MAX_BULK_SHOT_SCOPE)
+            .map(|index| bulk_data(&format!("shot-{index}"), index as i64))
+            .collect::<Vec<_>>();
+        let ids = data
+            .iter()
+            .map(|item| vec![item.shot.id.clone()])
+            .collect::<Vec<_>>();
+        let error = order_scene_shot_ids(&ids, &data).unwrap_err();
+        assert!(error.starts_with("EPISODE_BULK_SCOPE_TOO_LARGE:"));
     }
 
     #[test]
@@ -1011,6 +1151,55 @@ mod tests {
             .execute(&pool)
             .await
             .expect("test project should use the production id format");
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES ('wfl_kera2_t2i_local_v2', 'Krea2', 'image', 't2i', 'wfv-kera2',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("Krea2 workflow fixture should insert");
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('wfv-kera2', 'wfl_kera2_t2i_local_v2', '1', '{}', 'sha',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("Krea2 workflow version fixture should insert");
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('recipe-kera2', 'wfv-kera2', '1', 1, ?, 'sha', '2026-01-01T00:00:00Z')",
+        )
+        .bind(
+            "schema_version: 1\n\
+id: kera2\n\
+name: Krea2\n\
+workflow:\n\
+  file: workflow_api.json\n\
+inputs:\n\
+  prompt:\n\
+    type: textarea\n\
+    label: Prompt\n\
+    required: true\n\
+    default: \"\"\n\
+bindings:\n\
+  - source: prompt\n\
+    target:\n\
+      node: \"6\"\n\
+      input: text\n\
+outputs:\n\
+  - id: generated_image\n\
+    type: image\n\
+    node: \"9\"\n\
+    required: true\n",
+        )
+        .execute(&pool)
+        .await
+        .expect("Krea2 recipe fixture should insert");
         let repository = Arc::new(SqliteShotRepository::new(pool.clone()));
         repository
             .insert(&crate::application::ports::ShotRecord {
@@ -1136,5 +1325,207 @@ mod tests {
                 Some(old_version.id.as_str())
             );
         }
+    }
+
+    #[tokio::test]
+    async fn episode_preset_scope_updates_only_stage_config_and_preserves_shot_ownership() {
+        let directory = tempdir().expect("temporary directory");
+        let pool = initialize(&directory.path().join("bulk.db"))
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET id = 'prj_default' WHERE id = 'project-1'")
+            .execute(&pool)
+            .await
+            .expect("test project should use the production id format");
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES ('wfl_kera2_t2i_local_v2', 'Krea2', 'image', 't2i', 'wfv-kera2-scope',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("Krea2 workflow fixture should insert");
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('wfv-kera2-scope', 'wfl_kera2_t2i_local_v2', '1', '{}', 'sha',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("Krea2 workflow version fixture should insert");
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('recipe-kera2-scope', 'wfv-kera2-scope', '1', 1, ?, 'sha', '2026-01-01T00:00:00Z')",
+        )
+        .bind(
+            r#"schema_version: 1
+id: kera2_scope
+name: Krea2 Scope
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true
+"#,
+        )
+        .execute(&pool)
+        .await
+        .expect("Krea2 recipe fixture should insert");
+        for asset_id in ["ast_image", "ast_video", "ast_reference"] {
+            sqlx::query(
+                "INSERT INTO assets
+                 (id, project_id, type, category, name, original_name, storage_path,
+                  sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at)
+                 VALUES (?, 'prj_default', 'image', 'source_image', ?, ?, ?, 'sha', 'image/png',
+                         1, 1, 1, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(asset_id)
+            .bind(asset_id)
+            .bind(asset_id)
+            .bind(format!("assets/{asset_id}.png"))
+            .execute(&pool)
+            .await
+            .expect("asset fixture should insert");
+        }
+        let repository = Arc::new(SqliteShotRepository::new(pool.clone()));
+        for (id, ordinal) in [("shot-a", 20), ("shot-b", 10)] {
+            repository
+                .insert(&ShotRecord {
+                    id: id.to_owned(),
+                    project_id: "prj_default".to_owned(),
+                    ordinal,
+                    name: id.to_owned(),
+                    prompt_text: "base".to_owned(),
+                    prompt_entry_id: None,
+                    prompt_version_id: None,
+                    selected_image_asset_id: Some("ast_image".to_owned()),
+                    selected_video_asset_id: Some("ast_video".to_owned()),
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                })
+                .await
+                .expect("shot fixture should insert");
+        }
+        sqlx::query(
+            "INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal)
+             VALUES ('shot-a', 'image', 'ast_reference', 0)",
+        )
+        .execute(&pool)
+        .await
+        .expect("reference fixture should insert");
+        sqlx::query(
+            "INSERT INTO production_series
+             (id, project_id, ordinal, name, description, created_at, updated_at)
+             VALUES ('series-a', 'prj_default', 0, 'Series', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("series fixture should insert");
+        sqlx::query(
+            "INSERT INTO production_episodes
+             (id, series_id, ordinal, name, description, created_at, updated_at)
+             VALUES ('episode-a', 'series-a', 0, 'Episode', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("episode fixture should insert");
+        sqlx::query(
+            "INSERT INTO production_scenes
+             (id, episode_id, ordinal, name, description, created_at, updated_at)
+             VALUES ('scene-a', 'episode-a', 0, 'Scene', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("scene fixture should insert");
+        for (shot_id, ordinal) in [("shot-a", 0), ("shot-b", 1)] {
+            sqlx::query(
+                "INSERT INTO shot_scene_assignments
+                 (shot_id, scene_id, ordinal, created_at, updated_at)
+                 VALUES (?, 'scene-a', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(shot_id)
+            .bind(ordinal)
+            .execute(&pool)
+            .await
+            .expect("scene assignment fixture should insert");
+        }
+        let assignments_before = sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT shot_id, scene_id, ordinal FROM shot_scene_assignments ORDER BY ordinal",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("assignments should load");
+
+        let service = service(repository.clone(), &pool);
+        let result = service
+            .set_stage_config_for_scenes(
+                BulkStageConfigRequest {
+                    project_id: "prj_default".to_owned(),
+                    stage: crate::domain::ShotStage::Image,
+                    shot_ids: Vec::new(),
+                    workflow_version_id: "wfv-kera2-scope".to_owned(),
+                    recipe_id: "recipe-kera2-scope".to_owned(),
+                    values: Default::default(),
+                    prompt: None,
+                },
+                &[
+                    vec!["shot-a".to_owned(), "shot-b".to_owned()],
+                    vec!["shot-a".to_owned()],
+                ],
+            )
+            .await
+            .expect("episode preset apply should use the existing atomic bulk contract");
+        assert_eq!(result.configured_shot_ids, vec!["shot-b", "shot-a"]);
+
+        let shots = repository
+            .list("prj_default")
+            .await
+            .expect("shots should load after preset apply");
+        for shot in shots {
+            assert_eq!(
+                shot.shot.selected_image_asset_id.as_deref(),
+                Some("ast_image")
+            );
+            assert_eq!(
+                shot.shot.selected_video_asset_id.as_deref(),
+                Some("ast_video")
+            );
+            assert_eq!(
+                shot.shot.ordinal,
+                if shot.shot.id == "shot-a" { 20 } else { 10 }
+            );
+            assert_eq!(
+                shot.reference_assets.len(),
+                usize::from(shot.shot.id == "shot-a")
+            );
+            assert_eq!(
+                shot.stage_configs.len(),
+                usize::from(shot.shot.id == "shot-a" || shot.shot.id == "shot-b")
+            );
+        }
+        let assignments_after = sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT shot_id, scene_id, ordinal FROM shot_scene_assignments ORDER BY ordinal",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("assignments should remain readable");
+        assert_eq!(assignments_after, assignments_before);
     }
 }

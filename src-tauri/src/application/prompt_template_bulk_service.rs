@@ -11,6 +11,7 @@ use crate::application::prompt_template_service::{PromptTemplateError, PromptTem
 use crate::application::reference_anchor_service::{
     ReferenceAnchorError, ReferenceAnchorService, ReferenceAnchorView,
 };
+use crate::application::shot_bulk_service::order_scene_shot_ids;
 use crate::domain::{
     PromptAnchor, PromptAnchorContext, PromptAnchorKind, PromptProjectContext, PromptShotContext,
     PromptStructureContext, PromptTemplateContext, ReferenceAnchorKind, ShotStage,
@@ -299,6 +300,41 @@ impl PromptTemplateBulkService {
             shot_ids: request.shot_ids,
             updated_at,
         })
+    }
+
+    pub async fn preview_bulk_for_scenes(
+        &self,
+        mut request: PromptTemplateBulkPreviewInput,
+        scene_shot_ids: &[Vec<String>],
+    ) -> Result<PromptTemplateBulkPreview, PromptTemplateBulkError> {
+        request.shot_ids = self
+            .collect_scene_shot_ids(&request.project_id, scene_shot_ids)
+            .await?;
+        self.preview_bulk(request).await
+    }
+
+    /// Resolve Scene membership before entering the existing all-or-nothing
+    /// apply path. Rendering still happens per Shot, so every Shot receives
+    /// its own series/episode/scene/shot context.
+    pub async fn apply_for_scenes(
+        &self,
+        mut request: PromptTemplateApplyInput,
+        scene_shot_ids: &[Vec<String>],
+    ) -> Result<PromptTemplateApplyResult, PromptTemplateBulkError> {
+        request.shot_ids = self
+            .collect_scene_shot_ids(&request.project_id, scene_shot_ids)
+            .await?;
+        self.apply(request).await
+    }
+
+    async fn collect_scene_shot_ids(
+        &self,
+        project_id: &str,
+        scene_shot_ids: &[Vec<String>],
+    ) -> Result<Vec<String>, PromptTemplateBulkError> {
+        validate_project_id(project_id)?;
+        let data = self.shot_bulk_repository.list_bulk_data(project_id).await?;
+        order_scene_shot_ids(scene_shot_ids, &data).map_err(PromptTemplateBulkError::InvalidInput)
     }
 
     async fn load_template(
@@ -1096,6 +1132,19 @@ mod tests {
             .assign_shots("prj_default", &scene.id, &["shot-a".to_owned()])
             .await
             .unwrap();
+        let scene_b = production_structure_service
+            .create_scene(CreateSceneRequest {
+                project_id: "prj_default".to_owned(),
+                episode_id: scene.episode_id.clone(),
+                name: "娑婆世界".to_owned(),
+                description: "另一场景".to_owned(),
+            })
+            .await
+            .unwrap();
+        production_structure_service
+            .assign_shots("prj_default", &scene_b.id, &["shot-b".to_owned()])
+            .await
+            .unwrap();
         let service = PromptTemplateBulkService::new(
             project_repository,
             prompt_repository,
@@ -1126,7 +1175,7 @@ mod tests {
                 prompt_entry_id: prompt_id.clone(),
                 prompt_version_id: version_id.clone(),
                 stage: ShotStage::Image,
-                shot_ids: vec!["shot-a".to_owned(), "shot-b".to_owned()],
+                shot_ids: vec!["shot-a".to_owned(), "shot-missing".to_owned()],
                 context_anchor_ids: vec!["anc_character".to_owned()],
                 custom_values: custom_values.clone(),
             })
@@ -1192,6 +1241,62 @@ mod tests {
         .unwrap();
         assert_eq!(after_edit, frozen);
         assert!(!after_edit.contains("新版"));
+    }
+
+    #[tokio::test]
+    async fn episode_prompt_apply_dedupes_and_renders_each_shots_own_scene_context() {
+        let (_directory, pool, service, prompt_id, version_id, _scene_id) = setup_service().await;
+        let failed = service
+            .apply_for_scenes(
+                PromptTemplateApplyInput {
+                    project_id: "prj_default".to_owned(),
+                    prompt_entry_id: prompt_id.clone(),
+                    prompt_version_id: version_id.clone(),
+                    stage: ShotStage::Image,
+                    shot_ids: Vec::new(),
+                    context_anchor_ids: Vec::new(),
+                    custom_values: BTreeMap::from([("camera".to_owned(), "中景".to_owned())]),
+                },
+                &[vec!["shot-a".to_owned(), "shot-missing".to_owned()]],
+            )
+            .await
+            .expect_err("a missing shot must fail the whole prompt apply");
+        assert!(matches!(failed, PromptTemplateBulkError::InvalidInput(_)));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM shot_stage_prompts")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+
+        let result = service
+            .apply_for_scenes(
+                PromptTemplateApplyInput {
+                    project_id: "prj_default".to_owned(),
+                    prompt_entry_id: prompt_id,
+                    prompt_version_id: version_id,
+                    stage: ShotStage::Image,
+                    shot_ids: Vec::new(),
+                    context_anchor_ids: Vec::new(),
+                    custom_values: BTreeMap::from([("camera".to_owned(), "中景".to_owned())]),
+                },
+                &[
+                    vec!["shot-b".to_owned(), "shot-a".to_owned()],
+                    vec!["shot-a".to_owned()],
+                ],
+            )
+            .await
+            .expect("multi-scene prompt apply should be atomic");
+        assert_eq!(result.shot_ids, vec!["shot-a", "shot-b"]);
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT shot_id, prompt_text FROM shot_stage_prompts WHERE stage = 'image' ORDER BY shot_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(rows[0].1.contains("忉利天宫/佛陀端坐"));
+        assert!(rows[1].1.contains("娑婆世界/大众听法"));
     }
 
     #[test]

@@ -39,6 +39,7 @@ import { ShotListToolbar } from "./ShotListToolbar";
 import { ProductionStructurePanel } from "./ProductionStructurePanel";
 import { PromptTemplatePanel } from "./PromptTemplatePanel";
 import { SceneProductionPanel } from "./SceneProductionPanel";
+import { EpisodeProductionPanel } from "./EpisodeProductionPanel";
 import {
   appendAnchorReferences,
   replaceWithAnchorReferences,
@@ -70,6 +71,7 @@ interface Props {
   onShotSelected?: (shotId?: string) => void;
   onOpenInStudio: (shot: ShotView, stage: ShotStage, recipe: RecipeViewModel) => void;
   onOpenTask?: (taskId: string) => void;
+  onOpenProductionQueue?: () => void;
 }
 
 type StageDraft = {
@@ -80,7 +82,7 @@ type StageDraft = {
 
 const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
-export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, onShotSelected, onOpenInStudio, onOpenTask }: Props) {
+export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, onShotSelected, onOpenInStudio, onOpenTask, onOpenProductionQueue }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
   const [stage, setStage] = useState<ShotStage>("image");
@@ -552,6 +554,25 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         onSelectShot={setSelectedShotId}
         onChanged={setProductionStructure}
         onError={(message) => setError(message || undefined)}
+      />
+      <EpisodeProductionPanel
+        projectId={projectId}
+        tree={productionStructure}
+        shots={shots}
+        promptEntries={promptEntries}
+        referenceAnchors={referenceAnchors}
+        onRefresh={reload}
+        onNotice={(message) => setNotice(message)}
+        onError={(message) => setError(message || undefined)}
+        onOpenProductionQueue={onOpenProductionQueue}
+        onNavigateToScene={(sceneId) => {
+          const scene = productionStructure.series.flatMap((series) => series.episodes.flatMap((episode) => episode.scenes)).find((item) => item.id === sceneId);
+          const firstShotId = scene?.shotIds[0];
+          if (firstShotId) {
+            setSelectedShotId(firstShotId);
+            onShotSelected?.(firstShotId);
+          }
+        }}
       />
       <ProjectProductionPipeline
         projectId={projectId}

@@ -87,6 +87,12 @@ import type {
   SceneProductionPrepareResult,
 } from "../types/sceneProduction";
 import type {
+  EpisodeProductionPlan,
+  EpisodeProductionPlanRequest,
+  EpisodeProductionPrepareRequest,
+  EpisodeProductionPrepareResult,
+} from "../types/episodeProduction";
+import type {
   ProductionRun,
   ProductionRunCreateRequest,
   ProductionRunListItem,
@@ -221,6 +227,14 @@ export function prepareSceneProduction(request: SceneProductionPrepareRequest): 
     batchId: result.detail?.id ?? null,
     skippedCount: 0,
   }));
+}
+
+export function getEpisodeProductionPlan(request: EpisodeProductionPlanRequest): Promise<EpisodeProductionPlan> {
+  return invoke<EpisodeProductionPlan>("episode_production_plan", { request });
+}
+
+export function prepareEpisodeProduction(request: EpisodeProductionPrepareRequest): Promise<EpisodeProductionPrepareResult> {
+  return invoke<EpisodeProductionPrepareResult>("episode_production_prepare", { request });
 }
 
 export function getPromptLibraryEntry(projectId: string, promptId: string): Promise<PromptEntryView> {
