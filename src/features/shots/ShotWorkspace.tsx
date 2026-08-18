@@ -4,10 +4,12 @@ import {
   bulkAssignShotPrompt,
   bulkSetShotStageConfig,
   deleteShot,
+  exportProjectManifest,
   generateShot,
   getAsset,
   getShot,
   listPromptLibrary,
+  listProductionStructure,
   listReferenceAnchors,
   listRecentAssets,
   listShots,
@@ -25,6 +27,7 @@ import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
+import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
@@ -33,6 +36,7 @@ import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
+import { ProductionStructurePanel } from "./ProductionStructurePanel";
 import {
   appendAnchorReferences,
   replaceWithAnchorReferences,
@@ -44,6 +48,7 @@ import {
   updateShotListControls,
   type ShotListControls,
 } from "./shotListQuery";
+import { EMPTY_PRODUCTION_STRUCTURE, productionSceneOptions, shotSceneIndex } from "./productionStructureState";
 import {
   filterProductionRuntimeCatalog,
   h3FamilyForWorkflowId,
@@ -77,6 +82,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [referenceAnchors, setReferenceAnchors] = useState<ReferenceAnchorView[]>([]);
+  const [productionStructure, setProductionStructure] = useState<ProductionStructureTree>(() => EMPTY_PRODUCTION_STRUCTURE(projectId));
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState("");
@@ -92,7 +98,9 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const reloadGeneration = useRef(0);
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
-  const shotList = useMemo(() => buildShotListView(shots, shotListControls), [shots, shotListControls]);
+  const shotSceneIds = useMemo(() => shotSceneIndex(productionStructure), [productionStructure]);
+  const sceneFilterOptions = useMemo(() => productionSceneOptions(productionStructure), [productionStructure]);
+  const shotList = useMemo(() => buildShotListView(shots, shotListControls, shotSceneIds), [shots, shotListControls, shotSceneIds]);
   const currentDraft = stageDrafts[stage];
   const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
   const stageRecipes = useMemo(
@@ -133,16 +141,18 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
     setLoading(true);
     setError(undefined);
     try {
-      const [nextShots, nextAssets, promptPage, nextAnchors] = await Promise.all([
+      const [nextShots, nextAssets, promptPage, nextAnchors, nextStructure] = await Promise.all([
         listShots(projectId),
         listRecentAssets(projectId, 80),
         listPromptLibrary(projectId, { kind: "prompt", limit: 100 }),
         listReferenceAnchors(projectId).catch(() => []),
+        listProductionStructure(projectId).catch(() => EMPTY_PRODUCTION_STRUCTURE(projectId)),
       ]);
       if (generation !== reloadGeneration.current) return;
       setShots(nextShots);
       setAssets(nextAssets);
       setReferenceAnchors(nextAnchors);
+      setProductionStructure(nextStructure);
       setPromptEntries(promptPage.items);
       setSelectedShotId((current) => current && nextShots.some((shot) => shot.id === current) ? current : nextShots[0]?.id);
     } catch (loadError: unknown) {
@@ -445,6 +455,19 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
     setNotice(`已载入 Prompt Library「${entry.name}」的 v${version.version}；之后编辑会清除来源标记。`);
   }
 
+  async function exportManifest() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const exported = await exportProjectManifest(projectId);
+      if (exported) setNotice(`项目清单已导出：${exported.fileName}`);
+    } catch (exportError: unknown) {
+      setError(toUserMessage(exportError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const stageLinks = selectedShot?.generationLinks.filter((link) => link.stage === stage) ?? [];
   const stageCandidateIds = new Set(stageLinks.flatMap((link) => link.task?.outputAssetIds ?? []));
   const stageCandidates = assets.filter((asset) => stageCandidateIds.has(asset.id) && (stage === "image" ? isImageAsset(asset) : isVideoAsset(asset)));
@@ -487,6 +510,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         <div className="shot-toolbar">
           <button type="button" onClick={() => void addShot()} disabled={busy}>新建镜头</button>
           <button type="button" className="quiet-button" onClick={() => setBulkImportOpen((open) => !open)} disabled={busy}>{bulkImportOpen ? "收起批量导入" : "批量导入镜头"}</button>
+          <button type="button" className="quiet-button" onClick={() => void exportManifest()} disabled={busy}>导出项目清单</button>
           <button type="button" className="quiet-button" onClick={() => void reload()} disabled={busy}>刷新</button>
         </div>
       </div>
@@ -495,6 +519,15 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
         onImported={async () => { await reload(); setBulkImportOpen(false); }}
         onCancel={() => setBulkImportOpen(false)}
       />}
+      <ProductionStructurePanel
+        projectId={projectId}
+        tree={productionStructure}
+        shots={shots}
+        selectedShotId={selectedShotId}
+        onSelectShot={setSelectedShotId}
+        onChanged={setProductionStructure}
+        onError={(message) => setError(message || undefined)}
+      />
       <ProjectProductionPipeline
         projectId={projectId}
         shots={shots}
@@ -522,6 +555,8 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
             pageCount={shotList.pageCount}
             onQueryChange={(query) => setShotListControls((current) => updateShotListControls(current, { query }))}
             onStatusChange={(status) => setShotListControls((current) => updateShotListControls(current, { status }))}
+            sceneOptions={sceneFilterOptions}
+            onSceneChange={(sceneId) => setShotListControls((current) => updateShotListControls(current, { sceneId }))}
             onPageSizeChange={(pageSize) => setShotListControls((current) => updateShotListControls(current, { pageSize }))}
             onPageChange={(page) => setShotListControls((current) => ({ ...current, page: Math.max(1, Math.min(page, shotList.pageCount)) }))}
           />

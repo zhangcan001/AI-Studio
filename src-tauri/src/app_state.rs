@@ -14,7 +14,9 @@ use crate::application::preset_service::PresetService;
 use crate::application::production_item_review_service::ProductionItemReviewService;
 use crate::application::production_orchestrator_service::ProductionOrchestratorService;
 use crate::application::production_queue_service::ProductionQueueService;
+use crate::application::production_structure_service::ProductionStructureService;
 use crate::application::project_backup_service::ProjectBackupService;
+use crate::application::project_manifest_service::ProjectManifestService;
 use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
 use crate::application::prompt_library_service::PromptLibraryService;
@@ -49,6 +51,7 @@ pub struct AppState {
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
+    pub production_structure_service: Arc<ProductionStructureService>,
     pub reference_anchor_service: Arc<ReferenceAnchorService>,
     pub asset_deletion_service: Arc<AssetDeletionService>,
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
@@ -59,6 +62,7 @@ pub struct AppState {
     pub task_recovery_service: Arc<TaskRecoveryService>,
     pub project_service: Arc<ProjectService>,
     pub project_backup_service: Arc<ProjectBackupService>,
+    pub project_manifest_service: Arc<ProjectManifestService>,
     pub preset_service: Arc<PresetService>,
     pub prompt_library_service: Arc<PromptLibraryService>,
     pub shot_service: Arc<ShotService>,
@@ -88,6 +92,7 @@ impl AppState {
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
+        production_structure_service: Arc<ProductionStructureService>,
         reference_anchor_service: Arc<ReferenceAnchorService>,
         asset_deletion_service: Arc<AssetDeletionService>,
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
@@ -98,6 +103,7 @@ impl AppState {
         task_recovery_service: Arc<TaskRecoveryService>,
         project_service: Arc<ProjectService>,
         project_backup_service: Arc<ProjectBackupService>,
+        project_manifest_service: Arc<ProjectManifestService>,
         preset_service: Arc<PresetService>,
         prompt_library_service: Arc<PromptLibraryService>,
         shot_service: Arc<ShotService>,
@@ -125,6 +131,7 @@ impl AppState {
             task_query_service,
             asset_query_service,
             asset_library_service,
+            production_structure_service,
             reference_anchor_service,
             asset_deletion_service,
             asset_video_prompt_service,
@@ -135,6 +142,7 @@ impl AppState {
             task_recovery_service,
             project_service,
             project_backup_service,
+            project_manifest_service,
             preset_service,
             prompt_library_service,
             shot_service,

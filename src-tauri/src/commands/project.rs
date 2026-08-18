@@ -3,6 +3,7 @@ use crate::{
     application::project_service::{ProjectServiceError, ProjectView},
     error::AppError,
 };
+use std::path::PathBuf;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -95,6 +96,38 @@ pub async fn project_backup_restore(
     inspection_id: String,
 ) -> Result<crate::application::project_backup_service::RestoredProjectView, AppError> {
     state.project_backup_service.restore(&inspection_id).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn project_manifest_export(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    destination: Option<PathBuf>,
+) -> Result<Option<crate::application::project_manifest_service::ProjectManifestExportView>, AppError>
+{
+    super::validate_project_id(&project_id)?;
+    let destination = match destination {
+        Some(path) => path,
+        None => {
+            let Some(file) = app_handle
+                .dialog()
+                .file()
+                .add_filter("AI Studio 项目清单", &["json"])
+                .set_file_name("AI-Studio-Project-Manifest.json")
+                .blocking_save_file()
+            else {
+                return Ok(None);
+            };
+            file.into_path()
+                .map_err(|_| AppError::filesystem("清单保存位置不可用"))?
+        }
+    };
+    state
+        .project_manifest_service
+        .export(&project_id, destination)
+        .await
+        .map(Some)
 }
 
 pub(crate) fn map_project_error(error: ProjectServiceError) -> AppError {

@@ -43,6 +43,20 @@ import type {
   ProjectBackupPreview,
   ProjectView,
 } from "../types/project";
+import type { ProjectManifestExportView } from "../types/projectManifest";
+import type {
+  ProductionAssignShotsRequest,
+  ProductionEpisode,
+  ProductionEpisodeRequest,
+  ProductionReorderRequest,
+  ProductionScene,
+  ProductionSceneRequest,
+  ProductionSceneShotReorderRequest,
+  ProductionSeries,
+  ProductionSeriesRequest,
+  ProductionStructureTree,
+  ProductionUnassignShotsRequest,
+} from "../types/productionStructure";
 import type {
   ComfyEndpointTest,
   ComfyEnvironmentProfile,
@@ -487,6 +501,76 @@ export function listProductionRunTemplates(projectId: string): Promise<Productio
 
 export function listShots(projectId: string): Promise<ShotView[]> {
   return invoke<ShotView[]>("shot_list", { projectId });
+}
+
+export function listProductionStructure(projectId: string): Promise<ProductionStructureTree> {
+  return invoke<ProductionStructureTree>("production_structure_tree", { projectId });
+}
+
+export function createProductionSeries(request: ProductionSeriesRequest): Promise<ProductionSeries> {
+  return invoke<ProductionSeries>("production_series_create", { request });
+}
+
+export function updateProductionSeries(request: Required<Pick<ProductionSeriesRequest, "projectId" | "seriesId" | "name">> & Pick<ProductionSeriesRequest, "description">): Promise<ProductionSeries> {
+  return invoke<ProductionSeries>("production_series_update", { request });
+}
+
+export function deleteProductionSeries(projectId: string, seriesId: string): Promise<void> {
+  return invoke<void>("production_series_delete", { projectId, seriesId });
+}
+
+export function reorderProductionSeries(projectId: string, orderedIds: string[]): Promise<ProductionSeries[]> {
+  return invoke<ProductionSeries[]>("production_series_reorder", { request: { projectId, orderedIds } });
+}
+
+export function createProductionEpisode(request: ProductionEpisodeRequest): Promise<ProductionEpisode> {
+  return invoke<ProductionEpisode>("production_episode_create", { request });
+}
+
+export function updateProductionEpisode(request: Required<Pick<ProductionEpisodeRequest, "projectId" | "episodeId" | "name">> & Pick<ProductionEpisodeRequest, "description">): Promise<ProductionEpisode> {
+  return invoke<ProductionEpisode>("production_episode_update", { request });
+}
+
+export function deleteProductionEpisode(projectId: string, episodeId: string): Promise<void> {
+  return invoke<void>("production_episode_delete", { projectId, episodeId });
+}
+
+export function reorderProductionEpisodes(projectId: string, seriesId: string, orderedIds: string[]): Promise<ProductionEpisode[]> {
+  const request: ProductionReorderRequest = { projectId, parentId: seriesId, orderedIds };
+  return invoke<ProductionEpisode[]>("production_episode_reorder", { request });
+}
+
+export function createProductionScene(request: ProductionSceneRequest): Promise<ProductionScene> {
+  return invoke<ProductionScene>("production_scene_create", { request });
+}
+
+export function updateProductionScene(request: Required<Pick<ProductionSceneRequest, "projectId" | "sceneId" | "name">> & Pick<ProductionSceneRequest, "description">): Promise<ProductionScene> {
+  return invoke<ProductionScene>("production_scene_update", { request });
+}
+
+export function deleteProductionScene(projectId: string, sceneId: string): Promise<void> {
+  return invoke<void>("production_scene_delete", { projectId, sceneId });
+}
+
+export function reorderProductionScenes(projectId: string, episodeId: string, orderedIds: string[]): Promise<ProductionScene[]> {
+  const request: ProductionReorderRequest = { projectId, parentId: episodeId, orderedIds };
+  return invoke<ProductionScene[]>("production_scene_reorder", { request });
+}
+
+export function assignProductionSceneShots(request: ProductionAssignShotsRequest): Promise<void> {
+  return invoke<void>("production_scene_assign_shots", { request });
+}
+
+export function unassignProductionSceneShots(request: ProductionUnassignShotsRequest): Promise<void> {
+  return invoke<void>("production_scene_unassign_shots", { request });
+}
+
+export function reorderProductionSceneShots(request: ProductionSceneShotReorderRequest): Promise<void> {
+  return invoke<void>("production_scene_reorder_shots", { request });
+}
+
+export function exportProjectManifest(projectId: string, destination?: string): Promise<ProjectManifestExportView | null> {
+  return invoke<ProjectManifestExportView | null>("project_manifest_export", { projectId, destination });
 }
 
 export function listReferenceAnchors(projectId: string): Promise<ReferenceAnchorView[]> {

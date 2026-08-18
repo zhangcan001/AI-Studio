@@ -1,0 +1,67 @@
+.production-structure-panel {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--ux-border);
+  border-radius: 14px;
+  background: var(--ux-surface-1);
+}
+
+.production-structure-heading,
+.production-structure-node,
+.production-structure-assignment-heading,
+.production-structure-assignment-controls,
+.production-structure-picker-toolbar,
+.production-structure-shot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.production-structure-heading,
+.production-structure-assignment-heading,
+.production-structure-picker-toolbar {
+  justify-content: space-between;
+}
+
+.production-structure-heading h3 { margin: 3px 0 0; }
+.production-structure-heading .section-description { margin: 4px 0 0; }
+.production-structure-tree { display: grid; gap: 6px; max-height: 410px; overflow: auto; padding: 10px; border: 1px solid var(--ux-border); border-radius: 10px; background: var(--ux-surface-2); }
+.production-structure-children { display: grid; gap: 5px; margin-left: 18px; padding-left: 10px; border-left: 1px solid var(--ux-border); }
+.production-structure-node { min-height: 34px; flex-wrap: wrap; }
+.production-structure-node > strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.production-structure-actions { display: inline-flex; gap: 4px; }
+.production-structure-actions .quiet-button { padding: 4px 7px; font-size: 0.72rem; }
+.production-structure-title-button,
+.production-structure-shot-name { display: inline-flex; min-width: 0; flex: 1; gap: 7px; align-items: baseline; border: 0; color: var(--ux-text); background: transparent; text-align: left; cursor: pointer; }
+.production-structure-title-button small,
+.production-structure-assignment-heading small,
+.production-structure-picker-row small { color: var(--ux-muted); font-size: 0.72rem; }
+.production-structure-title-button:hover,
+.production-structure-shot-name:hover { color: var(--ux-accent); }
+.production-structure-scene-selected { padding: 4px 7px; border-radius: 7px; background: color-mix(in srgb, var(--ux-accent) 8%, transparent); }
+.production-structure-shot-list { display: grid; gap: 3px; margin: 2px 0 5px 16px; padding-left: 10px; border-left: 1px dashed var(--ux-border); }
+.production-structure-shot-row .quiet-button { padding: 2px 6px; font-size: 0.72rem; }
+.production-structure-empty { margin: 4px 0; color: var(--ux-muted); font-size: 0.78rem; }
+.production-structure-assignment { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--ux-border); }
+.production-structure-assignment-heading strong,
+.production-structure-assignment-heading small { display: block; }
+.production-structure-assignment-heading > span { color: var(--ux-muted); font-size: 0.78rem; }
+.production-structure-assignment-controls label { flex: 1; }
+.production-structure-assignment-controls select { width: 100%; }
+.production-structure-shot-picker { display: grid; gap: 8px; }
+.production-structure-picker-toolbar input { min-width: 220px; flex: 1; }
+.production-structure-picker-list { display: grid; gap: 4px; max-height: 250px; overflow: auto; padding: 7px; border: 1px solid var(--ux-border); border-radius: 9px; }
+.production-structure-picker-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 7px; border-radius: 6px; cursor: pointer; }
+.production-structure-picker-row:hover { background: var(--ux-surface-2); }
+.production-structure-picker-row > span { display: grid; min-width: 0; gap: 2px; }
+.production-structure-picker-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+
+@media (max-width: 800px) {
+  .production-structure-heading,
+  .production-structure-assignment-heading,
+  .production-structure-picker-toolbar { align-items: flex-start; flex-direction: column; }
+  .production-structure-assignment-controls { align-items: stretch; flex-direction: column; }
+  .production-structure-picker-toolbar input { width: 100%; min-width: 0; }
+}

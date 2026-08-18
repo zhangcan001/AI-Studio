@@ -14,11 +14,12 @@ pub use application::ports::{
     WorkflowRuntimeStateRepository,
 };
 pub use infrastructure::database::{
-    SqliteAssetDeletionRepository, SqliteAssetRepository, SqliteAssetVideoPromptRepository,
-    SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
-    SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionItemReviewRepository,
-    SqliteProductionQueueRepository, SqliteProjectRepository, SqlitePromptLibraryRepository,
-    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    initialize, SqliteAssetDeletionRepository, SqliteAssetRepository,
+    SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
+    SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
+    SqliteProductionItemReviewRepository, SqliteProductionQueueRepository, SqliteProjectRepository,
+    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -41,8 +42,10 @@ use application::{
     production_item_review_service::ProductionItemReviewService,
     production_orchestrator_service::ProductionOrchestratorService,
     production_queue_service::ProductionQueueService,
+    production_structure_service::ProductionStructureService,
     project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
+    project_manifest_service::ProjectManifestService,
     project_service::ProjectService,
     project_template_service::ProjectTemplateService,
     prompt_library_service::PromptLibraryService,
@@ -217,6 +220,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(SqliteAssetRepository::new(database_pool.clone()));
             let reference_anchor_repository: Arc<dyn application::ports::ReferenceAnchorRepository> =
                 Arc::new(infrastructure::database::SqliteReferenceAnchorRepository::new(
+                    database_pool.clone(),
+                ));
+            let production_structure_repository: Arc<dyn application::ports::ProductionStructureRepository> =
+                Arc::new(infrastructure::database::SqliteProductionStructureRepository::new(
                     database_pool.clone(),
                 ));
             let asset_deletion_repository: Arc<dyn application::ports::AssetDeletionRepository> =
@@ -411,6 +418,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_repository.clone(),
                 clock.clone(),
             ));
+            let production_structure_service = Arc::new(ProductionStructureService::new(
+                production_structure_repository,
+                clock.clone(),
+            ));
             let asset_deletion_service = Arc::new(AssetDeletionService::new(
                 asset_repository.clone(),
                 asset_deletion_repository,
@@ -530,6 +541,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 data_dirs.projects.clone(),
                 data_dirs.cache.clone(),
             ));
+            let project_manifest_service = Arc::new(ProjectManifestService::new(database_pool.clone()));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository.clone(),
                 definition_repository.clone(),
@@ -592,6 +604,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 asset_library_service,
+                production_structure_service,
                 reference_anchor_service,
                 asset_deletion_service,
                 asset_video_prompt_service,
@@ -602,6 +615,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_recovery_service,
                 project_service,
                 project_backup_service,
+                project_manifest_service,
                 preset_service,
                 prompt_library_service,
                 shot_service,
@@ -836,6 +850,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_backup_export,
             commands::project::project_backup_inspect,
             commands::project::project_backup_restore,
+            commands::project::project_manifest_export,
             commands::prompt_library::prompt_library_list,
             commands::prompt_library::prompt_library_get,
             commands::prompt_library::prompt_library_create,
@@ -847,6 +862,22 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::reference_anchor::reference_anchor_create,
             commands::reference_anchor::reference_anchor_update,
             commands::reference_anchor::reference_anchor_delete,
+            commands::production_structure::production_structure_tree,
+            commands::production_structure::production_series_create,
+            commands::production_structure::production_series_update,
+            commands::production_structure::production_series_delete,
+            commands::production_structure::production_series_reorder,
+            commands::production_structure::production_episode_create,
+            commands::production_structure::production_episode_update,
+            commands::production_structure::production_episode_delete,
+            commands::production_structure::production_episode_reorder,
+            commands::production_structure::production_scene_create,
+            commands::production_structure::production_scene_update,
+            commands::production_structure::production_scene_delete,
+            commands::production_structure::production_scene_reorder,
+            commands::production_structure::production_scene_assign_shots,
+            commands::production_structure::production_scene_unassign_shots,
+            commands::production_structure::production_scene_reorder_shots,
             commands::shot::shot_list,
             commands::shot::shot_get,
             commands::shot::shot_create,

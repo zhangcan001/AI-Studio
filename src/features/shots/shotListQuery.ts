@@ -26,6 +26,7 @@ export const SHOT_LIST_STATUS_OPTIONS: ReadonlyArray<{
 export interface ShotListControls {
   query: string;
   status: ShotListStatusFilter;
+  sceneId: string;
   pageSize: number;
   page: number;
 }
@@ -42,30 +43,32 @@ export interface ShotListView {
 }
 
 export function defaultShotListControls(): ShotListControls {
-  return { query: "", status: "ALL", pageSize: DEFAULT_SHOT_LIST_PAGE_SIZE, page: 1 };
+  return { query: "", status: "ALL", sceneId: "ALL", pageSize: DEFAULT_SHOT_LIST_PAGE_SIZE, page: 1 };
 }
 
 export function updateShotListControls(
   controls: ShotListControls,
-  change: Partial<Pick<ShotListControls, "query" | "status" | "pageSize">>,
+  change: Partial<Pick<ShotListControls, "query" | "status" | "sceneId" | "pageSize">>,
 ): ShotListControls {
   return { ...controls, ...change, page: 1 };
 }
 
-export function isShotListFiltered(controls: Pick<ShotListControls, "query" | "status" | "pageSize">): boolean {
-  return Boolean(controls.query.trim()) || controls.status !== "ALL";
+export function isShotListFiltered(controls: Pick<ShotListControls, "query" | "status" | "sceneId" | "pageSize">): boolean {
+  return Boolean(controls.query.trim()) || controls.status !== "ALL" || controls.sceneId !== "ALL";
 }
 
-export function isShotListReorderDisabled(controls: Pick<ShotListControls, "query" | "status" | "pageSize">): boolean {
+export function isShotListReorderDisabled(controls: Pick<ShotListControls, "query" | "status" | "sceneId" | "pageSize">): boolean {
   return isShotListFiltered(controls);
 }
 
-export function buildShotListView(shots: ShotView[], controls: ShotListControls): ShotListView {
+export function buildShotListView(shots: ShotView[], controls: ShotListControls, shotSceneIds: Readonly<Record<string, string>> = {}): ShotListView {
   const query = controls.query.trim().toLocaleLowerCase();
   const filteredShots = shots
     .filter((shot) => {
       if (query && !`${shot.name}\n${shot.promptText}`.toLocaleLowerCase().includes(query)) return false;
-      return controls.status === "ALL" || deriveShotStatus(shot) === controls.status;
+      if (controls.status !== "ALL" && deriveShotStatus(shot) !== controls.status) return false;
+      if (controls.sceneId === "UNASSIGNED") return !shotSceneIds[shot.id];
+      return controls.sceneId === "ALL" || shotSceneIds[shot.id] === controls.sceneId;
     })
     .sort((left, right) => left.ordinal - right.ordinal || left.id.localeCompare(right.id));
   const pageCount = Math.max(1, Math.ceil(filteredShots.length / controls.pageSize));

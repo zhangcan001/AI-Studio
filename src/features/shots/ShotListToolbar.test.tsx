@@ -15,6 +15,8 @@ describe("ShotListToolbar", () => {
         pageCount={2}
         onQueryChange={() => undefined}
         onStatusChange={() => undefined}
+        sceneOptions={[{ value: "ALL", label: "全部镜头" }, { value: "UNASSIGNED", label: "未归档" }]}
+        onSceneChange={() => undefined}
         onPageSizeChange={() => undefined}
         onPageChange={() => undefined}
       />,
@@ -25,6 +27,7 @@ describe("ShotListToolbar", () => {
     expect(html).toContain("25 / 页");
     expect(html).toContain("50 / 页");
     expect(html).toContain("100 / 页");
+    expect(html).toContain("结构筛选");
     expect(html).toContain("显示 1-50 / 匹配 73 / 总计 500");
   });
 });

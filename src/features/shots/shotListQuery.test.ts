@@ -43,6 +43,16 @@ describe("ShotWorkspace list controls", () => {
     expect(buildShotListView(shots, { ...defaultShotListControls(), status: "GENERATING_IMAGE" }).pageShots.map((item) => item.id)).toEqual(["running"]);
   });
 
+  it("filters the Shot List by scene without changing the source shot array", () => {
+    const shots = [shot("scene-shot", 0), shot("unassigned", 1), shot("other-scene", 2)];
+    const controls = { ...defaultShotListControls(), sceneId: "scene-a" };
+    const result = buildShotListView(shots, controls, { "scene-shot": "scene-a", "other-scene": "scene-b" });
+
+    expect(result.pageShots.map((item) => item.id)).toEqual(["scene-shot"]);
+    expect(shots.map((item) => item.id)).toEqual(["scene-shot", "unassigned", "other-scene"]);
+    expect(buildShotListView(shots, { ...defaultShotListControls(), sceneId: "UNASSIGNED" }, { "scene-shot": "scene-a" }).pageShots.map((item) => item.id)).toEqual(["unassigned", "other-scene"]);
+  });
+
   it("applies display pagination after filtering and reports counts", () => {
     const shots = Array.from({ length: 120 }, (_, index) => shot(String(index + 1), index));
     const result = buildShotListView(shots, { ...defaultShotListControls(), page: 3 });
@@ -58,6 +68,7 @@ describe("ShotWorkspace list controls", () => {
     const controls = { ...defaultShotListControls(), page: 4 };
     expect(updateShotListControls(controls, { query: "120" }).page).toBe(1);
     expect(updateShotListControls(controls, { status: "FAILED" }).page).toBe(1);
+    expect(updateShotListControls(controls, { sceneId: "scene-a" }).page).toBe(1);
     expect(updateShotListControls(controls, { pageSize: 25 }).page).toBe(1);
   });
 
@@ -66,6 +77,7 @@ describe("ShotWorkspace list controls", () => {
     expect(isShotListFiltered({ ...defaultShotListControls(), pageSize: 25 })).toBe(false);
     expect(isShotListFiltered({ ...defaultShotListControls(), query: "shot" })).toBe(true);
     expect(isShotListFiltered({ ...defaultShotListControls(), status: "READY" })).toBe(true);
+    expect(isShotListFiltered({ ...defaultShotListControls(), sceneId: "scene-a" })).toBe(true);
     expect(isShotListReorderDisabled({ ...defaultShotListControls(), query: "shot" })).toBe(true);
     expect(isShotListReorderDisabled(defaultShotListControls())).toBe(false);
   });

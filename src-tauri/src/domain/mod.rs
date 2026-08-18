@@ -9,6 +9,7 @@ pub mod preset;
 pub mod production_item_review;
 pub mod production_queue;
 pub mod production_run;
+pub mod production_structure;
 pub mod project_id;
 pub mod recipe;
 pub mod reference_anchor;
@@ -29,6 +30,10 @@ pub use production_queue::{
     ProductionQueueDomainError,
 };
 pub use production_run::{ProductionRunStatus, ProductionStageStatus, ProductionStageType};
+pub use production_structure::{
+    ProductionEpisode, ProductionEpisodeId, ProductionScene, ProductionSceneId, ProductionSeries,
+    ProductionSeriesId, ProductionStructureDomainError, ShotSceneAssignment,
+};
 pub use project_id::{validate_project_id, ProjectIdValidationError};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,

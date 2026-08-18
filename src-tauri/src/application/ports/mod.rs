@@ -13,6 +13,7 @@ pub mod organization_repository;
 pub mod preset_repository;
 pub mod production_item_review_repository;
 pub mod production_queue_repository;
+pub mod production_structure_repository;
 pub mod project_directory_store;
 pub mod project_repository;
 pub mod prompt_library_repository;
@@ -65,6 +66,9 @@ pub use production_item_review_repository::{
     ProductionItemReviewRecord, ProductionItemReviewRepository,
 };
 pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepository};
+pub use production_structure_repository::{
+    ProductionStructureRepository, ProductionStructureTreeData,
+};
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use prompt_library_repository::{

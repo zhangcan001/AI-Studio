@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 11;
+const BACKUP_VERSION: u32 = 12;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -329,6 +329,18 @@ impl ProjectBackupService {
         for anchor in &document.reference_anchors {
             reference_anchor_ids.insert(anchor.id.clone(), format!("anc_{}", Uuid::new_v4()));
         }
+        let mut production_series_ids = HashMap::new();
+        for series in &document.production_series {
+            production_series_ids.insert(series.id.clone(), format!("ser_{}", Uuid::new_v4()));
+        }
+        let mut production_episode_ids = HashMap::new();
+        for episode in &document.production_episodes {
+            production_episode_ids.insert(episode.id.clone(), format!("ep_{}", Uuid::new_v4()));
+        }
+        let mut production_scene_ids = HashMap::new();
+        for scene in &document.production_scenes {
+            production_scene_ids.insert(scene.id.clone(), format!("scn_{}", Uuid::new_v4()));
+        }
 
         let copy_result = copy_assets(
             &mut archive,
@@ -373,6 +385,11 @@ impl ProjectBackupService {
                 &benchmark_quality_score_ids,
                 &tag_ids,
                 &reference_anchor_ids,
+                &ProductionStructureIds {
+                    series: production_series_ids,
+                    episodes: production_episode_ids,
+                    scenes: production_scene_ids,
+                },
                 &shot_ids,
                 &shot_generation_link_ids,
                 &restored_assets,
@@ -616,6 +633,8 @@ impl ProjectBackupService {
         .fetch_all(&mut *transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
+        let (production_series, production_episodes, production_scenes, shot_scene_assignments) =
+            query_production_structure(&mut transaction, project_id).await?;
         let included_asset_ids = db_assets
             .iter()
             .filter(|asset| {
@@ -799,6 +818,10 @@ impl ProjectBackupService {
             reference_anchor_asset_rows,
             &included_asset_ids,
         );
+        let shot_scene_assignments = shot_scene_assignments
+            .into_iter()
+            .filter(|assignment| included_shot_ids.contains(assignment.shot_id.as_str()))
+            .collect::<Vec<_>>();
         let document = BackupDocument {
             project: BackupProject {
                 id: project.id,
@@ -825,6 +848,10 @@ impl ProjectBackupService {
             asset_favorites,
             asset_video_prompts,
             reference_anchors,
+            production_series,
+            production_episodes,
+            production_scenes,
+            shot_scene_assignments,
             production_item_reviews,
             benchmark_experiments,
             benchmark_candidates,
@@ -865,6 +892,7 @@ impl ProjectBackupService {
         benchmark_quality_score_ids: &HashMap<String, String>,
         tag_ids: &HashMap<String, String>,
         reference_anchor_ids: &HashMap<String, String>,
+        production_structure_ids: &ProductionStructureIds,
         shot_ids: &HashMap<String, String>,
         shot_generation_link_ids: &HashMap<String, String>,
         restored_assets: &[RestoredAsset],
@@ -897,6 +925,7 @@ impl ProjectBackupService {
             benchmark_quality_score_ids,
             tag_ids,
             reference_anchor_ids,
+            production_structure_ids,
             shot_ids,
             shot_generation_link_ids,
             restored_assets,
@@ -962,6 +991,14 @@ struct BackupDocument {
     asset_video_prompts: Vec<BackupAssetVideoPrompt>,
     #[serde(default)]
     reference_anchors: Vec<BackupReferenceAnchor>,
+    #[serde(default)]
+    production_series: Vec<BackupProductionSeries>,
+    #[serde(default)]
+    production_episodes: Vec<BackupProductionEpisode>,
+    #[serde(default)]
+    production_scenes: Vec<BackupProductionScene>,
+    #[serde(default)]
+    shot_scene_assignments: Vec<BackupShotSceneAssignment>,
     #[serde(default)]
     production_item_reviews: Vec<BackupProductionItemReview>,
     #[serde(default)]
@@ -1073,6 +1110,59 @@ struct BackupReferenceAnchorAsset {
     asset_id: String,
     ordinal: i64,
     created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionSeries {
+    id: String,
+    project_id: String,
+    ordinal: i64,
+    name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionEpisode {
+    id: String,
+    series_id: String,
+    ordinal: i64,
+    name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupProductionScene {
+    id: String,
+    episode_id: String,
+    ordinal: i64,
+    name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotSceneAssignment {
+    shot_id: String,
+    scene_id: String,
+    ordinal: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Default)]
+struct ProductionStructureIds {
+    series: HashMap<String, String>,
+    episodes: HashMap<String, String>,
+    scenes: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1612,6 +1702,48 @@ struct DbReferenceAnchorAsset {
 }
 
 #[derive(FromRow)]
+struct DbProductionSeries {
+    id: String,
+    project_id: String,
+    ordinal: i64,
+    name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbProductionEpisode {
+    id: String,
+    series_id: String,
+    ordinal: i64,
+    name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbProductionScene {
+    id: String,
+    episode_id: String,
+    ordinal: i64,
+    name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbShotSceneAssignment {
+    shot_id: String,
+    scene_id: String,
+    ordinal: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
 struct DbTaskEvent {
     id: String,
     task_id: String,
@@ -1917,6 +2049,125 @@ fn assemble_reference_anchor_backups(
             updated_at: anchor.updated_at,
         })
         .collect()
+}
+
+async fn query_production_structure(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<
+    (
+        Vec<BackupProductionSeries>,
+        Vec<BackupProductionEpisode>,
+        Vec<BackupProductionScene>,
+        Vec<BackupShotSceneAssignment>,
+    ),
+    AppError,
+> {
+    let table_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sqlite_master
+         WHERE type = 'table' AND name IN
+           ('production_series', 'production_episodes', 'production_scenes',
+            'shot_scene_assignments')",
+    )
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    if table_count == 0 {
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+    }
+    if table_count != 4 {
+        return Err(AppError::database(
+            "生产结构表不完整，请先应用 migration 021",
+        ));
+    }
+
+    let series = sqlx::query_as::<_, DbProductionSeries>(
+        "SELECT id, project_id, ordinal, name, description, created_at, updated_at
+         FROM production_series WHERE project_id = ? ORDER BY ordinal, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .map(|row| BackupProductionSeries {
+        id: row.id,
+        project_id: row.project_id,
+        ordinal: row.ordinal,
+        name: row.name,
+        description: row.description,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+    .collect();
+    let episodes = sqlx::query_as::<_, DbProductionEpisode>(
+        "SELECT e.id, e.series_id, e.ordinal, e.name, e.description, e.created_at, e.updated_at
+         FROM production_episodes e
+         JOIN production_series s ON s.id = e.series_id
+         WHERE s.project_id = ? ORDER BY e.series_id, e.ordinal, e.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .map(|row| BackupProductionEpisode {
+        id: row.id,
+        series_id: row.series_id,
+        ordinal: row.ordinal,
+        name: row.name,
+        description: row.description,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+    .collect();
+    let scenes = sqlx::query_as::<_, DbProductionScene>(
+        "SELECT c.id, c.episode_id, c.ordinal, c.name, c.description, c.created_at, c.updated_at
+         FROM production_scenes c
+         JOIN production_episodes e ON e.id = c.episode_id
+         JOIN production_series s ON s.id = e.series_id
+         WHERE s.project_id = ? ORDER BY c.episode_id, c.ordinal, c.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .map(|row| BackupProductionScene {
+        id: row.id,
+        episode_id: row.episode_id,
+        ordinal: row.ordinal,
+        name: row.name,
+        description: row.description,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+    .collect();
+    let assignments = sqlx::query_as::<_, DbShotSceneAssignment>(
+        "SELECT a.shot_id, a.scene_id, a.ordinal, a.created_at, a.updated_at
+         FROM shot_scene_assignments a
+         JOIN production_scenes c ON c.id = a.scene_id
+         JOIN production_episodes e ON e.id = c.episode_id
+         JOIN production_series s ON s.id = e.series_id
+         JOIN shots h ON h.id = a.shot_id
+         WHERE s.project_id = ? AND h.project_id = ?
+         ORDER BY a.scene_id, a.ordinal, a.shot_id",
+    )
+    .bind(project_id)
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .map(|row| BackupShotSceneAssignment {
+        shot_id: row.shot_id,
+        scene_id: row.scene_id,
+        ordinal: row.ordinal,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+    .collect();
+    Ok((series, episodes, scenes, assignments))
 }
 
 fn remap_reference_anchor_assets(
@@ -3035,7 +3286,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -3083,6 +3334,7 @@ fn validate_document_entries(
     validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
     validate_reference_anchor_document(document)?;
+    validate_production_structure_document(document, version)?;
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
     validate_production_orchestrator_document(document)?;
@@ -3913,6 +4165,133 @@ fn validate_reference_anchor_document(document: &BackupDocument) -> Result<(), A
     Ok(())
 }
 
+fn validate_production_structure_document(
+    document: &BackupDocument,
+    version: u32,
+) -> Result<(), AppError> {
+    if version < 12
+        && (!document.production_series.is_empty()
+            || !document.production_episodes.is_empty()
+            || !document.production_scenes.is_empty()
+            || !document.shot_scene_assignments.is_empty())
+    {
+        return Err(AppError::backup_invalid("生产结构数据需要 Backup v12"));
+    }
+
+    let mut series_ids = HashSet::new();
+    let mut series_ordinals = Vec::with_capacity(document.production_series.len());
+    for series in &document.production_series {
+        if series.project_id != document.project.id
+            || series.id.trim().is_empty()
+            || !series_ids.insert(series.id.as_str())
+            || series.ordinal < 0
+            || !valid_structure_name(&series.name)
+            || series.description.chars().count() > 1000
+        {
+            return Err(AppError::backup_invalid("备份 Series 数据无效"));
+        }
+        series_ordinals.push(series.ordinal);
+    }
+    if !is_contiguous_ordinals(&mut series_ordinals) {
+        return Err(AppError::backup_invalid(
+            "备份 Series 序号必须从 0 连续排列",
+        ));
+    }
+
+    let mut episode_ids = HashSet::new();
+    let mut episode_ordinals = HashMap::<&str, Vec<i64>>::new();
+    for episode in &document.production_episodes {
+        if episode.id.trim().is_empty()
+            || !episode_ids.insert(episode.id.as_str())
+            || !series_ids.contains(episode.series_id.as_str())
+            || episode.ordinal < 0
+            || !valid_structure_name(&episode.name)
+            || episode.description.chars().count() > 1000
+        {
+            return Err(AppError::backup_invalid("备份 Episode 数据无效"));
+        }
+        episode_ordinals
+            .entry(episode.series_id.as_str())
+            .or_default()
+            .push(episode.ordinal);
+    }
+    if episode_ordinals
+        .values_mut()
+        .any(|ordinals| !is_contiguous_ordinals(ordinals))
+    {
+        return Err(AppError::backup_invalid("备份 Episode 序号必须连续"));
+    }
+
+    let mut scene_ids = HashSet::new();
+    let mut scene_ordinals = HashMap::<&str, Vec<i64>>::new();
+    for scene in &document.production_scenes {
+        if scene.id.trim().is_empty()
+            || !scene_ids.insert(scene.id.as_str())
+            || !episode_ids.contains(scene.episode_id.as_str())
+            || scene.ordinal < 0
+            || !valid_structure_name(&scene.name)
+            || scene.description.chars().count() > 1000
+        {
+            return Err(AppError::backup_invalid("备份 Scene 数据无效"));
+        }
+        scene_ordinals
+            .entry(scene.episode_id.as_str())
+            .or_default()
+            .push(scene.ordinal);
+    }
+    if scene_ordinals
+        .values_mut()
+        .any(|ordinals| !is_contiguous_ordinals(ordinals))
+    {
+        return Err(AppError::backup_invalid("备份 Scene 序号必须连续"));
+    }
+
+    let shot_ids = document
+        .shots
+        .iter()
+        .map(|shot| shot.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut assigned_shots = HashSet::new();
+    let mut assignment_ordinals = HashMap::<&str, Vec<i64>>::new();
+    for assignment in &document.shot_scene_assignments {
+        if assignment.shot_id.trim().is_empty()
+            || !shot_ids.contains(assignment.shot_id.as_str())
+            || !scene_ids.contains(assignment.scene_id.as_str())
+            || !assigned_shots.insert(assignment.shot_id.as_str())
+            || assignment.ordinal < 0
+        {
+            return Err(AppError::backup_invalid("备份镜头 Scene 归属无效"));
+        }
+        assignment_ordinals
+            .entry(assignment.scene_id.as_str())
+            .or_default()
+            .push(assignment.ordinal);
+    }
+    if assignment_ordinals
+        .values_mut()
+        .any(|ordinals| !is_contiguous_ordinals(ordinals))
+    {
+        return Err(AppError::backup_invalid("备份 Scene 镜头序号必须连续"));
+    }
+    Ok(())
+}
+
+fn valid_structure_name(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed == value
+        && !value.contains(['\r', '\n'])
+        && value.chars().count() <= 100
+}
+
+fn is_contiguous_ordinals(ordinals: &mut [i64]) -> bool {
+    ordinals.sort_unstable();
+    ordinals
+        .iter()
+        .enumerate()
+        .all(|(index, ordinal)| *ordinal == index as i64)
+}
+
 fn safe_zip_path(name: &str) -> bool {
     if name.is_empty()
         || name.starts_with('/')
@@ -4160,6 +4539,7 @@ async fn restore_rows_in_transaction(
     benchmark_quality_score_ids: &HashMap<String, String>,
     tag_ids: &HashMap<String, String>,
     reference_anchor_ids: &HashMap<String, String>,
+    production_structure_ids: &ProductionStructureIds,
     shot_ids: &HashMap<String, String>,
     shot_generation_link_ids: &HashMap<String, String>,
     restored_assets: &[RestoredAsset],
@@ -4967,6 +5347,77 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    for series in &document.production_series {
+        let series_id = production_structure_ids
+            .series
+            .get(&series.id)
+            .ok_or_else(|| AppError::backup_invalid("Series ID 映射缺失"))?;
+        sqlx::query(
+            "INSERT INTO production_series
+             (id, project_id, ordinal, name, description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(series_id)
+        .bind(&project.id)
+        .bind(series.ordinal)
+        .bind(&series.name)
+        .bind(&series.description)
+        .bind(&series.created_at)
+        .bind(&series.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for episode in &document.production_episodes {
+        let episode_id = production_structure_ids
+            .episodes
+            .get(&episode.id)
+            .ok_or_else(|| AppError::backup_invalid("Episode ID 映射缺失"))?;
+        let series_id = production_structure_ids
+            .series
+            .get(&episode.series_id)
+            .ok_or_else(|| AppError::backup_invalid("Episode 缺少 Series 映射"))?;
+        sqlx::query(
+            "INSERT INTO production_episodes
+             (id, series_id, ordinal, name, description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(episode_id)
+        .bind(series_id)
+        .bind(episode.ordinal)
+        .bind(&episode.name)
+        .bind(&episode.description)
+        .bind(&episode.created_at)
+        .bind(&episode.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for scene in &document.production_scenes {
+        let scene_id = production_structure_ids
+            .scenes
+            .get(&scene.id)
+            .ok_or_else(|| AppError::backup_invalid("Scene ID 映射缺失"))?;
+        let episode_id = production_structure_ids
+            .episodes
+            .get(&scene.episode_id)
+            .ok_or_else(|| AppError::backup_invalid("Scene 缺少 Episode 映射"))?;
+        sqlx::query(
+            "INSERT INTO production_scenes
+             (id, episode_id, ordinal, name, description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(scene_id)
+        .bind(episode_id)
+        .bind(scene.ordinal)
+        .bind(&scene.name)
+        .bind(&scene.description)
+        .bind(&scene.created_at)
+        .bind(&scene.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for shot in &document.shots {
         let shot_id = shot_ids
             .get(&shot.id)
@@ -5007,6 +5458,28 @@ async fn restore_rows_in_transaction(
         .bind(selected_video_asset_id)
         .bind(&shot.created_at)
         .bind(&shot.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for assignment in &document.shot_scene_assignments {
+        let shot_id = shot_ids
+            .get(&assignment.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("Scene Assignment 缺少镜头映射"))?;
+        let scene_id = production_structure_ids
+            .scenes
+            .get(&assignment.scene_id)
+            .ok_or_else(|| AppError::backup_invalid("Scene Assignment 缺少 Scene 映射"))?;
+        sqlx::query(
+            "INSERT INTO shot_scene_assignments
+             (shot_id, scene_id, ordinal, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(shot_id)
+        .bind(scene_id)
+        .bind(assignment.ordinal)
+        .bind(&assignment.created_at)
+        .bind(&assignment.updated_at)
         .execute(&mut **transaction)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
@@ -5222,11 +5695,13 @@ mod tests {
         assemble_reference_anchor_backups, collect_exact_asset_id_references, inspect_archive,
         remap_reference_anchor_assets, remap_snapshot_asset_references, restored_name,
         safe_zip_path, validate_asset_video_prompt_document, validate_organization_document,
-        validate_prompt_document, validate_reference_anchor_document, BackupAsset, BackupAssetTag,
-        BackupAssetTagLink, BackupAssetVideoPrompt, BackupDocument, BackupProject,
-        BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor, BackupReferenceAnchorAsset,
+        validate_production_structure_document, validate_prompt_document,
+        validate_reference_anchor_document, BackupAsset, BackupAssetTag, BackupAssetTagLink,
+        BackupAssetVideoPrompt, BackupDocument, BackupProductionEpisode, BackupProductionScene,
+        BackupProductionSeries, BackupProject, BackupPromptEntry, BackupPromptVersion,
+        BackupReferenceAnchor, BackupReferenceAnchorAsset, BackupShot, BackupShotSceneAssignment,
         BackupSnapshot, BackupTask, DbReferenceAnchor, DbReferenceAnchorAsset,
-        ProjectBackupService,
+        ProductionStructureIds, ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
@@ -5420,6 +5895,10 @@ mod tests {
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
             reference_anchors: Vec::new(),
+            production_series: Vec::new(),
+            production_episodes: Vec::new(),
+            production_scenes: Vec::new(),
+            shot_scene_assignments: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
@@ -5570,6 +6049,88 @@ mod tests {
             .remove("referenceAnchors");
         let document: BackupDocument = serde_json::from_value(value).unwrap();
         assert!(document.reference_anchors.is_empty());
+    }
+
+    #[test]
+    fn v11_restore_defaults_structure_and_v12_structure_remaps_ids() {
+        let mut legacy =
+            serde_json::to_value(organization_document(Vec::new(), Vec::new())).unwrap();
+        let legacy_object = legacy
+            .as_object_mut()
+            .expect("backup document is an object");
+        for field in [
+            "productionSeries",
+            "productionEpisodes",
+            "productionScenes",
+            "shotSceneAssignments",
+        ] {
+            legacy_object.remove(field);
+        }
+        let legacy: BackupDocument = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.production_series.is_empty());
+        assert!(legacy.production_episodes.is_empty());
+        assert!(legacy.production_scenes.is_empty());
+        assert!(legacy.shot_scene_assignments.is_empty());
+
+        let mut document = organization_document(Vec::new(), Vec::new());
+        document.shots = vec![BackupShot {
+            id: "sht_old".to_owned(),
+            project_id: document.project.id.clone(),
+            ordinal: 0,
+            name: "镜头 1".to_owned(),
+            prompt_text: "prompt".to_owned(),
+            prompt_entry_id: None,
+            prompt_version_id: None,
+            selected_image_asset_id: None,
+            selected_video_asset_id: None,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.production_series = vec![BackupProductionSeries {
+            id: "ser_old".to_owned(),
+            project_id: document.project.id.clone(),
+            ordinal: 0,
+            name: "第一季".to_owned(),
+            description: String::new(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.production_episodes = vec![BackupProductionEpisode {
+            id: "ep_old".to_owned(),
+            series_id: "ser_old".to_owned(),
+            ordinal: 0,
+            name: "第一集".to_owned(),
+            description: String::new(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.production_scenes = vec![BackupProductionScene {
+            id: "scn_old".to_owned(),
+            episode_id: "ep_old".to_owned(),
+            ordinal: 0,
+            name: "开场".to_owned(),
+            description: String::new(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.shot_scene_assignments = vec![BackupShotSceneAssignment {
+            shot_id: "sht_old".to_owned(),
+            scene_id: "scn_old".to_owned(),
+            ordinal: 0,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        validate_production_structure_document(&document, 12)
+            .expect("v12 structure should validate");
+
+        let remaps = ProductionStructureIds {
+            series: HashMap::from([("ser_old".to_owned(), "ser_new".to_owned())]),
+            episodes: HashMap::from([("ep_old".to_owned(), "ep_new".to_owned())]),
+            scenes: HashMap::from([("scn_old".to_owned(), "scn_new".to_owned())]),
+        };
+        assert_eq!(remaps.series["ser_old"], "ser_new");
+        assert_eq!(remaps.episodes["ep_old"], "ep_new");
+        assert_eq!(remaps.scenes["scn_old"], "scn_new");
     }
 
     #[test]
@@ -5889,6 +6450,38 @@ mod tests {
         .await
         .unwrap();
         sqlx::query(
+            "INSERT INTO production_series
+             (id, project_id, ordinal, name, description, created_at, updated_at)
+             VALUES ('ser_backup', 'project-backup', 0, '第一季', '', '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_episodes
+             (id, series_id, ordinal, name, description, created_at, updated_at)
+             VALUES ('ep_backup', 'ser_backup', 0, '第一集', '', '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_scenes
+             (id, episode_id, ordinal, name, description, created_at, updated_at)
+             VALUES ('scn_backup', 'ep_backup', 0, '开场', '', '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_scene_assignments
+             (shot_id, scene_id, ordinal, created_at, updated_at)
+             VALUES ('sht_backup', 'scn_backup', 0, '2026-01-01T00:03:00Z', '2026-01-01T00:03:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
             "INSERT INTO shot_stage_configs (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
              VALUES ('sht_backup', 'image', 'workflow-version-1', 'recipe-1', '{\"steps\":{\"type\":\"integer\",\"value\":4}}', '2026-01-01T00:03:00Z'),
                     ('sht_backup', 'video', 'workflow-version-1', 'recipe-1', '{\"seed\":{\"type\":\"seed_random\"}}', '2026-01-01T00:03:00Z')",
@@ -6014,7 +6607,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 11);
+        assert_eq!(manifest.version, 12);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -6050,6 +6643,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(production_counts, (1, 3, 7, 1, 1, 1));
+        let restored_structure: (String, String, String, String) = sqlx::query_as(
+            "SELECT s.id, e.id, c.id, a.shot_id
+             FROM production_series s
+             JOIN production_episodes e ON e.series_id = s.id
+             JOIN production_scenes c ON c.episode_id = e.id
+             JOIN shot_scene_assignments a ON a.scene_id = c.id
+             WHERE s.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_structure.0, "ser_backup");
+        assert_ne!(restored_structure.1, "ep_backup");
+        assert_ne!(restored_structure.2, "scn_backup");
+        assert_ne!(restored_structure.3, "sht_backup");
         let restored_path = sqlx::query_scalar::<_, String>(
             "SELECT storage_path FROM assets WHERE project_id = ? AND type = 'image' AND original_name = '图像.png'",
         )
@@ -6794,6 +7403,10 @@ mod tests {
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
             reference_anchors: Vec::new(),
+            production_series: Vec::new(),
+            production_episodes: Vec::new(),
+            production_scenes: Vec::new(),
+            shot_scene_assignments: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
@@ -6849,6 +7462,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &ProductionStructureIds::default(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &[],
@@ -6941,6 +7555,10 @@ mod tests {
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
             reference_anchors: Vec::new(),
+            production_series: Vec::new(),
+            production_episodes: Vec::new(),
+            production_scenes: Vec::new(),
+            shot_scene_assignments: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),

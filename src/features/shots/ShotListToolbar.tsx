@@ -10,6 +10,8 @@ interface Props {
   pageCount: number;
   onQueryChange: (query: string) => void;
   onStatusChange: (status: ShotListStatusFilter) => void;
+  sceneOptions?: ReadonlyArray<{ value: string; label: string }>;
+  onSceneChange?: (sceneId: string) => void;
   onPageSizeChange: (pageSize: number) => void;
   onPageChange: (page: number) => void;
 }
@@ -23,6 +25,8 @@ export function ShotListToolbar({
   pageCount,
   onQueryChange,
   onStatusChange,
+  sceneOptions = [],
+  onSceneChange,
   onPageSizeChange,
   onPageChange,
 }: Props) {
@@ -49,6 +53,12 @@ export function ShotListToolbar({
             {SHOT_LIST_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
+        {sceneOptions.length > 0 && onSceneChange && <label>
+          <span className="sr-only">结构筛选</span>
+          <select value={controls.sceneId} onChange={(event) => onSceneChange(event.target.value)} aria-label="结构筛选">
+            {sceneOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>}
         <label>
           <span className="sr-only">每页数量</span>
           <select
