@@ -8,7 +8,7 @@ use crate::domain::{validate_scalar_values, ShotStage};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, SqlitePool};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ impl SqliteShotRepository {
 
     async fn load_related(&self, shot: ShotRow) -> Result<ShotData, RepositoryError> {
         let shot_id = shot.id.clone();
+        let shot = shot.try_into_domain()?;
         let stage_rows = sqlx::query_as::<_, ShotStageConfigRow>(
             "SELECT shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at
              FROM shot_stage_configs WHERE shot_id = ? ORDER BY stage",
@@ -69,9 +70,22 @@ impl SqliteShotRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
+        let prompt_rows = sqlx::query_as::<_, ShotStagePromptRow>(
+            "SELECT shot_id, stage, prompt_text, prompt_entry_id,
+                    prompt_version_id, updated_at
+             FROM shot_stage_prompts WHERE shot_id = ? ORDER BY stage",
+        )
+        .bind(&shot_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let stage_prompts = prompt_rows
+            .into_iter()
+            .map(ShotStagePromptRow::try_into_domain)
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(ShotData {
-            shot: shot.try_into_domain()?,
+            shot: shot.clone(),
             stage_configs: stage_rows
                 .into_iter()
                 .map(ShotStageConfigRow::try_into_domain)
@@ -84,7 +98,118 @@ impl SqliteShotRepository {
                 .into_iter()
                 .map(ShotGenerationLinkRow::try_into_domain)
                 .collect::<Result<Vec<_>, _>>()?,
+            stage_prompts: if stage_prompts.is_empty() {
+                legacy_stage_prompts(&shot)
+            } else {
+                stage_prompts
+            },
         })
+    }
+
+    async fn load_related_many(
+        &self,
+        shots: Vec<ShotRow>,
+        project_id: &str,
+    ) -> Result<Vec<ShotData>, RepositoryError> {
+        if shots.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let stage_rows = sqlx::query_as::<_, ShotStageConfigRow>(
+            "SELECT c.shot_id, c.stage, c.workflow_version_id, c.recipe_id,
+                    c.scalar_values_json, c.updated_at
+             FROM shot_stage_configs c
+             JOIN shots s ON s.id = c.shot_id
+             WHERE s.project_id = ? ORDER BY c.shot_id, c.stage",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let reference_rows = sqlx::query_as::<_, ShotReferenceRow>(
+            "SELECT r.shot_id, r.stage, r.asset_id, r.ordinal
+             FROM shot_reference_assets r
+             JOIN shots s ON s.id = r.shot_id
+             WHERE s.project_id = ? ORDER BY r.shot_id, r.stage, r.ordinal, r.asset_id",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let link_rows = sqlx::query_as::<_, ShotGenerationLinkRow>(
+            "SELECT l.id, l.shot_id, l.stage, l.task_id, l.production_batch_item_id,
+                    l.created_at
+             FROM shot_generation_links l
+             JOIN shots s ON s.id = l.shot_id
+             WHERE s.project_id = ? ORDER BY l.shot_id, l.created_at DESC, l.id DESC",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        let prompt_rows = sqlx::query_as::<_, ShotStagePromptRow>(
+            "SELECT p.shot_id, p.stage, p.prompt_text, p.prompt_entry_id,
+                    p.prompt_version_id, p.updated_at
+             FROM shot_stage_prompts p
+             JOIN shots s ON s.id = p.shot_id
+             WHERE s.project_id = ? ORDER BY p.shot_id, p.stage",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut stage_configs_by_shot = HashMap::<String, Vec<ShotStageConfigRecord>>::new();
+        for row in stage_rows {
+            let config = row.try_into_domain()?;
+            stage_configs_by_shot
+                .entry(config.shot_id.clone())
+                .or_default()
+                .push(config);
+        }
+        let mut references_by_shot = HashMap::<String, Vec<ShotReferenceAssetRecord>>::new();
+        for row in reference_rows {
+            let reference = row.try_into_domain()?;
+            references_by_shot
+                .entry(reference.shot_id.clone())
+                .or_default()
+                .push(reference);
+        }
+        let mut links_by_shot = HashMap::<String, Vec<ShotGenerationLinkRecord>>::new();
+        for row in link_rows {
+            let link = row.try_into_domain()?;
+            links_by_shot
+                .entry(link.shot_id.clone())
+                .or_default()
+                .push(link);
+        }
+        let mut prompts_by_shot = HashMap::<String, Vec<ShotStagePromptRecord>>::new();
+        for row in prompt_rows {
+            let prompt = row.try_into_domain()?;
+            prompts_by_shot
+                .entry(prompt.shot_id.clone())
+                .or_default()
+                .push(prompt);
+        }
+
+        shots
+            .into_iter()
+            .map(|row| {
+                let shot = row.try_into_domain()?;
+                let shot_id = shot.id.clone();
+                let stage_prompts = prompts_by_shot
+                    .remove(&shot_id)
+                    .filter(|prompts| !prompts.is_empty())
+                    .unwrap_or_else(|| legacy_stage_prompts(&shot));
+                Ok(ShotData {
+                    shot,
+                    stage_configs: stage_configs_by_shot.remove(&shot_id).unwrap_or_default(),
+                    stage_prompts,
+                    reference_assets: references_by_shot.remove(&shot_id).unwrap_or_default(),
+                    generation_links: links_by_shot.remove(&shot_id).unwrap_or_default(),
+                })
+            })
+            .collect()
     }
 }
 
@@ -101,11 +226,7 @@ impl ShotRepository for SqliteShotRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        let mut result = Vec::with_capacity(rows.len());
-        for row in rows {
-            result.push(self.load_related(row).await?);
-        }
-        Ok(result)
+        self.load_related_many(rows, project_id).await
     }
 
     async fn find(
@@ -827,6 +948,20 @@ impl ShotGenerationLinkRow {
             created_at: parse_datetime("shot generation created_at", &self.created_at)?,
         })
     }
+}
+
+fn legacy_stage_prompts(shot: &ShotRecord) -> Vec<ShotStagePromptRecord> {
+    [ShotStage::Image, ShotStage::Video]
+        .into_iter()
+        .map(|stage| ShotStagePromptRecord {
+            shot_id: shot.id.clone(),
+            stage,
+            prompt_text: shot.prompt_text.clone(),
+            prompt_entry_id: shot.prompt_entry_id.clone(),
+            prompt_version_id: shot.prompt_version_id.clone(),
+            updated_at: shot.updated_at,
+        })
+        .collect()
 }
 
 #[cfg(test)]

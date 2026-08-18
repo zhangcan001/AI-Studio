@@ -1,6 +1,9 @@
 pub mod pool;
 pub mod repositories;
 
+#[cfg(test)]
+mod dev033_benchmark;
+
 pub use pool::initialize;
 pub use repositories::{
     SqliteAssetBrowseRepository, SqliteAssetDeletionRepository, SqliteAssetRepository,

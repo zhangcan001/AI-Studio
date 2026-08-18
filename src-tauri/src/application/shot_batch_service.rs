@@ -881,6 +881,7 @@ outputs:
                 updated_at: now,
             },
             stage_configs: Vec::new(),
+            stage_prompts: Vec::new(),
             reference_assets: references
                 .iter()
                 .map(|(asset_id, ordinal)| ShotReferenceAssetRecord {

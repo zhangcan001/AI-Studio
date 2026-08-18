@@ -773,20 +773,52 @@ impl ShotService {
     }
 
     async fn views(&self, data: Vec<ShotData>) -> Result<Vec<ShotView>, ShotServiceError> {
+        let task_ids = data
+            .iter()
+            .flat_map(|item| item.generation_links.iter())
+            .filter_map(|link| link.task_id.as_deref())
+            .map(|task_id| {
+                TaskId::parse(task_id.to_owned())
+                    .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tasks = self.task_repository.find_many_by_ids(&task_ids).await?;
+        let tasks_by_id = tasks
+            .into_iter()
+            .map(|task| (task.id.to_string(), task))
+            .collect::<HashMap<_, _>>();
         let mut result = Vec::with_capacity(data.len());
         for item in data {
-            result.push(self.view(item).await?);
+            result.push(self.view_with_tasks(item, &tasks_by_id).await?);
         }
         Ok(result)
     }
 
     async fn view(&self, data: ShotData) -> Result<ShotView, ShotServiceError> {
-        let stage_prompts = if let Some(repository) = &self.stage_prompt_repository {
-            repository
-                .find_bulk_data(&data.shot.project_id, &data.shot.id)
-                .await?
-                .map(|item| item.stage_prompts)
-                .unwrap_or_default()
+        let task_ids = data
+            .generation_links
+            .iter()
+            .filter_map(|link| link.task_id.as_deref())
+            .map(|task_id| {
+                TaskId::parse(task_id.to_owned())
+                    .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tasks = self.task_repository.find_many_by_ids(&task_ids).await?;
+        let tasks_by_id = tasks
+            .into_iter()
+            .map(|task| (task.id.to_string(), task))
+            .collect::<HashMap<_, _>>();
+        self.view_with_tasks(data, &tasks_by_id).await
+    }
+
+    async fn view_with_tasks(
+        &self,
+        data: ShotData,
+        tasks_by_id: &HashMap<String, crate::domain::Task>,
+    ) -> Result<ShotView, ShotServiceError> {
+        let stage_prompts = if self.stage_prompt_repository.is_some() {
+            data.stage_prompts
         } else {
             Vec::new()
         };
@@ -794,13 +826,9 @@ impl ShotService {
         let mut generation_links = Vec::with_capacity(data.generation_links.len());
         for link in &data.generation_links {
             let task = if let Some(task_id) = &link.task_id {
-                let task_id = TaskId::parse(task_id.clone())
-                    .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
-                let task = self
-                    .task_repository
-                    .find_by_id(&task_id)
-                    .await?
-                    .ok_or_else(|| ShotServiceError::NotFound(task_id.to_string()))?;
+                let task = tasks_by_id
+                    .get(task_id)
+                    .ok_or_else(|| ShotServiceError::NotFound(task_id.to_owned()))?;
                 if task.project_id != data.shot.project_id {
                     return Err(ShotServiceError::InvalidInput(
                         "Shot generation link 跨项目".to_owned(),
@@ -809,7 +837,7 @@ impl ShotService {
                 task_statuses.insert(task.id.to_string(), task.status);
                 Some(
                     self.task_query_service
-                        .view(task)
+                        .view(task.clone())
                         .await
                         .map_err(|error| ShotServiceError::TaskView(error.to_string()))?,
                 )

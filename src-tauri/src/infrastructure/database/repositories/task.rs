@@ -319,6 +319,37 @@ impl TaskRepository for SqliteTaskRepository {
         row.map(TaskRow::try_into_domain).transpose()
     }
 
+    async fn find_many_by_ids(&self, task_ids: &[TaskId]) -> Result<Vec<Task>, RepositoryError> {
+        if task_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", task_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "SELECT
+                id, project_id, workflow_id, workflow_version_id, recipe_id,
+                submission_idempotency_key, submission_attempt, parent_task_id,
+                app_version, build_commit, workflow_version, workflow_sha256,
+                recipe_version, recipe_sha256, package_name, package_source_path,
+                dynamic_binding_targets_json,
+                generation_execution_id, compiled_workflow_sha256, runtime_profile,
+                concurrency_class, prepare_started_at, prepared_at, submitted_at,
+                execution_started_at, execution_finished_at, collection_finished_at,
+                status, prompt_id, queue_number,
+                progress_mode, progress_current, progress_total, current_node_id,
+                error_code, error_message, raw_error_json,
+                created_at, queued_at, started_at, finished_at
+             FROM tasks WHERE id IN ({placeholders})"
+        );
+        let mut query = sqlx::query_as::<_, TaskRow>(&query);
+        for task_id in task_ids {
+            query = query.bind(task_id.as_str());
+        }
+        let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+        rows.into_iter().map(TaskRow::try_into_domain).collect()
+    }
+
     async fn find_by_submission_idempotency_key(
         &self,
         project_id: &str,

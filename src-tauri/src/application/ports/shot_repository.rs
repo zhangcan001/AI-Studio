@@ -1,4 +1,4 @@
-use super::RepositoryError;
+use super::{shot_bulk_repository::ShotStagePromptRecord, RepositoryError};
 use crate::domain::ShotStage;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -51,6 +51,7 @@ pub struct ShotGenerationLinkRecord {
 pub struct ShotData {
     pub shot: ShotRecord,
     pub stage_configs: Vec<ShotStageConfigRecord>,
+    pub stage_prompts: Vec<ShotStagePromptRecord>,
     pub reference_assets: Vec<ShotReferenceAssetRecord>,
     pub generation_links: Vec<ShotGenerationLinkRecord>,
 }
