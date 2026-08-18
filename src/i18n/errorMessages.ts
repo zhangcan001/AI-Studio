@@ -78,6 +78,16 @@ const ERROR_MESSAGES: Record<string, string> = {
   SNAPSHOT_PERSISTENCE_ERROR: "任务恢复状态保存失败，请查看技术详情。",
   TASK_RECOVERY_DEFERRED: "任务恢复已延后，请稍后刷新任务状态。",
   TASK_RECOVERY_UNRESOLVED: "任务恢复状态暂时无法确认，请查看任务详情。",
+  PROMPT_TEMPLATE_SYNTAX_ERROR: "模板语法有误，请检查 {{variable.path}} 是否完整。",
+  PROMPT_TEMPLATE_UNKNOWN_VARIABLE: "模板包含尚未支持的变量，请修改后重试。",
+  PROMPT_TEMPLATE_CONTEXT_MISSING: "当前镜头缺少模板所需的项目结构上下文。",
+  PROMPT_TEMPLATE_CUSTOM_VALUE_MISSING: "请填写模板要求的自定义变量。",
+  PROMPT_TEMPLATE_CUSTOM_VALUES_INVALID: "模板自定义变量格式无效，请检查名称、长度和总大小。",
+  PROMPT_TEMPLATE_APPLY_VALIDATION_FAILED: "模板批量校验未通过，请检查镜头上下文与自定义变量。",
+  PROMPT_TEMPLATE_ANCHOR_PROJECT_MISMATCH: "所选 Reference Anchor 不属于当前项目。",
+  PROMPT_TEMPLATE_ANCHOR_LIMIT: "模板上下文最多选择 20 个 Reference Anchor。",
+  PROMPT_TEMPLATE_SHOT_LIMIT: "模板批量应用一次最多处理 500 个镜头。",
+  PROMPT_TEMPLATE_RESULT_TOO_LARGE: "渲染后的 Prompt 过长，请缩短模板或上下文。",
 };
 
 function rawErrorMessage(error: unknown): string {

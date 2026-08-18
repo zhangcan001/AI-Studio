@@ -2166,6 +2166,18 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .prompt-library-diff span:last-child { color: var(--ux-success); }
 .prompt-library-version-checks { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--ux-muted); font-size: 0.76rem; }
 .prompt-library-version-checks label { display: inline-flex; align-items: center; gap: 4px; }
+.prompt-template-badge { display: inline-flex; align-items: center; margin-left: 5px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--ux-accent) 55%, transparent); border-radius: 999px; color: var(--ux-accent); font-size: 0.68rem; font-style: normal; font-weight: 650; white-space: nowrap; }
+.prompt-template-helper { margin-top: 8px; padding: 8px; border: 1px solid var(--ux-border); border-radius: 8px; background: var(--ux-surface-1); }
+.prompt-template-helper > summary { cursor: pointer; color: var(--ux-accent); font-size: 0.78rem; font-weight: 650; }
+.prompt-template-helper p { margin: 7px 0; color: var(--ux-muted); font-size: 0.74rem; }
+.prompt-template-helper code { color: var(--ux-text); }
+.prompt-template-variable-groups { display: grid; gap: 7px; }
+.prompt-template-variable-group { display: grid; gap: 4px; }
+.prompt-template-variable-group > strong { color: var(--ux-text); font-size: 0.72rem; }
+.prompt-template-variable-group > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.prompt-template-variable-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border: 1px solid var(--ux-border); border-radius: 5px; color: var(--ux-muted); background: var(--ux-surface-2); font: inherit; font-size: 0.69rem; }
+.prompt-template-variable-chip:hover { border-color: var(--ux-accent); color: var(--ux-text); }
+.prompt-template-variable-chip small { color: var(--ux-success); }
 
 .studio-input-heading p,
 .creation-result-heading p {

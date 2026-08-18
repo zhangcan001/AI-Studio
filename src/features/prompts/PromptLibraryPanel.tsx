@@ -18,6 +18,8 @@ import {
   selectPromptTargetField,
   type PromptSnippetMode,
 } from "./promptLibrary";
+import { PromptTemplateVariableHelper } from "./PromptTemplateVariableHelper";
+import { isPromptTemplateText } from "./promptTemplateState";
 
 interface Props {
   projectId: string;
@@ -253,7 +255,11 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
         <div className="prompt-library-list" aria-label="提示词库条目">
           {loading && <p className="disabled-note">正在加载提示词库...</p>}
           {!loading && !entries.length && <p className="disabled-note">暂无匹配条目。</p>}
-          {entries.map((entry) => <button type="button" key={entry.id} className={entry.id === selectedId ? "prompt-library-list-item active" : "prompt-library-list-item"} onClick={() => setSelectedId(entry.id)}><strong>{entry.name}</strong><span>{entry.kind === "prompt" ? "Prompt" : "Snippet"} · {entry.versionCount} 个版本</span><small>{entry.tags.join(" · ") || "无标签"}</small></button>)}
+          {entries.map((entry) => {
+            const latest = entry.versions[entry.versions.length - 1];
+            const template = entry.kind === "prompt" && Boolean(latest && isPromptTemplateText(latest.text));
+            return <button type="button" key={entry.id} className={entry.id === selectedId ? "prompt-library-list-item active" : "prompt-library-list-item"} onClick={() => setSelectedId(entry.id)}><strong>{entry.name}</strong><span>{entry.kind === "prompt" ? "Prompt" : "Snippet"} · {entry.versionCount} 个版本 {template && <em className="prompt-template-badge">模板 Prompt</em>}</span><small>{entry.tags.join(" · ") || "无标签"}</small></button>;
+          })}
         </div>
         <div className="prompt-library-detail">
           <div className="prompt-library-save-current">
@@ -263,10 +269,11 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
           </div>
           {detail && (
             <>
-              <div className="prompt-library-detail-heading"><div><strong>{detail.name}</strong><span>{detail.kind === "prompt" ? "Prompt" : "Snippet"} · {detail.versionCount} 个版本</span></div><button type="button" className="quiet-button" onClick={() => void removeEntry()} disabled={saving}>删除</button></div>
+              <div className="prompt-library-detail-heading"><div><strong>{detail.name}</strong><span>{detail.kind === "prompt" ? "Prompt" : "Snippet"} · {detail.versionCount} 个版本 {detail.kind === "prompt" && selectedVersion && isPromptTemplateText(selectedVersion.text) && <em className="prompt-template-badge">模板 Prompt</em>}</span></div><button type="button" className="quiet-button" onClick={() => void removeEntry()} disabled={saving}>删除</button></div>
               <div className="prompt-library-form-row"><input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} aria-label="提示词名称" /><input value={newTags} onChange={(event) => setNewTags(event.target.value)} aria-label="提示词标签" placeholder="标签，逗号分隔" /><button type="button" className="quiet-button" onClick={() => void saveMetadata()} disabled={saving}>更新元数据</button></div>
               <div className="prompt-library-versions"><div className="prompt-library-version-list" aria-label="提示词版本">{detail.versions.map((version) => <button type="button" key={version.id} className={version.id === selectedVersionId ? "active" : ""} onClick={() => setSelectedVersionId(version.id)}>v{version.version}<small>{new Date(version.createdAt).toLocaleString()}</small></button>)}</div><div className="prompt-library-version-actions"><button type="button" onClick={() => void saveCurrentAsVersion()} disabled={saving || !targetFieldKey}>保存当前为新版本</button>{selectedVersion && <><button type="button" className="quiet-button" onClick={() => applyVersion(selectedVersion)} disabled={!targetFieldKey}>应用到 Studio</button>{detail.kind === "snippet" && <><button type="button" className="quiet-button" onClick={() => applyVersion(selectedVersion, "prepend")} disabled={!targetFieldKey}>开头插入</button><button type="button" className="quiet-button" onClick={() => applyVersion(selectedVersion, "append")} disabled={!targetFieldKey}>末尾追加</button></>}</>}</div></div>
               <pre className="prompt-library-version-text">{selectedVersion?.text ?? "请选择版本"}</pre>
+              {detail.kind === "prompt" && selectedVersion && isPromptTemplateText(selectedVersion.text) && <PromptTemplateVariableHelper compact />}
               <div className="prompt-library-compare"><strong>版本比较</strong><div className="prompt-library-form-row"><select value={compareLeftId ?? ""} onChange={(event) => setCompareLeftId(event.target.value)}>{detail.versions.map((version) => <option key={version.id} value={version.id}>v{version.version}</option>)}</select><span>→</span><select value={compareRightId ?? ""} onChange={(event) => setCompareRightId(event.target.value)}>{detail.versions.map((version) => <option key={version.id} value={version.id}>v{version.version}</option>)}</select></div>{diff && <div className="prompt-library-diff"><span>删除：{diff.removedLines.join(" / ") || "—"}</span><span>新增：{diff.addedLines.join(" / ") || "—"}</span></div>}</div>
               {detail.kind === "prompt" && <div className="prompt-library-experiment"><strong>用于实验（2–8 个版本）</strong><div className="prompt-library-version-checks">{detail.versions.map((version) => <label key={version.id}><input type="checkbox" checked={experimentVersionIds.has(version.id)} onChange={() => toggleExperimentVersion(version.id)} />v{version.version}</label>)}</div><button type="button" onClick={useVersionsForExperiment} disabled={experimentVersionIds.size < 2 || experimentVersionIds.size > 8 || !targetFieldKey}>送入实验规划器</button></div>}
             </>

@@ -14,6 +14,8 @@ pub mod comfy_service;
 mod dev027_e2e;
 #[cfg(test)]
 mod dev031_e2e;
+#[cfg(test)]
+mod dev036_compatibility;
 pub mod diagnostics_service;
 pub mod generation_catalog_service;
 #[cfg(test)]
@@ -41,6 +43,8 @@ pub mod project_manifest_service;
 pub mod project_service;
 pub mod project_template_service;
 pub mod prompt_library_service;
+pub mod prompt_template_bulk_service;
+pub mod prompt_template_service;
 pub mod reference_anchor_service;
 pub mod scheduler;
 pub mod settings_service;

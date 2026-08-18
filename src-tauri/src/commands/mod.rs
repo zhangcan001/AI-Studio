@@ -13,6 +13,7 @@ pub mod production_queue;
 pub mod production_structure;
 pub mod project;
 pub mod prompt_library;
+pub mod prompt_template;
 pub mod reference_anchor;
 pub mod settings;
 pub mod shot;

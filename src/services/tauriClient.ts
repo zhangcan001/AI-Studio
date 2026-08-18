@@ -45,6 +45,15 @@ import type {
 } from "../types/project";
 import type { ProjectManifestExportView } from "../types/projectManifest";
 import type {
+  PromptTemplateAnalysis,
+  PromptTemplateApplyRequest,
+  PromptTemplateApplyResult,
+  PromptTemplateBulkPreview,
+  PromptTemplateBulkPreviewRequest,
+  PromptTemplatePreview,
+  PromptTemplatePreviewRequest,
+} from "../types/promptTemplate";
+import type {
   ProductionAssignShotsRequest,
   ProductionEpisode,
   ProductionEpisodeRequest,
@@ -135,6 +144,22 @@ export function listPromptLibrary(
     cursor: filters.cursor,
     limit: filters.limit,
   });
+}
+
+export function analyzePromptTemplate(text: string): Promise<PromptTemplateAnalysis> {
+  return invoke<PromptTemplateAnalysis>("prompt_template_analyze", { text });
+}
+
+export function previewPromptTemplate(request: PromptTemplatePreviewRequest): Promise<PromptTemplatePreview> {
+  return invoke<PromptTemplatePreview>("prompt_template_preview", { request });
+}
+
+export function previewPromptTemplateBulk(request: PromptTemplateBulkPreviewRequest): Promise<PromptTemplateBulkPreview> {
+  return invoke<PromptTemplateBulkPreview>("prompt_template_bulk_preview", { request });
+}
+
+export function applyPromptTemplate(request: PromptTemplateApplyRequest): Promise<PromptTemplateApplyResult> {
+  return invoke<PromptTemplateApplyResult>("prompt_template_apply", { request });
 }
 
 export function getPromptLibraryEntry(projectId: string, promptId: string): Promise<PromptEntryView> {

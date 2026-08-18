@@ -572,6 +572,8 @@ function App() {
         >
           <ShotWorkspace
             projectId={activeProject.id}
+            projectName={activeProject.name}
+            projectDescription={activeProject.description}
             catalog={catalog}
             onOpenInStudio={(shot, stage, recipe) => {
               useStudioStore.getState().loadDraft(recipe, (shot.stageConfigs.find((config) => config.stage === stage)?.scalarValues ?? {}) as GenerationValues);

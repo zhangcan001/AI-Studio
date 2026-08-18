@@ -37,6 +37,7 @@ import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
 import { ProductionStructurePanel } from "./ProductionStructurePanel";
+import { PromptTemplatePanel } from "./PromptTemplatePanel";
 import {
   appendAnchorReferences,
   replaceWithAnchorReferences,
@@ -48,7 +49,8 @@ import {
   updateShotListControls,
   type ShotListControls,
 } from "./shotListQuery";
-import { EMPTY_PRODUCTION_STRUCTURE, productionSceneOptions, shotSceneIndex } from "./productionStructureState";
+import { EMPTY_PRODUCTION_STRUCTURE, findProductionSceneParent, productionSceneOptions, shotSceneIndex } from "./productionStructureState";
+import { isPromptTemplateText } from "../prompts/promptTemplateState";
 import {
   filterProductionRuntimeCatalog,
   h3FamilyForWorkflowId,
@@ -60,6 +62,8 @@ import "./ShotWorkspace.css";
 
 interface Props {
   projectId: string;
+  projectName?: string;
+  projectDescription?: string | null;
   catalog: RecipeViewModel[];
   onOpenInStudio: (shot: ShotView, stage: ShotStage, recipe: RecipeViewModel) => void;
   onOpenTask?: (taskId: string) => void;
@@ -73,7 +77,7 @@ type StageDraft = {
 
 const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
-export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }: Props) {
+export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, onOpenInStudio, onOpenTask }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string>();
   const [stage, setStage] = useState<ShotStage>("image");
@@ -100,6 +104,12 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const shotSceneIds = useMemo(() => shotSceneIndex(productionStructure), [productionStructure]);
   const sceneFilterOptions = useMemo(() => productionSceneOptions(productionStructure), [productionStructure]);
+  const selectedPromptEntry = promptEntries.find((entry) => entry.id === selectedPromptId);
+  const selectedPromptVersion = selectedPromptEntry?.versions.find((version) => version.id === selectedShot?.promptVersionId)
+    ?? selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
+  const selectedSceneContext = selectedShot?.id && shotSceneIds[selectedShot.id]
+    ? findProductionSceneParent(productionStructure, shotSceneIds[selectedShot.id])
+    : undefined;
   const shotList = useMemo(() => buildShotListView(shots, shotListControls, shotSceneIds), [shots, shotListControls, shotSceneIds]);
   const currentDraft = stageDrafts[stage];
   const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
@@ -450,6 +460,10 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
     const entry = promptEntries.find((item) => item.id === selectedPromptId);
     const version = entry?.versions[entry.versions.length - 1];
     if (!entry || !version) return;
+    if (entry.kind === "prompt" && isPromptTemplateText(version.text)) {
+      setNotice("这是模板 Prompt，请在下方预览并确认后应用；不会把 {{variable}} 原样保存到镜头。");
+      return;
+    }
     setPromptText(version.text);
     setPromptProvenance({ entryId: entry.id, versionId: version.id });
     setNotice(`已载入 Prompt Library「${entry.name}」的 v${version.version}；之后编辑会清除来源标记。`);
@@ -591,11 +605,24 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
             <div className="shot-editor-body">
               <div className="shot-settings-column">
                 <label><span>镜头名称</span><input value={name} onChange={(event) => setName(event.target.value)} /></label>
-                <label><span>Prompt 快照</span><textarea value={promptText} onChange={(event) => { setPromptText(event.target.value); setPromptProvenance(undefined); }} rows={6} placeholder="描述镜头画面、动作和构图" /></label>
+                <label><span>Prompt 快照</span><textarea value={promptText} onChange={(event) => { setPromptText(event.target.value); setPromptProvenance(undefined); setSelectedPromptId(""); }} rows={6} placeholder="描述镜头画面、动作和构图" /></label>
                 <div className="shot-prompt-loader">
                   <label><span>从 Prompt Library 载入</span><select value={selectedPromptId} onChange={(event) => setSelectedPromptId(event.target.value)}><option value="">选择提示词</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {entry.versions.length} 版</option>)}</select></label>
                   <button type="button" className="quiet-button" onClick={loadPrompt} disabled={!selectedPromptId}>载入快照</button>
                 </div>
+                {selectedPromptEntry?.kind === "prompt" && selectedPromptVersion && isPromptTemplateText(selectedPromptVersion.text) && <PromptTemplatePanel
+                  projectId={projectId}
+                  projectName={projectName}
+                  projectDescription={projectDescription}
+                  stage={stage}
+                  entry={selectedPromptEntry}
+                  version={selectedPromptVersion}
+                  shot={selectedShot}
+                  structureContext={selectedSceneContext}
+                  referenceAnchors={referenceAnchors}
+                  onApplied={() => reload()}
+                  disabled={busy}
+                />}
                 {promptProvenance && <p className="shot-provenance">来源：Prompt Library · version {promptProvenance.versionId.slice(-8)}</p>}
                 <div className="shot-stage-tabs" role="tablist" aria-label="制作阶段">
                   <button type="button" className={stage === "image" ? "active" : ""} onClick={() => setStage("image")}>关键帧图片</button>
