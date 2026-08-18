@@ -82,8 +82,15 @@ DEV-041 fixture 覆盖 6 Scene / 60 Shot：
 - Episode service/command tests: `8 passed / 0 failed`。
 - Shot bulk tests: `6 passed / 0 failed`。
 - Prompt bulk tests: `6 passed / 0 failed`。
-- `dev041_safety` Rust integration: `9 passed / 0 failed / 1 ignored`。
-- Episode/Scene/Structure/stability frontend tests: `17 passed / 0 failed / 1 todo`。
+- `dev041_safety` Rust integration: `10 passed / 0 failed / 0 ignored`。
+- Episode/Scene/Structure/stability frontend tests: `17 passed / 0 failed / 0 todo`。
+
+DEV-043 test-debt closure：Rust implementation contract gate 已启用并通过，
+验证 Episode service/panel 复用现有 Scene/Queue 边界且没有新增并行执行架构。
+原 stability `todo` 已删除；EpisodeProductionPanel 的正式组件、结果状态和
+Tauri command-envelope 测试已覆盖该 frontend integration contract，因此不再
+保留重复的占位测试。唯一保留的 Rust `#[ignore]` 是 DEV-027 真实 ComfyUI 与
+现场数据库 gate，属于 external/live dependency。
 
 最终回归：
 
