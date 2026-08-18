@@ -2,8 +2,7 @@
 //!
 //! These tests intentionally model the Episode boundary in memory. They do
 //! not start Tauri, ComfyUI, an HTTP server, a queue worker, or a GPU task.
-//! The ignored implementation gate is intentionally pending until Agents A-C
-//! integrate the Episode service and panel.
+//! The implementation gate audits the integrated Episode service and panel.
 
 use serde_json::json;
 use std::{
@@ -562,7 +561,6 @@ fn dev041_existing_runtime_has_no_parallel_episode_queue_or_gpu_path() {
 }
 
 #[test]
-#[ignore = "pending Agent A/B/C Episode service and panel integration"]
 fn dev041_episode_implementation_contract_gate() {
     let service = read_repo("src-tauri/src/application/episode_production_service.rs");
     let panel = read_repo("src/features/shots/EpisodeProductionPanel.tsx");
@@ -570,7 +568,7 @@ fn dev041_episode_implementation_contract_gate() {
     assert!(service.contains("SceneProductionService"));
     assert!(service.contains("production_queue_start") || !service.contains("start_all"));
     assert!(panel.contains("allowPartial"));
-    assert!(panel.contains("Open production queue") || panel.contains("production queue"));
+    assert!(panel.to_ascii_lowercase().contains("production queue"));
     for forbidden in [
         "EpisodeQueue",
         "EpisodeExecutor",

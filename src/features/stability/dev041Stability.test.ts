@@ -192,5 +192,4 @@ describe("DEV-041 no-GPU Episode safety contract", () => {
     expect(plans[0].slice(0, 5).flatMap((scene) => scene.shots)).toHaveLength(50);
   });
 
-  it.todo("runs the production implementation architecture gate after Agents A-C integrate Episode scope");
 });
