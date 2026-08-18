@@ -9,7 +9,7 @@ interface ProjectState {
   activeProjectId?: string;
   loading: boolean;
   error?: string;
-  setProjects: (projects: ProjectView[]) => void;
+  setProjects: (projects: ProjectView[], savedProjectId?: string) => void;
   setActiveProject: (projectId: string) => void;
   upsertProject: (project: ProjectView) => void;
   setLoading: (loading: boolean) => void;
@@ -53,9 +53,9 @@ export function resolveActiveProjectId(
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   loading: true,
-  setProjects: (projects) => {
-    const activeProjectId = resolveActiveProjectId(projects);
-    persistProjectId(activeProjectId);
+  setProjects: (projects, savedProjectId = readStoredProjectId()) => {
+    const activeProjectId = resolveActiveProjectId(projects, savedProjectId);
+    if (activeProjectId !== get().activeProjectId) persistProjectId(activeProjectId);
     set({ projects, activeProjectId, error: undefined });
   },
   setActiveProject: (activeProjectId) => {

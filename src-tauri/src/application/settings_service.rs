@@ -3,7 +3,7 @@ use crate::application::{
     diagnostics_service::{DiagnosticsService, RuntimeActivityStatusView},
     ports::{
         AppSettings, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory, ComfyConnectionConfig,
-        ComfyEnvironmentProfile, RuntimeParameterProfile, SettingsStore,
+        ComfyEnvironmentProfile, RuntimeParameterProfile, SettingsStore, WorkspaceResume,
     },
     production_queue_service::ProductionQueueService,
 };
@@ -150,6 +150,35 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .production_queue_name_presets
             .clone()
+    }
+
+    pub fn workspace_resume(&self) -> WorkspaceResume {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .workspace_resume
+            .clone()
+    }
+
+    pub async fn save_workspace_resume(
+        &self,
+        workspace_resume: WorkspaceResume,
+    ) -> Result<WorkspaceResume, AppError> {
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings.workspace_resume = workspace_resume.clone();
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(workspace_resume)
     }
 
     pub async fn save_production_queue_name_preset(
@@ -461,11 +490,18 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .comfy_environment_profiles
             .clone();
+        let workspace_resume = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .workspace_resume
+            .clone();
         let next_settings = AppSettings {
             schema_version: 1,
             comfy: crate::application::ports::ComfySettings {
                 endpoint: config.endpoint(),
             },
+            workspace_resume,
             preferred_presets,
             runtime_profiles,
             production_queue_name_presets,

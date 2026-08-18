@@ -17,6 +17,7 @@ use crate::application::production_orchestrator_service::ProductionOrchestratorS
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::production_structure_service::ProductionStructureService;
 use crate::application::project_backup_service::ProjectBackupService;
+use crate::application::project_command_center_service::ProjectCommandCenterService;
 use crate::application::project_manifest_service::ProjectManifestService;
 use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
@@ -55,6 +56,7 @@ pub struct AppState {
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
     pub production_structure_service: Arc<ProductionStructureService>,
+    pub project_command_center_service: Arc<ProjectCommandCenterService>,
     pub reference_anchor_service: Arc<ReferenceAnchorService>,
     pub asset_deletion_service: Arc<AssetDeletionService>,
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
@@ -99,6 +101,7 @@ impl AppState {
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
         production_structure_service: Arc<ProductionStructureService>,
+        project_command_center_service: Arc<ProjectCommandCenterService>,
         reference_anchor_service: Arc<ReferenceAnchorService>,
         asset_deletion_service: Arc<AssetDeletionService>,
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
@@ -141,6 +144,7 @@ impl AppState {
             asset_query_service,
             asset_library_service,
             production_structure_service,
+            project_command_center_service,
             reference_anchor_service,
             asset_deletion_service,
             asset_video_prompt_service,

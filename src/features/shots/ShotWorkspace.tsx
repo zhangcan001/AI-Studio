@@ -65,6 +65,8 @@ interface Props {
   projectName?: string;
   projectDescription?: string | null;
   catalog: RecipeViewModel[];
+  initialSelectedShotId?: string;
+  onShotSelected?: (shotId?: string) => void;
   onOpenInStudio: (shot: ShotView, stage: ShotStage, recipe: RecipeViewModel) => void;
   onOpenTask?: (taskId: string) => void;
 }
@@ -77,9 +79,9 @@ type StageDraft = {
 
 const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
-export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, onOpenInStudio, onOpenTask }: Props) {
+export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, onShotSelected, onOpenInStudio, onOpenTask }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
-  const [selectedShotId, setSelectedShotId] = useState<string>();
+  const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
   const [stage, setStage] = useState<ShotStage>("image");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
@@ -164,7 +166,15 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       setReferenceAnchors(nextAnchors);
       setProductionStructure(nextStructure);
       setPromptEntries(promptPage.items);
-      setSelectedShotId((current) => current && nextShots.some((shot) => shot.id === current) ? current : nextShots[0]?.id);
+      setSelectedShotId((current) => {
+        const nextSelected = current && nextShots.some((shot) => shot.id === current)
+          ? current
+          : initialSelectedShotId && nextShots.some((shot) => shot.id === initialSelectedShotId)
+            ? initialSelectedShotId
+            : nextShots[0]?.id;
+        if (nextSelected !== current) onShotSelected?.(nextSelected);
+        return nextSelected;
+      });
     } catch (loadError: unknown) {
       if (generation !== reloadGeneration.current) return;
       setError(toUserMessage(loadError));
@@ -580,7 +590,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           {shotList.pageShots.map((item) => {
             const derived = deriveShotStatus(item);
             return (
-              <button key={item.id} type="button" className={`shot-list-item${item.id === selectedShotId ? " shot-list-item-active" : ""}`} onClick={() => setSelectedShotId(item.id)}>
+              <button key={item.id} type="button" className={`shot-list-item${item.id === selectedShotId ? " shot-list-item-active" : ""}`} onClick={() => { setSelectedShotId(item.id); onShotSelected?.(item.id); }}>
                 <span className="shot-list-number">{String(item.ordinal + 1).padStart(2, "0")}</span>
                 <span className="shot-list-copy"><strong>{item.name}</strong><small>{shotStatusLabels[derived]}</small></span>
               </button>

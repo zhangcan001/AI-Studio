@@ -9,6 +9,8 @@ pub struct AppSettings {
     pub schema_version: u32,
     pub comfy: ComfySettings,
     #[serde(default)]
+    pub workspace_resume: WorkspaceResume,
+    #[serde(default)]
     pub preferred_presets: BTreeMap<String, String>,
     #[serde(default)]
     pub runtime_profiles: Vec<RuntimeParameterProfile>,
@@ -23,6 +25,7 @@ impl Default for AppSettings {
         Self {
             schema_version: 1,
             comfy: ComfySettings::default(),
+            workspace_resume: WorkspaceResume::default(),
             preferred_presets: BTreeMap::new(),
             runtime_profiles: Vec::new(),
             production_queue_name_presets: vec![
@@ -34,6 +37,17 @@ impl Default for AppSettings {
             comfy_environment_profiles: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceResume {
+    #[serde(default)]
+    pub last_project_id: Option<String>,
+    #[serde(default)]
+    pub last_workspace: Option<String>,
+    #[serde(default)]
+    pub last_shot_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

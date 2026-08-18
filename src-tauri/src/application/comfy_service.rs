@@ -74,6 +74,7 @@ pub struct ComfyStatusView {
 pub struct ComfyService {
     runtime: Arc<ComfyRuntime>,
     capability_cache: Arc<RwLock<Option<CapabilityCache>>>,
+    status_cache: Arc<RwLock<Option<ComfyStatusView>>>,
 }
 
 pub struct ComfyRuntime {
@@ -123,6 +124,7 @@ impl ComfyService {
         Self {
             runtime,
             capability_cache: Arc::new(RwLock::new(None)),
+            status_cache: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -139,7 +141,11 @@ impl ComfyService {
         let endpoint = self.endpoint();
 
         match self.runtime.adapter().health_check().await {
-            Ok(health) => Ok(self.connected_status(health.system, cached_capability, endpoint)),
+            Ok(health) => {
+                let status = self.connected_status(health.system, cached_capability, endpoint);
+                *self.status_cache.write().await = Some(status.clone());
+                Ok(status)
+            }
             Err(error) => {
                 tracing::warn!(
                     endpoint = %endpoint,
@@ -147,16 +153,23 @@ impl ComfyService {
                     "ComfyUI health check failed"
                 );
 
-                Ok(ComfyStatusView {
+                let status = ComfyStatusView {
                     status: status_for_adapter_error(&error),
                     endpoint,
                     comfyui_version: None,
                     system: None,
                     devices: Vec::new(),
                     capability: cached_capability,
-                })
+                };
+                *self.status_cache.write().await = Some(status.clone());
+                Ok(status)
             }
         }
+    }
+
+    /// Return the last status collected by `get_status` without contacting ComfyUI.
+    pub async fn cached_status(&self) -> Option<ComfyStatusView> {
+        self.status_cache.read().await.clone()
     }
 
     pub async fn refresh_capabilities(&self) -> Result<CapabilitySummary, AppError> {

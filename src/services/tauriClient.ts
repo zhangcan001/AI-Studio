@@ -73,6 +73,8 @@ import type {
   ComfySettingsView,
   RuntimeParameterProfile,
 } from "../types/settings";
+import type { WorkspaceResume } from "../types/workspaceResume";
+import type { ProjectCommandCenterAggregate } from "../types/projectCommandCenter";
 import type { ReferenceAnchorRequest, ReferenceAnchorUpdateRequest, ReferenceAnchorView } from "../types/referenceAnchor";
 import type { PresetView } from "../types/preset";
 import type {
@@ -229,6 +231,14 @@ export function deleteComfyEnvironmentProfile(profileId: string): Promise<void> 
 
 export function applyComfyEnvironmentProfile(profileId: string): Promise<ComfySettingsView> {
   return invoke<ComfySettingsView>("comfy_environment_profile_apply", { profileId });
+}
+
+export function getWorkspaceResume(): Promise<WorkspaceResume> {
+  return invoke<WorkspaceResume>("workspace_resume_get");
+}
+
+export function saveWorkspaceResume(workspaceResume: WorkspaceResume): Promise<WorkspaceResume> {
+  return invoke<WorkspaceResume>("workspace_resume_save", { workspaceResume });
 }
 
 export function getComfyPreflight(): Promise<ComfyPreflightReport> {
@@ -1092,6 +1102,10 @@ export function getProductionAuditLineage(request: ProductionAuditLineageRequest
 
 export function getProductionAuditIntegrity(projectId: string): Promise<ProductionAuditIntegrity> {
   return invoke<ProductionAuditIntegrity>("production_audit_integrity", { request: { projectId } });
+}
+
+export function getProjectCommandCenter(projectId: string): Promise<ProjectCommandCenterAggregate> {
+  return invoke<ProjectCommandCenterAggregate>("project_command_center_get", { projectId });
 }
 
 export function assetLibraryPage(query: AssetLibraryQuery): Promise<AssetLibraryPage> {

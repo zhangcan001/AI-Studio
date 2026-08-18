@@ -46,6 +46,7 @@ use application::{
     production_structure_service::ProductionStructureService,
     project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
+    project_command_center_service::ProjectCommandCenterService,
     project_manifest_service::ProjectManifestService,
     project_service::ProjectService,
     project_template_service::ProjectTemplateService,
@@ -525,6 +526,14 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 diagnostics_service.clone(),
                 workflow_lifecycle_service.clone(),
             ));
+            let project_command_center_service = Arc::new(
+                ProjectCommandCenterService::new(database_pool.clone())
+                    .with_audit_service(production_audit_service.clone())
+                    .with_comfy_cache_services(
+                        comfy_service.clone(),
+                        comfy_preflight_service.clone(),
+                    ),
+            );
             let project_service = Arc::new(ProjectService::new(
                 project_repository.clone(),
                 project_directory_store,
@@ -619,6 +628,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_query_service,
                 asset_library_service,
                 production_structure_service,
+                project_command_center_service,
                 reference_anchor_service,
                 asset_deletion_service,
                 asset_video_prompt_service,
@@ -782,6 +792,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::settings::production_queue_name_presets_list,
             commands::settings::production_queue_name_preset_save,
             commands::settings::production_queue_name_preset_delete,
+            commands::settings::workspace_resume_get,
+            commands::settings::workspace_resume_save,
             commands::workflow_library::workflow_library_refresh,
             commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
             commands::workflow_onboarding::workflow_onboarding_auto_import_api_workflow,
@@ -872,6 +884,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_backup_inspect,
             commands::project::project_backup_restore,
             commands::project::project_manifest_export,
+            commands::project_command_center::project_command_center_get,
             commands::prompt_library::prompt_library_list,
             commands::prompt_library::prompt_library_get,
             commands::prompt_library::prompt_library_create,

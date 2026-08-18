@@ -1,6 +1,6 @@
 use crate::{
     app_state::AppState,
-    application::ports::{ComfyEnvironmentProfile, RuntimeParameterProfile},
+    application::ports::{ComfyEnvironmentProfile, RuntimeParameterProfile, WorkspaceResume},
     error::AppError,
 };
 
@@ -56,6 +56,22 @@ pub fn production_queue_name_presets_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, AppError> {
     Ok(state.settings_service.production_queue_name_presets())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn workspace_resume_get(state: tauri::State<'_, AppState>) -> WorkspaceResume {
+    state.settings_service.workspace_resume()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workspace_resume_save(
+    state: tauri::State<'_, AppState>,
+    workspace_resume: WorkspaceResume,
+) -> Result<WorkspaceResume, AppError> {
+    state
+        .settings_service
+        .save_workspace_resume(workspace_resume)
+        .await
 }
 
 #[tauri::command(rename_all = "camelCase")]

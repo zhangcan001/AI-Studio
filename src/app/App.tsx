@@ -6,12 +6,14 @@ import {
   listGenerationCatalog,
   listProjects,
   listRecentTasks,
+  listShots,
   reconcileActiveTasks,
   refreshComfyCapabilities,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
 import { useProjectStore } from "../stores/projectStore";
+import { useWorkspaceResumeStore } from "../stores/workspaceResumeStore";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
@@ -20,6 +22,7 @@ import { AssetLibrary } from "../features/assets/AssetLibrary";
 import { AssetVideoBatchWorkspace } from "../features/assets/AssetVideoBatchWorkspace";
 import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
+import { ProjectCommandCenter, type ProjectCommandDestination } from "../features/projects/ProjectCommandCenter";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
 import { ShotWorkspace } from "../features/shots/ShotWorkspace";
@@ -31,14 +34,14 @@ import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
+import { resolveWorkspaceNavigation, type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import "./App.css";
 
-type Workspace = "studio" | "video" | "shots" | "assets" | "tasks" | "projects" | "workflows" | "settings";
-
 const workspaceLabels: Record<Workspace, string> = {
+  "command-center": "项目中心",
   studio: "批量图片",
   video: "批量视频",
   shots: "镜头生产",
@@ -50,6 +53,7 @@ const workspaceLabels: Record<Workspace, string> = {
 };
 
 const workspaceDescriptions: Record<Workspace, string> = {
+  "command-center": "查看项目就绪度、生产进度、问题和下一步工作。",
   studio: "用 Prompt 列表串行生产图片，并在当前工作区追踪结果。",
   video: "为图片资产配置 MiniMax H3 视频参数，并串行生成。",
   shots: "批量导入、配置、生产并人工复核项目内全部 Shot。",
@@ -69,7 +73,8 @@ function keepsNativeContextMenu(target: EventTarget | null): boolean {
 }
 
 function App() {
-  const [workspace, setWorkspace] = useState<Workspace>("studio");
+  const [workspace, setWorkspace] = useState<Workspace>("command-center");
+  const [resumeShotId, setResumeShotId] = useState<string>();
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
@@ -96,6 +101,10 @@ function App() {
   const setProjectError = useProjectStore((state) => state.setError);
   const setRecentTasks = useTaskStore((state) => state.setRecentTasks);
   const recentTasks = useTaskStore((state) => state.recentTasks);
+  const loadWorkspaceResume = useWorkspaceResumeStore((state) => state.load);
+  const recordWorkspaceChange = useWorkspaceResumeStore((state) => state.recordWorkspaceChange);
+  const recordProjectChange = useWorkspaceResumeStore((state) => state.recordProjectChange);
+  const recordShotChange = useWorkspaceResumeStore((state) => state.recordShotChange);
 
   const refreshProductionAdmission = useCallback(async () => {
     try {
@@ -170,9 +179,24 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     setProjectLoading(true);
-    void listProjects()
-      .then((nextProjects) => {
-        if (!cancelled) setProjects(nextProjects);
+    void Promise.all([listProjects(), loadWorkspaceResume()])
+      .then(async ([nextProjects, resume]) => {
+        if (cancelled) return;
+        // An invalid project is deliberately passed through as an explicit empty
+        // preference so legacy localStorage cannot resurrect a deleted resume.
+        setProjects(nextProjects, resume.lastProjectId ?? "");
+        let shotIds: string[] | undefined;
+        if (
+          resume.lastWorkspace === "shots"
+          && resume.lastProjectId
+          && nextProjects.some((project) => project.id === resume.lastProjectId)
+        ) {
+          shotIds = await listShots(resume.lastProjectId).then((shots) => shots.map((shot) => shot.id)).catch(() => []);
+        }
+        if (cancelled) return;
+        const navigation = resolveWorkspaceNavigation(nextProjects, resume, shotIds);
+        setResumeShotId(navigation.shotId);
+        setWorkspace(navigation.workspace);
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
@@ -187,7 +211,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [setProjectError, setProjectLoading, setProjects]);
+  }, [loadWorkspaceResume, setProjectError, setProjectLoading, setProjects]);
 
   useEffect(() => {
     setFocusedTaskId(undefined);
@@ -218,8 +242,26 @@ function App() {
     };
   }, [activeProjectId, setRecentTasks]);
 
-  function openProject(projectId: string, preserveProductionBatch = false) {
-    if (projectId === activeProjectId) return;
+  function navigateToWorkspace(nextWorkspace: Workspace) {
+    if (nextWorkspace === workspace) return;
+    setWorkspace(nextWorkspace);
+    void recordWorkspaceChange(nextWorkspace, activeProjectId);
+  }
+
+  function handleShotSelected(shotId?: string) {
+    setResumeShotId(shotId);
+    void recordShotChange(shotId);
+  }
+
+  function openProject(
+    projectId: string,
+    preserveProductionBatch = false,
+    destination: Workspace = preserveProductionBatch ? "studio" : "command-center",
+  ) {
+    if (projectId === activeProjectId) {
+      navigateToWorkspace(destination);
+      return;
+    }
     useTaskStore.getState().clear();
     useStudioStore.getState().resetDraft();
     useStudioStore.getState().clearPendingAssetIntent();
@@ -228,15 +270,17 @@ function App() {
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
     setError(null);
-    setWorkspace("studio");
+    setResumeShotId(undefined);
+    setWorkspace(destination);
+    void recordProjectChange(projectId, destination);
   }
 
   function openProductionQueue() {
     const { batchId, projectId } = productionAdmission;
     if (!batchId || !projectId) return;
     setFocusedProductionBatchId(batchId);
-    if (projectId !== activeProjectId) openProject(projectId, true);
-    else if (workspace !== "video") setWorkspace("studio");
+    if (projectId !== activeProjectId) openProject(projectId, true, "studio");
+    else if (workspace !== "video") navigateToWorkspace("studio");
   }
 
   async function reconnectComfy() {
@@ -299,7 +343,7 @@ function App() {
         return;
       }
       useStudioStore.getState().setSelectedWorkflow(workflow);
-      setWorkspace("studio");
+      navigateToWorkspace("studio");
       setError(null);
     } catch (openError: unknown) {
       setError(toUserMessage(openError));
@@ -342,7 +386,7 @@ function App() {
       createdAt: draft.createdAt,
     });
     setError(null);
-    setWorkspace("studio");
+    navigateToWorkspace("studio");
   }
 
   function useAssetInStudio(asset: AssetView) {
@@ -358,7 +402,7 @@ function App() {
       assetType: assetType as StudioAssetType,
     });
     setError(null);
-    setWorkspace("studio");
+    navigateToWorkspace("studio");
   }
 
   function handleProjectUpdated(project: ProjectView) {
@@ -368,26 +412,34 @@ function App() {
 
   function handleProjectRestored(project: ProjectView) {
     useProjectStore.getState().upsertProject(project);
-    openProject(project.id);
+    setResumeShotId(undefined);
+    setWorkspace("studio");
+    void recordProjectChange(project.id, "studio");
   }
 
   function handleTemplateProjectCreated(result: TemplateProjectResult) {
     useProjectStore.getState().upsertProject(result.project);
-    openProject(result.project.id);
+    setResumeShotId(undefined);
+    setWorkspace("studio");
+    void recordProjectChange(result.project.id, "studio");
     const workflow = catalog.find((item) => item.workflowVersionId === result.workflowVersionId && item.recipeId === result.recipeId);
     if (!workflow) {
       setError("模板项目已创建，但工作流当前不可用。");
       return;
     }
     useStudioStore.getState().loadDraft(workflow, result.values);
-    setWorkspace("studio");
+    navigateToWorkspace("studio");
     setError(null);
   }
 
   function openVideoBatch(assets: AssetView[]) {
     setVideoBatchAssets(assets);
-    setWorkspace("video");
+    navigateToWorkspace("video");
     setError(null);
+  }
+
+  function navigateFromCommandCenter(destination: ProjectCommandDestination) {
+    navigateToWorkspace(destination);
   }
 
   const comfy = bootstrapState?.comfy;
@@ -441,7 +493,7 @@ function App() {
                 type="button"
                 key={value}
                 className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
-                onClick={() => setWorkspace(value)}
+                onClick={() => navigateToWorkspace(value)}
                 aria-current={workspace === value ? "page" : undefined}
               >
                 <WorkspaceGlyph name={value} />
@@ -478,7 +530,7 @@ function App() {
               <span className="header-project-chip-label">PROJECT</span>
               <strong>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</strong>
             </span>
-            <button type="button" className="quiet-button header-new-project" onClick={() => setWorkspace("projects")}>
+            <button type="button" className="quiet-button header-new-project" onClick={() => navigateToWorkspace("projects")}>
               <span className="button-leading-icon" aria-hidden="true">+</span>
               新建项目
             </button>
@@ -531,6 +583,15 @@ function App() {
       )}
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
+      {workspace === "command-center" && (
+        <WorkspaceErrorBoundary
+          resetKey={activeProject?.id ?? "no-project"}
+          onBackToAssets={() => navigateToWorkspace("assets")}
+          onRetry={() => navigateToWorkspace("command-center")}
+        >
+          <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />
+        </WorkspaceErrorBoundary>
+      )}
       {activeProject && workspace === "studio" && (
         <section className="studio-layout">
           <GenerationStudio
@@ -544,11 +605,11 @@ function App() {
             onCatalogChanged={reloadCatalog}
             onProductionAdmissionChanged={refreshProductionAdmission}
             onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
-            onOpenWorkflows={() => setWorkspace("workflows")}
+            onOpenWorkflows={() => navigateToWorkspace("workflows")}
             onReconnectComfy={() => void reconnectComfy()}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
-              setWorkspace("tasks");
+              navigateToWorkspace("tasks");
             }}
           />
         </section>
@@ -560,28 +621,30 @@ function App() {
           onOpenVideoBatch={openVideoBatch}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
-            setWorkspace("tasks");
+            navigateToWorkspace("tasks");
           }}
         />
       )}
       {activeProject && workspace === "shots" && (
         <WorkspaceErrorBoundary
           resetKey={activeProject.id}
-          onBackToAssets={() => setWorkspace("assets")}
-          onRetry={() => setWorkspace("shots")}
+          onBackToAssets={() => navigateToWorkspace("assets")}
+          onRetry={() => navigateToWorkspace("shots")}
         >
           <ShotWorkspace
             projectId={activeProject.id}
             projectName={activeProject.name}
             projectDescription={activeProject.description}
             catalog={catalog}
+            initialSelectedShotId={resumeShotId}
+            onShotSelected={handleShotSelected}
             onOpenInStudio={(shot, stage, recipe) => {
               useStudioStore.getState().loadDraft(recipe, (shot.stageConfigs.find((config) => config.stage === stage)?.scalarValues ?? {}) as GenerationValues);
-              setWorkspace(stage === "image" ? "studio" : "video");
+              navigateToWorkspace(stage === "image" ? "studio" : "video");
             }}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
-              setWorkspace("tasks");
+              navigateToWorkspace("tasks");
             }}
           />
         </WorkspaceErrorBoundary>
@@ -589,10 +652,10 @@ function App() {
       {activeProject && workspace === "video" && (
         <WorkspaceErrorBoundary
           resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
-          onBackToAssets={() => setWorkspace("assets")}
+          onBackToAssets={() => navigateToWorkspace("assets")}
           onRetry={() => {
             setVideoBatchAssets([]);
-            setWorkspace("video");
+            navigateToWorkspace("video");
           }}
         >
           <AssetVideoBatchWorkspace
@@ -607,10 +670,10 @@ function App() {
             onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
-              setWorkspace("tasks");
+              navigateToWorkspace("tasks");
             }}
-            onBackToAssets={() => setWorkspace("assets")}
-            onOpenWorkflows={() => setWorkspace("workflows")}
+            onBackToAssets={() => navigateToWorkspace("assets")}
+            onOpenWorkflows={() => navigateToWorkspace("workflows")}
           />
         </WorkspaceErrorBoundary>
       )}
@@ -621,7 +684,7 @@ function App() {
           productionBusy={productionAdmission.busy}
           focusTaskId={focusedTaskId}
           onLoadInputs={loadHistoricalInputs}
-          onOpenShot={() => setWorkspace("shots")}
+          onOpenShot={() => navigateToWorkspace("shots")}
         />
       )}
       {workspace === "projects" && (
@@ -643,7 +706,7 @@ function App() {
           onOpenStudio={openPublishedWorkflow}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
-            setWorkspace("tasks");
+            navigateToWorkspace("tasks");
           }}
         />
       )}
@@ -679,6 +742,7 @@ function WorkspaceGlyph({ name }: { name: Workspace }) {
     projects: "M3.5 8h7l2 2h8v9h-17z M5 8V5.5A1.5 1.5 0 0 1 6.5 4h4l1.5 2H19A1.5 1.5 0 0 1 20.5 7.5V10",
     workflows: "M5 5h4v4H5z M15 15h4v4h-4z M9 7h6v10 M15 7h2v8 M7 9v6h8",
     settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-2.6V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H6v-2.6h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V4.8h2.6V5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v2.6h-.2a1.7 1.7 0 0 0-1.6 1z",
+    "command-center": "M4 5h16v14H4z M8 9h3 M13 9h3 M8 13h3 M13 13h3 M8 17h8",
   };
 
   return (

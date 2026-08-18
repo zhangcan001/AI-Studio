@@ -86,6 +86,7 @@ pub struct ComfyPreflightService {
     comfy_service: Arc<ComfyService>,
     diagnostics_service: Arc<DiagnosticsService>,
     workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
+    report_cache: Arc<tokio::sync::RwLock<Option<ComfyPreflightReport>>>,
 }
 
 impl ComfyPreflightService {
@@ -98,6 +99,7 @@ impl ComfyPreflightService {
             comfy_service,
             diagnostics_service,
             workflow_lifecycle_service,
+            report_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -118,14 +120,21 @@ impl ComfyPreflightService {
             Err(error) => (None, Some((error.code().to_owned(), error.to_string()))),
         };
 
-        Ok(compose_report(
+        let report = compose_report(
             comfy_status,
             activity,
             node_count,
             capability_error,
             workspace,
             workspace_error,
-        ))
+        );
+        *self.report_cache.write().await = Some(report.clone());
+        Ok(report)
+    }
+
+    /// Return the last preflight report without refreshing ComfyUI capabilities.
+    pub async fn cached_current(&self) -> Option<ComfyPreflightReport> {
+        self.report_cache.read().await.clone()
     }
 }
 

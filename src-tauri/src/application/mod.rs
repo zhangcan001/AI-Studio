@@ -40,6 +40,7 @@ pub mod production_queue_service;
 pub mod production_structure_service;
 pub mod project_backup_service;
 pub mod project_bootstrap;
+pub mod project_command_center_service;
 pub mod project_manifest_service;
 pub mod project_service;
 pub mod project_template_service;

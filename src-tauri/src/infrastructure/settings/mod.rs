@@ -148,7 +148,7 @@ impl SettingsStore for JsonSettingsStore {
 #[cfg(test)]
 mod tests {
     use super::JsonSettingsStore;
-    use crate::application::ports::{AppSettings, ComfySettings, SettingsStore};
+    use crate::application::ports::{AppSettings, ComfySettings, SettingsStore, WorkspaceResume};
     use std::{
         io::Write,
         sync::{Arc, Mutex},
@@ -196,6 +196,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_settings_default_workspace_resume_without_schema_bump() {
+        let directory = tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("settings.json"),
+            r#"{"schemaVersion":1,"comfy":{"endpoint":"http://localhost:8188"}}"#,
+        )
+        .unwrap();
+
+        let loaded = JsonSettingsStore::new(directory.path().to_owned())
+            .load()
+            .await;
+        assert_eq!(loaded.settings.workspace_resume, WorkspaceResume::default());
+        assert!(loaded.warning.is_none());
+    }
+
+    #[tokio::test]
     async fn invalid_json_uses_default_and_does_not_overwrite_file() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("settings.json");
@@ -216,6 +232,7 @@ mod tests {
             comfy: ComfySettings {
                 endpoint: "https://lan-host:9443".to_owned(),
             },
+            workspace_resume: WorkspaceResume::default(),
             preferred_presets: std::collections::BTreeMap::new(),
             runtime_profiles: Vec::new(),
             production_queue_name_presets: Vec::new(),
@@ -249,6 +266,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workspace_resume_round_trips_without_schema_bump() {
+        let directory = tempdir().unwrap();
+        let store = JsonSettingsStore::new(directory.path().to_owned());
+        let mut settings = AppSettings::default();
+        settings.workspace_resume = WorkspaceResume {
+            last_project_id: Some("project-1".to_owned()),
+            last_workspace: Some("shots".to_owned()),
+            last_shot_id: Some("shot-2".to_owned()),
+        };
+
+        store.save(&settings).await.unwrap();
+
+        assert_eq!(store.load().await.settings, settings);
+    }
+
+    #[tokio::test]
     async fn successful_replacement_keeps_only_complete_new_settings() {
         let directory = tempdir().unwrap();
         let store = JsonSettingsStore::new(directory.path().to_owned());
@@ -258,6 +291,7 @@ mod tests {
             comfy: ComfySettings {
                 endpoint: "http://localhost:8188".to_owned(),
             },
+            workspace_resume: WorkspaceResume::default(),
             preferred_presets: std::collections::BTreeMap::new(),
             runtime_profiles: Vec::new(),
             production_queue_name_presets: Vec::new(),

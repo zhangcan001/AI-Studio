@@ -78,7 +78,7 @@ pub use reference_anchor_repository::{ReferenceAnchorRecord, ReferenceAnchorRepo
 pub use repository_error::RepositoryError;
 pub use settings_store::{
     AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,
-    SettingsStore,
+    SettingsStore, WorkspaceResume,
 };
 pub use shot_batch_repository::{ShotBatchBinding, ShotBatchRepository};
 pub use shot_bulk_repository::{ShotBulkData, ShotBulkRepository, ShotStagePromptRecord};
