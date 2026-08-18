@@ -49,6 +49,8 @@ use application::{
     project_service::ProjectService,
     project_template_service::ProjectTemplateService,
     prompt_library_service::PromptLibraryService,
+    prompt_template_bulk_service::PromptTemplateBulkService,
+    prompt_template_service::PromptTemplateService,
     reference_anchor_service::ReferenceAnchorService,
     settings_service::SettingsService,
     shot_batch_service::ShotBatchService,
@@ -552,6 +554,16 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 prompt_library_repository.clone(),
                 clock.clone(),
             ));
+            let prompt_template_service = Arc::new(PromptTemplateService::new());
+            let prompt_template_bulk_service = Arc::new(PromptTemplateBulkService::new(
+                project_repository.clone(),
+                prompt_library_repository.clone(),
+                shot_bulk_repository.clone(),
+                production_structure_service.clone(),
+                reference_anchor_service.clone(),
+                prompt_template_service.clone(),
+                clock.clone(),
+            ));
             let shot_bulk_service = Arc::new(ShotBulkService::new(
                 shot_bulk_repository.clone(),
                 definition_repository.clone(),
@@ -618,6 +630,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_manifest_service,
                 preset_service,
                 prompt_library_service,
+                prompt_template_service,
+                prompt_template_bulk_service,
                 shot_service,
                 shot_batch_service,
                 shot_bulk_service,
@@ -857,6 +871,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::prompt_library::prompt_library_add_version,
             commands::prompt_library::prompt_library_update_metadata,
             commands::prompt_library::prompt_library_delete,
+            commands::prompt_template::prompt_template_analyze,
+            commands::prompt_template::prompt_template_preview,
+            commands::prompt_template::prompt_template_bulk_preview,
+            commands::prompt_template::prompt_template_apply,
             commands::reference_anchor::reference_anchors_list,
             commands::reference_anchor::reference_anchor_get,
             commands::reference_anchor::reference_anchor_create,
