@@ -33,6 +33,7 @@ pub mod pagination;
 pub mod ports;
 pub mod preset_service;
 pub mod product_runtime_scope;
+pub mod production_audit_service;
 pub mod production_item_review_service;
 pub mod production_orchestrator_service;
 pub mod production_queue_service;

@@ -39,6 +39,7 @@ use application::{
     organization_service::OrganizationService,
     ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
     preset_service::PresetService,
+    production_audit_service::ProductionAuditService,
     production_item_review_service::ProductionItemReviewService,
     production_orchestrator_service::ProductionOrchestratorService,
     production_queue_service::ProductionQueueService,
@@ -480,6 +481,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_repository.clone(),
                 clock.clone(),
             ));
+            let production_audit_service = Arc::new(ProductionAuditService::new(database_pool.clone()));
             let workflow_benchmark_service = Arc::new(WorkflowBenchmarkService::new(
                 database_pool.clone(),
                 definition_repository.clone(),
@@ -639,6 +641,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_template_service,
                 production_queue_service,
                 production_item_review_service,
+                production_audit_service,
                 diagnostics_service,
                 comfy_preflight_service,
                 settings_service,
@@ -847,6 +850,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_item_review::production_item_review_set_note,
             commands::production_item_review::production_item_review_regenerate,
             commands::production_item_review::production_item_review_regenerate_marked,
+            commands::production_audit::production_audit_summary,
+            commands::production_audit::production_audit_recent_activity,
+            commands::production_audit::production_audit_lineage,
+            commands::production_audit::production_audit_integrity,
             commands::production_orchestrator::production_run_create,
             commands::production_orchestrator::production_run_list,
             commands::production_orchestrator::production_run_get,

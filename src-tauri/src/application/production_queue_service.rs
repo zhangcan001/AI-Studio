@@ -77,6 +77,16 @@ pub struct RetryLineage {
     pub attempt_count: usize,
 }
 
+/// The audit service uses the same retry-lineage rules as partial resume, but
+/// reads rows directly in one set-based query. Keeping the graph validation in
+/// this module prevents the two production views from drifting apart.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RetryLineageEdge {
+    pub item_id: String,
+    pub parent_item_id: Option<String>,
+    pub ordinal: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductionPartialResumeEntry {
     pub root_item_id: String,
@@ -1452,25 +1462,39 @@ const PARTIAL_ELIGIBILITY_BLOCKED: &str = "BLOCKED";
 pub(crate) fn build_retry_lineages(
     items: &[ProductionBatchItem],
 ) -> Result<Vec<RetryLineage>, String> {
+    let edges = items
+        .iter()
+        .map(|item| RetryLineageEdge {
+            item_id: item.id.as_str().to_owned(),
+            parent_item_id: item.retry_of_item_id.clone(),
+            ordinal: i64::from(item.ordinal),
+        })
+        .collect::<Vec<_>>();
+    build_retry_lineages_from_edges(&edges)
+}
+
+pub(crate) fn build_retry_lineages_from_edges(
+    items: &[RetryLineageEdge],
+) -> Result<Vec<RetryLineage>, String> {
     let mut items_by_id = HashMap::with_capacity(items.len());
     for item in items {
-        if items_by_id.insert(item.id.as_str(), item).is_some() {
+        if items_by_id.insert(item.item_id.as_str(), item).is_some() {
             return Err(retry_lineage_error("duplicate item id"));
         }
     }
 
     let mut children = HashMap::with_capacity(items.len());
     for item in items {
-        let Some(parent_id) = item.retry_of_item_id.as_deref() else {
+        let Some(parent_id) = item.parent_item_id.as_deref() else {
             continue;
         };
         if !items_by_id.contains_key(parent_id) {
             return Err(retry_lineage_error(format!(
                 "missing parent {parent_id} for {}",
-                item.id.as_str()
+                item.item_id
             )));
         }
-        if children.insert(parent_id, item.id.as_str()).is_some() {
+        if children.insert(parent_id, item.item_id.as_str()).is_some() {
             return Err(retry_lineage_error(format!(
                 "multiple children for parent {parent_id}"
             )));
@@ -1479,8 +1503,8 @@ pub(crate) fn build_retry_lineages(
 
     let mut roots = items
         .iter()
-        .filter(|item| item.retry_of_item_id.is_none())
-        .map(|item| item.id.as_str())
+        .filter(|item| item.parent_item_id.is_none())
+        .map(|item| item.item_id.as_str())
         .collect::<Vec<_>>();
     roots.sort_by_key(|id| items_by_id.get(id).map(|item| item.ordinal));
     if !items.is_empty() && roots.is_empty() {
