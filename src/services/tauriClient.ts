@@ -105,6 +105,13 @@ import type {
   ProductionReviewStatus,
 } from "../types/productionItemReview";
 import type {
+  ProductionAuditIntegrity,
+  ProductionAuditLineage,
+  ProductionAuditLineageRequest,
+  ProductionAuditActivity,
+  ProductionAuditSummary,
+} from "../types/productionAudit";
+import type {
   CapabilityCheckView,
   WorkflowAutoOnboardingPlanView,
   WorkflowCapabilityBatchView,
@@ -1069,6 +1076,22 @@ export function getTaskDetail(projectId: string, taskId: string): Promise<TaskDe
 
 export function getReusableDraft(projectId: string, taskId: string): Promise<ReusableGenerationDraft> {
   return invoke<ReusableGenerationDraft>("task_get_reusable_draft", { projectId, taskId });
+}
+
+export function getProductionAuditSummary(projectId: string): Promise<ProductionAuditSummary> {
+  return invoke<ProductionAuditSummary>("production_audit_summary", { request: { projectId } });
+}
+
+export function getProductionAuditRecentActivity(projectId: string, limit = 50): Promise<ProductionAuditActivity[]> {
+  return invoke<ProductionAuditActivity[]>("production_audit_recent_activity", { request: { projectId, limit } });
+}
+
+export function getProductionAuditLineage(request: ProductionAuditLineageRequest): Promise<ProductionAuditLineage> {
+  return invoke<ProductionAuditLineage>("production_audit_lineage", { request });
+}
+
+export function getProductionAuditIntegrity(projectId: string): Promise<ProductionAuditIntegrity> {
+  return invoke<ProductionAuditIntegrity>("production_audit_integrity", { request: { projectId } });
 }
 
 export function assetLibraryPage(query: AssetLibraryQuery): Promise<AssetLibraryPage> {

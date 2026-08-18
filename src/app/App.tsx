@@ -621,6 +621,7 @@ function App() {
           productionBusy={productionAdmission.busy}
           focusTaskId={focusedTaskId}
           onLoadInputs={loadHistoricalInputs}
+          onOpenShot={() => setWorkspace("shots")}
         />
       )}
       {workspace === "projects" && (

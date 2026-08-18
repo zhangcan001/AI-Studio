@@ -76,6 +76,7 @@ pub struct ProductionAuditSummary {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductionAuditActivity {
+    pub id: String,
     pub kind: String,
     pub timestamp: String,
     pub severity: ProductionAuditSeverity,
@@ -93,6 +94,7 @@ pub struct ProductionAuditActivity {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductionAuditLineage {
+    pub project_id: String,
     pub root_type: String,
     pub root_id: String,
     pub nodes: Vec<ProductionAuditLineageNode>,
@@ -580,6 +582,7 @@ impl ProductionAuditService {
             _ => unreachable!(),
         }
         Ok(ProductionAuditLineage {
+            project_id: project_id.to_owned(),
             root_type: normalized_type,
             root_id: root_id.to_owned(),
             nodes: builder.nodes,
@@ -1130,6 +1133,15 @@ fn activity(
     error_code: Option<String>,
 ) -> ProductionAuditActivity {
     ProductionAuditActivity {
+        id: format!(
+            "{}:{}:{}:{}:{}:{}",
+            kind,
+            run_id.as_deref().unwrap_or_default(),
+            batch_id.as_deref().unwrap_or_default(),
+            item_id.as_deref().unwrap_or_default(),
+            task_id.as_deref().unwrap_or_default(),
+            timestamp
+        ),
         kind: kind.to_owned(),
         timestamp: timestamp.to_owned(),
         severity,

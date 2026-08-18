@@ -2099,8 +2099,9 @@ mod tests {
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::GenerationService;
     use crate::application::ports::{
-        Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyHealth, ComfyHistory,
-        ComfyOutputData, ComfyOutputFile, NoopTaskUpdateSink, PromptSubmission, SystemStats,
+        Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyExecutionEvent,
+        ComfyHealth, ComfyHistory, ComfyOutputData, ComfyOutputFile, NoopTaskUpdateSink,
+        PromptSubmission, SystemStats,
     };
     use crate::application::product_runtime_scope::MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID;
     use crate::application::production_queue_service::ProductionQueueService;
@@ -2452,6 +2453,15 @@ outputs:
 
     struct NoopComfyAdapter;
 
+    struct NeverCompleteComfySubscription;
+
+    #[async_trait]
+    impl ComfyEventSubscription for NeverCompleteComfySubscription {
+        async fn next_event(&mut self) -> Result<Option<ComfyExecutionEvent>, ComfyAdapterError> {
+            std::future::pending().await
+        }
+    }
+
     #[async_trait]
     impl ComfyAdapter for NoopComfyAdapter {
         async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
@@ -2493,18 +2503,14 @@ outputs:
             _prompt_id: &str,
             _workflow: serde_json::Value,
         ) -> Result<PromptSubmission, ComfyAdapterError> {
-            Err(ComfyAdapterError::Incompatible(
-                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
-            ))
+            std::future::pending().await
         }
 
         async fn subscribe_events(
             &self,
             _client_id: &str,
         ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
-            Err(ComfyAdapterError::Incompatible(
-                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
-            ))
+            Ok(Box::new(NeverCompleteComfySubscription))
         }
     }
 
@@ -2567,6 +2573,22 @@ outputs:
         .execute(pool)
         .await
         .expect("test task output link should persist");
+    }
+
+    async fn wait_until_batch_item_is_observed(pool: &SqlitePool, item_id: &str) {
+        loop {
+            let status = sqlx::query_scalar::<_, String>(
+                "SELECT status FROM production_batch_items WHERE id = ?",
+            )
+            .bind(item_id)
+            .fetch_one(pool)
+            .await
+            .expect("production item should remain readable");
+            if !matches!(status.as_str(), "PENDING" | "DISPATCHING") {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
     }
 
     #[tokio::test]
@@ -2740,7 +2762,7 @@ outputs:
             .await
             .expect("Krea2 batch should be readable");
         assert_eq!(krea_batch.items.len(), 3);
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        wait_until_batch_item_is_observed(&pool, krea_batch.items[0].id.as_str()).await;
         for (item, task_id, asset_id, storage_path) in [
             (
                 &krea_batch.items[0],
@@ -2875,7 +2897,7 @@ outputs:
                 (Some(2), Some("ast_krea_c")),
             ]
         );
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        wait_until_batch_item_is_observed(&pool, &h3_item_id).await;
         sqlx::query(
             "UPDATE production_batches SET status = 'PAUSED', updated_at = ? WHERE id = ?;
              UPDATE production_batch_items
@@ -2932,7 +2954,7 @@ outputs:
                 (Some(2), Some("ast_krea_c")),
             ]
         );
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        wait_until_batch_item_is_observed(&pool, &retry_item_id).await;
 
         insert_succeeded_output(
             &pool,

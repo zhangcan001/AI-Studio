@@ -6,6 +6,7 @@ import type { ReusableGenerationDraft, TaskDetail, TaskHistoryFilter, TaskHistor
 import type { TaskStatus } from "../../types/task";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { AssetPreview } from "../assets/AssetPreview";
+import { ProductionAuditCenter } from "../production/ProductionAuditCenter";
 import { TaskHistoryDetail } from "./TaskHistoryDetail";
 import { TaskHistoryList } from "./TaskHistoryList";
 import { mergeTaskHistoryItems } from "./taskHistoryState";
@@ -16,9 +17,11 @@ interface Props {
   productionBusy: boolean;
   focusTaskId?: string;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
+  onOpenShot?: (shotId: string) => void;
 }
 
-export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, onLoadInputs }: Props) {
+export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, onLoadInputs, onOpenShot }: Props) {
+  const [view, setView] = useState<"tasks" | "audit">("tasks");
   const [filter, setFilter] = useState<TaskHistoryFilter>("ALL");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -143,11 +146,28 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
     if (focusTaskId) void selectTask(focusTaskId);
   }, [focusTaskId, projectId]); // The focused id is an explicit navigation request; selectTask reads current project state.
 
+  useEffect(() => {
+    if (focusTaskId) setView("tasks");
+  }, [focusTaskId]);
+
   const previewAsset = detail?.outputAssets.find((asset) => asset.id === previewAssetId);
 
   return (
     <section className="workspace-panel" aria-busy={loading}>
-      {selectedTaskId && detail ? (
+      <div className="task-history-tabs" role="tablist" aria-label="任务与生产审计">
+        <button type="button" role="tab" aria-selected={view === "tasks"} className={view === "tasks" ? "filter-button filter-button-active" : "filter-button"} onClick={() => setView("tasks")}>任务历史</button>
+        <button type="button" role="tab" aria-selected={view === "audit"} className={view === "audit" ? "filter-button filter-button-active" : "filter-button"} onClick={() => setView("audit")}>生产审计</button>
+      </div>
+      {view === "audit" ? (
+        <ProductionAuditCenter
+          projectId={projectId}
+          onOpenTask={(taskId) => {
+            setView("tasks");
+            void selectTask(taskId);
+          }}
+          onOpenShot={onOpenShot}
+        />
+      ) : selectedTaskId && detail ? (
         <TaskHistoryDetail
           projectId={projectId}
           detail={detail}
