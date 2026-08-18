@@ -62,7 +62,14 @@ Focused evidence for DEV-036:
 - DEV-036 compatibility integration tests: 9 passed.
 - Frontend template/localization tests: 9 passed.
 
-The prescribed repository-wide regression is run once at handoff after this document is committed to the working tree.
+Final handoff gate evidence:
+
+- `cargo fmt --all -- --check`: PASS.
+- `cargo check --manifest-path src-tauri/Cargo.toml`: PASS.
+- Rust full suite: 544 passed / 1 failed / 1 ignored. The only failure is the existing `production_orchestrator_service::tests::production_run_lifecycle_keeps_batch_task_asset_lineage_without_gpu` Krea2 no-GPU lifecycle test; it is unrelated to DEV-036 prompt-template wiring, so no product code was changed to mask it.
+- Frontend full suite: 61 test files / 198 tests passed.
+- `pnpm build`: PASS.
+- `git diff --check`: PASS.
 
 ## 15. Database
 
@@ -74,4 +81,4 @@ Template parsing/rendering is a pure text operation. Context assembly is applica
 
 ## 17. Final Decision
 
-DEV-036 is implemented with the existing persistence model, deterministic validation/error codes, bounded custom/anchor inputs, set-based bulk context loading, read-only preview, atomic apply, and frozen rendered prompts. The release/version baseline remains unchanged.
+DEV-036 PROMPT TEMPLATE + CONTEXT PASS. The existing persistence model, deterministic validation/error codes, bounded custom/anchor inputs, set-based bulk context loading, read-only preview, atomic apply, and frozen rendered prompts are closed and handed off. The unrelated pre-existing Krea2 no-GPU lifecycle failure is recorded above; the release/version baseline remains unchanged.
