@@ -55,3 +55,10 @@ the private BatchWorkflowPresetUpdateRequest type from
 src-tauri/src/commands/batch_workflow_preset.rs. The main Agent must make that
 request type visible before the Rust safety test can execute. Agent D did not
 modify that file.
+
+## Resolution
+
+- blocker fixed
+- BatchWorkflowPresetUpdateRequest is public
+- targeted Rust safety suite PASS
+- final full regression PASS

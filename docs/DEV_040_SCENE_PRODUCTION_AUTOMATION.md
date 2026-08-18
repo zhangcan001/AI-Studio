@@ -58,3 +58,48 @@ git diff --check
 ```
 
 Product remains `0.6.0`, migration remains `021`, backup version remains `12`, and Manifest remains `1`.
+
+## Final validation
+
+DEV-040B final gate was run on `master` at `70216025b7818c07539597a0e1374aa71875b6d4`, with a clean worktree and `HEAD == origin/master`.
+
+Targeted Rust:
+
+- `dev040`: 6 passed, 0 failed, 0 ignored.
+- `BatchWorkflowPresetService`: 7 passed, 0 failed, 0 ignored.
+- `SceneProductionService`: 2 passed, 0 failed, 0 ignored.
+- The targeted suites cover preset CRUD and safety, DONE/PREPARED/ELIGIBLE/BLOCKED classification, strict and partial prepare, repeat and concurrent prepare admission, manual Image Review gating, and the 500 Shot / 50 Scene fixture.
+
+Targeted frontend:
+
+- 2 files / 8 tests passed: `SceneProductionPanel.test.tsx` (3) and `dev040Stability.test.ts` (5).
+
+Final regression:
+
+- `cargo fmt --all -- --check`: PASS.
+- `cargo check --manifest-path src-tauri/Cargo.toml`: PASS.
+- Rust full: 564 passed, 0 failed, 1 ignored.
+- Integration suites: DEV-035 3 passed, DEV-036 9 passed, DEV-039 5 passed, DEV-040 6 passed; 23 passed total.
+- Rust doc-tests: 0 passed, 0 failed.
+- Frontend: 66 files / 231 tests passed.
+- `pnpm build`: PASS; 155 modules transformed.
+- `git diff --check`: PASS.
+
+Architecture and safety confirmation:
+
+- `BatchWorkflowPresetUpdateRequest` is public and `batch_workflow_preset_update` compiles.
+- Preset and Scene commands are formally registered; `AppState` contains the Preset and Scene services.
+- Scene production reuses `ProductionStructureService`, `ShotBatchService`, the existing `ShotBatchRepository`, `PromptTemplateBulkService`, and `production_queue_start`.
+- No DEV-040 direct `/prompt`, `ComfyHttpAdapter`, `GenerationService`, `SceneQueue`, `SceneExecutor`, or duplicate `ProductionBatch` path exists.
+- `batch_workflow_presets` uses `serde(default)` and settings preservation remains intact.
+
+Version and release freeze:
+
+- Product `0.6.0`; migration `021`; backup version `12`; Manifest `1`.
+- `v0.6.0^{}` = `e3d7181f23a9b7285a426efb20ead4db17198757`.
+- `v0.5.0^{}` = `02e67cff50f5da1d207478071636af166048820c`.
+- `v0.4.0^{}` = `94918f6322ce690ff7b1630961abb56b8a31ed11`.
+
+## Final decision
+
+DEV-040 BATCH WORKFLOW PRESETS + SCENE PRODUCTION AUTOMATION PASS
