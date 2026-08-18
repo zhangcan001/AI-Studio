@@ -71,7 +71,7 @@ mod tests {
                'asset_video_prompts', 'production_item_reviews', 'benchmark_experiments',
                'benchmark_candidates', 'benchmark_runs', 'benchmark_quality_scores',
                'production_runs', 'production_stages', 'production_stage_items',
-               'production_run_templates')",
+               'production_run_templates', 'reference_anchors', 'reference_anchor_assets')",
         )
         .fetch_one(pool)
         .await
@@ -87,13 +87,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 33);
+        assert_eq!(table_count(&pool).await, 35);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            19
+            20
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -224,7 +224,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 33);
+        assert_eq!(table_count(&second_pool).await, 35);
         second_pool.close().await;
     }
 
@@ -611,6 +611,54 @@ mod tests {
         assert_eq!(
             sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM shot_stage_prompts WHERE shot_id = 'migration-shot-c'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/020_reference_anchors.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration 020 should apply to a 019 database");
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path,
+              sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at)
+             VALUES ('migration-anchor-asset', 'migration-project', 'image', 'source_image',
+                     'Anchor', 'anchor.png', 'C:/migration/anchor.png', 'sha', 'image/png',
+                     1, 1, 1, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO reference_anchors
+             (id, project_id, kind, name, normalized_name, description, created_at, updated_at)
+             VALUES ('migration-anchor', 'migration-project', 'CHARACTER', 'Anchor', 'anchor', '',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO reference_anchor_assets
+             (anchor_id, asset_id, ordinal, created_at)
+             VALUES ('migration-anchor', 'migration-anchor-asset', 0, '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM assets WHERE id = 'migration-anchor-asset'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM reference_anchor_assets WHERE anchor_id = 'migration-anchor'",
             )
             .fetch_one(&pool)
             .await

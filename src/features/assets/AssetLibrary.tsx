@@ -19,6 +19,8 @@ import { AssetDeleteDialog } from "./AssetDeleteDialog";
 import { TagManagerDialog } from "./TagManagerDialog";
 import type { AssetTag } from "../../types/organization";
 import { replaceAssetOrganization } from "./assetOrganization";
+import { ReferenceAnchorPanel } from "./ReferenceAnchorPanel";
+import { isImageAsset } from "./referenceAnchorState";
 
 const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
   { value: "ALL", label: "全部分类" },
@@ -223,6 +225,7 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
   const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL" || favoriteOnly || tagId);
   const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
   const selectedH3Assets = assets.filter((asset) => selectedAssetIds.has(asset.id));
+  const selectedAnchorAssets = assets.filter((asset) => selectedAssetIds.has(asset.id) && isImageAsset(asset));
 
   function requestDeleteSelection() {
     const selected = assets.filter((asset) => selectedAssetIds.has(asset.id));
@@ -357,6 +360,11 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
         selectionMode={selectionMode}
         selectedIds={[...selectedAssetIds]}
         onToggleSelection={toggleBulkSelection}
+      />
+      <ReferenceAnchorPanel
+        projectId={projectId}
+        selectedAssets={selectedAnchorAssets}
+        onClearSelection={() => setSelectedAssetIds(new Set())}
       />
       {hasFilters && !loading && (
         <button type="button" className="quiet-button clear-asset-filters" onClick={clearFilters}>清除筛选</button>

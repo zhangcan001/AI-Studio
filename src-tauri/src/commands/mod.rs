@@ -12,6 +12,7 @@ pub mod production_orchestrator;
 pub mod production_queue;
 pub mod project;
 pub mod prompt_library;
+pub mod reference_anchor;
 pub mod settings;
 pub mod shot;
 pub mod shot_batch;

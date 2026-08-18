@@ -46,6 +46,7 @@ use application::{
     project_service::ProjectService,
     project_template_service::ProjectTemplateService,
     prompt_library_service::PromptLibraryService,
+    reference_anchor_service::ReferenceAnchorService,
     settings_service::SettingsService,
     shot_batch_service::ShotBatchService,
     shot_bulk_service::ShotBulkService,
@@ -214,6 +215,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(SqliteProjectRepository::new(database_pool.clone()));
             let asset_repository: Arc<dyn AssetRepository> =
                 Arc::new(SqliteAssetRepository::new(database_pool.clone()));
+            let reference_anchor_repository: Arc<dyn application::ports::ReferenceAnchorRepository> =
+                Arc::new(infrastructure::database::SqliteReferenceAnchorRepository::new(
+                    database_pool.clone(),
+                ));
             let asset_deletion_repository: Arc<dyn application::ports::AssetDeletionRepository> =
                 Arc::new(SqliteAssetDeletionRepository::new(database_pool.clone()));
             let asset_video_prompt_repository: Arc<dyn application::ports::AssetVideoPromptRepository> =
@@ -401,6 +406,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_browse_repository,
                 organization_repository.clone(),
             ));
+            let reference_anchor_service = Arc::new(ReferenceAnchorService::new(
+                reference_anchor_repository,
+                asset_repository.clone(),
+                clock.clone(),
+            ));
             let asset_deletion_service = Arc::new(AssetDeletionService::new(
                 asset_repository.clone(),
                 asset_deletion_repository,
@@ -582,6 +592,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 asset_library_service,
+                reference_anchor_service,
                 asset_deletion_service,
                 asset_video_prompt_service,
                 task_history_service,
@@ -831,6 +842,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::prompt_library::prompt_library_add_version,
             commands::prompt_library::prompt_library_update_metadata,
             commands::prompt_library::prompt_library_delete,
+            commands::reference_anchor::reference_anchors_list,
+            commands::reference_anchor::reference_anchor_get,
+            commands::reference_anchor::reference_anchor_create,
+            commands::reference_anchor::reference_anchor_update,
+            commands::reference_anchor::reference_anchor_delete,
             commands::shot::shot_list,
             commands::shot::shot_get,
             commands::shot::shot_create,

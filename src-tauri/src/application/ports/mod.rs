@@ -16,6 +16,7 @@ pub mod production_queue_repository;
 pub mod project_directory_store;
 pub mod project_repository;
 pub mod prompt_library_repository;
+pub mod reference_anchor_repository;
 pub mod repository_error;
 pub mod settings_store;
 pub mod shot_batch_repository;
@@ -69,6 +70,7 @@ pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use prompt_library_repository::{
     PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
 };
+pub use reference_anchor_repository::{ReferenceAnchorRecord, ReferenceAnchorRepository};
 pub use repository_error::RepositoryError;
 pub use settings_store::{
     AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,

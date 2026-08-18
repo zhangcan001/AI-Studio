@@ -18,6 +18,7 @@ use crate::application::project_backup_service::ProjectBackupService;
 use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
 use crate::application::prompt_library_service::PromptLibraryService;
+use crate::application::reference_anchor_service::ReferenceAnchorService;
 use crate::application::settings_service::SettingsService;
 use crate::application::shot_batch_service::ShotBatchService;
 use crate::application::shot_bulk_service::ShotBulkService;
@@ -48,6 +49,7 @@ pub struct AppState {
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
+    pub reference_anchor_service: Arc<ReferenceAnchorService>,
     pub asset_deletion_service: Arc<AssetDeletionService>,
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
     pub task_history_service: Arc<TaskHistoryService>,
@@ -86,6 +88,7 @@ impl AppState {
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
+        reference_anchor_service: Arc<ReferenceAnchorService>,
         asset_deletion_service: Arc<AssetDeletionService>,
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
         task_history_service: Arc<TaskHistoryService>,
@@ -122,6 +125,7 @@ impl AppState {
             task_query_service,
             asset_query_service,
             asset_library_service,
+            reference_anchor_service,
             asset_deletion_service,
             asset_video_prompt_service,
             task_history_service,

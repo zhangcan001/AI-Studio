@@ -50,6 +50,7 @@ import type {
   ComfySettingsView,
   RuntimeParameterProfile,
 } from "../types/settings";
+import type { ReferenceAnchorRequest, ReferenceAnchorUpdateRequest, ReferenceAnchorView } from "../types/referenceAnchor";
 import type { PresetView } from "../types/preset";
 import type {
   ProductionRun,
@@ -486,6 +487,10 @@ export function listProductionRunTemplates(projectId: string): Promise<Productio
 
 export function listShots(projectId: string): Promise<ShotView[]> {
   return invoke<ShotView[]>("shot_list", { projectId });
+}
+
+export function listReferenceAnchors(projectId: string): Promise<ReferenceAnchorView[]> {
+  return invoke<ReferenceAnchorView[]>("reference_anchors_list", { projectId });
 }
 
 export function getShot(projectId: string, shotId: string): Promise<ShotView> {
@@ -999,6 +1004,22 @@ export function bulkAddAssetTag(projectId: string, assetIds: string[], tagId: st
 
 export function bulkRemoveAssetTag(projectId: string, assetIds: string[], tagId: string): Promise<void> {
   return invoke<void>("asset_bulk_remove_tag", { projectId, assetIds, tagId });
+}
+
+export function getReferenceAnchor(projectId: string, anchorId: string): Promise<ReferenceAnchorView> {
+  return invoke<ReferenceAnchorView>("reference_anchor_get", { projectId, anchorId });
+}
+
+export function createReferenceAnchor(request: ReferenceAnchorRequest): Promise<ReferenceAnchorView> {
+  return invoke<ReferenceAnchorView>("reference_anchor_create", { request });
+}
+
+export function updateReferenceAnchor(request: ReferenceAnchorUpdateRequest): Promise<ReferenceAnchorView> {
+  return invoke<ReferenceAnchorView>("reference_anchor_update", { request });
+}
+
+export function deleteReferenceAnchor(projectId: string, anchorId: string): Promise<void> {
+  return invoke<void>("reference_anchor_delete", { projectId, anchorId });
 }
 
 export function listProjectTemplates(): Promise<ProjectTemplate[]> {

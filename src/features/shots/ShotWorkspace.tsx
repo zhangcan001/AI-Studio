@@ -8,6 +8,7 @@ import {
   getAsset,
   getShot,
   listPromptLibrary,
+  listReferenceAnchors,
   listRecentAssets,
   listShots,
   readAssetImage,
@@ -23,6 +24,7 @@ import {
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { PromptEntryView } from "../../types/prompt";
+import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
@@ -31,6 +33,10 @@ import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
+import {
+  appendAnchorReferences,
+  replaceWithAnchorReferences,
+} from "./referenceAnchorApply";
 import {
   buildShotListView,
   defaultShotListControls,
@@ -70,6 +76,8 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
   const [assets, setAssets] = useState<AssetView[]>([]);
+  const [referenceAnchors, setReferenceAnchors] = useState<ReferenceAnchorView[]>([]);
+  const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState("");
   const [name, setName] = useState("");
@@ -100,6 +108,7 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
       isProductionRuntimeForStage(stage, recipe.workflowId),
   );
   const currentReferences = references[stage] ?? [];
+  const selectedAnchor = referenceAnchors.find((anchor) => anchor.id === selectedAnchorId);
   const ref2vaMode = stage === "video" && isRef2vaRecipe(currentRecipe);
   const ref2vaImageField = ref2vaMode ? referenceImagesField(currentRecipe) : undefined;
   const ref2vaMinItems = ref2vaMode ? Math.max(2, ref2vaImageField?.minItems ?? 0) : undefined;
@@ -124,14 +133,16 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
     setLoading(true);
     setError(undefined);
     try {
-      const [nextShots, nextAssets, promptPage] = await Promise.all([
+      const [nextShots, nextAssets, promptPage, nextAnchors] = await Promise.all([
         listShots(projectId),
         listRecentAssets(projectId, 80),
         listPromptLibrary(projectId, { kind: "prompt", limit: 100 }),
+        listReferenceAnchors(projectId).catch(() => []),
       ]);
       if (generation !== reloadGeneration.current) return;
       setShots(nextShots);
       setAssets(nextAssets);
+      setReferenceAnchors(nextAnchors);
       setPromptEntries(promptPage.items);
       setSelectedShotId((current) => current && nextShots.some((shot) => shot.id === current) ? current : nextShots[0]?.id);
     } catch (loadError: unknown) {
@@ -320,6 +331,40 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
       const next = await replaceShotReferences({ projectId, shotId: selectedShot.id, stage, assetIds: currentReferences });
       applyShot(next);
       setNotice("Reference 素材已保存为关系；不会复制素材文件。");
+    } catch (referenceError: unknown) { setError(toUserMessage(referenceError)); }
+    finally { setBusy(false); }
+  }
+
+  async function applyReferenceAnchor(mode: "append" | "replace") {
+    if (!selectedShot || !selectedAnchor) return;
+    const anchorAssetIds = selectedAnchor.assets.map((asset) => asset.assetId);
+    const result = mode === "append"
+      ? appendAnchorReferences(currentReferences, anchorAssetIds)
+      : replaceWithAnchorReferences(anchorAssetIds);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    const nextReferences = ref2vaMode
+      ? ensurePrimaryReference(result.assetIds, selectedShot.selectedImageAssetId)
+      : result.assetIds;
+    const nextValidation = ref2vaMode
+      ? validateRef2vaReferences(ref2vaImageField, nextReferences)
+      : undefined;
+    if (nextValidation) {
+      setError(nextValidation);
+      return;
+    }
+    setBusy(true); setError(undefined); setNotice(undefined);
+    try {
+      const next = await replaceShotReferences({
+        projectId,
+        shotId: selectedShot.id,
+        stage,
+        assetIds: nextReferences,
+      });
+      applyShot(next);
+      setNotice(`${mode === "append" ? "已追加" : "已替换为"}参考锚点“${selectedAnchor.name}”；Shot 仅保存 asset IDs。`);
     } catch (referenceError: unknown) { setError(toUserMessage(referenceError)); }
     finally { setBusy(false); }
   }
@@ -535,6 +580,22 @@ export function ShotWorkspace({ projectId, catalog, onOpenInStudio, onOpenTask }
                     <div><span className="section-label">Reference</span><h4>{ref2vaMode ? "有序参考图" : "参考素材关系"}</h4></div>
                     {(stage === "image" || ref2vaMode) && <button type="button" className="quiet-button" onClick={() => void replaceReferences()} disabled={busy}>保存关系</button>}
                   </div>
+                  {(stage === "image" || ref2vaMode) && <div className="shot-anchor-picker">
+                    <label>
+                      <span>参考锚点</span>
+                      <select value={selectedAnchorId} onChange={(event) => setSelectedAnchorId(event.target.value)} disabled={busy}>
+                        <option value="">选择可复用的参考锚点</option>
+                        {referenceAnchors.map((anchor) => <option key={anchor.id} value={anchor.id} disabled={!anchor.usable || anchor.assets.length === 0}>
+                          [{anchor.kind}] {anchor.name}{anchor.usable && anchor.assets.length > 0 ? ` · ${anchor.assets.length} 张` : " · 暂无参考图"}
+                        </option>)}
+                      </select>
+                    </label>
+                    <div className="shot-anchor-actions">
+                      <button type="button" className="quiet-button" onClick={() => void applyReferenceAnchor("append")} disabled={busy || !selectedAnchor?.usable || !selectedAnchor.assets.length}>追加锚点</button>
+                      <button type="button" className="quiet-button" onClick={() => void applyReferenceAnchor("replace")} disabled={busy || !selectedAnchor?.usable || !selectedAnchor.assets.length}>替换为锚点</button>
+                    </div>
+                    <p className="shot-inline-note">套用后只写入当前参考图 asset IDs；锚点之后的修改不会影响此 Shot。</p>
+                  </div>}
                   {stage === "image" ? (
                     <>
                       <p className="shot-inline-note">仅保存当前项目素材 ID，不复制文件。图片阶段可选多个。</p>

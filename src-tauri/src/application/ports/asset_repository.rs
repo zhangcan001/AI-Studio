@@ -18,6 +18,19 @@ pub trait AssetRepository: Send + Sync {
 
     async fn find_by_id(&self, asset_id: &AssetId) -> Result<Option<Asset>, RepositoryError>;
 
+    /// Batch lookup used by project-local asset memberships. SQLite provides
+    /// one `IN (...)` query; the default keeps small test repositories
+    /// source-compatible.
+    async fn find_many_by_ids(&self, asset_ids: &[AssetId]) -> Result<Vec<Asset>, RepositoryError> {
+        let mut assets = Vec::with_capacity(asset_ids.len());
+        for asset_id in asset_ids {
+            if let Some(asset) = self.find_by_id(asset_id).await? {
+                assets.push(asset);
+            }
+        }
+        Ok(assets)
+    }
+
     async fn list_by_source_task(&self, task_id: &TaskId) -> Result<Vec<Asset>, RepositoryError>;
 
     async fn list_recent(

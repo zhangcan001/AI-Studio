@@ -10,7 +10,8 @@ pub use repositories::{
     SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
     SqliteProductionItemReviewRepository, SqliteProductionQueueRepository, SqliteProjectRepository,
-    SqlitePromptLibraryRepository, SqliteShotRepository, SqliteTaskHistoryRepository,
-    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
-    SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
+    SqlitePromptLibraryRepository, SqliteReferenceAnchorRepository, SqliteShotRepository,
+    SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRunRepository, SqliteWorkflowRuntimeRepository,
+    SqliteWorkflowRuntimeStateRepository,
 };

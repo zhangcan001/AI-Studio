@@ -5,7 +5,7 @@ use super::{
 use crate::application::ports::{AssetRepository, RepositoryError, TaskOutputAssetMapping};
 use crate::domain::{Asset, AssetId, AssetType, TaskId};
 use async_trait::async_trait;
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{QueryBuilder, Sqlite, SqlitePool, Transaction};
 
 #[derive(Clone)]
 pub struct SqliteAssetRepository {
@@ -93,6 +93,25 @@ impl AssetRepository for SqliteAssetRepository {
             .await
             .map_err(map_sqlx_error)?;
         row.map(AssetRow::try_into_domain).transpose()
+    }
+
+    async fn find_many_by_ids(&self, asset_ids: &[AssetId]) -> Result<Vec<Asset>, RepositoryError> {
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(format!("{ASSET_SELECT} WHERE id IN ("));
+        let mut separated = query.separated(", ");
+        for asset_id in asset_ids {
+            separated.push_bind(asset_id.as_str());
+        }
+        separated.push_unseparated(") ORDER BY id ASC");
+        let rows = query
+            .build_query_as::<AssetRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        rows.into_iter().map(AssetRow::try_into_domain).collect()
     }
 
     async fn list_by_source_task(&self, task_id: &TaskId) -> Result<Vec<Asset>, RepositoryError> {

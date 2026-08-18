@@ -17,7 +17,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 10;
+const BACKUP_VERSION: u32 = 11;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -325,6 +325,10 @@ impl ProjectBackupService {
         for tag in &document.asset_tags {
             tag_ids.insert(tag.id.clone(), format!("tag_{}", Uuid::new_v4()));
         }
+        let mut reference_anchor_ids = HashMap::new();
+        for anchor in &document.reference_anchors {
+            reference_anchor_ids.insert(anchor.id.clone(), format!("anc_{}", Uuid::new_v4()));
+        }
 
         let copy_result = copy_assets(
             &mut archive,
@@ -368,6 +372,7 @@ impl ProjectBackupService {
                 &benchmark_run_ids,
                 &benchmark_quality_score_ids,
                 &tag_ids,
+                &reference_anchor_ids,
                 &shot_ids,
                 &shot_generation_link_ids,
                 &restored_assets,
@@ -593,6 +598,24 @@ impl ProjectBackupService {
             updated_at: row.updated_at,
         })
         .collect::<Vec<_>>();
+        let reference_anchor_rows = sqlx::query_as::<_, DbReferenceAnchor>(
+            "SELECT id, project_id, kind, name, normalized_name, description, created_at, updated_at
+             FROM reference_anchors WHERE project_id = ? ORDER BY created_at, id",
+        )
+        .bind(project_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        let reference_anchor_asset_rows = sqlx::query_as::<_, DbReferenceAnchorAsset>(
+            "SELECT m.anchor_id, m.asset_id, m.ordinal, m.created_at
+             FROM reference_anchor_assets m
+             JOIN reference_anchors a ON a.id = m.anchor_id
+             WHERE a.project_id = ? ORDER BY m.anchor_id, m.ordinal, m.asset_id",
+        )
+        .bind(project_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
         let included_asset_ids = db_assets
             .iter()
             .filter(|asset| {
@@ -766,11 +789,16 @@ impl ProjectBackupService {
         }
         let included_asset_ids = assets
             .iter()
-            .map(|asset| asset.id.as_str())
+            .map(|asset| asset.id.clone())
             .collect::<HashSet<_>>();
         asset_tag_links.retain(|link| included_asset_ids.contains(link.asset_id.as_str()));
         asset_favorites.retain(|favorite| included_asset_ids.contains(favorite.asset_id.as_str()));
         asset_video_prompts.retain(|prompt| included_asset_ids.contains(prompt.asset_id.as_str()));
+        let reference_anchors = assemble_reference_anchor_backups(
+            reference_anchor_rows,
+            reference_anchor_asset_rows,
+            &included_asset_ids,
+        );
         let document = BackupDocument {
             project: BackupProject {
                 id: project.id,
@@ -796,6 +824,7 @@ impl ProjectBackupService {
             asset_tag_links,
             asset_favorites,
             asset_video_prompts,
+            reference_anchors,
             production_item_reviews,
             benchmark_experiments,
             benchmark_candidates,
@@ -835,6 +864,7 @@ impl ProjectBackupService {
         benchmark_run_ids: &HashMap<String, String>,
         benchmark_quality_score_ids: &HashMap<String, String>,
         tag_ids: &HashMap<String, String>,
+        reference_anchor_ids: &HashMap<String, String>,
         shot_ids: &HashMap<String, String>,
         shot_generation_link_ids: &HashMap<String, String>,
         restored_assets: &[RestoredAsset],
@@ -866,6 +896,7 @@ impl ProjectBackupService {
             benchmark_run_ids,
             benchmark_quality_score_ids,
             tag_ids,
+            reference_anchor_ids,
             shot_ids,
             shot_generation_link_ids,
             restored_assets,
@@ -929,6 +960,8 @@ struct BackupDocument {
     asset_favorites: Vec<BackupAssetFavorite>,
     #[serde(default)]
     asset_video_prompts: Vec<BackupAssetVideoPrompt>,
+    #[serde(default)]
+    reference_anchors: Vec<BackupReferenceAnchor>,
     #[serde(default)]
     production_item_reviews: Vec<BackupProductionItemReview>,
     #[serde(default)]
@@ -1018,6 +1051,28 @@ struct BackupAssetVideoPrompt {
     project_id: String,
     prompt_text: String,
     updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupReferenceAnchor {
+    id: String,
+    project_id: String,
+    kind: String,
+    name: String,
+    normalized_name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+    assets: Vec<BackupReferenceAnchorAsset>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupReferenceAnchorAsset {
+    asset_id: String,
+    ordinal: i64,
+    created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1537,6 +1592,26 @@ struct DbAssetVideoPrompt {
 }
 
 #[derive(FromRow)]
+struct DbReferenceAnchor {
+    id: String,
+    project_id: String,
+    kind: String,
+    name: String,
+    normalized_name: String,
+    description: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbReferenceAnchorAsset {
+    anchor_id: String,
+    asset_id: String,
+    ordinal: i64,
+    created_at: String,
+}
+
+#[derive(FromRow)]
 struct DbTaskEvent {
     id: String,
     task_id: String,
@@ -1801,6 +1876,67 @@ struct RestoredAsset {
     new_id: String,
     storage_path: String,
     thumbnail_path: Option<String>,
+}
+
+fn assemble_reference_anchor_backups(
+    anchors: Vec<DbReferenceAnchor>,
+    memberships: Vec<DbReferenceAnchorAsset>,
+    included_asset_ids: &HashSet<String>,
+) -> Vec<BackupReferenceAnchor> {
+    let mut assets_by_anchor = HashMap::<String, Vec<BackupReferenceAnchorAsset>>::new();
+    for membership in memberships {
+        if included_asset_ids.contains(&membership.asset_id) {
+            assets_by_anchor
+                .entry(membership.anchor_id)
+                .or_default()
+                .push(BackupReferenceAnchorAsset {
+                    asset_id: membership.asset_id,
+                    ordinal: membership.ordinal,
+                    created_at: membership.created_at,
+                });
+        }
+    }
+    for assets in assets_by_anchor.values_mut() {
+        assets.sort_by(|left, right| {
+            left.ordinal
+                .cmp(&right.ordinal)
+                .then_with(|| left.asset_id.cmp(&right.asset_id))
+        });
+    }
+    anchors
+        .into_iter()
+        .map(|anchor| BackupReferenceAnchor {
+            assets: assets_by_anchor.remove(&anchor.id).unwrap_or_default(),
+            id: anchor.id,
+            project_id: anchor.project_id,
+            kind: anchor.kind,
+            name: anchor.name,
+            normalized_name: anchor.normalized_name,
+            description: anchor.description,
+            created_at: anchor.created_at,
+            updated_at: anchor.updated_at,
+        })
+        .collect()
+}
+
+fn remap_reference_anchor_assets(
+    anchor: &BackupReferenceAnchor,
+    asset_ids: &HashMap<String, String>,
+) -> Result<Vec<BackupReferenceAnchorAsset>, AppError> {
+    anchor
+        .assets
+        .iter()
+        .map(|asset| {
+            Ok(BackupReferenceAnchorAsset {
+                asset_id: asset_ids
+                    .get(&asset.asset_id)
+                    .cloned()
+                    .ok_or_else(|| AppError::backup_invalid("参考锚点素材缺少映射"))?,
+                ordinal: asset.ordinal,
+                created_at: asset.created_at.clone(),
+            })
+        })
+        .collect()
 }
 
 impl BackupTask {
@@ -2897,7 +3033,10 @@ fn inspect_archive(
     }
     let manifest: ProjectBackupManifest = read_zip_json(&mut archive, "manifest.json")?;
     if manifest.format != BACKUP_FORMAT
-        || !matches!(manifest.version, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10)
+        || !matches!(
+            manifest.version,
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
+        )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
     }
@@ -2943,6 +3082,7 @@ fn validate_document_entries(
     validate_asset_video_prompt_document(document)?;
     validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
+    validate_reference_anchor_document(document)?;
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
     validate_production_orchestrator_document(document)?;
@@ -3707,6 +3847,72 @@ fn validate_organization_document(document: &BackupDocument) -> Result<(), AppEr
     Ok(())
 }
 
+fn validate_reference_anchor_document(document: &BackupDocument) -> Result<(), AppError> {
+    const MAX_ANCHORS: usize = 1000;
+    const MAX_ASSETS_PER_ANCHOR: usize = 20;
+    let asset_types = document
+        .assets
+        .iter()
+        .map(|asset| (asset.id.as_str(), asset.asset_type.as_str()))
+        .collect::<HashMap<_, _>>();
+    if document.reference_anchors.len() > MAX_ANCHORS {
+        return Err(AppError::backup_invalid("备份参考锚点数量超过限制"));
+    }
+    let mut anchor_ids = HashSet::new();
+    let mut names = HashSet::new();
+    for anchor in &document.reference_anchors {
+        if anchor.project_id != document.project.id
+            || anchor.id.trim().is_empty()
+            || !anchor_ids.insert(anchor.id.as_str())
+            || !matches!(
+                anchor.kind.as_str(),
+                "CHARACTER" | "SCENE" | "PROP" | "STYLE"
+            )
+            || anchor.description.chars().count() > 500
+        {
+            return Err(AppError::backup_invalid("备份参考锚点元数据无效"));
+        }
+        let (canonical_name, normalized_name) =
+            crate::application::organization_service::normalize_name(
+                &anchor.name,
+                80,
+                "REFERENCE_ANCHOR",
+            )
+            .map_err(|error| AppError::backup_invalid(format!("参考锚点名称无效：{error}")))?;
+        if anchor.name != canonical_name || anchor.normalized_name != normalized_name {
+            return Err(AppError::backup_invalid("备份参考锚点名称未规范化"));
+        }
+        if !names.insert((anchor.kind.as_str(), anchor.normalized_name.as_str())) {
+            return Err(AppError::backup_invalid("备份包含重复参考锚点名称"));
+        }
+        if anchor.assets.len() > MAX_ASSETS_PER_ANCHOR {
+            return Err(AppError::backup_invalid("参考锚点素材数量超过 20 个上限"));
+        }
+        let mut asset_ids = HashSet::new();
+        let mut ordinals = Vec::with_capacity(anchor.assets.len());
+        for asset in &anchor.assets {
+            if !asset_ids.insert(asset.asset_id.as_str())
+                || asset_types.get(asset.asset_id.as_str()).copied() != Some("image")
+                || asset.ordinal < 0
+            {
+                return Err(AppError::backup_invalid("参考锚点素材引用无效"));
+            }
+            ordinals.push(asset.ordinal);
+        }
+        ordinals.sort_unstable();
+        if ordinals
+            .iter()
+            .enumerate()
+            .any(|(index, ordinal)| *ordinal != index as i64)
+        {
+            return Err(AppError::backup_invalid(
+                "参考锚点素材序号必须从 0 连续排列",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn safe_zip_path(name: &str) -> bool {
     if name.is_empty()
         || name.starts_with('/')
@@ -3953,6 +4159,7 @@ async fn restore_rows_in_transaction(
     benchmark_run_ids: &HashMap<String, String>,
     benchmark_quality_score_ids: &HashMap<String, String>,
     tag_ids: &HashMap<String, String>,
+    reference_anchor_ids: &HashMap<String, String>,
     shot_ids: &HashMap<String, String>,
     shot_generation_link_ids: &HashMap<String, String>,
     restored_assets: &[RestoredAsset],
@@ -4173,7 +4380,41 @@ async fn restore_rows_in_transaction(
         .bind(&asset.updated_at)
         .execute(&mut **transaction)
         .await
+            .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for anchor in &document.reference_anchors {
+        let anchor_id = reference_anchor_ids
+            .get(&anchor.id)
+            .ok_or_else(|| AppError::backup_invalid("参考锚点 ID 映射缺失"))?;
+        sqlx::query(
+            "INSERT INTO reference_anchors
+             (id, project_id, kind, name, normalized_name, description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(anchor_id)
+        .bind(&project.id)
+        .bind(&anchor.kind)
+        .bind(&anchor.name)
+        .bind(&anchor.normalized_name)
+        .bind(&anchor.description)
+        .bind(&anchor.created_at)
+        .bind(&anchor.updated_at)
+        .execute(&mut **transaction)
+        .await
         .map_err(|error| AppError::database(error.to_string()))?;
+        for asset in remap_reference_anchor_assets(anchor, asset_ids)? {
+            sqlx::query(
+                "INSERT INTO reference_anchor_assets (anchor_id, asset_id, ordinal, created_at)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(anchor_id)
+            .bind(&asset.asset_id)
+            .bind(asset.ordinal)
+            .bind(&asset.created_at)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| AppError::database(error.to_string()))?;
+        }
     }
     for prompt in &document.asset_video_prompts {
         let Some(asset_id) = asset_ids.get(&prompt.asset_id) else {
@@ -4978,11 +5219,14 @@ async fn ensure_version_recipe_dependency(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_exact_asset_id_references, inspect_archive, remap_snapshot_asset_references,
-        restored_name, safe_zip_path, validate_asset_video_prompt_document,
-        validate_organization_document, validate_prompt_document, BackupAsset, BackupAssetTag,
+        assemble_reference_anchor_backups, collect_exact_asset_id_references, inspect_archive,
+        remap_reference_anchor_assets, remap_snapshot_asset_references, restored_name,
+        safe_zip_path, validate_asset_video_prompt_document, validate_organization_document,
+        validate_prompt_document, validate_reference_anchor_document, BackupAsset, BackupAssetTag,
         BackupAssetTagLink, BackupAssetVideoPrompt, BackupDocument, BackupProject,
-        BackupPromptEntry, BackupPromptVersion, BackupSnapshot, BackupTask, ProjectBackupService,
+        BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor, BackupReferenceAnchorAsset,
+        BackupSnapshot, BackupTask, DbReferenceAnchor, DbReferenceAnchorAsset,
+        ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
@@ -5175,6 +5419,7 @@ mod tests {
             asset_tag_links: links,
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
+            reference_anchors: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
@@ -5278,6 +5523,99 @@ mod tests {
             .collect();
         validate_organization_document(&organization_document(tags, links))
             .expect("organization limits are inclusive");
+    }
+
+    #[test]
+    fn backup_reference_anchor_validation_preserves_image_memberships_only() {
+        let mut valid = organization_document(Vec::new(), Vec::new());
+        valid.reference_anchors = vec![BackupReferenceAnchor {
+            id: "anc_character".to_owned(),
+            project_id: valid.project.id.clone(),
+            kind: "CHARACTER".to_owned(),
+            name: "地藏菩萨".to_owned(),
+            normalized_name: "地藏菩萨".to_owned(),
+            description: "主参考".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            assets: vec![BackupReferenceAnchorAsset {
+                asset_id: "ast_organization".to_owned(),
+                ordinal: 0,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+            }],
+        }];
+        validate_reference_anchor_document(&valid).expect("valid anchor backup should pass");
+
+        let mut video = valid.clone();
+        video.assets[0].asset_type = "video".to_owned();
+        assert!(validate_reference_anchor_document(&video).is_err());
+
+        let mut duplicate_ordinal = valid.clone();
+        duplicate_ordinal.reference_anchors[0]
+            .assets
+            .push(BackupReferenceAnchorAsset {
+                asset_id: "ast_organization".to_owned(),
+                ordinal: 0,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+            });
+        assert!(validate_reference_anchor_document(&duplicate_ordinal).is_err());
+    }
+
+    #[test]
+    fn v10_backup_defaults_reference_anchors_to_empty() {
+        let mut value =
+            serde_json::to_value(organization_document(Vec::new(), Vec::new())).unwrap();
+        value
+            .as_object_mut()
+            .expect("backup document is an object")
+            .remove("referenceAnchors");
+        let document: BackupDocument = serde_json::from_value(value).unwrap();
+        assert!(document.reference_anchors.is_empty());
+    }
+
+    #[test]
+    fn reference_anchor_export_and_restore_keep_order_and_remap_assets() {
+        let included = HashSet::from(["ast_a".to_owned(), "ast_b".to_owned()]);
+        let anchors = vec![DbReferenceAnchor {
+            id: "anc_old".to_owned(),
+            project_id: "project-1".to_owned(),
+            kind: "CHARACTER".to_owned(),
+            name: "角色".to_owned(),
+            normalized_name: "角色".to_owned(),
+            description: "说明".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        let memberships = vec![
+            DbReferenceAnchorAsset {
+                anchor_id: "anc_old".to_owned(),
+                asset_id: "ast_b".to_owned(),
+                ordinal: 1,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+            },
+            DbReferenceAnchorAsset {
+                anchor_id: "anc_old".to_owned(),
+                asset_id: "ast_a".to_owned(),
+                ordinal: 0,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+            },
+        ];
+        let exported = assemble_reference_anchor_backups(anchors, memberships, &included);
+        assert_eq!(exported[0].assets[0].asset_id, "ast_a");
+        assert_eq!(exported[0].assets[1].asset_id, "ast_b");
+
+        let mapping = HashMap::from([
+            ("ast_a".to_owned(), "ast_new_a".to_owned()),
+            ("ast_b".to_owned(), "ast_new_b".to_owned()),
+        ]);
+        let restored = remap_reference_anchor_assets(&exported[0], &mapping).unwrap();
+        assert_eq!(
+            restored
+                .iter()
+                .map(|asset| asset.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ast_new_a", "ast_new_b"]
+        );
+        assert!(!restored.iter().any(|asset| asset.asset_id == "ast_a"));
     }
 
     fn prompt_document() -> BackupDocument {
@@ -5676,7 +6014,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 10);
+        assert_eq!(manifest.version, 11);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -6455,6 +6793,7 @@ mod tests {
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
+            reference_anchors: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
@@ -6500,6 +6839,7 @@ mod tests {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -6600,6 +6940,7 @@ mod tests {
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
             asset_video_prompts: Vec::new(),
+            reference_anchors: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
