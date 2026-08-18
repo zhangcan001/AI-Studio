@@ -38,6 +38,7 @@ import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
 import { ProductionStructurePanel } from "./ProductionStructurePanel";
 import { PromptTemplatePanel } from "./PromptTemplatePanel";
+import { SceneProductionPanel } from "./SceneProductionPanel";
 import {
   appendAnchorReferences,
   replaceWithAnchorReferences,
@@ -566,6 +567,17 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           setStage(reviewStage);
           setSelectedShotId(shotIds[0]);
         }}
+      />
+      <SceneProductionPanel
+        projectId={projectId}
+        sceneOptions={sceneFilterOptions.filter((option) => option.value !== "ALL" && option.value !== "UNASSIGNED")}
+        currentSceneId={selectedSceneContext?.scene.id}
+        currentShot={selectedShot}
+        promptEntries={promptEntries}
+        referenceAnchors={referenceAnchors}
+        onRefresh={reload}
+        onNotice={(message) => setNotice(message)}
+        onNavigateToReview={(reviewStage) => setStage(reviewStage)}
       />
       <div className="shot-workspace-grid">
         <aside className="shot-list-pane" aria-label="镜头列表">

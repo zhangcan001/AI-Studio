@@ -237,6 +237,7 @@ mod tests {
             runtime_profiles: Vec::new(),
             production_queue_name_presets: Vec::new(),
             comfy_environment_profiles: Vec::new(),
+            batch_workflow_presets: Vec::new(),
         };
         store.save(&settings).await.unwrap();
         assert!(directory.path().join("settings.json").is_file());
@@ -296,6 +297,7 @@ mod tests {
             runtime_profiles: Vec::new(),
             production_queue_name_presets: Vec::new(),
             comfy_environment_profiles: Vec::new(),
+            batch_workflow_presets: Vec::new(),
         };
         store.save(&old).await.unwrap();
         store.save(&new).await.unwrap();

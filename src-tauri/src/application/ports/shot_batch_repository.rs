@@ -13,6 +13,15 @@ pub struct ShotBatchBinding {
     pub production_batch_item_id: String,
 }
 
+/// A non-terminal Shot binding already owned by the production queue.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveShotBatchBinding {
+    pub shot_id: String,
+    pub stage: ShotStage,
+    pub production_batch_id: String,
+    pub production_batch_item_id: String,
+}
+
 #[async_trait]
 pub trait ShotBatchRepository: Send + Sync {
     async fn insert_batch_with_bindings(
@@ -56,4 +65,12 @@ pub trait ShotBatchRepository: Send + Sync {
         project_id: &str,
         shot_id: &str,
     ) -> Result<bool, RepositoryError>;
+
+    /// Returns active bindings for the requested shots in one set-based query.
+    async fn list_active_shot_bindings(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<Vec<ActiveShotBatchBinding>, RepositoryError>;
 }

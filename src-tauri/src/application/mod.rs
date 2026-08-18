@@ -3,6 +3,7 @@ pub mod asset_import_service;
 pub mod asset_library_service;
 pub mod asset_query_service;
 pub mod asset_video_prompt_service;
+pub mod batch_workflow_preset_service;
 pub mod build_info;
 pub mod builtin_runtime_packages;
 #[cfg(test)]
@@ -48,6 +49,7 @@ pub mod prompt_library_service;
 pub mod prompt_template_bulk_service;
 pub mod prompt_template_service;
 pub mod reference_anchor_service;
+pub mod scene_production_service;
 pub mod scheduler;
 pub mod settings_service;
 pub mod shot_batch_service;

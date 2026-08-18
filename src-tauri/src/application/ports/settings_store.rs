@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -18,6 +19,8 @@ pub struct AppSettings {
     pub production_queue_name_presets: Vec<String>,
     #[serde(default)]
     pub comfy_environment_profiles: Vec<ComfyEnvironmentProfile>,
+    #[serde(default)]
+    pub batch_workflow_presets: Vec<BatchWorkflowPreset>,
 }
 
 impl Default for AppSettings {
@@ -35,8 +38,31 @@ impl Default for AppSettings {
                 "场景实验".to_owned(),
             ],
             comfy_environment_profiles: Vec::new(),
+            batch_workflow_presets: Vec::new(),
         }
     }
+}
+
+/// A reusable local production configuration. It intentionally contains no
+/// project-owned identifiers, media assets, or prompt/reference selections.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchWorkflowPreset {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub image: Option<BatchWorkflowStagePreset>,
+    pub video: Option<BatchWorkflowStagePreset>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchWorkflowStagePreset {
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub values: Value,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

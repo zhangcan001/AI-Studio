@@ -2,6 +2,7 @@ use crate::application::asset_deletion_service::AssetDeletionService;
 use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
 use crate::application::asset_video_prompt_service::AssetVideoPromptService;
+use crate::application::batch_workflow_preset_service::BatchWorkflowPresetService;
 use crate::application::comfy_memory_service::ComfyMemoryService;
 use crate::application::comfy_preflight_service::ComfyPreflightService;
 use crate::application::comfy_service::ComfyService;
@@ -25,6 +26,7 @@ use crate::application::prompt_library_service::PromptLibraryService;
 use crate::application::prompt_template_bulk_service::PromptTemplateBulkService;
 use crate::application::prompt_template_service::PromptTemplateService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
+use crate::application::scene_production_service::SceneProductionService;
 use crate::application::settings_service::SettingsService;
 use crate::application::shot_batch_service::ShotBatchService;
 use crate::application::shot_bulk_service::ShotBulkService;
@@ -83,6 +85,8 @@ pub struct AppState {
     pub diagnostics_service: Arc<DiagnosticsService>,
     pub comfy_preflight_service: Arc<ComfyPreflightService>,
     pub settings_service: Arc<SettingsService>,
+    pub batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
+    pub scene_production_service: Arc<SceneProductionService>,
 }
 
 impl AppState {
@@ -128,6 +132,8 @@ impl AppState {
         diagnostics_service: Arc<DiagnosticsService>,
         comfy_preflight_service: Arc<ComfyPreflightService>,
         settings_service: Arc<SettingsService>,
+        batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
+        scene_production_service: Arc<SceneProductionService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -171,6 +177,8 @@ impl AppState {
             diagnostics_service,
             comfy_preflight_service,
             settings_service,
+            batch_workflow_preset_service,
+            scene_production_service,
         }
     }
 }

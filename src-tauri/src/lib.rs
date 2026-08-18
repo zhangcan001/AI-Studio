@@ -28,6 +28,7 @@ use application::{
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
     asset_video_prompt_service::AssetVideoPromptService,
+    batch_workflow_preset_service::BatchWorkflowPresetService,
     comfy_memory_service::ComfyMemoryService,
     comfy_preflight_service::ComfyPreflightService,
     comfy_service::{ComfyRuntime, ComfyService},
@@ -54,6 +55,7 @@ use application::{
     prompt_template_bulk_service::PromptTemplateBulkService,
     prompt_template_service::PromptTemplateService,
     reference_anchor_service::ReferenceAnchorService,
+    scene_production_service::SceneProductionService,
     settings_service::SettingsService,
     shot_batch_service::ShotBatchService,
     shot_bulk_service::ShotBulkService,
@@ -604,6 +606,14 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             )
             .with_stage_prompt_repository(shot_bulk_repository));
+            let batch_workflow_preset_service = Arc::new(BatchWorkflowPresetService::new(
+                settings_service.clone(),
+                definition_repository.clone(),
+            ));
+            let scene_production_service = Arc::new(SceneProductionService::new(
+                production_structure_service.clone(),
+                shot_batch_service.clone(),
+            ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
                 *slot = Some(Arc::new(MediaProtocolService::new(
                     asset_repository.clone(),
@@ -655,6 +665,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 diagnostics_service,
                 comfy_preflight_service,
                 settings_service,
+                batch_workflow_preset_service,
+                scene_production_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -794,6 +806,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::settings::production_queue_name_preset_delete,
             commands::settings::workspace_resume_get,
             commands::settings::workspace_resume_save,
+            commands::batch_workflow_preset::batch_workflow_presets_list,
+            commands::batch_workflow_preset::batch_workflow_preset_create,
+            commands::batch_workflow_preset::batch_workflow_preset_update,
+            commands::batch_workflow_preset::batch_workflow_preset_delete,
             commands::workflow_library::workflow_library_refresh,
             commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
             commands::workflow_onboarding::workflow_onboarding_auto_import_api_workflow,
@@ -928,6 +944,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::shot::shot_generate,
             commands::shot_batch::shot_batch_plan,
             commands::shot_batch::shot_batch_create,
+            commands::scene_production::scene_production_plan,
+            commands::scene_production::scene_production_prepare,
             commands::shot_bulk::preview_shot_bulk_import,
             commands::shot_bulk::commit_shot_bulk_import,
             commands::shot_bulk::bulk_assign_shot_prompt,

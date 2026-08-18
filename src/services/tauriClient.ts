@@ -78,6 +78,15 @@ import type { ProjectCommandCenterAggregate } from "../types/projectCommandCente
 import type { ReferenceAnchorRequest, ReferenceAnchorUpdateRequest, ReferenceAnchorView } from "../types/referenceAnchor";
 import type { PresetView } from "../types/preset";
 import type {
+  BatchWorkflowPreset,
+  BatchWorkflowPresetCreateRequest,
+  BatchWorkflowPresetUpdateRequest,
+  SceneProductionPlan,
+  SceneProductionPlanRequest,
+  SceneProductionPrepareRequest,
+  SceneProductionPrepareResult,
+} from "../types/sceneProduction";
+import type {
   ProductionRun,
   ProductionRunCreateRequest,
   ProductionRunListItem,
@@ -169,6 +178,49 @@ export function previewPromptTemplateBulk(request: PromptTemplateBulkPreviewRequ
 
 export function applyPromptTemplate(request: PromptTemplateApplyRequest): Promise<PromptTemplateApplyResult> {
   return invoke<PromptTemplateApplyResult>("prompt_template_apply", { request });
+}
+
+export function listBatchWorkflowPresets(): Promise<BatchWorkflowPreset[]> {
+  return invoke<BatchWorkflowPreset[]>("batch_workflow_presets_list");
+}
+
+export function createBatchWorkflowPreset(request: BatchWorkflowPresetCreateRequest): Promise<BatchWorkflowPreset> {
+  return invoke<BatchWorkflowPreset>("batch_workflow_preset_create", { input: request });
+}
+
+export function updateBatchWorkflowPreset(request: BatchWorkflowPresetUpdateRequest): Promise<BatchWorkflowPreset> {
+  const { presetId, ...input } = request;
+  return invoke<BatchWorkflowPreset>("batch_workflow_preset_update", { presetId, input });
+}
+
+export function deleteBatchWorkflowPreset(presetId: string): Promise<void> {
+  return invoke<void>("batch_workflow_preset_delete", { presetId });
+}
+
+export function getSceneProductionPlan(request: SceneProductionPlanRequest): Promise<SceneProductionPlan> {
+  return invoke<SceneProductionPlan>("scene_production_plan", {
+    projectId: request.projectId,
+    sceneId: request.sceneId,
+    stage: request.stage,
+  });
+}
+
+export function prepareSceneProduction(request: SceneProductionPrepareRequest): Promise<SceneProductionPrepareResult> {
+  return invoke<{
+    projectId: string;
+    sceneId: string;
+    stage: string;
+    created: boolean;
+    createdCount: number;
+    alreadyPrepared: boolean;
+    existingBatchIds: string[];
+    detail?: ProductionBatchDetail | null;
+  }>("scene_production_prepare", { request }).then((result) => ({
+    ...result,
+    stage: result.stage as SceneProductionPrepareResult["stage"],
+    batchId: result.detail?.id ?? null,
+    skippedCount: 0,
+  }));
 }
 
 export function getPromptLibraryEntry(projectId: string, promptId: string): Promise<PromptEntryView> {

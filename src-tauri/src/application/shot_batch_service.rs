@@ -77,6 +77,17 @@ struct PlannedShot {
     recipe: Option<Recipe>,
 }
 
+fn plan_view(project_id: &str, stage: ShotStage, planned: Vec<PlannedShot>) -> ShotBatchPlanView {
+    let eligible_count = planned.iter().filter(|item| item.row.eligible).count();
+    ShotBatchPlanView {
+        project_id: project_id.to_owned(),
+        stage: stage.as_str().to_owned(),
+        max_items: MAX_SHOT_BATCH_ITEMS,
+        eligible_count,
+        rows: planned.into_iter().map(|item| item.row).collect(),
+    }
+}
+
 pub struct ShotBatchService {
     shot_repository: Arc<dyn ShotRepository>,
     shot_batch_repository: Arc<dyn ShotBatchRepository>,
@@ -122,15 +133,43 @@ impl ShotBatchService {
         stage: ShotStage,
     ) -> Result<ShotBatchPlanView, ShotBatchServiceError> {
         validate_project(project_id)?;
-        let planned = self.build_plan(project_id, stage).await?;
-        let eligible_count = planned.iter().filter(|item| item.row.eligible).count();
-        Ok(ShotBatchPlanView {
-            project_id: project_id.to_owned(),
-            stage: stage.as_str().to_owned(),
-            max_items: MAX_SHOT_BATCH_ITEMS,
-            eligible_count,
-            rows: planned.into_iter().map(|item| item.row).collect(),
-        })
+        let planned = self.build_plan(project_id, stage, None).await?;
+        Ok(plan_view(project_id, stage, planned))
+    }
+
+    /// Builds the normal ShotBatch eligibility plan for a bounded set of shots.
+    /// The eligibility rules stay in this service; SceneProductionService only
+    /// scopes and classifies the result.
+    pub async fn plan_for_shots(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<ShotBatchPlanView, ShotBatchServiceError> {
+        validate_project(project_id)?;
+        let selected_ids = shot_ids.iter().cloned().collect::<HashSet<_>>();
+        if selected_ids.len() != shot_ids.len() {
+            return Err(ShotBatchServiceError::InvalidInput(
+                "场景镜头不能重复".to_owned(),
+            ));
+        }
+        let planned = self
+            .build_plan(project_id, stage, Some(&selected_ids))
+            .await?;
+        Ok(plan_view(project_id, stage, planned))
+    }
+
+    pub async fn list_active_shot_bindings(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<Vec<crate::application::ports::ActiveShotBatchBinding>, ShotBatchServiceError> {
+        validate_project(project_id)?;
+        self.shot_batch_repository
+            .list_active_shot_bindings(project_id, stage, shot_ids)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn create(
@@ -150,7 +189,9 @@ impl ShotBatchService {
                 "批量生产不能重复选择同一个镜头".to_owned(),
             ));
         }
-        let planned = self.build_plan(&request.project_id, request.stage).await?;
+        let planned = self
+            .build_plan(&request.project_id, request.stage, None)
+            .await?;
         let by_id = planned
             .into_iter()
             .map(|item| (item.row.shot_id.clone(), item))
@@ -245,8 +286,15 @@ impl ShotBatchService {
         &self,
         project_id: &str,
         stage: ShotStage,
+        shot_ids: Option<&HashSet<String>>,
     ) -> Result<Vec<PlannedShot>, ShotBatchServiceError> {
-        let shots = self.shot_repository.list(project_id).await?;
+        let shots = self
+            .shot_repository
+            .list(project_id)
+            .await?
+            .into_iter()
+            .filter(|data| shot_ids.is_none_or(|ids| ids.contains(&data.shot.id)))
+            .collect::<Vec<_>>();
         let available_definitions = self
             .definition_repository
             .list_available()
@@ -331,6 +379,7 @@ impl ShotBatchService {
                 .await?,
             );
         }
+        result.sort_by_key(|item| item.row.ordinal);
         Ok(result)
     }
 

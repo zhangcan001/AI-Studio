@@ -1,3 +1,4 @@
+use crate::application::ports::settings_store::BatchWorkflowPreset;
 use crate::application::{
     comfy_service::{ComfyRuntime, ComfyService},
     diagnostics_service::{DiagnosticsService, RuntimeActivityStatusView},
@@ -158,6 +159,35 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .workspace_resume
             .clone()
+    }
+
+    pub fn batch_workflow_presets(&self) -> Vec<BatchWorkflowPreset> {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .batch_workflow_presets
+            .clone()
+    }
+
+    pub async fn save_batch_workflow_presets(
+        &self,
+        batch_workflow_presets: Vec<BatchWorkflowPreset>,
+    ) -> Result<(), AppError> {
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings.batch_workflow_presets = batch_workflow_presets;
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(())
     }
 
     pub async fn save_workspace_resume(
@@ -490,6 +520,12 @@ impl SettingsService {
             .unwrap_or_else(|error| error.into_inner())
             .comfy_environment_profiles
             .clone();
+        let batch_workflow_presets = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .batch_workflow_presets
+            .clone();
         let workspace_resume = self
             .settings
             .read()
@@ -506,6 +542,7 @@ impl SettingsService {
             runtime_profiles,
             production_queue_name_presets,
             comfy_environment_profiles,
+            batch_workflow_presets,
         };
         self.store
             .save(&next_settings)
@@ -651,13 +688,16 @@ fn endpoint_test_error(error: ComfyAdapterError) -> AppError {
 mod tests {
     use super::*;
     use crate::application::diagnostics_service::RuntimeActivityStatusView;
+    use crate::application::ports::settings_store::{
+        BatchWorkflowPreset, BatchWorkflowStagePreset,
+    };
     use crate::application::ports::{
         AppSettings, ComfyConnectionConfig, ComfyEnvironmentProfile, ComfyEventSubscription,
         ComfyHealth, ComfyHistory, ComfyOutputData, ComfyOutputFile, LoadedSettings,
         PromptSubmission, RuntimeParameterProfile, SettingsStore, SystemStats,
     };
     use async_trait::async_trait;
-    use serde_json::Value;
+    use serde_json::{json, Value};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -958,6 +998,55 @@ mod tests {
             .unwrap()
             .runtime_profiles
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_workflow_presets_round_trip_through_settings_service() {
+        let adapter = BlockingAdapter::new();
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let store = Arc::new(MemorySettingsStore::default());
+        let service = test_settings_service(activity, admission, store.clone(), adapter.clone());
+        let preset = BatchWorkflowPreset {
+            id: "bwp_test".to_owned(),
+            name: "图片+视频".to_owned(),
+            description: "可跨项目复用".to_owned(),
+            image: Some(BatchWorkflowStagePreset {
+                workflow_version_id: "wfv_image".to_owned(),
+                recipe_id: "rcp_image".to_owned(),
+                values: json!({"steps": {"type": "integer", "value": 12}}),
+            }),
+            video: None,
+            created_at: "2026-08-18T00:00:00Z".to_owned(),
+            updated_at: "2026-08-18T00:00:00Z".to_owned(),
+        };
+
+        service
+            .save_batch_workflow_presets(vec![preset.clone()])
+            .await
+            .unwrap();
+        assert_eq!(service.batch_workflow_presets(), vec![preset.clone()]);
+        assert_eq!(
+            store.saved.lock().unwrap().last().unwrap().schema_version,
+            1
+        );
+        assert_eq!(
+            store
+                .saved
+                .lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .batch_workflow_presets,
+            vec![preset]
+        );
     }
 
     #[tokio::test]

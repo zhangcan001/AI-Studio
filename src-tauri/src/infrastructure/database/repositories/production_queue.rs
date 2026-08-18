@@ -3,8 +3,8 @@ use super::{
     parse_optional_datetime, serialize_json,
 };
 use crate::application::ports::{
-    ActiveProductionItem, ProductionQueueRepository, RepositoryError, ShotBatchBinding,
-    ShotBatchRepository,
+    ActiveProductionItem, ActiveShotBatchBinding, ProductionQueueRepository, RepositoryError,
+    ShotBatchBinding, ShotBatchRepository,
 };
 use crate::domain::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
@@ -837,6 +837,51 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
         .await
         .map_err(map_sqlx_error)?;
         Ok(count > 0)
+    }
+
+    async fn list_active_shot_bindings(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<Vec<ActiveShotBatchBinding>, RepositoryError> {
+        if shot_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", shot_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "SELECT l.shot_id, l.production_batch_item_id, i.batch_id
+             FROM shot_generation_links l
+             JOIN production_batch_items i ON i.id = l.production_batch_item_id
+             JOIN production_batches b ON b.id = i.batch_id
+             WHERE b.project_id = ? AND l.stage = ?
+               AND i.status IN ('PENDING', 'DISPATCHING', 'DISPATCHED')
+               AND l.shot_id IN ({placeholders})
+             ORDER BY l.shot_id ASC, i.batch_id ASC, i.id ASC"
+        );
+        let mut request = sqlx::query_as::<_, (String, String, String)>(&query)
+            .bind(project_id)
+            .bind(stage.as_str());
+        for shot_id in shot_ids {
+            request = request.bind(shot_id);
+        }
+        let rows = request
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|(shot_id, production_batch_item_id, production_batch_id)| {
+                ActiveShotBatchBinding {
+                    shot_id,
+                    stage,
+                    production_batch_id,
+                    production_batch_item_id,
+                }
+            })
+            .collect())
     }
 }
 

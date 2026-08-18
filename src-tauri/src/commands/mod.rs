@@ -1,4 +1,5 @@
 pub mod asset;
+pub mod batch_workflow_preset;
 pub mod catalog;
 pub mod comfy;
 pub mod diagnostics;
@@ -17,6 +18,7 @@ pub mod project_command_center;
 pub mod prompt_library;
 pub mod prompt_template;
 pub mod reference_anchor;
+pub mod scene_production;
 pub mod settings;
 pub mod shot;
 pub mod shot_batch;
