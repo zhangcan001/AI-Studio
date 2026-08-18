@@ -14,6 +14,7 @@ use crate::application::h3_local_import_service::H3LocalImportService;
 use crate::application::organization_service::OrganizationService;
 use crate::application::preset_service::PresetService;
 use crate::application::production_audit_service::ProductionAuditService;
+use crate::application::production_batch_runbook_service::ProductionBatchRunbookService;
 use crate::application::production_item_review_service::ProductionItemReviewService;
 use crate::application::production_orchestrator_service::ProductionOrchestratorService;
 use crate::application::production_queue_service::ProductionQueueService;
@@ -28,6 +29,7 @@ use crate::application::prompt_template_bulk_service::PromptTemplateBulkService;
 use crate::application::prompt_template_service::PromptTemplateService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
 use crate::application::scene_production_service::SceneProductionService;
+use crate::application::series_production_service::SeriesProductionService;
 use crate::application::settings_service::SettingsService;
 use crate::application::shot_batch_service::ShotBatchService;
 use crate::application::shot_bulk_service::ShotBulkService;
@@ -89,6 +91,8 @@ pub struct AppState {
     pub batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
     pub scene_production_service: Arc<SceneProductionService>,
     pub episode_production_service: Arc<EpisodeProductionService>,
+    pub series_production_service: Arc<SeriesProductionService>,
+    pub production_batch_runbook_service: Arc<ProductionBatchRunbookService>,
 }
 
 impl AppState {
@@ -137,6 +141,8 @@ impl AppState {
         batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
         scene_production_service: Arc<SceneProductionService>,
         episode_production_service: Arc<EpisodeProductionService>,
+        series_production_service: Arc<SeriesProductionService>,
+        production_batch_runbook_service: Arc<ProductionBatchRunbookService>,
     ) -> Self {
         Self {
             data_dirs,
@@ -183,6 +189,8 @@ impl AppState {
             batch_workflow_preset_service,
             scene_production_service,
             episode_production_service,
+            series_production_service,
+            production_batch_runbook_service,
         }
     }
 }

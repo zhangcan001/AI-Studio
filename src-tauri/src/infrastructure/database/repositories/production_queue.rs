@@ -6,6 +6,9 @@ use crate::application::ports::{
     ActiveProductionItem, ActiveShotBatchBinding, ProductionQueueRepository, RepositoryError,
     ShotBatchBinding, ShotBatchRepository,
 };
+use crate::application::production_batch_runbook_service::{
+    ProductionBatchRunbookRepository, ProductionBatchRunbookSourceRow,
+};
 use crate::domain::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, ShotStage,
@@ -24,6 +27,39 @@ pub struct SqliteProductionQueueRepository {
 impl SqliteProductionQueueRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+}
+
+#[async_trait]
+impl ProductionBatchRunbookRepository for SqliteProductionQueueRepository {
+    async fn list_project_shot_batch_runbook_rows(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProductionBatchRunbookSourceRow>, RepositoryError> {
+        let rows = sqlx::query_as::<_, RunbookSourceRow>(
+            "SELECT
+                b.id AS batch_id, b.project_id, b.name AS batch_name,
+                b.status AS batch_status, b.continue_on_failure, b.archived_at,
+                b.created_at AS batch_created_at, b.updated_at AS batch_updated_at,
+                i.id AS item_id, i.status AS item_status,
+                l.shot_id, l.stage, a.scene_id
+             FROM production_batch_items i
+             INNER JOIN production_batches b ON b.id = i.batch_id
+             INNER JOIN shot_generation_links l ON l.production_batch_item_id = i.id
+             INNER JOIN shots s ON s.id = l.shot_id
+             INNER JOIN shot_scene_assignments a ON a.shot_id = l.shot_id
+             WHERE b.project_id = ? AND s.project_id = ?
+             ORDER BY b.created_at ASC, b.id ASC, i.ordinal ASC, i.id ASC",
+        )
+        .bind(project_id)
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter()
+            .map(RunbookSourceRow::try_into_domain)
+            .collect()
     }
 }
 
@@ -983,6 +1019,48 @@ struct BatchRow {
     archived_at: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct RunbookSourceRow {
+    batch_id: String,
+    project_id: String,
+    batch_name: String,
+    batch_status: String,
+    continue_on_failure: i64,
+    archived_at: Option<String>,
+    batch_created_at: String,
+    batch_updated_at: String,
+    item_id: String,
+    item_status: String,
+    shot_id: String,
+    stage: String,
+    scene_id: String,
+}
+
+impl RunbookSourceRow {
+    fn try_into_domain(self) -> Result<ProductionBatchRunbookSourceRow, RepositoryError> {
+        Ok(ProductionBatchRunbookSourceRow {
+            batch: BatchRow {
+                id: self.batch_id,
+                project_id: self.project_id,
+                name: self.batch_name,
+                status: self.batch_status,
+                continue_on_failure: self.continue_on_failure,
+                archived_at: self.archived_at,
+                created_at: self.batch_created_at,
+                updated_at: self.batch_updated_at,
+            }
+            .try_into_domain()?,
+            item_id: self.item_id,
+            item_status: ProductionBatchItemStatus::parse(&self.item_status)
+                .map_err(|error| map_domain_error("production batch item status", error))?,
+            shot_id: self.shot_id,
+            stage: ShotStage::try_from_str(&self.stage)
+                .map_err(|error| map_domain_error("Shot generation stage", error))?,
+            scene_id: self.scene_id,
+        })
+    }
 }
 
 impl BatchRow {

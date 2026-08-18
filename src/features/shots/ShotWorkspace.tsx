@@ -8,9 +8,12 @@ import {
   generateShot,
   getAsset,
   getShot,
+  getProductionBatchRunbook,
+  getSeriesProductionPlan,
   listPromptLibrary,
   listProductionStructure,
   listReferenceAnchors,
+  listBatchWorkflowPresets,
   listRecentAssets,
   listShots,
   readAssetImage,
@@ -19,6 +22,9 @@ import {
   replaceShotReferences,
   reorderShots,
   selectShotResult,
+  prepareSeriesProduction,
+  previewPromptTemplateBulk,
+  applyPromptTemplate,
   setShotStageConfig,
   startProductionQueue,
   updateShot,
@@ -28,6 +34,12 @@ import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/gener
 import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
+import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
+import type {
+  SeriesPromptBulkRequest,
+  SeriesPresetApplyRequest,
+} from "../../types/seriesProduction";
+import type { BatchWorkflowPreset } from "../../types/sceneProduction";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
@@ -40,6 +52,8 @@ import { ProductionStructurePanel } from "./ProductionStructurePanel";
 import { PromptTemplatePanel } from "./PromptTemplatePanel";
 import { SceneProductionPanel } from "./SceneProductionPanel";
 import { EpisodeProductionPanel } from "./EpisodeProductionPanel";
+import { SeriesProductionPanel } from "./SeriesProductionPanel";
+import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunbookPanel";
 import {
   appendAnchorReferences,
   replaceWithAnchorReferences,
@@ -92,6 +106,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [referenceAnchors, setReferenceAnchors] = useState<ReferenceAnchorView[]>([]);
   const [productionStructure, setProductionStructure] = useState<ProductionStructureTree>(() => EMPTY_PRODUCTION_STRUCTURE(projectId));
+  const [productionBatchRunbook, setProductionBatchRunbook] = useState<ProductionBatchRunbookView>(() => emptyRunbook(projectId));
+  const [batchWorkflowPresets, setBatchWorkflowPresets] = useState<BatchWorkflowPreset[]>([]);
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState("");
@@ -156,18 +172,22 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     setLoading(true);
     setError(undefined);
     try {
-      const [nextShots, nextAssets, promptPage, nextAnchors, nextStructure] = await Promise.all([
+      const [nextShots, nextAssets, promptPage, nextAnchors, nextStructure, nextRunbook, nextPresets] = await Promise.all([
         listShots(projectId),
         listRecentAssets(projectId, 80),
         listPromptLibrary(projectId, { kind: "prompt", limit: 100 }),
         listReferenceAnchors(projectId).catch(() => []),
         listProductionStructure(projectId).catch(() => EMPTY_PRODUCTION_STRUCTURE(projectId)),
+        getProductionBatchRunbook({ projectId }).catch(() => emptyRunbook(projectId)),
+        listBatchWorkflowPresets().catch(() => []),
       ]);
       if (generation !== reloadGeneration.current) return;
       setShots(nextShots);
       setAssets(nextAssets);
       setReferenceAnchors(nextAnchors);
       setProductionStructure(nextStructure);
+      setProductionBatchRunbook(nextRunbook);
+      setBatchWorkflowPresets(nextPresets);
       setPromptEntries(promptPage.items);
       setSelectedShotId((current) => {
         const nextSelected = current && nextShots.some((shot) => shot.id === current)
@@ -574,6 +594,79 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           }
         }}
       />
+      <SeriesProductionPanel
+        projectId={projectId}
+        tree={productionStructure}
+        shots={shots}
+        promptEntries={promptEntries}
+        referenceAnchors={referenceAnchors}
+        initialPresets={batchWorkflowPresets}
+        onRefresh={reload}
+        onNotice={(message) => setNotice(message)}
+        onError={(message) => setError(message || undefined)}
+        onOpenProductionQueue={onOpenProductionQueue}
+        onNavigateToEpisode={(episodeId) => {
+          const firstShotId = firstShotForEpisode(productionStructure, episodeId);
+          if (firstShotId) { setSelectedShotId(firstShotId); onShotSelected?.(firstShotId); }
+        }}
+        onPlan={getSeriesProductionPlan}
+        onPrepare={prepareSeriesProduction}
+        onApplyPreset={async (request: SeriesPresetApplyRequest) => {
+          await bulkSetShotStageConfig({
+            projectId: request.projectId,
+            stage: request.stage,
+            shotIds: request.shotIds,
+            workflowVersionId: request.workflowVersionId,
+            recipeId: request.recipeId,
+            values: request.values,
+          });
+          await reload();
+        }}
+        onPreviewPrompt={async (request: SeriesPromptBulkRequest) => {
+          const preview = await previewPromptTemplateBulk({
+            projectId: request.projectId,
+            promptEntryId: request.promptEntryId,
+            promptVersionId: request.promptVersionId,
+            shotIds: request.shotIds,
+            contextAnchorIds: request.contextAnchorIds,
+            customValues: request.customValues,
+            previewLimit: 20,
+          });
+          return {
+            total: preview.total,
+            valid: preview.valid,
+            invalid: preview.invalid,
+            samples: preview.previewEntries.map((entry) => ({ shotId: entry.shotId, text: entry.renderedText, valid: true })),
+          };
+        }}
+        onApplyPrompt={async (request: SeriesPromptBulkRequest) => {
+          await applyPromptTemplate({
+            projectId: request.projectId,
+            promptEntryId: request.promptEntryId,
+            promptVersionId: request.promptVersionId,
+            stage: request.stage,
+            shotIds: request.shotIds,
+            contextAnchorIds: request.contextAnchorIds,
+            customValues: request.customValues,
+          });
+          await reload();
+        }}
+      />
+      <ProductionBatchRunbookPanel
+        projectId={projectId}
+        runbook={productionBatchRunbook}
+        onRefresh={reload}
+        onStartBatch={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
+        onOpenProductionQueue={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+        onNavigateToEpisode={(episodeId) => {
+          const firstShotId = firstShotForEpisode(productionStructure, episodeId);
+          if (firstShotId) { setSelectedShotId(firstShotId); onShotSelected?.(firstShotId); }
+        }}
+        onNavigateToScene={(sceneId) => {
+          const firstShotId = firstShotForScene(productionStructure, sceneId);
+          if (firstShotId) { setSelectedShotId(firstShotId); onShotSelected?.(firstShotId); }
+        }}
+      />
       <ProjectProductionPipeline
         projectId={projectId}
         shots={shots}
@@ -864,4 +957,23 @@ function AssetThumb({ projectId, asset }: { projectId: string; asset: AssetView 
 function CandidateCard({ projectId, asset, selected, onSelect, disabled = false, label }: { projectId: string; asset: AssetView; selected: boolean; onSelect: () => void; disabled?: boolean; label: string }) {
   const isVideo = isVideoAsset(asset);
   return <article className={`shot-candidate-card${selected ? " shot-candidate-card-selected" : ""}`}><AssetThumb projectId={projectId} asset={asset} /><div><strong>{asset.name}</strong><small>{asset.id}</small></div><button type="button" disabled={disabled || selected} onClick={onSelect}>{selected ? "已选" : label}</button>{isVideo && <small>视频候选</small>}</article>;
+}
+
+function emptyRunbook(projectId: string): ProductionBatchRunbookView {
+  return { projectId, rows: [] };
+}
+
+function firstShotForEpisode(tree: ProductionStructureTree, episodeId: string): string | undefined {
+  return tree.series
+    .flatMap((series) => series.episodes)
+    .find((episode) => episode.id === episodeId)
+    ?.scenes.flatMap((scene) => scene.shotIds)[0];
+}
+
+function firstShotForScene(tree: ProductionStructureTree, sceneId: string): string | undefined {
+  return tree.series
+    .flatMap((series) => series.episodes)
+    .flatMap((episode) => episode.scenes)
+    .find((scene) => scene.id === sceneId)
+    ?.shotIds[0];
 }

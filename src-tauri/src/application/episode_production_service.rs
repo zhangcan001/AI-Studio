@@ -1,5 +1,5 @@
 use crate::application::production_structure_service::{
-    ProductionStructureError, ProductionStructureService,
+    ProductionEpisodeTreeView, ProductionStructureError, ProductionStructureService,
 };
 use crate::application::scene_production_service::{
     SceneProductionError, SceneProductionPlan, SceneProductionService,
@@ -149,7 +149,46 @@ impl EpisodeProductionService {
     ) -> Result<EpisodeProductionPrepareResult, EpisodeProductionError> {
         let scope = self.episode_scope(project_id, episode_id).await?;
         let selected_indices = select_scenes(&scope.scenes, scene_ids)?;
-        let plan = self.plan_scope(&scope, stage).await?;
+        self.prepare_scope(&scope, &selected_indices, stage, allow_partial)
+            .await
+    }
+
+    pub(crate) async fn plan_tree_scope(
+        &self,
+        project_id: &str,
+        series_id: &str,
+        series_name: &str,
+        episode: &ProductionEpisodeTreeView,
+        stage: ShotStage,
+    ) -> Result<EpisodeProductionPlan, EpisodeProductionError> {
+        let scope = EpisodeScope::from_tree(project_id, series_id, series_name, episode);
+        self.plan_scope(&scope, stage).await
+    }
+
+    pub(crate) async fn prepare_tree_scope(
+        &self,
+        project_id: &str,
+        series_id: &str,
+        series_name: &str,
+        episode: &ProductionEpisodeTreeView,
+        stage: ShotStage,
+        scene_ids: &[String],
+        allow_partial: bool,
+    ) -> Result<EpisodeProductionPrepareResult, EpisodeProductionError> {
+        let scope = EpisodeScope::from_tree(project_id, series_id, series_name, episode);
+        let selected_indices = select_scenes(&scope.scenes, scene_ids)?;
+        self.prepare_scope(&scope, &selected_indices, stage, allow_partial)
+            .await
+    }
+
+    async fn prepare_scope(
+        &self,
+        scope: &EpisodeScope,
+        selected_indices: &[usize],
+        stage: ShotStage,
+        allow_partial: bool,
+    ) -> Result<EpisodeProductionPrepareResult, EpisodeProductionError> {
+        let plan = self.plan_scope(scope, stage).await?;
 
         if !allow_partial
             && selected_indices
@@ -160,8 +199,8 @@ impl EpisodeProductionService {
         }
 
         let mut result = EpisodeProductionPrepareResult {
-            project_id: project_id.to_owned(),
-            episode_id: episode_id.to_owned(),
+            project_id: scope.project_id.clone(),
+            episode_id: scope.episode_id.clone(),
             stage: stage.as_str().to_owned(),
             status: EpisodePrepareStatus::Noop,
             requested_scenes: selected_indices.len(),
@@ -174,7 +213,7 @@ impl EpisodeProductionService {
             results: Vec::with_capacity(selected_indices.len()),
         };
 
-        for index in selected_indices {
+        for index in selected_indices.iter().copied() {
             let scene = &scope.scenes[index];
             let scene_plan = &plan.scenes[index];
             let base = |status| EpisodeProductionScenePrepareResult {
@@ -218,7 +257,7 @@ impl EpisodeProductionService {
                     match self
                         .scene_production_service
                         .prepare_scope(
-                            project_id,
+                            &scope.project_id,
                             &scene.scene_id,
                             &scene.scene_name,
                             &scene.shot_ids,
@@ -444,6 +483,40 @@ struct EpisodeScope {
     episode_name: String,
     episode_ordinal: u32,
     scenes: Vec<EpisodeSceneScope>,
+}
+
+impl EpisodeScope {
+    fn from_tree(
+        project_id: &str,
+        series_id: &str,
+        series_name: &str,
+        episode: &ProductionEpisodeTreeView,
+    ) -> Self {
+        let mut scenes = episode
+            .scenes
+            .iter()
+            .map(|scene| EpisodeSceneScope {
+                scene_id: scene.scene.id.clone(),
+                scene_name: scene.scene.name.clone(),
+                scene_ordinal: scene.scene.ordinal,
+                shot_ids: scene.shot_ids.clone(),
+            })
+            .collect::<Vec<_>>();
+        scenes.sort_by(|left, right| {
+            left.scene_ordinal
+                .cmp(&right.scene_ordinal)
+                .then_with(|| left.scene_id.cmp(&right.scene_id))
+        });
+        Self {
+            project_id: project_id.to_owned(),
+            series_id: series_id.to_owned(),
+            series_name: series_name.to_owned(),
+            episode_id: episode.episode.id.clone(),
+            episode_name: episode.episode.name.clone(),
+            episode_ordinal: episode.episode.ordinal,
+            scenes,
+        }
+    }
 }
 
 struct EpisodeSceneScope {

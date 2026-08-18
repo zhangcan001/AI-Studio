@@ -42,6 +42,7 @@ use application::{
     ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
     preset_service::PresetService,
     production_audit_service::ProductionAuditService,
+    production_batch_runbook_service::ProductionBatchRunbookService,
     production_item_review_service::ProductionItemReviewService,
     production_orchestrator_service::ProductionOrchestratorService,
     production_queue_service::ProductionQueueService,
@@ -57,6 +58,7 @@ use application::{
     prompt_template_service::PromptTemplateService,
     reference_anchor_service::ReferenceAnchorService,
     scene_production_service::SceneProductionService,
+    series_production_service::SeriesProductionService,
     settings_service::SettingsService,
     shot_batch_service::ShotBatchService,
     shot_bulk_service::ShotBulkService,
@@ -619,6 +621,15 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_structure_service.clone(),
                 scene_production_service.clone(),
             ));
+            let series_production_service = Arc::new(SeriesProductionService::new(
+                production_structure_service.clone(),
+                episode_production_service.clone(),
+            ));
+            let production_batch_runbook_service = Arc::new(ProductionBatchRunbookService::new(
+                production_structure_service.clone(),
+                production_queue_repository_impl.clone(),
+                production_queue_service.clone(),
+            ));
             if let Ok(mut slot) = setup_media_protocol_slot.lock() {
                 *slot = Some(Arc::new(MediaProtocolService::new(
                     asset_repository.clone(),
@@ -673,6 +684,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 batch_workflow_preset_service,
                 scene_production_service,
                 episode_production_service,
+                series_production_service,
+                production_batch_runbook_service,
             ));
 
             tauri::async_runtime::spawn(async move {
@@ -888,6 +901,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_audit::production_audit_recent_activity,
             commands::production_audit::production_audit_lineage,
             commands::production_audit::production_audit_integrity,
+            commands::production_batch_runbook::production_batch_runbook,
             commands::production_orchestrator::production_run_create,
             commands::production_orchestrator::production_run_list,
             commands::production_orchestrator::production_run_get,
@@ -954,6 +968,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::scene_production::scene_production_prepare,
             commands::episode_production::episode_production_plan,
             commands::episode_production::episode_production_prepare,
+            commands::series_production::series_production_plan,
+            commands::series_production::series_production_prepare,
             commands::shot_bulk::preview_shot_bulk_import,
             commands::shot_bulk::commit_shot_bulk_import,
             commands::shot_bulk::bulk_assign_shot_prompt,

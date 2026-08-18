@@ -93,6 +93,16 @@ import type {
   EpisodeProductionPrepareResult,
 } from "../types/episodeProduction";
 import type {
+  SeriesProductionPlan,
+  SeriesProductionPlanRequest,
+  SeriesProductionPrepareRequest,
+  SeriesProductionPrepareResult,
+} from "../types/seriesProduction";
+import type {
+  ProductionBatchRunbookRequest,
+  ProductionBatchRunbookView,
+} from "../types/productionBatchRunbook";
+import type {
   ProductionRun,
   ProductionRunCreateRequest,
   ProductionRunListItem,
@@ -235,6 +245,18 @@ export function getEpisodeProductionPlan(request: EpisodeProductionPlanRequest):
 
 export function prepareEpisodeProduction(request: EpisodeProductionPrepareRequest): Promise<EpisodeProductionPrepareResult> {
   return invoke<EpisodeProductionPrepareResult>("episode_production_prepare", { request });
+}
+
+export function getSeriesProductionPlan(request: SeriesProductionPlanRequest): Promise<SeriesProductionPlan> {
+  return invoke<SeriesProductionPlan>("series_production_plan", { request });
+}
+
+export function prepareSeriesProduction(request: SeriesProductionPrepareRequest): Promise<SeriesProductionPrepareResult> {
+  return invoke<SeriesProductionPrepareResult>("series_production_prepare", { request });
+}
+
+export function getProductionBatchRunbook(request: ProductionBatchRunbookRequest): Promise<ProductionBatchRunbookView> {
+  return invoke<ProductionBatchRunbookView>("production_batch_runbook", { request });
 }
 
 export function getPromptLibraryEntry(projectId: string, promptId: string): Promise<PromptEntryView> {
