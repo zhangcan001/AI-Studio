@@ -14,7 +14,7 @@ import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useWorkspaceResumeStore } from "../stores/workspaceResumeStore";
-import type { GenerationValues, RecipeViewModel } from "../types/generation";
+import type { RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
@@ -25,8 +25,7 @@ import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
 import { ProjectCommandCenter, type ProjectCommandDestination } from "../features/projects/ProjectCommandCenter";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
-import { ShotWorkspace } from "../features/shots/ShotWorkspace";
-import { ComfyStatus as ComfyStatusCard } from "../features/comfy/ComfyStatus";
+import { ShotWorkspace, type ShotContextPathItem } from "../features/shots/ShotWorkspace";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import { useStudioStore } from "../stores/studioStore";
@@ -36,10 +35,16 @@ import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { resolveWorkspaceNavigation, type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
-import { projectDisplayName } from "../i18n/statusLabels";
+import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
 import { StudioShell } from "./StudioShell";
 import type { StudioBreadcrumbItem } from "../components/studio/StudioTopBar";
+import {
+  defaultStudioSectionForWorkspace,
+  shotWorkspaceModeForSection,
+  studioRouteForSection,
+  type StudioSection,
+} from "./studioNavigation";
 import "./App.css";
 import "../styles/studioTokens.css";
 
@@ -65,6 +70,9 @@ function keepsNativeContextMenu(target: EventTarget | null): boolean {
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("command-center");
+  const [activeStudioSection, setActiveStudioSection] = useState<StudioSection>("project");
+  const [shotContextPath, setShotContextPath] = useState<ShotContextPathItem[]>([]);
+  const [shotContextTarget, setShotContextTarget] = useState<ShotContextPathItem>();
   const [resumeShotId, setResumeShotId] = useState<string>();
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
@@ -188,6 +196,7 @@ function App() {
         const navigation = resolveWorkspaceNavigation(nextProjects, resume, shotIds);
         setResumeShotId(navigation.shotId);
         setWorkspace(navigation.workspace);
+        setActiveStudioSection(defaultStudioSectionForWorkspace(navigation.workspace));
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
@@ -233,10 +242,24 @@ function App() {
     };
   }, [activeProjectId, setRecentTasks]);
 
-  function navigateToWorkspace(nextWorkspace: Workspace) {
-    if (nextWorkspace === workspace) return;
+  function navigateToRoute(nextWorkspace: Workspace, nextSection = defaultStudioSectionForWorkspace(nextWorkspace)) {
+    if (nextWorkspace === workspace && nextSection === activeStudioSection) return;
     setWorkspace(nextWorkspace);
+    setActiveStudioSection(nextSection);
+    if (nextWorkspace !== "shots") {
+      setShotContextPath([]);
+      setShotContextTarget(undefined);
+    }
     void recordWorkspaceChange(nextWorkspace, activeProjectId);
+  }
+
+  function navigateToWorkspace(nextWorkspace: Workspace) {
+    navigateToRoute(nextWorkspace);
+  }
+
+  function navigateToStudioSection(section: StudioSection) {
+    const route = studioRouteForSection(section);
+    navigateToRoute(route.workspace, route.section);
   }
 
   function handleShotSelected(shotId?: string) {
@@ -248,9 +271,10 @@ function App() {
     projectId: string,
     preserveProductionBatch = false,
     destination: Workspace = preserveProductionBatch ? "studio" : "command-center",
+    section: StudioSection = defaultStudioSectionForWorkspace(destination),
   ) {
     if (projectId === activeProjectId) {
-      navigateToWorkspace(destination);
+      navigateToRoute(destination, section);
       return;
     }
     useTaskStore.getState().clear();
@@ -263,15 +287,23 @@ function App() {
     setError(null);
     setResumeShotId(undefined);
     setWorkspace(destination);
+    setActiveStudioSection(section);
+    if (destination !== "shots") {
+      setShotContextPath([]);
+      setShotContextTarget(undefined);
+    }
     void recordProjectChange(projectId, destination);
   }
 
   function openProductionQueue() {
     const { batchId, projectId } = productionAdmission;
-    if (!batchId || !projectId) return;
-    setFocusedProductionBatchId(batchId);
-    if (projectId !== activeProjectId) openProject(projectId, true, "studio");
-    else if (workspace !== "video") navigateToWorkspace("studio");
+    if (batchId && projectId) {
+      setFocusedProductionBatchId(batchId);
+      if (projectId !== activeProjectId) openProject(projectId, true, "shots", "production");
+      else navigateToRoute("shots", "production");
+      return;
+    }
+    navigateToStudioSection("production");
   }
 
   async function reconnectComfy() {
@@ -404,15 +436,17 @@ function App() {
   function handleProjectRestored(project: ProjectView) {
     useProjectStore.getState().upsertProject(project);
     setResumeShotId(undefined);
-    setWorkspace("studio");
-    void recordProjectChange(project.id, "studio");
+    setWorkspace("shots");
+    setActiveStudioSection("creation");
+    void recordProjectChange(project.id, "shots");
   }
 
   function handleTemplateProjectCreated(result: TemplateProjectResult) {
     useProjectStore.getState().upsertProject(result.project);
     setResumeShotId(undefined);
-    setWorkspace("studio");
-    void recordProjectChange(result.project.id, "studio");
+    setWorkspace("shots");
+    setActiveStudioSection("creation");
+    void recordProjectChange(result.project.id, "shots");
     const workflow = catalog.find((item) => item.workflowVersionId === result.workflowVersionId && item.recipeId === result.recipeId);
     if (!workflow) {
       setError("模板项目已创建，但工作流当前不可用。");
@@ -430,20 +464,44 @@ function App() {
   }
 
   function navigateFromCommandCenter(destination: ProjectCommandDestination) {
+    if (destination === "studio" || destination === "shots") {
+      navigateToStudioSection("creation");
+      return;
+    }
     navigateToWorkspace(destination);
   }
 
   const comfy = bootstrapState?.comfy;
   const isConnected = comfy?.status === "CONNECTED";
+  const hasComfyCapabilityIssue = isConnected && !comfy?.capability;
+  const showComfyWarning = Boolean(comfy && (!isConnected || hasComfyCapabilityIssue));
   const hasActiveTasks = recentTasks.some((task) =>
     ["CREATED", "VALIDATING", "PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED", "COLLECTING"]
     .includes(task.status),
   );
 
+  const handleShotContextPathChange = useCallback((path: ShotContextPathItem[]) => {
+    setShotContextPath(path);
+  }, []);
+  const handleShotContextPathSelect = useCallback((item: ShotContextPathItem) => {
+    setShotContextTarget({ ...item });
+  }, []);
+
   const breadcrumbs: StudioBreadcrumbItem[] = activeProject
     ? [
-      { label: projectDisplayName(activeProject.id, activeProject.name) },
-      { label: workspaceLabels[workspace], current: true },
+      {
+        label: projectDisplayName(activeProject.id, activeProject.name),
+        onClick: () => navigateToStudioSection("project"),
+      },
+      ...(workspace === "shots"
+        ? shotContextPath.length
+          ? shotContextPath.map((item, index) => ({
+            label: item.label,
+            current: index === shotContextPath.length - 1,
+            onClick: index === shotContextPath.length - 1 ? undefined : () => handleShotContextPathSelect(item),
+          }))
+          : [{ label: "镜头生产", current: true }]
+        : [{ label: workspaceLabels[workspace], current: true }]),
     ]
     : [{ label: "项目", current: true }];
 
@@ -478,19 +536,19 @@ function App() {
         comfyStatus={comfy}
         comfyLoading={connectionLoading}
         breadcrumbs={breadcrumbs}
-        onNavigate={(destination, item) => {
+        currentSection={activeStudioSection}
+        onNavigate={(_destination, item) => {
           if (item.id === "production") {
             openProductionQueue();
-            navigateToWorkspace("studio");
             return;
           }
-          navigateToWorkspace(destination);
+          navigateToStudioSection(item.id);
         }}
-        onSearch={() => navigateToWorkspace("shots")}
+        onSearch={() => navigateToStudioSection("creation")}
         searchLabel="搜索镜头 / 场景"
         searchShortcut="Ctrl K"
-        onSettings={() => navigateToWorkspace("settings")}
-        onBrandClick={() => navigateToWorkspace("command-center")}
+        onSettings={() => navigateToStudioSection("settings")}
+        onBrandClick={() => navigateToStudioSection("project")}
       >
         <div className="app-main-content" id="app-main-content" tabIndex={-1}>
 
@@ -515,14 +573,15 @@ function App() {
       {projectContextLoading && activeProject && (
         <p className="project-loading" role="status">正在加载项目...</p>
       )}
-      {(workspace === "studio" || workspace === "video") && (
-        <ComfyStatusCard
-          status={comfy}
-          connectionLoading={connectionLoading}
-          capabilityLoading={capabilityLoading}
-          onReconnect={() => void reconnectComfy()}
-          onRefreshCapabilities={() => void refreshCapabilities()}
-        />
+      {workspace !== "settings" && showComfyWarning && (
+        <section className="comfy-status-warning" role="status" aria-live="polite">
+          <div>
+            <span className="section-label">运行环境提醒</span>
+            <strong>ComfyUI {comfyStatusLabel(comfy?.status)}</strong>
+            <p>{hasComfyCapabilityIssue ? "已连接但节点能力尚未确认，请先完成运行时预检。" : "当前生成工作区不可用，请检查运行时端点。"}</p>
+          </div>
+          <button type="button" className="quiet-button" onClick={() => navigateToStudioSection("settings")}>打开设置</button>
+        </section>
       )}
 
       {(hasActiveTasks || recoveryNotice) && (
@@ -592,16 +651,15 @@ function App() {
             projectDescription={activeProject.description}
             catalog={catalog}
             initialSelectedShotId={resumeShotId}
+            mode={shotWorkspaceModeForSection(activeStudioSection)}
             onShotSelected={handleShotSelected}
-            onOpenInStudio={(shot, stage, recipe) => {
-              useStudioStore.getState().loadDraft(recipe, (shot.stageConfigs.find((config) => config.stage === stage)?.scalarValues ?? {}) as GenerationValues);
-              navigateToWorkspace(stage === "image" ? "studio" : "video");
-            }}
+            onContextPathChange={handleShotContextPathChange}
+            contextPathTarget={shotContextTarget}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
               navigateToWorkspace("tasks");
             }}
-            onOpenProductionQueue={() => navigateToWorkspace("studio")}
+            onOpenProductionQueue={() => navigateToStudioSection("production")}
           />
         </WorkspaceErrorBoundary>
       )}
@@ -679,7 +737,6 @@ function App() {
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
       {error && <p className="error-message global-error">提示：{error}</p>}
-      {bootstrapState && <p className="version">版本 {bootstrapState.status.version}</p>}
         </div>
       </StudioShell>
     </div>

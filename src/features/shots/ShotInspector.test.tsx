@@ -28,8 +28,10 @@ const recipe = {
   mode: "reference_to_video",
   fields: [
     { key: "width", type: "integer" as const, label: "Width", required: true, default: 1280 },
+    { key: "duration", type: "integer" as const, label: "Duration", required: true, default: 8 },
     { key: "steps", type: "integer" as const, label: "Steps", required: true, default: 20 },
     { key: "cfg", type: "number" as const, label: "CFG", required: true, default: 7 },
+    { key: "seed", type: "seed" as const, label: "Seed", required: false, defaultMode: "random" as const },
   ],
 };
 
@@ -40,7 +42,7 @@ describe("ShotInspector", () => {
         projectId="project-1"
         stage="video"
         currentRecipe={recipe}
-        currentDraft={{ workflowVersionId: "h3-v1", recipeId: "h3-r1", values: { width: { type: "integer", value: 1280 }, steps: { type: "integer", value: 20 }, cfg: { type: "number", value: 7 } } }}
+        currentDraft={{ workflowVersionId: "h3-v1", recipeId: "h3-r1", values: { width: { type: "integer", value: 1280 }, duration: { type: "integer", value: 8 }, steps: { type: "integer", value: 20 }, cfg: { type: "number", value: 7 }, seed: { type: "seed_random" } } }}
         onGenerate={vi.fn()}
         configDirty
         onSave={vi.fn()}
@@ -53,6 +55,9 @@ describe("ShotInspector", () => {
     expect(html).toContain("高级设置");
     expect(html).toContain("<details class=\"shot-inspector-advanced\">");
     expect(html).toContain("当前工作流信息");
+    expect(html).toContain("1 个参数");
+    expect(html.indexOf("<details class=\"shot-inspector-advanced\">")).toBeGreaterThan(html.indexOf(">CFG</span>"));
+    expect(html.indexOf("<details class=\"shot-inspector-advanced\">")).toBeGreaterThan(html.indexOf(">Duration</span>"));
   });
 
   it("renders ordered references, anchor actions, and the keyframe contract without selecting anything", () => {

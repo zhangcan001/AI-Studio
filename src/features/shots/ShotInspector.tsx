@@ -75,7 +75,7 @@ export interface ShotInspectorProps {
   onTabChange?: (tab: ShotInspectorTab) => void;
 }
 
-const ADVANCED_FIELD_PATTERN = /steps|cfg|seed|width|height|fps|duration|sampler|denoise|guidance|strength|motion|scale/i;
+const ADVANCED_FIELD_PATTERN = /seed|sampler|denoise|guidance|detail|low[_-]?frequency|high[_-]?frequency|noise/i;
 
 export function ShotInspector({
   projectId,

@@ -52,4 +52,4 @@ onOpen?: (batchId: string) => void | Promise<void>
 - Unmapped functions: 0
 - Queue Drawer scheduler / global start / automatic next admission: not part of this matrix or component contract
 
-新壳层与镜头工作区已接入 `App.tsx` / `ShotWorkspace.tsx`；旧生产面板默认收起但仍可打开，未删除任何 backend action 或人工审核 gate。
+DEV-044B 后的新壳层与镜头工作区已接入 `App.tsx` / `ShotWorkspace.tsx`。旧 shot 细节编辑器、`shot-legacy-panels` 与重复 grid/list 已删除；Runbook、Project Pipeline、Review Board 只在各自正式 context 渲染。Queue Drawer 在 Creation / Review 保留收起摘要，在 Production 不重复渲染完整队列。未删除任何 backend action 或人工审核 gate。

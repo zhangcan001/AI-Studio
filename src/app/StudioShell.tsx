@@ -131,7 +131,7 @@ const workspaceToRailSection: Partial<Record<Workspace, StudioRailItemId>> = {
   studio: "creation",
   video: "production",
   assets: "assets",
-  shots: "review",
+  shots: "creation",
   tasks: "review",
   projects: "project",
   workflows: "creation",

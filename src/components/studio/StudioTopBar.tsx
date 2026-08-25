@@ -6,6 +6,7 @@ import "./StudioTopBar.css";
 export interface StudioBreadcrumbItem {
   label: string;
   href?: string;
+  onClick?: () => void;
   current?: boolean;
 }
 
@@ -79,7 +80,9 @@ export function StudioTopBar({
           return (
             <span className="studio-topbar__breadcrumb-group" key={`${item.label}-${index}`}>
               {index > 0 && <StudioTopBarIcon name="chevron" className="studio-topbar__breadcrumb-chevron" />}
-              {item.href && !current ? (
+              {item.onClick && !current ? (
+                <button type="button" className="studio-topbar__breadcrumb-button" onClick={item.onClick}>{item.label}</button>
+              ) : item.href && !current ? (
                 <a href={item.href} className="studio-topbar__breadcrumb-link">{item.label}</a>
               ) : (
                 <span className={current ? "studio-topbar__breadcrumb-current" : "studio-topbar__breadcrumb-label"} aria-current={current ? "page" : undefined}>

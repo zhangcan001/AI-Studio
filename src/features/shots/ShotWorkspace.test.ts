@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
 import {
   addOrderedReference,
+  buildShotContextPath,
   ensurePrimaryReference,
   isRef2vaRecipe,
   moveOrderedReference,
   removeOrderedReference,
   referenceImagesField,
+  shotContextSurface,
   toggleOrderedReference,
   validateRef2vaReferences,
 } from "./ShotWorkspace";
@@ -14,6 +16,41 @@ import {
   MINIMAX_H3_FL2VA_I2V_QUALITY_WORKFLOW_ID,
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
 } from "../runtime/productRuntimeScope";
+import type { ProductionStructureTree } from "../../types/productionStructure";
+import type { WorkspaceSelection } from "../../types/workspaceSelection";
+
+const structure: ProductionStructureTree = {
+  projectId: "project-1",
+  series: [{
+    id: "series-1",
+    projectId: "project-1",
+    ordinal: 0,
+    name: "第一季",
+    description: "",
+    createdAt: "",
+    updatedAt: "",
+    episodes: [{
+      id: "episode-1",
+      seriesId: "series-1",
+      ordinal: 0,
+      name: "第一集",
+      description: "",
+      createdAt: "",
+      updatedAt: "",
+      scenes: [{
+        id: "scene-1",
+        episodeId: "episode-1",
+        ordinal: 0,
+        name: "入口",
+        description: "",
+        shotIds: ["shot-1"],
+        createdAt: "",
+        updatedAt: "",
+      }],
+    }],
+  }],
+  unassignedShotIds: [],
+};
 
 function recipe(workflowId: string = MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID): RecipeViewModel {
   return {
@@ -53,5 +90,33 @@ describe("Shot ordered REF2VA references", () => {
     expect(validateRef2vaReferences(field, ["ast-b", "ast-a"])).toBeUndefined();
     expect(validateRef2vaReferences({ ...field!, minItems: 0 }, [])).toBe("REF2VA 至少需要 2 张参考图");
     expect(validateRef2vaReferences(field, ["ast-a", "ast-a"])).toBe("REF2VA 参考图不能重复");
+  });
+});
+
+describe("Shot workspace context path", () => {
+  it("derives project hierarchy and selected shot breadcrumbs", () => {
+    const selections: WorkspaceSelection[] = [
+      { type: "project", projectId: "project-1" },
+      { type: "series", seriesId: "series-1" },
+      { type: "episode", episodeId: "episode-1" },
+      { type: "scene", sceneId: "scene-1" },
+      { type: "shot", shotId: "shot-1" },
+    ];
+
+    expect(buildShotContextPath(structure, selections[0])).toEqual([]);
+    expect(buildShotContextPath(structure, selections[1]).map((item) => item.id)).toEqual(["series-1"]);
+    expect(buildShotContextPath(structure, selections[2]).map((item) => item.id)).toEqual(["series-1", "episode-1"]);
+    expect(buildShotContextPath(structure, selections[3]).map((item) => item.id)).toEqual(["series-1", "episode-1", "scene-1"]);
+    expect(buildShotContextPath(structure, selections[4]).map((item) => item.id)).toEqual(["series-1", "episode-1", "scene-1", "shot-1"]);
+  });
+
+  it("keeps creation contexts exclusive and reserves production/review for their official surfaces", () => {
+    expect(shotContextSurface("creation", "project")).toBe("project");
+    expect(shotContextSurface("creation", "series")).toBe("series");
+    expect(shotContextSurface("creation", "episode")).toBe("episode");
+    expect(shotContextSurface("creation", "scene")).toBe("scene");
+    expect(shotContextSurface("creation", "shot")).toBe("shot");
+    expect(shotContextSurface("production", "shot")).toBe("production");
+    expect(shotContextSurface("review", "series")).toBe("review");
   });
 });
