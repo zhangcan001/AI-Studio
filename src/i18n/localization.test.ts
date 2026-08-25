@@ -31,8 +31,8 @@ describe("简体中文状态展示", () => {
     expect(assetDisplayName({ category: "generated_image", name: "Generated Image 1" })).toBe("生成图片 1");
     expect(assetDisplayName({ category: "source_image", name: "My Reference.png" })).toBe("My Reference.png");
     expect(workflowModeLabel("reference_to_video")).toBe("参考素材生成视频");
-    expect(workflowDisplayName("wfl_kera2_t2i_local_v2", "原始工作流名")).toBe("Kera2 文生图");
-    expect(workflowDisplayName(undefined, "Krea2 T2I Local")).toBe("Kera2 文生图");
+    expect(workflowDisplayName("wfl_kera2_t2i_local_v2", "原始工作流名")).toBe("Krea2 文生图");
+    expect(workflowDisplayName(undefined, "Krea2 T2I Local")).toBe("Krea2 文生图");
     expect(workflowDisplayName("custom_workflow", "用户工作流")).toBe("用户工作流");
     expect(projectDisplayName("prj_default", "系统默认项目")).toBe("默认项目");
     expect(projectDisplayName("prj_custom", "我的项目")).toBe("我的项目");

@@ -84,7 +84,7 @@ describe("failed batch partial resume frontend contract", () => {
     expect(html).toContain("已完成：<strong>1</strong>");
     expect(html).toContain("可恢复：<strong>1</strong>");
     expect(html).toContain("需人工检查：<strong>1</strong>");
-    expect(html).toContain("Attempts：<strong>4</strong>");
+    expect(html).toContain("尝试次数：<strong>4</strong>");
     expect(html).toContain('checked=""');
     expect(html).toContain("需人工检查");
     expect(html).toContain('disabled=""');

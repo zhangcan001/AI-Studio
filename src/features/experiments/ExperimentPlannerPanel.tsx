@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
+import { fieldLabel } from "../../i18n/statusLabels";
 import {
   buildExperimentPlan,
   experimentVariantFields,
@@ -62,7 +63,7 @@ export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedR
     if (dimensions.length >= 2) return;
     const nextField = fields.find((field) => !dimensions.some((dimension) => dimension.fieldKey === field.key));
     if (!nextField) {
-      setIssues(["当前 Recipe 没有更多可实验的文字、整数或 Seed 字段。"]);
+      setIssues(["当前配方没有更多可实验的文字、整数或 Seed 字段。"]);
       return;
     }
     setDimensions((current) => [...current, newDimension(`dimension-${Date.now()}-${current.length}`, nextField.key)]);
@@ -136,7 +137,7 @@ export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedR
         <div>
           <span className="section-label">实验计划</span>
           <h3>从当前创作生成参数变体</h3>
-          <p>{initialDimensions?.length ? "已从 Prompt Library 预填版本；仍需预览并明确加入队列。" : "只组合当前 Recipe 的文字、整数和 Seed 字段；图片、视频、音频素材继续复用基础 Draft。"}</p>
+          <p>{initialDimensions?.length ? "已从提示词库预填版本；仍需预览并明确加入队列。" : "只组合当前配方的文字、整数和 Seed 字段；图片、视频、音频素材继续复用基础草稿。"}</p>
         </div>
         <span className="experiment-dimension-count">{dimensions.length} / 2 个维度</span>
       </div>
@@ -154,7 +155,7 @@ export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedR
                 <label>
                   <span>变化字段</span>
                   <select aria-label={`实验维度 ${index + 1} 字段`} value={dimension.fieldKey} onChange={(event) => changeDimension(dimension.id, { fieldKey: event.target.value, rawValues: "", seedMode: "fixed" })}>
-                    {fields.map((candidate) => <option key={candidate.key} value={candidate.key} disabled={dimensions.some((other) => other.id !== dimension.id && other.fieldKey === candidate.key)}>{candidate.label} · {candidate.type}</option>)}
+                    {fields.map((candidate) => <option key={candidate.key} value={candidate.key} disabled={dimensions.some((other) => other.id !== dimension.id && other.fieldKey === candidate.key)}>{fieldLabel(candidate.key, candidate.label)} · {candidate.type}</option>)}
                   </select>
                 </label>
                 {field?.type === "seed" && (
@@ -188,7 +189,7 @@ export function ExperimentPlannerPanel({ recipe, baseValues, baseReady, blockedR
         <button type="button" onClick={previewPlan} disabled={!dimensions.length}>预览实验计划</button>
       </div>
 
-      {!baseReady && <p className="experiment-blocked-reason" role="status">请先完成基础 Draft：{blockedReason ?? "输入校验或素材检查尚未通过。"}</p>}
+      {!baseReady && <p className="experiment-blocked-reason" role="status">请先完成基础草稿：{blockedReason ?? "输入校验或素材检查尚未通过。"}</p>}
       {issues.length > 0 && <ul className="experiment-issue-list">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
       {plan && (
         <>

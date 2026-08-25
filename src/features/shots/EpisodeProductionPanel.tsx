@@ -179,7 +179,7 @@ export function EpisodeProductionPanel({
         values: stagePreset.values,
       });
       setNotice(`已将“${selectedPreset.name}”应用到所选 ${selectedPlans.length} 个场景、${selectedShotIds.length} 个镜头。引用素材和已选媒体未改变。`);
-      onNotice?.("Episode 场景预设已应用。");
+      onNotice?.("集场景预设已应用。");
       await refreshAfterMutation();
     });
   }
@@ -213,7 +213,7 @@ export function EpisodeProductionPanel({
         customValues,
       });
       setPromptPreview(undefined);
-      setNotice(`已将提示词模板应用到所选 ${selectedPlans.length} 个场景、${selectedShotIds.length} 个镜头；每个镜头保留自己的 Scene Context。`);
+      setNotice(`已将提示词模板应用到所选 ${selectedPlans.length} 个场景、${selectedShotIds.length} 个镜头；每个镜头保留自己的场景上下文。`);
       await refreshAfterMutation();
     });
   }
@@ -281,67 +281,67 @@ export function EpisodeProductionPanel({
   }
 
   if (!episodeOptions.length) {
-    return <section className="episode-production-panel" aria-label="集生产规划"><div className="episode-production-empty"><strong>暂无可生产集</strong><span>请先在现有 Production Structure 中创建 Episode 和 Scene。</span></div></section>;
+    return <section className="episode-production-panel" aria-label="集生产规划"><div className="episode-production-empty"><strong>暂无可生产集</strong><span>请先在现有内容结构中创建集和场景。</span></div></section>;
   }
 
   return (
     <section className="episode-production-panel" aria-label="集生产规划" aria-busy={isBusy}>
       <div className="episode-production-header">
-        <div><span className="section-label">Episode Production</span><h3>集生产规划</h3><p>一次检查多个 Scene，准备后仍由你按现有 Production Queue 顺序启动。</p></div>
-        <span className="episode-production-safety">不会自动启动 GPU · 不跨过人工 Review</span>
+        <div><span className="section-label">集生产规划</span><h3>集生产规划</h3><p>一次检查多个场景，准备后仍由你按现有生产队列顺序启动。</p></div>
+        <span className="episode-production-safety">不会自动启动 GPU · 不跨过人工审核</span>
       </div>
 
       <div className="episode-production-toolbar">
-        <label><span>集</span><select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setPlan(undefined); setSelectedSceneIds([]); }} disabled={isBusy} aria-label="Episode 选择">{episodeOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label><span>集</span><select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setPlan(undefined); setSelectedSceneIds([]); }} disabled={isBusy} aria-label="集选择">{episodeOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
         <div className="episode-production-stage-tabs" role="tablist" aria-label="生产阶段">{STAGES.map((nextStage) => <button key={nextStage} type="button" className={stage === nextStage ? "active" : ""} role="tab" aria-selected={stage === nextStage} onClick={() => selectStage(nextStage)} disabled={isBusy}>{sceneProductionStageLabel(nextStage)}</button>)}</div>
         <button type="button" className="quiet-button" onClick={() => void refreshPlan()} disabled={isBusy || !episodeId}>{busyAction === "plan" ? "检查中…" : "重新检查计划"}</button>
       </div>
 
       {plan ? <>
-        <div className="episode-production-summary" aria-label="Episode 汇总">
+        <div className="episode-production-summary" aria-label="集汇总">
           <div><span>系列</span><strong>{plan.seriesName || currentEpisode?.seriesName || "—"}</strong></div>
           <div><span>集</span><strong>第 {String(plan.episodeOrdinal + 1).padStart(2, "0")} 集 · {plan.episodeName}</strong></div>
-          <div><span>Scenes</span><strong>{plan.sceneTotal}</strong></div>
-          <div><span>Shots</span><strong>{plan.shotTotal}</strong></div>
-          <div><span>DONE</span><strong>{plan.done}</strong></div>
-          <div><span>PREPARED</span><strong>{plan.prepared}</strong></div>
-          <div><span>ELIGIBLE</span><strong>{plan.eligible}</strong></div>
-          <div><span>BLOCKED</span><strong>{plan.blocked}</strong></div>
+          <div><span>场景</span><strong>{plan.sceneTotal}</strong></div>
+          <div><span>镜头</span><strong>{plan.shotTotal}</strong></div>
+          <div><span>已完成</span><strong>{plan.done}</strong></div>
+          <div><span>已准备</span><strong>{plan.prepared}</strong></div>
+          <div><span>可生产</span><strong>{plan.eligible}</strong></div>
+          <div><span>已阻塞</span><strong>{plan.blocked}</strong></div>
         </div>
 
-        <section className="episode-production-card" aria-label="Scene 选择">
-          <div className="episode-production-card-heading"><div><span className="section-label">Scene Scope</span><h4>Scene 总览</h4></div><span>{selectedSceneIds.length} 个已选 / {selectedShotIds.length} 个镜头</span></div>
-          <div className="episode-production-selection-actions"><div className="episode-production-filter-tabs" role="group" aria-label="Scene 筛选">{FILTERS.map((value) => <button key={value} type="button" className={filter === value ? "active" : ""} onClick={() => setFilter(value)} disabled={isBusy}>{episodeFilterLabel(value)}</button>)}</div><div className="episode-production-select-actions"><button type="button" className="quiet-button" onClick={() => selectAll("ready")} disabled={isBusy}>全选可准备</button><button type="button" className="quiet-button" onClick={() => selectAll("blocked")} disabled={isBusy}>全选有阻塞</button><button type="button" className="quiet-button" onClick={() => selectAll("clear")} disabled={isBusy}>清空</button></div></div>
-          <div className="episode-production-table-wrap"><table><thead><tr><th>选择</th><th>Scene</th><th>Shots</th><th>DONE</th><th>PREPARED</th><th>ELIGIBLE</th><th>BLOCKED</th><th>状态</th><th /></tr></thead><tbody>{visibleScenes.map((scene) => <tr key={scene.sceneId}><td><input type="checkbox" checked={selectedSceneIds.includes(scene.sceneId)} onChange={() => toggleScene(scene.sceneId)} disabled={isBusy} aria-label={`选择场景 ${scene.sceneName}`} /></td><td><strong>{String(scene.sceneOrdinal + 1).padStart(2, "0")} · {scene.sceneName}</strong><small>{scene.sceneId}</small>{scene.blockingReasons.length > 0 && <small className="episode-production-blocker-reason">{scene.blockingReasons.join("；")}</small>}</td><td>{scene.total}</td><td>{scene.done}</td><td>{scene.prepared}</td><td>{scene.eligible}</td><td>{scene.blocked}</td><td><span className={`episode-production-status episode-production-status-${scene.classification.toLowerCase()}`}>{episodeSceneClassificationLabel(scene.classification)}</span></td><td>{scene.blocked > 0 && <button type="button" className="quiet-button" onClick={() => onNavigateToScene?.(scene.sceneId)} disabled={isBusy}>查看场景</button>}</td></tr>)}</tbody></table></div>
-          {!visibleScenes.length && <div className="episode-production-empty"><strong>没有匹配的 Scene</strong><span>请切换筛选条件。</span></div>}
+        <section className="episode-production-card" aria-label="场景选择">
+          <div className="episode-production-card-heading"><div><span className="section-label">场景范围</span><h4>场景总览</h4></div><span>{selectedSceneIds.length} 个已选 / {selectedShotIds.length} 个镜头</span></div>
+          <div className="episode-production-selection-actions"><div className="episode-production-filter-tabs" role="group" aria-label="场景筛选">{FILTERS.map((value) => <button key={value} type="button" className={filter === value ? "active" : ""} onClick={() => setFilter(value)} disabled={isBusy}>{episodeFilterLabel(value)}</button>)}</div><div className="episode-production-select-actions"><button type="button" className="quiet-button" onClick={() => selectAll("ready")} disabled={isBusy}>全选可准备</button><button type="button" className="quiet-button" onClick={() => selectAll("blocked")} disabled={isBusy}>全选有阻塞</button><button type="button" className="quiet-button" onClick={() => selectAll("clear")} disabled={isBusy}>清空</button></div></div>
+          <div className="episode-production-table-wrap"><table><thead><tr><th>选择</th><th>场景</th><th>镜头</th><th>已完成</th><th>已准备</th><th>可生产</th><th>已阻塞</th><th>状态</th><th /></tr></thead><tbody>{visibleScenes.map((scene) => <tr key={scene.sceneId}><td><input type="checkbox" checked={selectedSceneIds.includes(scene.sceneId)} onChange={() => toggleScene(scene.sceneId)} disabled={isBusy} aria-label={`选择场景 ${scene.sceneName}`} /></td><td><strong>{String(scene.sceneOrdinal + 1).padStart(2, "0")} · {scene.sceneName}</strong><small>{scene.sceneId}</small>{scene.blockingReasons.length > 0 && <small className="episode-production-blocker-reason">{scene.blockingReasons.join("；")}</small>}</td><td>{scene.total}</td><td>{scene.done}</td><td>{scene.prepared}</td><td>{scene.eligible}</td><td>{scene.blocked}</td><td><span className={`episode-production-status episode-production-status-${scene.classification.toLowerCase()}`}>{episodeSceneClassificationLabel(scene.classification)}</span></td><td>{scene.blocked > 0 && <button type="button" className="quiet-button" onClick={() => onNavigateToScene?.(scene.sceneId)} disabled={isBusy}>查看场景</button>}</td></tr>)}</tbody></table></div>
+          {!visibleScenes.length && <div className="episode-production-empty"><strong>没有匹配的场景</strong><span>请切换筛选条件。</span></div>}
         </section>
 
         <div className="episode-production-grid">
-          <section className="episode-production-card" aria-label="Episode 批量预设">
-            <div className="episode-production-card-heading"><div><span className="section-label">Preset</span><h4>批量应用预设</h4></div><span>{presets.length} / 30</span></div>
-            <label><span>Batch Workflow Preset</span><select value={selectedPresetId} onChange={(event) => setSelectedPresetId(event.target.value)} disabled={isBusy}><option value="">选择预设</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{!preset.available ? " · 不可用" : ""}</option>)}</select></label>
+          <section className="episode-production-card" aria-label="集批量预设">
+            <div className="episode-production-card-heading"><div><span className="section-label">预设</span><h4>批量应用预设</h4></div><span>{presets.length} / 30</span></div>
+            <label><span>批量工作流预设</span><select value={selectedPresetId} onChange={(event) => setSelectedPresetId(event.target.value)} disabled={isBusy}><option value="">选择预设</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{!preset.available ? " · 不可用" : ""}</option>)}</select></label>
             <div className="episode-production-actions"><button type="button" onClick={() => { setStage("image"); void applyPresetForStage("image"); }} disabled={isBusy || !selectedPreset?.image || !selectedSceneIds.length}>{isBusy && busyAction === "preset-apply" ? "应用中…" : "应用图片预设到所选场景"}</button><button type="button" className="quiet-button" onClick={() => { setStage("video"); void applyPresetForStage("video"); }} disabled={isBusy || !selectedPreset?.video || !selectedSceneIds.length}>应用视频预设到所选场景</button></div>
-            <small className="episode-production-hint">最多一次应用 500 个镜头；不会改变 references、Selected Image、Selected Video、Anchor 或 Scene assignment。</small>
+            <small className="episode-production-hint">最多一次应用 500 个镜头；不会改变参考素材、已确认图片、已确认视频、锚点或场景归属。</small>
           </section>
 
-          <section className="episode-production-card" aria-label="Episode Prompt 批量应用">
-            <div className="episode-production-card-heading"><div><span className="section-label">Prompt</span><h4>批量应用 Prompt</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div>
-            <label><span>Prompt Entry</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
-            <label><span>Version</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>
-            {referenceAnchors.length > 0 && <div className="episode-production-anchor-list"><span>Context Anchors（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}
+          <section className="episode-production-card" aria-label="集提示词批量应用">
+            <div className="episode-production-card-heading"><div><span className="section-label">提示词</span><h4>批量应用提示词</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div>
+            <label><span>提示词条目</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+            <label><span>版本</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>
+            {referenceAnchors.length > 0 && <div className="episode-production-anchor-list"><span>上下文锚点（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}
             {promptCustomNames.length > 0 && <div className="episode-production-custom-values">{promptCustomNames.map((name) => <label key={name}><span>{name}</span><input value={customValues[name] ?? ""} onChange={(event) => setCustomValues((current) => ({ ...current, [name]: event.target.value }))} disabled={isBusy} /></label>)}</div>}
-            <div className="episode-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !selectedShotIds.length}>{busyAction === "prompt-preview" ? "预览中…" : "预览所选 Scene Prompt"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !promptPreview || promptPreview.invalid > 0}>应用所选 Scene Prompt</button></div>
-            {promptPreview && <p className={promptPreview.invalid ? "episode-production-inline-error" : "episode-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。每个 Shot 使用自己的 Scene Context。</p>}
+            <div className="episode-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !selectedShotIds.length}>{busyAction === "prompt-preview" ? "预览中…" : "预览所选场景提示词"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !promptPreview || promptPreview.invalid > 0}>应用所选场景提示词</button></div>
+            {promptPreview && <p className={promptPreview.invalid ? "episode-production-inline-error" : "episode-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。每个镜头使用自己的场景上下文。</p>}
           </section>
         </div>
 
-        <section className="episode-production-card episode-production-prepare" aria-label="Episode Prepare">
-          <div className="episode-production-card-heading"><div><span className="section-label">Prepare</span><h4>准备所选 Scene</h4></div><span>{selectedShotIds.length} 个 Shot</span></div>
+        <section className="episode-production-card episode-production-prepare" aria-label="集准备">
+          <div className="episode-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选场景</h4></div><span>{selectedShotIds.length} 个镜头</span></div>
           <label className="episode-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞场景，仅准备当前可生产内容</label>
-          <p className="episode-production-hint">默认严格模式；确认文字会明确提示“不会自动启动 GPU”。每个 Scene 最多准备一个 READY Batch。</p>
-          <button type="button" className="episode-production-primary-action" onClick={() => void prepare()} disabled={isBusy || !selectedPlans.length || !selectedShotIds.length}>{busyAction === "prepare" ? "准备中…" : "准备所选 Scene"}</button>
+          <p className="episode-production-hint">默认严格模式；确认文字会明确提示“不会自动启动 GPU”。每个场景最多准备一个就绪批次。</p>
+          <button type="button" className="episode-production-primary-action" onClick={() => void prepare()} disabled={isBusy || !selectedPlans.length || !selectedShotIds.length}>{busyAction === "prepare" ? "准备中…" : "准备所选场景"}</button>
         </section>
-      </> : <div className="episode-production-loading" role="status">正在加载 Episode 生产计划…</div>}
+      </> : <div className="episode-production-loading" role="status">正在加载集生产计划…</div>}
 
       {result && <EpisodePrepareResultView result={result} onOpenProductionQueue={onOpenProductionQueue} disabled={isBusy} onNavigateToScene={onNavigateToScene} />}
       {error && <div className="episode-production-error" role="alert"><strong>{error.code}</strong><span>{error.message}</span>{error.technicalMessage && <details><summary>技术详情</summary><code>{error.technicalMessage}</code></details>}</div>}
@@ -363,11 +363,11 @@ export function EpisodePrepareResultView({
 }) {
   const status = result.status ?? (result.skippedBlockedScenes.length > 0 ? "PARTIAL" : result.createdBatches > 0 ? "SUCCESS" : "NOOP");
   const blockerRows = result.results.filter((row) => row.blockingReasons.length > 0 || row.status === "BLOCKED" || Boolean(row.error));
-  return <section className={`episode-production-result episode-production-result-${status.toLowerCase()}`} aria-label="Episode Prepare 结果">
-    <div><span className="section-label">Prepare Result</span><h4>{episodePrepareStatusLabel(status)}</h4></div>
-    <p>创建批次：<strong>{result.createdBatches}</strong> · 新建 Shot items：<strong>{result.createdItems}</strong> · 已跳过：<strong>{result.alreadyPreparedScenes.length + result.skippedDoneScenes.length + result.skippedEmptyScenes.length}</strong></p>
-    {status === "PARTIAL" && <p>已成功准备部分 Scene，其余 Scene 因状态变化或阻塞未准备。</p>}
-    {blockerRows.length > 0 && <div className="episode-production-blockers"><strong>阻塞 Scene</strong>{blockerRows.map((row) => <div key={row.sceneId}><span>{row.sceneName || row.sceneId}：{row.blockingReasons.join("；") || row.error || "状态阻塞"}</span><button type="button" className="quiet-button" onClick={() => onNavigateToScene?.(row.sceneId)} disabled={disabled}>查看场景</button></div>)}</div>}
+  return <section className={`episode-production-result episode-production-result-${status.toLowerCase()}`} aria-label="集准备结果">
+    <div><span className="section-label">准备结果</span><h4>{episodePrepareStatusLabel(status)}</h4></div>
+    <p>创建批次：<strong>{result.createdBatches}</strong> · 新建镜头项目：<strong>{result.createdItems}</strong> · 已跳过：<strong>{result.alreadyPreparedScenes.length + result.skippedDoneScenes.length + result.skippedEmptyScenes.length}</strong></p>
+    {status === "PARTIAL" && <p>已成功准备部分场景，其余场景因状态变化或阻塞未准备。</p>}
+    {blockerRows.length > 0 && <div className="episode-production-blockers"><strong>阻塞场景</strong>{blockerRows.map((row) => <div key={row.sceneId}><span>{row.sceneName || row.sceneId}：{row.blockingReasons.join("；") || row.error || "状态阻塞"}</span><button type="button" className="quiet-button" onClick={() => onNavigateToScene?.(row.sceneId)} disabled={disabled}>查看场景</button></div>)}</div>}
     <button type="button" onClick={onOpenProductionQueue} disabled={disabled || !onOpenProductionQueue}>打开生产队列</button>
   </section>;
 }
@@ -433,20 +433,20 @@ function blockedPrepareResult(projectId: string, episodeId: string, stage: Episo
 }
 
 function episodePrepareStatusLabel(status: "SUCCESS" | "NOOP" | "PARTIAL" | "BLOCKED"): string {
-  return { SUCCESS: "SUCCESS · 已准备", NOOP: "NOOP · 没有新增批次", PARTIAL: "PARTIAL · 部分准备", BLOCKED: "BLOCKED · 未创建批次" }[status];
+  return { SUCCESS: "已准备", NOOP: "没有新增批次", PARTIAL: "部分准备", BLOCKED: "未创建批次" }[status];
 }
 
 function episodePrepareNotice(result: EpisodeProductionPrepareResult): string {
   const status = result.status ?? (result.createdBatches > 0 ? "SUCCESS" : "NOOP");
-  if (status === "PARTIAL") return `已成功准备部分 Scene，创建 ${result.createdBatches} 个生产批次；其余 Scene 因状态变化未准备。`;
-  if (status === "BLOCKED") return "严格模式未创建批次；请处理阻塞 Scene 后重新检查。";
-  return `已准备 ${result.createdBatches} 个生产批次、${result.createdItems} 个 Shot items；不会自动启动 GPU。`;
+  if (status === "PARTIAL") return `已成功准备部分场景，创建 ${result.createdBatches} 个生产批次；其余场景因状态变化未准备。`;
+  if (status === "BLOCKED") return "严格模式未创建批次；请处理阻塞场景后重新检查。";
+  return `已准备 ${result.createdBatches} 个生产批次、${result.createdItems} 个镜头项目；不会自动启动 GPU。`;
 }
 
 function toEpisodeError(value: unknown, fallbackCode: string): EpisodeError {
   const formatted = formatUiError(value);
   const embeddedCode = formatted.technicalMessage?.match(/EPISODE_(?:PRODUCTION|BULK|SCENE)[A-Z0-9_]*/)?.[0];
-  return { code: embeddedCode ?? formatted.code ?? fallbackCode, message: embeddedCode === "EPISODE_PRODUCTION_BLOCKED" ? "严格模式未创建批次；请先处理阻塞 Scene。" : formatted.message, technicalMessage: formatted.technicalMessage };
+  return { code: embeddedCode ?? formatted.code ?? fallbackCode, message: embeddedCode === "EPISODE_PRODUCTION_BLOCKED" ? "严格模式未创建批次；请先处理阻塞场景。" : formatted.message, technicalMessage: formatted.technicalMessage };
 }
 
 function parseEpisodePrepareErrorResult(value: unknown): EpisodeProductionPrepareResult | undefined {

@@ -14,7 +14,7 @@ export function WorkflowImportResult({ plan, onOpenAdvanced, onOpenStudio }: Pro
 
   return (
     <section className="workflow-smart-result" aria-label="智能导入结果">
-      <div className="workflow-smart-result-mark" aria-hidden="true">PASS</div>
+      <div className="workflow-smart-result-mark" aria-hidden="true">通过</div>
       <div className="workflow-smart-result-copy">
         <span className="section-label">智能导入完成</span>
         <h3>工作流导入成功</h3>
@@ -26,7 +26,7 @@ export function WorkflowImportResult({ plan, onOpenAdvanced, onOpenStudio }: Pro
           <span>输入<strong>{inputLabels}</strong></span>
           <span>输出<strong>{outputLabels}</strong></span>
           <span>兼容性<strong>通过</strong></span>
-          <span>Recipe<strong>已自动生成</strong></span>
+          <span>配方<strong>已自动生成</strong></span>
           <span>状态<strong>已启用</strong></span>
         </div>
         <div className="workflow-smart-actions">

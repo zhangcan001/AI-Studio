@@ -54,7 +54,7 @@ export function PartialResumePreview({
         <span>已完成：<strong>{plan.resolved}</strong></span>
         <span>可恢复：<strong>{plan.autoResumable}</strong></span>
         <span>需人工检查：<strong>{plan.reviewRequired}</strong></span>
-        <span>Attempts：<strong>{plan.attemptTotal}</strong></span>
+        <span>尝试次数：<strong>{plan.attemptTotal}</strong></span>
       </div>
       {(plan.pending > 0 || plan.active > 0 || !plan.canResume) && (
         <p className="disabled-note">

@@ -31,7 +31,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
 
   return (
     <section className="shot-batch-review-board" aria-label={`${stageLabel(stage)}批量复核`}>
-      <div className="shot-block-heading"><div><span className="section-label">人工复核</span><h3>{stage === "image" ? "关键帧候选复核" : "最终视频候选复核"}</h3></div><span className="shot-inline-note">每个 Shot 必须明确选择结果后才进入下一阶段。</span></div>
+      <div className="shot-block-heading"><div><span className="section-label">人工复核</span><h3>{stage === "image" ? "关键帧候选复核" : "最终视频候选复核"}</h3></div><span className="shot-inline-note">每个镜头必须明确选择结果后才进入下一阶段。</span></div>
       <div className="shot-batch-review-grid">
         {shots.map((shot) => {
           const status = deriveStageStatus(shot, stage);
@@ -48,7 +48,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
             </article>
           );
         })}
-        {!shots.length && <p className="empty-state">还没有 Shot。</p>}
+        {!shots.length && <p className="empty-state">还没有镜头。</p>}
       </div>
     </section>
   );

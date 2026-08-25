@@ -36,8 +36,8 @@ describe("studio product UX contracts", () => {
     );
 
     expect((html.match(/class="workflow-launcher-card/g) ?? []).length).toBe(2);
-    expect(html).toContain("Kera2 文生图");
-    expect(html).toContain("MiniMax H3 参考图生视频");
+    expect(html).toContain("Krea2 文生图");
+    expect(html).toContain("H3 参考图生视频");
     expect(html).toContain('aria-pressed="true"');
   });
 
@@ -46,8 +46,8 @@ describe("studio product UX contracts", () => {
 
     expect(html).toContain("单次创作");
     expect(html).toContain("批量生产");
-    expect(html).toContain("Production Run");
-    expect(html).toContain("Benchmark Lab");
+    expect(html).toContain("生产运行");
+    expect(html).toContain("基准实验室");
     expect(html).toContain('aria-selected="true"');
   });
 

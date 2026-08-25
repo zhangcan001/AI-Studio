@@ -24,7 +24,7 @@ export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props)
           <h2 id="workflow-launcher-title">选择创作类型</h2>
           <p className="section-description">先选一个工作流，再填写输入参数。</p>
         </div>
-        <span className="workflow-launcher-count">{visibleCatalog.length} / {productCatalog.length} 个 Recipe</span>
+        <span className="workflow-launcher-count">{visibleCatalog.length} / {productCatalog.length} 个配方</span>
       </div>
       <div className="workflow-launcher-controls">
         <label>
@@ -56,7 +56,7 @@ export function WorkflowLauncher({ catalog, selectedWorkflow, onSelect }: Props)
                 <span className="workflow-card-mark" aria-hidden="true">{workflowModeLabel(recipe.mode).slice(0, 1)}</span>
                 <span className="workflow-card-copy">
                   <strong>{workflowDisplayName(recipe.workflowId, recipe.name)}</strong>
-                  <small>{runtimeKindLabel(runtimeKindFor(recipe))} · {workflowModeLabel(recipe.mode)} · Recipe {recipe.recipeVersion ?? recipe.recipeId}</small>
+                  <small>{runtimeKindLabel(runtimeKindFor(recipe))} · {workflowModeLabel(recipe.mode)} · 配方 {recipe.recipeVersion ?? recipe.recipeId}</small>
                   <span>{workflowDescription(recipe.mode)}</span>
                 </span>
                 <span className="workflow-card-state" aria-hidden="true">{selected ? "已选择" : "选择"}</span>

@@ -21,7 +21,7 @@ export function PromptTemplateVariableHelper({ compact = false }: Props) {
   return (
     <details className={`prompt-template-helper${compact ? " prompt-template-helper-compact" : ""}`}>
       <summary>模板变量帮助</summary>
-      <p>Prompt 正文中使用 <code>{"{{variable.path}}"}</code>。点击变量可复制；Snippet 仍按普通文本处理。</p>
+      <p>提示词正文中使用 <code>{"{{variable.path}}"}</code>。点击变量可复制；片段仍按普通文本处理。</p>
       <div className="prompt-template-variable-groups">
         {PROMPT_TEMPLATE_VARIABLE_GROUPS.map((group) => (
           <div key={group.label} className="prompt-template-variable-group">

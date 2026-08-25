@@ -21,11 +21,11 @@ export function resolutionFields(recipe: RecipeViewModel): ResolutionFields | un
 
 export function resolutionContractError(recipe: RecipeViewModel): string | undefined {
   const width = exactIntegerField(recipe, "width");
-  if (!width) return "Recipe 缺少 key 为 `width` 的 integer 字段。";
+  if (!width) return "配方缺少键为 `width` 的整数输入字段。";
   const height = exactIntegerField(recipe, "height");
-  if (!height) return "Recipe 缺少 key 为 `height` 的 integer 字段。";
-  if (!width.required) return "Recipe 的 `width` 必须是必填 integer 字段。";
-  if (!height.required) return "Recipe 的 `height` 必须是必填 integer 字段。";
+  if (!height) return "配方缺少键为 `height` 的整数输入字段。";
+  if (!width.required) return "配方的 `width` 必须是必填整数输入字段。";
+  if (!height.required) return "配方的 `height` 必须是必填整数输入字段。";
   return undefined;
 }
 
@@ -39,8 +39,8 @@ export function validateResolution(
     return {
       ok: false,
       errors: {
-        width: resolutionContractError(recipe) ?? "Recipe 缺少合法的 width/height 字段。",
-        height: resolutionContractError(recipe) ?? "Recipe 缺少合法的 width/height 字段。",
+        width: resolutionContractError(recipe) ?? "配方缺少合法的 width/height 字段。",
+        height: resolutionContractError(recipe) ?? "配方缺少合法的 width/height 字段。",
       },
     };
   }

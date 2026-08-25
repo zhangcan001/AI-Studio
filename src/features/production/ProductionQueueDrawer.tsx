@@ -129,7 +129,7 @@ export function ProductionQueueDrawer({
         onClick={toggleExpanded}
       >
         <span className="production-queue-drawer-title">
-          <span className="production-queue-drawer-kicker">QUEUE</span>
+          <span className="production-queue-drawer-kicker">队列</span>
           <strong>生产队列</strong>
         </span>
         <span className="production-queue-drawer-stats" aria-label="生产队列摘要">
@@ -162,7 +162,7 @@ export function ProductionQueueDrawer({
 
           {rows.length > visibleRows.length && (
             <p className="production-queue-drawer-limit" role="status">
-              已显示前 {visibleRows.length} 个队列项，共 {rows.length} 个；完整 Runbook 保持在生产工作区。
+              已显示前 {visibleRows.length} 个队列项，共 {rows.length} 个；完整执行清单保持在生产工作区。
             </p>
           )}
 
@@ -237,7 +237,7 @@ function BatchRow({
           <button
             type="button"
             data-action="start"
-            aria-label={`Start queue ${row.id}`}
+            aria-label={`开始队列 ${row.id}`}
             onClick={() => onStart(row.id)}
             disabled={Boolean(busyAction)}
           >
@@ -249,7 +249,7 @@ function BatchRow({
             type="button"
             className="quiet"
             data-action="pause"
-            aria-label={`Pause queue ${row.id}`}
+            aria-label={`暂停队列 ${row.id}`}
             onClick={() => onPause(row.id)}
             disabled={Boolean(busyAction)}
           >
@@ -261,7 +261,7 @@ function BatchRow({
             type="button"
             className="quiet"
             data-action="retry"
-            aria-label={`Retry queue ${row.id}`}
+            aria-label={`重试队列 ${row.id}`}
             onClick={() => onRetry(row.id)}
             disabled={Boolean(busyAction)}
           >
@@ -273,7 +273,7 @@ function BatchRow({
             type="button"
             className="quiet"
             data-action="open"
-            aria-label={`Open queue ${row.id}`}
+            aria-label={`打开队列 ${row.id}`}
             onClick={() => onOpen(row.id)}
             disabled={Boolean(busyAction)}
           >
@@ -317,7 +317,7 @@ function ItemRow({
           type="button"
           className="quiet"
           data-action="retry"
-          aria-label={`Retry item ${item.id}`}
+          aria-label={`重试项目 ${item.id}`}
           onClick={() => onRetry(item.id)}
           disabled={Boolean(busyAction)}
         >

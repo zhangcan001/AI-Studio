@@ -3,6 +3,8 @@ import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../serv
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ShotInputValues, ShotStage } from "../../types/shot";
+import { fieldLabel } from "../../i18n/statusLabels";
+import { referenceAnchorKindLabels } from "../assets/referenceAnchorState";
 import "./ShotInspector.css";
 
 export type ShotInspectorTab = "parameters" | "references" | "prompt";
@@ -131,7 +133,7 @@ export function ShotInspector({
     <aside className="shot-inspector" aria-label="镜头检查器">
       <div className="shot-inspector-heading">
         <div>
-          <span className="shot-inspector-kicker">Inspector</span>
+          <span className="shot-inspector-kicker">参数面板</span>
           <h2>镜头设置</h2>
         </div>
         <span className="shot-inspector-stage">{stage === "image" ? "图片" : "视频"}</span>
@@ -142,7 +144,7 @@ export function ShotInspector({
         </button>
         {configDirty && onSave && <button type="button" className="quiet-button" onClick={() => void onSave()} disabled={busy}>保存配置</button>}
       </div>
-      <div className="shot-inspector-tabs" role="tablist" aria-label="Inspector sections">
+      <div className="shot-inspector-tabs" role="tablist" aria-label="参数面板分区">
         <InspectorTabButton tab="parameters" label="参数" selected={selectedTab === "parameters"} onSelect={selectTab} />
         <InspectorTabButton tab="references" label="参考" selected={selectedTab === "references"} onSelect={selectTab} />
         <InspectorTabButton tab="prompt" label="提示词" selected={selectedTab === "prompt"} onSelect={selectTab} />
@@ -151,23 +153,23 @@ export function ShotInspector({
       {selectedTab === "parameters" && (
         <div className="shot-inspector-panel" role="tabpanel" aria-label="参数">
           <section className="shot-inspector-section">
-            <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">Runtime</span><h3>生成参数</h3></div></div>
+            <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">运行参数</span><h3>生成参数</h3></div></div>
             {stageRecipes.length > 0 && (
               <label className="shot-inspector-field">
-                <span>工作流 / Recipe</span>
+                <span>工作流 / 配方</span>
                 <select value={currentDraft?.recipeId ?? ""} onChange={(event) => onRecipeChange?.(event.target.value)} disabled={busy || !onRecipeChange}>
-                  <option value="">选择兼容 Recipe</option>
+                  <option value="">选择兼容配方</option>
                   {stageRecipes.map((recipe) => <option key={`${recipe.workflowVersionId}:${recipe.recipeId}`} value={recipe.recipeId}>{recipe.name} · {recipe.mode}</option>)}
                 </select>
               </label>
             )}
             {currentRecipe ? (
               <div className="shot-inspector-runtime-meta" aria-label="当前工作流信息">
-                <span><small>Workflow</small><strong>{currentRecipe.name}</strong></span>
-                <span><small>Recipe</small><strong>{currentRecipe.recipeId}</strong></span>
+                <span><small>工作流</small><strong>{currentRecipe.name}</strong></span>
+                <span><small>配方</small><strong>{currentRecipe.recipeId}</strong></span>
               </div>
             ) : (
-              <div className="shot-inspector-empty"><strong>尚未配置阶段参数</strong><span>选择一个兼容 Recipe 后即可编辑生成参数。</span></div>
+              <div className="shot-inspector-empty"><strong>尚未配置阶段参数</strong><span>选择一个兼容配方后即可编辑生成参数。</span></div>
             )}
             {commonFields.map((field) => <ScalarField key={field.key} field={field} value={currentDraft?.values[field.key]} disabled={busy || !onScalarChange} onChange={(value) => onScalarChange?.(field, value)} />)}
             {advancedFields.length > 0 && (
@@ -231,17 +233,18 @@ function isScalarRecipeField(field: RecipeField): field is ScalarRecipeField {
 }
 
 function ScalarField({ field, value, disabled, onChange }: { field: ScalarRecipeField; value?: DraftValue; disabled: boolean; onChange: (value: DraftValue) => void }) {
+  const label = fieldLabel(field.key, field.label);
   if (field.type === "seed") {
     const fixed = value?.type === "seed_fixed";
     return (
       <label className="shot-inspector-field">
-        <span>{field.label}</span>
+        <span>{label}</span>
         <span className="shot-inspector-seed-row">
           <select value={fixed ? "fixed" : "random"} onChange={(event) => onChange(event.target.value === "fixed" ? { type: "seed_fixed", value: field.defaultValue ?? "0" } : { type: "seed_random" })} disabled={disabled}>
             <option value="random">随机</option>
             <option value="fixed">固定</option>
           </select>
-          {fixed && <input value={value.value} inputMode="numeric" onChange={(event) => onChange({ type: "seed_fixed", value: event.target.value })} disabled={disabled} aria-label={`${field.label}值`} />}
+          {fixed && <input value={value.value} inputMode="numeric" onChange={(event) => onChange({ type: "seed_fixed", value: event.target.value })} disabled={disabled} aria-label={`${label}值`} />}
         </span>
       </label>
     );
@@ -250,7 +253,7 @@ function ScalarField({ field, value, disabled, onChange }: { field: ScalarRecipe
   const currentValue = value?.type === valueType ? value.value : "";
   return (
     <label className="shot-inspector-field">
-      <span>{field.label}</span>
+      <span>{label}</span>
       <input type="number" value={currentValue} min={field.min} max={field.max} step={field.step ?? (field.type === "integer" ? 1 : "any")} onChange={(event) => onChange({ type: valueType, value: Number(event.target.value) })} disabled={disabled} />
     </label>
   );
@@ -277,14 +280,14 @@ function ReferenceInspector({ projectId, stage, references, availableReferences,
   return (
     <div className="shot-inspector-panel" role="tabpanel" aria-label="参考">
       <section className="shot-inspector-section">
-        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">References</span><h3>{stage === "video" ? "有序参考图" : "参考素材"}</h3></div>{onSaveReferences && <button type="button" className="quiet-button" onClick={() => void onSaveReferences()} disabled={busy}>保存</button>}</div>
+        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">参考素材</span><h3>{stage === "video" ? "有序参考图" : "参考素材"}</h3></div>{onSaveReferences && <button type="button" className="quiet-button" onClick={() => void onSaveReferences()} disabled={busy}>保存</button>}</div>
         {stage === "video" && keyframeAsset && <div className="shot-inspector-keyframe"><AssetThumb projectId={projectId} asset={keyframeAsset} /><span><small>关键帧</small><strong>{keyframeAsset.name}</strong></span></div>}
         {referenceAnchors.length > 0 && (
           <div className="shot-inspector-anchor-picker">
-            <label className="shot-inspector-field"><span>Reference Anchor</span><select value={selectedAnchorId} onChange={(event) => onAnchorChange?.(event.target.value)} disabled={busy || !onAnchorChange}><option value="">选择参考锚点</option>{referenceAnchors.map((anchor) => <option key={anchor.id} value={anchor.id} disabled={anchor.usable === false}>{anchor.kind ? `[${anchor.kind}] ` : ""}{anchor.name}</option>)}</select></label>
+            <label className="shot-inspector-field"><span>参考锚点</span><select value={selectedAnchorId} onChange={(event) => onAnchorChange?.(event.target.value)} disabled={busy || !onAnchorChange}><option value="">选择参考锚点</option>{referenceAnchors.map((anchor) => <option key={anchor.id} value={anchor.id} disabled={anchor.usable === false}>{anchor.kind ? `[${referenceAnchorKindLabels[anchor.kind as keyof typeof referenceAnchorKindLabels] ?? "其他"}] ` : ""}{anchor.name}</option>)}</select></label>
             <div className="shot-inspector-inline-actions">
-              <button type="button" className="quiet-button" onClick={() => onApplyAnchor?.("append")} disabled={busy || !selectedAnchor || selectedAnchor.usable === false || !onApplyAnchor}>追加 Anchor</button>
-              <button type="button" className="quiet-button" onClick={() => onApplyAnchor?.("replace")} disabled={busy || !selectedAnchor || selectedAnchor.usable === false || !onApplyAnchor}>替换 Anchor</button>
+              <button type="button" className="quiet-button" onClick={() => onApplyAnchor?.("append")} disabled={busy || !selectedAnchor || selectedAnchor.usable === false || !onApplyAnchor}>追加锚点</button>
+              <button type="button" className="quiet-button" onClick={() => onApplyAnchor?.("replace")} disabled={busy || !selectedAnchor || selectedAnchor.usable === false || !onApplyAnchor}>替换锚点</button>
             </div>
           </div>
         )}
@@ -301,11 +304,11 @@ function ReferenceInspector({ projectId, stage, references, availableReferences,
               </div>
             </div>
           ))}
-          {references.length === 0 && <EmptyInspectorState title="暂无参考素材" detail="从下方素材中添加，或选择一个 Reference Anchor。" />}
+          {references.length === 0 && <EmptyInspectorState title="暂无参考素材" detail="从下方素材中添加，或选择一个参考锚点。" />}
         </div>
       </section>
       <section className="shot-inspector-section">
-        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">Available</span><h3>可用素材</h3></div></div>
+        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">可用素材</span><h3>可用素材</h3></div></div>
         <div className="shot-inspector-available-list">
           {availableReferences.filter((asset) => !listedIds.has(asset.id)).slice(0, 18).map((asset) => <button key={asset.id} type="button" className="shot-inspector-available-item" onClick={() => onReferenceAdd?.(asset.id)} disabled={busy || !onReferenceAdd}><AssetThumb projectId={projectId} asset={asset} /><span><strong>{asset.name}</strong><small>{asset.id}</small></span><b aria-hidden="true">＋</b></button>)}
           {availableReferences.filter((asset) => !listedIds.has(asset.id)).length === 0 && <p className="shot-inspector-note">没有可追加的素材。</p>}
@@ -332,21 +335,21 @@ function PromptInspector({ promptText, onPromptChange, promptLibrary, selectedPr
   return (
     <div className="shot-inspector-panel" role="tabpanel" aria-label="提示词">
       <section className="shot-inspector-section">
-        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">Prompt</span><h3>当前提示词</h3></div></div>
-        <label className="shot-inspector-field"><span>Prompt Text</span><textarea value={promptText} onChange={(event) => onPromptChange?.(event.target.value)} disabled={busy || !onPromptChange} rows={8} placeholder="描述镜头画面、动作和构图" /></label>
-        {promptProvenance && <p className="shot-inspector-note">来源：Prompt Library · version {promptProvenance.versionId.slice(-8)}</p>}
+        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">提示词</span><h3>当前提示词</h3></div></div>
+        <label className="shot-inspector-field"><span>提示词正文</span><textarea value={promptText} onChange={(event) => onPromptChange?.(event.target.value)} disabled={busy || !onPromptChange} rows={8} placeholder="描述镜头画面、动作和构图" /></label>
+        {promptProvenance && <p className="shot-inspector-note">来源：提示词库 · 版本 {promptProvenance.versionId.slice(-8)}</p>}
       </section>
       {promptLibrary.length > 0 && (
         <section className="shot-inspector-section">
-          <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">Library</span><h3>Prompt Library</h3></div></div>
+          <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">提示词库</span><h3>提示词库</h3></div></div>
           <div className="shot-inspector-prompt-loader"><select value={selectedPromptId} onChange={(event) => onPromptSelect?.(event.target.value)} disabled={busy || !onPromptSelect}><option value="">选择提示词</option>{promptLibrary.map((prompt) => <option key={prompt.id} value={prompt.id}>{prompt.name}{prompt.versionCount ? ` · ${prompt.versionCount} 版` : ""}</option>)}</select><button type="button" className="quiet-button" onClick={() => void onLoadPrompt?.()} disabled={busy || !selectedPromptId || !onLoadPrompt}>载入快照</button></div>
         </section>
       )}
-      {promptTemplate && <section className="shot-inspector-section shot-inspector-template-slot"><span className="shot-inspector-label">Template</span>{promptTemplate}</section>}
+      {promptTemplate && <section className="shot-inspector-section shot-inspector-template-slot"><span className="shot-inspector-label">模板</span>{promptTemplate}</section>}
       <section className="shot-inspector-section">
-        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">Preview</span><h3>Prompt Preview</h3></div></div>
-        <pre className="shot-inspector-prompt-preview">{promptPreview || promptText || "尚无 Prompt 预览。"}</pre>
-        <div className="shot-inspector-inline-actions"><button type="button" className="quiet-button" onClick={() => void onPreviewPrompt?.()} disabled={busy || !onPreviewPrompt}>预览</button><button type="button" onClick={() => void onApplyPrompt?.()} disabled={busy || !onApplyPrompt || !(promptPreview ?? promptText).trim()}>应用 Prompt</button></div>
+        <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">预览</span><h3>提示词预览</h3></div></div>
+        <pre className="shot-inspector-prompt-preview">{promptPreview || promptText || "尚无提示词预览。"}</pre>
+        <div className="shot-inspector-inline-actions"><button type="button" className="quiet-button" onClick={() => void onPreviewPrompt?.()} disabled={busy || !onPreviewPrompt}>预览</button><button type="button" onClick={() => void onApplyPrompt?.()} disabled={busy || !onApplyPrompt || !(promptPreview ?? promptText).trim()}>应用提示词</button></div>
       </section>
     </div>
   );

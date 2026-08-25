@@ -551,7 +551,7 @@ export function GenerationStudio({
 
   function addCurrentToBatch() {
     if (!selectedWorkflow || !imageCapability?.batchPromptCompatible || !imagePrompt) {
-      setBatchNotice(krea2ConfigError ?? genericImageNotice ?? "当前工作流没有可识别的标准 Prompt 输入，暂时无法添加到图片批次。");
+      setBatchNotice(krea2ConfigError ?? genericImageNotice ?? "当前工作流没有可识别的标准提示词输入，暂时无法添加到图片批次。");
       return;
     }
     const nextErrors = validateRecipeValues(selectedWorkflow, values);
@@ -610,7 +610,7 @@ export function GenerationStudio({
 
   function addBlankPromptCard() {
     if (!selectedWorkflow || !imageCapability?.batchPromptCompatible) {
-      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准 Prompt 输入，不能创建 Prompt 列表批次。");
+      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准提示词输入，不能创建提示词列表批次。");
       return;
     }
     if (batchItems.length >= 100) {
@@ -652,7 +652,7 @@ export function GenerationStudio({
 
   function splitPastedPrompts() {
     if (!selectedWorkflow || !imageCapability?.batchPromptCompatible) {
-      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准 Prompt 输入，不能拆分 Prompt 列表。");
+      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准提示词输入，不能拆分提示词列表。");
       return;
     }
     const parsed = splitPromptBlocks(batchPasteText);
@@ -763,7 +763,7 @@ export function GenerationStudio({
   async function submitExperimentPlan(plan: ExperimentPlan) {
     if (!selectedWorkflow) return;
     if (!canExperimentBase) {
-      setNotice(blockedReason ?? "当前基础 Draft 尚未满足实验队列提交条件。");
+      setNotice(blockedReason ?? "当前基础草稿尚未满足实验队列提交条件。");
       return;
     }
     setNotice(null);
@@ -961,7 +961,7 @@ export function GenerationStudio({
             <span className="section-label">批量图片</span>
             <strong>{selectedWorkflow ? `${workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name)} 已就绪` : "图片工作流"}</strong>
           </div>
-          <span>自动推荐稳定工作流；手动更换后，工作流版本和 Recipe 会随任务冻结。</span>
+          <span>自动推荐稳定工作流；手动更换后，工作流版本和配方会随任务冻结。</span>
         </section>
         <StudioModeTabs mode={studioMode} onChange={setStudioMode} />
         <WorkflowSelector
@@ -1079,7 +1079,7 @@ export function GenerationStudio({
             </div>
             {templateEditorOpen && (
               <section className="project-template-editor" aria-label="保存为项目模板">
-                <label><span>模板名称</span><input autoFocus maxLength={80} value={templateName} placeholder="例如：Kera2 海报起点" onChange={(event) => setTemplateName(event.target.value)} /></label>
+                <label><span>模板名称</span><input autoFocus maxLength={80} value={templateName} placeholder="例如：Krea2 海报起点" onChange={(event) => setTemplateName(event.target.value)} /></label>
                 <label><span>模板说明 <small>可选</small></span><textarea rows={2} maxLength={500} value={templateDescription} onChange={(event) => setTemplateDescription(event.target.value)} /></label>
                 <div><button type="button" onClick={() => void saveProjectTemplate()} disabled={templateSaving || !templateName.trim()}>{templateSaving ? "正在保存..." : "保存模板"}</button><button type="button" className="quiet-button" onClick={() => setTemplateEditorOpen(false)} disabled={templateSaving}>取消</button></div>
                 {templateError && <p className="error-message" role="alert">{templateError}</p>}
@@ -1143,7 +1143,7 @@ export function GenerationStudio({
                   onAdmissionChanged={onProductionAdmissionChanged}
                   onCreated={(created) => {
                     setExperimentFocusBatchId(created.productionBatchId);
-                    setNotice(`Benchmark 已保存：${created.candidates.length} 个候选已进入普通生产队列。`);
+                    setNotice(`基准实验已保存：${created.candidates.length} 个候选已进入普通生产队列。`);
                   }}
                 />
                 <details className="legacy-experiment-planner">
@@ -1175,7 +1175,7 @@ export function GenerationStudio({
                 <div className="batch-panel-header">
                   <div>
                     <span className="section-label">提示词列表</span>
-                  <p>{imageCapability?.batchPromptCompatible ? "每张提示词卡片都会创建一个图片任务；创建批次后工作流版本和参数会冻结。" : "当前工作流没有标准 Prompt 输入，Prompt 列表批量生成不可用；请使用上方通用参数模式单次生成。"}</p>
+                  <p>{imageCapability?.batchPromptCompatible ? "每张提示词卡片都会创建一个图片任务；创建批次后工作流版本和参数会冻结。" : "当前工作流没有标准提示词输入，提示词列表批量生成不可用；请使用上方通用参数模式单次生成。"}</p>
                   </div>
                 <div className="batch-actions">
                   <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible}>
@@ -1218,7 +1218,7 @@ export function GenerationStudio({
                   </span>
                   <small>仅影响之后添加的项目</small>
                 </summary>
-                <p>Prompt 在下方列表中单独编辑；这里的数字和种子参数会作为新项目的默认值。</p>
+                <p>提示词在下方列表中单独编辑；这里的数字和种子参数会作为新项目的默认值。</p>
                 <DynamicFormRenderer
                   recipe={selectedWorkflow}
                   values={values}

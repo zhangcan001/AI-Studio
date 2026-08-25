@@ -257,7 +257,7 @@ export function ProjectCommandCenterView({
     <section className="workspace-panel project-command-center" aria-busy={busyNow || undefined}>
       <div className="section-heading workspace-heading project-command-heading">
         <div className="project-command-title-block">
-          <span className="section-label">Project Command Center</span>
+          <span className="section-label">项目指挥中心</span>
           <h2>项目指挥中心</h2>
           <p className="section-description">从项目状态、运行环境到镜头进度，集中决定下一步工作。</p>
         </div>
@@ -274,7 +274,7 @@ export function ProjectCommandCenterView({
       {project && (
         <section className="project-command-project" aria-labelledby="project-command-project-title">
           <div className="project-command-project-copy">
-            <span className="section-label">Project</span>
+            <span className="section-label">项目</span>
             <h3 id="project-command-project-title">{projectDisplayName(project.id, project.name)}</h3>
             <p>{project.description?.trim() || "暂无项目说明。"}</p>
             <dl className="project-command-project-meta">
@@ -283,10 +283,10 @@ export function ProjectCommandCenterView({
             </dl>
           </div>
           <div className="project-command-project-next">
-            <span className="section-label">Continue Work</span>
+            <span className="section-label">继续工作</span>
             <strong>推荐下一步：{action.label}</strong>
             <p>{action.detail}</p>
-            <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="Continue Work">
+            <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="继续工作">
               继续工作
             </button>
           </div>
@@ -303,7 +303,7 @@ export function ProjectCommandCenterView({
 
       {!loading && !hasSnapshot && !error && (
         <section className="project-command-empty" aria-label="项目为空">
-          <span className="section-label">Empty Project</span>
+          <span className="section-label">项目为空</span>
           <h3>{project ? "当前项目还没有内容" : "暂无项目"}</h3>
           <p>{project ? "先创建镜头或开始一次创作，完成后这里会汇总项目状态。" : "选择一个项目后，这里会显示项目就绪度、生产进度和最近活动。"}</p>
           {!project && <button type="button" onClick={() => onNavigate?.("projects")} disabled={!onNavigate}>管理项目</button>}
@@ -313,19 +313,19 @@ export function ProjectCommandCenterView({
       {hasSnapshot && (
         <>
           <div className="project-command-summary-grid" aria-label="项目摘要">
-            <SummaryCard label="Readiness" title={derived.readiness.label} tone={derived.readiness.status.toLowerCase()}>
+            <SummaryCard label="就绪度" title={derived.readiness.label} tone={derived.readiness.status.toLowerCase()}>
               <span>{derived.readiness.workflowReady} / {derived.readiness.workflowTotal} 个工作流可用</span>
               <small>{derived.readiness.connection}</small>
             </SummaryCard>
-            <SummaryCard label="Content" title={`${derived.content.shots} 个镜头`}>
+            <SummaryCard label="内容" title={`${derived.content.shots} 个镜头`}>
               <span>{derived.content.prompts} 个提示词 · {derived.content.assets} 个素材</span>
               <small>{derived.content.scenes} 个场景 · {derived.content.configuredShots} 个已配置</small>
             </SummaryCard>
-            <SummaryCard label="Production" title={`${derived.production.active} 个活动项`} tone={derived.production.failed ? "warning" : undefined}>
+            <SummaryCard label="生产" title={`${derived.production.active} 个活动项`} tone={derived.production.failed ? "warning" : undefined}>
               <span>{derived.production.completed} 个运行完成 · {derived.production.failed} 个失败</span>
               <small>{derived.production.reviewRequired} 个待人工检查</small>
             </SummaryCard>
-            <SummaryCard label="Runtime" title={derived.runtime.busy ? "运行中" : "空闲"} tone={derived.runtime.busy ? "active" : undefined}>
+            <SummaryCard label="运行参数" title={derived.runtime.busy ? "运行中" : "空闲"} tone={derived.runtime.busy ? "active" : undefined}>
               <span>{derived.readiness.connection} · {derived.runtime.activeTaskCount} 个活动任务</span>
               <small>{derived.runtime.gpu || "GPU 不可用"} · {derived.runtime.vram}</small>
             </SummaryCard>
@@ -334,11 +334,11 @@ export function ProjectCommandCenterView({
           {!project && (
             <section className="project-command-recommendation" aria-labelledby="project-command-recommendation-title">
               <div>
-                <span className="section-label">Continue Work</span>
+                <span className="section-label">继续工作</span>
                 <h3 id="project-command-recommendation-title">推荐下一步：{action.label}</h3>
                 <p>{action.detail}</p>
               </div>
-              <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="Continue Work">
+              <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="继续工作">
                 继续工作
               </button>
             </section>
@@ -347,7 +347,7 @@ export function ProjectCommandCenterView({
           <div className="project-command-workspace">
             <div className="project-command-main-column">
               <section className="project-command-card project-command-progress-card" aria-labelledby="project-command-progress-title">
-                <CardHeading eyebrow="Progress" title="项目进度" id="project-command-progress-title" />
+                <CardHeading eyebrow="进度" title="项目进度" id="project-command-progress-title" />
                 <ProgressBar percent={derived.progress.percent} label={`${derived.progress.completed} / ${derived.progress.total} 个镜头已完成`} />
                 <div className="project-command-stat-row">
                   <Stat label="待生成" value={derived.progress.pendingKeyframes} />
@@ -358,7 +358,7 @@ export function ProjectCommandCenterView({
               </section>
 
               <section className="project-command-card" aria-labelledby="project-command-scene-title">
-                <CardHeading eyebrow="Scene Progress" title="场景进度" id="project-command-scene-title" />
+                <CardHeading eyebrow="场景进度" title="场景进度" id="project-command-scene-title" />
                 {derived.sceneProgress.length ? (
                   <div className="project-command-scene-list">
                     {derived.sceneProgress.map((scene) => (
@@ -374,7 +374,7 @@ export function ProjectCommandCenterView({
 
             <aside className="project-command-side-column" aria-label="项目上下文">
               <section className="project-command-card" aria-labelledby="project-command-issues-title">
-                <CardHeading eyebrow="Issues" title="需要关注" id="project-command-issues-title" />
+                <CardHeading eyebrow="问题" title="需要关注" id="project-command-issues-title" />
                 {derived.issues.length ? (
                   <div className="project-command-issue-list">
                     {derived.issues.map((issue) => <article className={`project-command-issue project-command-issue-${issue.severity.toLowerCase()}`} key={issue.id}><div><strong>{issue.title}</strong><span>{issue.source === "runtime" ? "运行时" : "生产数据"}</span></div><p>{issue.detail}</p></article>)}
@@ -383,7 +383,7 @@ export function ProjectCommandCenterView({
               </section>
 
               <section className="project-command-card" aria-labelledby="project-command-activity-title">
-                <CardHeading eyebrow="Recent Activity" title="最近活动" id="project-command-activity-title" />
+                <CardHeading eyebrow="最近活动" title="最近活动" id="project-command-activity-title" />
                 {displayActivity.length ? (
                   <div className="project-command-activity-list">
                     {displayActivity.slice(0, 8).map((item) => <article className={`project-command-activity project-command-activity-${item.severity.toLowerCase()}`} key={item.id}><time dateTime={item.timestamp}>{formatDateTime(item.timestamp)}</time><div><strong>{item.title}</strong><p>{item.detail}</p>{item.errorCode && <code>{item.errorCode}</code>}</div></article>)}
@@ -392,7 +392,7 @@ export function ProjectCommandCenterView({
               </section>
 
               <section className="project-command-card project-command-quick-actions" aria-labelledby="project-command-quick-actions-title">
-                <CardHeading eyebrow="Quick Actions" title="快速操作" id="project-command-quick-actions-title" />
+                <CardHeading eyebrow="快速操作" title="快速操作" id="project-command-quick-actions-title" />
                 <div className="project-command-action-grid">
                   {COMMAND_CENTER_QUICK_ACTIONS.slice(0, 3).map((item) => <button type="button" className="project-command-action" data-command-action={item.id} key={item.id} onClick={() => onNavigate?.(item.destination)} disabled={!onNavigate || busyNow}><strong>{item.label}</strong><span>{item.detail}</span></button>)}
                 </div>

@@ -12,7 +12,7 @@ import type { ProductionBatchSummary, ProductionQueueOverview } from "../../type
 import type { RecipeViewModel } from "../../types/generation";
 import type { TaskHistoryItem } from "../../types/history";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { formatDateTime, productionStatusLabel, workflowDisplayName } from "../../i18n/statusLabels";
+import { fieldLabel, formatDateTime, productionStatusLabel, workflowDisplayName } from "../../i18n/statusLabels";
 import {
   productionQueueAction,
   recentPromptEntries,
@@ -109,7 +109,7 @@ export function CreationDashboard({
 
   return (
     <details className="creation-dashboard">
-      <summary><span><span className="section-label">Studio Dashboard</span><strong>生产概览</strong></span><small>最近使用 · 队列状态 · 不自动生成</small></summary>
+      <summary><span><span className="section-label">生产面板</span><strong>生产概览</strong></span><small>最近使用 · 队列状态 · 不自动生成</small></summary>
       <div className="creation-dashboard-grid">
         <section className="creation-dashboard-card" aria-label="生产概览统计">
           <div className="creation-dashboard-card-heading"><strong>生产概览</strong><button type="button" className="quiet-button" onClick={() => void refresh()} disabled={loading}>{loading ? "刷新中..." : "刷新"}</button></div>
@@ -143,10 +143,10 @@ export function CreationDashboard({
         </section>
 
         <section className="creation-dashboard-card" aria-label="最近提示词">
-          <div className="creation-dashboard-card-heading"><strong>最近提示词</strong><small>Prompt / Snippet · 最多 5 个</small></div>
-          {textFields.length > 1 && <label className="creation-dashboard-target"><span>用于创作目标字段</span><select value={promptTargetFieldKey} onChange={(event) => onPromptTargetFieldChange(event.target.value)}><option value="">请选择文字字段</option>{textFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}</select></label>}
+          <div className="creation-dashboard-card-heading"><strong>最近提示词</strong><small>提示词 / 片段 · 最多 5 个</small></div>
+          {textFields.length > 1 && <label className="creation-dashboard-target"><span>用于创作目标字段</span><select value={promptTargetFieldKey} onChange={(event) => onPromptTargetFieldChange(event.target.value)}><option value="">请选择文字字段</option>{textFields.map((field) => <option key={field.key} value={field.key}>{fieldLabel(field.key, field.label)}</option>)}</select></label>}
           <div className="creation-dashboard-list">
-            {recentPrompts.map((entry) => <div key={entry.id} className="creation-dashboard-row"><div><strong>{entry.name}</strong><small>{entry.kind === "prompt" ? "Prompt" : "Snippet"} · {entry.versionCount} 个版本 · {formatDateTime(entry.updatedAt)}</small></div><button type="button" className="quiet-button" onClick={() => onUsePrompt(entry, promptTargetFieldKey || textFields[0]?.key || "")} disabled={!textFields.length || (textFields.length > 1 && !promptTargetFieldKey)}>用于创作</button></div>)}
+            {recentPrompts.map((entry) => <div key={entry.id} className="creation-dashboard-row"><div><strong>{entry.name}</strong><small>{entry.kind === "prompt" ? "提示词" : "片段"} · {entry.versionCount} 个版本 · {formatDateTime(entry.updatedAt)}</small></div><button type="button" className="quiet-button" onClick={() => onUsePrompt(entry, promptTargetFieldKey || textFields[0]?.key || "")} disabled={!textFields.length || (textFields.length > 1 && !promptTargetFieldKey)}>用于创作</button></div>)}
             {!recentPrompts.length && <p className="disabled-note">暂无提示词库条目。</p>}
           </div>
         </section>

@@ -275,7 +275,7 @@ describe("独立视频批次输入", () => {
       fields: recipe.fields.map((field) => field.key === "duration_seconds" ? { ...field, min: 0, max: 16 } : field),
     };
     const result = h3RecipeContract(invalid);
-    expect(result).toEqual({ ok: false, reason: "H3 Recipe 的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" });
+    expect(result).toEqual({ ok: false, reason: "H3 配方的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" });
   });
 
   it("blocks asset qualification and creation eligibility for invalid custom resolution", () => {

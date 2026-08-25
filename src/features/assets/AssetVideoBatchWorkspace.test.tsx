@@ -60,14 +60,14 @@ describe("H3 批量视频工作区渲染安全", () => {
       <ProjectFolderImportControls busy={false} hasInspection onRescan={vi.fn()} />,
     );
 
-    expect(html).toContain("项目文件夹 · Segment 自动识别");
-    expect(html).toContain("每个一级子文件夹对应一个视频 Segment");
+    expect(html).toContain("项目文件夹 · 分段自动识别");
+    expect(html).toContain("每个一级子文件夹对应一个视频分段");
     expect(html).toContain("重新扫描");
     expect(html).not.toContain("自动同名配对");
     expect(html).not.toContain("JSON 批量清单");
-    expect(html).not.toContain("Prompt 文生视频");
+    expect(html).not.toContain("提示词文生视频");
     expect(html).not.toContain("首尾帧配对");
-    expect(html).not.toContain("Omni 全能参考清单");
+    expect(html).not.toContain("全能参考清单");
   });
 
   it("labels per-segment parameter sources for confirmation", () => {
@@ -95,7 +95,7 @@ describe("H3 批量视频工作区渲染安全", () => {
 
     expect(html).toContain("批量视频");
     expect(html).toContain("文生视频");
-    expect(html).toContain("视频 Prompt");
+    expect(html).toContain("视频提示词");
     expect(html).toMatch(/<button[^>]*disabled[^>]*>创建视频批次（0）<\/button>/);
     expect(html).not.toContain("REF2VA_IMAGE");
   });

@@ -77,5 +77,5 @@ export function isExecutionTruthStatus(status: string): boolean {
 }
 
 export function statusLabel(status: string): string {
-  return shotStatusLabels[status as ShotStatus] ?? status;
+  return shotStatusLabels[status as ShotStatus] ?? "未知状态";
 }

@@ -72,7 +72,7 @@ describe("experiment planner", () => {
     expect(frozen.issues).toEqual([]);
     expect(frozen.values.seed).toEqual({ type: "seed_fixed", value: "999" });
     const invalid = freezeSeedVariants({ key: "seed", minValue: "100", maxValue: "10" }, 1, () => "50");
-    expect(invalid.issues).toEqual(["当前 Recipe 没有可用的 Seed 合法范围。"]);
+    expect(invalid.issues).toEqual(["当前配方没有可用的 Seed 合法范围。"]);
   });
 
   it("removes a frozen item without changing the remaining values", () => {

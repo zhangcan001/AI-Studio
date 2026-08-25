@@ -57,7 +57,7 @@ describe("ShotInspector", () => {
     expect(html).toContain("当前工作流信息");
     expect(html).toContain("1 个参数");
     expect(html.indexOf("<details class=\"shot-inspector-advanced\">")).toBeGreaterThan(html.indexOf(">CFG</span>"));
-    expect(html.indexOf("<details class=\"shot-inspector-advanced\">")).toBeGreaterThan(html.indexOf(">Duration</span>"));
+    expect(html.indexOf("<details class=\"shot-inspector-advanced\">")).toBeGreaterThan(html.indexOf(">时长（秒）</span>"));
   });
 
   it("renders ordered references, anchor actions, and the keyframe contract without selecting anything", () => {
@@ -83,8 +83,8 @@ describe("ShotInspector", () => {
     expect(html).toContain("@图片1");
     expect(html).toContain("@图片2");
     expect(html).toContain("角色锚点");
-    expect(html).toContain("追加 Anchor");
-    expect(html).toContain("替换 Anchor");
+    expect(html).toContain("追加锚点");
+    expect(html).toContain("替换锚点");
     expect(html).toContain("关键帧");
   });
 
@@ -97,7 +97,7 @@ describe("ShotInspector", () => {
         activeTab="prompt"
         promptText="wide establishing shot"
         promptPreview="wide establishing shot, frozen"
-        promptTemplate={<div>Prompt Template slot</div>}
+        promptTemplate={<div>提示词模板插槽</div>}
         promptLibrary={[{ id: "prompt-1", name: "Cinematic", versionCount: 3 }]}
         selectedPromptId="prompt-1"
         onPromptSelect={vi.fn()}
@@ -107,9 +107,9 @@ describe("ShotInspector", () => {
       />,
     );
 
-    expect(html).toContain("Prompt Preview");
+    expect(html).toContain("提示词预览");
     expect(html).toContain("wide establishing shot, frozen");
-    expect(html).toContain("Prompt Template slot");
-    expect(html).toContain("应用 Prompt");
+    expect(html).toContain("提示词模板插槽");
+    expect(html).toContain("应用提示词");
   });
 });

@@ -35,14 +35,14 @@ const plan: EpisodeProductionPlan = {
   projectId: "project-1", seriesId: "series-1", seriesName: "第一季", episodeId: "episode-1", episodeName: "夜战", episodeOrdinal: 2, stage: "image", sceneTotal: 2, shotTotal: 3, done: 1, prepared: 1, eligible: 1, blocked: 1, readySceneCount: 1, blockedSceneCount: 1, fullyDoneSceneCount: 0, canPrepareAll: false,
   scenes: [
     { sceneId: "scene-1", sceneName: "巷口", sceneOrdinal: 1, total: 2, done: 1, prepared: 1, eligible: 0, blocked: 0, canPrepare: false, classification: "PREPARED", existingBatchIds: ["batch-1"], blockingReasons: [] },
-    { sceneId: "scene-2", sceneName: "屋顶", sceneOrdinal: 2, total: 1, done: 0, prepared: 0, eligible: 1, blocked: 1, canPrepare: true, classification: "PARTIAL", existingBatchIds: [], blockingReasons: ["缺少图片 Prompt"] },
+    { sceneId: "scene-2", sceneName: "屋顶", sceneOrdinal: 2, total: 1, done: 0, prepared: 0, eligible: 1, blocked: 1, canPrepare: true, classification: "PARTIAL", existingBatchIds: [], blockingReasons: ["缺少图片提示词"] },
   ],
 };
 
 describe("EpisodeProductionPanel", () => {
   it("renders Episode/stage selectors, summary, filters, scene rows, strict default and safe prepare copy", () => {
     const html = renderToStaticMarkup(<EpisodeProductionPanel projectId="project-1" tree={tree} shots={[shot("shot-1", 0), shot("shot-2", 1), shot("shot-3", 2)]} initialPlan={plan} />);
-    expect(html).toContain("Episode 选择");
+    expect(html).toContain("集选择");
     expect(html).toContain("图片");
     expect(html).toContain("第一季");
     expect(html).toContain("夜战");
@@ -51,7 +51,7 @@ describe("EpisodeProductionPanel", () => {
     expect(html).toContain("跳过阻塞场景，仅准备当前可生产内容");
     expect(html).toContain("不会自动启动 GPU");
     expect(html).toContain("巷口");
-    expect(html).toContain("缺少图片 Prompt");
+    expect(html).toContain("缺少图片提示词");
   });
 
   it("keeps scene scope ordered and filters classifications in the frontend", () => {
@@ -75,12 +75,12 @@ describe("EpisodeProductionPanel", () => {
     const onNavigate = vi.fn();
     const successHtml = renderToStaticMarkup(<EpisodePrepareResultView result={{ projectId: "project-1", episodeId: "episode-1", stage: "image", status: "SUCCESS", requestedScenes: 1, createdBatches: 1, createdItems: 2, alreadyPreparedScenes: [], skippedDoneScenes: [], skippedEmptyScenes: [], skippedBlockedScenes: [], results: [] }} onOpenProductionQueue={onOpenQueue} disabled={false} onNavigateToScene={onNavigate} />);
     const partialHtml = renderToStaticMarkup(<EpisodePrepareResultView result={{ projectId: "project-1", episodeId: "episode-1", stage: "image", status: "PARTIAL", requestedScenes: 2, createdBatches: 1, createdItems: 2, alreadyPreparedScenes: [], skippedDoneScenes: [], skippedEmptyScenes: [], skippedBlockedScenes: ["scene-2"], results: [{ sceneId: "scene-2", sceneName: "屋顶", status: "FAILED", created: false, createdCount: 0, existingBatchIds: [], blockingReasons: [], error: "状态发生变化" }] }} onOpenProductionQueue={onOpenQueue} disabled={false} onNavigateToScene={onNavigate} />);
-    const blockedHtml = renderToStaticMarkup(<EpisodePrepareResultView result={{ projectId: "project-1", episodeId: "episode-1", stage: "image", status: "BLOCKED", requestedScenes: 1, createdBatches: 0, createdItems: 0, alreadyPreparedScenes: [], skippedDoneScenes: [], skippedEmptyScenes: [], skippedBlockedScenes: ["scene-2"], results: [{ sceneId: "scene-2", sceneName: "屋顶", status: "BLOCKED", created: false, createdCount: 0, existingBatchIds: [], blockingReasons: ["缺少 Prompt"] }] }} onOpenProductionQueue={onOpenQueue} disabled={false} onNavigateToScene={onNavigate} />);
-    expect(successHtml).toContain("SUCCESS");
+    const blockedHtml = renderToStaticMarkup(<EpisodePrepareResultView result={{ projectId: "project-1", episodeId: "episode-1", stage: "image", status: "BLOCKED", requestedScenes: 1, createdBatches: 0, createdItems: 0, alreadyPreparedScenes: [], skippedDoneScenes: [], skippedEmptyScenes: [], skippedBlockedScenes: ["scene-2"], results: [{ sceneId: "scene-2", sceneName: "屋顶", status: "BLOCKED", created: false, createdCount: 0, existingBatchIds: [], blockingReasons: ["缺少提示词"] }] }} onOpenProductionQueue={onOpenQueue} disabled={false} onNavigateToScene={onNavigate} />);
+    expect(successHtml).toContain("已准备");
     expect(successHtml).toContain("打开生产队列");
-    expect(partialHtml).toContain("PARTIAL");
+    expect(partialHtml).toContain("部分准备");
     expect(partialHtml).toContain("状态发生变化");
-    expect(blockedHtml).toContain("BLOCKED");
+    expect(blockedHtml).toContain("未创建批次");
     expect(blockedHtml).toContain("查看场景");
   });
 });

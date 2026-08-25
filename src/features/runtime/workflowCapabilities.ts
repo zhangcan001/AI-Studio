@@ -77,7 +77,7 @@ export function imageRecipeCapability(recipe: RecipeViewModel): ImageRecipeCapab
       promptField,
       batchPromptCompatible: false,
       genericGenerationCompatible: false,
-      reason: "该 Recipe 没有图片输出。",
+      reason: "该配方没有图片输出。",
     };
   }
   if (!promptField) {
@@ -86,7 +86,7 @@ export function imageRecipeCapability(recipe: RecipeViewModel): ImageRecipeCapab
       promptField,
       batchPromptCompatible,
       genericGenerationCompatible,
-      reason: "该工作流没有可识别的标准 Prompt 输入，可使用通用参数模式生成。",
+      reason: "该工作流没有可识别的标准提示词输入，可使用通用参数模式生成。",
     };
   }
   return { outputImage, promptField, batchPromptCompatible, genericGenerationCompatible };
@@ -131,7 +131,7 @@ export function videoRecipeCapability(recipe: RecipeViewModel): VideoRecipeCapab
       supportedModes: [],
       projectFolderModes: [],
       genericGenerationCompatible: false,
-      reason: "该 Recipe 没有视频输出。",
+      reason: "该配方没有视频输出。",
     };
   }
   return {
@@ -142,7 +142,7 @@ export function videoRecipeCapability(recipe: RecipeViewModel): VideoRecipeCapab
     genericGenerationCompatible: true,
     reason: promptField
       ? undefined
-      : "该工作流没有标准 Prompt 输入，将使用通用参数模式。",
+      : "该工作流没有标准提示词输入，将使用通用参数模式。",
   };
 }
 

@@ -69,7 +69,7 @@ describe("ShotCreationWorkspace", () => {
     expect(html).toContain("历史");
     expect(html).toContain("设置");
     expect(html).toContain("候选");
-    expect(html).toContain("Prompt Preview");
+    expect(html).toContain("提示词预览");
     expect(html).toContain("参数");
     expect(html).toContain("preload=\"metadata\"");
     expect(html).toContain("controls=\"\"");

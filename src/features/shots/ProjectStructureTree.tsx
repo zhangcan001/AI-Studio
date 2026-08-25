@@ -355,7 +355,7 @@ export function ProjectStructureTree({
       nodeKey: nodeKey("scene", scene.id),
       selection: selectionForNode("scene", scene.id),
       kind: "scene",
-      label: `Scene ${String(scene.ordinal + 1).padStart(2, "0")} · ${scene.name}`,
+      label: `场景 ${String(scene.ordinal + 1).padStart(2, "0")} · ${scene.name}`,
       meta: `${matchingShotCount} 个镜头`,
       level: 4,
       position,
@@ -458,10 +458,10 @@ export function ProjectStructureTree({
               <span aria-hidden="true">＋</span>
             </button>
             {createMenuOpen && <div className="project-structure-tree-create-menu" role="menu" aria-label="新建菜单">
-              {renderCreateMenuItem("shot", "新建 Shot")}
-              {renderCreateMenuItem("series", "新建 Series")}
-              {renderCreateMenuItem("episode", "新建 Episode")}
-              {renderCreateMenuItem("scene", "新建 Scene")}
+              {renderCreateMenuItem("shot", "新建镜头")}
+              {renderCreateMenuItem("series", "新建系列")}
+              {renderCreateMenuItem("episode", "新建集")}
+              {renderCreateMenuItem("scene", "新建场景")}
             </div>}
           </div>
           {openManagement && !headerActions && <button type="button" className="project-structure-tree-manage-button" onClick={() => openManagement(createContext)}>管理</button>}

@@ -98,7 +98,7 @@ export function ShotBulkImportPanel({ projectId, onImported, onCancel }: ShotBul
       await commitShotBulkImport({ projectId, format, content });
       setContent("");
       setPreview(undefined);
-      setNotice(`已导入 ${importedCount} 个 Shot。`);
+      setNotice(`已导入 ${importedCount} 个镜头。`);
       await onImported?.();
     } catch (value: unknown) {
       setError(toUserMessage(value));
@@ -130,7 +130,7 @@ export function ShotBulkImportPanel({ projectId, onImported, onCancel }: ShotBul
 
       <div className="shot-batch-stage-tabs" role="tablist" aria-label="批量导入格式">
         <button type="button" role="tab" aria-selected={format === "tsv"} className={format === "tsv" ? "active" : ""} onClick={() => selectFormat("tsv")} disabled={busy}>
-          TSV
+                  表格文本
         </button>
         <button type="button" role="tab" aria-selected={format === "json"} className={format === "json" ? "active" : ""} onClick={() => selectFormat("json")} disabled={busy}>
           JSON
@@ -198,7 +198,7 @@ export function ShotBulkImportPanel({ projectId, onImported, onCancel }: ShotBul
           </table>
         </div>
       ) : (
-        <p className="empty-state">输入 TSV 或 JSON 后点击“检查”，这里会显示逐行预览。</p>
+        <p className="empty-state">输入表格文本或 JSON 后点击“检查”，这里会显示逐行预览。</p>
       )}
     </section>
   );

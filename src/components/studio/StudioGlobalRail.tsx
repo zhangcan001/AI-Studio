@@ -57,7 +57,7 @@ export function StudioGlobalRail({ activeItem, items = defaultStudioRailItems, o
         })}
       </nav>
       <div className="studio-global-rail__footer" aria-label="本地工作区">
-        <span>LOCAL</span>
+        <span>本地</span>
       </div>
     </aside>
   );

@@ -186,7 +186,7 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
             <div className="asset-video-prompt-heading">
               <div>
                 <strong>视频提示词</strong>
-                <small>资产可直接用于 MiniMax H3 批量视频；允许保留内部换行。</small>
+                <small>资产可直接用于 H3 批量视频；允许保留内部换行。</small>
               </div>
               <span className={videoPrompt.trim() ? "asset-prompt-status asset-prompt-status-ready" : "asset-prompt-status"}>
                 {videoPrompt.trim() ? "已配置" : "未配置"}

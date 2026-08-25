@@ -56,8 +56,8 @@ export function StudioTopBar({
     <span className="studio-topbar__brand-lockup">
       <span className="studio-topbar__brand-mark" aria-hidden="true">AI</span>
       <span className="studio-topbar__brand-copy">
-        <strong>AI STUDIO</strong>
-        <small>CREATIVE WORKSTATION</small>
+        <strong>AI Studio</strong>
+        <small>创作工作台</small>
       </span>
     </span>
   );

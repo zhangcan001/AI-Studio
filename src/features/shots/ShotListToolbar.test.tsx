@@ -22,7 +22,7 @@ describe("ShotListToolbar", () => {
       />,
     );
 
-    expect(html).toContain("搜索镜头名称或 Prompt");
+    expect(html).toContain("搜索镜头名称或提示词");
     expect(html).toContain("全部");
     expect(html).toContain("25 / 页");
     expect(html).toContain("50 / 页");

@@ -68,14 +68,14 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 const WORKFLOW_ALIASES: Record<string, string> = {
-  wfl_kera2_t2i_local_v2: "Kera2 文生图",
-  wfl_minimax_h3_reference_video: "MiniMax H3 参考图生视频",
+  wfl_kera2_t2i_local_v2: "Krea2 文生图",
+  wfl_minimax_h3_reference_video: "H3 参考图生视频",
 };
 
 const WORKFLOW_NAME_ALIASES: Record<string, string> = {
-  "krea2 t2i local": "Kera2 文生图",
-  "kera2 t2i local": "Kera2 文生图",
-  "minimax h3 reference video": "MiniMax H3 参考图生视频",
+  "krea2 t2i local": "Krea2 文生图",
+  "kera2 t2i local": "Krea2 文生图",
+  "minimax h3 reference video": "H3 参考图生视频",
 };
 
 const EVENT_LABELS: Record<string, string> = {

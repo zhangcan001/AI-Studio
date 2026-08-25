@@ -34,7 +34,7 @@ const anchorKindLabels: Record<ReferenceAnchorView["kind"], string> = {
 };
 
 function stageLabel(stage: ShotStage): string {
-  return stage === "image" ? "Image" : "Video";
+  return stage === "image" ? "图片" : "视频";
 }
 
 function defaultContextRows(
@@ -176,22 +176,22 @@ export function PromptTemplatePanel({
     <section className="prompt-template-panel" aria-label="模板预览">
       <div className="prompt-template-heading">
         <div>
-          <span className="section-label">Prompt Template</span>
-          <h4>模板预览 <em className="prompt-template-badge">模板 Prompt</em></h4>
-          <p>{entry.name} · v{version.version} · 目标 {stageLabel(stage)} · 当前 Shot：{shot.name}</p>
+          <span className="section-label">提示词模板</span>
+          <h4>模板预览 <em className="prompt-template-badge">提示词模板</em></h4>
+          <p>{entry.name} · v{version.version} · 目标 {stageLabel(stage)} · 当前镜头：{shot.name}</p>
         </div>
         <span className="prompt-template-variable-count">{analysis.variables.length} 个变量</span>
       </div>
 
       <div className="prompt-template-context">
-        <div className="prompt-template-subheading"><strong>Context</strong><small>当前镜头自动解析的上下文</small></div>
+        <div className="prompt-template-subheading"><strong>上下文</strong><small>当前镜头自动解析的上下文</small></div>
         <div className="prompt-template-context-grid">
           {contextRows.map(([key, value]) => <div key={key}><span>{key}</span><strong>{value || "—"}</strong></div>)}
         </div>
       </div>
 
       <div className="prompt-template-anchor-picker">
-        <div className="prompt-template-subheading"><strong>Reference Anchors</strong><small>仅作为本次模板上下文，不改变素材关系；选择顺序会随本次操作保留。</small></div>
+        <div className="prompt-template-subheading"><strong>参考锚点</strong><small>仅作为本次模板上下文，不改变素材关系；选择顺序会随本次操作保留。</small></div>
         <div className="prompt-template-anchor-list">
           {referenceAnchors.map((anchor) => (
             <label key={anchor.id}>
@@ -200,12 +200,12 @@ export function PromptTemplatePanel({
               <small>{anchor.description || "无描述"}</small>
             </label>
           ))}
-          {!referenceAnchors.length && <span className="empty-state">当前项目暂无 Reference Anchor。</span>}
+          {!referenceAnchors.length && <span className="empty-state">当前项目暂无参考锚点。</span>}
         </div>
       </div>
 
       {customNames.length > 0 && <div className="prompt-template-custom-inputs">
-        <div className="prompt-template-subheading"><strong>Custom inputs</strong><small>模板自动识别出的自定义变量</small></div>
+        <div className="prompt-template-subheading"><strong>自定义输入</strong><small>模板自动识别出的自定义变量</small></div>
         <div className="prompt-template-custom-grid">
           {customNames.map((name) => <label key={name}><span>{name}</span><input value={customValues[name] ?? ""} maxLength={4096} onChange={(event) => changeCustomValue(name, event.target.value)} placeholder={"输入 " + name} disabled={busy || disabled} /></label>)}
         </div>
@@ -216,10 +216,10 @@ export function PromptTemplatePanel({
         <button type="button" className="quiet-button" onClick={() => void applyCurrentShot()} disabled={busy || disabled || !preview}>应用到当前镜头</button>
         {structureContext?.scene && <button type="button" className="quiet-button" onClick={() => void applyCurrentScene()} disabled={busy || disabled || !preview}>应用到当前场景（{structureContext.scene.shotIds.length}）</button>}
       </div>
-      {!structureContext?.scene && <p className="shot-inline-note">当前镜头未归档到 Scene，因此不会显示场景批量应用。</p>}
+      {!structureContext?.scene && <p className="shot-inline-note">当前镜头未归档到场景，因此不会显示场景批量应用。</p>}
       {preview && <div className="prompt-template-preview-grid">
-        <div><strong>Template</strong><pre>{preview.templateText}</pre></div>
-        <div><strong>Rendered</strong><pre>{preview.renderedText}</pre></div>
+        <div><strong>模板文本</strong><pre>{preview.templateText}</pre></div>
+        <div><strong>渲染结果</strong><pre>{preview.renderedText}</pre></div>
       </div>}
       {preview?.warnings.map((warning) => <p key={warning} className="settings-warning">{warning}</p>)}
       {error && <p className="error-message" role="alert">{error}</p>}

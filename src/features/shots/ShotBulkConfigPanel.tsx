@@ -47,7 +47,7 @@ function stageLabel(stage: ShotStage): string {
 
 function promptPreview(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= 96) return normalized || "未配置 Prompt";
+  if (normalized.length <= 96) return normalized || "未配置提示词";
   return `${normalized.slice(0, 93)}…`;
 }
 
@@ -99,10 +99,10 @@ export function ShotBulkConfigPanel({
     setSelectedIds(new Set(bulkSelectionIds(shots, preset, stage)));
     reportNotice(
       preset === "all"
-        ? `已选择全部 ${shots.length} 个 Shot。`
+        ? `已选择全部 ${shots.length} 个镜头。`
         : preset === "ready"
-          ? `已选择当前${stageLabel(stage)} Ready 的 Shot。`
-          : `已选择当前${stageLabel(stage)}未配置的 Shot。`,
+          ? `已选择当前${stageLabel(stage)}待生成的镜头。`
+          : `已选择当前${stageLabel(stage)}未配置的镜头。`,
     );
   }
 
@@ -123,7 +123,7 @@ export function ShotBulkConfigPanel({
     successMessage: string,
   ) {
     if (!selectedIdsInOrder.length) {
-      reportError("请先选择至少一个 Shot。");
+      reportError("请先选择至少一个镜头。");
       return;
     }
     setBusyAction(actionName);
@@ -147,23 +147,23 @@ export function ShotBulkConfigPanel({
     await runAction(
       `configure-${nextStage}`,
       (shotIds) => onConfigureStage(nextStage, shotIds),
-      `已提交 ${selectedCount} 个 Shot 的${stageLabel(nextStage)}批量配置。`,
+      `已提交 ${selectedCount} 个镜头的${stageLabel(nextStage)}批量配置。`,
     );
   }
 
   async function assignPrompt() {
     if (!onBulkPrompt) {
-      reportNotice("已保留批量 Prompt 入口；当前组件不会绕过 ShotService 直接写数据库。 ");
+      reportNotice("已保留批量提示词入口；当前组件不会绕过镜头服务直接写数据库。 ");
       return;
     }
     if (!promptText.trim()) {
-      reportError("请输入要批量应用的 Prompt。清除 provenance 请使用后端批量命令。" );
+      reportError("请输入要批量应用的提示词。清除来源标记请使用后端批量命令。" );
       return;
     }
     await runAction(
       "prompt",
       (shotIds) => onBulkPrompt(stage, shotIds, promptText),
-      `已提交 ${selectedCount} 个 Shot 的批量 Prompt 操作；保存后仍按快照语义生效。`,
+      `已提交 ${selectedCount} 个镜头的批量提示词操作；保存后仍按快照语义生效。`,
     );
   }
 
@@ -183,7 +183,7 @@ export function ShotBulkConfigPanel({
           .filter((row) => !row || !row.eligible);
         if (blocked.length || shotIds.length > plan.maxItems) {
           const details = blocked
-            .map((row) => row ? `${row.name}：${row.blockingReasons.join("；")}` : "所选 Shot 不在当前项目批次计划中")
+            .map((row) => row ? `${row.name}：${row.blockingReasons.join("；")}` : "所选镜头不在当前项目批次计划中")
             .join("；");
           const limit = shotIds.length > plan.maxItems ? `所选数量超过当前批次上限 ${plan.maxItems}。` : "";
           throw new Error([details, limit].filter(Boolean).join(" "));
@@ -192,24 +192,24 @@ export function ShotBulkConfigPanel({
         const batch = await createShotBatch({ projectId, stage: nextStage, shotIds });
         try {
           await startProductionQueue(projectId, batch.id);
-          reportNotice(`${stageLabel(nextStage)} Batch 已创建并开始严格串行执行；结果仍需人工 Review/Select。`);
+          reportNotice(`${stageLabel(nextStage)} 批次已创建并开始严格串行执行；结果仍需人工审核/选择。`);
         } catch (startError: unknown) {
-          reportNotice(`${stageLabel(nextStage)} Batch 已创建为待启动状态：${batch.name}。${toUserMessage(startError)}`);
+          reportNotice(`${stageLabel(nextStage)} 批次已创建为待启动状态：${batch.name}。${toUserMessage(startError)}`);
         }
       },
-      `${stageLabel(nextStage)} Batch 操作已完成；生成结果仍需人工 Review/Select。`,
+      `${stageLabel(nextStage)} 批次操作已完成；生成结果仍需人工审核/选择。`,
     );
   }
 
   return (
-    <section className="shot-bulk-config-panel" aria-label="批量 Shot 配置">
+    <section className="shot-bulk-config-panel" aria-label="批量镜头配置">
       <div className="pipeline-section-heading">
         <div>
           <span className="section-label">批量配置</span>
-          <h3>Shot 批量生产入口</h3>
-          <p className="pipeline-muted">先选择 Shot，再进入图片/视频配置、Prompt 或现有 ShotBatchService 队列。</p>
+          <h3>镜头批量生产入口</h3>
+          <p className="pipeline-muted">先选择镜头，再进入图片/视频配置、提示词或现有镜头批次队列。</p>
         </div>
-        <span className="pipeline-selection-count">{selectedCount} 个 Shot 已选择</span>
+        <span className="pipeline-selection-count">{selectedCount} 个镜头已选择</span>
       </div>
 
       <div className="pipeline-stage-tabs" role="tablist" aria-label="批量配置阶段">
@@ -227,10 +227,10 @@ export function ShotBulkConfigPanel({
         ))}
       </div>
 
-      <div className="pipeline-selection-toolbar" aria-label="Shot 选择操作">
+      <div className="pipeline-selection-toolbar" aria-label="镜头选择操作">
         <button type="button" className="quiet-button" onClick={() => applyPreset("all")} disabled={Boolean(busyAction)}>全选</button>
         <button type="button" className="quiet-button" onClick={() => setSelectedIds(new Set())} disabled={Boolean(busyAction) || !selectedCount}>取消全选</button>
-        <button type="button" className="quiet-button" onClick={() => applyPreset("ready")} disabled={Boolean(busyAction)}>选择 Ready</button>
+        <button type="button" className="quiet-button" onClick={() => applyPreset("ready")} disabled={Boolean(busyAction)}>选择就绪项</button>
         <button type="button" className="quiet-button" onClick={() => applyPreset("unconfigured")} disabled={Boolean(busyAction)}>选择未配置</button>
         <span>{selectedCount} / {shots.length} 已选择</span>
       </div>
@@ -243,25 +243,25 @@ export function ShotBulkConfigPanel({
           配置视频阶段
         </button>
         <button type="button" onClick={() => void assignPrompt()} disabled={Boolean(busyAction) || !selectedCount}>
-          批量 Prompt
+          批量应用提示词
         </button>
         <button type="button" onClick={() => void createBatch("image")} disabled={Boolean(busyAction) || !selectedCount}>
-          {busyAction === "batch-image" ? "正在创建图片 Batch…" : "创建图片 Batch"}
+          {busyAction === "batch-image" ? "正在创建图片批次…" : "创建图片批次"}
         </button>
         <button type="button" onClick={() => void createBatch("video")} disabled={Boolean(busyAction) || !selectedCount}>
-          {busyAction === "batch-video" ? "正在创建视频 Batch…" : "创建视频 Batch"}
+          {busyAction === "batch-video" ? "正在创建视频批次…" : "创建视频批次"}
         </button>
       </div>
 
       <label className="pipeline-prompt-editor">
-        <span>批量应用当前阶段 Prompt</span>
-        <textarea value={promptText} onChange={(event) => setPromptText(event.target.value)} rows={3} placeholder="输入后点击“批量 Prompt”；文本会以当前阶段快照写入所选 Shot。" disabled={Boolean(busyAction)} />
+        <span>批量应用当前阶段提示词</span>
+        <textarea value={promptText} onChange={(event) => setPromptText(event.target.value)} rows={3} placeholder="输入后点击“批量应用提示词”；文本会以当前阶段快照写入所选镜头。" disabled={Boolean(busyAction)} />
       </label>
 
       <div className="pipeline-shot-table-wrap">
         <table className="pipeline-shot-table">
           <thead>
-            <tr><th aria-label="选择" /><th>Shot</th><th>当前 Prompt 快照</th><th>图片状态</th><th>视频状态</th></tr>
+            <tr><th aria-label="选择" /><th>镜头</th><th>当前提示词快照</th><th>图片状态</th><th>视频状态</th></tr>
           </thead>
           <tbody>
             {shots.map((shot) => (
@@ -276,17 +276,17 @@ export function ShotBulkConfigPanel({
                   />
                 </td>
                 <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shot.id}</small></td>
-                <td><span className="pipeline-prompt-preview">{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `Library version ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
+                <td><span className="pipeline-prompt-preview">{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `提示词库版本 ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
                 <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "image"))}</span></td>
                 <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "video"))}</span></td>
               </tr>
             ))}
-            {!shots.length && <tr><td colSpan={5}><p className="empty-state">当前项目还没有 Shot。</p></td></tr>}
+            {!shots.length && <tr><td colSpan={5}><p className="empty-state">当前项目还没有镜头。</p></td></tr>}
           </tbody>
         </table>
       </div>
 
-      <p className="pipeline-human-review-note"><strong>人工 Review 保持不变：</strong>批量操作不会自动选择第一张图片、最新图片或第一个视频；图片生成后停在 IMAGE_REVIEW，视频生成后停在 VIDEO_REVIEW。</p>
+      <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>批量操作不会自动选择第一张图片、最新图片或第一个视频；图片生成后停在图片审核，视频生成后停在视频审核。</p>
       {localNotice && <p className="studio-notice">{localNotice}</p>}
       {localError && <p className="error-message" role="alert">{localError}</p>}
     </section>

@@ -7,7 +7,7 @@ import type { AssetView } from "../../types/asset";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import type { ReusableGenerationDraft, TaskDetail } from "../../types/history";
 import type { ProductionBatchDetail } from "../../types/productionQueue";
-import { taskStatusLabel } from "../../i18n/statusLabels";
+import { fieldLabel, productionItemStatusLabel, taskStatusLabel } from "../../i18n/statusLabels";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { AssetCompareWorkspace } from "../assets/AssetCompareWorkspace";
 import { toggleCompareSelection } from "../assets/assetCompare";
@@ -39,7 +39,7 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
   const [compareOpen, setCompareOpen] = useState(false);
   const [notice, setNotice] = useState<string>();
   const fieldLabels = useMemo(
-    () => Object.fromEntries((recipe?.fields ?? []).map((field) => [field.key, field.label])),
+    () => Object.fromEntries((recipe?.fields ?? []).map((field) => [field.key, fieldLabel(field.key, field.label)])),
     [recipe],
   );
 
@@ -88,7 +88,7 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
         <div>
           <span className="section-label">实验结果</span>
           <h3>结果择优</h3>
-          <p>{comparisonLabel}。结果仍来自普通 Task、Snapshot 和 Asset；这里只显示摘要差异，不暴露完整快照。</p>
+          <p>{comparisonLabel}。结果仍来自普通任务、快照和素材；这里只显示摘要差异，不暴露完整快照。</p>
         </div>
         <div className="experiment-compare-toolbar">
           <span>已选 {compareAssets.length} / 4 个结果</span>
@@ -115,7 +115,7 @@ export function ExperimentResultGrid({ projectId, batch, recipe, baseValues, onP
             <article className="experiment-result-card" key={item.id}>
               <div className="experiment-result-card-heading">
                 <strong>#{item.ordinal + 1}</strong>
-                <span className={`status-pill task-${(record?.task?.status ?? item.status).toLowerCase()}`}>{record?.task ? taskStatusLabel(record.task.status) : item.status}</span>
+                <span className={`status-pill task-${(record?.task?.status ?? item.status).toLowerCase()}`}>{record?.task ? taskStatusLabel(record.task.status) : productionItemStatusLabel(item.status)}</span>
               </div>
               <dl className="experiment-result-facts">
                 <div><dt>变化字段</dt><dd>{diff.length ? diff.map((entry) => `${entry.fieldKey}：${entry.after}`).join(" · ") : emptyDiffLabel}</dd></div>

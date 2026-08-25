@@ -78,7 +78,7 @@ export function freezeSeedVariants(
   const min = parseSeed(field.minValue);
   const max = parseSeed(field.maxValue);
   if (min === undefined || max === undefined || min > max) {
-    return { values: [], issues: ["当前 Recipe 没有可用的 Seed 合法范围。"] };
+    return { values: [], issues: ["当前配方没有可用的 Seed 合法范围。"] };
   }
   const values: Array<Extract<DraftValue, { type: "seed_fixed" }>> = [];
   const seen = new Set<string>();
@@ -86,7 +86,7 @@ export function freezeSeedVariants(
     const value = source(field, index);
     const numeric = parseSeed(value);
     if (numeric === undefined || numeric < min || numeric > max) {
-      issues.push("生成的随机 Seed 超出当前 Recipe 范围。");
+      issues.push("生成的随机 Seed 超出当前配方范围。");
       continue;
     }
     const fixed = numeric.toString();
@@ -271,7 +271,7 @@ function validateVariantValue(field: Extract<RecipeField, { type: "textarea" | "
   const min = parseSeed(field.minValue);
   const max = parseSeed(field.maxValue);
   if (numeric === undefined || min === undefined || max === undefined || numeric < min || numeric > max) {
-    issues.push(`字段“${field.label}”的 Seed 不在 Recipe 合法范围内。`);
+  issues.push(`字段“${field.label}”的 Seed 不在配方合法范围内。`);
   }
 }
 

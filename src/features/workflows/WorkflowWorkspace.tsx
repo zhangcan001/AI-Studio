@@ -301,7 +301,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     try {
       const inspection = await inspectWorkflowDeletion(item.workflowVersionId);
       if (inspection.builtin) {
-        setWorkspaceError("这是内置 Runtime Package，不能永久删除；如需停用请使用“停用”。");
+        setWorkspaceError("这是内置运行包，不能永久删除；如需停用请使用“停用”。");
         return;
       }
       if (inspection.activeTaskCount > 0 || inspection.activeQueueItemCount > 0) {
@@ -329,7 +329,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         ? await inspectWorkflowDeletion(item.workflowVersionId)
         : undefined;
       if (inspection?.builtin) {
-        setWorkspaceError("该工作流包含内置 Runtime Package，不能永久删除。");
+        setWorkspaceError("该工作流包含内置运行包，不能永久删除。");
         return;
       }
       if (inspection && (inspection.activeTaskCount > 0 || inspection.activeQueueItemCount > 0)) {
@@ -499,7 +499,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         targetNode: nodeId,
         targetInput: input.name,
       }));
-      setNotice(`${mapping.label} 已加入新 Recipe 草稿。`);
+      setNotice(`${mapping.label} 已加入新配方草稿。`);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     } finally {
@@ -527,7 +527,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         targetNode,
         targetInput,
       }));
-      setNotice("生产参数字段已保存到新 Recipe 草稿。");
+      setNotice("生产参数字段已保存到新配方草稿。");
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     } finally {
@@ -592,7 +592,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       setParameterOriginalKeys([]);
       await loadWorkspace("refresh");
       await onCatalogChanged();
-      setNotice(`已保存为 Recipe ${result.recipeId}；Workflow Version 保持不变。`);
+      setNotice(`已保存为配方 ${result.recipeId}；工作流版本保持不变。`);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     } finally {
@@ -883,7 +883,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       <section className="workflow-import-quality" aria-label="工作流导入质量门">
         <div>
           <span className="section-label">导入质量门</span>
-          <strong>选择 JSON → 自动识别 → 能力检查 → Recipe → 自动确认</strong>
+          <strong>选择 JSON → 自动识别 → 能力检查 → 配方 → 自动确认</strong>
           <p>正常工作流只需一次操作；只有歧义、缺失节点或不兼容字段才会进入问题聚焦。</p>
         </div>
         <ul>
@@ -943,7 +943,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button workflow-parameter-button" onClick={() => void openParameterExposure(item)}>生产参数</button>}
               {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "快速测试"}</button>}
               {item.workflowId && <button type="button" className="quiet-button" onClick={() => void smartImportWorkflow(item.workflowId)}>创建新版本</button>}
-              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)} disabled={item.builtin} title={item.builtin ? "内置 Runtime Package 不可永久删除" : "删除此工作流版本"}>{item.builtin ? "删除（内置不可用）" : "删除"}</button>}
+              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)} disabled={item.builtin} title={item.builtin ? "内置运行包不可永久删除" : "删除此工作流版本"}>{item.builtin ? "删除（内置不可用）" : "删除"}</button>}
               {item.workflowVersionId && item.archived && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复到列表</button>}
               <details className="workflow-row-menu">
                 <summary aria-label="更多工作流操作">⋯</summary>
@@ -952,7 +952,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
                   {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
                   {item.workflowVersionId && !item.archived && !item.builtin && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)}>删除此版本</button>}
                   {item.workflowVersionId && !item.archived && item.workflowId && <button type="button" className="quiet-button danger-button" onClick={() => void removeEntireWorkflow(item)}>删除整个工作流</button>}
-                  {item.builtin && <span className="workflow-row-menu-note">内置 Runtime Package 不可永久删除</span>}
+                  {item.builtin && <span className="workflow-row-menu-note">内置运行包不可永久删除</span>}
                 </div>
               </details>
             </div>
@@ -960,7 +960,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               <summary>查看详情</summary>
               <div className="workflow-detail-grid">
                 <span>启用状态 <strong>{item.archived ? "已归档" : item.enabled ? "已启用" : "已停用"}</strong></span>
-                <span>包来源 <strong>{item.builtin ? "内置 Runtime Package" : "用户导入"}</strong></span>
+                <span>包来源 <strong>{item.builtin ? "内置运行包" : "用户导入"}</strong></span>
                 <span>工作流 SHA-256 <strong>{item.workflowSha256 ?? "—"}</strong></span>
                 <span>配方 SHA-256 <strong>{item.recipeSha256 ?? "—"}</strong></span>
                 <span>节点数量 <strong>{item.nodeCount}</strong></span>
@@ -1137,12 +1137,12 @@ function ParameterExposurePane({
   }
 
   return (
-    <section className="workflow-parameter-exposure" aria-label="Workflow 生产参数">
+    <section className="workflow-parameter-exposure" aria-label="工作流生产参数">
       <header className="workflow-parameter-header">
         <div>
-          <span className="section-label">Workflow Parameter Exposure</span>
+          <span className="section-label">工作流参数暴露</span>
           <h3>{workflow.name ?? workflow.packageName}</h3>
-          <p className="section-description">只修改 Recipe 参数暴露，不修改 Workflow API Graph；内置 Runtime 也只会复制为新 Recipe。</p>
+          <p className="section-description">只修改配方参数暴露，不修改工作流 API 图结构；内置运行包也只会复制为新配方。</p>
         </div>
         <div className="workflow-smart-actions">
           <button type="button" className="quiet-button" onClick={onRefresh} disabled={loading}>{loading ? "读取中..." : "刷新 ComfyUI 参数"}</button>
@@ -1150,15 +1150,15 @@ function ParameterExposurePane({
           <button type="button" onClick={() => onSave(draft.inputMappings.flatMap((mapping) => {
             const edit = edits[mappingKey(mapping.targetNode, mapping.targetInput)];
             return edit ? [{ mapping, draft: edit }] : [];
-          }))} disabled={loading}>{loading ? "保存中..." : "保存为新 Recipe"}</button>
+        }))} disabled={loading}>{loading ? "保存中..." : "保存为新配方"}</button>
         </div>
       </header>
 
       <div className="workflow-parameter-summary">
-        <span>Workflow Version<strong>{workflow.workflowVersion ?? "—"}</strong></span>
-        <span>当前 Recipe<strong>{currentRecipe?.version ?? "—"} · {currentRecipe?.inputCount ?? 0} 项</strong></span>
-        <span>新 Recipe<strong>{draft.manifest.recipeVersion} · {draft.inputMappings.length} 项</strong></span>
-        <span>Graph SHA-256<strong>{draft.workflowSha256.slice(0, 16)}…</strong></span>
+        <span>工作流版本<strong>{workflow.workflowVersion ?? "—"}</strong></span>
+        <span>当前配方<strong>{currentRecipe?.version ?? "—"} · {currentRecipe?.inputCount ?? 0} 项</strong></span>
+        <span>新配方<strong>{draft.manifest.recipeVersion} · {draft.inputMappings.length} 项</strong></span>
+        <span>图结构 SHA-256<strong>{draft.workflowSha256.slice(0, 16)}…</strong></span>
       </div>
 
       <div className="workflow-parameter-preview">
@@ -1166,15 +1166,15 @@ function ParameterExposurePane({
         <strong>{draft.inputMappings.length} 个生产参数</strong>
         <small>新增：{addedKeys.length ? addedKeys.join("、") : "无"}</small>
         <small>删除：{removedKeys.length ? removedKeys.join("、") : "无"}</small>
-        <small>发布后直接使用现有 Preset / 默认预设系统；旧 Recipe 的预设保持原作用域，不自动改写。</small>
+        <small>发布后直接使用现有预设 / 默认预设系统；旧配方的预设保持原作用域，不自动改写。</small>
       </div>
 
-      <label className="workflow-parameter-search">搜索节点 / 输入 / Semantic Key
+      <label className="workflow-parameter-search">搜索节点 / 输入 / 语义键
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="例如 steps、KSampler、节点 88" />
       </label>
 
       <section className="workflow-parameter-section">
-        <div className="workflow-parameter-section-heading"><div><span className="section-label">已暴露参数</span><h4>{draft.inputMappings.length} 项</h4></div><small>修改只作用于新 Recipe Draft</small></div>
+        <div className="workflow-parameter-section-heading"><div><span className="section-label">已暴露参数</span><h4>{draft.inputMappings.length} 项</h4></div><small>修改只作用于新配方草稿</small></div>
         {draft.inputMappings.length ? draft.inputMappings.map((mapping) => {
           const key = mappingKey(mapping.targetNode, mapping.targetInput);
           const edit = edits[key] ?? mappingToDraft(mapping);
@@ -1183,7 +1183,7 @@ function ParameterExposurePane({
               <div className="workflow-parameter-field-heading"><div><strong>{mapping.label}</strong><code>{mapping.semanticKey}</code></div><span>节点 {mapping.targetNode} · {mapping.targetInput}</span><button type="button" className="quiet-button danger-button" onClick={() => onRemove(mapping)} disabled={loading}>移除</button></div>
               <div className="workflow-parameter-form">
                 <label>显示名称<input value={edit.label} onChange={(event) => patchMapping(mapping, { label: event.target.value })} /></label>
-                <label>Semantic Key<input value={edit.semanticKey} onChange={(event) => patchMapping(mapping, { semanticKey: event.target.value })} /></label>
+                <label>语义键<input value={edit.semanticKey} onChange={(event) => patchMapping(mapping, { semanticKey: event.target.value })} /></label>
                 <label>类型<select value={edit.fieldType} onChange={(event) => patchMapping(mapping, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
                 <label className="checkbox-label"><input type="checkbox" checked={edit.required} onChange={(event) => patchMapping(mapping, { required: event.target.checked })} /> 必填</label>
                 {(edit.fieldType === "textarea" || edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <label>默认值<input value={edit.defaultValue} onChange={(event) => patchMapping(mapping, { defaultValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : undefined} /></label>}
@@ -1191,13 +1191,13 @@ function ParameterExposurePane({
                   <label>最小值<input value={edit.minValue} onChange={(event) => patchMapping(mapping, { minValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>
                   <label>最大值<input value={edit.maxValue} onChange={(event) => patchMapping(mapping, { maxValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>
                 </>}
-                {(edit.fieldType === "integer" || edit.fieldType === "number") && <label>Step<input value={edit.step} onChange={(event) => patchMapping(mapping, { step: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>}
+                {(edit.fieldType === "integer" || edit.fieldType === "number") && <label>步长<input value={edit.step} onChange={(event) => patchMapping(mapping, { step: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : "numeric"} /></label>}
                 {edit.fieldType.endsWith("s") && <label>最大数量<input value={edit.maxItems} onChange={(event) => patchMapping(mapping, { maxItems: event.target.value })} inputMode="numeric" /></label>}
                 <button type="button" onClick={() => onSaveMapping(edit, mapping.targetNode, mapping.targetInput)} disabled={loading}>保存字段</button>
               </div>
             </div>
           );
-        }) : <p className="disabled-note">当前 Recipe 没有可编辑的输入映射。</p>}
+        }) : <p className="disabled-note">当前配方没有可编辑的输入映射。</p>}
       </section>
 
       <section className="workflow-parameter-section">
@@ -1211,7 +1211,7 @@ function ParameterExposurePane({
 
       <details className="workflow-parameter-section workflow-parameter-internal">
         <summary><span className="section-label">工作流内部参数</span><strong>{internal.length} 项</strong></summary>
-        <p className="disabled-note">链接输入、危险路径/模型/设备输入和暂不支持的字段类型保持内部状态，不会写入 Recipe。</p>
+        <p className="disabled-note">链接输入、危险路径/模型/设备输入和暂不支持的字段类型保持内部状态，不会写入配方。</p>
         {internal.map(({ node, input }) => <div className="workflow-parameter-internal-row" key={`${node.nodeId}:${input.name}`}><span>节点 {node.nodeId} · {node.classType}</span><strong>{input.name}</strong><small>{input.isLinked ? "内部连接 · 不可作为生产参数" : isDangerousParameterName(input.name) ? "危险输入 · 后端禁止暴露" : "当前字段类型暂不支持"}</small></div>)}
       </details>
     </section>
@@ -1376,7 +1376,7 @@ function ValidatePane({ draft, loading, onValidate, onPublish }: { draft: Workfl
     <div className="workflow-onboarding-pane">
       <div className="workflow-validation-grid">{checks.map(([label, valid]) => <span key={label} className={valid ? "workflow-check-pass" : "workflow-check-fail"}>{valid ? "✓" : "!"} {label}</span>)}</div>
       {!!validation.issues.length && <ul className="workflow-issue-list">{validation.issues.map((issue) => <li key={issue}>{localizeWorkflowIssue(issue)}</li>)}</ul>}
-      <details className="workflow-recipe-preview"><summary>高级信息：生成的 Recipe YAML</summary><pre>{draft.recipe.yaml ?? "配方当前还未通过校验。"}</pre></details>
+      <details className="workflow-recipe-preview"><summary>高级信息：生成的配方配置</summary><pre>{draft.recipe.yaml ?? "配方当前还未通过校验。"}</pre></details>
       <div className="workflow-pane-actions"><button type="button" onClick={onValidate} disabled={loading}>{loading ? "正在校验..." : "再次校验"}</button><button type="button" onClick={onPublish} disabled={!validation.readyToPublish}>继续发布</button></div>
     </div>
   );
@@ -1552,7 +1552,7 @@ function deletionConfirmation(inspection: WorkflowDeletionInspection, requiresAr
     "",
     requiresArchive
       ? "该版本已有历史引用，将从生产选择器归档，但保留任务、批次、资产和重生成能力。"
-      : "该版本没有历史任务或生产批次引用，将永久删除运行包、Recipe 注册和运行状态。",
+      : "该版本没有历史任务或生产批次引用，将永久删除运行包、配方注册和运行状态。",
     "",
     requiresArchive ? "确定归档此工作流版本吗？" : "确定永久删除此工作流版本吗？此操作不可撤销。",
   ];

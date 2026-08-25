@@ -19,6 +19,7 @@ import type { AssetView } from "../../types/asset";
 import type { GenerationValues, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ProductionRun, ProductionRunStage, ProductionRunTemplate } from "../../types/productionRun";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { fieldLabel } from "../../i18n/statusLabels";
 import { defaultGenerationValues } from "../../stores/studioStore";
 import { validateRecipeValues } from "../studio/DynamicFormRenderer";
 import {
@@ -121,7 +122,7 @@ export function productionRunSelectionError(
   if (new Set(assetIds).size !== assetIds.length) return "参考图片不能重复选择。";
   if (mode === "I2V" && count !== 1) return "I2V 需要选择 1 张图片作为首帧。";
   if (mode === "REF2VA" && count < min) return `REF2VA 至少需要选择 ${min} 张图片（当前 ${count} 张）。`;
-  if (count > max) return `当前 Recipe 最多支持 ${max} 张参考图片。`;
+  if (count > max) return `当前配方最多支持 ${max} 张参考图片。`;
   return undefined;
 }
 
@@ -195,7 +196,7 @@ function normalizedImageCount(value: number, mode: ProductionRunVideoMode): numb
 
 function recipeValueError(recipe: RecipeViewModel, values: GenerationValues): string | undefined {
   const [key, message] = Object.entries(validateRecipeValues(recipe, values))[0] ?? [];
-  return key && message ? `${key}：${message}` : undefined;
+  return key && message ? `${fieldLabel(key)}：${message}` : undefined;
 }
 
 function statusLabel(status: string): string {
@@ -207,7 +208,7 @@ function statusLabel(status: string): string {
     case "PARTIAL_FAILED": return "部分失败";
     case "FAILED": return "失败";
     case "CANCELLED": return "已取消";
-    default: return status;
+    default: return "未知状态";
   }
 }
 
@@ -215,7 +216,7 @@ function stageLabel(stageType: string): string {
   switch (stageType) {
     case "KREA2_IMAGE_GENERATION": return "Krea2 图片生成";
     case "ASSET_SELECTION": return "人工选图";
-    case "H3_VIDEO_GENERATION": return "MiniMax H3 视频生成";
+    case "H3_VIDEO_GENERATION": return "H3 视频生成";
     default: return stageType;
   }
 }
@@ -230,9 +231,9 @@ function FinalVideoPreview({ projectId, assetIds }: { projectId: string; assetId
   if (!assetIds.length) return null;
   return (
     <div className="production-run-final-video" aria-label="最终视频预览">
-      <strong>Final Video</strong>
+      <strong>最终视频</strong>
       {assetIds.map((assetId) => failedAssetIds.has(assetId) ? (
-        <p className="error-message" role="alert" key={assetId}>视频预览加载失败：{assetId}。可刷新 Run 或查看任务诊断。</p>
+        <p className="error-message" role="alert" key={assetId}>视频预览加载失败：{assetId}。可刷新运行或查看任务诊断。</p>
       ) : (
         <div className="production-run-final-video-item" key={assetId}>
           <video
@@ -251,7 +252,7 @@ function FinalVideoPreview({ projectId, assetIds }: { projectId: string; assetId
 }
 
 export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues, onOpenTask, onAdmissionChanged }: Props) {
-  const [name, setName] = useState("Production Run");
+  const [name, setName] = useState("生产运行");
   const [imageCount, setImageCount] = useState(2);
   const [videoMode, setVideoMode] = useState<ProductionRunVideoMode>("I2V");
   const [h3Prompt, setH3Prompt] = useState("");
@@ -427,7 +428,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
     try {
       const saved = await saveProductionRunTemplate({
         projectId,
-        name: name.trim() || "Production Run 模板",
+        name: name.trim() || "生产运行模板",
         krea2WorkflowVersionId: baseRecipe.workflowVersionId,
         krea2RecipeId: baseRecipe.recipeId,
         defaultImageCount: imageCount,
@@ -451,7 +452,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
 
   async function createRun() {
     if (!h3Recipe) {
-      setError(`当前 ${selectedMode.label} / ${h3Profile} 没有可用的视频 Recipe。`);
+      setError(`当前 ${selectedMode.label} / ${h3Profile === "H3_QUALITY" ? "质量" : "快速"} 没有可用的视频配方。`);
       return;
     }
     const validationError = recipeValueError(h3Recipe, h3Values);
@@ -463,7 +464,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
     try {
       const created = await createProductionRun({
         projectId,
-        name: name.trim() || "Production Run",
+        name: name.trim() || "生产运行",
         krea2WorkflowVersionId: baseRecipe.workflowVersionId,
         krea2RecipeId: baseRecipe.recipeId,
         krea2Values: baseValues,
@@ -475,7 +476,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       });
       adoptRun(created);
       setRuns((current) => [created, ...current.filter((run) => run.id !== created.id)]);
-      setNotice(`${selectedMode.label} Production Run 已创建，输入已冻结。 `);
+      setNotice(`${selectedMode.label} 生产运行已创建，输入已冻结。 `);
     } catch (createError: unknown) { setError(toUserMessage(createError)); }
     finally { setBusy(false); }
   }
@@ -547,7 +548,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       return;
     }
     if (selectedAssetIds.length >= selectionBounds.max) {
-      setNotice(`当前 Recipe 最多支持 ${selectionBounds.max} 张参考图片。`);
+      setNotice(`当前配方最多支持 ${selectionBounds.max} 张参考图片。`);
       return;
     }
     setSelectedAssetIds((current) => [...current, asset.id]);
@@ -562,33 +563,33 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
   }
 
   return (
-    <section className="production-run-panel" aria-label="Production Runs">
+    <section className="production-run-panel" aria-label="生产运行">
       <div className="production-run-heading">
-        <div><span className="section-label">Production Runs</span><h3>Prompt → Krea2 → 选图 → H3</h3><p>固定三阶段生产链；H3 模式在创建 Run 时冻结，选图顺序会写入 reference_index。</p></div>
-        <span className="workflow-benchmark-badge">Orchestrator Foundation</span>
+        <div><span className="section-label">生产运行</span><h3>提示词 → Krea2 → 选图 → H3</h3><p>固定三阶段生产链；H3 模式在创建运行时冻结，选图顺序会写入参考图序号。</p></div>
+        <span className="workflow-benchmark-badge">编排器基础</span>
       </div>
       <div className="production-run-create-grid">
-        <label><span>Run 名称</span><input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
+        <label><span>运行名称</span><input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
         <label><span>Krea2 图片数量</span><input type="number" min={videoMode === "REF2VA" ? 2 : 1} max={100} value={imageCount} onChange={(event) => setImageCount(normalizedImageCount(Number(event.target.value), videoMode))} /></label>
         <label><span>H3 模式</span><select value={videoMode} onChange={(event) => changeVideoMode(event.target.value as ProductionRunVideoMode)} disabled={busy}><option value="I2V">I2V · 单首帧</option><option value="REF2VA">REF2VA · 2–N 参考图</option></select><small>{selectedMode.description}</small></label>
-        <label><span>H3 Profile</span><select value={h3Profile} onChange={(event) => setH3Profile(h3ProfileValue(event.target.value))} disabled={busy}><option value="H3_FAST">FAST</option><option value="H3_QUALITY">QUALITY</option></select></label>
-        {numericFields.map((field) => <label key={field.key}><span>{field.label}</span><input type="number" min={field.min} max={field.max} step={field.step} value={numericValue(h3Values, field.key) ?? ""} onChange={(event) => { const value = Number(event.target.value); if (!Number.isFinite(value)) return; setH3Values((current) => ({ ...current, [field.key]: { type: field.type, value } })); }} /></label>)}
-        <label className="production-run-prompt"><span>H3 Prompt</span><textarea rows={2} value={h3Prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder="输入视频 Prompt" /></label>
+        <label><span>H3 配置档</span><select value={h3Profile} onChange={(event) => setH3Profile(h3ProfileValue(event.target.value))} disabled={busy}><option value="H3_FAST">快速</option><option value="H3_QUALITY">质量</option></select></label>
+        {numericFields.map((field) => <label key={field.key}><span>{fieldLabel(field.key, field.label)}</span><input type="number" min={field.min} max={field.max} step={field.step} value={numericValue(h3Values, field.key) ?? ""} onChange={(event) => { const value = Number(event.target.value); if (!Number.isFinite(value)) return; setH3Values((current) => ({ ...current, [field.key]: { type: field.type, value } })); }} /></label>)}
+        <label className="production-run-prompt"><span>H3 提示词</span><textarea rows={2} value={h3Prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder="输入视频提示词" /></label>
       </div>
       <div className="production-run-actions">
-        <button type="button" onClick={() => void createRun()} disabled={busy || !h3Recipe}>新建 Production Run</button>
+        <button type="button" onClick={() => void createRun()} disabled={busy || !h3Recipe}>新建生产运行</button>
         <button type="button" className="quiet-button" onClick={() => void saveTemplate()} disabled={busy || !h3Recipe}>保存模板</button>
         {templates.length > 0 && <label className="production-run-template-picker"><span>模板</span><select value={selectedTemplateId} onChange={(event) => { const template = templates.find((item) => item.id === event.target.value); if (template) applyTemplate(template); }}><option value="">选择模板</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>}
-        {selectedRun && <button type="button" className="quiet-button" onClick={() => void execute(() => reload(selectedRun.id), "Production Run 已刷新。 ")} disabled={busy}>刷新</button>}
+        {selectedRun && <button type="button" className="quiet-button" onClick={() => void execute(() => reload(selectedRun.id), "生产运行已刷新。 ")} disabled={busy}>刷新</button>}
       </div>
-      {!h3Recipe && <p className="disabled-note" role="status">当前 {selectedMode.label} / {h3Profile} 没有可用的 H3 视频 Recipe，Production Run 暂不可用。</p>}
-      {modeMismatch && <p className="disabled-note" role="status">当前 Run 的 H3 模式已冻结为 {selectedRunMode}；切换只影响新建 Run，确认当前选图前请切回 {selectedRunMode}。</p>}
-      {unsupportedRunMode && <p className="error-message" role="alert">当前 Run 使用了不受 Production Run 支持的 H3 Recipe，已阻止继续提交。</p>}
+      {!h3Recipe && <p className="disabled-note" role="status">当前 {selectedMode.label} / {h3Profile === "H3_QUALITY" ? "质量" : "快速"} 没有可用的 H3 视频配方，生产运行暂不可用。</p>}
+      {modeMismatch && <p className="disabled-note" role="status">当前运行的 H3 模式已冻结为 {selectedRunMode}；切换只影响新建运行，确认当前选图前请切回 {selectedRunMode}。</p>}
+      {unsupportedRunMode && <p className="error-message" role="alert">当前运行使用了不受生产运行支持的 H3 配方，已阻止继续提交。</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
       {notice && <p className="studio-notice" role="status">{notice}</p>}
-      {runsLoading && <p className="disabled-note" role="status">正在加载 Production Run 历史…</p>}
-      {!runsLoading && runs.length === 0 && <p className="disabled-note" role="status">暂无 Production Run，请先新建一个运行。</p>}
-      {!runsLoading && runs.length > 0 && <div className="production-run-history" aria-label="Production Run 历史">
+      {runsLoading && <p className="disabled-note" role="status">正在加载生产运行历史…</p>}
+      {!runsLoading && runs.length === 0 && <p className="disabled-note" role="status">暂无生产运行，请先新建一个运行。</p>}
+      {!runsLoading && runs.length > 0 && <div className="production-run-history" aria-label="生产运行历史">
         {runs.map((run) => <button type="button" key={run.id} className={selectedRun?.id === run.id ? "production-run-history-row production-run-history-row-active" : "production-run-history-row"} onClick={() => { adoptRun(run); void refreshAssets(productionRunGeneratedAssetIds(run)).catch(() => undefined); }}>{run.name}<span>{statusLabel(run.status)}</span></button>)}
       </div>}
       {selectedRun && <div className="production-run-stages">
@@ -631,24 +632,24 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
           </div>
           {selectionError && <p className="error-message" role="alert">{selectionError}</p>}
           {selectionFrozen && missingSelectedCount > 0 && <p className="disabled-note" role="status">已冻结的参考图片中有素材当前不可预览；顺序仍按持久化记录保留。</p>}
-          <button type="button" onClick={() => void execute(() => selectProductionRunAssets(projectId, selectedRun.id, selectedAssetIds), "选图已冻结，H3 Stage 已就绪。 ")} disabled={busy || selectionFrozen || !selectionReady || modeMismatch}>确认选图</button>
+          <button type="button" onClick={() => void execute(() => selectProductionRunAssets(projectId, selectedRun.id, selectedAssetIds), "选图已冻结，H3 阶段已就绪。 ")} disabled={busy || selectionFrozen || !selectionReady || modeMismatch}>确认选图</button>
         </div>}
         <div className="production-run-actions">
-          {imageStage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionImages(projectId, selectedRun.id), "Krea2 图片 Stage 已进入普通串行队列。 ")} disabled={busy}>Run Images</button>}
-          {h3Stage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionVideo(projectId, selectedRun.id), "H3 视频 Stage 已进入普通串行队列。 ")} disabled={busy || !selectionReady || modeMismatch}>Run Video</button>}
-          {h3Stage?.status === "FAILED" && <button type="button" onClick={() => void execute(() => retryProductionVideo(projectId, selectedRun.id), "H3 已创建新 attempt，Krea2 图片保留。 ")} disabled={busy}>Retry H3</button>}
-          {!['SUCCEEDED', 'CANCELLED'].includes(selectedRun.status) && <button type="button" className="quiet-button" onClick={() => void execute(() => cancelProductionRun(projectId, selectedRun.id), "Production Run 已取消，成功资产保留。 ")} disabled={busy}>取消 Run</button>}
+          {imageStage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionImages(projectId, selectedRun.id), "Krea2 图片阶段已进入普通串行队列。 ")} disabled={busy}>执行图片阶段</button>}
+          {h3Stage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionVideo(projectId, selectedRun.id), "H3 视频阶段已进入普通串行队列。 ")} disabled={busy || !selectionReady || modeMismatch}>执行视频阶段</button>}
+          {h3Stage?.status === "FAILED" && <button type="button" onClick={() => void execute(() => retryProductionVideo(projectId, selectedRun.id), "H3 已创建新尝试，Krea2 图片保留。 ")} disabled={busy}>重试 H3</button>}
+          {!['SUCCEEDED', 'CANCELLED'].includes(selectedRun.status) && <button type="button" className="quiet-button" onClick={() => void execute(() => cancelProductionRun(projectId, selectedRun.id), "生产运行已取消，成功资产保留。 ")} disabled={busy}>取消运行</button>}
         </div>
         {finalVideoIds.length > 0 && <FinalVideoPreview projectId={projectId} assetIds={finalVideoIds} />}
-        {h3Stage?.status === "SUCCEEDED" && finalVideoIds.length === 0 && <p className="disabled-note" role="status">H3 已完成，但当前没有可播放的视频资产；请刷新 Run 或查看诊断。</p>}
+        {h3Stage?.status === "SUCCEEDED" && finalVideoIds.length === 0 && <p className="disabled-note" role="status">H3 已完成，但当前没有可播放的视频资产；请刷新运行或查看诊断。</p>}
         <details className="production-run-diagnostics">
           <summary>诊断 / 冻结配置</summary>
-          <p>Run ID：{selectedRun.id} · 当前阶段：{selectedRun.currentStageOrdinal + 1}</p>
+          <p>运行 ID：{selectedRun.id} · 当前阶段：{selectedRun.currentStageOrdinal + 1}</p>
           {selectedRun.stages.map((stage) => <div key={stage.id}>
             <strong>{stage.ordinal + 1}. {stageLabel(stage.stageType)}</strong>
-            <p>Stage ID：{stage.id} · Workflow Version：{stage.workflowVersionId ?? "—"} · Recipe：{stage.recipeId ?? "—"} · Batch：{stage.productionBatchId ?? "—"}</p>
+            <p>阶段 ID：{stage.id} · 工作流版本：{stage.workflowVersionId ?? "—"} · 配方：{stage.recipeId ?? "—"} · 批次：{stage.productionBatchId ?? "—"}</p>
             <pre>{JSON.stringify(stage.frozenConfig, null, 2) ?? "{}"}</pre>
-            {stage.items.map((item) => <p key={item.id}>Item {item.ordinal + 1} · attempt {item.attempt} · task {item.taskId ?? "—"} · asset {item.assetId ?? "—"} · source {item.sourceAssetId ?? "—"} · reference_index {item.referenceIndex ?? "—"} · submission {item.submissionIdempotencyKey ?? "—"}{item.errorCode ? ` · ${item.errorCode}: ${item.errorMessage ?? ""}` : ""}</p>)}
+            {stage.items.map((item) => <p key={item.id}>项目 {item.ordinal + 1} · 尝试次数 {item.attempt} · 任务 {item.taskId ?? "—"} · 素材 {item.assetId ?? "—"} · 来源 {item.sourceAssetId ?? "—"} · 参考图序号 {item.referenceIndex ?? "—"} · 提交标识 {item.submissionIdempotencyKey ?? "—"}{item.errorCode ? ` · ${item.errorCode}：${item.errorMessage ?? ""}` : ""}</p>)}
           </div>)}
         </details>
       </div>}

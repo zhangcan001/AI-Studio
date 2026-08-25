@@ -68,7 +68,7 @@ export function ResolutionControl({
             }}
             disabled={disabled}
           >
-            {presets.length === 0 && <option value={presetsOnly ? "unsupported" : "custom"}>当前 Recipe 无可用预设</option>}
+            {presets.length === 0 && <option value={presetsOnly ? "unsupported" : "custom"}>当前配方无可用预设</option>}
             {presetsOnly && !selectedPreset && presets.length > 0 && (
               <option value="unsupported" disabled>
                 当前输出不在图片规格范围内
@@ -121,7 +121,7 @@ export function ResolutionControl({
       <small className="field-hint">
         {presetsOnly
           ? "仅支持图片规格中的 14 档 16:9 输出分辨率。"
-          : `合法范围：宽度 ${widthField.min ?? 1}–${widthField.max ?? "不限"}，高度 ${heightField.min ?? 1}–${heightField.max ?? "不限"}；不符合 Recipe 步长的值不会自动调整。`}
+          : `合法范围：宽度 ${widthField.min ?? 1}–${widthField.max ?? "不限"}，高度 ${heightField.min ?? 1}–${heightField.max ?? "不限"}；不符合配方步长的值不会自动调整。`}
       </small>
     </section>
   );

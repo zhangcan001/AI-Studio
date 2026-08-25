@@ -6,6 +6,7 @@ import {
 } from "../../services/tauriClient";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import type { RuntimeParameterProfile } from "../../types/settings";
+import { fieldLabel } from "../../i18n/statusLabels";
 import {
   applyRuntimeParameterProfile,
   listLegacyRuntimeParameterProfiles,
@@ -190,7 +191,7 @@ export function RuntimeParameterProfilePanel({ recipe, values, onApply }: Props)
     <details className="runtime-profile-panel">
       <summary>运行时参数档案</summary>
       <div className="runtime-profile-content">
-        <p>保存当前 Recipe 的整数输入；应用时按字段 key 直接绑定，素材、并发设置和名称猜测都不会写入档案。</p>
+        <p>保存当前配方的整数输入；应用时按字段键直接绑定，素材、并发设置和名称猜测都不会写入档案。</p>
         <div className="runtime-profile-toolbar">
           <select aria-label="运行时参数档案" value={selectedId} onChange={(event) => selectProfile(event.target.value)} disabled={loading || saving}>
             <option value="">新建参数档案</option>
@@ -207,12 +208,12 @@ export function RuntimeParameterProfilePanel({ recipe, values, onApply }: Props)
         <div className="runtime-profile-grid">
           {integerFields.map((field) => (
             <label key={field.key}>
-              <span>{field.label} <small>{field.min !== undefined && field.max !== undefined ? `（${field.min}–${field.max}）` : ""}</small></span>
+              <span>{fieldLabel(field.key, field.label)} <small>{field.min !== undefined && field.max !== undefined ? `（${field.min}–${field.max}）` : ""}</small></span>
               <input inputMode="numeric" value={draft[field.key] ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [field.key]: event.target.value }))} placeholder="未设置" />
             </label>
           ))}
         </div>
-        {!integerFields.length && <small>当前 Recipe 没有可保存的整数字段。</small>}
+        {!integerFields.length && <small>当前配方没有可保存的整数字段。</small>}
         {notice && <p className="runtime-profile-notice" role="status">{notice}</p>}
       </div>
     </details>

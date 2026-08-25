@@ -215,7 +215,7 @@ function H3AssetLibraryPicker({
     <section className="h3-asset-library-picker" aria-label="H3 资产库媒体选择">
       <div className="h3-asset-library-picker-heading">
         <div>
-          <span className="section-label">Asset Library</span>
+          <span className="section-label">资产库</span>
           <h3>选择输入素材</h3>
           <p className="section-description">
             {generationMode === "FL2VA_TEXT_TO_VIDEO"
@@ -318,8 +318,8 @@ export function ProjectFolderImportControls({
   return (
     <div className="h3-local-import-controls" aria-label="项目文件夹导入规则">
       <div className="h3-project-folder-policy">
-        <strong>项目文件夹 · Segment 自动识别</strong>
-        <span>每个一级子文件夹对应一个视频 Segment；系统按 Prompt 和媒体自动选择生成模式。</span>
+        <strong>项目文件夹 · 分段自动识别</strong>
+        <span>每个一级子文件夹对应一个视频分段；系统按提示词和媒体自动选择生成模式。</span>
       </div>
       {hasInspection && (
         <button type="button" className="quiet-button" onClick={onRescan} disabled={busy}>
@@ -364,7 +364,7 @@ function ProjectFolderWorkflowStrategy({
         <div>
           <span className="section-label">工作流策略</span>
           <strong>项目文件夹按模式选择</strong>
-          <p>自动推荐保持现有 H3 映射；手动模式只会冻结当前项目中实际出现的 Segment 模式。</p>
+          <p>自动推荐保持现有 H3 映射；手动模式只会冻结当前项目中实际出现的分段模式。</p>
         </div>
         <label>
           <span>策略</span>
@@ -386,7 +386,7 @@ function ProjectFolderWorkflowStrategy({
             <div className="project-folder-workflow-mode" key={mode}>
               <div>
                 <strong>{modeLabel(mode)}</strong>
-                <small>{staleManualSelection ? "手动选择已失效，请重新选择兼容 Recipe" : current ? `${current.name} · ${current.workflowVersionId} · ${current.recipeId}` : "没有兼容工作流"}</small>
+                    <small>{staleManualSelection ? "手动选择已失效，请重新选择兼容配方" : current ? `${current.name} · ${current.workflowVersionId} · ${current.recipeId}` : "没有兼容工作流"}</small>
               </div>
               {strategy === "MANUAL" ? (
                 <select
@@ -411,7 +411,7 @@ function ProjectFolderWorkflowStrategy({
                 </select>
               ) : (
                 <span className={current ? "project-folder-workflow-source" : "project-folder-workflow-source project-folder-workflow-source-error"}>
-                  {current ? "自动推荐" : "缺少兼容 Recipe"}
+                  {current ? "自动推荐" : "缺少兼容配方"}
                 </span>
               )}
             </div>
@@ -425,7 +425,7 @@ function ProjectFolderWorkflowStrategy({
 export function projectParameterSourceLabel(source: string): string {
   switch (source) {
     case "USER_OVERRIDE": return "用户修改";
-    case "FRONT_MATTER": return "Front Matter";
+    case "FRONT_MATTER": return "前置元数据";
     case "PROMPT_SPEC": return "提示词";
     case "PROMPT_SPEC_ROUNDED": return "提示词取整";
     case "REFERENCE_VIDEO": return "参考视频";
@@ -520,9 +520,9 @@ function ProjectFolderSegmentEditor({
   }
 
   return (
-    <div className="h3-project-segment-list" aria-label="项目文件夹 Segment 列表">
+    <div className="h3-project-segment-list" aria-label="项目文件夹分段列表">
       <div className="h3-project-segment-heading">
-        <span>按自然排序的 Segment</span>
+        <span>按自然排序的分段</span>
         <span>{project.readyCount} / {project.segmentCount} 段可生成</span>
       </div>
       {project.segments.map((segment) => {
@@ -537,7 +537,7 @@ function ProjectFolderSegmentEditor({
                 <strong>{segment.folderName}</strong>
                 <span>{H3_MODE_OPTIONS.find((option) => option.id === segment.generationMode)?.label ?? segment.generationMode} · {segment.durationSeconds} 秒 · {segment.width} × {segment.height}</span>
                 <small>时长来源：{projectParameterSourceLabel(segment.durationSource)} · 分辨率来源：{projectParameterSourceLabel(segment.resolutionSource)}</small>
-                <small>{segment.prompt?.replace(/\s+/g, " ").slice(0, 180) || "缺少 Prompt"}</small>
+                <small>{segment.prompt?.replace(/\s+/g, " ").slice(0, 180) || "缺少提示词"}</small>
               </div>
               <div className="h3-project-segment-counts">
                 <span>图 {segment.media.filter((item) => item.kind === "image").length}</span>
@@ -576,7 +576,7 @@ function ProjectFolderSegmentEditor({
                     </select>
                   </label>
                 </div>
-                <label className="h3-project-prompt-editor"><span>Prompt（只保存到本次 Session Draft）</span><textarea rows={4} maxLength={64 * 1024} value={form.prompt} onChange={(event) => onChange(segment.segmentId, { prompt: event.target.value })} disabled={busy} /></label>
+                <label className="h3-project-prompt-editor"><span>提示词（只保存到本次草稿）</span><textarea rows={4} maxLength={64 * 1024} value={form.prompt} onChange={(event) => onChange(segment.segmentId, { prompt: event.target.value })} disabled={busy} /></label>
                 {(form.mode === "FL2VA_IMAGE_TO_VIDEO" || form.mode === "FL2VA_FIRST_LAST") && (
                   <div className="h3-project-frame-editor">
                     <label><span>首帧</span><select value={form.firstFrameId ?? ""} onChange={(event) => onChange(segment.segmentId, { firstFrameId: event.target.value || undefined })} disabled={busy}><option value="">未选择</option>{images.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
@@ -675,7 +675,7 @@ export function AssetVideoBatchWorkspace({
   const contract = useMemo(
     () => recipe
       ? h3RecipeContract(recipe)
-      : { ok: false as const, reason: "运行目录中没有精确的 MiniMax H3 Recipe。" },
+      : { ok: false as const, reason: "运行目录中没有精确的 H3 配方。" },
     [recipe],
   );
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -1269,7 +1269,7 @@ export function AssetVideoBatchWorkspace({
           <div>
             <span className="section-label">视频工作流</span>
             <h2>{recipe.name}</h2>
-            <p className="section-description">该工作流使用通用参数模式，不会强行套用 MiniMax H3 的模式、质量或项目文件夹参数。</p>
+            <p className="section-description">该工作流使用通用参数模式，不会强行套用 H3 的模式、质量或项目文件夹参数。</p>
           </div>
           <button type="button" className="quiet-button" onClick={onBackToAssets}>返回资产库</button>
         </div>
@@ -1319,7 +1319,7 @@ export function AssetVideoBatchWorkspace({
         <div>
           <span className="section-label">批量视频</span>
           <h2>资产 + 视频提示词</h2>
-          <p className="section-description">从当前项目图片资产直接创建 MiniMax H3 视频批次；它与图片批次相互独立。</p>
+          <p className="section-description">从当前项目图片资产直接创建 H3 视频批次；它与图片批次相互独立。</p>
         </div>
         <button type="button" className="quiet-button" onClick={onBackToAssets}>返回资产库</button>
       </div>
@@ -1366,26 +1366,26 @@ export function AssetVideoBatchWorkspace({
           baseRecipe={recipe}
           baseValues={batchItems[0]?.values ?? batchDraft.items[0]?.values ?? defaultGenerationValues(recipe)}
           baseReady={Boolean(canCreate && batchDraft.items.length)}
-          blockedReason={!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !modeAssetReady ? "当前模式的参考素材尚未准备完成。" : "请先填写有效的视频 Prompt。"}
+          blockedReason={!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !modeAssetReady ? "当前模式的参考素材尚未准备完成。" : "请先填写有效的视频提示词。"}
           onOpenTask={onOpenTask}
           onAdmissionChanged={onAdmissionChanged}
           onCreated={(created) => {
             setCreatedBatchId(created.productionBatchId);
             setCreatedBatchStarted(created.status === "RUNNING");
-            setNotice(`视频 Benchmark 已创建：${created.candidates.length} 个候选进入普通串行队列。`);
+            setNotice(`视频基准实验已创建：${created.candidates.length} 个候选进入普通串行队列。`);
           }}
         />
       )}
 
       {sourceMode === "ASSET_LIBRARY" && (
-      <section className="h3-mode-selector" aria-label="MiniMax H3 生成模式">
+      <section className="h3-mode-selector" aria-label="H3 生成模式">
         <div className="h3-mode-selector-heading">
           <div>
-            <span className="section-label">H3 Full Mode</span>
+            <span className="section-label">H3 完整模式</span>
             <h3>选择生成类型</h3>
-            <p className="section-description">只显示本机已安装并通过节点契约审计的模式；未满足 graph 条件的模式会明确禁用。</p>
+            <p className="section-description">只显示本机已安装并通过节点契约审计的模式；未满足图结构条件的模式会明确禁用。</p>
           </div>
-          <span className="h3-mode-contract-badge">{recipe ? `${recipe.name} · ${recipe.mode}` : "未找到可用 Recipe"}</span>
+          <span className="h3-mode-contract-badge">{recipe ? `${recipe.name} · ${recipe.mode}` : "未找到可用配方"}</span>
         </div>
         <div className="h3-mode-family-tabs" role="tablist" aria-label="H3 模式家族">
           {(["FL2VA", "REF2VA"] as const).map((family) => {
@@ -1433,7 +1433,7 @@ export function AssetVideoBatchWorkspace({
             );
           })}
         </div>
-        {!modeSupported && <p className="h3-mode-disabled-note" role="status">当前本地 H3 工作流未启用该模式。请先安装/启用经过本机 `/object_info` 与 graph 审计的 Recipe。</p>}
+        {!modeSupported && <p className="h3-mode-disabled-note" role="status">当前本地 H3 工作流未启用该模式。请先安装/启用经过本机 `/object_info` 与图结构审计的配方。</p>}
       </section>
       )}
 
@@ -1451,16 +1451,16 @@ export function AssetVideoBatchWorkspace({
         <small>
           {qualityProfile === "QUALITY"
             ? "高质量：20步正式工作流，生成更慢，显存和内存占用更高。"
-            : "快速预览：4步 Turbo，速度优先，画质和参考一致性可能低于高质量模式。"}
+            : "快速预览：4 步加速模式，速度优先，画质和参考一致性可能低于高质量模式。"}
         </small>
       </section>
 
       <section className="h3-safety-card" aria-label="H3 安全配置">
         <div>
-          <strong>MiniMax H3</strong>
+          <strong>H3</strong>
           <p>模型产品能力：最高 15 秒 · 最高 2K</p>
-          <p>当前 Runtime：{qualityProfile === "QUALITY" ? "20 步正式工作流" : "4 步 Turbo 预览"} · 单任务串行</p>
-          <small>{qualityProfile === "QUALITY" ? "QUALITY 不会因 16GB 设备自动降级；失败按正常 Task FAILED 处理。" : "FAST 仅用于快速预览，历史包保持不变。"}</small>
+          <p>当前运行参数：{qualityProfile === "QUALITY" ? "20 步正式工作流" : "4 步加速预览"} · 单任务串行</p>
+          <small>{qualityProfile === "QUALITY" ? "质量模式不会因 16GB 设备自动降级；失败按正常任务失败处理。" : "快速模式仅用于快速预览，历史包保持不变。"}</small>
         </div>
         {sourceMode === "ASSET_LIBRARY" && contract.ok && (
           <ResolutionControl
@@ -1485,22 +1485,22 @@ export function AssetVideoBatchWorkspace({
             onChange={(event) => setDurationSeconds(Number(event.target.value))}
             disabled={busy || !contract.ok}
           >
-            <option value="" disabled>Recipe 不可用</option>
+            <option value="" disabled>配方不可用</option>
             {contract.ok && contract.contract.durationOptions.map((option) => (
               <option key={option} value={option}>{option} 秒</option>
             ))}
           </select>
           <small>
             {contract.ok
-              ? `Recipe 范围 ${contract.contract.durationField.min}–${contract.contract.durationField.max} 秒 · 默认 ${contract.contract.durationField.default} 秒`
-              : "H3 runtime unavailable"}
+              ? `配方范围 ${contract.contract.durationField.min}–${contract.contract.durationField.max} 秒 · 默认 ${contract.contract.durationField.default} 秒`
+              : "H3 运行时不可用"}
           </small>
         </div>}
         {sourceMode === "LOCAL_FOLDER" && (
           <div className="h3-project-folder-defaults" role="status">
-            <strong>Segment 参数优先级</strong>
-            <span>用户修改 → Front Matter → 提示词规格 → 素材比例 → 默认</span>
-            <small>无规格且无可用素材推断时使用 {qualityProfile} · 5 秒 · 960 × 544；每段可展开单独编辑。</small>
+            <strong>分段参数优先级</strong>
+            <span>用户修改 → 前置元数据 → 提示词规格 → 素材比例 → 默认</span>
+          <small>无规格且无可用素材推断时使用 {qualityProfile === "QUALITY" ? "高质量模式" : "快速模式"} · 5 秒 · 960 × 544；每段可展开单独编辑。</small>
           </div>
         )}
         <small>{recipe ? `运行时已锁定：${recipe.workflowId}` : "运行时未就绪"}</small>
@@ -1513,12 +1513,12 @@ export function AssetVideoBatchWorkspace({
 
       {sourceMode === "LOCAL_FOLDER" ? (
         <div className="h3-local-import-layout">
-          <section className="h3-local-import-panel" aria-label="MiniMax H3 项目文件夹批量导入">
+          <section className="h3-local-import-panel" aria-label="H3 项目文件夹批量导入">
             <div className="section-heading">
               <div>
                 <span className="section-label">本地批量</span>
                 <h3>项目文件夹导入</h3>
-                <p className="section-description">选择一个项目根目录；每个一级子文件夹对应一个视频 Segment。扫描只读，提交后才导入素材并创建严格串行队列。</p>
+                <p className="section-description">选择一个项目根目录；每个一级子文件夹对应一个视频分段。扫描只读，提交后才导入素材并创建严格串行队列。</p>
               </div>
               <button type="button" onClick={() => void chooseLocalDirectory()} disabled={busy}>
                 {busy ? "处理中…" : "选择项目文件夹"}
@@ -1544,7 +1544,7 @@ export function AssetVideoBatchWorkspace({
                 </div>
                 <div className="h3-local-import-summary" aria-label="本地批量扫描结果">
                   <span>图片 <strong>{localInspection.imageCount}</strong></span>
-                  <span>Prompt <strong>{localInspection.promptCount}</strong></span>
+                  <span>提示词 <strong>{localInspection.promptCount}</strong></span>
                   <span className="h3-local-import-summary-ready">可生成 <strong>{localInspection.readyCount}</strong></span>
                   <span className={localInspection.errorCount ? "h3-local-import-summary-error" : ""}>异常 <strong>{localInspection.errorCount}</strong></span>
                 </div>
@@ -1601,7 +1601,7 @@ export function AssetVideoBatchWorkspace({
                           </span>
                           <span className="h3-local-import-prompt">
                             <span className={expanded ? "" : "h3-local-import-prompt-preview"}>{pair.promptPreview ?? pair.promptDisplayName}</span>
-                            {pair.promptPreview && <button type="button" className="quiet-button h3-local-import-prompt-toggle" onClick={() => setExpandedLocalOrdinal(expanded ? undefined : pair.ordinal)}>{expanded ? "收起" : "查看 Prompt"}</button>}
+                            {pair.promptPreview && <button type="button" className="quiet-button h3-local-import-prompt-toggle" onClick={() => setExpandedLocalOrdinal(expanded ? undefined : pair.ordinal)}>{expanded ? "收起" : "查看提示词"}</button>}
                           </span>
                           <span className="h3-local-import-bytes">{formatPromptBytes(pair.promptBytes)}</span>
                           <span className={pair.status === "READY" ? "h3-local-import-status h3-local-import-status-ready" : "h3-local-import-status"}>{localImportStatusLabel(pair.status)}</span>
@@ -1626,7 +1626,7 @@ export function AssetVideoBatchWorkspace({
                   </button>
                   {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
                 </div>
-                {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择图片规格中的 16:9 输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
+                {!runtimeReady && <p className="error-message" role="alert">H3 运行时不可用：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的配方时长。" : !resolutionReady ? "请选择图片规格中的 16:9 输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
               </>
             )}
           </section>
@@ -1671,8 +1671,8 @@ export function AssetVideoBatchWorkspace({
             onSetLastFrame={setLastFrame}
           />
           <section className="h3-batch-prompt-panel" aria-label="H3 批次提示词">
-            <label htmlFor="h3-batch-prompt"><span>视频 Prompt</span><textarea id="h3-batch-prompt" value={batchPrompt} onChange={(event) => setBatchPrompt(event.target.value)} rows={5} maxLength={64 * 1024} disabled={busy || !modeSupported} placeholder="描述运动、镜头、声音和连续性；可使用 <Picture 1>、<Audio 1>、<Video 1>。" /></label>
-            <small>{modePromptTooLong ? "Prompt 超过 64 KiB" : "该 Prompt 会随本次队列创建冻结。"}</small>
+            <label htmlFor="h3-batch-prompt"><span>视频提示词</span><textarea id="h3-batch-prompt" value={batchPrompt} onChange={(event) => setBatchPrompt(event.target.value)} rows={5} maxLength={64 * 1024} disabled={busy || !modeSupported} placeholder="描述运动、镜头、声音和连续性；可使用 <Picture 1>、<Audio 1>、<Video 1>。" /></label>
+            <small>{modePromptTooLong ? "提示词超过 64 KiB" : "该提示词会随本次队列创建冻结。"}</small>
           </section>
           <div className="asset-video-batch-summary">
             <span>模式 <strong>{H3_MODE_OPTIONS.find((option) => option.id === generationMode)?.label}</strong></span>
@@ -1763,10 +1763,10 @@ export function AssetVideoBatchWorkspace({
             </button>
             {createdBatchId && !createdBatchStarted && <button type="button" className="quiet-button" onClick={() => void startBatch()} disabled={busy || productionAdmission.busy}>开始生成</button>}
           </div>
-          {!runtimeReady && <p className="error-message" role="alert">H3 runtime unavailable：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的 Recipe 时长。" : !resolutionReady ? "请选择图片规格中的 16:9 输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
+          {!runtimeReady && <p className="error-message" role="alert">H3 运行时不可用：{contract.ok ? (!comfyConnected ? "ComfyUI 未连接。" : !taskEventsReady ? "任务事件通道未就绪。" : !durationReady ? "请选择有效的配方时长。" : !resolutionReady ? "请选择图片规格中的 16:9 输出分辨率。" : "运行时未就绪。") : contract.reason}</p>}
           {batchDraft.error && <p className="error-message" role="alert">视频批次预览失败：{batchDraft.error}</p>}
-          {generationMode.startsWith("FL2VA") && missingPromptAssets.length > 0 && !batchPrompt.trim() && <p className="disabled-note">请填写批次 Prompt，或为首帧图片保存视频提示词。</p>}
-          {modePromptTooLong && <p className="error-message">视频 Prompt 按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
+          {generationMode.startsWith("FL2VA") && missingPromptAssets.length > 0 && !batchPrompt.trim() && <p className="disabled-note">请填写批次提示词，或为首帧图片保存视频提示词。</p>}
+          {modePromptTooLong && <p className="error-message">视频提示词按 UTF-8 计算不得超过 64 KiB，请缩短后再创建批次。</p>}
           {!modeAssetReady && modeSupported && <p className="disabled-note">请先选择当前模式需要的素材并设置首帧/末帧角色。</p>}
           </div>
           <ProductionQueuePanel
@@ -1995,7 +1995,7 @@ function GenericVideoWorkflowPanel({
         submissionIdempotencyKey,
       });
       setCreatedTaskId(task.id);
-      setNotice("通用视频任务已创建；工作流版本和 Recipe 已冻结。" );
+      setNotice("通用视频任务已创建；工作流版本和配方已冻结。" );
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
     } finally {
@@ -2012,7 +2012,7 @@ function GenericVideoWorkflowPanel({
         <div>
           <span className="section-label">通用视频生成</span>
           <h3>工作流参数</h3>
-          <p>使用当前 Recipe 的字段和约束；不会注入 H3 的 FL2VA、REF2VA 或质量参数。</p>
+          <p>使用当前配方的字段和约束；不会注入 H3 的 FL2VA、REF2VA 或质量参数。</p>
         </div>
         <span className="workflow-selector-origin">自定义</span>
       </div>

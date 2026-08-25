@@ -19,7 +19,7 @@ export function ShotProgressDashboard({ shots }: { shots: ShotView[] }) {
     ["失败", summary.needsAttention, "danger"],
   ] as const;
   return (
-    <section className="shot-progress-dashboard" aria-label="Shot 生产进度">
+    <section className="shot-progress-dashboard" aria-label="镜头生产进度">
       <div className="shot-progress-heading"><div><span className="section-label">生产总览</span><h3>生产进度</h3></div><span className="shot-progress-count">{summary.completed} / {summary.total} 已完成</span></div>
       <div className="shot-progress-metrics">
         {metrics.map(([label, value, tone]) => <div key={label} className={`shot-progress-metric shot-progress-metric-${tone}`}><span>{label}</span><strong>{value}</strong></div>)}

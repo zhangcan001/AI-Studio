@@ -53,6 +53,10 @@ const REVIEW_CLASS: Record<ProductionReviewStatus, string> = {
   IN_PROGRESS: "review-status-in-progress",
 };
 
+function qualityProfileLabel(profile: string): string {
+  return { QUALITY: "质量", FAST: "快速" }[profile] ?? profile;
+}
+
 export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey, onOpenTask, onBatchChanged }: Props) {
   const [review, setReview] = useState<ProductionBatchReview>();
   const [filter, setFilter] = useState<Filter>("ALL");
@@ -173,7 +177,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         <div>
           <span className="section-label">H3 批量审片</span>
           <h3>生成结果审核与局部返工</h3>
-          <p>审核状态独立于 Task；返工从已冻结参数创建新版本，不重新扫描项目文件夹。</p>
+          <p>审核状态独立于任务；返工从已冻结参数创建新版本，不重新扫描项目文件夹。</p>
         </div>
         <button
           type="button"
@@ -294,8 +298,8 @@ function ReviewCard({
             <span className={`review-status ${REVIEW_CLASS[item.reviewStatus]}`}>{REVIEW_LABELS[item.reviewStatus]}</span>
             {item.preferred && <span className="review-preferred">当前优选</span>}
           </span>
-          <span className="production-review-prompt">{item.promptText || "未提取 Prompt"}</span>
-          <small>{item.qualityProfile} · {item.durationSeconds ? `${item.durationSeconds} 秒` : "—"} · {item.width && item.height ? `${item.width} × ${item.height}` : "—"} · {taskStatusLabel(item.taskStatus)}</small>
+          <span className="production-review-prompt">{item.promptText || "未提取提示词"}</span>
+          <small>{qualityProfileLabel(item.qualityProfile)} · {item.durationSeconds ? `${item.durationSeconds} 秒` : "—"} · {item.width && item.height ? `${item.width} × ${item.height}` : "—"} · {taskStatusLabel(item.taskStatus)}</small>
         </span>
         <span className="production-review-card-chevron" aria-hidden="true">{expanded ? "收起" : "查看"}</span>
       </button>
@@ -305,12 +309,12 @@ function ReviewCard({
           {asset ? <ReviewVideo projectId={projectId} assetId={asset.id} name={asset.name} posterUrl={posterUrl} /> : <div className="production-review-video-empty">{productionItemStatusLabel(item.productionItemStatus)}</div>}
           <div className="production-review-metadata">
             <span>生成模式：{modeLabel(item.workflowVersionId)}</span>
-            <span>Task：{item.taskId ?? "尚未创建"}</span>
+            <span>任务：{item.taskId ?? "尚未创建"}</span>
             <span>创建：{formatDateTime(item.createdAt)}</span>
             {item.finishedAt && <span>完成：{formatDateTime(item.finishedAt)}</span>}
             {item.seed && <span>Seed：{item.seed}</span>}
           </div>
-          <p className="production-review-prompt-full">{item.promptText || "未提取 Prompt"}</p>
+          <p className="production-review-prompt-full">{item.promptText || "未提取提示词"}</p>
           {error && <p className="production-review-item-error" role="alert">{error}</p>}
           <label className="production-review-note">
             <span>审片备注</span>
@@ -322,7 +326,7 @@ function ReviewCard({
             <button type="button" className="review-star-button" onClick={() => onStatus("STARRED")} disabled={busy || reviewDisabled}>优秀</button>
             <button type="button" className="quiet-button" onClick={() => onStatus("REGENERATE")} disabled={busy || reviewDisabled}>待重生成</button>
             <button type="button" className="quiet-button danger-button" onClick={() => onStatus("REJECTED")} disabled={busy || reviewDisabled}>废弃</button>
-            {item.taskId && <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>查看 Task</button>}
+            {item.taskId && <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>查看任务</button>}
             {!reviewDisabled && <button type="button" className="quiet-button" onClick={onRegenerate} disabled={busy}>编辑并重生成</button>}
           </div>
         </div>
@@ -387,14 +391,14 @@ function RegenerateDialog({
     <div className="production-review-dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="production-review-dialog" role="dialog" aria-modal="true" aria-label="编辑并重生成" onMouseDown={(event) => event.stopPropagation()}>
         <div className="production-review-dialog-heading"><div><span className="section-label">局部返工</span><h3>编辑并重生成</h3></div><button type="button" className="quiet-button" onClick={onClose}>关闭</button></div>
-        <label className="production-review-dialog-checkbox"><input type="checkbox" checked={overridePrompt} onChange={(event) => setOverridePrompt(event.target.checked)} /> 修改 Prompt</label>
-        <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={!overridePrompt || busy} aria-label="重生成 Prompt" />
+        <label className="production-review-dialog-checkbox"><input type="checkbox" checked={overridePrompt} onChange={(event) => setOverridePrompt(event.target.checked)} /> 修改提示词</label>
+        <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={!overridePrompt || busy} aria-label="重生成提示词" />
         <div className="production-review-dialog-grid">
           <label>时长（1–15 秒）<input type="number" min={1} max={15} value={duration} onChange={(event) => setDuration(event.target.value)} disabled={busy} /></label>
           <label>分辨率<select value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy}>{MINIMAX_H3_RESOLUTION_PRESETS.map((preset) => <option key={preset.id} value={`${preset.width}x${preset.height}`}>{preset.width} × {preset.height}</option>)}</select></label>
         </div>
         <label className="production-review-dialog-checkbox"><input type="checkbox" checked={useOriginalSeed} onChange={(event) => setUseOriginalSeed(event.target.checked)} disabled={busy} /> 使用原 Seed（默认使用新随机 Seed）</label>
-        <p className="disabled-note">生成模式、参考素材、质量档位和 Recipe 继承原版本；不会重新扫描本地文件夹。</p>
+        <p className="disabled-note">生成模式、参考素材、质量档位和配方继承原版本；不会重新扫描本地文件夹。</p>
         <div className="production-review-dialog-actions"><button type="button" className="quiet-button" onClick={onClose} disabled={busy}>取消</button><button type="button" onClick={() => onSubmit({ promptOverride: overridePrompt ? prompt : undefined, durationSeconds: Number(duration), width: selected.width, height: selected.height, useOriginalSeed })} disabled={busy || !prompt.trim()}>{busy ? "正在创建…" : "创建返工任务"}</button></div>
       </section>
     </div>

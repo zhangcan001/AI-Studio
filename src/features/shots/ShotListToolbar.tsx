@@ -42,8 +42,8 @@ export function ShotListToolbar({
             type="search"
             value={controls.query}
             onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="搜索镜头名称或 Prompt"
-            aria-label="搜索镜头名称或 Prompt"
+            placeholder="搜索镜头名称或提示词"
+            aria-label="搜索镜头名称或提示词"
           />
         </label>
         <button type="button" className={filterActive ? "shot-list-filter-trigger shot-list-filter-trigger-active" : "shot-list-filter-trigger"} aria-label="镜头筛选" aria-controls="shot-list-filter-popover" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)}>
@@ -59,7 +59,7 @@ export function ShotListToolbar({
           </select>
         </label>
         {sceneOptions.length > 0 && onSceneChange && <label>
-          <span>Scene</span>
+          <span>场景</span>
           <select value={controls.sceneId} onChange={(event) => onSceneChange(event.target.value)} aria-label="结构筛选">
             {sceneOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>

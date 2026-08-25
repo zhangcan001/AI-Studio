@@ -143,9 +143,9 @@ describe("ProductionQueueDrawer", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Start queue batch-ready"');
-    expect(html).toContain('aria-label="Pause queue batch-1"');
-    expect(html).toContain('aria-label="Open queue batch-1"');
+    expect(html).toContain('aria-label="开始队列 batch-ready"');
+    expect(html).toContain('aria-label="暂停队列 batch-1"');
+    expect(html).toContain('aria-label="打开队列 batch-1"');
     expect(html).not.toContain("Start All");
     expect(html).not.toContain("Scheduler");
     expect(html).not.toContain("Auto Start Next");

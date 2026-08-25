@@ -387,7 +387,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       }
       applyShot(next);
       setDirtyStages(new Set());
-      setNotice("镜头设置已保存；提示词已保存为当前快照。后续 Prompt Library 更新不会自动改动此镜头。");
+      setNotice("镜头设置已保存；提示词已保存为当前快照。后续提示词库更新不会自动改动此镜头。");
     } catch (saveError: unknown) {
       setError(toUserMessage(saveError));
     } finally {
@@ -431,7 +431,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     try {
       const next = await replaceShotReferences({ projectId, shotId: selectedShot.id, stage, assetIds: currentReferences });
       applyShot(next);
-      setNotice("Reference 素材已保存为关系；不会复制素材文件。");
+      setNotice("参考素材已保存为关系；不会复制素材文件。");
     } catch (referenceError: unknown) { setError(toUserMessage(referenceError)); }
     finally { setBusy(false); }
   }
@@ -465,7 +465,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         assetIds: nextReferences,
       });
       applyShot(next);
-      setNotice(`${mode === "append" ? "已追加" : "已替换为"}参考锚点“${selectedAnchor.name}”；Shot 仅保存 asset IDs。`);
+      setNotice(`${mode === "append" ? "已追加" : "已替换为"}参考锚点“${selectedAnchor.name}”；镜头仅保存素材 ID。`);
     } catch (referenceError: unknown) { setError(toUserMessage(referenceError)); }
     finally { setBusy(false); }
   }
@@ -497,7 +497,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         applyShot(next);
       }
       const task = await generateShot({ projectId, shotId: selectedShot.id, stage, values: currentDraft.values });
-      setNotice(`任务 ${task.id} 已创建；Shot 状态由任务和候选素材派生。不会自动跳过候选选择。`);
+      setNotice(`任务 ${task.id} 已创建；镜头状态由任务和候选素材派生。不会自动跳过候选选择。`);
       applyShot(await getShot(projectId, selectedShot.id));
     } catch (generateError: unknown) { setError(toUserMessage(generateError)); }
     finally { setBusy(false); }
@@ -542,12 +542,12 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     const version = entry?.versions[entry.versions.length - 1];
     if (!entry || !version) return;
     if (entry.kind === "prompt" && isPromptTemplateText(version.text)) {
-      setNotice("这是模板 Prompt，请在下方预览并确认后应用；不会把 {{variable}} 原样保存到镜头。");
+      setNotice("这是提示词模板，请在下方预览并确认后应用；不会把 {{variable}} 原样保存到镜头。");
       return;
     }
     setPromptText(version.text);
     setPromptProvenance({ entryId: entry.id, versionId: version.id });
-    setNotice(`已载入 Prompt Library「${entry.name}」的 v${version.version}；之后编辑会清除来源标记。`);
+    setNotice(`已载入提示词库「${entry.name}」的 v${version.version}；之后编辑会清除来源标记。`);
   }
 
   async function exportManifest() {
@@ -629,7 +629,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
 
   async function configureBulkStage(nextStage: ShotStage, shotIds: string[]) {
     const recipe = preferredStageRecipe(productCatalog, nextStage);
-    if (!recipe) throw new Error(`当前没有可用的${nextStage === "image" ? "Krea2 图片" : "MiniMax H3 视频"} Recipe。`);
+    if (!recipe) throw new Error(`当前没有可用的${nextStage === "image" ? "Krea2 图片" : "H3 视频"}配方。`);
     await bulkSetShotStageConfig({
       projectId,
       stage: nextStage,
@@ -659,7 +659,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   function openStructureManagement(context: WorkspaceSelection) {
     setStructureManagementOpen(true);
     setWorkspaceSelection(context);
-    setNotice("已打开结构管理；Series / Episode / Scene 的新增、重命名、排序和归档仍由原有管理面板执行。");
+    setNotice("已打开结构管理；系列 / 集 / 场景的新增、重命名、排序和归档仍由原有管理面板执行。");
   }
 
   function handleStructureCreate(target: ProjectStructureCreateTarget, context: WorkspaceSelection) {
@@ -773,8 +773,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           {contextSurface !== "shot" && <div className="shot-context-heading">
             <div>
               {mode !== "creation" && <span className="section-label">{mode === "production" ? "生产" : "审核"}</span>}
-              <h2>{workspaceSelection.type === "scene" ? "场景工作区" : workspaceSelection.type === "episode" ? "Episode 工作区" : workspaceSelection.type === "series" ? "Series 工作区" : "项目工作区"}</h2>
-              {mode === "production" && <p>Runbook 与项目批量管线集中在生产模式。</p>}
+              <h2>{workspaceSelection.type === "scene" ? "场景工作区" : workspaceSelection.type === "episode" ? "集工作区" : workspaceSelection.type === "series" ? "系列工作区" : "项目工作区"}</h2>
+              {mode === "production" && <p>运行手册与项目批量流程集中在生产模式。</p>}
               {mode === "review" && <p>集中处理候选确认、失败重试和人工审核。</p>}
             </div>
             <span className="shot-context-selection">{workspaceSelection.type === "project" ? (projectName ?? projectId) : "已选结构节点"}</span>
@@ -797,7 +797,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onRetry={(link) => retryShot(selectedShot?.id ?? "", link.stage)}
               onDeleteShot={() => void removeShot()}
               onCreateShot={() => void addShot()}
-              onCopyPrompt={(prompt) => void navigator.clipboard?.writeText(prompt).then(() => setNotice("Prompt 已复制。"))}
+              onCopyPrompt={(prompt) => void navigator.clipboard?.writeText(prompt).then(() => setNotice("提示词已复制。"))}
               workspaceTab={shotWorkspaceTab}
               onWorkspaceTabChange={setShotWorkspaceTab}
               inspectorTab={inspectorTab}
@@ -847,15 +847,15 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
                 onApplied={() => void reload()}
                 disabled={busy}
               /> : undefined}
-              onPreviewPrompt={() => setNotice("Prompt 预览使用当前编辑框内容；保存镜头后才会写入快照。")}
-              onApplyPrompt={() => setNotice("当前 Prompt 预览已应用到编辑框；点击保存镜头写入快照。")}
+              onPreviewPrompt={() => setNotice("提示词预览使用当前编辑框内容；保存镜头后才会写入快照。")}
+              onApplyPrompt={() => setNotice("当前提示词预览已应用到编辑框；点击保存镜头写入快照。")}
               notice={notice}
               error={error}
             />
           ) : contextSurface === "project" ? (
             <section className="shot-context-empty" data-surface="creation-project">
               <strong>从项目结构开始</strong>
-              <p>选择 Series、Episode、Scene 或 Shot，当前工作区会只显示对应的制作上下文。</p>
+              <p>选择系列、集、场景或镜头，当前工作区会只显示对应的制作上下文。</p>
             </section>
           ) : contextSurface === "series" ? (
             <SeriesProductionPanel
@@ -944,7 +944,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         </div>
       </div>
       {mode !== "review" && structureManagementOpen && <section className="shot-structure-management-panel">
-        <div className="shot-secondary-heading"><div><span className="section-label">Structure management</span><h3>结构与批量管理</h3></div><button type="button" className="quiet-button" onClick={() => setStructureManagementOpen(false)}>收起管理面板</button></div>
+        <div className="shot-secondary-heading"><div><span className="section-label">结构管理</span><h3>结构与批量管理</h3></div><button type="button" className="quiet-button" onClick={() => setStructureManagementOpen(false)}>收起管理面板</button></div>
         <ProductionStructurePanel
         projectId={projectId}
         tree={productionStructure}
@@ -999,7 +999,7 @@ export function buildShotContextPath(
       const sceneId = shotSceneIndex(tree)[selection.shotId];
       const parent = sceneId ? findProductionSceneParent(tree, sceneId) : undefined;
       const shot = shots.find((item) => item.id === selection.shotId);
-      const shotItem: ShotContextPathItem = { type: "shot", id: selection.shotId, label: shot?.name ?? `Shot ${selection.shotId}` };
+      const shotItem: ShotContextPathItem = { type: "shot", id: selection.shotId, label: shot?.name ?? `镜头 ${selection.shotId}` };
       return parent ? [...structurePath(parent.series, parent.episode, parent.scene), shotItem] : [shotItem];
     }
   }
@@ -1039,7 +1039,7 @@ function episodeLabel(ordinal: number, name: string): string {
 }
 
 function sceneLabel(ordinal: number, name: string): string {
-  return `Scene ${String(ordinal + 1).padStart(2, "0")} · ${name}`;
+  return `场景 ${String(ordinal + 1).padStart(2, "0")} · ${name}`;
 }
 
 export function isRef2vaRecipe(recipe?: RecipeViewModel): boolean {
@@ -1054,7 +1054,7 @@ export function validateRef2vaReferences(
   field: Extract<RecipeField, { type: "images" }> | undefined,
   assetIds: string[],
 ): string | undefined {
-  if (!field) return "REF2VA Recipe 缺少多图参考输入";
+  if (!field) return "REF2VA 配方缺少多图参考输入";
   const minItems = Math.max(2, field.minItems);
   if (new Set(assetIds).size !== assetIds.length) return "REF2VA 参考图不能重复";
   if (assetIds.length < minItems) return `REF2VA 至少需要 ${minItems} 张参考图`;

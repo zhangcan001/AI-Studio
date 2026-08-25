@@ -69,7 +69,7 @@ describe("Pack 07 prompt library source contracts", () => {
       ],
     };
     expect(selectPromptTargetField(multiTextareaRecipe).issue).toContain("多个文字输入字段");
-    expect(selectPromptTargetField(multiTextareaRecipe, "missing").issue).toContain("不属于当前 Recipe");
+    expect(selectPromptTargetField(multiTextareaRecipe, "missing").issue).toContain("不属于当前配方");
     expect(selectPromptTargetField(multiTextareaRecipe, "negative").fieldKey).toBe("negative");
   });
 });

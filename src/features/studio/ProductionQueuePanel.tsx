@@ -475,7 +475,7 @@ export function ProductionQueuePanel({
           value={name}
           maxLength={120}
           onChange={(event) => setName(event.target.value)}
-          placeholder="例如：第 01 集 Kera2 + H3"
+          placeholder="例如：第 01 集 Krea2 + H3"
         />
         <div className="production-queue-name-presets">
           <label>

@@ -87,11 +87,11 @@ describe("ProjectCommandCenter", () => {
     const html = renderToStaticMarkup(<ProjectCommandCenterView {...viewProps()} />);
     expect(html).toContain("项目指挥中心");
     expect(html).toContain(project.name);
-    expect(html).toContain("Readiness");
-    expect(html).toContain("Content");
-    expect(html).toContain("Production");
-    expect(html).toContain("Runtime");
-    expect(html).toContain("Continue Work");
+    expect(html).toContain("就绪度");
+    expect(html).toContain("内容");
+    expect(html).toContain("生产");
+    expect(html).toContain("运行参数");
+    expect(html).toContain("继续工作");
   });
 
   it("keeps Continue Work navigation-only and chooses review work deterministically", () => {

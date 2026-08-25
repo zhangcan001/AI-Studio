@@ -417,7 +417,7 @@ export function SettingsWorkspace({
           )}
           {!profilesLoading && !environmentProfiles.length && <p>还没有保存的 ComfyUI 环境。</p>}
           <div className="settings-endpoint-row">
-            <input aria-label="环境名称" value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} maxLength={80} placeholder="环境名称，例如：WorkFisher H3" disabled={profileSaving} />
+            <input aria-label="环境名称" value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} maxLength={80} placeholder="环境名称，例如：本地 H3" disabled={profileSaving} />
             <input aria-label="环境 ComfyUI 地址" value={profileEndpointDraft} onChange={(event) => setProfileEndpointDraft(event.target.value)} placeholder="http://127.0.0.1:8188" spellCheck={false} disabled={profileSaving} />
             <button type="button" className="primary-action" onClick={() => void saveEnvironmentProfile()} disabled={profileSaving || environmentProfiles.length >= 20 && !editingProfileId}>
               {profileSaving ? "正在保存……" : editingProfileId ? "更新环境" : "保存环境"}

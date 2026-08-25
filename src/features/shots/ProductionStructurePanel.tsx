@@ -194,7 +194,7 @@ export function ProductionStructurePanel({ projectId, tree, shots, selectedShotI
   return (
     <section className="production-structure-panel" aria-labelledby="production-structure-title" aria-busy={busy}>
       <div className="production-structure-heading">
-        <div><span className="section-label">Production structure</span><h3 id="production-structure-title">内容结构</h3><p className="section-description">Project → Series → Episode → Scene；删除结构不会删除镜头。</p></div>
+        <div><span className="section-label">内容结构</span><h3 id="production-structure-title">内容结构</h3><p className="section-description">项目 → 系列 → 集 → 场景；删除结构不会删除镜头。</p></div>
         <button type="button" onClick={() => void addSeries()} disabled={busy}>新增系列</button>
       </div>
       <div className="production-structure-tree" role="tree" aria-label="项目内容结构">
@@ -224,7 +224,7 @@ export function ProductionStructurePanel({ projectId, tree, shots, selectedShotI
           <button type="button" className="quiet-button" onClick={() => void unassignSelectedShots()} disabled={busy || !selectedShotIds.length}>取消所属场景</button>
         </div>
         <div className="production-structure-shot-picker">
-          <div className="production-structure-picker-toolbar"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索镜头名称或 Prompt" aria-label="搜索待分配镜头" /><button type="button" className="quiet-button" onClick={toggleAllVisible} disabled={busy || !searchableShots.length}>{searchableShots.length > 0 && searchableShots.every((shot) => selectedShotIds.includes(shot.id)) ? "取消全选" : "全选当前结果"}</button></div>
+          <div className="production-structure-picker-toolbar"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索镜头名称或提示词" aria-label="搜索待分配镜头" /><button type="button" className="quiet-button" onClick={toggleAllVisible} disabled={busy || !searchableShots.length}>{searchableShots.length > 0 && searchableShots.every((shot) => selectedShotIds.includes(shot.id)) ? "取消全选" : "全选当前结果"}</button></div>
           <div className="production-structure-picker-list">{searchableShots.map((shot) => <label key={shot.id} className="production-structure-picker-row"><input type="checkbox" checked={selectedShotIds.includes(shot.id)} onChange={() => toggleShot(shot.id)} disabled={busy} /><span><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shotIndex[shot.id] ? `已归档 · ${shotIndex[shot.id]}` : "未归档"}</small></span></label>)}{!searchableShots.length && <p className="production-structure-empty">没有匹配的镜头。</p>}</div>
         </div>
       </div>

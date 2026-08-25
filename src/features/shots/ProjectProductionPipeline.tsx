@@ -120,29 +120,29 @@ const METRICS: ReadonlyArray<{
   label: string;
   tone: string;
 }> = [
-  { key: "total", label: "Total Shots", tone: "neutral" },
-  { key: "unconfigured", label: "Unconfigured", tone: "warning" },
-  { key: "imageReady", label: "Image Ready", tone: "muted" },
-  { key: "imageGenerating", label: "Image Generating", tone: "active" },
-  { key: "imageReview", label: "Image Review", tone: "review" },
-  { key: "imageSelected", label: "Image Selected", tone: "success" },
-  { key: "videoReady", label: "Video Ready", tone: "muted" },
-  { key: "videoGenerating", label: "Video Generating", tone: "active" },
-  { key: "videoReview", label: "Video Review", tone: "review" },
-  { key: "completed", label: "Completed", tone: "success" },
-  { key: "failed", label: "Failed", tone: "danger" },
+  { key: "total", label: "镜头总数", tone: "neutral" },
+  { key: "unconfigured", label: "未配置", tone: "warning" },
+  { key: "imageReady", label: "图片待生成", tone: "muted" },
+  { key: "imageGenerating", label: "图片生成中", tone: "active" },
+  { key: "imageReview", label: "图片待审核", tone: "review" },
+  { key: "imageSelected", label: "图片已选择", tone: "success" },
+  { key: "videoReady", label: "视频待生成", tone: "muted" },
+  { key: "videoGenerating", label: "视频生成中", tone: "active" },
+  { key: "videoReview", label: "视频待审核", tone: "review" },
+  { key: "completed", label: "已完成", tone: "success" },
+  { key: "failed", label: "失败", tone: "danger" },
 ];
 
 const STAGE_LABELS: Record<ProjectPipelineStage, string> = {
-  SHOTS: "Shots",
-  IMAGE_CONFIGURED: "Image Configured",
-  IMAGE_GENERATING: "Image Generating",
-  IMAGE_REVIEW: "Image Review",
-  IMAGE_SELECTED: "Image Selected",
-  VIDEO_CONFIGURED: "Video Configured",
-  VIDEO_GENERATING: "Video Generating",
-  VIDEO_REVIEW: "Video Review",
-  COMPLETED: "Completed",
+  SHOTS: "镜头",
+  IMAGE_CONFIGURED: "图片已配置",
+  IMAGE_GENERATING: "图片生成中",
+  IMAGE_REVIEW: "图片待审核",
+  IMAGE_SELECTED: "图片已选择",
+  VIDEO_CONFIGURED: "视频已配置",
+  VIDEO_GENERATING: "视频生成中",
+  VIDEO_REVIEW: "视频待审核",
+  COMPLETED: "已完成",
 };
 
 export function ProjectProductionPipeline({ onOpenReview, busy = false, ...bulkProps }: ProjectProductionPipelineProps) {
@@ -164,11 +164,11 @@ export function ProjectProductionPipeline({ onOpenReview, busy = false, ...bulkP
     <section className="project-production-pipeline" aria-label="项目生产管线">
       <div className="pipeline-section-heading">
         <div>
-          <span className="section-label">Project Production</span>
+          <span className="section-label">项目生产</span>
           <h2>项目生产管线</h2>
-          <p className="pipeline-muted">进度由当前 Shot、阶段配置、任务和人工选择实时派生，不保存容易过期的项目进度字段。</p>
+          <p className="pipeline-muted">进度由当前镜头、阶段配置、任务和人工选择实时派生，不保存容易过期的项目进度字段。</p>
         </div>
-        <strong className="pipeline-completion-count">{summary.completed} / {summary.total} Completed · {completionPercent}%</strong>
+        <strong className="pipeline-completion-count">{summary.completed} / {summary.total} 已完成 · {completionPercent}%</strong>
       </div>
 
       <ShotProgressDashboard shots={bulkProps.shots} />
@@ -202,12 +202,12 @@ export function ProjectProductionPipeline({ onOpenReview, busy = false, ...bulkP
 
       <div className="pipeline-review-actions">
         <div>
-          <strong>Review 仍由人完成</strong>
-          <p className="pipeline-muted">生成结果不会自动成为 selected asset；REF2VA 的 ordered references 也继续由用户配置。</p>
+          <strong>审核仍由人完成</strong>
+          <p className="pipeline-muted">生成结果不会自动成为已确认素材；REF2VA 的有序参考图也继续由用户配置。</p>
         </div>
         <div className="pipeline-action-grid">
-          <button type="button" onClick={() => void openReview("image", imageReviewIds)} disabled={busy || !onOpenReview || !imageReviewIds.length}>Review 图片 ({imageReviewIds.length})</button>
-          <button type="button" onClick={() => void openReview("video", videoReviewIds)} disabled={busy || !onOpenReview || !videoReviewIds.length}>Review 视频 ({videoReviewIds.length})</button>
+          <button type="button" onClick={() => void openReview("image", imageReviewIds)} disabled={busy || !onOpenReview || !imageReviewIds.length}>审核图片（{imageReviewIds.length}）</button>
+          <button type="button" onClick={() => void openReview("video", videoReviewIds)} disabled={busy || !onOpenReview || !videoReviewIds.length}>审核视频（{videoReviewIds.length}）</button>
         </div>
       </div>
 

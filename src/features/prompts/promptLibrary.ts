@@ -37,15 +37,15 @@ export function selectPromptTargetField(
   requestedFieldKey?: string,
 ): { fieldKey?: string; issue?: string } {
   const fields = recipe.fields.filter((field) => field.type === "textarea");
-  if (!fields.length) return { issue: "当前 Recipe 没有文字输入字段。" };
+  if (!fields.length) return { issue: "当前配方没有文字输入字段。" };
   if (requestedFieldKey) {
     return fields.some((field) => field.key === requestedFieldKey)
       ? { fieldKey: requestedFieldKey }
-      : { issue: "所选文字输入字段不属于当前 Recipe。" };
+      : { issue: "所选文字输入字段不属于当前配方。" };
   }
   return fields.length === 1
     ? { fieldKey: fields[0].key }
-    : { issue: "当前 Recipe 有多个文字输入字段，请明确选择目标字段。" };
+    : { issue: "当前配方有多个文字输入字段，请明确选择目标字段。" };
 }
 
 export function normalizePromptText(text: string): string {
@@ -100,7 +100,7 @@ export function applyPromptVersionToStudio(
   version: PromptVersion,
 ): PromptStudioApplyResult {
   const field = recipe.fields.find((candidate) => candidate.key === fieldKey);
-  if (!field || field.type !== "textarea") return { issue: "请选择当前 Recipe 的文字输入字段。" };
+  if (!field || field.type !== "textarea") return { issue: "请选择当前配方的文字输入字段。" };
   return {
     values: {
       ...cloneValues(values),
@@ -117,7 +117,7 @@ export function applyPromptSnippetToStudio(
   mode: PromptSnippetMode,
 ): PromptStudioApplyResult {
   const field = recipe.fields.find((candidate) => candidate.key === fieldKey);
-  if (!field || field.type !== "textarea") return { issue: "请选择当前 Recipe 的文字输入字段。" };
+  if (!field || field.type !== "textarea") return { issue: "请选择当前配方的文字输入字段。" };
   const currentValue = values[field.key];
   const current = currentValue?.type === "string" ? currentValue.value : "";
   const next = mode === "replace"

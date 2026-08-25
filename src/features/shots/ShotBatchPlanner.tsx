@@ -88,12 +88,12 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
   }
 
   return (
-    <section className={`shot-batch-panel${open ? " shot-batch-panel-open" : ""}`} aria-label="批量 Shot 生产">
+    <section className={`shot-batch-panel${open ? " shot-batch-panel-open" : ""}`} aria-label="批量镜头生产">
       <div className="shot-batch-panel-heading">
         <div>
           <span className="section-label">批量规划</span>
           <h3>批量生产与复核</h3>
-          <p className="shot-inline-note">先批量生成关键帧，再由你逐个选定；点击视频批次后才会进入 MiniMax H3 队列。</p>
+          <p className="shot-inline-note">先批量生成关键帧，再由你逐个选定；点击视频批次后才会进入 H3 队列。</p>
         </div>
         <button type="button" className={open ? "quiet-button" : "shot-primary-action"} onClick={() => setOpen((current) => !current)}>
           {open ? "收起批量规划" : "打开批量规划"}
@@ -104,26 +104,26 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
           <div className="shot-batch-stage-tabs" role="tablist" aria-label="批量阶段">
             {(["image", "video"] as const).map((nextStage) => (
               <button key={nextStage} type="button" className={stage === nextStage ? "active" : ""} onClick={() => setStage(nextStage)} role="tab" aria-selected={stage === nextStage}>
-                {nextStage === "image" ? "Kera2 · 批量关键帧" : "MiniMax H3 · 批量视频"}
+                {nextStage === "image" ? "Krea2 · 批量关键帧" : "H3 · 批量视频"}
               </button>
             ))}
             <button type="button" className="quiet-button" onClick={() => void loadPlan()} disabled={loading || creating}>重新检查资格</button>
           </div>
           <div className="shot-batch-frozen-notice">
             <strong>批次快照规则</strong>
-            <span>入队时冻结每个 Shot 的 Prompt、scalar、Reference、工作流版本与 Recipe；之后编辑 Shot 不会改写已入队项。</span>
+            <span>入队时冻结每个镜头的提示词、标量参数、参考素材、工作流版本与配方；之后编辑镜头不会改写已入队项。</span>
           </div>
           <div className="shot-batch-selection-bar">
             <label><input type="checkbox" checked={allEligibleSelected} onChange={toggleAll} disabled={!eligibleIds.length || loading || creating} /> 全选符合条件的镜头</label>
             <span>{selectedIds.size} / {plan?.maxItems ?? 100} 已选择 · {plan?.eligibleCount ?? 0} 个符合条件</span>
             <button type="button" className="shot-primary-action" onClick={() => void createAndStart()} disabled={creating || loading || !selectedIds.size}>
-              {creating ? "正在创建队列…" : stage === "image" ? "批量生成关键帧" : "批量生成视频（MiniMax H3）"}
+              {creating ? "正在创建队列…" : stage === "image" ? "批量生成关键帧" : "批量生成视频（H3）"}
             </button>
           </div>
           {loading ? <p className="project-loading">正在检查当前工作流、素材与任务状态…</p> : (
             <div className="shot-batch-table-wrap">
               <table className="shot-batch-table">
-                <thead><tr><th aria-label="选择" /><th>Shot</th><th>模式</th><th>参考数量</th><th>当前状态</th><th>工作流 / Recipe</th><th>资格与阻塞原因</th></tr></thead>
+                <thead><tr><th aria-label="选择" /><th>镜头</th><th>模式</th><th>参考数量</th><th>当前状态</th><th>工作流 / 配方</th><th>资格与阻塞原因</th></tr></thead>
                 <tbody>
                   {(plan?.rows ?? []).map((row) => (
                     <tr key={row.shotId} className={row.eligible ? "" : "shot-batch-row-blocked"}>
@@ -133,10 +133,10 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
                       <td><strong>{shotReferenceCount(row)}</strong><small>{row.stage === "video" ? "有序参考" : "—"}</small></td>
                       <td><span className={`shot-status-chip shot-status-${row.currentStatus.toLowerCase()}`}>{shotStatusLabels[row.currentStatus as keyof typeof shotStatusLabels] ?? row.currentStatus}</span></td>
                       <td><strong>{row.recipeName ?? "未配置"}</strong><small>{row.workflowVersionId ? "当前版本 · 入队时冻结" : "等待配置"}</small></td>
-                      <td>{row.eligible ? <span className="shot-batch-ready">READY · 可加入批次</span> : <span className="shot-batch-reasons">BLOCKED · {row.blockingReasons.join("；")}</span>}</td>
+                      <td>{row.eligible ? <span className="shot-batch-ready">就绪 · 可加入批次</span> : <span className="shot-batch-reasons">已阻塞 · {row.blockingReasons.join("；")}</span>}</td>
                     </tr>
                   ))}
-                  {!plan?.rows.length && <tr><td colSpan={7}><p className="empty-state">当前项目还没有 Shot。</p></td></tr>}
+                  {!plan?.rows.length && <tr><td colSpan={7}><p className="empty-state">当前项目还没有镜头。</p></td></tr>}
                 </tbody>
               </table>
             </div>

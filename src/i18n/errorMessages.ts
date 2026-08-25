@@ -40,7 +40,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INPUT_ASSET_READ_FAILED: "读取所选素材失败，请重新选择。",
   INPUT_ASSET_MIME_INVALID: "所选素材格式不受支持，请重新选择。",
   INPUT_ASSET_REPOSITORY_ERROR: "读取素材库失败，请稍后重试。",
-  WORKFLOW_NOT_API_FORMAT: "该文件不是 ComfyUI API 格式工作流，请重新导出 API Format 工作流。",
+  WORKFLOW_NOT_API_FORMAT: "该文件不是 ComfyUI API 格式工作流，请重新导出 API 格式工作流。",
   WORKFLOW_FILE_TOO_LARGE: "工作流文件过大，无法导入。",
   WORKFLOW_PACKAGE_INVALID: "工作流运行包无效，请重新检查工作流。",
   WORKFLOW_VERSION_CONFLICT: "工作流版本已发生变化，请刷新后重试。",
@@ -53,7 +53,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INPUT_REQUIRED: "请先填写必填输入项。",
   INPUT_TYPE_MISMATCH: "输入值类型不符合要求。",
   INPUT_OUT_OF_RANGE: "输入值超出允许范围。",
-  INPUT_STEP_MISMATCH: "输入值不符合当前 Recipe 的步进要求。",
+  INPUT_STEP_MISMATCH: "输入值不符合当前配方的步进要求。",
   INPUT_COUNT_OUT_OF_RANGE: "输入素材数量不符合要求。",
   WORKFLOW_INVALID: "工作流内容无效，请重新导入。",
   QUEUE_DISPATCH_UNCERTAIN: "上次退出时任务提交结果无法确认，为避免重复生成，队列已暂停。",
@@ -84,10 +84,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   PROMPT_TEMPLATE_CUSTOM_VALUE_MISSING: "请填写模板要求的自定义变量。",
   PROMPT_TEMPLATE_CUSTOM_VALUES_INVALID: "模板自定义变量格式无效，请检查名称、长度和总大小。",
   PROMPT_TEMPLATE_APPLY_VALIDATION_FAILED: "模板批量校验未通过，请检查镜头上下文与自定义变量。",
-  PROMPT_TEMPLATE_ANCHOR_PROJECT_MISMATCH: "所选 Reference Anchor 不属于当前项目。",
-  PROMPT_TEMPLATE_ANCHOR_LIMIT: "模板上下文最多选择 20 个 Reference Anchor。",
+  PROMPT_TEMPLATE_ANCHOR_PROJECT_MISMATCH: "所选参考锚点不属于当前项目。",
+  PROMPT_TEMPLATE_ANCHOR_LIMIT: "模板上下文最多选择 20 个参考锚点。",
   PROMPT_TEMPLATE_SHOT_LIMIT: "模板批量应用一次最多处理 500 个镜头。",
-  PROMPT_TEMPLATE_RESULT_TOO_LARGE: "渲染后的 Prompt 过长，请缩短模板或上下文。",
+  PROMPT_TEMPLATE_RESULT_TOO_LARGE: "渲染后的提示词过长，请缩短模板或上下文。",
 };
 
 function rawErrorMessage(error: unknown): string {

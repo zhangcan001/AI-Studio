@@ -54,7 +54,7 @@ export function WorkflowSelector({
           <strong>{selected ? workflowDisplayName(selected.workflowId, selected.name) : "没有可用工作流"}</strong>
           {selected && (
             <span className="workflow-selector-meta">
-              {selected.workflowVersionId} · Recipe {selected.recipeVersion ?? selected.recipeId}
+              {selected.workflowVersionId} · 配方 {selected.recipeVersion ?? selected.recipeId}
             </span>
           )}
         </div>
@@ -81,9 +81,9 @@ export function WorkflowSelector({
             {candidates.length > 10 ? (
               <label>
                 <span>搜索工作流</span>
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="名称、workflowId 或 recipeId" autoFocus />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="名称、工作流 ID 或配方 ID" autoFocus />
               </label>
-            ) : <span>{candidates.length} 个正式可用 Recipe</span>}
+            ) : <span>{candidates.length} 个正式可用配方</span>}
             <div>
               <button type="button" className="quiet-button" onClick={() => { onRestoreRecommendation(); setOpen(false); }} disabled={disabled || !recommended || isRecommended}>
                 恢复推荐工作流
@@ -108,7 +108,7 @@ export function WorkflowSelector({
                 >
                   <span className="workflow-selector-option-copy">
                     <strong>{workflowDisplayName(recipe.workflowId, recipe.name)}</strong>
-                    <small>{recipe.workflowVersionId} · Recipe {recipe.recipeVersion ?? recipe.recipeId}</small>
+                    <small>{recipe.workflowVersionId} · 配方 {recipe.recipeVersion ?? recipe.recipeId}</small>
                     <span>{recipe.outputTypes?.join(" · ") || "未声明输出"} · {recipe.mode}</span>
                   </span>
                   <span className="workflow-selector-option-tags">

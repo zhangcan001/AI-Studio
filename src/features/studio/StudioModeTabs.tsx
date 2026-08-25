@@ -17,12 +17,12 @@ export function StudioModeTabs({ mode, onChange }: Props) {
         <small>管理任务清单和生产队列</small>
       </button>
       <button type="button" role="tab" aria-selected={mode === "production"} className={mode === "production" ? "studio-mode-tab studio-mode-tab-active" : "studio-mode-tab"} onClick={() => onChange("production")}>
-        Production Run
-        <small>Prompt → Krea2 → 选图 → H3</small>
+        生产运行
+        <small>提示词 → Krea2 → 选图 → H3</small>
       </button>
       <button type="button" role="tab" aria-selected={mode === "experiment"} className={mode === "experiment" ? "studio-mode-tab studio-mode-tab-active" : "studio-mode-tab"} onClick={() => onChange("experiment")}>
-        Benchmark Lab
-        <small>Workflow / Recipe / Preset 横向比较</small>
+        基准实验室
+        <small>工作流 / 配方 / 预设横向比较</small>
       </button>
     </div>
   );

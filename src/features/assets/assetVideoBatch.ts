@@ -66,7 +66,7 @@ export interface H3ModeOption {
 }
 
 export const H3_MODE_OPTIONS: H3ModeOption[] = [
-  { id: "FL2VA_TEXT_TO_VIDEO", label: "文生视频", description: "只用 Prompt 生成视频", family: "FL2VA" },
+  { id: "FL2VA_TEXT_TO_VIDEO", label: "文生视频", description: "只用提示词生成视频", family: "FL2VA" },
   { id: "FL2VA_IMAGE_TO_VIDEO", label: "一张图生视频", description: "从首帧图片开始生成", family: "FL2VA" },
   { id: "FL2VA_FIRST_LAST", label: "首尾帧视频", description: "锁定首帧与末帧", family: "FL2VA" },
   { id: "REF2VA_IMAGE", label: "仅图片", description: "使用有序图片参考", family: "REF2VA" },
@@ -140,7 +140,7 @@ export function h3AssetQualification(input: H3AssetQualificationInput): string {
   if (!input.isImage) return "不是图片素材";
   if (!input.promptReady) return "未填写视频提示词";
   if (input.promptTooLong) return "视频提示词超过 64 KiB";
-  if (!input.h3RuntimeReady) return "H3 runtime unavailable";
+  if (!input.h3RuntimeReady) return "H3 运行时不可用";
   if (!input.comfyConnected) return "ComfyUI 未连接";
   if (!input.taskEventsReady) return "任务事件通道未就绪";
   if (!input.durationReady) return "请选择有效时长";
@@ -245,7 +245,7 @@ export function buildH3BatchValues(
   const result = h3RecipeContract(recipe);
   if (!result.ok) throw new Error(result.reason);
   const defaultDuration = result.contract.durationField.default;
-  if (defaultDuration === undefined) throw new Error("H3 Recipe 缺少 duration_seconds 默认值。");
+  if (defaultDuration === undefined) throw new Error("H3 配方缺少 duration_seconds 默认值。");
   const duration = durationSeconds ?? defaultDuration;
   if (!result.contract.durationOptions.includes(duration)) {
     throw new Error(`H3 视频时长必须选择 ${result.contract.durationField.min}–${result.contract.durationField.max} 秒。`);
@@ -290,7 +290,7 @@ export function buildH3ModeBatchValues(
   if (!result.ok) throw new Error(result.reason);
   const { contract } = result;
   const defaultDuration = contract.durationField.default;
-  if (defaultDuration === undefined) throw new Error("H3 Recipe 缺少 duration_seconds 默认值。");
+  if (defaultDuration === undefined) throw new Error("H3 配方缺少 duration_seconds 默认值。");
   const duration = durationSeconds ?? defaultDuration;
   if (!contract.durationOptions.includes(duration)) {
     throw new Error(`H3 视频时长必须选择 ${contract.durationField.min}–${contract.durationField.max} 秒。`);
@@ -301,7 +301,7 @@ export function buildH3ModeBatchValues(
     throw new Error("H3 输出分辨率必须选择图片规格中的 14 档 16:9 分辨率。");
   }
   if (!h3ModeSupported(contract, mode)) {
-    throw new Error(`当前 H3 Recipe 不支持模式 ${mode}。`);
+    throw new Error(`当前 H3 配方不支持模式 ${mode}。`);
   }
 
   const values: GenerationValues = {};
@@ -376,14 +376,14 @@ export function h3ReferenceField(recipe: RecipeViewModel): RecipeField | undefin
 export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResult {
   const family = h3FamilyForWorkflowId(recipe.workflowId);
   if (!family) {
-    return { ok: false, reason: "运行目录中的 Recipe 不是 MiniMax H3。" };
+    return { ok: false, reason: "运行目录中的配方不是 H3。" };
   }
   if (!recipe.outputTypes?.includes("video")) {
-    return { ok: false, reason: "H3 Recipe 未声明视频输出。" };
+    return { ok: false, reason: "H3 配方未声明视频输出。" };
   }
   const promptField = exactField(recipe, H3_PROMPT_KEY, "textarea");
   if (!promptField) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `prompt` 的 textarea 字段。" };
+    return { ok: false, reason: "H3 配方缺少键为 `prompt` 的文本输入字段。" };
   }
   const referenceField = exactField(recipe, H3_REFERENCE_IMAGE_KEY, "image")
     ?? exactField(recipe, H3_REFERENCE_IMAGE_KEY, "images");
@@ -399,19 +399,19 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
     && !referenceVideosField
     && !referenceAudiosField
   ) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `reference_image` 或 Omni Reference media 字段。" };
+    return { ok: false, reason: "H3 配方缺少键为 `reference_image` 或全能参考媒体字段。" };
   }
   const durationField = exactField(recipe, H3_DURATION_KEY, "integer");
   if (!durationField) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `duration_seconds` 的 integer 字段。" };
+    return { ok: false, reason: "H3 配方缺少键为 `duration_seconds` 的整数输入字段。" };
   }
   const widthField = exactField(recipe, "width", "integer");
   if (!widthField) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `width` 的 integer 字段。" };
+    return { ok: false, reason: "H3 配方缺少键为 `width` 的整数输入字段。" };
   }
   const heightField = exactField(recipe, "height", "integer");
   if (!heightField) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `height` 的 integer 字段。" };
+    return { ok: false, reason: "H3 配方缺少键为 `height` 的整数输入字段。" };
   }
   if (
     !widthField.required
@@ -419,7 +419,7 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
     || widthField.default === undefined
     || heightField.default === undefined
   ) {
-    return { ok: false, reason: "H3 Recipe 的 width、height 必须是带默认值的必填字段。" };
+    return { ok: false, reason: "H3 配方的 width、height 必须是带默认值的必填字段。" };
   }
   if (
     durationField.min === undefined
@@ -435,13 +435,13 @@ export function h3RecipeContract(recipe: RecipeViewModel): H3RecipeContractResul
     || durationField.default < durationField.min
     || durationField.default > durationField.max
   ) {
-    return { ok: false, reason: "H3 Recipe 的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" };
+    return { ok: false, reason: "H3 配方的 duration_seconds 必须是 1–15 秒、步长 1 且包含默认值。" };
   }
   const minDuration = durationField.min;
   const maxDuration = durationField.max;
   const seedField = exactField(recipe, H3_SEED_KEY, "seed");
   if (!seedField) {
-    return { ok: false, reason: "H3 Recipe 缺少 key 为 `seed` 的 seed 字段。" };
+    return { ok: false, reason: "H3 配方缺少键为 `seed` 的 Seed 输入字段。" };
   }
   return {
     ok: true,

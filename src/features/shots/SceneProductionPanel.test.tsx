@@ -74,7 +74,7 @@ describe("SceneProductionPanel", () => {
     expect(html).toContain("生产阶段");
     expect(html).toContain("电影基础");
     expect(html).toContain("应用图片预设到场景");
-    expect(html).toContain("Prompt Entry");
+    expect(html).toContain("提示词条目");
     expect(html).toContain("应用图片提示词");
     expect(html).toContain("已完成");
     expect(html).toContain("已准备");

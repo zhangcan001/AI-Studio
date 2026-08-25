@@ -176,7 +176,7 @@ export function SceneProductionPanel({
       return;
     }
     if (!currentShot) {
-      setError({ code: "CURRENT_SHOT_REQUIRED", message: "请先在 Shot Workspace 选择一个已配置镜头。" });
+      setError({ code: "CURRENT_SHOT_REQUIRED", message: "请先在镜头工作区选择一个已配置镜头。" });
       return;
     }
     const configs = new Map(currentShot.stageConfigs.map((config) => [config.stage, config]));
@@ -227,7 +227,7 @@ export function SceneProductionPanel({
       await deleteBatchWorkflowPreset(selectedPreset.id);
       setPresets((current) => current.filter((preset) => preset.id !== selectedPreset.id));
       setSelectedPresetId("");
-      setNotice("预设已删除。不会影响任何已有 Shot 配置。");
+      setNotice("预设已删除。不会影响任何已有镜头配置。");
     });
   }
 
@@ -280,7 +280,7 @@ export function SceneProductionPanel({
         contextAnchorIds: anchorIds,
         customValues,
       });
-      setNotice(`已将提示词模板应用到 ${planShotIds.length} 个镜头；最终 Prompt 已按阶段快照冻结。`);
+      setNotice(`已将提示词模板应用到 ${planShotIds.length} 个镜头；最终提示词已按阶段快照冻结。`);
       setPromptPreview(undefined);
       await reloadPlan();
       await onRefresh?.();
@@ -294,7 +294,7 @@ export function SceneProductionPanel({
       const result = await prepareSceneProduction({ projectId, sceneId, stage, allowPartial: allowPartialValue });
       setPreparedBatchId(result.batchId ?? result.existingBatchIds[0] ?? undefined);
       setNotice(result.created
-        ? `已准备 ${sceneProductionStageLabel(stage)}生产批次；生成尚未启动，Image → Video 仍需人工 Review。`
+        ? `已准备 ${sceneProductionStageLabel(stage)}生产批次；生成尚未启动，图片 → 视频仍需人工审核。`
         : result.alreadyPrepared ? "该场景阶段已有准备中的批次，未创建重复生产项。" : (result.message ?? "没有创建新的生产批次。"));
       await reloadPlan();
       await onRefresh?.();
@@ -308,7 +308,7 @@ export function SceneProductionPanel({
     }
     await runAction("start", async () => {
       await startProductionQueue(projectId, preparedBatchId);
-      setNotice(`${sceneProductionStageLabel(stage)}生产已提交到现有 Production Queue；结果仍需人工 Review。`);
+      setNotice(`${sceneProductionStageLabel(stage)}生产已提交到现有生产队列；结果仍需人工审核。`);
       onNavigateToReview?.(stage);
     });
   }
@@ -327,14 +327,14 @@ export function SceneProductionPanel({
   }
 
   if (!sceneOptions.length) {
-    return <section className="scene-production-panel" aria-label="场景生产"><div className="scene-production-empty"><strong>暂无可生产场景</strong><span>请先在现有 Production Structure 中创建 Scene 并分配 Shot。</span></div></section>;
+    return <section className="scene-production-panel" aria-label="场景生产"><div className="scene-production-empty"><strong>暂无可生产场景</strong><span>请先在现有内容结构中创建场景并分配镜头。</span></div></section>;
   }
 
   return (
     <section className="scene-production-panel" aria-label="场景生产">
       <div className="scene-production-header">
-        <div><span className="section-label">Scene Production</span><h3>场景生产自动化</h3><p>配置、检查、准备，再由你明确启动现有 Production Queue。</p></div>
-        <span className="scene-production-safety">不会自动生成或跨过人工 Review</span>
+        <div><span className="section-label">场景生产</span><h3>场景生产自动化</h3><p>配置、检查、准备，再由你明确启动现有生产队列。</p></div>
+        <span className="scene-production-safety">不会自动生成或跨过人工审核</span>
       </div>
 
       <div className="scene-production-toolbar">
@@ -345,34 +345,34 @@ export function SceneProductionPanel({
 
       <div className="scene-production-grid">
         <section className="scene-production-card" aria-label="批量工作流预设">
-          <div className="scene-production-card-heading"><div><span className="section-label">Preset</span><h4>批量工作流预设</h4></div><span>{presets.length} / 30</span></div>
+          <div className="scene-production-card-heading"><div><span className="section-label">预设</span><h4>批量工作流预设</h4></div><span>{presets.length} / 30</span></div>
           <label><span>当前预设</span><select value={selectedPresetId} onChange={(event) => selectPreset(event.target.value)} disabled={isBusy}><option value="">选择预设</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{!preset.available ? " · 不可用" : ""}</option>)}</select></label>
           {selectedPreset && <div className="scene-production-preset-summary"><strong>{selectedPreset.name}</strong><span className={selectedPreset.available ? "scene-production-available" : "scene-production-unavailable"}>{selectedPreset.available ? "可用" : selectedPreset.unavailableReason ?? selectedPreset.reason ?? "WORKFLOW_UNAVAILABLE"}</span><small>图片：{presetSummary(selectedPreset, "image")} · 视频：{presetSummary(selectedPreset, "video")}</small></div>}
           <div className="scene-production-form-grid"><label><span>名称</span><input value={presetName} maxLength={80} onChange={(event) => setPresetName(event.target.value)} placeholder="例如：电影感场景基础配置" disabled={isBusy} /></label><label><span>说明</span><input value={presetDescription} maxLength={500} onChange={(event) => setPresetDescription(event.target.value)} placeholder="可选，最多 500 字" disabled={isBusy} /></label></div>
-          <div className="scene-production-checks"><span>从当前 Shot 保存：</span>{STAGES.map((nextStage) => <label key={nextStage}><input type="checkbox" checked={presetStages.has(nextStage)} onChange={() => setPresetStages((current) => toggleStage(current, nextStage))} disabled={isBusy} />{sceneProductionStageLabel(nextStage)}</label>)}</div>
+          <div className="scene-production-checks"><span>从当前镜头保存：</span>{STAGES.map((nextStage) => <label key={nextStage}><input type="checkbox" checked={presetStages.has(nextStage)} onChange={() => setPresetStages((current) => toggleStage(current, nextStage))} disabled={isBusy} />{sceneProductionStageLabel(nextStage)}</label>)}</div>
           <div className="scene-production-actions"><button type="button" onClick={() => void saveCurrentPreset()} disabled={isBusy || !currentShot || !presetStages.size}>{busyAction === "preset-save" ? "保存中…" : "保存当前配置为预设"}</button><button type="button" className="quiet-button" onClick={() => void renamePreset()} disabled={isBusy || !selectedPreset || !presetName.trim()}>重命名</button><button type="button" className="quiet-button danger-button" onClick={() => void removePreset()} disabled={isBusy || !selectedPreset}>删除</button></div>
           <button type="button" className="scene-production-secondary-action" onClick={() => void applyPreset()} disabled={isBusy || !selectedStagePreset || !selectedPreset?.available || !planShotIds.length}>{busyAction === "preset-apply" ? "应用中…" : `应用${sceneProductionStageLabel(stage)}预设到场景`}</button>
-          <small className="scene-production-hint">应用会覆盖阶段配置，但不会覆盖 Ordered References、Selected Image 或 Selected Video。</small>
+          <small className="scene-production-hint">应用会覆盖阶段配置，但不会覆盖有序参考图、已确认图片或已确认视频。</small>
         </section>
 
-        <section className="scene-production-card" aria-label="Prompt Template 批量应用">
-          <div className="scene-production-card-heading"><div><span className="section-label">Prompt</span><h4>提示词模板</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div>
-          <label><span>Prompt Entry</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
-          <label><span>Version</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>
-          {referenceAnchors.length > 0 && <div className="scene-production-anchor-list"><span>Context Anchors（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}
+        <section className="scene-production-card" aria-label="提示词模板批量应用">
+          <div className="scene-production-card-heading"><div><span className="section-label">提示词</span><h4>提示词模板</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div>
+          <label><span>提示词条目</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+          <label><span>版本</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>
+          {referenceAnchors.length > 0 && <div className="scene-production-anchor-list"><span>上下文锚点（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}
           {promptCustomNames.length > 0 && <div className="scene-production-custom-values">{promptCustomNames.map((name) => <label key={name}><span>{name}</span><input value={customValues[name] ?? ""} maxLength={4096} onChange={(event) => setCustomValues((current) => ({ ...current, [name]: event.target.value }))} disabled={isBusy} /></label>)}</div>}
-          <div className="scene-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !planShotIds.length}>{busyAction === "prompt-preview" ? "预览中…" : "预览场景 Prompt"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !promptPreview || promptPreview.invalid > 0}>{busyAction === "prompt-apply" ? "应用中…" : `应用${sceneProductionStageLabel(stage)}提示词`}</button></div>
-          {promptPreview && <p className={promptPreview.invalid ? "scene-production-inline-error" : "scene-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。应用后会冻结最终阶段 Prompt。</p>}
+          <div className="scene-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !planShotIds.length}>{busyAction === "prompt-preview" ? "预览中…" : "预览场景提示词"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !promptPreview || promptPreview.invalid > 0}>{busyAction === "prompt-apply" ? "应用中…" : `应用${sceneProductionStageLabel(stage)}提示词`}</button></div>
+          {promptPreview && <p className={promptPreview.invalid ? "scene-production-inline-error" : "scene-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。应用后会冻结最终阶段提示词。</p>}
         </section>
       </div>
 
       <section className="scene-production-card scene-production-plan" aria-label="生产计划">
-        <div className="scene-production-card-heading"><div><span className="section-label">Production Plan</span><h4>{plan.sceneName || "当前场景"} · {sceneProductionStageLabel(stage)}</h4></div><span>{plan.total} 个镜头</span></div>
+        <div className="scene-production-card-heading"><div><span className="section-label">生产计划</span><h4>{plan.sceneName || "当前场景"} · {sceneProductionStageLabel(stage)}</h4></div><span>{plan.total} 个镜头</span></div>
         <div className="scene-production-counts">{CLASSIFICATIONS.map((classification) => <span key={classification} className={`scene-production-count scene-production-count-${classification.toLowerCase()}`}><strong>{plan[classification.toLowerCase() as "done" | "prepared" | "eligible" | "blocked"]}</strong>{sceneProductionClassificationLabel(classification)}</span>)}</div>
-        {!plan.total && <div className="scene-production-empty"><strong>场景暂无 Shot</strong><span>请回到现有 Production Structure 分配镜头。</span></div>}
-        {plan.total > 0 && <div className="scene-production-table-wrap"><table><thead><tr><th>Shot</th><th>分类</th><th>阻塞原因</th></tr></thead><tbody>{plan.rows.slice(0, 100).map((row) => <tr key={row.shotId}><td><strong>{String(row.globalOrdinal + 1).padStart(2, "0")} · {row.name}</strong><small>{row.shotId}</small></td><td><span className={`scene-production-classification scene-production-classification-${row.classification.toLowerCase()}`}>{sceneProductionClassificationLabel(row.classification)}</span></td><td>{row.blockingReasons.length ? row.blockingReasons.join("；") : row.existingBatchId ? `已有批次 ${row.existingBatchId}` : "—"}</td></tr>)}</tbody></table></div>}
+        {!plan.total && <div className="scene-production-empty"><strong>场景暂无镜头</strong><span>请回到现有内容结构分配镜头。</span></div>}
+        {plan.total > 0 && <div className="scene-production-table-wrap"><table><thead><tr><th>镜头</th><th>分类</th><th>阻塞原因</th></tr></thead><tbody>{plan.rows.slice(0, 100).map((row) => <tr key={row.shotId}><td><strong>{String(row.globalOrdinal + 1).padStart(2, "0")} · {row.name}</strong><small>{row.shotId}</small></td><td><span className={`scene-production-classification scene-production-classification-${row.classification.toLowerCase()}`}>{sceneProductionClassificationLabel(row.classification)}</span></td><td>{row.blockingReasons.length ? row.blockingReasons.join("；") : row.existingBatchId ? `已有批次 ${row.existingBatchId}` : "—"}</td></tr>)}</tbody></table></div>}
         <div className="scene-production-prepare-bar"><label><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 仅准备当前可生产镜头（跳过被阻塞项）</label><span>单批最多 {plan.maxBatchItems} 个</span><button type="button" onClick={() => void prepare(false)} disabled={isBusy || !canPrepare}>{busyAction === "prepare" ? "准备中…" : "准备场景生产"}</button><button type="button" className="quiet-button" onClick={() => void prepare(true)} disabled={isBusy || !allowPartial || !partialCanPrepare}>{busyAction === "prepare" ? "准备中…" : "仅准备可生产镜头"}</button><button type="button" className="scene-production-start" onClick={() => void startPreparedBatch()} disabled={isBusy || !preparedBatchId}>{busyAction === "start" ? "启动中…" : "启动生产"}</button></div>
-        <p className="scene-production-hint">准备不会启动 GPU。Image 完成后必须人工选择 Selected Image，之后视频计划才会自然变为可生产；视频结果同样需要人工 Review。</p>
+        <p className="scene-production-hint">准备不会启动 GPU。图片完成后必须人工选择已确认图片，之后视频计划才会自然变为可生产；视频结果同样需要人工审核。</p>
       </section>
 
       {error && <div className="scene-production-error" role="alert"><strong>{error.code}</strong><span>{error.message}</span>{error.technicalMessage && <details><summary>技术详情</summary><code>{error.technicalMessage}</code></details>}</div>}

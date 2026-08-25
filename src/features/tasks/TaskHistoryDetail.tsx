@@ -200,43 +200,43 @@ function RuntimeDiagnostics({
 }) {
   telemetry = telemetry ?? {};
   return (
-    <section className="detail-section runtime-diagnostics" aria-label="Runtime Diagnostics">
+    <section className="detail-section runtime-diagnostics" aria-label="运行诊断">
       <div className="section-heading">
         <div>
-          <span className="section-label">Runtime Diagnostics</span>
+          <span className="section-label">运行诊断</span>
           <h3>实际运行来源</h3>
         </div>
       </div>
       {provenance && (
         <div className="detail-facts">
-          <Fact label="App version" value={provenance.appVersion} />
-          <Fact label="Build commit" value={provenance.buildCommit} />
-          <Fact label="Workflow package" value={provenance.packageName ?? "—"} />
-          <Fact label="Workflow ID" value={provenance.workflowId} />
-          <Fact label="Workflow version ID" value={provenance.workflowVersionId} />
-          <Fact label="Workflow version" value={provenance.workflowVersion} />
-          <Fact label="Workflow SHA-256" value={provenance.workflowSha256} />
-          <Fact label="Recipe ID" value={provenance.recipeId} />
-          <Fact label="Recipe version" value={provenance.recipeVersion} />
-          <Fact label="Recipe SHA-256" value={provenance.recipeSha256} />
-          <Fact label="Package source" value={provenance.packageSourcePath ?? "—"} />
+          <Fact label="应用版本" value={provenance.appVersion} />
+          <Fact label="构建提交" value={provenance.buildCommit} />
+          <Fact label="工作流运行包" value={provenance.packageName ?? "—"} />
+          <Fact label="工作流 ID" value={provenance.workflowId} />
+          <Fact label="工作流版本 ID" value={provenance.workflowVersionId} />
+          <Fact label="工作流版本" value={provenance.workflowVersion} />
+          <Fact label="工作流 SHA-256" value={provenance.workflowSha256} />
+          <Fact label="配方 ID" value={provenance.recipeId} />
+          <Fact label="配方版本" value={provenance.recipeVersion} />
+          <Fact label="配方 SHA-256" value={provenance.recipeSha256} />
+          <Fact label="运行包来源" value={provenance.packageSourcePath ?? "—"} />
           <Fact
-            label="Dynamic binding targets"
+            label="动态绑定目标"
             value={provenance.dynamicBindingTargets.length ? provenance.dynamicBindingTargets.join(" · ") : "—"}
           />
         </div>
       )}
       <div className="detail-facts">
-        <Fact label="Generation execution" value={telemetry.generationExecutionId ?? "—"} />
-        <Fact label="Compiled workflow SHA-256" value={telemetry.compiledWorkflowSha256 ?? "—"} />
-        <Fact label="Runtime profile" value={telemetry.runtimeProfile ?? "—"} />
-        <Fact label="Concurrency class" value={telemetry.concurrencyClass ?? "—"} />
-        <Fact label="Total" value={formatDuration(telemetry.totalMs)} />
-        <Fact label="Queue" value={formatDuration(telemetry.queueWaitMs)} />
-        <Fact label="Prepare" value={formatDuration(telemetry.prepareMs)} />
-        <Fact label="Submit" value={formatDuration(telemetry.submitMs)} />
-        <Fact label="Comfy" value={formatDuration(telemetry.comfyExecutionMs)} />
-        <Fact label="Collect" value={formatDuration(telemetry.collectionMs)} />
+        <Fact label="生成执行" value={telemetry.generationExecutionId ?? "—"} />
+        <Fact label="编译后工作流 SHA-256" value={telemetry.compiledWorkflowSha256 ?? "—"} />
+        <Fact label="运行参数档案" value={telemetry.runtimeProfile ?? "—"} />
+        <Fact label="并发类别" value={telemetry.concurrencyClass ?? "—"} />
+        <Fact label="总耗时" value={formatDuration(telemetry.totalMs)} />
+        <Fact label="排队耗时" value={formatDuration(telemetry.queueWaitMs)} />
+        <Fact label="准备耗时" value={formatDuration(telemetry.prepareMs)} />
+        <Fact label="提交耗时" value={formatDuration(telemetry.submitMs)} />
+        <Fact label="ComfyUI 执行耗时" value={formatDuration(telemetry.comfyExecutionMs)} />
+        <Fact label="收集耗时" value={formatDuration(telemetry.collectionMs)} />
       </div>
     </section>
   );

@@ -6,19 +6,19 @@ export const PROMPT_TEMPLATE_VARIABLE_GROUPS = [
     variables: ["project.id", "project.name", "project.description"],
   },
   {
-    label: "Series",
+    label: "系列",
     variables: ["series.id", "series.name", "series.description", "series.number"],
   },
   {
-    label: "Episode",
+    label: "集",
     variables: ["episode.id", "episode.name", "episode.description", "episode.number"],
   },
   {
-    label: "Scene",
+    label: "场景",
     variables: ["scene.id", "scene.name", "scene.description", "scene.number"],
   },
   {
-    label: "Shot",
+    label: "镜头",
     variables: ["shot.id", "shot.name", "shot.number", "shot.basePrompt"],
   },
   {

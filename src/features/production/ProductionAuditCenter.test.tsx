@@ -83,7 +83,7 @@ const lineage: ProductionAuditLineage = {
 describe("ProductionAuditCenter", () => {
   it.each(["HEALTHY", "WARNING", "BLOCKED"] as const)("renders %s health", (health) => {
     const html = renderToStaticMarkup(<ProductionAuditCenterView summary={{ ...summary, health }} />);
-    expect(html).toContain(`生产数据健康：${health}`);
+    expect(html).toContain(`生产数据健康：${health === "HEALTHY" ? "健康" : health === "WARNING" ? "需要关注" : "已阻断"}`);
   });
 
   it("renders summary cards and recent activity with task reuse affordance", () => {
@@ -120,8 +120,8 @@ describe("ProductionAuditCenter", () => {
         onOpenShot={vi.fn()}
       />,
     );
-    expect(html).toContain("Run → Stage → Batch → Logical Item → Attempt → Task → Snapshot → Asset");
-    expect(html).toContain("LOGICAL_ITEM");
+    expect(html).toContain("运行 → 阶段 → 批次 → 逻辑项 → 尝试 → 任务 → 快照 → 素材");
+    expect(html).toContain("逻辑项");
     expect(html).toContain("Task B2");
     expect(html).toContain("Snapshot B2");
     expect(html).toContain("Asset B2");

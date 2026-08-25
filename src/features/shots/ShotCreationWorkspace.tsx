@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
-import { formatDateTime } from "../../i18n/statusLabels";
+import { formatDateTime, taskStatusLabel } from "../../i18n/statusLabels";
 import type { AssetView } from "../../types/asset";
 import type { ShotGenerationLink, ShotStage, ShotView } from "../../types/shot";
+import { statusLabel } from "./shotDomain";
 import { ShotInspector, type ShotInspectorProps, type ShotInspectorTab } from "./ShotInspector";
 import { ZoomableImagePreview } from "./ZoomableImagePreview";
 import "./ShotCreationWorkspace.css";
@@ -120,7 +121,7 @@ export function ShotCreationWorkspace({
   if (!shot) {
     return (
       <section className="shot-creation-workspace shot-creation-workspace-empty" aria-label="镜头制作">
-        <EmptyWorkspaceState title="选择一个镜头开始制作" detail="镜头的 Prompt、阶段配置、参考关系和候选审核都会在这里集中处理。" actionLabel="新建镜头" onAction={onCreateShot} />
+        <EmptyWorkspaceState title="选择一个镜头开始制作" detail="镜头的提示词、阶段配置、参考关系和候选审核都会在这里集中处理。" actionLabel="新建镜头" onAction={onCreateShot} />
       </section>
     );
   }
@@ -129,9 +130,9 @@ export function ShotCreationWorkspace({
     <section className="shot-creation-workspace" aria-busy={inspectorProps.busy ?? false}>
       <header className="shot-creation-header">
         <div className="shot-creation-title">
-          <span className="shot-creation-kicker">Shot {String(shot.ordinal + 1).padStart(2, "0")}</span>
+          <span className="shot-creation-kicker">镜头 {String(shot.ordinal + 1).padStart(2, "0")}</span>
           <input className="shot-creation-name" value={name ?? shot.name} onChange={(event) => onNameChange?.(event.target.value)} disabled={!onNameChange || inspectorProps.busy} aria-label="镜头名称" />
-          <span className="shot-creation-status">{stage === "image" ? shot.imageStatus : shot.videoStatus}</span>
+          <span className="shot-creation-status">{statusLabel(stage === "image" ? shot.imageStatus : shot.videoStatus)}</span>
         </div>
         <div className="shot-creation-stage-switch" role="group" aria-label="媒体阶段">
           <button type="button" aria-pressed={stage === "image"} className={stage === "image" ? "shot-stage-switch-active" : ""} onClick={() => onStageChange("image")} disabled={inspectorProps.busy}>图片</button>
@@ -211,9 +212,9 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
           <button type="button" className="shot-candidate-confirm" onClick={() => previewCandidate && void onCandidateConfirm?.(previewCandidate.asset.id, previewCandidate.fromLinkedTask)} disabled={busy || !canConfirmPreview}>确认当前候选</button>
         </aside>
       </section>
-      <section className="shot-prompt-preview" aria-label="Prompt Preview">
-        <div className="shot-prompt-preview-heading"><div><span className="shot-creation-kicker">Prompt Preview</span><strong>当前实际提示词</strong></div><div className="shot-prompt-preview-actions"><button type="button" className="quiet-button" onClick={() => onCopyPrompt?.(promptText)} disabled={!onCopyPrompt || !promptText.trim()}>复制</button><button type="button" className="quiet-button" onClick={onEditPrompt}>编辑</button></div></div>
-        <p>{promptText || "尚未填写 Prompt。"}</p>
+      <section className="shot-prompt-preview" aria-label="提示词预览">
+        <div className="shot-prompt-preview-heading"><div><span className="shot-creation-kicker">提示词预览</span><strong>当前实际提示词</strong></div><div className="shot-prompt-preview-actions"><button type="button" className="quiet-button" onClick={() => onCopyPrompt?.(promptText)} disabled={!onCopyPrompt || !promptText.trim()}>复制</button><button type="button" className="quiet-button" onClick={onEditPrompt}>编辑</button></div></div>
+        <p>{promptText || "尚未填写提示词。"}</p>
       </section>
     </div>
   );
@@ -235,11 +236,11 @@ function CandidateRailItem({ projectId, candidate, selected, onSelect, disabled 
 function ReferenceWorkspace({ projectId, stage, references, keyframeAsset }: { projectId: string; stage: ShotStage; references: ShotInspectorProps["references"]; keyframeAsset?: AssetView }) {
   return (
     <div className="shot-creation-view">
-      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">References</span><h2>参考素材总览</h2></div><span className="shot-creation-count">{references?.length ?? 0} 张</span></div>
+      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">参考素材</span><h2>参考素材总览</h2></div><span className="shot-creation-count">{references?.length ?? 0} 张</span></div>
       {stage === "video" && keyframeAsset && <div className="shot-reference-keyframe"><ShotMediaPreview projectId={projectId} asset={keyframeAsset} variant="thumb" /><span><small>关键帧</small><strong>{keyframeAsset.name}</strong></span></div>}
       <div className="shot-reference-grid">
         {references?.map((reference, index) => <article key={`${reference.assetId}:${index}`} className="shot-reference-card"><span className="shot-reference-index">@图片{index + 1}</span>{reference.asset ? <ShotMediaPreview projectId={projectId} asset={reference.asset} variant="card" /> : <div className="shot-reference-placeholder">暂无预览</div>}<strong>{reference.label ?? reference.asset?.name ?? reference.assetId}</strong><small>{reference.assetId}</small></article>)}
-        {!references?.length && <EmptyWorkspaceState title="暂无参考素材" detail="在右侧 Inspector 的“参考”页添加当前镜头的 ordered references。" />}
+        {!references?.length && <EmptyWorkspaceState title="暂无参考素材" detail="在右侧参数面板的“参考”页添加当前镜头的有序参考图。" />}
       </div>
     </div>
   );
@@ -248,12 +249,13 @@ function ReferenceWorkspace({ projectId, stage, references, keyframeAsset }: { p
 function HistoryWorkspace({ history, onOpenTask, onRetry, busy }: { history: ShotGenerationLink[]; onOpenTask?: (taskId: string) => void; onRetry?: (link: ShotGenerationLink) => void | Promise<void>; busy: boolean }) {
   return (
     <div className="shot-creation-view">
-      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">History</span><h2>生成历史</h2></div><span className="shot-creation-count">{history.length} 条</span></div>
+      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">历史</span><h2>生成历史</h2></div><span className="shot-creation-count">{history.length} 条</span></div>
       <div className="shot-history-table">
         {history.map((link) => {
-          const status = link.task?.status ?? (link.productionBatchItemId ? "QUEUED" : "关联中");
+          const statusCode = link.task?.status;
+          const status = statusCode ? taskStatusLabel(statusCode) : (link.productionBatchItemId ? taskStatusLabel("QUEUED") : "关联中");
           const taskId = link.task?.id ?? link.taskId;
-          return <article key={link.id} className="shot-history-row"><span className="shot-history-date">{formatDateTime(link.createdAt)}</span><span className="shot-history-stage">{link.stage === "image" ? "图片" : "视频"}</span><strong>{status}</strong><span className="shot-history-output">{link.task?.outputAssetIds.length ?? 0} 个候选</span><div className="shot-history-actions">{taskId && onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(taskId)}>查看任务</button>}{status === "FAILED" && onRetry && <button type="button" className="quiet-button" onClick={() => void onRetry(link)} disabled={busy}>重试</button>}</div></article>;
+          return <article key={link.id} className="shot-history-row"><span className="shot-history-date">{formatDateTime(link.createdAt)}</span><span className="shot-history-stage">{link.stage === "image" ? "图片" : "视频"}</span><strong>{status}</strong><span className="shot-history-output">{link.task?.outputAssetIds.length ?? 0} 个候选</span><div className="shot-history-actions">{taskId && onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(taskId)}>查看任务</button>}{statusCode === "FAILED" && onRetry && <button type="button" className="quiet-button" onClick={() => void onRetry(link)} disabled={busy}>重试</button>}</div></article>;
         })}
         {history.length === 0 && <EmptyWorkspaceState title="尚无生成历史" detail="当前阶段的任务、候选和失败记录会按时间出现在这里。" />}
       </div>
@@ -264,9 +266,9 @@ function HistoryWorkspace({ history, onOpenTask, onRetry, busy }: { history: Sho
 function SettingsWorkspace({ shot, onDeleteShot, busy }: { shot: ShotView; onDeleteShot?: () => void | Promise<void>; busy: boolean }) {
   return (
     <div className="shot-creation-view shot-settings-view">
-      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">Settings</span><h2>镜头信息</h2></div></div>
-      <dl className="shot-settings-metadata"><div><dt>镜头 ID</dt><dd>{shot.id}</dd></div><div><dt>状态</dt><dd>{shot.status}</dd></div><div><dt>创建时间</dt><dd>{formatDateTime(shot.createdAt)}</dd></div><div><dt>更新时间</dt><dd>{formatDateTime(shot.updatedAt)}</dd></div></dl>
-      <section className="shot-danger-zone"><div><span className="shot-creation-kicker">Danger Zone</span><h3>删除镜头</h3><p>只删除镜头编排元数据，不会自动删除已生成的素材文件。</p></div><button type="button" className="danger-button" onClick={() => void onDeleteShot?.()} disabled={busy || !onDeleteShot}>删除镜头</button></section>
+      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">设置</span><h2>镜头信息</h2></div></div>
+      <dl className="shot-settings-metadata"><div><dt>镜头 ID</dt><dd>{shot.id}</dd></div><div><dt>状态</dt><dd>{statusLabel(shot.status)}</dd></div><div><dt>创建时间</dt><dd>{formatDateTime(shot.createdAt)}</dd></div><div><dt>更新时间</dt><dd>{formatDateTime(shot.updatedAt)}</dd></div></dl>
+      <section className="shot-danger-zone"><div><span className="shot-creation-kicker">危险操作</span><h3>删除镜头</h3><p>只删除镜头编排元数据，不会自动删除已生成的素材文件。</p></div><button type="button" className="danger-button" onClick={() => void onDeleteShot?.()} disabled={busy || !onDeleteShot}>删除镜头</button></section>
     </div>
   );
 }

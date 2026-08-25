@@ -30,7 +30,7 @@ describe("ShotBulkImportPanel", () => {
 
     expect(html).toContain("批量导入镜头");
     expect(html).toContain('role="tablist"');
-    expect(html).toContain(">TSV<");
+    expect(html).toContain(">表格文本<");
     expect(html).toContain(">JSON<");
     expect(html).toContain("总行数：");
     expect(html).toContain("可导入：");
