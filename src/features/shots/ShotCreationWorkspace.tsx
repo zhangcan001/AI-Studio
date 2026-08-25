@@ -4,6 +4,7 @@ import { formatDateTime } from "../../i18n/statusLabels";
 import type { AssetView } from "../../types/asset";
 import type { ShotGenerationLink, ShotStage, ShotView } from "../../types/shot";
 import { ShotInspector, type ShotInspectorProps, type ShotInspectorTab } from "./ShotInspector";
+import { ZoomableImagePreview } from "./ZoomableImagePreview";
 import "./ShotCreationWorkspace.css";
 import "./ShotInspector.css";
 
@@ -152,6 +153,7 @@ export function ShotCreationWorkspace({
             previewAsset={preview}
             onCandidateSelect={onCandidateSelect}
             onCandidateConfirm={onCandidateConfirm}
+            previewResetKey={`${shot.id}:${stage}`}
             onGenerate={inspectorProps.onGenerate}
             busy={inspectorProps.busy}
             promptText={promptText}
@@ -169,7 +171,7 @@ export function ShotCreationWorkspace({
   );
 }
 
-function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, previewAsset, onCandidateSelect, onCandidateConfirm, onGenerate, busy, promptText, onCopyPrompt, onEditPrompt }: {
+function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, previewAsset, onCandidateSelect, onCandidateConfirm, previewResetKey, onGenerate, busy, promptText, onCopyPrompt, onEditPrompt }: {
   projectId: string;
   stage: ShotStage;
   candidates: ShotWorkspaceCandidate[];
@@ -177,6 +179,7 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
   previewAsset?: AssetView;
   onCandidateSelect?: (candidate: ShotWorkspaceCandidate) => void;
   onCandidateConfirm?: (assetId: string, fromLinkedTask?: boolean) => void | Promise<void>;
+  previewResetKey: string;
   onGenerate: () => void | Promise<void>;
   busy?: boolean;
   promptText: string;
@@ -197,7 +200,7 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
       <section className="shot-preview-candidate-shell" aria-label="主预览与候选">
         <div className="shot-main-preview">
           <div className="shot-main-preview-heading"><span>{previewLabel}</span>{previewAsset && <small>{previewAsset.name}</small>}</div>
-          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={busy} />}
+          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" resetKey={`${previewResetKey}:${previewAsset.id}`} /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={busy} />}
         </div>
         <aside className="shot-candidate-rail" aria-label="候选列表">
           <div className="shot-candidate-rail-heading"><strong>候选</strong><span>{candidates.length}</span></div>
@@ -272,11 +275,14 @@ function EmptyWorkspaceState({ title, detail, actionLabel, onAction, disabled = 
   return <div className="shot-workspace-empty-state"><span className="shot-empty-glyph" aria-hidden="true">＋</span><strong>{title}</strong><p>{detail}</p>{actionLabel && onAction && <button type="button" onClick={() => void onAction()} disabled={disabled}>{actionLabel}</button>}</div>;
 }
 
-function ShotMediaPreview({ projectId, asset, variant }: { projectId: string; asset: AssetView; variant: "main" | "card" | "thumb" }) {
+function ShotMediaPreview({ projectId, asset, variant, resetKey }: { projectId: string; asset: AssetView; variant: "main" | "card" | "thumb"; resetKey?: string }) {
   const isVideo = asset.assetType === "video" || asset.category === "source_video" || asset.category === "generated_video";
   const media = useAssetMedia(projectId, asset, variant, isVideo);
   if (isVideo && media.src) return <video className={`shot-media-preview shot-media-preview-${variant}`} src={media.src} poster={media.poster} controls={variant === "main"} preload="metadata" muted={variant !== "main"} playsInline aria-label={asset.name} />;
-  if (media.src) return <img className={`shot-media-preview shot-media-preview-${variant}`} src={media.src} alt={asset.name} loading={variant === "main" ? undefined : "lazy"} />;
+  if (media.src) {
+    if (variant === "main") return <ZoomableImagePreview imageUrl={media.src} alt={asset.name} label={`${asset.name} 主预览`} resetKey={resetKey} className={`shot-media-preview shot-media-preview-${variant}`} />;
+    return <img className={`shot-media-preview shot-media-preview-${variant}`} src={media.src} alt={asset.name} loading="lazy" />;
+  }
   return <div className={`shot-media-preview shot-media-preview-${variant} shot-media-placeholder`} aria-label={`${asset.name} 预览加载中`}>预览</div>;
 }
 

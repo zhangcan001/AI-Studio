@@ -177,8 +177,9 @@
 .shot-creation-view-heading h2 { margin-top: 2px; font-size: 0.94rem; }
 .shot-creation-count { font-size: 0.68rem; }
 .shot-preview-candidate-shell { grid-template-columns: minmax(0, 1fr) minmax(160px, 176px); min-height: 520px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); background: #080a0d; }
-.shot-main-preview { position: relative; min-height: 520px; background: #080a0d; }
+.shot-main-preview { display: block; position: relative; min-height: 520px; background: #080a0d; }
 .shot-main-preview-heading { position: absolute; z-index: 1; top: 8px; right: 10px; left: 10px; min-height: 28px; padding: 5px 7px; border: 0; color: var(--studio-text); background: linear-gradient(180deg, rgb(8 10 13 / 76%), transparent); font-size: 0.72rem; pointer-events: none; }
+.shot-main-preview-heading { right: 174px; }
 .shot-main-preview-heading small { color: var(--studio-text-secondary); font-size: 0.66rem; }
 .shot-media-preview { background: #080a0d; }
 .shot-media-preview-main { min-height: 480px; }

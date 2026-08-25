@@ -73,6 +73,7 @@ describe("ShotCreationWorkspace", () => {
     expect(html).toContain("参数");
     expect(html).toContain("preload=\"metadata\"");
     expect(html).toContain("controls=\"\"");
+    expect(html).not.toContain("zoomable-image-toolbar");
     expect((html.match(/shot-candidate-confirm/g) ?? []).length).toBe(1);
     expect(html).not.toContain(">确认<");
     expect((html.match(/shot-inspector-generate/g) ?? []).length).toBe(1);

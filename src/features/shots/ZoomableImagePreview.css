@@ -1,0 +1,71 @@
+.zoomable-image-preview {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  overflow: hidden;
+  background: #080a0d;
+  touch-action: none;
+  user-select: none;
+}
+
+.zoomable-image-preview-image {
+  position: absolute;
+  display: block;
+  max-width: none;
+  max-height: none;
+  pointer-events: auto;
+  user-select: none;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.zoomable-image-preview[data-pan-enabled="true"] { cursor: grab; }
+.zoomable-image-preview-dragging { cursor: grabbing; }
+
+.zoomable-image-toolbar {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 2px;
+  border: 1px solid var(--studio-border-strong);
+  border-radius: var(--studio-radius-sm);
+  background: rgb(16 18 22 / 88%);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(8px);
+}
+
+.zoomable-image-toolbar button {
+  display: inline-grid;
+  min-width: 30px;
+  min-height: 30px;
+  place-items: center;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--studio-text-secondary);
+  background: transparent;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.zoomable-image-toolbar button:hover:not(:disabled) { color: var(--studio-text); background: var(--studio-surface-3); }
+.zoomable-image-toolbar button:focus-visible { outline: 2px solid var(--studio-accent); outline-offset: 1px; }
+.zoomable-image-toolbar button:disabled { cursor: not-allowed; opacity: 0.4; }
+.zoomable-image-percent { min-width: 38px; padding: 0 5px; color: var(--studio-text); font-size: 0.68rem; font-variant-numeric: tabular-nums; text-align: center; }
+
+@media (max-width: 600px) {
+  .zoomable-image-toolbar { top: 6px; right: 6px; }
+  .zoomable-image-toolbar button { min-width: 28px; min-height: 28px; padding: 0 4px; }
+  .zoomable-image-percent { min-width: 34px; padding: 0 3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zoomable-image-preview-image { transition: none !important; }
+}
