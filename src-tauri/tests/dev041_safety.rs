@@ -568,7 +568,7 @@ fn dev041_episode_implementation_contract_gate() {
     assert!(service.contains("SceneProductionService"));
     assert!(service.contains("production_queue_start") || !service.contains("start_all"));
     assert!(panel.contains("allowPartial"));
-    assert!(panel.to_ascii_lowercase().contains("production queue"));
+    assert!(panel.contains("生产队列"));
     for forbidden in [
         "EpisodeQueue",
         "EpisodeExecutor",
