@@ -116,7 +116,7 @@ function PartialResumeEntryRow({
         />
         <span>
           <strong>第 {entry.ordinal + 1} 项</strong>
-          <small>{reviewRequired ? "需人工检查" : "可自动恢复"} · attempts {entry.attemptCount}</small>
+          <small>{reviewRequired ? "需人工检查" : "可自动恢复"} · 尝试次数 {entry.attemptCount}</small>
           {error && <small title={entry.errorMessage}>{error}</small>}
         </span>
       </label>
