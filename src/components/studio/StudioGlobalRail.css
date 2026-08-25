@@ -1,0 +1,76 @@
+@import "../../styles/studioTokens.css";
+
+.studio-global-rail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1px solid var(--studio-border);
+  background: var(--studio-surface-1);
+  color: var(--studio-text-secondary);
+  font-family: var(--studio-font-family);
+}
+
+.studio-global-rail__brand { display: grid; min-height: 72px; place-items: center; }
+.studio-global-rail__brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: var(--studio-radius-sm);
+  color: #ede9fe;
+  background: var(--studio-accent-soft);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.studio-global-rail__nav { display: grid; width: 100%; gap: var(--studio-space-1); padding: var(--studio-space-2) var(--studio-space-2); }
+.studio-global-rail__item {
+  position: relative;
+  display: grid;
+  min-height: 58px;
+  width: 100%;
+  place-items: center;
+  gap: 5px;
+  padding: var(--studio-space-2) 2px;
+  border: 1px solid transparent;
+  border-radius: var(--studio-radius-sm);
+  color: var(--studio-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 600;
+  transition: background var(--studio-motion-fast) ease, border-color var(--studio-motion-fast) ease, color var(--studio-motion-fast) ease;
+}
+.studio-global-rail__item::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -9px;
+  width: 3px;
+  border-radius: 0 var(--studio-radius-sm) var(--studio-radius-sm) 0;
+  background: transparent;
+  content: "";
+}
+.studio-global-rail__item:hover { border-color: var(--studio-border); color: var(--studio-text-secondary); background: rgba(255, 255, 255, 0.04); }
+.studio-global-rail__item:focus-visible { outline: none; box-shadow: var(--studio-focus-ring); }
+.studio-global-rail__item--active { border-color: rgba(139, 92, 246, 0.22); color: #ddd6fe; background: var(--studio-accent-soft); }
+.studio-global-rail__item--active::before { background: var(--studio-accent-hover); }
+.studio-global-rail__item svg { width: 20px; height: 20px; }
+.studio-global-rail__item--active svg { color: var(--studio-accent-hover); }
+
+.studio-global-rail__footer { display: grid; min-height: 48px; margin-top: auto; place-items: center; color: var(--studio-text-muted); font-size: 0.55rem; letter-spacing: 0.1em; }
+
+@media (max-width: 1499px) {
+  .studio-global-rail__brand { min-height: 64px; }
+  .studio-global-rail__brand-mark { width: 30px; height: 30px; }
+  .studio-global-rail__nav { padding-inline: var(--studio-space-1); }
+  .studio-global-rail__item { min-height: 54px; font-size: 0.62rem; }
+  .studio-global-rail__item::before { left: -5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-global-rail__item { transition: none; }
+}

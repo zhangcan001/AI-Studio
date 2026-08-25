@@ -16,6 +16,7 @@ import {
   listBatchWorkflowPresets,
   listRecentAssets,
   listShots,
+  pauseProductionQueue,
   readAssetImage,
   readAssetThumbnail,
   requeueProductionQueueItemByItem,
@@ -41,6 +42,7 @@ import type {
 } from "../../types/seriesProduction";
 import type { BatchWorkflowPreset } from "../../types/sceneProduction";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
+import type { WorkspaceSelection } from "../../types/workspaceSelection";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { deriveShotStatus, recentShotFailure, shotStatusLabels } from "./shotDomain";
@@ -54,6 +56,10 @@ import { SceneProductionPanel } from "./SceneProductionPanel";
 import { EpisodeProductionPanel } from "./EpisodeProductionPanel";
 import { SeriesProductionPanel } from "./SeriesProductionPanel";
 import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunbookPanel";
+import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
+import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
+import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
+import type { ShotInspectorTab } from "./ShotInspector";
 import {
   appendAnchorReferences,
   replaceWithAnchorReferences,
@@ -111,6 +117,13 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState("");
+  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>(() => initialSelectedShotId
+    ? { type: "shot", shotId: initialSelectedShotId }
+    : { type: "project", projectId });
+  const [shotWorkspaceTab, setShotWorkspaceTab] = useState<ShotCreationWorkspaceTab>("generate");
+  const [inspectorTab, setInspectorTab] = useState<ShotInspectorTab>("parameters");
+  const [previewAssetId, setPreviewAssetId] = useState<string>();
+  const [structureManagementOpen, setStructureManagementOpen] = useState(false);
   const [name, setName] = useState("");
   const [promptText, setPromptText] = useState("");
   const [promptProvenance, setPromptProvenance] = useState<{ entryId: string; versionId: string }>();
@@ -131,6 +144,14 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const selectedSceneContext = selectedShot?.id && shotSceneIds[selectedShot.id]
     ? findProductionSceneParent(productionStructure, shotSceneIds[selectedShot.id])
     : undefined;
+  const workspaceSceneId = workspaceSelection.type === "scene"
+    ? workspaceSelection.sceneId
+    : workspaceSelection.type === "shot"
+      ? shotSceneIds[workspaceSelection.shotId]
+      : undefined;
+  const workspaceSceneContext = workspaceSceneId
+    ? findProductionSceneParent(productionStructure, workspaceSceneId)
+    : selectedSceneContext;
   const shotList = useMemo(() => buildShotListView(shots, shotListControls, shotSceneIds), [shots, shotListControls, shotSceneIds]);
   const currentDraft = stageDrafts[stage];
   const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
@@ -157,6 +178,10 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const imageAssets = assets.filter(isImageAsset);
   const videoAssets = assets.filter(isVideoAsset);
 
+  useEffect(() => {
+    setPreviewAssetId(undefined);
+  }, [selectedShotId, stage]);
+
   const applyShot = useCallback((next: ShotView) => {
     setShots((current) => {
       const replaced = current.some((shot) => shot.id === next.id)
@@ -165,6 +190,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       return replaced.sort((left, right) => left.ordinal - right.ordinal);
     });
     setSelectedShotId(next.id);
+    setWorkspaceSelection({ type: "shot", shotId: next.id });
   }, []);
 
   const reload = useCallback(async () => {
@@ -303,8 +329,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }
 
   function changeScalar(field: RecipeField, value: DraftValue | undefined) {
-    if (!currentDraft || (field.type !== "integer" && field.type !== "seed")) return;
-    if (!value || (value.type !== "integer" && value.type !== "seed_random" && value.type !== "seed_fixed")) return;
+    if (!currentDraft || (field.type !== "integer" && field.type !== "number" && field.type !== "seed")) return;
+    if (!value || (value.type !== "integer" && value.type !== "number" && value.type !== "seed_random" && value.type !== "seed_fixed")) return;
     setStageDrafts((current) => ({
       ...current,
       [stage]: { ...currentDraft, values: { ...currentDraft.values, [field.key]: value } },
@@ -355,7 +381,12 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       await deleteShot(projectId, selectedShot.id);
       const remaining = shots.filter((shot) => shot.id !== selectedShot.id);
       setShots(remaining);
-      setSelectedShotId(remaining[0]?.id);
+      const nextSelectedShotId = remaining[0]?.id;
+      setSelectedShotId(nextSelectedShotId);
+      setWorkspaceSelection(nextSelectedShotId
+        ? { type: "shot", shotId: nextSelectedShotId }
+        : { type: "project", projectId });
+      onShotSelected?.(nextSelectedShotId);
     } catch (deleteError: unknown) { setError(toUserMessage(deleteError)); }
     finally { setBusy(false); }
   }
@@ -521,6 +552,64 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const manualAssets = stage === "image" ? imageAssets : videoAssets;
   const hasFrozenQueueLink = Boolean(selectedShot?.generationLinks.some((link) => link.productionBatchItemId));
   const recentFailure = selectedShot ? recentShotFailure(selectedShot, stage) : undefined;
+  const selectedAssetId = stage === "image" ? selectedShot?.selectedImageAssetId : selectedShot?.selectedVideoAssetId;
+  const stageCandidateLinks = stageLinks.filter((link) => Boolean(link.task?.outputAssetIds.length));
+  const shotCandidates = useMemo<ShotWorkspaceCandidate[]>(() => {
+    const result = new Map<string, ShotWorkspaceCandidate>();
+    for (const asset of [...stageCandidates, ...manualAssets]) {
+      const link = stageCandidateLinks.find((candidateLink) => candidateLink.task?.outputAssetIds.includes(asset.id));
+      const taskStatus = link?.task?.status;
+      const status = selectedAssetId === asset.id
+        ? "selected"
+        : taskStatus === "FAILED"
+          ? "failed"
+          : taskStatus === "RUNNING" || taskStatus === "COLLECTING"
+            ? "generating"
+            : taskStatus === "QUEUED" || taskStatus === "CREATED" || taskStatus === "PREPARING"
+              ? "queued"
+              : "ready";
+      if (!result.has(asset.id)) {
+        result.set(asset.id, {
+          asset,
+          status,
+          taskId: link?.task?.id ?? link?.taskId,
+          createdAt: link?.createdAt,
+          error: link?.task?.error?.message,
+          fromLinkedTask: Boolean(link),
+        });
+      }
+    }
+    return [...result.values()];
+  }, [manualAssets, selectedAssetId, stageCandidateLinks, stageCandidates]);
+  const previewAsset = assets.find((asset) => asset.id === previewAssetId)
+    ?? assets.find((asset) => asset.id === selectedAssetId);
+  const inspectorReferences = currentReferences.map((assetId, index) => ({
+    assetId,
+    ordinal: index,
+    asset: assets.find((asset) => asset.id === assetId),
+    label: `@图片${index + 1}`,
+  }));
+  const referenceAnchorOptions = referenceAnchors.map((anchor) => ({
+    id: anchor.id,
+    name: anchor.name,
+    kind: anchor.kind,
+    usable: anchor.usable,
+    assets: anchor.assets.flatMap((item) => item.asset ? [item.asset] : []),
+  }));
+  const promptLibraryOptions = promptEntries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    versionCount: entry.versions.length,
+  }));
+  const canGenerate = Boolean(currentDraft)
+    && !(stage === "video" && ((!ref2vaMode && !selectedShot?.selectedImageAssetId) || Boolean(referenceValidation)));
+  const treeShotFilter = useCallback((shot: ShotView) => {
+    const query = shotListControls.query.trim().toLocaleLowerCase();
+    if (query && !`${shot.name}\n${shot.promptText}`.toLocaleLowerCase().includes(query)) return false;
+    if (shotListControls.status !== "ALL" && deriveShotStatus(shot) !== shotListControls.status) return false;
+    if (shotListControls.sceneId === "UNASSIGNED") return !shotSceneIds[shot.id];
+    return shotListControls.sceneId === "ALL" || shotSceneIds[shot.id] === shotListControls.sceneId;
+  }, [shotListControls, shotSceneIds]);
 
   async function configureBulkStage(nextStage: ShotStage, shotIds: string[]) {
     const recipe = preferredStageRecipe(productCatalog, nextStage);
@@ -542,6 +631,27 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       shotIds,
       source: { type: "text", text },
     });
+  }
+
+  function selectWorkspaceSelection(selection: WorkspaceSelection) {
+    setWorkspaceSelection(selection);
+    if (selection.type !== "shot") return;
+    setSelectedShotId(selection.shotId);
+    onShotSelected?.(selection.shotId);
+  }
+
+  function openStructureManagement(context: WorkspaceSelection) {
+    setStructureManagementOpen(true);
+    setWorkspaceSelection(context);
+    setNotice("已打开结构管理；Series / Episode / Scene 的新增、重命名、排序和归档仍由原有管理面板执行。");
+  }
+
+  function handleStructureCreate(target: ProjectStructureCreateTarget, context: WorkspaceSelection) {
+    if (target === "shot") {
+      void addShot();
+      return;
+    }
+    openStructureManagement(context);
   }
 
   if (loading) return <section className="workspace-panel shot-workspace"><p className="project-loading">正在加载镜头制作...</p></section>;
@@ -566,15 +676,242 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         onImported={async () => { await reload(); setBulkImportOpen(false); }}
         onCancel={() => setBulkImportOpen(false)}
       />}
-      <ProductionStructurePanel
+      <div className="shot-production-layout">
+        <div className="shot-structure-column">
+          <ProjectStructureTree
+            project={{ id: projectId, name: projectName ?? projectId }}
+            tree={productionStructure}
+            shots={shots}
+            selectedSelection={workspaceSelection}
+            onSelectSelection={selectWorkspaceSelection}
+            onCreate={handleStructureCreate}
+            openManagement={openStructureManagement}
+            shotFilter={treeShotFilter}
+            headerActions={<>
+              <button type="button" className="quiet-button" onClick={() => setBulkImportOpen((open) => !open)} disabled={busy}>{bulkImportOpen ? "收起导入" : "导入"}</button>
+              <button type="button" className="quiet-button" onClick={() => void exportManifest()} disabled={busy}>清单</button>
+            </>}
+          />
+          <section className="shot-structure-filter" aria-label="镜头搜索和筛选">
+            <div className="shot-structure-filter-heading"><strong>镜头定位</strong><span>{shotList.filteredCount} / {shots.length}</span></div>
+            <ShotListToolbar
+              controls={shotListControls}
+              filteredCount={shotList.filteredCount}
+              totalCount={shots.length}
+              pageStart={shotList.pageStart}
+              pageEnd={shotList.pageEnd}
+              pageCount={shotList.pageCount}
+              onQueryChange={(query) => setShotListControls((current) => updateShotListControls(current, { query }))}
+              onStatusChange={(status) => setShotListControls((current) => updateShotListControls(current, { status }))}
+              sceneOptions={sceneFilterOptions}
+              onSceneChange={(sceneId) => setShotListControls((current) => updateShotListControls(current, { sceneId }))}
+              onPageSizeChange={(pageSize) => setShotListControls((current) => updateShotListControls(current, { pageSize }))}
+              onPageChange={(page) => setShotListControls((current) => ({ ...current, page: Math.max(1, Math.min(page, shotList.pageCount)) }))}
+            />
+            {shotList.isFiltered && <div className="shot-search-results" aria-label="镜头搜索结果">
+              {shotList.pageShots.map((item) => <button key={item.id} type="button" className={item.id === selectedShotId ? "shot-search-result shot-search-result-active" : "shot-search-result"} onClick={() => selectWorkspaceSelection({ type: "shot", shotId: item.id })}><span>{String(item.ordinal + 1).padStart(2, "0")}</span><strong>{item.name}</strong><small>{shotStatusLabels[deriveShotStatus(item)]}</small></button>)}
+              {!shotList.pageShots.length && <span className="empty-state">没有匹配的镜头。</span>}
+            </div>}
+          </section>
+        </div>
+        <div className="shot-production-context">
+          <div className="shot-context-heading">
+            <div>
+              <span className="section-label">Production context</span>
+              <h2>{workspaceSelection.type === "shot" ? "镜头工作区" : workspaceSelection.type === "scene" ? "场景工作区" : workspaceSelection.type === "episode" ? "Episode 工作区" : workspaceSelection.type === "series" ? "Series 工作区" : "项目工作区"}</h2>
+              <p>{workspaceSelection.type === "shot" ? "在同一工作区完成生成、候选确认、参考关系和 Prompt 快照。" : "结构选择只改变当前上下文；批量与结构管理动作仍保留在对应管理面板。"}</p>
+            </div>
+            <span className="shot-context-selection">{workspaceSelection.type === "shot" ? (selectedShot?.name ?? "未选择镜头") : workspaceSelection.type === "project" ? (projectName ?? projectId) : "已选结构节点"}</span>
+          </div>
+          {workspaceSelection.type === "shot" ? (
+            <ShotCreationWorkspace
+              projectId={projectId}
+              shot={selectedShot}
+              name={name}
+              onNameChange={setName}
+              stage={stage}
+              onStageChange={setStage}
+              candidates={shotCandidates}
+              selectedAssetId={selectedAssetId}
+              previewAsset={previewAsset}
+              onCandidateSelect={(candidate) => setPreviewAssetId(candidate.asset.id)}
+              onCandidateConfirm={(assetId, fromLinkedTask) => void selectResult(assetId, fromLinkedTask ?? false)}
+              onOpenTask={onOpenTask}
+              history={stageLinks}
+              onRetry={(link) => retryShot(selectedShot?.id ?? "", link.stage)}
+              onDeleteShot={() => void removeShot()}
+              onCreateShot={() => void addShot()}
+              onCopyPrompt={(prompt) => void navigator.clipboard?.writeText(prompt).then(() => setNotice("Prompt 已复制。"))}
+              workspaceTab={shotWorkspaceTab}
+              onWorkspaceTabChange={setShotWorkspaceTab}
+              inspectorTab={inspectorTab}
+              onInspectorTabChange={setInspectorTab}
+              currentDraft={currentDraft}
+              currentRecipe={currentRecipe}
+              stageRecipes={stageRecipes}
+              onRecipeChange={changeStageRecipe}
+              onScalarChange={changeScalar}
+              busy={busy}
+              canGenerate={canGenerate}
+              onGenerate={generate}
+              configDirty={dirtyStages.has(stage)}
+              onSave={save}
+              references={inspectorReferences}
+              availableReferences={imageAssets}
+              referenceAnchors={referenceAnchorOptions}
+              selectedAnchorId={selectedAnchorId}
+              onAnchorChange={setSelectedAnchorId}
+              keyframeAsset={selectedShot?.selectedImageAssetId ? assets.find((asset) => asset.id === selectedShot.selectedImageAssetId) : undefined}
+              onReferenceAdd={(assetId) => setReferences((current) => ({
+                ...current,
+                [stage]: addOrderedReference(current[stage], assetId, stage === "video" ? ref2vaImageField?.maxItems : undefined),
+              }))}
+              onReferenceRemove={(assetId) => setReferences((current) => ({ ...current, [stage]: removeOrderedReference(current[stage], assetId) }))}
+              onReferenceMove={(index, delta) => setReferences((current) => ({ ...current, [stage]: moveOrderedReference(current[stage], index, delta) }))}
+              onApplyAnchor={(mode) => void applyReferenceAnchor(mode)}
+              onSaveReferences={() => void replaceReferences()}
+              promptText={promptText}
+              onPromptChange={(text) => { setPromptText(text); setPromptProvenance(undefined); setSelectedPromptId(""); }}
+              promptLibrary={promptLibraryOptions}
+              selectedPromptId={selectedPromptId}
+              onPromptSelect={setSelectedPromptId}
+              onLoadPrompt={loadPrompt}
+              promptProvenance={promptProvenance}
+              promptPreview={promptText}
+              promptTemplate={selectedPromptEntry?.kind === "prompt" && selectedPromptVersion && isPromptTemplateText(selectedPromptVersion.text) ? <PromptTemplatePanel
+                projectId={projectId}
+                projectName={projectName}
+                projectDescription={projectDescription}
+                stage={stage}
+                entry={selectedPromptEntry}
+                version={selectedPromptVersion}
+                shot={selectedShot!}
+                structureContext={workspaceSceneContext}
+                referenceAnchors={referenceAnchors}
+                onApplied={() => void reload()}
+                disabled={busy}
+              /> : undefined}
+              onPreviewPrompt={() => setNotice("Prompt 预览使用当前编辑框内容；保存镜头后才会写入快照。")}
+              onApplyPrompt={() => setNotice("当前 Prompt 预览已应用到编辑框；点击保存镜头写入快照。")}
+              notice={notice}
+              error={error}
+            />
+          ) : workspaceSelection.type === "project" ? (
+            <ProjectProductionPipeline
+              projectId={projectId}
+              shots={shots}
+              onRefresh={reload}
+              onNotice={(message) => setNotice(message)}
+              onError={(message) => setError(message)}
+              onConfigureStage={configureBulkStage}
+              onBulkPrompt={assignBulkPrompt}
+              busy={busy}
+              onOpenReview={(reviewStage, shotIds) => {
+                if (busy || !shotIds.length) return;
+                setStage(reviewStage);
+                selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
+              }}
+            />
+          ) : workspaceSelection.type === "series" ? (
+            <SeriesProductionPanel
+              projectId={projectId}
+              tree={productionStructure}
+              shots={shots}
+              promptEntries={promptEntries}
+              referenceAnchors={referenceAnchors}
+              initialPresets={batchWorkflowPresets}
+              onRefresh={reload}
+              onNotice={(message) => setNotice(message)}
+              onError={(message) => setError(message || undefined)}
+              onOpenProductionQueue={onOpenProductionQueue}
+              onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
+              onPlan={getSeriesProductionPlan}
+              onPrepare={prepareSeriesProduction}
+              onApplyPreset={async (request: SeriesPresetApplyRequest) => {
+                await bulkSetShotStageConfig({
+                  projectId: request.projectId,
+                  stage: request.stage,
+                  shotIds: request.shotIds,
+                  workflowVersionId: request.workflowVersionId,
+                  recipeId: request.recipeId,
+                  values: request.values,
+                });
+                await reload();
+              }}
+              onPreviewPrompt={async (request: SeriesPromptBulkRequest) => {
+                const preview = await previewPromptTemplateBulk({
+                  projectId: request.projectId,
+                  promptEntryId: request.promptEntryId,
+                  promptVersionId: request.promptVersionId,
+                  shotIds: request.shotIds,
+                  contextAnchorIds: request.contextAnchorIds,
+                  customValues: request.customValues,
+                  previewLimit: 20,
+                });
+                return {
+                  total: preview.total,
+                  valid: preview.valid,
+                  invalid: preview.invalid,
+                  samples: preview.previewEntries.map((entry) => ({ shotId: entry.shotId, text: entry.renderedText, valid: true })),
+                };
+              }}
+              onApplyPrompt={async (request: SeriesPromptBulkRequest) => {
+                await applyPromptTemplate({
+                  projectId: request.projectId,
+                  promptEntryId: request.promptEntryId,
+                  promptVersionId: request.promptVersionId,
+                  stage: request.stage,
+                  shotIds: request.shotIds,
+                  contextAnchorIds: request.contextAnchorIds,
+                  customValues: request.customValues,
+                });
+                await reload();
+              }}
+            />
+          ) : workspaceSelection.type === "episode" ? (
+            <EpisodeProductionPanel
+              projectId={projectId}
+              tree={productionStructure}
+              shots={shots}
+              promptEntries={promptEntries}
+              referenceAnchors={referenceAnchors}
+              initialPresets={batchWorkflowPresets}
+              onRefresh={reload}
+              onNotice={(message) => setNotice(message)}
+              onError={(message) => setError(message || undefined)}
+              onOpenProductionQueue={onOpenProductionQueue}
+              onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
+            />
+          ) : (
+            <SceneProductionPanel
+              projectId={projectId}
+              sceneOptions={sceneFilterOptions.filter((option) => option.value !== "ALL" && option.value !== "UNASSIGNED")}
+              currentSceneId={workspaceSelection.sceneId}
+              currentShot={selectedShot}
+              promptEntries={promptEntries}
+              referenceAnchors={referenceAnchors}
+              initialPresets={batchWorkflowPresets}
+              onRefresh={reload}
+              onNotice={(message) => setNotice(message)}
+              onNavigateToReview={(reviewStage) => setStage(reviewStage)}
+            />
+          )}
+        </div>
+      </div>
+      {structureManagementOpen && <section className="shot-structure-management-panel">
+        <div className="shot-secondary-heading"><div><span className="section-label">Structure management</span><h3>结构与批量管理</h3></div><button type="button" className="quiet-button" onClick={() => setStructureManagementOpen(false)}>收起管理面板</button></div>
+        <ProductionStructurePanel
         projectId={projectId}
         tree={productionStructure}
         shots={shots}
         selectedShotId={selectedShotId}
-        onSelectShot={setSelectedShotId}
+        onSelectShot={(shotId) => selectWorkspaceSelection({ type: "shot", shotId })}
         onChanged={setProductionStructure}
         onError={(message) => setError(message || undefined)}
       />
+      </section>}
+      <details className="shot-legacy-panels">
+        <summary>展开完整生产管理、批量编排与审核工具</summary>
       <EpisodeProductionPanel
         projectId={projectId}
         tree={productionStructure}
@@ -716,7 +1053,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           {shotList.pageShots.map((item) => {
             const derived = deriveShotStatus(item);
             return (
-              <button key={item.id} type="button" className={`shot-list-item${item.id === selectedShotId ? " shot-list-item-active" : ""}`} onClick={() => { setSelectedShotId(item.id); onShotSelected?.(item.id); }}>
+              <button key={item.id} type="button" className={`shot-list-item${item.id === selectedShotId ? " shot-list-item-active" : ""}`} onClick={() => selectWorkspaceSelection({ type: "shot", shotId: item.id })}>
                 <span className="shot-list-number">{String(item.ordinal + 1).padStart(2, "0")}</span>
                 <span className="shot-list-copy"><strong>{item.name}</strong><small>{shotStatusLabels[derived]}</small></span>
               </button>
@@ -837,6 +1174,13 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         onRetry={(shotId, reviewStage) => void retryShot(shotId, reviewStage)}
         onOpenTask={onOpenTask}
       />
+      </details>
+      <ProductionQueueDrawer
+        runbook={productionBatchRunbook}
+        onStart={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
+        onPause={async (batchId) => { await pauseProductionQueue(projectId, batchId); await reload(); }}
+        onOpen={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+      />
       {notice && <p className="studio-notice">{notice}</p>}
       {error && <p className="error-message">{error}</p>}
     </section>
@@ -910,13 +1254,14 @@ function isVideoAsset(asset: AssetView): boolean {
   return asset.assetType === "video" || asset.category === "source_video" || asset.category === "generated_video";
 }
 
-function isScalarField(field: RecipeField): field is Extract<RecipeField, { type: "integer" | "seed" }> {
-  return field.type === "integer" || field.type === "seed";
+function isScalarField(field: RecipeField): field is Extract<RecipeField, { type: "integer" | "number" | "seed" }> {
+  return field.type === "integer" || field.type === "number" || field.type === "seed";
 }
 
 function defaultScalarValues(recipe: RecipeViewModel): ShotInputValues {
   return Object.fromEntries(recipe.fields.filter(isScalarField).map((field) => {
     if (field.type === "integer") return [field.key, field.default === undefined ? { type: "integer", value: 0 } : { type: "integer", value: field.default }];
+    if (field.type === "number") return [field.key, field.default === undefined ? { type: "number", value: 0 } : { type: "number", value: field.default }];
     return [field.key, field.defaultMode === "fixed" ? { type: "seed_fixed", value: field.defaultValue ?? "0" } : { type: "seed_random" }];
   }));
 }
@@ -933,9 +1278,9 @@ function preferredStageRecipe(catalog: RecipeViewModel[], stage: ShotStage): Rec
   return compatible[0];
 }
 
-function ScalarControl({ field, value, onChange }: { field: RecipeField & { type: "integer" | "seed" }; value?: DraftValue; onChange: (value: DraftValue) => void }) {
-  if (field.type === "integer") {
-    return <label className="shot-scalar-control"><span>{field.label}</span><input type="number" value={value?.type === "integer" ? value.value : ""} min={field.min} max={field.max} onChange={(event) => onChange({ type: "integer", value: Number(event.target.value) })} /></label>;
+function ScalarControl({ field, value, onChange }: { field: RecipeField & { type: "integer" | "number" | "seed" }; value?: DraftValue; onChange: (value: DraftValue) => void }) {
+  if (field.type === "integer" || field.type === "number") {
+    return <label className="shot-scalar-control"><span>{field.label}</span><input type="number" value={value?.type === field.type ? value.value : ""} min={field.min} max={field.max} step={field.step ?? (field.type === "integer" ? 1 : "any")} onChange={(event) => onChange({ type: field.type, value: Number(event.target.value) })} /></label>;
   }
   const fixed = value?.type === "seed_fixed";
   return <div className="shot-scalar-control"><span>{field.label}</span><div className="shot-seed-control"><select value={fixed ? "fixed" : "random"} onChange={(event) => onChange(event.target.value === "fixed" ? { type: "seed_fixed", value: field.defaultValue ?? "0" } : { type: "seed_random" })}><option value="random">随机</option><option value="fixed">固定</option></select>{fixed && <input value={value.value} inputMode="numeric" onChange={(event) => onChange({ type: "seed_fixed", value: event.target.value })} />}</div></div>;

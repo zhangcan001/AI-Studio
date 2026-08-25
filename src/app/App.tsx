@@ -36,9 +36,12 @@ import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import { resolveWorkspaceNavigation, type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
-import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
+import { projectDisplayName } from "../i18n/statusLabels";
 import { StartupScreen } from "./StartupScreen";
+import { StudioShell } from "./StudioShell";
+import type { StudioBreadcrumbItem } from "../components/studio/StudioTopBar";
 import "./App.css";
+import "../styles/studioTokens.css";
 
 const workspaceLabels: Record<Workspace, string> = {
   "command-center": "项目中心",
@@ -51,21 +54,6 @@ const workspaceLabels: Record<Workspace, string> = {
   workflows: "工作流",
   settings: "设置",
 };
-
-const workspaceDescriptions: Record<Workspace, string> = {
-  "command-center": "查看项目就绪度、生产进度、问题和下一步工作。",
-  studio: "用 Prompt 列表串行生产图片，并在当前工作区追踪结果。",
-  video: "为图片资产配置 MiniMax H3 视频参数，并串行生成。",
-  shots: "批量导入、配置、生产并人工复核项目内全部 Shot。",
-  assets: "集中浏览、筛选和继续使用当前项目的媒体资产。",
-  tasks: "查看任务状态、输入快照和生成结果。",
-  projects: "管理项目、模板和本地备份。",
-  workflows: "检查运行包、配方和工作流发布状态。",
-  settings: "连接运行时、释放模型内存和导出诊断信息。",
-};
-
-const primaryWorkspaces: Workspace[] = ["command-center", "studio", "video", "shots", "assets", "tasks"];
-const secondaryWorkspaces: Workspace[] = ["projects", "workflows", "settings"];
 
 function keepsNativeContextMenu(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
@@ -449,7 +437,26 @@ function App() {
   const isConnected = comfy?.status === "CONNECTED";
   const hasActiveTasks = recentTasks.some((task) =>
     ["CREATED", "VALIDATING", "PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED", "COLLECTING"]
-      .includes(task.status),
+    .includes(task.status),
+  );
+
+  const breadcrumbs: StudioBreadcrumbItem[] = activeProject
+    ? [
+      { label: projectDisplayName(activeProject.id, activeProject.name) },
+      { label: workspaceLabels[workspace], current: true },
+    ]
+    : [{ label: "项目", current: true }];
+
+  const projectSelector = (
+    <select
+      aria-label="当前项目"
+      value={activeProjectId ?? ""}
+      onChange={(event) => openProject(event.target.value)}
+      disabled={projectLoading || !projects.length || projectContextLoading}
+    >
+      {!activeProjectId && <option value="">正在加载项目...</option>}
+      {projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project.id, project.name)}</option>)}
+    </select>
   );
 
   if (!bootstrapState) {
@@ -457,104 +464,34 @@ function App() {
   }
 
   return (
-    <main
-      className={`app-shell app-workspace-${workspace}`}
+    <div
+      className="studio-context-guard"
       onContextMenu={(event) => {
         if (!keepsNativeContextMenu(event.target)) event.preventDefault();
       }}
     >
-      <a className="skip-link" href="#app-main-content">跳到当前工作区</a>
-      <aside className="app-sidebar" aria-label="AI Studio 主导航">
-        <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true"><span>AI</span></div>
-          <div className="brand-copy">
-            <p className="eyebrow">LOCAL CREATIVE CONTROL ROOM</p>
-            <h1>AI Studio</h1>
-            <span className="brand-subtitle">PROMPT · RUNTIME · ASSET</span>
-          </div>
-        </div>
-        <div className="sidebar-project project-selector">
-          <label htmlFor="active-project">当前项目</label>
-          <select
-            id="active-project"
-            value={activeProjectId ?? ""}
-            onChange={(event) => openProject(event.target.value)}
-            disabled={projectLoading || !projects.length || projectContextLoading}
-          >
-            {!activeProjectId && <option value="">正在加载项目...</option>}
-            {projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project.id, project.name)}</option>)}
-          </select>
-        </div>
-        <nav className="workspace-nav" aria-label="工作区导航">
-          <div className="workspace-nav-heading">
-            <span className="section-label">工作台</span>
-            <small>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</small>
-          </div>
-          <div className="workspace-nav-group">
-            <span className="workspace-nav-group-label">核心工作区</span>
-            <div className="workspace-nav-items">
-              {primaryWorkspaces.map((value) => (
-                <WorkspaceNavButton
-                  key={value}
-                  value={value}
-                  activeWorkspace={workspace}
-                  onNavigate={navigateToWorkspace}
-                />
-              ))}
-            </div>
-          </div>
-          <details className="workspace-nav-more" open={secondaryWorkspaces.includes(workspace)}>
-            <summary>
-              <span>管理与设置</span>
-              <span className="workspace-nav-more-chevron" aria-hidden="true">⌄</span>
-            </summary>
-            <div className="workspace-nav-items">
-              {secondaryWorkspaces.map((value) => (
-                <WorkspaceNavButton
-                  key={value}
-                  value={value}
-                  activeWorkspace={workspace}
-                  onNavigate={navigateToWorkspace}
-                />
-              ))}
-            </div>
-          </details>
-        </nav>
-        {comfy && (
-          <div className="sidebar-runtime" aria-label="运行时状态">
-            <span className="header-status-kicker">RUNTIME LINK</span>
-            <div className="sidebar-runtime-status">
-              <span className={`status-dot status-${comfy.status.toLowerCase()}`} />
-              <strong>ComfyUI {comfyStatusLabel(comfy.status)}</strong>
-            </div>
-            <small>{comfy.devices[0]?.name ?? "GPU 不可用"}</small>
-          </div>
-        )}
-        <div className="sidebar-footer">
-          <span>LOCAL · PRIVATE</span>
-          <small>工作内容保存在本机</small>
-        </div>
-      </aside>
-
-      <div className="app-main">
-        <header className="app-header">
-          <div className="app-page-heading">
-            <span className="section-label">当前工作区</span>
-            <h1>{workspaceLabels[workspace]}</h1>
-            <p>{workspaceDescriptions[workspace]}</p>
-          </div>
-          <div className="app-header-actions">
-            <span className="header-project-chip">
-              <span className="header-project-chip-label">PROJECT</span>
-              <strong>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</strong>
-            </span>
-            <button type="button" className="quiet-button header-new-project" onClick={() => navigateToWorkspace("projects")}>
-              <span className="button-leading-icon" aria-hidden="true">+</span>
-              新建项目
-            </button>
-          </div>
-        </header>
-
+      <StudioShell
+        className={`app-workspace-${workspace}`}
+        workspace={workspace}
+        project={activeProject ? { id: activeProject.id, name: projectDisplayName(activeProject.id, activeProject.name) } : undefined}
+        projectSelector={projectSelector}
+        comfyStatus={comfy}
+        comfyLoading={connectionLoading}
+        breadcrumbs={breadcrumbs}
+        onNavigate={(destination, item) => {
+          if (item.id === "production") {
+            openProductionQueue();
+            navigateToWorkspace("studio");
+            return;
+          }
+          navigateToWorkspace(destination);
+        }}
+        onSearch={() => navigateToWorkspace("shots")}
+        searchLabel="搜索镜头 / 场景"
+        searchShortcut="Ctrl K"
+        onSettings={() => navigateToWorkspace("settings")}
+        onBrandClick={() => navigateToWorkspace("command-center")}
+      >
         <div className="app-main-content" id="app-main-content" tabIndex={-1}>
 
       {(workspace === "studio" || workspace === "video") && productionAdmission.busy && (
@@ -744,52 +681,9 @@ function App() {
       {error && <p className="error-message global-error">提示：{error}</p>}
       {bootstrapState && <p className="version">版本 {bootstrapState.status.version}</p>}
         </div>
-      </div>
-    </main>
+      </StudioShell>
+    </div>
   );
 }
 
 export default App;
-
-function WorkspaceGlyph({ name }: { name: Workspace }) {
-  const paths: Record<Workspace, string> = {
-    studio: "M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v10a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3v-3H5.5A1.5 1.5 0 0 1 4 15.5z M8 8h8 M8 12h5",
-    video: "M4.5 6.5A2.5 2.5 0 0 1 7 4h8a2.5 2.5 0 0 1 2.5 2.5v1L21 6v12l-3.5-1.5v1A2.5 2.5 0 0 1 15 20H7a2.5 2.5 0 0 1-2.5-2.5z M10 9l5 3-5 3z",
-    shots: "M4 5h16v14H4z M7 8h10 M7 12h6 M7 16h8",
-    assets: "M3.5 7h6l2 2h9v10h-17z M3.5 7V5.5A1.5 1.5 0 0 1 5 4h5l2 2h7.5A1.5 1.5 0 0 1 21 7.5V9",
-    tasks: "M6 4h12v16H6z M9 8h6 M9 12h6 M9 16h4",
-    projects: "M3.5 8h7l2 2h8v9h-17z M5 8V5.5A1.5 1.5 0 0 1 6.5 4h4l1.5 2H19A1.5 1.5 0 0 1 20.5 7.5V10",
-    workflows: "M5 5h4v4H5z M15 15h4v4h-4z M9 7h6v10 M15 7h2v8 M7 9v6h8",
-    settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-2.6V20a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H6v-2.6h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V4.8h2.6V5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v2.6h-.2a1.7 1.7 0 0 0-1.6 1z",
-    "command-center": "M4 5h16v14H4z M8 9h3 M13 9h3 M8 13h3 M13 13h3 M8 17h8",
-  };
-
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={paths[name]} />
-    </svg>
-  );
-}
-
-function WorkspaceNavButton({
-  value,
-  activeWorkspace,
-  onNavigate,
-}: {
-  value: Workspace;
-  activeWorkspace: Workspace;
-  onNavigate: (workspace: Workspace) => void;
-}) {
-  const active = activeWorkspace === value;
-  return (
-    <button
-      type="button"
-      className={active ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
-      onClick={() => onNavigate(value)}
-      aria-current={active ? "page" : undefined}
-    >
-      <WorkspaceGlyph name={value} />
-      <span>{workspaceLabels[value]}</span>
-    </button>
-  );
-}
