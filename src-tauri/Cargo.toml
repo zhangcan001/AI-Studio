@@ -1,6 +1,6 @@
 [package]
 name = "ai-studio"
-version = "0.6.1"
+version = "0.6.2"
 description = "AI Studio local ComfyUI production workbench"
 authors = ["AI Studio"]
 edition = "2021"
