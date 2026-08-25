@@ -24,7 +24,12 @@ const keyUiSources = import.meta.glob([
   "../features/experiments/ExperimentResultGrid.tsx",
   "../features/shots/ShotBatchPlanner.tsx",
   "../features/prompts/PromptLibraryPanel.tsx",
+  "../features/prompts/PromptTemplateVariableHelper.tsx",
+  "../features/prompts/promptTemplateState.ts",
   "../features/workflows/WorkflowWorkspace.tsx",
+  "../features/workflows/WorkflowImportIssues.tsx",
+  "../features/settings/SettingsWorkspace.tsx",
+  "../features/studio/DynamicFormRenderer.tsx",
 ], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
 const forbiddenVisibleCopy = [
@@ -51,6 +56,14 @@ const forbiddenVisibleCopy = [
   "Kera2",
   "Turbo",
   "READY 批次",
+  "label: \"Project\"",
+  "label: \"Anchor\"",
+  "label: \"Custom\"",
+  ">Python<",
+  "READY ·",
+  "WARNING ·",
+  "BLOCKED ·",
+  "WORKFLOW_UNAVAILABLE",
 ];
 
 function readKeyUi(): string {

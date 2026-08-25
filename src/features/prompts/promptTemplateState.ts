@@ -2,7 +2,7 @@ import type { PromptTemplateAnalysis } from "../../types/promptTemplate";
 
 export const PROMPT_TEMPLATE_VARIABLE_GROUPS = [
   {
-    label: "Project",
+    label: "项目",
     variables: ["project.id", "project.name", "project.description"],
   },
   {
@@ -22,7 +22,7 @@ export const PROMPT_TEMPLATE_VARIABLE_GROUPS = [
     variables: ["shot.id", "shot.name", "shot.number", "shot.basePrompt"],
   },
   {
-    label: "Anchor",
+    label: "锚点",
     variables: [
       "anchors.character.names",
       "anchors.character.context",
@@ -36,7 +36,7 @@ export const PROMPT_TEMPLATE_VARIABLE_GROUPS = [
       "anchors.all.context",
     ],
   },
-  { label: "Custom", variables: ["custom.camera", "custom.mood"] },
+  { label: "自定义", variables: ["custom.camera", "custom.mood"] },
 ] as const;
 
 const BUILTIN_VARIABLES: ReadonlySet<string> = new Set(

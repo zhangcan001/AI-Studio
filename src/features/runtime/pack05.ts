@@ -317,7 +317,7 @@ export function validateMultiRuntimeQueue(
       continue;
     }
     if (!runtime.enabled) issues.push({ code: "QUEUE_RUNTIME_DISABLED", message: "任务引用的运行时已停用。", itemId: item.id });
-    if (runtime.readiness.toLocaleUpperCase() !== "READY") issues.push({ code: "QUEUE_RUNTIME_NOT_READY", message: "任务引用的运行时尚未达到 READY。", itemId: item.id });
+    if (runtime.readiness.toLocaleUpperCase() !== "READY") issues.push({ code: "QUEUE_RUNTIME_NOT_READY", message: "任务引用的运行时尚未达到就绪状态。", itemId: item.id });
     if (runtime.capability && runtime.capability.toLocaleUpperCase() !== "READY") issues.push({ code: "QUEUE_RUNTIME_CAPABILITY_INVALID", message: "任务引用的运行时能力检查未通过。", itemId: item.id });
   }
 

@@ -233,11 +233,11 @@ export function validateRecipeValues(
     } else if (field.type === "videos" || field.type === "audios") {
       const expectedType = field.type === "videos" ? "video_assets" : "audio_assets";
       const assetIds = value?.type === expectedType ? value.assetIds : [];
-      const label = field.type === "videos" ? "videos" : "audio files";
+      const label = field.type === "videos" ? "视频" : "音频文件";
       if (assetIds.length > field.maxItems || (assetIds.length > 0 && assetIds.length < field.minItems)) {
-        errors[field.key] = `请选择 ${field.minItems} 到 ${field.maxItems} 个${label === "videos" ? "视频" : "音频文件"}。`;
+        errors[field.key] = `请选择 ${field.minItems} 到 ${field.maxItems} 个${label}。`;
       } else if (field.required && assetIds.length < field.minItems) {
-        errors[field.key] = `至少请选择 ${field.minItems} 个${label === "videos" ? "视频" : "音频文件"}。`;
+        errors[field.key] = `至少请选择 ${field.minItems} 个${label}。`;
       }
     }
   }

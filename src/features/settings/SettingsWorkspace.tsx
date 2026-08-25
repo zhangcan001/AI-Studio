@@ -474,7 +474,7 @@ function PreflightReportView({ report }: { report: ComfyPreflightReport }) {
       <dl className="settings-list settings-comfy-summary">
         <div><dt>环境</dt><dd>{report.endpoint}</dd></div>
         <div><dt>ComfyUI</dt><dd>{report.comfyuiVersion ?? "--"}</dd></div>
-        <div><dt>Python</dt><dd>{report.pythonVersion ?? "--"}</dd></div>
+        <div><dt>解释器版本</dt><dd>{report.pythonVersion ?? "--"}</dd></div>
         <div><dt>连接</dt><dd>{report.connection}</dd></div>
         <div><dt>GPU</dt><dd>{report.gpu ?? "不可用"}</dd></div>
         <div><dt>VRAM</dt><dd>{formatVram(report.vramFree, report.vramTotal)}</dd></div>
@@ -537,9 +537,9 @@ function preflightStatusClass(status: ComfyPreflightReport["status"]): string {
 }
 
 function preflightStatusLabel(status: ComfyPreflightReport["status"]): string {
-  if (status === "READY") return "READY · 运行环境就绪";
-  if (status === "WARNING") return "WARNING · 存在警告";
-  return "BLOCKED · 当前环境无法生产";
+  if (status === "READY") return "就绪 · 运行环境就绪";
+  if (status === "WARNING") return "警告 · 存在警告";
+  return "已阻断 · 当前环境无法生产";
 }
 
 function preflightStatusDescription(status: ComfyPreflightReport["status"]): string {

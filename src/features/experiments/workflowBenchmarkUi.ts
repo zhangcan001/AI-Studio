@@ -24,7 +24,7 @@ export function benchmarkAdmissionNotice(status: string, autoStart: boolean): st
     case "FAILED_TO_QUEUE":
       return "基准实验未能加入生产队列，请检查生产准入。";
     default:
-      return `基准实验当前状态：${status}`;
+      return "基准实验当前状态：未知状态";
   }
 }
 

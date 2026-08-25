@@ -26,7 +26,7 @@ export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpe
           <h3>{waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流暂时无法发布" : "工作流需要确认"}</h3>
           <p>{plan.message}</p>
         </div>
-        <span className={`workflow-smart-state workflow-smart-state-${plan.state.toLowerCase()}`}>{waiting ? "WAITING" : plan.state === "BLOCKED" ? "BLOCKED" : "REVIEW"}</span>
+        <span className={`workflow-smart-state workflow-smart-state-${plan.state.toLowerCase()}`}>{waiting ? "等待中" : plan.state === "BLOCKED" ? "已阻断" : "待确认"}</span>
       </div>
       {!!plan.issues.length && (
         <div className="workflow-smart-issue-list">
