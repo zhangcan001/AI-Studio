@@ -86,11 +86,10 @@
 
 @media (max-width: 1180px) {
   .studio-shell__body,
-  .studio-shell--without-structure .studio-shell__body,
-  .studio-shell--without-inspector .studio-shell__body,
-  .studio-shell--without-structure.studio-shell--without-inspector .studio-shell__body {
+  .studio-shell--without-inspector .studio-shell__body {
     grid-template-columns: 72px 230px minmax(0, 1fr);
   }
+  .studio-shell--without-structure .studio-shell__body { grid-template-columns: 72px minmax(0, 1fr); }
   .studio-shell__inspector { display: none; }
   .comfy-status-warning { margin-inline: 8px; }
 }
