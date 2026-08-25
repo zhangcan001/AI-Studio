@@ -1,0 +1,416 @@
+/*
+ * AI Studio cross-page UI polish.
+ *
+ * This layer is intentionally scoped to StudioShell. It aligns legacy
+ * feature surfaces with the compact, content-first desktop workspace without
+ * changing feature behavior or interaction state.
+ */
+
+.studio-shell {
+  --ux-surface-0: var(--studio-bg);
+  --ux-surface-1: var(--studio-surface-1);
+  --ux-surface-2: var(--studio-surface-2);
+  --ux-surface: var(--studio-surface-2);
+  --ux-surface-raised: var(--studio-surface-3);
+  --ux-border: var(--studio-border);
+  --ux-border-strong: var(--studio-border-strong);
+  --ux-text: var(--studio-text);
+  --ux-muted: var(--studio-text-secondary);
+  --ux-accent: var(--studio-accent);
+  --ux-accent-strong: var(--studio-accent-strong);
+  --ux-accent-contrast: #ffffff;
+  --ux-success: var(--studio-success);
+  --ux-warning: var(--studio-warning);
+  --ux-danger: var(--studio-danger);
+  --ux-shadow: 0 18px 48px rgb(0 0 0 / 24%);
+  --ux-shadow-soft: 0 8px 24px rgb(0 0 0 / 18%);
+  color-scheme: dark;
+}
+
+.studio-shell__main {
+  container: studio-main / inline-size;
+  scrollbar-gutter: stable;
+}
+
+.app-main-content {
+  box-sizing: border-box;
+  width: min(100%, 1920px);
+  margin: 0 auto;
+  padding: clamp(16px, 1.6vw, 26px) clamp(16px, 2vw, 32px) 38px;
+}
+
+.app-main-content > .workspace-panel:not(.shot-workspace) {
+  padding: clamp(16px, 1.5vw, 22px);
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
+}
+
+.app-workspace-shots .app-main-content {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+
+.app-main-content :where(h1, h2, h3, h4, p, strong, dt, dd) {
+  overflow-wrap: anywhere;
+}
+
+.workspace-heading {
+  gap: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+}
+
+.workspace-heading h2,
+.project-command-heading h2 {
+  letter-spacing: -0.015em;
+}
+
+.section-description,
+.settings-card-heading p,
+.project-command-project-copy p {
+  color: var(--studio-text-secondary);
+}
+
+.studio-shell :where(button, input, select, textarea) {
+  font-family: inherit;
+}
+
+.studio-shell :where(button, input, select, textarea):disabled {
+  opacity: 0.58;
+}
+
+/* Project command center: one quiet canvas, with status cards as accents. */
+.project-command-center {
+  gap: 12px;
+}
+
+.project-command-project,
+.project-command-summary-card,
+.project-command-recommendation,
+.project-command-card,
+.project-command-stat,
+.project-command-scene-row,
+.project-command-issue,
+.project-command-activity,
+.project-command-action,
+.project-command-error,
+.project-command-empty {
+  border-color: var(--studio-border);
+  background: var(--studio-surface-2);
+  box-shadow: none;
+}
+
+.project-command-project {
+  gap: 12px;
+  padding: 14px;
+}
+
+.project-command-project-next {
+  border-color: color-mix(in srgb, var(--studio-accent) 48%, var(--studio-border));
+  background: var(--studio-accent-soft);
+}
+
+.project-command-summary-card {
+  gap: 5px;
+  padding: 11px 12px;
+  border-radius: var(--studio-radius-md);
+}
+
+.project-command-summary-ready { border-color: color-mix(in srgb, var(--studio-success) 55%, var(--studio-border)); }
+.project-command-summary-warning { border-color: color-mix(in srgb, var(--studio-warning) 58%, var(--studio-border)); }
+.project-command-summary-blocked { border-color: color-mix(in srgb, var(--studio-danger) 58%, var(--studio-border)); }
+.project-command-summary-active { border-color: color-mix(in srgb, var(--studio-accent) 56%, var(--studio-border)); }
+
+.project-command-recommendation {
+  gap: 14px;
+  padding: 13px 14px;
+}
+
+.project-command-card {
+  gap: 11px;
+  padding: 14px;
+  border-radius: var(--studio-radius-md);
+}
+
+.project-command-progress-card {
+  background: var(--studio-surface-2);
+}
+
+.project-command-stat,
+.project-command-scene-row,
+.project-command-issue,
+.project-command-activity,
+.project-command-action {
+  background: var(--studio-surface-3);
+}
+
+.project-command-action:hover:not(:disabled) {
+  border-color: var(--studio-accent);
+  background: var(--studio-accent-soft);
+}
+
+.project-command-progress-track {
+  height: 8px;
+  background: var(--studio-surface-3);
+}
+
+.project-command-progress-track span {
+  background: linear-gradient(90deg, var(--studio-accent-strong), var(--studio-accent-hover));
+}
+
+/* Asset library: more previews per viewport and less card chrome. */
+.app-workspace-assets .asset-library-query {
+  grid-template-columns: minmax(260px, 1.8fr) repeat(5, minmax(112px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 11px;
+  border: 1px solid var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-2);
+}
+
+.app-workspace-assets .asset-library-query label {
+  color: var(--studio-text-secondary);
+  font-size: 0.7rem;
+}
+
+.app-workspace-assets .asset-library-grid {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.app-workspace-assets .asset-library-card {
+  min-width: 0;
+  align-self: start;
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-1);
+  box-shadow: none;
+}
+
+.app-workspace-assets .asset-library-card:hover {
+  border-color: var(--studio-accent);
+  background: var(--studio-surface-2);
+  transform: none;
+}
+
+.app-workspace-assets .asset-library-image {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 0;
+  padding-bottom: 75%;
+  border-bottom: 1px solid var(--studio-border);
+  background: var(--studio-bg);
+}
+
+.app-workspace-assets .asset-library-card-main,
+.app-workspace-assets .asset-library-image :where(img, video) {
+  min-width: 0;
+}
+
+.app-workspace-assets .asset-library-image :where(img, video, .asset-image-placeholder) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.app-workspace-assets .asset-library-image :where(img, video) {
+  object-fit: contain;
+}
+
+.app-workspace-assets .asset-image-placeholder {
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+
+.app-workspace-assets .asset-library-card-copy {
+  gap: 3px;
+  padding: 10px 11px 8px;
+}
+
+.app-workspace-assets .asset-library-card-copy strong {
+  color: var(--studio-text);
+  font-size: 0.84rem;
+}
+
+.app-workspace-assets .asset-library-card-copy span,
+.app-workspace-assets .asset-library-card-copy small {
+  color: var(--studio-text-secondary);
+  font-size: 0.7rem;
+}
+
+.app-workspace-assets .asset-favorite-button {
+  min-height: 32px;
+  margin: 0 10px 10px;
+  padding-block: 5px;
+  border-color: var(--studio-border);
+  color: var(--studio-text-secondary);
+  background: transparent;
+}
+
+.app-workspace-assets .asset-favorite-button:hover:not(:disabled),
+.app-workspace-assets .asset-favorite-button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--studio-warning) 70%, var(--studio-border));
+  color: var(--studio-warning);
+  background: color-mix(in srgb, var(--studio-warning) 8%, transparent);
+}
+
+/* Settings: turn the runtime page into compact status sections. */
+.app-workspace-settings .settings-grid {
+  gap: 10px;
+  align-items: start;
+}
+
+.app-workspace-settings .settings-grid > .settings-card {
+  align-self: start;
+  min-height: 0;
+  padding: 14px 16px;
+}
+
+.app-workspace-settings .settings-list {
+  gap: 6px;
+}
+
+.app-workspace-settings .settings-list > div {
+  min-height: 22px;
+}
+
+.app-workspace-settings .settings-comfy-card {
+  display: grid;
+  gap: 11px;
+  padding: 16px;
+}
+
+.app-workspace-settings .settings-comfy-card > .runtime-status-card {
+  margin: 0;
+  padding: 10px 12px;
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-2);
+}
+
+.app-workspace-settings .settings-endpoint-form {
+  gap: 7px;
+  margin-top: 0;
+  padding-top: 11px;
+}
+
+.app-workspace-settings .settings-endpoint-row input {
+  min-height: 38px;
+}
+
+.app-workspace-settings .settings-comfy-summary {
+  gap: 8px;
+  margin-top: 0;
+  padding-top: 10px;
+}
+
+.app-workspace-settings .comfy-memory-release {
+  margin-top: 0;
+  padding: 10px 12px;
+}
+
+/* Shot review: compact empty states remain visible without filling the page. */
+.app-workspace-shots .shot-review-surface {
+  gap: 8px;
+}
+
+.app-workspace-shots .shot-production-context {
+  container: shot-context / inline-size;
+}
+
+.app-workspace-shots .shot-batch-review-board {
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border-radius: var(--studio-radius-md);
+}
+
+.app-workspace-shots .shot-batch-review-grid {
+  gap: 8px;
+  max-height: 560px;
+}
+
+.app-workspace-shots .shot-batch-review-card {
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--studio-radius-sm);
+}
+
+.app-workspace-shots .shot-batch-review-card .empty-state {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--studio-border-strong);
+  border-radius: var(--studio-radius-sm);
+  color: var(--studio-text-muted);
+  background: var(--studio-surface-1);
+}
+
+/* Container queries follow the usable main column, not the outer monitor size. */
+@container studio-main (max-width: 1160px) {
+  .project-command-project,
+  .project-command-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .project-command-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-workspace-assets .asset-library-query {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-workspace-assets .asset-search-field {
+    grid-column: 1 / -1;
+  }
+}
+
+@container studio-main (max-width: 700px) {
+  .app-main-content {
+    padding-inline: 12px;
+  }
+
+  .project-command-summary-grid,
+  .app-workspace-assets .asset-library-query {
+    grid-template-columns: 1fr;
+  }
+
+  .app-workspace-assets .asset-search-field {
+    grid-column: auto;
+  }
+}
+
+@container shot-context (max-width: 900px) {
+  .shot-creation-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container shot-context (max-width: 640px) {
+  .shot-preview-candidate-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .shot-candidate-rail {
+    border-top: 1px solid var(--studio-border);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-main-content {
+    padding-inline: 12px;
+  }
+}

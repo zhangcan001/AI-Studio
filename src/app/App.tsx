@@ -47,6 +47,7 @@ import {
 } from "./studioNavigation";
 import "./App.css";
 import "../styles/studioTokens.css";
+import "../styles/uiPolish.css";
 
 const workspaceLabels: Record<Workspace, string> = {
   "command-center": "项目中心",
