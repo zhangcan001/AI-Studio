@@ -1,18 +1,18 @@
 .project-structure-tree-panel {
-  --structure-bg: var(--surface-1, #12131c);
-  --structure-panel: var(--surface-2, #181a27);
-  --structure-panel-hover: rgba(139, 108, 255, 0.08);
-  --structure-selected: rgba(139, 108, 255, 0.16);
-  --structure-border: var(--border-subtle, rgba(255, 255, 255, 0.1));
-  --structure-text: var(--text-primary, #f3f1fb);
-  --structure-muted: var(--text-secondary, #a7a4b6);
+  --structure-bg: var(--studio-surface-1, #101216);
+  --structure-panel: var(--studio-surface-2, #14171c);
+  --structure-panel-hover: rgba(255, 255, 255, 0.045);
+  --structure-selected: rgba(139, 92, 246, 0.12);
+  --structure-border: var(--studio-border, rgba(255, 255, 255, 0.07));
+  --structure-text: var(--studio-text, #f3f4f6);
+  --structure-muted: var(--studio-text-secondary, #9ca3af);
   position: relative;
   display: flex;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--structure-border);
-  border-radius: 16px;
+  border: 0;
+  border-radius: 0;
   background: var(--structure-bg);
   color: var(--structure-text);
 }
@@ -322,3 +322,54 @@
     display: none;
   }
 }
+
+/* C polish: structure is a navigation pane, not a dashboard card. */
+.project-structure-tree-panel { background: var(--studio-surface-1); }
+.project-structure-tree-header { align-items: center; gap: 8px; padding: 10px 12px; background: transparent; }
+.project-structure-tree-eyebrow,
+.project-structure-tree-header p,
+.project-structure-tree-summary { display: none; }
+.project-structure-tree-header h2 { margin: 0; color: var(--studio-text); font-size: 0.82rem; font-weight: 650; line-height: 1.3; }
+.project-structure-tree-header-actions { gap: 4px; }
+.project-structure-tree-create-button,
+.project-structure-tree-manage-button,
+.shot-structure-more-button { min-height: 32px; border-radius: var(--studio-radius-sm); }
+.project-structure-tree-create-button { width: 32px; padding: 0; border-color: transparent; color: var(--studio-text-secondary); background: transparent; font-size: 0; }
+.project-structure-tree-create-button span { font-size: 1.05rem; }
+.project-structure-tree-create-button:hover,
+.project-structure-tree-create-button:focus-visible { border-color: var(--studio-border); color: var(--studio-text); background: var(--structure-panel-hover); }
+.project-structure-tree-create-menu,
+.shot-structure-more-menu { min-width: 156px; padding: 4px; border-color: var(--studio-border-strong); border-radius: var(--studio-radius-sm); background: var(--studio-surface-3); box-shadow: 0 14px 30px rgb(0 0 0 / 28%); }
+.project-structure-tree-create-menu button,
+.shot-structure-more-menu button { min-height: 32px; padding: 6px 9px; border-radius: 4px; color: var(--studio-text-secondary); font-size: 0.75rem; }
+.project-structure-tree-create-menu button:hover:not(:disabled),
+.project-structure-tree-create-menu button:focus-visible:not(:disabled),
+.shot-structure-more-menu button:hover:not(:disabled),
+.shot-structure-more-menu button:focus-visible:not(:disabled) { color: var(--studio-text); background: var(--structure-panel-hover); }
+.project-structure-tree { min-height: 120px; max-height: min(680px, 68vh); padding: 4px 6px 10px; scrollbar-color: rgba(167, 139, 250, 0.35) transparent; }
+.project-structure-tree-row { min-height: 32px; gap: 3px; border-radius: var(--studio-radius-sm); }
+.project-structure-treeitem.is-selected > .project-structure-tree-row { border-color: rgba(139, 92, 246, 0.4); background: var(--structure-selected); }
+.project-structure-treeitem[data-focused="true"] > .project-structure-tree-row { box-shadow: inset 0 0 0 1px var(--studio-accent); }
+.project-structure-tree-caret { width: 22px; height: 28px; flex-basis: 22px; color: var(--studio-text-muted); font-size: 13px; }
+.project-structure-tree-caret:hover,
+.project-structure-tree-caret:focus-visible { background: var(--structure-panel-hover); color: var(--studio-accent-hover); }
+.project-structure-tree-label { gap: 8px; padding: 6px 4px; line-height: 1.35; }
+.project-structure-treeitem-project .project-structure-tree-label-main { font-size: 0.8125rem; font-weight: 650; }
+.project-structure-treeitem-series .project-structure-tree-label-main,
+.project-structure-treeitem-episode .project-structure-tree-label-main { font-size: 0.78rem; font-weight: 550; }
+.project-structure-treeitem-scene .project-structure-tree-label-main,
+.project-structure-treeitem-shot .project-structure-tree-label-main { font-size: 0.75rem; }
+.project-structure-tree-label-meta { color: var(--studio-text-muted); font-size: 0.66rem; }
+.project-structure-tree-actions > button { min-height: 26px; color: var(--studio-text-muted); }
+.project-structure-tree-children { margin-left: 14px; border-left-color: rgba(255, 255, 255, 0.08); }
+.project-structure-tree-limit-note,
+.project-structure-tree-empty { margin-left: 28px; color: var(--studio-text-muted); font-size: 0.68rem; }
+.project-structure-tree-limit-note { border-color: var(--studio-border); border-radius: var(--studio-radius-sm); background: rgba(255, 255, 255, 0.025); }
+.project-structure-tree-unassigned { margin-left: 14px; border-left-color: rgba(245, 158, 11, 0.26); }
+.project-structure-tree-unassigned-heading { color: #d9aa62; font-size: 0.68rem; }
+
+.shot-structure-more { position: relative; }
+.shot-structure-more-button { width: 32px; padding: 0; border: 1px solid transparent; color: var(--studio-text-secondary); background: transparent; font-size: 1.1rem; line-height: 1; }
+.shot-structure-more-button:hover,
+.shot-structure-more-button:focus-visible { border-color: var(--studio-border); color: var(--studio-text); background: var(--structure-panel-hover); }
+.shot-structure-more-menu { position: absolute; z-index: 5; top: calc(100% + 6px); right: 0; display: grid; }

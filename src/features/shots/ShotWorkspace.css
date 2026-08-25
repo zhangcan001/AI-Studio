@@ -539,3 +539,67 @@
   .shot-context-heading { flex-direction: column; }
   .shot-context-selection { max-width: 100%; }
 }
+
+/* C polish: the shot canvas is the page; structure and inspector are quiet dividers around it. */
+.workspace-panel.shot-workspace {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.shot-workspace .section-label { color: var(--studio-text-muted); font-size: 0.64rem; letter-spacing: 0.04em; text-transform: none; }
+.shot-production-layout { grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); gap: 0; align-items: stretch; min-height: 0; }
+.shot-structure-column { gap: 0; padding: 0 10px 0 0; border-right: 1px solid var(--studio-border); }
+.shot-production-context { gap: 0; padding-left: 16px; }
+.shot-structure-filter { gap: 7px; padding: 10px 0 0; border: 0; border-top: 1px solid var(--studio-border); border-radius: 0; background: transparent; }
+.shot-structure-filter-heading { min-height: 28px; align-items: center; color: var(--studio-text-secondary); font-size: 0.72rem; }
+.shot-structure-filter-heading span { color: var(--studio-text-muted); font-size: 0.66rem; }
+.shot-list-controls { gap: 6px; padding: 0; border-bottom: 0; }
+.shot-list-control-row { gap: 6px; }
+.shot-list-control-row label:first-of-type { min-width: 0; }
+.shot-list-search input { min-height: 34px; padding: 6px 8px; border-color: var(--studio-border); border-radius: var(--studio-radius-sm); background: var(--studio-surface-2); font-size: 0.72rem; }
+.shot-list-filter-trigger { display: inline-flex; width: 34px; min-height: 34px; flex: 0 0 34px; align-items: center; justify-content: center; gap: 4px; padding: 0; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-sm); color: var(--studio-text-secondary); background: var(--studio-surface-2); font-size: 0.7rem; }
+.shot-list-filter-trigger svg { width: 15px; height: 15px; }
+.shot-list-filter-trigger:hover,
+.shot-list-filter-trigger:focus-visible,
+.shot-list-filter-trigger-active { border-color: var(--studio-accent); color: var(--studio-text); background: var(--studio-accent-soft); }
+.shot-list-filter-popover { display: grid; gap: 7px; padding: 8px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-sm); background: var(--studio-surface-2); }
+.shot-list-filter-popover[hidden] { display: none; }
+.shot-list-filter-popover label { display: grid; gap: 3px; color: var(--studio-text-secondary); font-size: 0.66rem; }
+.shot-list-filter-popover select { min-height: 32px; padding: 5px 7px; border-color: var(--studio-border); border-radius: var(--studio-radius-sm); background: var(--studio-surface-1); font-size: 0.7rem; }
+.shot-list-pagination { gap: 5px; color: var(--studio-text-muted); font-size: 0.64rem; }
+.shot-list-pagination span:first-child { flex: 1 1 100%; }
+.shot-list-pagination .quiet-button { min-height: 28px; padding: 4px 7px; font-size: 0.66rem; }
+.shot-search-results { gap: 3px; max-height: 190px; }
+.shot-search-result { grid-template-columns: 20px minmax(0, 1fr) max-content; gap: 5px; padding: 6px; border-radius: var(--studio-radius-sm); font-size: 0.7rem; }
+.shot-context-heading { padding: 8px 0 10px; border-bottom: 1px solid var(--studio-border); }
+.shot-context-heading h2 { font-size: 0.9rem; }
+.shot-context-heading p { margin-top: 3px; color: var(--studio-text-muted); font-size: 0.7rem; }
+.shot-context-selection { color: var(--studio-accent-hover); font-size: 0.7rem; }
+.shot-context-empty,
+.shot-structure-management-panel { border: 0; border-radius: 0; background: transparent; }
+.shot-context-empty { min-height: 280px; padding: 24px; }
+.shot-progress-dashboard,
+.shot-batch-panel,
+.shot-batch-review-board { border-radius: var(--studio-radius-md); background: var(--studio-surface-1); }
+.shot-batch-review-card,
+.shot-batch-review-candidate { border-color: var(--studio-border); border-radius: var(--studio-radius-sm); background: var(--studio-surface-2); }
+.shot-production-surfaces,
+.shot-review-surface { gap: 10px; }
+
+@media (max-width: 1499px) {
+  .shot-production-layout { grid-template-columns: minmax(210px, 232px) minmax(0, 1fr); }
+}
+
+@media (max-width: 1180px) {
+  .shot-production-layout { grid-template-columns: minmax(200px, 220px) minmax(0, 1fr); }
+  .shot-production-context { padding-left: 12px; }
+}
+
+@media (max-width: 820px) {
+  .shot-production-layout { grid-template-columns: 1fr; }
+  .shot-structure-column { padding: 0 0 10px; border-right: 0; border-bottom: 1px solid var(--studio-border); }
+  .shot-production-context { padding-left: 0; }
+}

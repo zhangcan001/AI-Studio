@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { ShotListControls, ShotListStatusFilter } from "./shotListQuery";
-import { SHOT_LIST_PAGE_SIZES, SHOT_LIST_STATUS_OPTIONS } from "./shotListQuery";
+import { DEFAULT_SHOT_LIST_PAGE_SIZE, SHOT_LIST_PAGE_SIZES, SHOT_LIST_STATUS_OPTIONS } from "./shotListQuery";
 
 interface Props {
   controls: ShotListControls;
@@ -30,6 +31,8 @@ export function ShotListToolbar({
   onPageSizeChange,
   onPageChange,
 }: Props) {
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterActive = controls.status !== "ALL" || controls.sceneId !== "ALL" || controls.pageSize !== DEFAULT_SHOT_LIST_PAGE_SIZE;
   return (
     <div className="shot-list-controls">
       <div className="shot-list-control-row">
@@ -43,29 +46,27 @@ export function ShotListToolbar({
             aria-label="搜索镜头名称或 Prompt"
           />
         </label>
+        <button type="button" className={filterActive ? "shot-list-filter-trigger shot-list-filter-trigger-active" : "shot-list-filter-trigger"} aria-label="镜头筛选" aria-controls="shot-list-filter-popover" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+          <span>筛选</span>
+        </button>
+      </div>
+      <div id="shot-list-filter-popover" className={filterOpen ? "shot-list-filter-popover shot-list-filter-popover-open" : "shot-list-filter-popover"} hidden={!filterOpen}>
         <label>
-          <span className="sr-only">状态筛选</span>
-          <select
-            value={controls.status}
-            onChange={(event) => onStatusChange(event.target.value as ShotListStatusFilter)}
-            aria-label="状态筛选"
-          >
+          <span>状态</span>
+          <select value={controls.status} onChange={(event) => onStatusChange(event.target.value as ShotListStatusFilter)} aria-label="状态筛选">
             {SHOT_LIST_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
         {sceneOptions.length > 0 && onSceneChange && <label>
-          <span className="sr-only">结构筛选</span>
+          <span>Scene</span>
           <select value={controls.sceneId} onChange={(event) => onSceneChange(event.target.value)} aria-label="结构筛选">
             {sceneOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>}
         <label>
-          <span className="sr-only">每页数量</span>
-          <select
-            value={controls.pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            aria-label="每页数量"
-          >
+          <span>每页数量</span>
+          <select value={controls.pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} aria-label="每页数量">
             {SHOT_LIST_PAGE_SIZES.map((size) => <option key={size} value={size}>{size} / 页</option>)}
           </select>
         </label>

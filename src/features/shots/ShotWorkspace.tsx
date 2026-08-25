@@ -145,6 +145,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [shotListControls, setShotListControls] = useState<ShotListControls>(defaultShotListControls);
   const reloadGeneration = useRef(0);
 
@@ -736,11 +737,15 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
             onCreate={handleStructureCreate}
             openManagement={openStructureManagement}
             shotFilter={treeShotFilter}
-            headerActions={<>
-              {mode === "creation" && <button type="button" className="quiet-button" onClick={() => setBulkImportOpen((open) => !open)} disabled={busy}>{bulkImportOpen ? "收起导入" : "导入"}</button>}
-              <button type="button" className="quiet-button" onClick={() => void exportManifest()} disabled={busy}>清单</button>
-              <button type="button" className="quiet-button" onClick={() => void reload()} disabled={busy}>刷新</button>
-            </>}
+            headerActions={<div className="shot-structure-more">
+              <button type="button" className="shot-structure-more-button" aria-label="更多结构操作" aria-haspopup="menu" aria-expanded={structureMenuOpen} onClick={() => setStructureMenuOpen((open) => !open)}>⋯</button>
+              {structureMenuOpen && <div className="shot-structure-more-menu" role="menu" aria-label="结构操作菜单">
+                {mode === "creation" && <button type="button" role="menuitem" onClick={() => { setBulkImportOpen((open) => !open); setStructureMenuOpen(false); }}>{bulkImportOpen ? "收起批量导入" : "批量导入"}</button>}
+                {mode !== "review" && <button type="button" role="menuitem" onClick={() => { openStructureManagement(workspaceSelection); setStructureMenuOpen(false); }}>结构管理</button>}
+                <button type="button" role="menuitem" onClick={() => { void exportManifest(); setStructureMenuOpen(false); }} disabled={busy}>导出清单</button>
+                <button type="button" role="menuitem" onClick={() => { void reload(); setStructureMenuOpen(false); }} disabled={busy}>刷新</button>
+              </div>}
+            </div>}
           />
           <section className="shot-structure-filter" aria-label="镜头搜索和筛选">
             <div className="shot-structure-filter-heading"><strong>镜头定位</strong><span>{shotList.filteredCount} / {shots.length}</span></div>
@@ -765,14 +770,15 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           </section>
         </div>
         <div className="shot-production-context">
-          <div className="shot-context-heading">
+          {contextSurface !== "shot" && <div className="shot-context-heading">
             <div>
-              <span className="section-label">{mode === "production" ? "Production" : mode === "review" ? "Review" : "Creation context"}</span>
-              <h2>{workspaceSelection.type === "shot" ? "镜头工作区" : workspaceSelection.type === "scene" ? "场景工作区" : workspaceSelection.type === "episode" ? "Episode 工作区" : workspaceSelection.type === "series" ? "Series 工作区" : "项目工作区"}</h2>
-              <p>{mode === "production" ? "Runbook 与项目批量管线集中在生产模式。" : mode === "review" ? "集中处理候选确认、失败重试和人工审核。" : workspaceSelection.type === "shot" ? "在同一工作区完成生成、候选确认、参考关系和 Prompt 快照。" : "结构选择只改变当前上下文；当前模式只显示对应面板。"}</p>
+              {mode !== "creation" && <span className="section-label">{mode === "production" ? "生产" : "审核"}</span>}
+              <h2>{workspaceSelection.type === "scene" ? "场景工作区" : workspaceSelection.type === "episode" ? "Episode 工作区" : workspaceSelection.type === "series" ? "Series 工作区" : "项目工作区"}</h2>
+              {mode === "production" && <p>Runbook 与项目批量管线集中在生产模式。</p>}
+              {mode === "review" && <p>集中处理候选确认、失败重试和人工审核。</p>}
             </div>
-            <span className="shot-context-selection">{workspaceSelection.type === "shot" ? (selectedShot?.name ?? "未选择镜头") : workspaceSelection.type === "project" ? (projectName ?? projectId) : "已选结构节点"}</span>
-          </div>
+            <span className="shot-context-selection">{workspaceSelection.type === "project" ? (projectName ?? projectId) : "已选结构节点"}</span>
+          </div>}
           {contextSurface === "review" ? reviewSurface : contextSurface === "production" ? productionSurface : contextSurface === "shot" ? (
             <ShotCreationWorkspace
               projectId={projectId}

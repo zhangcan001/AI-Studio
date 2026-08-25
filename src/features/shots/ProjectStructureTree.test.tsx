@@ -92,6 +92,8 @@ describe("ProjectStructureTree", () => {
     expect(html).toContain("入口");
     expect(html).toContain('aria-expanded="true"');
     expect(html).not.toContain("镜头 shot-1");
+    expect(html).not.toContain("Project structure");
+    expect(html).not.toContain("选择 Series、Episode、Scene 或 Shot");
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).toContain('data-header-slot="true"');
   });

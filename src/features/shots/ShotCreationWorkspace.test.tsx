@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { AssetView } from "../../types/asset";
 import type { ShotView } from "../../types/shot";
-import { ShotCreationWorkspace, resolveShotPreviewAsset, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
+import { ShotCreationWorkspace, canConfirmShotCandidate, resolveShotPreviewAsset, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
 
 const asset = (id: string, type: "image" | "video"): AssetView => ({
   id,
@@ -73,6 +73,9 @@ describe("ShotCreationWorkspace", () => {
     expect(html).toContain("参数");
     expect(html).toContain("preload=\"metadata\"");
     expect(html).toContain("controls=\"\"");
+    expect((html.match(/shot-candidate-confirm/g) ?? []).length).toBe(1);
+    expect(html).not.toContain(">确认<");
+    expect((html.match(/shot-inspector-generate/g) ?? []).length).toBe(1);
   });
 
   it("uses the selected asset for preview without mutating selection, then falls back to the latest candidate", () => {
@@ -80,6 +83,12 @@ describe("ShotCreationWorkspace", () => {
     expect(selected?.id).toBe("video-2");
     expect(resolveShotPreviewAsset(candidates, "missing")?.id).toBe("video-1");
     expect(resolveShotPreviewAsset(candidates, "missing", asset("manual-1", "image"))?.id).toBe("manual-1");
+  });
+
+  it("keeps thumbnail preview selection separate from explicit confirmation", () => {
+    expect(canConfirmShotCandidate(candidates[0], "video-2")).toBe(true);
+    expect(canConfirmShotCandidate(candidates[0], "video-1")).toBe(false);
+    expect(canConfirmShotCandidate({ ...candidates[0], status: "reviewed" }, "other")).toBe(false);
   });
 
   it("keeps a real empty state when there is no selected shot", () => {

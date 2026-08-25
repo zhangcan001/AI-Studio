@@ -443,13 +443,9 @@ export function ProjectStructureTree({
     <section className="project-structure-tree-panel" aria-labelledby="project-structure-tree-title">
       <header className="project-structure-tree-header">
         <div>
-          <span className="project-structure-tree-eyebrow">Project structure</span>
           <h2 id="project-structure-tree-title">项目结构</h2>
-          <p>选择 Series、Episode、Scene 或 Shot，主工作区会切换对应上下文。</p>
         </div>
         <div className="project-structure-tree-header-actions">
-          {headerActions}
-          {openManagement && <button type="button" className="project-structure-tree-manage-button" onClick={() => openManagement(createContext)}>管理</button>}
           <div className="project-structure-tree-create">
             <button
               type="button"
@@ -459,7 +455,7 @@ export function ProjectStructureTree({
               aria-expanded={createMenuOpen}
               onClick={() => setCreateMenuOpen((open) => !open)}
             >
-              <span aria-hidden="true">＋</span> 新建
+              <span aria-hidden="true">＋</span>
             </button>
             {createMenuOpen && <div className="project-structure-tree-create-menu" role="menu" aria-label="新建菜单">
               {renderCreateMenuItem("shot", "新建 Shot")}
@@ -468,9 +464,10 @@ export function ProjectStructureTree({
               {renderCreateMenuItem("scene", "新建 Scene")}
             </div>}
           </div>
+          {openManagement && !headerActions && <button type="button" className="project-structure-tree-manage-button" onClick={() => openManagement(createContext)}>管理</button>}
+          {headerActions}
         </div>
       </header>
-      <div className="project-structure-tree-summary">默认展开 Series / Episode；仅展开当前 Scene 的 Shot，共 {shots.length} 个 Shot。</div>
       <div className="project-structure-tree" role="tree" aria-label={`${project.name}项目结构`}>
         {renderTreeItem({
           nodeKey: nodeKey("project", projectId),

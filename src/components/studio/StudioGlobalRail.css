@@ -74,3 +74,12 @@
 @media (prefers-reduced-motion: reduce) {
   .studio-global-rail__item { transition: none; }
 }
+
+/* C polish: restrained rail emphasis; the content canvas owns the visual weight. */
+.studio-global-rail__brand { min-height: 58px; }
+.studio-global-rail__brand-mark { width: 30px; height: 30px; border-color: var(--studio-border-strong); background: var(--studio-accent-soft); }
+.studio-global-rail__nav { gap: 2px; padding: 6px 5px; }
+.studio-global-rail__item { min-height: 52px; border-color: transparent; border-radius: var(--studio-radius-sm); font-size: 0.62rem; }
+.studio-global-rail__item::before { top: 9px; bottom: 9px; left: -5px; width: 2px; }
+.studio-global-rail__item--active { border-color: transparent; color: var(--studio-text); background: rgba(139, 92, 246, 0.09); }
+.studio-global-rail__item--active svg { color: var(--studio-accent); }

@@ -67,6 +67,10 @@ export function resolveShotPreviewAsset(candidates: ShotWorkspaceCandidate[], se
   return previewAsset ?? candidates.find((candidate) => candidate.asset.id === selectedAssetId)?.asset ?? candidates[0]?.asset;
 }
 
+export function canConfirmShotCandidate(candidate: ShotWorkspaceCandidate, selectedAssetId?: string): boolean {
+  return candidate.asset.id !== selectedAssetId && candidate.status !== "selected" && candidate.status !== "reviewed";
+}
+
 export function ShotCreationWorkspace({
   projectId,
   shot,
@@ -180,20 +184,28 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
   onEditPrompt: () => void;
 }) {
   const previewLabel = previewAsset ? (stage === "image" ? "当前图片预览" : "当前视频预览") : "尚未生成候选";
+  const previewCandidate = previewAsset ? candidates.find((candidate) => candidate.asset.id === previewAsset.id) : undefined;
+  const canConfirmPreview = Boolean(
+    onCandidateConfirm &&
+    previewCandidate &&
+    previewCandidate.asset.id !== selectedAssetId &&
+    canConfirmShotCandidate(previewCandidate, selectedAssetId),
+  );
   return (
     <div className="shot-creation-view shot-creation-generate-view">
-      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">Generate</span><h2>{stage === "image" ? "关键帧图片" : "镜头视频"}</h2></div><span className="shot-creation-count">{candidates.length} 个候选</span></div>
+      <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">生成</span><h2>{stage === "image" ? "关键帧图片" : "镜头视频"}</h2></div><span className="shot-creation-count">{candidates.length} 个候选</span></div>
       <section className="shot-preview-candidate-shell" aria-label="主预览与候选">
         <div className="shot-main-preview">
           <div className="shot-main-preview-heading"><span>{previewLabel}</span>{previewAsset && <small>{previewAsset.name}</small>}</div>
-          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧 rail；确认动作仍由你显式触发。" actionLabel={busy ? "生成中…" : "生成"} onAction={onGenerate} disabled={busy} />}
+          {previewAsset ? <ShotMediaPreview projectId={projectId} asset={previewAsset} variant="main" /> : <EmptyWorkspaceState title="尚未生成候选" detail="生成完成后，候选会出现在右侧；确认动作仍由你显式触发。" actionLabel={busy ? "生成中…" : "生成第一个候选"} onAction={onGenerate} disabled={busy} />}
         </div>
         <aside className="shot-candidate-rail" aria-label="候选列表">
           <div className="shot-candidate-rail-heading"><strong>候选</strong><span>{candidates.length}</span></div>
           <div className="shot-candidate-list">
-            {candidates.map((candidate) => <CandidateRailItem key={`${candidate.asset.id}:${candidate.taskId ?? "candidate"}`} projectId={projectId} candidate={candidate} selected={candidate.status === "selected" || candidate.asset.id === selectedAssetId} onSelect={onCandidateSelect} onConfirm={onCandidateConfirm} disabled={busy ?? false} />)}
+            {candidates.map((candidate) => <CandidateRailItem key={`${candidate.asset.id}:${candidate.taskId ?? "candidate"}`} projectId={projectId} candidate={candidate} selected={candidate.status === "selected" || candidate.asset.id === selectedAssetId} onSelect={onCandidateSelect} disabled={busy ?? false} />)}
             {candidates.length === 0 && <p className="shot-creation-muted">暂无候选</p>}
           </div>
+          <button type="button" className="shot-candidate-confirm" onClick={() => previewCandidate && void onCandidateConfirm?.(previewCandidate.asset.id, previewCandidate.fromLinkedTask)} disabled={busy || !canConfirmPreview}>确认当前候选</button>
         </aside>
       </section>
       <section className="shot-prompt-preview" aria-label="Prompt Preview">
@@ -204,19 +216,15 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
   );
 }
 
-function CandidateRailItem({ projectId, candidate, selected, onSelect, onConfirm, disabled }: { projectId: string; candidate: ShotWorkspaceCandidate; selected: boolean; onSelect?: (candidate: ShotWorkspaceCandidate) => void; onConfirm?: (assetId: string, fromLinkedTask?: boolean) => void | Promise<void>; disabled: boolean }) {
+function CandidateRailItem({ projectId, candidate, selected, onSelect, disabled }: { projectId: string; candidate: ShotWorkspaceCandidate; selected: boolean; onSelect?: (candidate: ShotWorkspaceCandidate) => void; disabled: boolean }) {
   const status = candidate.statusLabel ?? (candidate.status ? candidateStatusLabels[candidate.status] : "待审核");
-  const confirmed = selected || candidate.status === "reviewed";
   return (
     <article className={`shot-candidate-rail-item${selected ? " shot-candidate-rail-item-selected" : ""}`}>
       <button type="button" className="shot-candidate-select" onClick={() => onSelect?.(candidate)} disabled={disabled || !onSelect} aria-pressed={selected}>
-        <ShotMediaPreview projectId={projectId} asset={candidate.asset} variant="thumb" />
-        <span className="shot-candidate-copy"><strong>{candidate.asset.name}</strong><small>{status}</small></span>
+        <span className="shot-candidate-thumb"><ShotMediaPreview projectId={projectId} asset={candidate.asset} variant="thumb" /><span className={`shot-candidate-status shot-candidate-status-${candidate.status ?? "ready"}`}>{status}</span></span>
+        <span className="shot-candidate-copy"><strong>{candidate.asset.name}</strong></span>
       </button>
-      <div className="shot-candidate-meta">
-        {candidate.error && <small className="shot-candidate-error">{candidate.error}</small>}
-        {onConfirm && <button type="button" className="quiet-button" onClick={() => void onConfirm(candidate.asset.id, candidate.fromLinkedTask)} disabled={disabled || confirmed}>{confirmed ? "已确认" : "确认"}</button>}
-      </div>
+      {candidate.error && <small className="shot-candidate-error">{candidate.error}</small>}
     </article>
   );
 }

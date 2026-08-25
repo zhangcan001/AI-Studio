@@ -224,3 +224,22 @@
   .studio-topbar__breadcrumb-link,
   .studio-topbar__breadcrumb-button { transition: none; }
 }
+
+/* C polish: a quiet 50px desktop bar with the project context kept secondary. */
+.studio-topbar {
+  min-height: 50px;
+  padding-inline: 12px;
+}
+.studio-topbar__brand-lockup { gap: 8px; }
+.studio-topbar__brand-mark { width: 28px; height: 28px; border-color: var(--studio-border-strong); background: var(--studio-accent-soft); }
+.studio-topbar__brand-copy strong { font-size: 0.74rem; letter-spacing: 0.1em; }
+.studio-topbar__brand-copy small { display: none; }
+.studio-topbar__breadcrumbs { min-height: 40px; margin-inline: 12px; }
+.studio-topbar__breadcrumb-current { max-width: 180px; }
+.studio-topbar__project-context { max-width: 144px; }
+.studio-topbar__project-context :where(select, button) { max-width: 144px; min-height: 34px; }
+.studio-topbar__comfy-status { max-width: 160px; padding-inline: 4px; }
+.studio-topbar__comfy-status--connected .studio-topbar__status-dot { box-shadow: none; }
+.studio-topbar__comfy-copy small { display: none; }
+.studio-topbar__search-trigger { min-height: 38px; padding-inline: 10px; }
+.studio-topbar__icon-button { width: 40px; height: 40px; }

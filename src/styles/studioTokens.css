@@ -3,16 +3,17 @@
   --studio-surface-1: #101216;
   --studio-surface-2: #14171c;
   --studio-surface-3: #191c22;
-  --studio-border: rgba(255, 255, 255, 0.08);
+  --studio-border: rgba(255, 255, 255, 0.07);
   --studio-border-strong: rgba(255, 255, 255, 0.12);
 
   --studio-text: #f3f4f6;
   --studio-text-secondary: #9ca3af;
   --studio-text-muted: #6b7280;
 
-  --studio-accent: #7c3aed;
-  --studio-accent-hover: #8b5cf6;
-  --studio-accent-soft: rgba(124, 58, 237, 0.14);
+  --studio-accent: #8b5cf6;
+  --studio-accent-strong: #7c3aed;
+  --studio-accent-hover: #a78bfa;
+  --studio-accent-soft: rgba(139, 92, 246, 0.12);
   --studio-success: #34d399;
   --studio-warning: #f59e0b;
   --studio-danger: #f87171;
@@ -20,11 +21,11 @@
   --studio-radius-sm: 6px;
   --studio-radius-md: 8px;
 
-  --studio-topbar-height: 56px;
-  --studio-global-rail-width: 88px;
-  --studio-structure-width: 288px;
-  --studio-inspector-width: 360px;
-  --studio-queue-collapsed-height: 46px;
+  --studio-topbar-height: 50px;
+  --studio-global-rail-width: 72px;
+  --studio-structure-width: 260px;
+  --studio-inspector-width: 332px;
+  --studio-queue-collapsed-height: 40px;
   --studio-queue-expanded-height: 240px;
 
   --studio-space-1: 4px;
@@ -37,4 +38,27 @@
   --studio-motion-standard: 220ms;
   --studio-focus-ring: 0 0 0 2px var(--studio-bg), 0 0 0 4px var(--studio-accent-hover);
   --studio-font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* Keep the legacy feature styles on the same visual language inside StudioShell. */
+  --ux-surface-0: var(--studio-bg);
+  --ux-surface-1: var(--studio-surface-1);
+  --ux-surface-2: var(--studio-surface-2);
+  --ux-border: var(--studio-border);
+  --ux-border-strong: var(--studio-border-strong);
+  --ux-text: var(--studio-text);
+  --ux-muted: var(--studio-text-secondary);
+  --ux-accent: var(--studio-accent);
+  --ux-accent-strong: var(--studio-accent-strong);
+  --ux-success: var(--studio-success);
+  --ux-warning: var(--studio-warning);
+  --ux-danger: var(--studio-danger);
 }
+
+/* Shared controls inside the desktop shell inherit the neutral palette. */
+.studio-shell :where(button, input, select, textarea) { border-radius: var(--studio-radius-sm); }
+.studio-shell button { border-color: var(--studio-border-strong); color: var(--studio-text); background: var(--studio-surface-2); }
+.studio-shell button:hover:not(:disabled) { border-color: var(--studio-accent); background: var(--studio-surface-3); }
+.studio-shell .quiet-button { border-color: var(--studio-border); color: var(--studio-text-secondary); background: transparent; }
+.studio-shell input,
+.studio-shell select,
+.studio-shell textarea { border-color: var(--studio-border); color: var(--studio-text); background: var(--studio-surface-2); }

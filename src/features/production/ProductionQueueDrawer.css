@@ -114,3 +114,38 @@
   .production-queue-drawer-row,
   .production-queue-drawer-item { scroll-behavior: auto; transition: none; }
 }
+
+/* C polish: the queue is a quiet bottom status strip until explicitly opened. */
+.production-queue-drawer {
+  --queue-bg: var(--studio-surface-1);
+  --queue-surface: var(--studio-surface-2);
+  --queue-surface-hover: var(--studio-surface-3);
+  --queue-border: var(--studio-border);
+  --queue-text: var(--studio-text);
+  --queue-muted: var(--studio-text-secondary);
+  --queue-accent: var(--studio-accent);
+  --queue-success: var(--studio-success);
+  --queue-warning: var(--studio-warning);
+  --queue-danger: var(--studio-danger);
+  border: 0;
+  border-top: 1px solid var(--studio-border);
+  border-radius: 0;
+  background: var(--studio-surface-1);
+  box-shadow: none;
+}
+.production-queue-drawer-toggle { grid-template-columns: minmax(120px, 1fr) auto 20px; min-height: 40px; padding: 4px 10px; }
+.production-queue-drawer-toggle:hover { background: rgba(255, 255, 255, 0.035); }
+.production-queue-drawer-kicker { display: none; }
+.production-queue-drawer-title strong { font-size: 0.74rem; font-weight: 600; }
+.production-queue-drawer-stats { gap: 10px; font-size: 0.68rem; }
+.production-queue-drawer-stats small { font-size: 0.64rem; }
+.production-queue-drawer-stats span:nth-child(1) strong { color: var(--queue-success); }
+.production-queue-drawer-stats span:nth-child(3) strong { color: var(--queue-danger); }
+.production-queue-drawer-body { gap: 8px; max-height: 240px; padding: 8px 10px 10px; border-top-color: var(--studio-border); }
+.production-queue-drawer-row,
+.production-queue-drawer-item { gap: 8px; padding: 5px; border-radius: var(--studio-radius-sm); background: rgba(255, 255, 255, 0.025); }
+.production-queue-drawer-thumbnail { width: 36px; height: 36px; border-color: var(--studio-border); border-radius: 4px; background: #080a0d; }
+.production-queue-drawer-actions button,
+.production-queue-drawer-item > button { min-height: 30px; padding: 4px 8px; border-color: var(--studio-accent); border-radius: var(--studio-radius-sm); color: var(--studio-text); background: var(--studio-accent-strong); font-size: 0.68rem; }
+.production-queue-drawer-actions button.quiet,
+.production-queue-drawer-item > button.quiet { border-color: var(--studio-border); background: transparent; }

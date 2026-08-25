@@ -28,6 +28,9 @@ describe("ShotListToolbar", () => {
     expect(html).toContain("50 / 页");
     expect(html).toContain("100 / 页");
     expect(html).toContain("结构筛选");
+    expect(html).toContain('aria-label="镜头筛选"');
+    expect(html).toContain('id="shot-list-filter-popover"');
+    expect(html).toContain('hidden=""');
     expect(html).toContain("显示 1-50 / 匹配 73 / 总计 500");
   });
 });
