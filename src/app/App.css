@@ -3795,7 +3795,7 @@ summary:focus-visible {
   padding: 4px 0 0;
 }
 
-/* Batch workspace hierarchy: editor first, then a full-width production list. */
+/* Batch workspace hierarchy: wide windows keep the editor beside the live queue. */
 .studio-panel-batch .batch-production-view {
   grid-template-columns: 1fr;
   gap: 16px;
@@ -6079,4 +6079,33 @@ input[type="radio"] {
   .workflow-selector-option-tags { justify-items: start; }
   .project-folder-workflow-strategy-heading > label,
   .project-folder-workflow-mode select { max-width: none; width: 100%; }
+}
+
+/* Production control room: keep the active work area beside the live queue on
+   the default desktop window, then collapse safely before either column gets
+   cramped. This only recomposes existing batch and queue components. */
+@media (min-width: 1081px) {
+  .studio-panel-batch .batch-production-view {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.46fr);
+  }
+
+  .batch-workspace-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.42fr);
+  }
+
+  .studio-panel-batch .batch-production-view .production-queue-panel-inline,
+  .batch-workspace-grid .production-queue-panel-inline {
+    position: sticky;
+    top: 148px;
+    max-height: calc(100vh - 170px);
+    overflow: auto;
+  }
+}
+
+@media (max-width: 1080px) {
+  .batch-workspace-grid .production-queue-panel-inline {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
 }
