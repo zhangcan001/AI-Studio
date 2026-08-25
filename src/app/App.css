@@ -6109,3 +6109,84 @@ input[type="radio"] {
     overflow: visible;
   }
 }
+
+/* Progressive navigation: keep the production loop visible and tuck away
+   project/runtime administration until it is needed. */
+.app-sidebar .workspace-nav {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-nav-group,
+.workspace-nav-more {
+  min-width: 0;
+}
+
+.workspace-nav-group {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-nav-group-label {
+  padding: 0 8px 2px;
+  color: var(--ux-muted);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.workspace-nav-more {
+  padding-top: 10px;
+  border-top: 1px solid var(--ux-border);
+}
+
+.workspace-nav-more summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 8px;
+  border-radius: var(--ux-radius-sm);
+  color: var(--ux-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  list-style: none;
+  user-select: none;
+}
+
+.workspace-nav-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-nav-more summary:hover {
+  color: var(--ux-text);
+  background: rgb(18 45 71 / 58%);
+}
+
+.workspace-nav-more-chevron {
+  color: var(--ux-accent);
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 180ms ease;
+}
+
+.workspace-nav-more[open] .workspace-nav-more-chevron {
+  transform: rotate(180deg);
+}
+
+.workspace-nav-more .workspace-nav-items {
+  margin-top: 4px;
+}
+
+@media (max-width: 900px) {
+  .app-sidebar .workspace-nav {
+    display: grid;
+    gap: 10px;
+  }
+
+  .workspace-nav-more {
+    padding-top: 8px;
+  }
+}

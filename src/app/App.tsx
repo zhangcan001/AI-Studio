@@ -64,6 +64,9 @@ const workspaceDescriptions: Record<Workspace, string> = {
   settings: "连接运行时、释放模型内存和导出诊断信息。",
 };
 
+const primaryWorkspaces: Workspace[] = ["command-center", "studio", "video", "shots", "assets", "tasks"];
+const secondaryWorkspaces: Workspace[] = ["projects", "workflows", "settings"];
+
 function keepsNativeContextMenu(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return target instanceof HTMLInputElement
@@ -487,20 +490,35 @@ function App() {
             <span className="section-label">工作台</span>
             <small>{activeProject ? projectDisplayName(activeProject.id, activeProject.name) : "未选择项目"}</small>
           </div>
-          <div className="workspace-nav-items">
-            {(Object.keys(workspaceLabels) as Workspace[]).map((value) => (
-              <button
-                type="button"
-                key={value}
-                className={workspace === value ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
-                onClick={() => navigateToWorkspace(value)}
-                aria-current={workspace === value ? "page" : undefined}
-              >
-                <WorkspaceGlyph name={value} />
-                <span>{workspaceLabels[value]}</span>
-              </button>
-            ))}
+          <div className="workspace-nav-group">
+            <span className="workspace-nav-group-label">核心工作区</span>
+            <div className="workspace-nav-items">
+              {primaryWorkspaces.map((value) => (
+                <WorkspaceNavButton
+                  key={value}
+                  value={value}
+                  activeWorkspace={workspace}
+                  onNavigate={navigateToWorkspace}
+                />
+              ))}
+            </div>
           </div>
+          <details className="workspace-nav-more" open={secondaryWorkspaces.includes(workspace)}>
+            <summary>
+              <span>管理与设置</span>
+              <span className="workspace-nav-more-chevron" aria-hidden="true">⌄</span>
+            </summary>
+            <div className="workspace-nav-items">
+              {secondaryWorkspaces.map((value) => (
+                <WorkspaceNavButton
+                  key={value}
+                  value={value}
+                  activeWorkspace={workspace}
+                  onNavigate={navigateToWorkspace}
+                />
+              ))}
+            </div>
+          </details>
         </nav>
         {comfy && (
           <div className="sidebar-runtime" aria-label="运行时状态">
@@ -750,5 +768,28 @@ function WorkspaceGlyph({ name }: { name: Workspace }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={paths[name]} />
     </svg>
+  );
+}
+
+function WorkspaceNavButton({
+  value,
+  activeWorkspace,
+  onNavigate,
+}: {
+  value: Workspace;
+  activeWorkspace: Workspace;
+  onNavigate: (workspace: Workspace) => void;
+}) {
+  const active = activeWorkspace === value;
+  return (
+    <button
+      type="button"
+      className={active ? "workspace-nav-button workspace-nav-button-active" : "workspace-nav-button"}
+      onClick={() => onNavigate(value)}
+      aria-current={active ? "page" : undefined}
+    >
+      <WorkspaceGlyph name={value} />
+      <span>{workspaceLabels[value]}</span>
+    </button>
   );
 }

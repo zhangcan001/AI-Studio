@@ -277,11 +277,19 @@ export function ProjectCommandCenterView({
             <span className="section-label">Project</span>
             <h3 id="project-command-project-title">{projectDisplayName(project.id, project.name)}</h3>
             <p>{project.description?.trim() || "暂无项目说明。"}</p>
+            <dl className="project-command-project-meta">
+              <div><dt>项目 ID</dt><dd>{project.id}</dd></div>
+              <div><dt>更新时间</dt><dd>{formatDateTime(project.updatedAt)}</dd></div>
+            </dl>
           </div>
-          <dl className="project-command-project-meta">
-            <div><dt>项目 ID</dt><dd>{project.id}</dd></div>
-            <div><dt>更新时间</dt><dd>{formatDateTime(project.updatedAt)}</dd></div>
-          </dl>
+          <div className="project-command-project-next">
+            <span className="section-label">Continue Work</span>
+            <strong>推荐下一步：{action.label}</strong>
+            <p>{action.detail}</p>
+            <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="Continue Work">
+              继续工作
+            </button>
+          </div>
         </section>
       )}
 
@@ -323,70 +331,75 @@ export function ProjectCommandCenterView({
             </SummaryCard>
           </div>
 
-          <section className="project-command-recommendation" aria-labelledby="project-command-recommendation-title">
-            <div>
-              <span className="section-label">Continue Work</span>
-              <h3 id="project-command-recommendation-title">推荐下一步：{action.label}</h3>
-              <p>{action.detail}</p>
-            </div>
-            <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="Continue Work">
-              继续工作
-            </button>
-          </section>
-
-          <div className="project-command-columns">
-            <section className="project-command-card" aria-labelledby="project-command-progress-title">
-              <CardHeading eyebrow="Progress" title="项目进度" id="project-command-progress-title" />
-              <ProgressBar percent={derived.progress.percent} label={`${derived.progress.completed} / ${derived.progress.total} 个镜头已完成`} />
-              <div className="project-command-stat-row">
-                <Stat label="待生成" value={derived.progress.pendingKeyframes} />
-                <Stat label="待选关键帧" value={Math.max(0, derived.progress.keyframesSelected - derived.progress.completed)} />
-                <Stat label="视频复核" value={derived.progress.pendingVideoReview} />
-                <Stat label="需关注" value={derived.progress.needsAttention} />
+          {!project && (
+            <section className="project-command-recommendation" aria-labelledby="project-command-recommendation-title">
+              <div>
+                <span className="section-label">Continue Work</span>
+                <h3 id="project-command-recommendation-title">推荐下一步：{action.label}</h3>
+                <p>{action.detail}</p>
               </div>
+              <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="Continue Work">
+                继续工作
+              </button>
             </section>
+          )}
 
-            <section className="project-command-card" aria-labelledby="project-command-scene-title">
-              <CardHeading eyebrow="Scene Progress" title="场景进度" id="project-command-scene-title" />
-              {derived.sceneProgress.length ? (
-                <div className="project-command-scene-list">
-                  {derived.sceneProgress.map((scene) => (
-                    <div className="project-command-scene-row" key={scene.id}>
-                      <div className="project-command-scene-copy"><strong>{scene.name}</strong><small>{scene.path} · {scene.completed} / {scene.total}</small></div>
-                      <ProgressBar percent={scene.percent} label={`${scene.percent}%`} compact />
-                    </div>
-                  ))}
+          <div className="project-command-workspace">
+            <div className="project-command-main-column">
+              <section className="project-command-card project-command-progress-card" aria-labelledby="project-command-progress-title">
+                <CardHeading eyebrow="Progress" title="项目进度" id="project-command-progress-title" />
+                <ProgressBar percent={derived.progress.percent} label={`${derived.progress.completed} / ${derived.progress.total} 个镜头已完成`} />
+                <div className="project-command-stat-row">
+                  <Stat label="待生成" value={derived.progress.pendingKeyframes} />
+                  <Stat label="待选关键帧" value={Math.max(0, derived.progress.keyframesSelected - derived.progress.completed)} />
+                  <Stat label="视频复核" value={derived.progress.pendingVideoReview} />
+                  <Stat label="需关注" value={derived.progress.needsAttention} />
                 </div>
-              ) : <p className="project-command-muted">尚未建立场景结构。</p>}
-            </section>
-          </div>
+              </section>
 
-          <div className="project-command-columns">
-            <section className="project-command-card" aria-labelledby="project-command-issues-title">
-              <CardHeading eyebrow="Issues" title="需要关注" id="project-command-issues-title" />
-              {derived.issues.length ? (
-                <div className="project-command-issue-list">
-                  {derived.issues.map((issue) => <article className={`project-command-issue project-command-issue-${issue.severity.toLowerCase()}`} key={issue.id}><div><strong>{issue.title}</strong><span>{issue.source === "runtime" ? "运行时" : "生产数据"}</span></div><p>{issue.detail}</p></article>)}
-                </div>
-              ) : <p className="project-command-healthy">未发现需要处理的问题。</p>}
-            </section>
-
-            <section className="project-command-card" aria-labelledby="project-command-activity-title">
-              <CardHeading eyebrow="Recent Activity" title="最近活动" id="project-command-activity-title" />
-              {displayActivity.length ? (
-                <div className="project-command-activity-list">
-                  {displayActivity.slice(0, 12).map((item) => <article className={`project-command-activity project-command-activity-${item.severity.toLowerCase()}`} key={item.id}><time dateTime={item.timestamp}>{formatDateTime(item.timestamp)}</time><div><strong>{item.title}</strong><p>{item.detail}</p>{item.errorCode && <code>{item.errorCode}</code>}</div></article>)}
-                </div>
-              ) : <p className="project-command-muted">当前项目还没有生产活动。</p>}
-            </section>
-          </div>
-
-          <section className="project-command-card project-command-quick-actions" aria-labelledby="project-command-quick-actions-title">
-            <CardHeading eyebrow="Quick Actions" title="快速操作" id="project-command-quick-actions-title" />
-            <div className="project-command-action-grid">
-              {COMMAND_CENTER_QUICK_ACTIONS.map((item) => <button type="button" className="project-command-action" data-command-action={item.id} key={item.id} onClick={() => onNavigate?.(item.destination)} disabled={!onNavigate || busyNow}><strong>{item.label}</strong><span>{item.detail}</span></button>)}
+              <section className="project-command-card" aria-labelledby="project-command-scene-title">
+                <CardHeading eyebrow="Scene Progress" title="场景进度" id="project-command-scene-title" />
+                {derived.sceneProgress.length ? (
+                  <div className="project-command-scene-list">
+                    {derived.sceneProgress.map((scene) => (
+                      <div className="project-command-scene-row" key={scene.id}>
+                        <div className="project-command-scene-copy"><strong>{scene.name}</strong><small>{scene.path} · {scene.completed} / {scene.total}</small></div>
+                        <ProgressBar percent={scene.percent} label={`${scene.percent}%`} compact />
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="project-command-muted">尚未建立场景结构。</p>}
+              </section>
             </div>
-          </section>
+
+            <aside className="project-command-side-column" aria-label="项目上下文">
+              <section className="project-command-card" aria-labelledby="project-command-issues-title">
+                <CardHeading eyebrow="Issues" title="需要关注" id="project-command-issues-title" />
+                {derived.issues.length ? (
+                  <div className="project-command-issue-list">
+                    {derived.issues.map((issue) => <article className={`project-command-issue project-command-issue-${issue.severity.toLowerCase()}`} key={issue.id}><div><strong>{issue.title}</strong><span>{issue.source === "runtime" ? "运行时" : "生产数据"}</span></div><p>{issue.detail}</p></article>)}
+                  </div>
+                ) : <p className="project-command-healthy">未发现需要处理的问题。</p>}
+              </section>
+
+              <section className="project-command-card" aria-labelledby="project-command-activity-title">
+                <CardHeading eyebrow="Recent Activity" title="最近活动" id="project-command-activity-title" />
+                {displayActivity.length ? (
+                  <div className="project-command-activity-list">
+                    {displayActivity.slice(0, 8).map((item) => <article className={`project-command-activity project-command-activity-${item.severity.toLowerCase()}`} key={item.id}><time dateTime={item.timestamp}>{formatDateTime(item.timestamp)}</time><div><strong>{item.title}</strong><p>{item.detail}</p>{item.errorCode && <code>{item.errorCode}</code>}</div></article>)}
+                  </div>
+                ) : <p className="project-command-muted">当前项目还没有生产活动。</p>}
+              </section>
+
+              <section className="project-command-card project-command-quick-actions" aria-labelledby="project-command-quick-actions-title">
+                <CardHeading eyebrow="Quick Actions" title="快速操作" id="project-command-quick-actions-title" />
+                <div className="project-command-action-grid">
+                  {COMMAND_CENTER_QUICK_ACTIONS.slice(0, 3).map((item) => <button type="button" className="project-command-action" data-command-action={item.id} key={item.id} onClick={() => onNavigate?.(item.destination)} disabled={!onNavigate || busyNow}><strong>{item.label}</strong><span>{item.detail}</span></button>)}
+                </div>
+                <small className="project-command-quick-actions-hint">其他管理入口已收进左侧“管理与设置”。</small>
+              </section>
+            </aside>
+          </div>
         </>
       )}
     </section>

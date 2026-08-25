@@ -78,3 +78,169 @@
 @keyframes project-command-spin { to { transform: rotate(360deg); } }
 @media (max-width: 1100px) { .project-command-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .project-command-project { display: grid; } .project-command-project-meta { min-width: 0; } .project-command-activity { grid-template-columns: 1fr; gap: 7px; } }
 @media (max-width: 700px) { .project-command-heading, .project-command-recommendation { display: grid; } .project-command-heading-actions { justify-content: flex-start; } .project-command-summary-grid, .project-command-columns, .project-command-action-grid { grid-template-columns: 1fr; } .project-command-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .project-command-scene-row { grid-template-columns: 1fr; } .project-command-progress-compact { min-width: 0; } }
+
+/* Information hierarchy refinement: keep one clear next action, one primary
+   progress column, and a compact context rail for issues and recent activity. */
+.project-command-center {
+  gap: 14px;
+}
+
+.project-command-project {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.42fr);
+  align-items: stretch;
+  gap: 14px;
+  padding: 15px;
+}
+
+.project-command-project-copy {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+}
+
+.project-command-project-copy h3 {
+  margin: 2px 0 2px;
+  font-size: clamp(1.15rem, 1.8vw, 1.35rem);
+}
+
+.project-command-project-copy p {
+  max-width: 62ch;
+}
+
+.project-command-project-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  min-width: 0;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(113 143 190 / 20%);
+}
+
+.project-command-project-meta div {
+  display: grid;
+  justify-content: start;
+  gap: 2px;
+}
+
+.project-command-project-meta dd {
+  max-width: none;
+  text-align: left;
+}
+
+.project-command-project-next {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid rgb(111 157 255 / 45%);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgb(45 78 133 / 55%), rgb(26 48 83 / 68%));
+}
+
+.project-command-project-next strong {
+  color: #f0f5ff;
+  overflow-wrap: anywhere;
+}
+
+.project-command-project-next p {
+  margin: 0;
+  color: #b5c5df;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.project-command-project-next button {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.project-command-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-command-summary-card {
+  gap: 5px;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.project-command-summary-card > strong {
+  font-size: 1rem;
+}
+
+.project-command-summary-card > div {
+  font-size: 0.72rem;
+}
+
+.project-command-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 0.43fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.project-command-main-column,
+.project-command-side-column {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.project-command-card {
+  gap: 12px;
+  padding: 15px;
+}
+
+.project-command-progress-card {
+  background: linear-gradient(145deg, rgb(25 48 80 / 82%), rgb(15 30 51 / 92%));
+}
+
+.project-command-action-grid {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.project-command-action {
+  gap: 3px;
+  padding: 10px 11px;
+}
+
+.project-command-quick-actions-hint {
+  color: #8292aa;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 1100px) {
+  .project-command-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .project-command-project {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.48fr);
+  }
+
+  .project-command-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.5fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .project-command-project,
+  .project-command-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .project-command-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-command-project-meta {
+    grid-template-columns: 1fr;
+  }
+}
