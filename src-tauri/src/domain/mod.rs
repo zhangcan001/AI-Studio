@@ -4,6 +4,7 @@
 //! or other infrastructure concerns.
 
 pub mod asset;
+pub mod consistency;
 pub mod generation_snapshot;
 pub mod preset;
 pub mod production_item_review;
@@ -21,6 +22,17 @@ pub mod workflow;
 pub use asset::{
     Asset, AssetDomainError, AssetId, AssetType, GENERATED_IMAGE_CATEGORY,
     GENERATED_VIDEO_CATEGORY, SOURCE_AUDIO_CATEGORY, SOURCE_IMAGE_CATEGORY, SOURCE_VIDEO_CATEGORY,
+};
+pub use consistency::{
+    generate_consistency_id, validate_consistency_id, validate_metadata_json,
+    validate_optional_text, validate_profile_binding, validate_profile_name,
+    validate_prompt_fragment, validate_reference_set, validate_reference_set_binding,
+    validate_reference_set_items, BindingDomainError, BindingRole, CharacterProfile,
+    ConsistencyIdKind, ConsistencyIdValidationError, ConsistencyProfileRecord,
+    ConsistencyValidationError, CostumeVariant, InheritanceMode, ProfileDomainError,
+    ProfileRevision, ProfileRevisionStatus, ProfileType, PropProfile, ReferenceSet,
+    ReferenceSetItem, ReferenceSetPurpose, ReferenceSetPurposeError, SceneProfile,
+    ShotProfileBinding, ShotReferenceSetBinding, StyleProfile, ValidationError,
 };
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
 pub use preset::{Preset, PresetDomainError, PresetId};

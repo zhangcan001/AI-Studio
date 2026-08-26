@@ -7,6 +7,7 @@ pub mod asset_store;
 pub mod asset_video_prompt_repository;
 pub mod clock;
 pub mod comfy_adapter;
+pub mod consistency_profile_repository;
 pub mod generation_definition_repository;
 pub mod generation_snapshot_repository;
 pub mod organization_repository;
@@ -18,10 +19,12 @@ pub mod project_directory_store;
 pub mod project_repository;
 pub mod prompt_library_repository;
 pub mod reference_anchor_repository;
+pub mod reference_set_repository;
 pub mod repository_error;
 pub mod settings_store;
 pub mod shot_batch_repository;
 pub mod shot_bulk_repository;
+pub mod shot_consistency_repository;
 pub mod shot_repository;
 pub mod task_history_repository;
 pub mod task_repository;
@@ -54,6 +57,7 @@ pub use comfy_adapter::{
     ComfyOutputData, ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult,
     ComfyUploadedInput, DeviceInfo, PromptSubmission, SystemStats,
 };
+pub use consistency_profile_repository::ConsistencyProfileRepository;
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
 };
@@ -75,6 +79,7 @@ pub use prompt_library_repository::{
     PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
 };
 pub use reference_anchor_repository::{ReferenceAnchorRecord, ReferenceAnchorRepository};
+pub use reference_set_repository::ReferenceSetRepository;
 pub use repository_error::RepositoryError;
 pub use settings_store::{
     AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,
@@ -82,6 +87,7 @@ pub use settings_store::{
 };
 pub use shot_batch_repository::{ActiveShotBatchBinding, ShotBatchBinding, ShotBatchRepository};
 pub use shot_bulk_repository::{ShotBulkData, ShotBulkRepository, ShotStagePromptRecord};
+pub use shot_consistency_repository::ShotConsistencyRepository;
 pub use shot_repository::{
     ShotData, ShotGenerationLinkRecord, ShotRecord, ShotReferenceAssetRecord, ShotRepository,
     ShotStageConfigRecord,
