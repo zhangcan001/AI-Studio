@@ -772,13 +772,21 @@ fn bulk_definition_reads_are_deduplicated_by_workflow_and_recipe() {
     assert_contains_all(
         evaluation,
         &[
-            "HashMap::<(String, String), Option<GenerationDefinition>>::new()",
-            "if !definitions.contains_key(&key)",
+            "let definition_pairs = contexts",
+            "collect::<BTreeSet<_>>()",
             "definition_repository",
-            ".find(workflow_version_id, recipe_id)",
-            "definitions.get(&key).cloned().flatten()",
+            "load_generation_definitions(",
+            "definitions.get(key)",
         ],
     );
+    assert_eq!(evaluation.matches(".find(").count(), 0);
+    let loader = section(
+        &source,
+        "async fn load_generation_definitions",
+        "fn prepare_generation_values",
+    );
+    assert_eq!(loader.matches(".find_many(pairs)").count(), 1);
+    assert_eq!(loader.matches(".find(").count(), 0);
 }
 
 #[test]

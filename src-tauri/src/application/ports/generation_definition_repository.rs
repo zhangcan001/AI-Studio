@@ -37,5 +37,22 @@ pub trait GenerationDefinitionRepository: Send + Sync {
         recipe_id: &str,
     ) -> Result<Option<GenerationDefinition>, RepositoryError>;
 
+    /// Loads the requested workflow-version/recipe pairs in bulk.
+    ///
+    /// The default keeps existing fakes and adapters source-compatible. SQL
+    /// repositories should override this with a set-based implementation.
+    async fn find_many(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<Vec<GenerationDefinition>, RepositoryError> {
+        let mut definitions = Vec::new();
+        for (workflow_version_id, recipe_id) in pairs {
+            if let Some(definition) = self.find(workflow_version_id, recipe_id).await? {
+                definitions.push(definition);
+            }
+        }
+        Ok(definitions)
+    }
+
     async fn list_available(&self) -> Result<Vec<AvailableGenerationDefinition>, RepositoryError>;
 }

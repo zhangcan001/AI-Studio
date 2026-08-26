@@ -1,10 +1,10 @@
 mod app_state;
-mod application;
+pub mod application;
 mod commands;
 pub mod compiler;
 pub mod domain;
 mod error;
-mod infrastructure;
+pub mod infrastructure;
 
 pub use application::ports::{
     AssetDeletionRepository, AssetRepository, AssetStore, AssetUsageRepository,

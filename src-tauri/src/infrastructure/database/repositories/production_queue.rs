@@ -1089,32 +1089,79 @@ async fn validate_shot_batch_bindings(
         .iter()
         .map(|item| item.id.as_str())
         .collect::<std::collections::HashSet<_>>();
-    for binding in bindings {
-        let shot_project =
-            sqlx::query_scalar::<_, String>("SELECT project_id FROM shots WHERE id = ?")
-                .bind(&binding.shot_id)
-                .fetch_optional(&mut **transaction)
-                .await
-                .map_err(map_sqlx_error)?
-                .ok_or_else(|| RepositoryError::not_found("shot", &binding.shot_id))?;
-        if shot_project != batch.project_id {
+    if bindings
+        .iter()
+        .any(|binding| !item_ids.contains(binding.production_batch_item_id.as_str()))
+    {
+        return Err(RepositoryError::integrity(
+            "prepared Shot binding references an unknown item",
+        ));
+    }
+
+    let requested_shot_ids = bindings
+        .iter()
+        .map(|binding| binding.shot_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if !requested_shot_ids.is_empty() {
+        let placeholders = std::iter::repeat_n("?", requested_shot_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!("SELECT id, project_id FROM shots WHERE id IN ({placeholders})");
+        let mut request = sqlx::query_as::<_, (String, String)>(&query);
+        for shot_id in &requested_shot_ids {
+            request = request.bind(*shot_id);
+        }
+        let shot_rows = request
+            .fetch_all(&mut **transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        let returned_valid_count = shot_rows
+            .iter()
+            .filter(|(_, project_id)| project_id == &batch.project_id)
+            .count();
+        if returned_valid_count != requested_shot_ids.len() {
+            for binding in bindings {
+                match shot_rows
+                    .iter()
+                    .find(|(shot_id, _)| shot_id == &binding.shot_id)
+                {
+                    None => return Err(RepositoryError::not_found("shot", &binding.shot_id)),
+                    Some((_, project_id)) if project_id != &batch.project_id => {
+                        return Err(RepositoryError::integrity(
+                            "prepared Shot batch cannot bind a Shot from another project",
+                        ));
+                    }
+                    Some(_) => {}
+                }
+            }
             return Err(RepositoryError::integrity(
                 "prepared Shot batch cannot bind a Shot from another project",
             ));
         }
-        if !item_ids.contains(binding.production_batch_item_id.as_str()) {
-            return Err(RepositoryError::integrity(
-                "prepared Shot binding references an unknown item",
-            ));
+    }
+
+    let requested_item_ids = bindings
+        .iter()
+        .map(|binding| binding.production_batch_item_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if !requested_item_ids.is_empty() {
+        let placeholders = std::iter::repeat_n("?", requested_item_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "SELECT DISTINCT production_batch_item_id
+             FROM shot_generation_links
+             WHERE production_batch_item_id IN ({placeholders})"
+        );
+        let mut request = sqlx::query_scalar::<_, String>(&query);
+        for item_id in &requested_item_ids {
+            request = request.bind(*item_id);
         }
-        let existing = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id = ?",
-        )
-        .bind(&binding.production_batch_item_id)
-        .fetch_one(&mut **transaction)
-        .await
-        .map_err(map_sqlx_error)?;
-        if existing != 0 {
+        let existing_item_ids = request
+            .fetch_all(&mut **transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        if !existing_item_ids.is_empty() {
             return Err(RepositoryError::integrity(
                 "production batch item already has a Shot generation link",
             ));
@@ -1493,6 +1540,10 @@ mod tests {
     use crate::application::ports::{
         ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
     };
+    use crate::domain::production_preparation::{
+        PreparationSnapshotPrompt, PreparationSnapshotReadiness, PreparationSnapshotRecord,
+        PreparationSnapshotV1, PreparationSnapshotWorkflow,
+    };
     use crate::domain::{
         ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
         ProductionBatchItemStatus, ProductionBatchStatus, ShotStage,
@@ -1502,6 +1553,7 @@ mod tests {
     };
     use chrono::{DateTime, TimeZone, Utc};
     use serde_json::json;
+    use sqlx::SqlitePool;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -2139,6 +2191,372 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepared_batch_bulk_validates_multiple_shot_memberships() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prepared-bulk-membership.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let shot_ids = ["sht_prepared_1", "sht_prepared_2", "sht_prepared_3"];
+        insert_test_shots(&pool, "project-1", &shot_ids).await;
+
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 18, 12, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let batch = fixture_batch(&batch_id, ProductionBatchStatus::Ready, now);
+        let items = (0..shot_ids.len())
+            .map(|ordinal| {
+                fixture_item(
+                    &batch_id,
+                    ordinal as u32,
+                    ProductionBatchItemStatus::Pending,
+                    None,
+                    json!({"ordinal": ordinal}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let bindings = items
+            .iter()
+            .zip(shot_ids)
+            .map(|(item, shot_id)| ShotBatchBinding {
+                shot_id: shot_id.to_owned(),
+                stage: ShotStage::Image,
+                production_batch_item_id: item.id.as_str().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let snapshots = items
+            .iter()
+            .zip(shot_ids)
+            .enumerate()
+            .map(|(ordinal, (item, shot_id))| {
+                fixture_preparation_snapshot(
+                    &format!("pps_prepared_{ordinal}"),
+                    &batch_id,
+                    item,
+                    shot_id,
+                    ShotStage::Image,
+                    now,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        repository
+            .insert_prepared_batch_with_bindings(&batch, &items, &bindings, &snapshots)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            count_by_batch(&pool, "production_batches", &batch_id).await,
+            1
+        );
+        assert_eq!(
+            count_by_batch(&pool, "production_batch_items", &batch_id).await,
+            3
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id IN (
+                    SELECT id FROM production_batch_items WHERE batch_id = ?
+                )",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_preparation_snapshots WHERE production_batch_id = ?",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            3
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn prepared_batch_bulk_rejects_cross_project_shot_membership() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prepared-bulk-project-scope.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Other Project', NULL, 'C:/other-project', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_test_shots(&pool, "project-1", &["sht_bulk_scope_1"]).await;
+        insert_test_shots(&pool, "project-2", &["sht_bulk_scope_2"]).await;
+
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 18, 12, 10, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let batch = fixture_batch(&batch_id, ProductionBatchStatus::Ready, now);
+        let shot_ids = ["sht_bulk_scope_1", "sht_bulk_scope_2"];
+        let items = (0..shot_ids.len())
+            .map(|ordinal| {
+                fixture_item(
+                    &batch_id,
+                    ordinal as u32,
+                    ProductionBatchItemStatus::Pending,
+                    None,
+                    json!({"ordinal": ordinal}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let bindings = items
+            .iter()
+            .zip(shot_ids)
+            .map(|(item, shot_id)| ShotBatchBinding {
+                shot_id: shot_id.to_owned(),
+                stage: ShotStage::Image,
+                production_batch_item_id: item.id.as_str().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let snapshots = items
+            .iter()
+            .zip(shot_ids)
+            .enumerate()
+            .map(|(ordinal, (item, shot_id))| {
+                fixture_preparation_snapshot(
+                    &format!("pps_bulk_scope_{ordinal}"),
+                    &batch_id,
+                    item,
+                    shot_id,
+                    ShotStage::Image,
+                    now,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let error = repository
+            .insert_prepared_batch_with_bindings(&batch, &items, &bindings, &snapshots)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RepositoryError::Integrity { .. }));
+        assert_eq!(
+            count_by_batch(&pool, "production_batches", &batch_id).await,
+            0
+        );
+        assert_eq!(
+            count_by_batch(&pool, "production_batch_items", &batch_id).await,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_preparation_snapshots WHERE production_batch_id = ?",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn prepared_batch_bulk_rejects_existing_shot_links_before_insert() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prepared-bulk-existing-link.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let shot_ids = ["sht_existing_1", "sht_existing_2", "sht_existing_3"];
+        insert_test_shots(&pool, "project-1", &shot_ids).await;
+
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 18, 12, 15, 0).unwrap();
+        let source_batch_id = ProductionBatchId::new();
+        let source_item = fixture_item(
+            &source_batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            json!({"source": true}),
+        );
+        repository
+            .insert_batch_with_bindings(
+                &fixture_batch(&source_batch_id, ProductionBatchStatus::Ready, now),
+                std::slice::from_ref(&source_item),
+                &[ShotBatchBinding {
+                    shot_id: shot_ids[0].to_owned(),
+                    stage: ShotStage::Image,
+                    production_batch_item_id: source_item.id.as_str().to_owned(),
+                }],
+            )
+            .await
+            .unwrap();
+
+        let batch_id = ProductionBatchId::new();
+        let batch = fixture_batch(&batch_id, ProductionBatchStatus::Ready, now);
+        let mut items = (0..shot_ids.len())
+            .map(|ordinal| {
+                fixture_item(
+                    &batch_id,
+                    ordinal as u32,
+                    ProductionBatchItemStatus::Pending,
+                    None,
+                    json!({"ordinal": ordinal}),
+                )
+            })
+            .collect::<Vec<_>>();
+        items[0].id = source_item.id.clone();
+        let bindings = items
+            .iter()
+            .zip(shot_ids)
+            .map(|(item, shot_id)| ShotBatchBinding {
+                shot_id: shot_id.to_owned(),
+                stage: ShotStage::Image,
+                production_batch_item_id: item.id.as_str().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let snapshots = items
+            .iter()
+            .zip(shot_ids)
+            .enumerate()
+            .map(|(ordinal, (item, shot_id))| {
+                fixture_preparation_snapshot(
+                    &format!("pps_existing_{ordinal}"),
+                    &batch_id,
+                    item,
+                    shot_id,
+                    ShotStage::Image,
+                    now,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let error = repository
+            .insert_prepared_batch_with_bindings(&batch, &items, &bindings, &snapshots)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RepositoryError::Integrity { .. }));
+        assert_eq!(
+            count_by_batch(&pool, "production_batches", &batch_id).await,
+            0
+        );
+        assert_eq!(
+            count_by_batch(&pool, "production_batch_items", &batch_id).await,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id = ?",
+            )
+            .bind(source_item.id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_preparation_snapshots WHERE production_batch_id = ?",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn prepared_batch_rolls_back_after_late_snapshot_failure() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prepared-rollback.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let shot_ids = ["sht_rollback_1", "sht_rollback_2"];
+        insert_test_shots(&pool, "project-1", &shot_ids).await;
+
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 18, 12, 30, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let batch = fixture_batch(&batch_id, ProductionBatchStatus::Ready, now);
+        let items = (0..shot_ids.len())
+            .map(|ordinal| {
+                fixture_item(
+                    &batch_id,
+                    ordinal as u32,
+                    ProductionBatchItemStatus::Pending,
+                    None,
+                    json!({"ordinal": ordinal}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let bindings = items
+            .iter()
+            .zip(shot_ids)
+            .map(|(item, shot_id)| ShotBatchBinding {
+                shot_id: shot_id.to_owned(),
+                stage: ShotStage::Image,
+                production_batch_item_id: item.id.as_str().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let snapshots = items
+            .iter()
+            .zip(shot_ids)
+            .map(|(item, shot_id)| {
+                fixture_preparation_snapshot(
+                    "pps_duplicate",
+                    &batch_id,
+                    item,
+                    shot_id,
+                    ShotStage::Image,
+                    now,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(repository
+            .insert_prepared_batch_with_bindings(&batch, &items, &bindings, &snapshots)
+            .await
+            .is_err());
+        assert_eq!(
+            count_by_batch(&pool, "production_batches", &batch_id).await,
+            0
+        );
+        assert_eq!(
+            count_by_batch(&pool, "production_batch_items", &batch_id).await,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id IN (
+                    SELECT id FROM production_batch_items WHERE batch_id = ?
+                )",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_preparation_snapshots WHERE production_batch_id = ?",
+            )
+            .bind(batch_id.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn bulk_requeue_copies_frozen_source_and_shot_binding() {
         let directory = tempdir().unwrap();
         let pool = initialize(&directory.path().join("bulk-requeue-binding.db"))
@@ -2496,6 +2914,92 @@ mod tests {
             archived_at: None,
             created_at: now,
             updated_at: now,
+        }
+    }
+
+    async fn insert_test_shots(pool: &SqlitePool, project_id: &str, shot_ids: &[&str]) {
+        for (ordinal, shot_id) in shot_ids.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 'prompt', '2026-08-18T12:00:00Z', '2026-08-18T12:00:00Z')",
+            )
+            .bind(shot_id)
+            .bind(project_id)
+            .bind(ordinal as i64)
+            .bind(format!("Shot {ordinal}"))
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    async fn count_by_batch(pool: &SqlitePool, table: &str, batch_id: &ProductionBatchId) -> i64 {
+        let query = format!(
+            "SELECT COUNT(*) FROM {table} WHERE {} = ?",
+            if table == "production_batches" {
+                "id"
+            } else {
+                "batch_id"
+            }
+        );
+        sqlx::query_scalar::<_, i64>(&query)
+            .bind(batch_id.as_str())
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    fn fixture_preparation_snapshot(
+        snapshot_id: &str,
+        batch_id: &ProductionBatchId,
+        item: &ProductionBatchItem,
+        shot_id: &str,
+        stage: ShotStage,
+        now: DateTime<Utc>,
+    ) -> PreparationSnapshotRecord {
+        let context_hash = format!("context-{shot_id}");
+        PreparationSnapshotRecord {
+            id: snapshot_id.to_owned(),
+            project_id: "project-1".to_owned(),
+            shot_id: shot_id.to_owned(),
+            stage,
+            context_hash: context_hash.clone(),
+            production_batch_id: batch_id.as_str().to_owned(),
+            production_batch_item_id: item.id.as_str().to_owned(),
+            snapshot: PreparationSnapshotV1 {
+                schema_version: 1,
+                project_id: "project-1".to_owned(),
+                shot_id: shot_id.to_owned(),
+                stage: stage.as_str().to_owned(),
+                context_hash,
+                resolved_at: now,
+                prepared_at: now,
+                structure: Default::default(),
+                profiles: Default::default(),
+                reference_sets: Vec::new(),
+                reference_assets: Vec::new(),
+                prompt: PreparationSnapshotPrompt {
+                    rendered_text: String::new(),
+                    negative_prompt: String::new(),
+                    ordered_segments: Vec::new(),
+                },
+                workflow: PreparationSnapshotWorkflow {
+                    workflow_version_id: Some("workflow-version-1".to_owned()),
+                    recipe_id: Some("recipe-1".to_owned()),
+                    scalar_values: json!({}),
+                },
+                output_spec: Default::default(),
+                stage_input: Default::default(),
+                frozen_generation_values: json!({}),
+                readiness: PreparationSnapshotReadiness {
+                    status: crate::domain::ShotReadinessStatus::Ready,
+                    score: 100,
+                    gates: Vec::new(),
+                    evaluated_at: now,
+                },
+                comfy_capability_evidence: Default::default(),
+            },
+            created_at: now,
         }
     }
 

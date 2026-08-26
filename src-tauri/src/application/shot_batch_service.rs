@@ -32,6 +32,51 @@ use std::{
 
 pub const MAX_SHOT_BATCH_ITEMS: usize = 100;
 
+fn is_negative_prompt_key(key: &str) -> bool {
+    matches!(key, "negative_prompt" | "negativePrompt" | "negative")
+}
+
+fn prompt_input_key(recipe: &Recipe) -> Result<Option<String>, String> {
+    if matches!(
+        recipe.inputs.get("prompt"),
+        Some(InputDefinition::TextArea { .. })
+    ) {
+        return Ok(Some("prompt".to_owned()));
+    }
+
+    let candidates = recipe
+        .inputs
+        .iter()
+        .filter(|(key, input)| {
+            matches!(input, InputDefinition::TextArea { .. }) && !is_negative_prompt_key(key)
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [key] => Ok(Some(key.clone())),
+        _ => Err("Recipe 包含多个 TextArea 输入，但没有明确的 prompt 输入".to_owned()),
+    }
+}
+
+fn negative_prompt_input_key(recipe: &Recipe) -> Result<Option<String>, String> {
+    let candidates = ["negative_prompt", "negativePrompt", "negative"]
+        .into_iter()
+        .filter(|key| {
+            matches!(
+                recipe.inputs.get(*key),
+                Some(InputDefinition::TextArea { .. })
+            )
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [key] => Ok(Some(key.clone())),
+        _ => Err("Recipe 包含多个明确的 negative prompt 输入".to_owned()),
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShotBatchPlanView {
@@ -259,12 +304,16 @@ impl ShotBatchService {
         }
         let mut values = scalar_values_from_json(&context.workflow.scalar_values)
             .map_err(|error| error.to_string())?;
-        if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
-            matches!(input, InputDefinition::TextArea { .. }).then_some(key)
-        }) {
+        if let Some(prompt_key) = prompt_input_key(recipe)? {
             values.insert(
-                prompt_key.clone(),
+                prompt_key,
                 GenerationInputValue::Text(context.prompt_context.rendered_text.clone()),
+            );
+        }
+        if let Some(negative_prompt_key) = negative_prompt_input_key(recipe)? {
+            values.insert(
+                negative_prompt_key,
+                GenerationInputValue::Text(context.prompt_context.negative_prompt.clone()),
             );
         }
 
@@ -710,15 +759,17 @@ impl ShotBatchService {
                 BTreeMap::new()
             }
         };
-        if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
-            matches!(input, InputDefinition::TextArea { .. }).then_some(key)
-        }) {
-            values.insert(
-                prompt_key.clone(),
-                GenerationInputValue::Text(
-                    stage_prompt.unwrap_or(&data.shot.prompt_text).to_owned(),
-                ),
-            );
+        match prompt_input_key(&recipe) {
+            Ok(Some(prompt_key)) => {
+                values.insert(
+                    prompt_key,
+                    GenerationInputValue::Text(
+                        stage_prompt.unwrap_or(&data.shot.prompt_text).to_owned(),
+                    ),
+                );
+            }
+            Ok(None) => {}
+            Err(error) => reasons.push(error),
         }
 
         if stage == ShotStage::Video {
@@ -956,12 +1007,14 @@ mod tests {
         ordered_reference_asset_ids, CreateShotBatchRequest, ShotBatchPlanRow, ShotBatchService,
         MAX_SHOT_BATCH_ITEMS,
     };
+    use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::{
         AvailableGenerationDefinition, ShotData, ShotRecord, ShotReferenceAssetRecord,
         ShotRepository, ShotStageConfigRecord,
     };
     use crate::application::product_runtime_scope::production_runtime_for_stage;
-    use crate::domain::ShotStage;
+    use crate::compiler::RecipeParser;
+    use crate::domain::{PromptContext, ResolvedShotContext, ResolvedWorkflowContext, ShotStage};
     use crate::infrastructure::database::{
         initialize,
         repositories::{
@@ -1047,6 +1100,56 @@ outputs:
     required: true
 "#;
 
+    const EXPLICIT_NEGATIVE_PROMPT_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: prompt_mapping_test
+name: Prompt Mapping Test
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  negative_prompt:
+    type: textarea
+    label: Negative Prompt
+    required: false
+    default: ""
+bindings: []
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true
+"#;
+
+    const AMBIGUOUS_TEXTAREA_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: ambiguous_prompt_test
+name: Ambiguous Prompt Test
+workflow:
+  file: workflow_api.json
+inputs:
+  action:
+    type: textarea
+    label: Action
+    required: true
+    default: ""
+  style:
+    type: textarea
+    label: Style
+    required: true
+    default: ""
+bindings: []
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true
+"#;
+
     fn shot_data_with_references(
         selected_image_asset_id: Option<&str>,
         references: &[(&str, i64)],
@@ -1078,6 +1181,32 @@ outputs:
                 })
                 .collect(),
             generation_links: Vec::new(),
+        }
+    }
+
+    fn resolved_prompt_context() -> ResolvedShotContext {
+        ResolvedShotContext {
+            project_id: "prj_default".to_owned(),
+            structure: Default::default(),
+            stage: ShotStage::Image,
+            stage_input: Default::default(),
+            reference_pack: Default::default(),
+            profiles: Default::default(),
+            reference_assets: Vec::new(),
+            prompt_context: PromptContext {
+                rendered_text: "positive prompt".to_owned(),
+                negative_prompt: "negative prompt".to_owned(),
+                ..Default::default()
+            },
+            workflow: ResolvedWorkflowContext {
+                scalar_values: json!({}),
+                ..Default::default()
+            },
+            output: Default::default(),
+            legacy: Default::default(),
+            diagnostics: Vec::new(),
+            partial: false,
+            resolver_identity: Default::default(),
         }
     }
 
@@ -1168,6 +1297,31 @@ outputs:
         };
         assert!(!row.eligible);
         assert_eq!(row.blocking_reasons.len(), 1);
+    }
+
+    #[test]
+    fn preparation_maps_explicit_negative_prompt_and_rejects_ambiguous_textareas() {
+        let context = resolved_prompt_context();
+        let recipe = RecipeParser::parse(EXPLICIT_NEGATIVE_PROMPT_RECIPE_YAML)
+            .expect("explicit prompt recipe should parse");
+        let values =
+            ShotBatchService::prepare_values_from_context(ShotStage::Image, &context, &recipe)
+                .expect("explicit prompt recipe should prepare");
+        assert!(matches!(
+            values.get("prompt"),
+            Some(GenerationInputValue::Text(value)) if value == "positive prompt"
+        ));
+        assert!(matches!(
+            values.get("negative_prompt"),
+            Some(GenerationInputValue::Text(value)) if value == "negative prompt"
+        ));
+
+        let ambiguous = RecipeParser::parse(AMBIGUOUS_TEXTAREA_RECIPE_YAML)
+            .expect("ambiguous recipe should parse");
+        let error =
+            ShotBatchService::prepare_values_from_context(ShotStage::Image, &context, &ambiguous)
+                .expect_err("ambiguous textareas must be rejected");
+        assert!(error.contains("多个 TextArea"));
     }
 
     #[test]

@@ -397,7 +397,21 @@ impl ProductionPreparationService {
             .shot_batch_service
             .current_stage_statuses(project_id, stage, shot_ids)
             .await?;
-        let mut definitions = HashMap::<(String, String), Option<GenerationDefinition>>::new();
+        let definition_pairs = contexts
+            .iter()
+            .filter_map(|context| {
+                context
+                    .workflow
+                    .workflow_version_id
+                    .clone()
+                    .zip(context.workflow.recipe_id.clone())
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let definitions =
+            load_generation_definitions(self.definition_repository.as_ref(), &definition_pairs)
+                .await?;
         let mut result = Vec::with_capacity(contexts.len());
         for (context, readiness) in contexts.into_iter().zip(readiness) {
             let workflow_key = context
@@ -405,20 +419,7 @@ impl ProductionPreparationService {
                 .workflow_version_id
                 .clone()
                 .zip(context.workflow.recipe_id.clone());
-            let definition = if let Some((workflow_version_id, recipe_id)) = workflow_key.as_ref() {
-                let key = (workflow_version_id.clone(), recipe_id.clone());
-                if !definitions.contains_key(&key) {
-                    definitions.insert(
-                        key.clone(),
-                        self.definition_repository
-                            .find(workflow_version_id, recipe_id)
-                            .await?,
-                    );
-                }
-                definitions.get(&key).cloned().flatten()
-            } else {
-                None
-            };
+            let definition = workflow_key.as_ref().and_then(|key| definitions.get(key));
             let (readiness, values) = if workflow_key.is_some() && definition.is_none() {
                 (
                     readiness_with_blocker(
@@ -430,7 +431,7 @@ impl ProductionPreparationService {
                     None,
                 )
             } else {
-                prepare_generation_values(&context, readiness, definition.as_ref())
+                prepare_generation_values(&context, readiness, definition)
             };
             let shot_id = context.structure.shot.id.clone();
             let existing_batch_ids = active_bindings
@@ -483,6 +484,26 @@ impl ProductionPreparationService {
         }
         Ok(result)
     }
+}
+
+async fn load_generation_definitions(
+    repository: &dyn GenerationDefinitionRepository,
+    pairs: &[(String, String)],
+) -> Result<HashMap<(String, String), GenerationDefinition>, RepositoryError> {
+    Ok(repository
+        .find_many(pairs)
+        .await?
+        .into_iter()
+        .map(|definition| {
+            (
+                (
+                    definition.workflow_version_id.clone(),
+                    definition.recipe_id.clone(),
+                ),
+                definition,
+            )
+        })
+        .collect())
 }
 
 fn prepare_generation_values(
@@ -774,5 +795,90 @@ impl From<ShotBatchServiceError> for ProductionPreparationError {
 impl From<ShotReadinessServiceError> for ProductionPreparationError {
     fn from(error: ShotReadinessServiceError) -> Self {
         Self::Readiness(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_generation_definitions, GenerationDefinition};
+    use crate::application::ports::{
+        AvailableGenerationDefinition, GenerationDefinitionRepository, RepositoryError,
+    };
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingDefinitionRepository {
+        find_calls: AtomicUsize,
+        find_many_calls: AtomicUsize,
+        definitions: Vec<GenerationDefinition>,
+    }
+
+    #[async_trait]
+    impl GenerationDefinitionRepository for CountingDefinitionRepository {
+        async fn find(
+            &self,
+            _workflow_version_id: &str,
+            _recipe_id: &str,
+        ) -> Result<Option<GenerationDefinition>, RepositoryError> {
+            self.find_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        }
+
+        async fn find_many(
+            &self,
+            pairs: &[(String, String)],
+        ) -> Result<Vec<GenerationDefinition>, RepositoryError> {
+            self.find_many_calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(pairs.len(), 500);
+            Ok(self.definitions.clone())
+        }
+
+        async fn list_available(
+            &self,
+        ) -> Result<Vec<AvailableGenerationDefinition>, RepositoryError> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn definition(index: usize) -> GenerationDefinition {
+        GenerationDefinition {
+            workflow_id: format!("workflow-{index}"),
+            workflow_version_id: format!("workflow-version-{index}"),
+            recipe_id: format!("recipe-{index}"),
+            workflow_version: "1".to_owned(),
+            workflow_sha256: format!("workflow-sha-{index}"),
+            recipe_version: "1".to_owned(),
+            recipe_sha256: format!("recipe-sha-{index}"),
+            package_name: None,
+            package_source_path: None,
+            workflow_json: serde_json::json!({}),
+            recipe_yaml: "schema_version: 1".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn bulk_definition_loader_uses_one_find_many_and_zero_find_calls() {
+        let definitions = (0..500).map(definition).collect::<Vec<_>>();
+        let repository = CountingDefinitionRepository {
+            find_calls: AtomicUsize::new(0),
+            find_many_calls: AtomicUsize::new(0),
+            definitions,
+        };
+        let pairs = (0..500)
+            .map(|index| {
+                (
+                    format!("workflow-version-{index}"),
+                    format!("recipe-{index}"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let loaded = load_generation_definitions(&repository, &pairs)
+            .await
+            .expect("bulk definition loading should succeed");
+
+        assert_eq!(loaded.len(), 500);
+        assert_eq!(repository.find_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(repository.find_many_calls.load(Ordering::SeqCst), 1);
     }
 }

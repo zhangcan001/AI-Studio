@@ -58,20 +58,75 @@ describe("ShotReadinessInspector", () => {
   it("shows all seven gates, context hash, profile sources, reference summary, and offline blocker", () => {
     const html = renderToStaticMarkup(<ShotReadinessInspector detail={detail} />);
     expect(html).toContain("七项 Gate");
-    expect(html).toContain("角色");
-    expect(html).toContain("场景");
-    expect(html).toContain("参考");
-    expect(html).toContain("提示词");
-    expect(html).toContain("工作流");
-    expect(html).toContain("输出");
+    for (const label of ["角色", "场景", "参考", "提示词", "工作流", "输出", "ComfyUI"]) {
+      expect(html).toContain(label);
+    }
+    expect(html).toContain("通过");
+    expect(html).toContain("阻塞");
     expect(html).toContain("ComfyUI");
     expect(html).toContain("01234567");
+    expect(html).toContain("0123456789abcdef0123456789abcdef");
     expect(html).toContain("Project");
     expect(html).toContain("Scene");
+    expect(html).toContain("character-1");
+    expect(html).toContain("scene-profile-1");
     expect(html).toContain("reference-set-1");
+    expect(html).toContain("1 个素材");
     expect(html).toContain("ComfyUI 离线");
-    expect(html).toContain("旧上下文");
     expect(html).toContain("keyframe-1");
+  });
+
+  it("shows the already-prepared and stale states without hiding the frozen context evidence", () => {
+    const html = renderToStaticMarkup(
+      <ShotReadinessInspector
+        detail={{
+          ...detail,
+          alreadyPrepared: true,
+          matchingPreparedBatchIds: ["batch-current"],
+          stalePreparedBatchIds: ["batch-old"],
+          snapshotIdentity: {
+            snapshotId: "snapshot-1",
+            productionBatchId: "batch-current",
+            productionBatchItemId: "item-1",
+            contextHash: detail.contextHash,
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain("已准备");
+    expect(html).toContain("旧上下文");
+    expect(html).toContain("0123456789abcdef0123456789abcdef");
+  });
+
+  it("keeps legacy shots visible when no new Profile or ReferenceSet exists", () => {
+    const html = renderToStaticMarkup(
+      <ShotReadinessInspector
+        detail={{
+          ...detail,
+          stage: "image",
+          readiness: { ...detail.readiness, status: "READY", gates: [] },
+          resolvedContext: {
+            stage: "image",
+            profiles: { characters: [], scene: null, props: [], style: null },
+            referencePack: { referenceSets: [], referenceAssets: [] },
+            legacy: { hasReferencePack: false, usesLegacyShotReferences: true, prompt: "旧版镜头提示词" },
+          },
+          contextHash: "legacy-context-hash",
+          currentStageStatus: "未开始",
+          matchingPreparedBatchIds: [],
+          stalePreparedBatchIds: [],
+          alreadyPrepared: false,
+          blockers: [],
+          warnings: [],
+        }}
+      />,
+    );
+
+    expect(html).toContain("Legacy Shot");
+    expect(html).toContain("沿用旧 Shot prompt / stage config / reference 关系");
+    expect(html).toContain("无新 Profile（可能使用 Legacy）");
+    expect(html).toContain("无 ReferenceSet");
   });
 
   it("normalizes missing gates to seven visible incomplete entries and exposes check messages", () => {

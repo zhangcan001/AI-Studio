@@ -4,7 +4,9 @@ use crate::application::ports::{
     RepositoryError,
 };
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
+
+const FIND_MANY_CHUNK_SIZE: usize = 200;
 
 #[derive(Clone)]
 pub struct SqliteGenerationDefinitionRepository {
@@ -52,6 +54,62 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
         .map_err(map_sqlx_error)?;
 
         row.map(DefinitionRow::try_into_domain).transpose()
+    }
+
+    async fn find_many(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<Vec<GenerationDefinition>, RepositoryError> {
+        if pairs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut definitions = Vec::new();
+        for chunk in pairs.chunks(FIND_MANY_CHUNK_SIZE) {
+            let mut query = QueryBuilder::<Sqlite>::new(
+                "SELECT
+                    w.id AS workflow_id,
+                    wv.id AS workflow_version_id,
+                    r.id AS recipe_id,
+                    wv.version AS workflow_version,
+                    wv.workflow_sha256,
+                    wv.package_name,
+                    wv.package_source_path,
+                    r.version AS recipe_version,
+                    r.recipe_sha256,
+                    wv.api_workflow_json,
+                    r.recipe_yaml
+                 FROM workflows w
+                 INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
+                 INNER JOIN recipes r ON r.workflow_version_id = wv.id
+                 WHERE (wv.id, r.id) IN (",
+            );
+            for (index, (workflow_version_id, recipe_id)) in chunk.iter().enumerate() {
+                if index > 0 {
+                    query.push(", ");
+                }
+                query
+                    .push("(")
+                    .push_bind(workflow_version_id.clone())
+                    .push(", ")
+                    .push_bind(recipe_id.clone())
+                    .push(")");
+            }
+            query.push(") ORDER BY wv.id ASC, r.id ASC");
+
+            let rows = query
+                .build_query_as::<DefinitionRow>()
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
+            definitions.extend(
+                rows.into_iter()
+                    .map(DefinitionRow::try_into_domain)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+
+        Ok(definitions)
     }
 
     async fn list_available(&self) -> Result<Vec<AvailableGenerationDefinition>, RepositoryError> {
@@ -152,10 +210,11 @@ impl DefinitionRow {
 
 #[cfg(test)]
 mod tests {
-    use super::SqliteGenerationDefinitionRepository;
+    use super::{SqliteGenerationDefinitionRepository, FIND_MANY_CHUNK_SIZE};
     use crate::application::ports::GenerationDefinitionRepository;
     use crate::infrastructure::database::{initialize, repositories::test_support};
     use sqlx::SqlitePool;
+    use std::collections::HashSet;
     use tempfile::{tempdir, TempDir};
 
     async fn setup() -> (TempDir, SqlitePool, SqliteGenerationDefinitionRepository) {
@@ -189,6 +248,81 @@ mod tests {
         assert_eq!(definition.recipe_id, "recipe-1");
         assert_eq!(definition.workflow_json["3"]["class_type"], "KSampler");
         assert!(definition.recipe_yaml.contains("schema_version"));
+    }
+
+    #[tokio::test]
+    async fn find_many_returns_500_pairs_with_bounded_chunking() {
+        let (_directory, pool, repository) = setup().await;
+        let mut pairs = Vec::with_capacity(500);
+        for index in 0..500 {
+            let workflow_id = format!("bulk-workflow-{index}");
+            let workflow_version_id = format!("bulk-workflow-version-{index}");
+            let recipe_id = format!("bulk-recipe-{index}");
+            sqlx::query(
+                "INSERT INTO workflows
+                    (id, name, category, mode, current_version_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&workflow_id)
+            .bind(format!("Bulk Workflow {index}"))
+            .bind("test")
+            .bind("image")
+            .bind(&workflow_version_id)
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .expect("bulk workflow fixture should insert");
+            sqlx::query(
+                "INSERT INTO workflow_versions
+                    (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&workflow_version_id)
+            .bind(&workflow_id)
+            .bind("1")
+            .bind("{}")
+            .bind(format!("bulk-workflow-sha-{index}"))
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .expect("bulk workflow version fixture should insert");
+            sqlx::query(
+                "INSERT INTO recipes
+                    (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&recipe_id)
+            .bind(&workflow_version_id)
+            .bind("1")
+            .bind(1)
+            .bind("schema_version: 1")
+            .bind(format!("bulk-recipe-sha-{index}"))
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .expect("bulk recipe fixture should insert");
+            pairs.push((workflow_version_id, recipe_id));
+        }
+
+        assert_eq!(pairs.chunks(FIND_MANY_CHUNK_SIZE).len(), 3);
+        assert!(pairs.chunks(FIND_MANY_CHUNK_SIZE).len() <= 5);
+        let definitions = repository
+            .find_many(&pairs)
+            .await
+            .expect("bulk definition lookup should succeed");
+
+        let returned_pairs = definitions
+            .iter()
+            .map(|definition| {
+                (
+                    definition.workflow_version_id.clone(),
+                    definition.recipe_id.clone(),
+                )
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(returned_pairs.len(), pairs.len());
+        assert!(pairs.iter().all(|pair| returned_pairs.contains(pair)));
     }
 
     #[tokio::test]
