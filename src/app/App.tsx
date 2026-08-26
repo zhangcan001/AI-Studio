@@ -18,7 +18,7 @@ import type { RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
 import { GenerationStudio } from "../features/studio/GenerationStudio";
-import { AssetLibrary } from "../features/assets/AssetLibrary";
+import { AssetWorkspace } from "../features/assets/AssetWorkspace";
 import { AssetVideoBatchWorkspace } from "../features/assets/AssetVideoBatchWorkspace";
 import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
@@ -630,7 +630,7 @@ function App() {
         </section>
       )}
       {activeProject && workspace === "assets" && (
-        <AssetLibrary
+        <AssetWorkspace
           projectId={activeProject.id}
           onUseInStudio={useAssetInStudio}
           onOpenVideoBatch={openVideoBatch}

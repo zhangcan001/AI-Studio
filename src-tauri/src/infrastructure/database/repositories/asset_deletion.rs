@@ -5,7 +5,7 @@ use crate::application::ports::{
 use crate::domain::{AssetId, ProductionBatchItemStatus, TaskId, TaskStatus};
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
@@ -48,6 +48,39 @@ struct ReviewReferenceRow {
     result_asset_id: String,
 }
 
+#[derive(FromRow)]
+struct ReferenceSetReferenceRow {
+    asset_id: String,
+    reference_set_id: String,
+}
+
+#[derive(FromRow)]
+struct ReferenceAnchorReferenceRow {
+    asset_id: String,
+    reference_anchor_id: String,
+}
+
+#[derive(FromRow)]
+struct ShotReferenceReferenceRow {
+    asset_id: String,
+    shot_id: String,
+}
+
+#[derive(FromRow)]
+struct SelectedShotReferenceRow {
+    shot_id: String,
+    selected_image_asset_id: Option<String>,
+    selected_video_asset_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct ProductionStageReferenceRow {
+    asset_id: Option<String>,
+    source_asset_id: Option<String>,
+    stage_item_id: String,
+    status: String,
+}
+
 #[async_trait]
 impl AssetDeletionRepository for SqliteAssetDeletionRepository {
     async fn references_for(
@@ -55,6 +88,9 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
         project_id: &str,
         asset_ids: &[AssetId],
     ) -> Result<Vec<AssetDeletionReferences>, RepositoryError> {
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let selected = asset_ids
             .iter()
             .map(|asset_id| asset_id.as_str().to_owned())
@@ -204,6 +240,144 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
             push_unique(&mut reference.historical_review_ids, row.review_id);
         }
 
+        // Semantic relations are live references.  Each query is explicitly
+        // constrained by the requested project because the relation tables
+        // intentionally do not all carry their own project_id.
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT rsi.asset_id, rs.id AS reference_set_id
+             FROM reference_set_items rsi
+             INNER JOIN reference_sets rs ON rs.id = rsi.reference_set_id
+             WHERE rs.project_id = ",
+        );
+        query.push_bind(project_id).push(" AND rsi.asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(")");
+        let rows = query
+            .build_query_as::<ReferenceSetReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for row in rows {
+            if let Some(reference) = references.get_mut(&row.asset_id) {
+                push_unique(&mut reference.reference_set_ids, row.reference_set_id);
+            }
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT aa.asset_id, a.id AS reference_anchor_id
+             FROM reference_anchor_assets aa
+             INNER JOIN reference_anchors a ON a.id = aa.anchor_id
+             WHERE a.project_id = ",
+        );
+        query.push_bind(project_id).push(" AND aa.asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(")");
+        let rows = query
+            .build_query_as::<ReferenceAnchorReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for row in rows {
+            if let Some(reference) = references.get_mut(&row.asset_id) {
+                push_unique(&mut reference.reference_anchor_ids, row.reference_anchor_id);
+            }
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT r.asset_id, r.shot_id
+             FROM shot_reference_assets r
+             INNER JOIN shots s ON s.id = r.shot_id
+             WHERE s.project_id = ",
+        );
+        query.push_bind(project_id).push(" AND r.asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") ORDER BY r.shot_id ASC, r.stage ASC, r.ordinal ASC");
+        let rows = query
+            .build_query_as::<ShotReferenceReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for row in rows {
+            if let Some(reference) = references.get_mut(&row.asset_id) {
+                push_unique(&mut reference.shot_reference_ids, row.shot_id);
+            }
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT id AS shot_id, selected_image_asset_id, selected_video_asset_id
+             FROM shots
+             WHERE project_id = ",
+        );
+        query
+            .push_bind(project_id)
+            .push(" AND (selected_image_asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") OR selected_video_asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(")) ORDER BY ordinal ASC, id ASC");
+        let rows = query
+            .build_query_as::<SelectedShotReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for row in rows {
+            for reference in references.values_mut() {
+                if row.selected_image_asset_id.as_deref() == Some(reference.asset_id.as_str())
+                    || row.selected_video_asset_id.as_deref() == Some(reference.asset_id.as_str())
+                {
+                    push_unique(&mut reference.selected_by_shot_ids, row.shot_id.clone());
+                }
+                if row.selected_image_asset_id.as_deref() == Some(reference.asset_id.as_str()) {
+                    push_unique(
+                        &mut reference.selected_image_by_shot_ids,
+                        row.shot_id.clone(),
+                    );
+                }
+                if row.selected_video_asset_id.as_deref() == Some(reference.asset_id.as_str()) {
+                    push_unique(
+                        &mut reference.selected_video_by_shot_ids,
+                        row.shot_id.clone(),
+                    );
+                }
+            }
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT i.id AS stage_item_id, i.status, i.asset_id, i.source_asset_id
+             FROM production_stage_items i
+             INNER JOIN production_stages stage ON stage.id = i.stage_id
+             INNER JOIN production_runs run ON run.id = stage.run_id
+             WHERE run.project_id = ",
+        );
+        query.push_bind(project_id).push(" AND (i.asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") OR i.source_asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(")) ORDER BY i.id ASC");
+        let rows = query
+            .build_query_as::<ProductionStageReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for row in rows {
+            if !is_live_production_status(&row.status) {
+                continue;
+            }
+            let mut referenced_assets = row
+                .asset_id
+                .into_iter()
+                .chain(row.source_asset_id)
+                .filter(|asset_id| selected.contains(asset_id));
+            while let Some(asset_id) = referenced_assets.next() {
+                if let Some(reference) = references.get_mut(&asset_id) {
+                    push_unique(
+                        &mut reference.active_production_item_ids,
+                        row.stage_item_id.clone(),
+                    );
+                }
+            }
+        }
+
         Ok(asset_ids
             .iter()
             .filter_map(|asset_id| references.remove(asset_id.as_str()))
@@ -219,6 +393,20 @@ fn push_unique<T: PartialEq>(items: &mut Vec<T>, value: T) {
 
 fn parse_task_id(value: &str) -> Option<TaskId> {
     TaskId::parse(value.to_owned()).ok()
+}
+
+fn push_asset_ids<'args, 'qb>(query: &'qb mut QueryBuilder<'args, Sqlite>, asset_ids: &[AssetId])
+where
+    'args: 'qb,
+{
+    let mut separated = query.separated(", ");
+    for asset_id in asset_ids {
+        separated.push_bind(asset_id.as_str().to_owned());
+    }
+}
+
+fn is_live_production_status(status: &str) -> bool {
+    !matches!(status, "SUCCEEDED" | "FAILED" | "SKIPPED" | "CANCELLED")
 }
 
 fn extract_asset_ids(value: &Value) -> HashSet<String> {

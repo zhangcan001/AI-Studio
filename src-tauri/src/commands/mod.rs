@@ -2,6 +2,7 @@ pub mod asset;
 pub mod batch_workflow_preset;
 pub mod catalog;
 pub mod comfy;
+pub mod consistency_assets;
 pub mod diagnostics;
 pub mod episode_production;
 pub mod generation;

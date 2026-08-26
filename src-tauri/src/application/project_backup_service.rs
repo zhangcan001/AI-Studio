@@ -1,4 +1,7 @@
 use crate::application::ports::ProjectRecord;
+use crate::domain::consistency::{
+    BindingRole, InheritanceMode, ProfileRevisionStatus, ProfileType, ReferenceSetPurpose,
+};
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -17,7 +20,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 12;
+const BACKUP_VERSION: u32 = 13;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -341,6 +344,54 @@ impl ProjectBackupService {
         for scene in &document.production_scenes {
             production_scene_ids.insert(scene.id.clone(), format!("scn_{}", Uuid::new_v4()));
         }
+        let mut consistency_ids = ConsistencyRestoreIds::default();
+        for profile_id in document
+            .character_profiles
+            .iter()
+            .map(|profile| &profile.id)
+            .chain(document.scene_profiles.iter().map(|profile| &profile.id))
+            .chain(document.prop_profiles.iter().map(|profile| &profile.id))
+            .chain(document.style_profiles.iter().map(|profile| &profile.id))
+        {
+            consistency_ids
+                .profiles
+                .insert(profile_id.clone(), format!("cp_{}", Uuid::new_v4()));
+        }
+        for variant in &document.costume_variants {
+            consistency_ids
+                .costume_variants
+                .insert(variant.id.clone(), format!("cv_{}", Uuid::new_v4()));
+        }
+        for revision in &document.profile_revisions {
+            consistency_ids
+                .profile_revisions
+                .insert(revision.id.clone(), format!("prv_{}", Uuid::new_v4()));
+        }
+        for reference_set in &document.reference_sets {
+            consistency_ids
+                .reference_sets
+                .insert(reference_set.id.clone(), format!("rs_{}", Uuid::new_v4()));
+        }
+        for binding in &document.shot_profile_bindings {
+            consistency_ids
+                .shot_profile_bindings
+                .insert(binding.id.clone(), format!("spb_{}", Uuid::new_v4()));
+        }
+        for binding in &document.shot_reference_set_bindings {
+            consistency_ids
+                .shot_reference_set_bindings
+                .insert(binding.id.clone(), format!("srb_{}", Uuid::new_v4()));
+        }
+        for binding in &document.scope_profile_bindings {
+            consistency_ids
+                .scope_profile_bindings
+                .insert(binding.id.clone(), format!("hpb_{}", Uuid::new_v4()));
+        }
+        for binding in &document.scope_reference_set_bindings {
+            consistency_ids
+                .scope_reference_set_bindings
+                .insert(binding.id.clone(), format!("hrb_{}", Uuid::new_v4()));
+        }
 
         let copy_result = copy_assets(
             &mut archive,
@@ -390,6 +441,7 @@ impl ProjectBackupService {
                     episodes: production_episode_ids,
                     scenes: production_scene_ids,
                 },
+                &consistency_ids,
                 &shot_ids,
                 &shot_generation_link_ids,
                 &restored_assets,
@@ -635,6 +687,22 @@ impl ProjectBackupService {
         .map_err(|error| AppError::database(error.to_string()))?;
         let (production_series, production_episodes, production_scenes, shot_scene_assignments) =
             query_production_structure(&mut transaction, project_id).await?;
+        let character_profiles = query_character_profiles(&mut transaction, project_id).await?;
+        let scene_profiles = query_scene_profiles(&mut transaction, project_id).await?;
+        let prop_profiles = query_prop_profiles(&mut transaction, project_id).await?;
+        let style_profiles = query_style_profiles(&mut transaction, project_id).await?;
+        let costume_variants = query_costume_variants(&mut transaction, project_id).await?;
+        let profile_revisions = query_profile_revisions(&mut transaction, project_id).await?;
+        let reference_sets = query_reference_sets(&mut transaction, project_id).await?;
+        let reference_set_items = query_reference_set_items(&mut transaction, project_id).await?;
+        let shot_profile_bindings =
+            query_shot_profile_bindings(&mut transaction, project_id).await?;
+        let shot_reference_set_bindings =
+            query_shot_reference_set_bindings(&mut transaction, project_id).await?;
+        let scope_profile_bindings =
+            query_scope_profile_bindings(&mut transaction, project_id).await?;
+        let scope_reference_set_bindings =
+            query_scope_reference_set_bindings(&mut transaction, project_id).await?;
         let included_asset_ids = db_assets
             .iter()
             .filter(|asset| {
@@ -866,6 +934,18 @@ impl ProjectBackupService {
             shot_stage_prompts,
             shot_reference_assets,
             shot_generation_links,
+            character_profiles,
+            scene_profiles,
+            prop_profiles,
+            style_profiles,
+            costume_variants,
+            profile_revisions,
+            reference_sets,
+            reference_set_items,
+            shot_profile_bindings,
+            shot_reference_set_bindings,
+            scope_profile_bindings,
+            scope_reference_set_bindings,
         };
         Ok(BuiltBackup { document, files })
     }
@@ -893,6 +973,7 @@ impl ProjectBackupService {
         tag_ids: &HashMap<String, String>,
         reference_anchor_ids: &HashMap<String, String>,
         production_structure_ids: &ProductionStructureIds,
+        consistency_ids: &ConsistencyRestoreIds,
         shot_ids: &HashMap<String, String>,
         shot_generation_link_ids: &HashMap<String, String>,
         restored_assets: &[RestoredAsset],
@@ -926,6 +1007,7 @@ impl ProjectBackupService {
             tag_ids,
             reference_anchor_ids,
             production_structure_ids,
+            consistency_ids,
             shot_ids,
             shot_generation_link_ids,
             restored_assets,
@@ -1027,6 +1109,213 @@ struct BackupDocument {
     shot_reference_assets: Vec<BackupShotReferenceAsset>,
     #[serde(default)]
     shot_generation_links: Vec<BackupShotGenerationLink>,
+    #[serde(default)]
+    character_profiles: Vec<BackupCharacterProfile>,
+    #[serde(default)]
+    scene_profiles: Vec<BackupSceneProfile>,
+    #[serde(default)]
+    prop_profiles: Vec<BackupPropProfile>,
+    #[serde(default)]
+    style_profiles: Vec<BackupStyleProfile>,
+    #[serde(default)]
+    costume_variants: Vec<BackupCostumeVariant>,
+    #[serde(default)]
+    profile_revisions: Vec<BackupProfileRevision>,
+    #[serde(default)]
+    reference_sets: Vec<BackupReferenceSet>,
+    #[serde(default)]
+    reference_set_items: Vec<BackupReferenceSetItem>,
+    #[serde(default)]
+    shot_profile_bindings: Vec<BackupShotProfileBinding>,
+    #[serde(default)]
+    shot_reference_set_bindings: Vec<BackupShotReferenceSetBinding>,
+    #[serde(default)]
+    scope_profile_bindings: Vec<BackupScopeProfileBinding>,
+    #[serde(default)]
+    scope_reference_set_bindings: Vec<BackupScopeReferenceSetBinding>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupCharacterProfile {
+    id: String,
+    project_id: String,
+    name: String,
+    description: String,
+    canonical_prompt: String,
+    negative_prompt: String,
+    default_style_profile_id: Option<String>,
+    default_reference_set_id: Option<String>,
+    active_revision_id: Option<String>,
+    metadata_json: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupSceneProfile {
+    id: String,
+    project_id: String,
+    name: String,
+    description: String,
+    environment_prompt: String,
+    lighting_prompt: Option<String>,
+    negative_prompt: Option<String>,
+    default_style_profile_id: Option<String>,
+    default_reference_set_id: Option<String>,
+    active_revision_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupPropProfile {
+    id: String,
+    project_id: String,
+    name: String,
+    description: String,
+    canonical_prompt: String,
+    material_prompt: Option<String>,
+    scale_prompt: Option<String>,
+    default_reference_set_id: Option<String>,
+    active_revision_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupStyleProfile {
+    id: String,
+    project_id: String,
+    name: String,
+    style_prompt: String,
+    color_prompt: Option<String>,
+    line_prompt: Option<String>,
+    negative_prompt: Option<String>,
+    output_notes: Option<String>,
+    active_revision_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupCostumeVariant {
+    id: String,
+    character_profile_id: String,
+    name: String,
+    prompt_fragment: String,
+    reference_set_id: Option<String>,
+    is_default: i64,
+    ordinal: i64,
+    active_revision_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupProfileRevision {
+    id: String,
+    profile_type: String,
+    profile_id: String,
+    revision_number: i64,
+    content_json: String,
+    content_sha256: String,
+    status: String,
+    created_at: String,
+    created_by: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupReferenceSet {
+    id: String,
+    project_id: String,
+    name: String,
+    purpose: String,
+    description: String,
+    owner_profile_type: Option<String>,
+    owner_profile_id: Option<String>,
+    active_revision_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupReferenceSetItem {
+    reference_set_id: String,
+    asset_id: String,
+    ordinal: i64,
+    role: Option<String>,
+    is_primary: i64,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotProfileBinding {
+    id: String,
+    shot_id: String,
+    role: String,
+    profile_type: String,
+    profile_id: String,
+    costume_variant_id: Option<String>,
+    ordinal: i64,
+    inheritance_mode: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupShotReferenceSetBinding {
+    id: String,
+    shot_id: String,
+    role: String,
+    reference_set_id: String,
+    ordinal: i64,
+    required: i64,
+    inheritance_mode: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupScopeProfileBinding {
+    id: String,
+    project_id: String,
+    scope_type: String,
+    scope_id: String,
+    role: String,
+    profile_type: String,
+    profile_id: String,
+    costume_variant_id: Option<String>,
+    ordinal: i64,
+    inheritance_mode: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupScopeReferenceSetBinding {
+    id: String,
+    project_id: String,
+    scope_type: String,
+    scope_id: String,
+    role: String,
+    reference_set_id: String,
+    ordinal: i64,
+    required: i64,
+    inheritance_mode: String,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1163,6 +1452,60 @@ struct ProductionStructureIds {
     series: HashMap<String, String>,
     episodes: HashMap<String, String>,
     scenes: HashMap<String, String>,
+}
+
+#[derive(Default)]
+struct ConsistencyRestoreIds {
+    profiles: HashMap<String, String>,
+    costume_variants: HashMap<String, String>,
+    profile_revisions: HashMap<String, String>,
+    reference_sets: HashMap<String, String>,
+    shot_profile_bindings: HashMap<String, String>,
+    shot_reference_set_bindings: HashMap<String, String>,
+    scope_profile_bindings: HashMap<String, String>,
+    scope_reference_set_bindings: HashMap<String, String>,
+}
+
+fn consistency_required_id<'a>(
+    ids: &'a HashMap<String, String>,
+    old_id: &str,
+    label: &str,
+) -> Result<&'a str, AppError> {
+    ids.get(old_id)
+        .map(String::as_str)
+        .ok_or_else(|| AppError::backup_invalid(format!("{} ID 映射缺失", label)))
+}
+
+fn consistency_optional_id(
+    ids: &HashMap<String, String>,
+    old_id: Option<&String>,
+) -> Option<String> {
+    old_id.map(|id| ids.get(id).cloned().unwrap_or_else(|| id.clone()))
+}
+
+fn remap_consistency_scope_id(
+    scope_type: &str,
+    scope_id: &str,
+    source_project_id: &str,
+    restored_project_id: &str,
+    structure_ids: &ProductionStructureIds,
+) -> Result<String, AppError> {
+    match scope_type {
+        "PROJECT" => {
+            if scope_id == source_project_id {
+                Ok(restored_project_id.to_owned())
+            } else {
+                Err(AppError::backup_invalid("一致性 Scope 项目 ID 不匹配"))
+            }
+        }
+        "SERIES" => consistency_required_id(&structure_ids.series, scope_id, "Scope Series")
+            .map(str::to_owned),
+        "EPISODE" => consistency_required_id(&structure_ids.episodes, scope_id, "Scope Episode")
+            .map(str::to_owned),
+        "SCENE" => consistency_required_id(&structure_ids.scenes, scope_id, "Scope Scene")
+            .map(str::to_owned),
+        _ => Err(AppError::backup_invalid("一致性 Scope 类型无效")),
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -3064,6 +3407,230 @@ async fn query_shot_generation_links(
         .collect())
 }
 
+async fn query_character_profiles(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupCharacterProfile>, AppError> {
+    sqlx::query_as::<_, BackupCharacterProfile>(
+        "SELECT id, project_id, name, description, canonical_prompt, negative_prompt,
+                default_style_profile_id, default_reference_set_id, active_revision_id,
+                metadata_json, created_at, updated_at
+         FROM character_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_scene_profiles(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupSceneProfile>, AppError> {
+    sqlx::query_as::<_, BackupSceneProfile>(
+        "SELECT id, project_id, name, description, environment_prompt, lighting_prompt,
+                negative_prompt, default_style_profile_id, default_reference_set_id,
+                active_revision_id, created_at, updated_at
+         FROM scene_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_prop_profiles(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupPropProfile>, AppError> {
+    sqlx::query_as::<_, BackupPropProfile>(
+        "SELECT id, project_id, name, description, canonical_prompt, material_prompt,
+                scale_prompt, default_reference_set_id, active_revision_id, created_at,
+                updated_at
+         FROM prop_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_style_profiles(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupStyleProfile>, AppError> {
+    sqlx::query_as::<_, BackupStyleProfile>(
+        "SELECT id, project_id, name, style_prompt, color_prompt, line_prompt,
+                negative_prompt, output_notes, active_revision_id, created_at, updated_at
+         FROM style_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_costume_variants(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupCostumeVariant>, AppError> {
+    sqlx::query_as::<_, BackupCostumeVariant>(
+        "SELECT v.id, v.character_profile_id, v.name, v.prompt_fragment,
+                v.reference_set_id, v.is_default, v.ordinal, v.active_revision_id,
+                v.created_at, v.updated_at
+         FROM costume_variants v
+         JOIN character_profiles p ON p.id = v.character_profile_id
+         WHERE p.project_id = ?
+         ORDER BY v.character_profile_id, v.ordinal, v.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_profile_revisions(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProfileRevision>, AppError> {
+    sqlx::query_as::<_, BackupProfileRevision>(
+        "SELECT id, profile_type, profile_id, revision_number, content_json,
+                content_sha256, status, created_at, created_by
+         FROM profile_revisions
+         WHERE (profile_type = 'CHARACTER' AND profile_id IN
+                    (SELECT id FROM character_profiles WHERE project_id = ?))
+            OR (profile_type = 'SCENE' AND profile_id IN
+                    (SELECT id FROM scene_profiles WHERE project_id = ?))
+            OR (profile_type = 'PROP' AND profile_id IN
+                    (SELECT id FROM prop_profiles WHERE project_id = ?))
+            OR (profile_type = 'STYLE' AND profile_id IN
+                    (SELECT id FROM style_profiles WHERE project_id = ?))
+         ORDER BY profile_type, profile_id, revision_number, id",
+    )
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_reference_sets(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupReferenceSet>, AppError> {
+    sqlx::query_as::<_, BackupReferenceSet>(
+        "SELECT id, project_id, name, purpose, description, owner_profile_type,
+                owner_profile_id, active_revision_id, created_at, updated_at
+         FROM reference_sets
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_reference_set_items(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupReferenceSetItem>, AppError> {
+    sqlx::query_as::<_, BackupReferenceSetItem>(
+        "SELECT i.reference_set_id, i.asset_id, i.ordinal, i.role, i.is_primary,
+                i.created_at
+         FROM reference_set_items i
+         JOIN reference_sets r ON r.id = i.reference_set_id
+         WHERE r.project_id = ?
+         ORDER BY i.reference_set_id, i.ordinal, i.asset_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_shot_profile_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupShotProfileBinding>, AppError> {
+    sqlx::query_as::<_, BackupShotProfileBinding>(
+        "SELECT b.id, b.shot_id, b.role, b.profile_type, b.profile_id,
+                b.costume_variant_id, b.ordinal, b.inheritance_mode,
+                b.created_at, b.updated_at
+         FROM shot_profile_bindings b
+         JOIN shots s ON s.id = b.shot_id
+         WHERE s.project_id = ?
+         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_shot_reference_set_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupShotReferenceSetBinding>, AppError> {
+    sqlx::query_as::<_, BackupShotReferenceSetBinding>(
+        "SELECT b.id, b.shot_id, b.role, b.reference_set_id, b.ordinal,
+                b.required, b.inheritance_mode, b.created_at, b.updated_at
+         FROM shot_reference_set_bindings b
+         JOIN shots s ON s.id = b.shot_id
+         WHERE s.project_id = ?
+         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_scope_profile_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupScopeProfileBinding>, AppError> {
+    sqlx::query_as::<_, BackupScopeProfileBinding>(
+        "SELECT id, project_id, scope_type, scope_id, role, profile_type,
+                profile_id, costume_variant_id, ordinal, inheritance_mode,
+                created_at, updated_at
+         FROM consistency_scope_profile_bindings
+         WHERE project_id = ?
+         ORDER BY scope_type, scope_id, role, ordinal, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_scope_reference_set_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupScopeReferenceSetBinding>, AppError> {
+    sqlx::query_as::<_, BackupScopeReferenceSetBinding>(
+        "SELECT id, project_id, scope_type, scope_id, role, reference_set_id,
+                ordinal, required, inheritance_mode, created_at, updated_at
+         FROM consistency_scope_reference_set_bindings
+         WHERE project_id = ?
+         ORDER BY scope_type, scope_id, role, ordinal, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
 const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
 
 fn write_zip_to_path(
@@ -3286,7 +3853,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -3334,6 +3901,7 @@ fn validate_document_entries(
     validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
     validate_reference_anchor_document(document)?;
+    validate_consistency_document(document, version)?;
     validate_production_structure_document(document, version)?;
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
@@ -4165,6 +4733,567 @@ fn validate_reference_anchor_document(document: &BackupDocument) -> Result<(), A
     Ok(())
 }
 
+fn validate_consistency_document(document: &BackupDocument, version: u32) -> Result<(), AppError> {
+    let has_consistency_data = !document.character_profiles.is_empty()
+        || !document.scene_profiles.is_empty()
+        || !document.prop_profiles.is_empty()
+        || !document.style_profiles.is_empty()
+        || !document.costume_variants.is_empty()
+        || !document.profile_revisions.is_empty()
+        || !document.reference_sets.is_empty()
+        || !document.reference_set_items.is_empty()
+        || !document.shot_profile_bindings.is_empty()
+        || !document.shot_reference_set_bindings.is_empty()
+        || !document.scope_profile_bindings.is_empty()
+        || !document.scope_reference_set_bindings.is_empty();
+    if version < 13 {
+        if has_consistency_data {
+            return Err(AppError::backup_invalid("一致性资产数据需要 Backup v13"));
+        }
+        return Ok(());
+    }
+
+    let mut profile_types = HashMap::<&str, &str>::new();
+    let mut profile_names = HashSet::<String>::new();
+    for profile in &document.character_profiles {
+        register_consistency_profile(
+            &mut profile_types,
+            &mut profile_names,
+            &profile.id,
+            &profile.project_id,
+            &profile.name,
+            "CHARACTER",
+        )?;
+        if !valid_consistency_text(&profile.description, 4_000)
+            || !valid_consistency_text(&profile.canonical_prompt, 20_000)
+            || !valid_consistency_text(&profile.negative_prompt, 20_000)
+            || !valid_consistency_metadata(&profile.metadata_json)
+        {
+            return Err(AppError::backup_invalid("Character Profile 内容无效"));
+        }
+    }
+    for profile in &document.scene_profiles {
+        register_consistency_profile(
+            &mut profile_types,
+            &mut profile_names,
+            &profile.id,
+            &profile.project_id,
+            &profile.name,
+            "SCENE",
+        )?;
+        if !valid_consistency_text(&profile.description, 4_000)
+            || !valid_consistency_text(&profile.environment_prompt, 20_000)
+            || !valid_consistency_optional_text(profile.lighting_prompt.as_deref(), 20_000)
+            || !valid_consistency_optional_text(profile.negative_prompt.as_deref(), 20_000)
+        {
+            return Err(AppError::backup_invalid("Scene Profile 内容无效"));
+        }
+    }
+    for profile in &document.prop_profiles {
+        register_consistency_profile(
+            &mut profile_types,
+            &mut profile_names,
+            &profile.id,
+            &profile.project_id,
+            &profile.name,
+            "PROP",
+        )?;
+        if !valid_consistency_text(&profile.description, 4_000)
+            || !valid_consistency_text(&profile.canonical_prompt, 20_000)
+            || !valid_consistency_optional_text(profile.material_prompt.as_deref(), 20_000)
+            || !valid_consistency_optional_text(profile.scale_prompt.as_deref(), 20_000)
+        {
+            return Err(AppError::backup_invalid("Prop Profile 内容无效"));
+        }
+    }
+    for profile in &document.style_profiles {
+        register_consistency_profile(
+            &mut profile_types,
+            &mut profile_names,
+            &profile.id,
+            &profile.project_id,
+            &profile.name,
+            "STYLE",
+        )?;
+        if !valid_consistency_text(&profile.style_prompt, 20_000)
+            || !valid_consistency_optional_text(profile.color_prompt.as_deref(), 20_000)
+            || !valid_consistency_optional_text(profile.line_prompt.as_deref(), 20_000)
+            || !valid_consistency_optional_text(profile.negative_prompt.as_deref(), 20_000)
+            || !valid_consistency_optional_text(profile.output_notes.as_deref(), 20_000)
+        {
+            return Err(AppError::backup_invalid("Style Profile 内容无效"));
+        }
+    }
+
+    let mut reference_set_purposes = HashMap::<&str, &str>::new();
+    let mut reference_set_names = HashSet::<String>::new();
+    for reference_set in &document.reference_sets {
+        if reference_set.project_id != document.project.id
+            || !valid_consistency_id(&reference_set.id)
+            || !valid_consistency_name(&reference_set.name)
+            || !valid_consistency_text(&reference_set.description, 4_000)
+            || reference_set_purpose(&reference_set.purpose).is_none()
+            || reference_set_purposes
+                .insert(&reference_set.id, &reference_set.purpose)
+                .is_some()
+            || !reference_set_names.insert(format!(
+                "{}:{}",
+                reference_set.purpose.to_ascii_uppercase(),
+                reference_set.name.to_lowercase()
+            ))
+        {
+            return Err(AppError::backup_invalid("Reference Set 元数据无效"));
+        }
+        let owner_pair_valid = match (
+            reference_set.owner_profile_type.as_deref(),
+            reference_set.owner_profile_id.as_deref(),
+        ) {
+            (None, None) => true,
+            (Some(profile_type), Some(profile_id)) => {
+                let Some(expected_type) = reference_set_owner_type(&reference_set.purpose) else {
+                    return Err(AppError::backup_invalid(
+                        "SHOT Reference Set 不能拥有 Profile",
+                    ));
+                };
+                ProfileType::try_from_db(profile_type).is_ok()
+                    && profile_type == expected_type
+                    && profile_types.get(profile_id).copied() == Some(profile_type)
+            }
+            _ => false,
+        };
+        if !owner_pair_valid {
+            return Err(AppError::backup_invalid("Reference Set Owner 无效"));
+        }
+    }
+    for profile in &document.character_profiles {
+        validate_consistency_profile_relation(
+            "CHARACTER",
+            &profile.id,
+            profile.default_style_profile_id.as_ref(),
+            profile.default_reference_set_id.as_ref(),
+            &profile_types,
+            &reference_set_purposes,
+        )?;
+    }
+    for profile in &document.scene_profiles {
+        validate_consistency_profile_relation(
+            "SCENE",
+            &profile.id,
+            profile.default_style_profile_id.as_ref(),
+            profile.default_reference_set_id.as_ref(),
+            &profile_types,
+            &reference_set_purposes,
+        )?;
+    }
+    for profile in &document.prop_profiles {
+        validate_consistency_profile_relation(
+            "PROP",
+            &profile.id,
+            None,
+            profile.default_reference_set_id.as_ref(),
+            &profile_types,
+            &reference_set_purposes,
+        )?;
+    }
+    for profile in &document.style_profiles {
+        validate_consistency_profile_relation(
+            "STYLE",
+            &profile.id,
+            None,
+            None,
+            &profile_types,
+            &reference_set_purposes,
+        )?;
+    }
+
+    let mut costume_character_ids = HashMap::<&str, &str>::new();
+    for variant in &document.costume_variants {
+        if !valid_consistency_id(&variant.id)
+            || costume_character_ids
+                .insert(&variant.id, &variant.character_profile_id)
+                .is_some()
+            || profile_types
+                .get(variant.character_profile_id.as_str())
+                .copied()
+                != Some("CHARACTER")
+            || !valid_consistency_name(&variant.name)
+            || !valid_consistency_text(&variant.prompt_fragment, 20_000)
+            || variant.is_default != 0 && variant.is_default != 1
+            || variant.ordinal < 0
+            || variant
+                .reference_set_id
+                .as_ref()
+                .is_some_and(|id| reference_set_purposes.get(id.as_str()) != Some(&"COSTUME"))
+        {
+            return Err(AppError::backup_invalid("Costume Variant 数据无效"));
+        }
+    }
+
+    let mut revision_ids = HashMap::<&str, (&str, &str)>::new();
+    let mut revision_keys = HashSet::<(&str, &str, i64)>::new();
+    for revision in &document.profile_revisions {
+        let valid_profile = profile_types.get(revision.profile_id.as_str()).copied()
+            == Some(revision.profile_type.as_str());
+        if !valid_consistency_id(&revision.id)
+            || revision_ids
+                .insert(&revision.id, (&revision.profile_type, &revision.profile_id))
+                .is_some()
+            || ProfileType::try_from_db(&revision.profile_type).is_err()
+            || !valid_profile
+            || revision.revision_number < 1
+            || !revision_keys.insert((
+                &revision.profile_type,
+                &revision.profile_id,
+                revision.revision_number,
+            ))
+            || serde_json::from_str::<Value>(&revision.content_json).is_err()
+            || revision.content_sha256.trim().is_empty()
+            || ProfileRevisionStatus::try_from_db(&revision.status).is_err()
+        {
+            return Err(AppError::backup_invalid("Profile Revision 数据无效"));
+        }
+    }
+    for profile in &document.character_profiles {
+        validate_active_revision(
+            "CHARACTER",
+            &profile.id,
+            profile.active_revision_id.as_ref(),
+            &revision_ids,
+        )?;
+    }
+    for profile in &document.scene_profiles {
+        validate_active_revision(
+            "SCENE",
+            &profile.id,
+            profile.active_revision_id.as_ref(),
+            &revision_ids,
+        )?;
+    }
+    for profile in &document.prop_profiles {
+        validate_active_revision(
+            "PROP",
+            &profile.id,
+            profile.active_revision_id.as_ref(),
+            &revision_ids,
+        )?;
+    }
+    for profile in &document.style_profiles {
+        validate_active_revision(
+            "STYLE",
+            &profile.id,
+            profile.active_revision_id.as_ref(),
+            &revision_ids,
+        )?;
+    }
+
+    let asset_types = document
+        .assets
+        .iter()
+        .map(|asset| (asset.id.as_str(), asset.asset_type.as_str()))
+        .collect::<HashMap<_, _>>();
+    let mut items_by_set = HashMap::<&str, Vec<&BackupReferenceSetItem>>::new();
+    for item in &document.reference_set_items {
+        if !reference_set_purposes.contains_key(item.reference_set_id.as_str())
+            || asset_types.get(item.asset_id.as_str()).copied() != Some("image")
+            || item.ordinal < 0
+            || item.is_primary != 0 && item.is_primary != 1
+            || item
+                .role
+                .as_deref()
+                .is_some_and(|role| !valid_consistency_text(role, 120) || role.trim().is_empty())
+        {
+            return Err(AppError::backup_invalid("Reference Set Item 数据无效"));
+        }
+        items_by_set
+            .entry(&item.reference_set_id)
+            .or_default()
+            .push(item);
+    }
+    for items in items_by_set.values() {
+        if items.len() > 20 {
+            return Err(AppError::backup_invalid(
+                "Reference Set Item 数量超过 20 个上限",
+            ));
+        }
+        let mut asset_ids = HashSet::new();
+        let mut ordinals = HashSet::new();
+        let mut primary_count = 0;
+        for item in items {
+            if !asset_ids.insert(item.asset_id.as_str())
+                || !ordinals.insert(item.ordinal)
+                || item.is_primary == 1 && {
+                    primary_count += 1;
+                    primary_count > 1
+                }
+            {
+                return Err(AppError::backup_invalid(
+                    "Reference Set Item 存在重复或多个 primary",
+                ));
+            }
+        }
+        let mut ordinals = ordinals.into_iter().collect::<Vec<_>>();
+        ordinals.sort_unstable();
+        if ordinals
+            .iter()
+            .enumerate()
+            .any(|(index, ordinal)| *ordinal != index as i64)
+        {
+            return Err(AppError::backup_invalid(
+                "Reference Set Item 序号必须从 0 连续排列",
+            ));
+        }
+    }
+
+    let shot_ids = document
+        .shots
+        .iter()
+        .map(|shot| shot.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut shot_profile_binding_ids = HashSet::new();
+    let mut shot_profile_slots = HashSet::new();
+    for binding in &document.shot_profile_bindings {
+        if !shot_profile_binding_ids.insert(binding.id.as_str())
+            || !shot_ids.contains(binding.shot_id.as_str())
+            || !binding_profile_fields_valid(
+                &binding.role,
+                &binding.profile_type,
+                &binding.profile_id,
+                binding.costume_variant_id.as_ref(),
+                &profile_types,
+                &costume_character_ids,
+            )
+            || binding.ordinal < 0
+            || !InheritanceMode::try_from_db(&binding.inheritance_mode).is_ok()
+            || !shot_profile_slots.insert((
+                binding.shot_id.as_str(),
+                binding.role.as_str(),
+                binding.ordinal,
+                binding.profile_id.as_str(),
+            ))
+        {
+            return Err(AppError::backup_invalid("Shot Profile Binding 数据无效"));
+        }
+    }
+    let mut shot_reference_binding_ids = HashSet::new();
+    let mut shot_reference_slots = HashSet::new();
+    for binding in &document.shot_reference_set_bindings {
+        if !shot_reference_binding_ids.insert(binding.id.as_str())
+            || !shot_ids.contains(binding.shot_id.as_str())
+            || !reference_set_purposes.contains_key(binding.reference_set_id.as_str())
+            || BindingRole::try_from_db(&binding.role).is_err()
+            || binding.ordinal < 0
+            || binding.required != 0 && binding.required != 1
+            || InheritanceMode::try_from_db(&binding.inheritance_mode).is_err()
+            || !shot_reference_slots.insert((
+                binding.shot_id.as_str(),
+                binding.role.as_str(),
+                binding.ordinal,
+                binding.reference_set_id.as_str(),
+            ))
+        {
+            return Err(AppError::backup_invalid(
+                "Shot Reference Set Binding 数据无效",
+            ));
+        }
+    }
+
+    let series_ids = document
+        .production_series
+        .iter()
+        .map(|series| series.id.as_str())
+        .collect::<HashSet<_>>();
+    let episode_ids = document
+        .production_episodes
+        .iter()
+        .map(|episode| episode.id.as_str())
+        .collect::<HashSet<_>>();
+    let scene_ids = document
+        .production_scenes
+        .iter()
+        .map(|scene| scene.id.as_str())
+        .collect::<HashSet<_>>();
+    let scope_is_valid = |scope_type: &str, scope_id: &str| match scope_type {
+        "PROJECT" => scope_id == document.project.id,
+        "SERIES" => series_ids.contains(scope_id),
+        "EPISODE" => episode_ids.contains(scope_id),
+        "SCENE" => scene_ids.contains(scope_id),
+        _ => false,
+    };
+    let mut scope_profile_binding_ids = HashSet::new();
+    let mut scope_profile_slots = HashSet::new();
+    for binding in &document.scope_profile_bindings {
+        if !scope_profile_binding_ids.insert(binding.id.as_str())
+            || binding.project_id != document.project.id
+            || !scope_is_valid(&binding.scope_type, &binding.scope_id)
+            || !binding_profile_fields_valid(
+                &binding.role,
+                &binding.profile_type,
+                &binding.profile_id,
+                binding.costume_variant_id.as_ref(),
+                &profile_types,
+                &costume_character_ids,
+            )
+            || binding.ordinal < 0
+            || InheritanceMode::try_from_db(&binding.inheritance_mode).is_err()
+            || !scope_profile_slots.insert((
+                binding.scope_type.as_str(),
+                binding.scope_id.as_str(),
+                binding.role.as_str(),
+                binding.ordinal,
+                binding.profile_id.as_str(),
+            ))
+        {
+            return Err(AppError::backup_invalid("Scope Profile Binding 数据无效"));
+        }
+    }
+    let mut scope_reference_binding_ids = HashSet::new();
+    let mut scope_reference_slots = HashSet::new();
+    for binding in &document.scope_reference_set_bindings {
+        if !scope_reference_binding_ids.insert(binding.id.as_str())
+            || binding.project_id != document.project.id
+            || !scope_is_valid(&binding.scope_type, &binding.scope_id)
+            || !reference_set_purposes.contains_key(binding.reference_set_id.as_str())
+            || BindingRole::try_from_db(&binding.role).is_err()
+            || binding.ordinal < 0
+            || binding.required != 0 && binding.required != 1
+            || InheritanceMode::try_from_db(&binding.inheritance_mode).is_err()
+            || !scope_reference_slots.insert((
+                binding.scope_type.as_str(),
+                binding.scope_id.as_str(),
+                binding.role.as_str(),
+                binding.ordinal,
+                binding.reference_set_id.as_str(),
+            ))
+        {
+            return Err(AppError::backup_invalid(
+                "Scope Reference Set Binding 数据无效",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn register_consistency_profile<'a>(
+    profile_types: &mut HashMap<&'a str, &'static str>,
+    profile_names: &mut HashSet<String>,
+    id: &'a str,
+    project_id: &str,
+    name: &str,
+    profile_type: &'static str,
+) -> Result<(), AppError> {
+    if project_id.trim().is_empty()
+        || !valid_consistency_id(id)
+        || !valid_consistency_name(name)
+        || profile_types.insert(id, profile_type).is_some()
+        || !profile_names.insert(format!("{}:{}", profile_type, name.trim().to_lowercase()))
+    {
+        return Err(AppError::backup_invalid("Profile 元数据无效"));
+    }
+    Ok(())
+}
+
+fn valid_consistency_id(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= 200
+}
+
+fn valid_consistency_name(value: &str) -> bool {
+    !value.trim().is_empty() && value.trim().chars().count() <= 120
+}
+
+fn valid_consistency_text(value: &str, max_chars: usize) -> bool {
+    value.chars().count() <= max_chars
+}
+
+fn valid_consistency_optional_text(value: Option<&str>, max_chars: usize) -> bool {
+    value.is_none_or(|value| valid_consistency_text(value, max_chars))
+}
+
+fn valid_consistency_metadata(value: &str) -> bool {
+    value.len() <= 64 * 1024
+        && serde_json::from_str::<Value>(value)
+            .map(|value| value.is_object())
+            .unwrap_or(false)
+}
+
+fn reference_set_purpose(value: &str) -> Option<&'static str> {
+    ReferenceSetPurpose::try_from_db(value)
+        .ok()
+        .map(ReferenceSetPurpose::as_str)
+}
+
+fn reference_set_owner_type(purpose: &str) -> Option<&'static str> {
+    match ReferenceSetPurpose::try_from_db(purpose).ok()? {
+        ReferenceSetPurpose::Character | ReferenceSetPurpose::Costume => Some("CHARACTER"),
+        ReferenceSetPurpose::Scene => Some("SCENE"),
+        ReferenceSetPurpose::Prop => Some("PROP"),
+        ReferenceSetPurpose::Style => Some("STYLE"),
+        ReferenceSetPurpose::Shot => None,
+    }
+}
+
+fn validate_consistency_profile_relation(
+    profile_type: &str,
+    profile_id: &str,
+    default_style_profile_id: Option<&String>,
+    default_reference_set_id: Option<&String>,
+    profile_types: &HashMap<&str, &str>,
+    reference_set_purposes: &HashMap<&str, &str>,
+) -> Result<(), AppError> {
+    if profile_types.get(profile_id).copied() != Some(profile_type)
+        || default_style_profile_id
+            .is_some_and(|id| profile_types.get(id.as_str()).copied() != Some("STYLE"))
+        || default_reference_set_id.as_ref().is_some_and(|id| {
+            id.trim().is_empty() || !reference_set_purposes.contains_key(id.as_str())
+        })
+    {
+        return Err(AppError::backup_invalid("Profile 关系引用无效"));
+    }
+    Ok(())
+}
+
+fn validate_active_revision(
+    profile_type: &str,
+    profile_id: &str,
+    active_revision_id: Option<&String>,
+    revisions: &HashMap<&str, (&str, &str)>,
+) -> Result<(), AppError> {
+    if active_revision_id.is_some_and(|revision_id| {
+        revisions
+            .get(revision_id.as_str())
+            .is_none_or(|(revision_type, revision_profile_id)| {
+                *revision_type != profile_type || *revision_profile_id != profile_id
+            })
+    }) {
+        return Err(AppError::backup_invalid(
+            "Profile active_revision_id 引用无效",
+        ));
+    }
+    Ok(())
+}
+
+fn binding_profile_fields_valid(
+    role: &str,
+    profile_type: &str,
+    profile_id: &str,
+    costume_variant_id: Option<&String>,
+    profile_types: &HashMap<&str, &str>,
+    costume_character_ids: &HashMap<&str, &str>,
+) -> bool {
+    let expected_type = match BindingRole::try_from_db(role).ok() {
+        Some(BindingRole::Character) => Some("CHARACTER"),
+        Some(BindingRole::Scene) => Some("SCENE"),
+        Some(BindingRole::Prop) => Some("PROP"),
+        Some(BindingRole::Style) => Some("STYLE"),
+        Some(BindingRole::ShotReference) | None => None,
+    };
+    profile_types.get(profile_id).copied() == Some(profile_type)
+        && expected_type == Some(profile_type)
+        && costume_variant_id.is_none_or(|variant_id| {
+            role == "CHARACTER"
+                && costume_character_ids.get(variant_id.as_str()).copied() == Some(profile_id)
+        })
+}
+
 fn validate_production_structure_document(
     document: &BackupDocument,
     version: u32,
@@ -4540,6 +5669,7 @@ async fn restore_rows_in_transaction(
     tag_ids: &HashMap<String, String>,
     reference_anchor_ids: &HashMap<String, String>,
     production_structure_ids: &ProductionStructureIds,
+    consistency_ids: &ConsistencyRestoreIds,
     shot_ids: &HashMap<String, String>,
     shot_generation_link_ids: &HashMap<String, String>,
     restored_assets: &[RestoredAsset],
@@ -4761,6 +5891,269 @@ async fn restore_rows_in_transaction(
         .execute(&mut **transaction)
         .await
             .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for profile in &document.style_profiles {
+        let profile_id =
+            consistency_required_id(&consistency_ids.profiles, &profile.id, "Style Profile")?;
+        let active_revision_id = consistency_optional_id(
+            &consistency_ids.profile_revisions,
+            profile.active_revision_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO style_profiles
+             (id, project_id, name, style_prompt, color_prompt, line_prompt,
+              negative_prompt, output_notes, active_revision_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(profile_id)
+        .bind(&project.id)
+        .bind(&profile.name)
+        .bind(&profile.style_prompt)
+        .bind(&profile.color_prompt)
+        .bind(&profile.line_prompt)
+        .bind(&profile.negative_prompt)
+        .bind(&profile.output_notes)
+        .bind(active_revision_id)
+        .bind(&profile.created_at)
+        .bind(&profile.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for reference_set in &document.reference_sets {
+        let reference_set_id = consistency_required_id(
+            &consistency_ids.reference_sets,
+            &reference_set.id,
+            "Reference Set",
+        )?;
+        let owner_profile_id = consistency_optional_id(
+            &consistency_ids.profiles,
+            reference_set.owner_profile_id.as_ref(),
+        );
+        let active_revision_id = consistency_optional_id(
+            &consistency_ids.profile_revisions,
+            reference_set.active_revision_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO reference_sets
+             (id, project_id, name, purpose, description, owner_profile_type,
+              owner_profile_id, active_revision_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(reference_set_id)
+        .bind(&project.id)
+        .bind(&reference_set.name)
+        .bind(&reference_set.purpose)
+        .bind(&reference_set.description)
+        .bind(&reference_set.owner_profile_type)
+        .bind(owner_profile_id)
+        .bind(active_revision_id)
+        .bind(&reference_set.created_at)
+        .bind(&reference_set.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for profile in &document.character_profiles {
+        let profile_id =
+            consistency_required_id(&consistency_ids.profiles, &profile.id, "Character Profile")?;
+        let default_style_profile_id = consistency_optional_id(
+            &consistency_ids.profiles,
+            profile.default_style_profile_id.as_ref(),
+        );
+        let default_reference_set_id = consistency_optional_id(
+            &consistency_ids.reference_sets,
+            profile.default_reference_set_id.as_ref(),
+        );
+        let active_revision_id = consistency_optional_id(
+            &consistency_ids.profile_revisions,
+            profile.active_revision_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO character_profiles
+             (id, project_id, name, description, canonical_prompt, negative_prompt,
+              default_style_profile_id, default_reference_set_id, active_revision_id,
+              metadata_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(profile_id)
+        .bind(&project.id)
+        .bind(&profile.name)
+        .bind(&profile.description)
+        .bind(&profile.canonical_prompt)
+        .bind(&profile.negative_prompt)
+        .bind(default_style_profile_id)
+        .bind(default_reference_set_id)
+        .bind(active_revision_id)
+        .bind(&profile.metadata_json)
+        .bind(&profile.created_at)
+        .bind(&profile.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for profile in &document.scene_profiles {
+        let profile_id =
+            consistency_required_id(&consistency_ids.profiles, &profile.id, "Scene Profile")?;
+        let default_style_profile_id = consistency_optional_id(
+            &consistency_ids.profiles,
+            profile.default_style_profile_id.as_ref(),
+        );
+        let default_reference_set_id = consistency_optional_id(
+            &consistency_ids.reference_sets,
+            profile.default_reference_set_id.as_ref(),
+        );
+        let active_revision_id = consistency_optional_id(
+            &consistency_ids.profile_revisions,
+            profile.active_revision_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO scene_profiles
+             (id, project_id, name, description, environment_prompt, lighting_prompt,
+              negative_prompt, default_style_profile_id, default_reference_set_id,
+              active_revision_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(profile_id)
+        .bind(&project.id)
+        .bind(&profile.name)
+        .bind(&profile.description)
+        .bind(&profile.environment_prompt)
+        .bind(&profile.lighting_prompt)
+        .bind(&profile.negative_prompt)
+        .bind(default_style_profile_id)
+        .bind(default_reference_set_id)
+        .bind(active_revision_id)
+        .bind(&profile.created_at)
+        .bind(&profile.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for profile in &document.prop_profiles {
+        let profile_id =
+            consistency_required_id(&consistency_ids.profiles, &profile.id, "Prop Profile")?;
+        let default_reference_set_id = consistency_optional_id(
+            &consistency_ids.reference_sets,
+            profile.default_reference_set_id.as_ref(),
+        );
+        let active_revision_id = consistency_optional_id(
+            &consistency_ids.profile_revisions,
+            profile.active_revision_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO prop_profiles
+             (id, project_id, name, description, canonical_prompt, material_prompt,
+              scale_prompt, default_reference_set_id, active_revision_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(profile_id)
+        .bind(&project.id)
+        .bind(&profile.name)
+        .bind(&profile.description)
+        .bind(&profile.canonical_prompt)
+        .bind(&profile.material_prompt)
+        .bind(&profile.scale_prompt)
+        .bind(default_reference_set_id)
+        .bind(active_revision_id)
+        .bind(&profile.created_at)
+        .bind(&profile.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for variant in &document.costume_variants {
+        let variant_id = consistency_required_id(
+            &consistency_ids.costume_variants,
+            &variant.id,
+            "Costume Variant",
+        )?;
+        let character_profile_id = consistency_required_id(
+            &consistency_ids.profiles,
+            &variant.character_profile_id,
+            "Costume Character Profile",
+        )?;
+        let reference_set_id = consistency_optional_id(
+            &consistency_ids.reference_sets,
+            variant.reference_set_id.as_ref(),
+        );
+        let active_revision_id = consistency_optional_id(
+            &consistency_ids.profile_revisions,
+            variant.active_revision_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO costume_variants
+             (id, character_profile_id, name, prompt_fragment, reference_set_id,
+              is_default, ordinal, active_revision_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(variant_id)
+        .bind(character_profile_id)
+        .bind(&variant.name)
+        .bind(&variant.prompt_fragment)
+        .bind(reference_set_id)
+        .bind(variant.is_default)
+        .bind(variant.ordinal)
+        .bind(active_revision_id)
+        .bind(&variant.created_at)
+        .bind(&variant.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for item in &document.reference_set_items {
+        let reference_set_id = consistency_required_id(
+            &consistency_ids.reference_sets,
+            &item.reference_set_id,
+            "Reference Set Item",
+        )?;
+        let asset_id = asset_ids
+            .get(&item.asset_id)
+            .ok_or_else(|| AppError::backup_invalid("Reference Set Item 素材映射缺失"))?;
+        sqlx::query(
+            "INSERT INTO reference_set_items
+             (reference_set_id, asset_id, ordinal, role, is_primary, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(reference_set_id)
+        .bind(asset_id)
+        .bind(item.ordinal)
+        .bind(&item.role)
+        .bind(item.is_primary)
+        .bind(&item.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for revision in &document.profile_revisions {
+        let revision_id = consistency_required_id(
+            &consistency_ids.profile_revisions,
+            &revision.id,
+            "Profile Revision",
+        )?;
+        let profile_id = consistency_required_id(
+            &consistency_ids.profiles,
+            &revision.profile_id,
+            "Profile Revision",
+        )?;
+        sqlx::query(
+            "INSERT INTO profile_revisions
+             (id, profile_type, profile_id, revision_number, content_json,
+              content_sha256, status, created_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(revision_id)
+        .bind(&revision.profile_type)
+        .bind(profile_id)
+        .bind(revision.revision_number)
+        .bind(&revision.content_json)
+        .bind(&revision.content_sha256)
+        .bind(&revision.status)
+        .bind(&revision.created_at)
+        .bind(&revision.created_by)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
     }
     for anchor in &document.reference_anchors {
         let anchor_id = reference_anchor_ids
@@ -5462,6 +6855,171 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    for binding in &document.shot_profile_bindings {
+        let binding_id = consistency_required_id(
+            &consistency_ids.shot_profile_bindings,
+            &binding.id,
+            "Shot Profile Binding",
+        )?;
+        let shot_id = shot_ids
+            .get(&binding.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("Shot Profile Binding 镜头映射缺失"))?;
+        let profile_id = consistency_required_id(
+            &consistency_ids.profiles,
+            &binding.profile_id,
+            "Shot Profile Binding",
+        )?;
+        let costume_variant_id = consistency_optional_id(
+            &consistency_ids.costume_variants,
+            binding.costume_variant_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO shot_profile_bindings
+             (id, shot_id, role, profile_type, profile_id, costume_variant_id,
+              ordinal, inheritance_mode, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(binding_id)
+        .bind(shot_id)
+        .bind(&binding.role)
+        .bind(&binding.profile_type)
+        .bind(profile_id)
+        .bind(costume_variant_id)
+        .bind(binding.ordinal)
+        .bind(&binding.inheritance_mode)
+        .bind(&binding.created_at)
+        .bind(&binding.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for binding in &document.shot_reference_set_bindings {
+        let binding_id = consistency_required_id(
+            &consistency_ids.shot_reference_set_bindings,
+            &binding.id,
+            "Shot Reference Set Binding",
+        )?;
+        let shot_id = shot_ids
+            .get(&binding.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("Shot Reference Set Binding 镜头映射缺失"))?;
+        let reference_set_id = consistency_required_id(
+            &consistency_ids.reference_sets,
+            &binding.reference_set_id,
+            "Shot Reference Set Binding",
+        )?;
+        sqlx::query(
+            "INSERT INTO shot_reference_set_bindings
+             (id, shot_id, role, reference_set_id, ordinal, required,
+              inheritance_mode, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(binding_id)
+        .bind(shot_id)
+        .bind(&binding.role)
+        .bind(reference_set_id)
+        .bind(binding.ordinal)
+        .bind(binding.required)
+        .bind(&binding.inheritance_mode)
+        .bind(&binding.created_at)
+        .bind(&binding.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for binding in &document.scope_profile_bindings {
+        let binding_id = consistency_required_id(
+            &consistency_ids.scope_profile_bindings,
+            &binding.id,
+            "Scope Profile Binding",
+        )?;
+        if binding.project_id != document.project.id {
+            return Err(AppError::backup_invalid(
+                "Scope Profile Binding 项目归属不一致",
+            ));
+        }
+        let scope_id = remap_consistency_scope_id(
+            &binding.scope_type,
+            &binding.scope_id,
+            &document.project.id,
+            &project.id,
+            production_structure_ids,
+        )?;
+        let profile_id = consistency_required_id(
+            &consistency_ids.profiles,
+            &binding.profile_id,
+            "Scope Profile Binding",
+        )?;
+        let costume_variant_id = consistency_optional_id(
+            &consistency_ids.costume_variants,
+            binding.costume_variant_id.as_ref(),
+        );
+        sqlx::query(
+            "INSERT INTO consistency_scope_profile_bindings
+             (id, project_id, scope_type, scope_id, role, profile_type,
+              profile_id, costume_variant_id, ordinal, inheritance_mode,
+              created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(binding_id)
+        .bind(&project.id)
+        .bind(&binding.scope_type)
+        .bind(scope_id)
+        .bind(&binding.role)
+        .bind(&binding.profile_type)
+        .bind(profile_id)
+        .bind(costume_variant_id)
+        .bind(binding.ordinal)
+        .bind(&binding.inheritance_mode)
+        .bind(&binding.created_at)
+        .bind(&binding.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    for binding in &document.scope_reference_set_bindings {
+        let binding_id = consistency_required_id(
+            &consistency_ids.scope_reference_set_bindings,
+            &binding.id,
+            "Scope Reference Set Binding",
+        )?;
+        if binding.project_id != document.project.id {
+            return Err(AppError::backup_invalid(
+                "Scope Reference Set Binding 项目归属不一致",
+            ));
+        }
+        let scope_id = remap_consistency_scope_id(
+            &binding.scope_type,
+            &binding.scope_id,
+            &document.project.id,
+            &project.id,
+            production_structure_ids,
+        )?;
+        let reference_set_id = consistency_required_id(
+            &consistency_ids.reference_sets,
+            &binding.reference_set_id,
+            "Scope Reference Set Binding",
+        )?;
+        sqlx::query(
+            "INSERT INTO consistency_scope_reference_set_bindings
+             (id, project_id, scope_type, scope_id, role, reference_set_id,
+              ordinal, required, inheritance_mode, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(binding_id)
+        .bind(&project.id)
+        .bind(&binding.scope_type)
+        .bind(scope_id)
+        .bind(&binding.role)
+        .bind(reference_set_id)
+        .bind(binding.ordinal)
+        .bind(binding.required)
+        .bind(&binding.inheritance_mode)
+        .bind(&binding.created_at)
+        .bind(&binding.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for assignment in &document.shot_scene_assignments {
         let shot_id = shot_ids
             .get(&assignment.shot_id)
@@ -5913,6 +7471,18 @@ mod tests {
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
             shot_generation_links: Vec::new(),
+            character_profiles: Vec::new(),
+            scene_profiles: Vec::new(),
+            prop_profiles: Vec::new(),
+            style_profiles: Vec::new(),
+            costume_variants: Vec::new(),
+            profile_revisions: Vec::new(),
+            reference_sets: Vec::new(),
+            reference_set_items: Vec::new(),
+            shot_profile_bindings: Vec::new(),
+            shot_reference_set_bindings: Vec::new(),
+            scope_profile_bindings: Vec::new(),
+            scope_reference_set_bindings: Vec::new(),
         }
     }
 
@@ -6592,6 +8162,209 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO style_profiles
+             (id, project_id, name, style_prompt, color_prompt, line_prompt,
+              negative_prompt, output_notes, active_revision_id, created_at, updated_at)
+             VALUES ('stp_backup_style', 'project-backup', 'Backup Style', 'ink anime',
+                     'violet', 'precise', 'photo', 'keep faces clear',
+                     'prv_backup_style', '2026-01-01T00:05:00Z', '2026-01-01T00:05:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO reference_sets
+             (id, project_id, name, purpose, description, owner_profile_type,
+              owner_profile_id, active_revision_id, created_at, updated_at)
+             VALUES
+             ('rs_backup_character', 'project-backup', 'Backup Character References',
+              'CHARACTER', 'character references', 'CHARACTER', 'cp_backup_character',
+              NULL, '2026-01-01T00:05:01Z', '2026-01-01T00:05:01Z'),
+             ('rs_backup_costume', 'project-backup', 'Backup Costume References',
+              'COSTUME', 'costume references', 'CHARACTER', 'cp_backup_character',
+              NULL, '2026-01-01T00:05:02Z', '2026-01-01T00:05:02Z'),
+             ('rs_backup_scene', 'project-backup', 'Backup Scene References',
+              'SCENE', 'scene references', 'SCENE', 'scp_backup_scene',
+              NULL, '2026-01-01T00:05:03Z', '2026-01-01T00:05:03Z'),
+             ('rs_backup_prop', 'project-backup', 'Backup Prop References',
+              'PROP', 'prop references', 'PROP', 'pp_backup_prop',
+              NULL, '2026-01-01T00:05:04Z', '2026-01-01T00:05:04Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO character_profiles
+             (id, project_id, name, description, canonical_prompt, negative_prompt,
+              default_style_profile_id, default_reference_set_id, active_revision_id,
+              metadata_json, created_at, updated_at)
+             VALUES ('cp_backup_character', 'project-backup', 'Backup Character',
+                     'character description', 'hero prompt', 'blurry',
+                     'stp_backup_style', 'rs_backup_character', 'prv_backup_character',
+                     '{\"species\":\"human\"}', '2026-01-01T00:05:05Z',
+                     '2026-01-01T00:05:05Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO scene_profiles
+             (id, project_id, name, description, environment_prompt, lighting_prompt,
+              negative_prompt, default_style_profile_id, default_reference_set_id,
+              active_revision_id, created_at, updated_at)
+             VALUES ('scp_backup_scene', 'project-backup', 'Backup Scene',
+                     'scene description', 'rainy street', 'neon',
+                     'empty', 'stp_backup_style', 'rs_backup_scene', 'prv_backup_scene',
+                     '2026-01-01T00:05:06Z', '2026-01-01T00:05:06Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO prop_profiles
+             (id, project_id, name, description, canonical_prompt, material_prompt,
+              scale_prompt, default_reference_set_id, active_revision_id,
+              created_at, updated_at)
+             VALUES ('pp_backup_prop', 'project-backup', 'Backup Prop',
+                     'prop description', 'lantern', 'brass', 'hand-sized',
+                     'rs_backup_prop', 'prv_backup_prop',
+                     '2026-01-01T00:05:07Z', '2026-01-01T00:05:07Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO costume_variants
+             (id, character_profile_id, name, prompt_fragment, reference_set_id,
+              is_default, ordinal, active_revision_id, created_at, updated_at)
+             VALUES ('cv_backup_costume', 'cp_backup_character', 'Travel Coat',
+                     'dark travel coat', 'rs_backup_costume', 1, 7, NULL,
+                     '2026-01-01T00:05:08Z', '2026-01-01T00:05:08Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (revision_id, profile_type, profile_id, content) in [
+            (
+                "prv_backup_character",
+                "CHARACTER",
+                "cp_backup_character",
+                "{\"revision\":\"character\"}",
+            ),
+            (
+                "prv_backup_scene",
+                "SCENE",
+                "scp_backup_scene",
+                "{\"revision\":\"scene\"}",
+            ),
+            (
+                "prv_backup_prop",
+                "PROP",
+                "pp_backup_prop",
+                "{\"revision\":\"prop\"}",
+            ),
+            (
+                "prv_backup_style",
+                "STYLE",
+                "stp_backup_style",
+                "{\"revision\":\"style\"}",
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO profile_revisions
+                 (id, profile_type, profile_id, revision_number, content_json,
+                  content_sha256, status, created_at, created_by)
+                 VALUES (?, ?, ?, 1, ?, ?, 'ACTIVE', '2026-01-01T00:05:09Z', 'dev051')",
+            )
+            .bind(revision_id)
+            .bind(profile_type)
+            .bind(profile_id)
+            .bind(content)
+            .bind("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO reference_set_items
+             (reference_set_id, asset_id, ordinal, role, is_primary, created_at)
+             VALUES
+             ('rs_backup_character', 'ast_backup', 0, 'front', 1, '2026-01-01T00:05:10Z'),
+             ('rs_backup_character', 'ast_source_backup', 1, 'side', 0, '2026-01-01T00:05:10Z'),
+             ('rs_backup_costume', 'ast_ref_b', 0, 'coat', 1, '2026-01-01T00:05:11Z'),
+             ('rs_backup_scene', 'ast_ref_c', 0, 'wide', 1, '2026-01-01T00:05:12Z'),
+             ('rs_backup_prop', 'ast_backup', 0, 'detail', 1, '2026-01-01T00:05:13Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_profile_bindings
+             (id, shot_id, role, profile_type, profile_id, costume_variant_id,
+              ordinal, inheritance_mode, created_at, updated_at)
+             VALUES
+             ('spb_backup_character', 'sht_backup', 'CHARACTER', 'CHARACTER',
+              'cp_backup_character', 'cv_backup_costume', 3, 'REPLACE',
+              '2026-01-01T00:05:14Z', '2026-01-01T00:05:14Z'),
+             ('spb_backup_scene', 'sht_backup', 'SCENE', 'SCENE',
+              'scp_backup_scene', NULL, 0, 'INHERITED',
+              '2026-01-01T00:05:15Z', '2026-01-01T00:05:15Z'),
+             ('spb_backup_prop', 'sht_backup', 'PROP', 'PROP',
+              'pp_backup_prop', NULL, 2, 'EXPLICIT',
+              '2026-01-01T00:05:16Z', '2026-01-01T00:05:16Z'),
+             ('spb_backup_style', 'sht_backup', 'STYLE', 'STYLE',
+              'stp_backup_style', NULL, 1, 'REMOVE',
+              '2026-01-01T00:05:17Z', '2026-01-01T00:05:17Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_reference_set_bindings
+             (id, shot_id, role, reference_set_id, ordinal, required,
+              inheritance_mode, created_at, updated_at)
+             VALUES
+             ('srb_backup_character', 'sht_backup', 'CHARACTER',
+              'rs_backup_character', 5, 1, 'REPLACE',
+              '2026-01-01T00:05:18Z', '2026-01-01T00:05:18Z'),
+             ('srb_backup_scene', 'sht_backup', 'SCENE',
+              'rs_backup_scene', 0, 0, 'INHERITED',
+              '2026-01-01T00:05:19Z', '2026-01-01T00:05:19Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO consistency_scope_profile_bindings
+             (id, project_id, scope_type, scope_id, role, profile_type, profile_id,
+              costume_variant_id, ordinal, inheritance_mode, created_at, updated_at)
+             VALUES
+             ('hpb_backup_project', 'project-backup', 'PROJECT', 'project-backup',
+              'CHARACTER', 'CHARACTER', 'cp_backup_character', NULL, 4, 'INHERITED',
+              '2026-01-01T00:05:20Z', '2026-01-01T00:05:20Z'),
+             ('hpb_backup_scene', 'project-backup', 'SCENE', 'scn_backup',
+              'SCENE', 'SCENE', 'scp_backup_scene', NULL, 6, 'REPLACE',
+              '2026-01-01T00:05:21Z', '2026-01-01T00:05:21Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO consistency_scope_reference_set_bindings
+             (id, project_id, scope_type, scope_id, role, reference_set_id,
+              ordinal, required, inheritance_mode, created_at, updated_at)
+             VALUES
+             ('hrb_backup_project', 'project-backup', 'PROJECT', 'project-backup',
+              'CHARACTER', 'rs_backup_character', 3, 1, 'INHERITED',
+              '2026-01-01T00:05:22Z', '2026-01-01T00:05:22Z'),
+             ('hrb_backup_scene', 'project-backup', 'SCENE', 'scn_backup',
+              'PROP', 'rs_backup_prop', 1, 0, 'REMOVE',
+              '2026-01-01T00:05:23Z', '2026-01-01T00:05:23Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO project_templates (id, name, normalized_name, description, workflow_version_id, recipe_id, values_json, created_at, updated_at) VALUES ('ptm_global', '全局模板', '全局模板', NULL, 'workflow-version-1', 'recipe-1', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").execute(&pool).await.unwrap();
 
         let service = ProjectBackupService::new(
@@ -6607,7 +8380,7 @@ mod tests {
         assert!(exported.entries >= 5);
         let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 12);
+        assert_eq!(manifest.version, 13);
         assert_eq!(exported.entries, names.len());
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
@@ -7193,7 +8966,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_v5_through_v9_fixtures_restore_with_empty_later_data() {
+    async fn fixed_v5_through_v9_and_v12_fixtures_restore_with_empty_later_data() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
@@ -7203,7 +8976,7 @@ mod tests {
             data_dirs.cache.clone(),
         );
 
-        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32] {
+        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32, 12_u32] {
             let project_id = format!("legacy-v{version}-project");
             let project_name = format!("旧项目 v{version}");
             let archive_path = directory.path().join(format!("legacy-v{version}.zip"));
@@ -7270,6 +9043,25 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(counts, (0, 0, 0));
+            let consistency_count: i64 = sqlx::query_scalar(
+                "SELECT
+                   (SELECT COUNT(*) FROM character_profiles)
+                 + (SELECT COUNT(*) FROM scene_profiles)
+                 + (SELECT COUNT(*) FROM prop_profiles)
+                 + (SELECT COUNT(*) FROM style_profiles)
+                 + (SELECT COUNT(*) FROM costume_variants)
+                 + (SELECT COUNT(*) FROM profile_revisions)
+                 + (SELECT COUNT(*) FROM reference_sets)
+                 + (SELECT COUNT(*) FROM reference_set_items)
+                 + (SELECT COUNT(*) FROM shot_profile_bindings)
+                 + (SELECT COUNT(*) FROM shot_reference_set_bindings)
+                 + (SELECT COUNT(*) FROM consistency_scope_profile_bindings)
+                 + (SELECT COUNT(*) FROM consistency_scope_reference_set_bindings)",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(consistency_count, 0);
         }
     }
 
@@ -7421,6 +9213,18 @@ mod tests {
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
             shot_generation_links: Vec::new(),
+            character_profiles: Vec::new(),
+            scene_profiles: Vec::new(),
+            prop_profiles: Vec::new(),
+            style_profiles: Vec::new(),
+            costume_variants: Vec::new(),
+            profile_revisions: Vec::new(),
+            reference_sets: Vec::new(),
+            reference_set_items: Vec::new(),
+            shot_profile_bindings: Vec::new(),
+            shot_reference_set_bindings: Vec::new(),
+            scope_profile_bindings: Vec::new(),
+            scope_reference_set_bindings: Vec::new(),
         };
         let project = ProjectRecord {
             id: project_id.clone(),
@@ -7463,6 +9267,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &ProductionStructureIds::default(),
+                &super::ConsistencyRestoreIds::default(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &[],
@@ -7573,6 +9378,18 @@ mod tests {
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
             shot_generation_links: Vec::new(),
+            character_profiles: Vec::new(),
+            scene_profiles: Vec::new(),
+            prop_profiles: Vec::new(),
+            style_profiles: Vec::new(),
+            costume_variants: Vec::new(),
+            profile_revisions: Vec::new(),
+            reference_sets: Vec::new(),
+            reference_set_items: Vec::new(),
+            shot_profile_bindings: Vec::new(),
+            shot_reference_set_bindings: Vec::new(),
+            scope_profile_bindings: Vec::new(),
+            scope_reference_set_bindings: Vec::new(),
         };
         let files = [super::BackupFileSource {
             zip_path: "assets/ast_large/content.bin".to_owned(),

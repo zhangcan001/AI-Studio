@@ -7,9 +7,10 @@ mod error;
 mod infrastructure;
 
 pub use application::ports::{
-    AssetDeletionRepository, AssetRepository, AssetStore, AssetVideoPromptRepository, Clock,
-    GenerationDefinitionRepository, GenerationSnapshotRepository, ProductionItemReviewRepository,
-    ProductionQueueRepository, ProjectRepository, RepositoryError, TaskRepository,
+    AssetDeletionRepository, AssetRepository, AssetStore, AssetUsageRepository,
+    AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
+    GenerationSnapshotRepository, ProductionItemReviewRepository, ProductionQueueRepository,
+    ProjectRecord, ProjectRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
     WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
@@ -27,11 +28,13 @@ use application::{
     asset_deletion_service::AssetDeletionService,
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
+    asset_usage_service::AssetUsageService,
     asset_video_prompt_service::AssetVideoPromptService,
     batch_workflow_preset_service::BatchWorkflowPresetService,
     comfy_memory_service::ComfyMemoryService,
     comfy_preflight_service::ComfyPreflightService,
     comfy_service::{ComfyRuntime, ComfyService},
+    consistency_profile_service::ConsistencyProfileService,
     diagnostics_service::DiagnosticsService,
     episode_production_service::EpisodeProductionService,
     generation_catalog_service::GenerationCatalogService,
@@ -57,6 +60,7 @@ use application::{
     prompt_template_bulk_service::PromptTemplateBulkService,
     prompt_template_service::PromptTemplateService,
     reference_anchor_service::ReferenceAnchorService,
+    reference_set_service::ReferenceSetService,
     scene_production_service::SceneProductionService,
     series_production_service::SeriesProductionService,
     settings_service::SettingsService,
@@ -249,6 +253,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(infrastructure::database::SqliteReferenceSetRepository::new(
                     database_pool.clone(),
                 ));
+            let asset_usage_repository: Arc<dyn application::ports::AssetUsageRepository> =
+                Arc::new(infrastructure::database::repositories::SqliteAssetUsageRepository::new(
+                    database_pool.clone(),
+                ));
             let shot_consistency_repository: Arc<dyn application::ports::ShotConsistencyRepository> =
                 Arc::new(infrastructure::database::SqliteShotConsistencyRepository::new(
                     database_pool.clone(),
@@ -302,8 +310,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_structure_repository.clone(),
                 shot_repository.clone(),
                 consistency_scope_repository,
-                consistency_profile_repository,
-                reference_set_repository,
+                consistency_profile_repository.clone(),
+                reference_set_repository.clone(),
                 shot_consistency_repository,
                 asset_repository.clone(),
                 clock.clone(),
@@ -453,10 +461,25 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 organization_repository.clone(),
             ));
             let reference_anchor_service = Arc::new(ReferenceAnchorService::new(
-                reference_anchor_repository,
+                reference_anchor_repository.clone(),
                 asset_repository.clone(),
                 clock.clone(),
             ));
+            let consistency_profile_service = Arc::new(ConsistencyProfileService::new(
+                consistency_profile_repository.clone(),
+                reference_set_repository.clone(),
+                project_repository.clone(),
+                clock.clone(),
+            ));
+            let reference_set_service = Arc::new(ReferenceSetService::new(
+                reference_set_repository,
+                consistency_profile_repository,
+                asset_repository.clone(),
+                reference_anchor_repository,
+                project_repository.clone(),
+                clock.clone(),
+            ));
+            let asset_usage_service = Arc::new(AssetUsageService::new(asset_usage_repository));
             let production_structure_service = Arc::new(ProductionStructureService::new(
                 production_structure_repository.clone(),
                 clock.clone(),
@@ -689,9 +712,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 asset_library_service,
+                asset_usage_service,
                 production_structure_service,
                 project_command_center_service,
                 reference_anchor_service,
+                consistency_profile_service,
+                reference_set_service,
                 asset_deletion_service,
                 asset_video_prompt_service,
                 task_history_service,
@@ -977,6 +1003,31 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::reference_anchor::reference_anchor_create,
             commands::reference_anchor::reference_anchor_update,
             commands::reference_anchor::reference_anchor_delete,
+            commands::consistency_assets::consistency_profile_list,
+            commands::consistency_assets::consistency_profile_get,
+            commands::consistency_assets::character_profile_create,
+            commands::consistency_assets::character_profile_update,
+            commands::consistency_assets::scene_profile_create,
+            commands::consistency_assets::scene_profile_update,
+            commands::consistency_assets::prop_profile_create,
+            commands::consistency_assets::prop_profile_update,
+            commands::consistency_assets::style_profile_create,
+            commands::consistency_assets::style_profile_update,
+            commands::consistency_assets::consistency_profile_delete,
+            commands::consistency_assets::costume_variant_list,
+            commands::consistency_assets::costume_variant_get,
+            commands::consistency_assets::costume_variant_create,
+            commands::consistency_assets::costume_variant_update,
+            commands::consistency_assets::costume_variant_delete,
+            commands::consistency_assets::reference_set_list,
+            commands::consistency_assets::reference_set_detail_get,
+            commands::consistency_assets::reference_set_create,
+            commands::consistency_assets::reference_set_update,
+            commands::consistency_assets::reference_set_delete,
+            commands::consistency_assets::reference_set_create_from_anchor,
+            commands::consistency_assets::asset_usage_get,
+            commands::consistency_assets::profile_usage_get,
+            commands::consistency_assets::reference_set_usage_get,
             commands::production_structure::production_structure_tree,
             commands::production_structure::production_series_create,
             commands::production_structure::production_series_update,

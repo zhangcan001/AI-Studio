@@ -1387,10 +1387,10 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(cargo.contains("version = \"0.6.2\""));
     let backup =
         fs::read_to_string(root.join("src/application/project_backup_service.rs")).unwrap();
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 12"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 13"));
     let manifest =
         fs::read_to_string(root.join("src/application/project_manifest_service.rs")).unwrap();
-    assert!(manifest.contains("const MANIFEST_VERSION: u32 = 1"));
+    assert!(manifest.contains("const MANIFEST_VERSION: u32 = 2"));
     let migration =
         fs::read_to_string(migration_dir.join("022_consistency_profiles_and_reference_sets.sql"))
             .unwrap();

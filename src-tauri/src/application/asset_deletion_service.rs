@@ -131,6 +131,56 @@ impl AssetDeletionService {
                 blocking_reasons
                     .push("该素材正被活动任务使用，请等待任务完成或取消后再删除。".to_owned());
             }
+            for reference_set_id in &reference.reference_set_ids {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!(
+                        "该素材仍被参考集“{reference_set_id}”使用，请先从该 ReferenceSet 移除素材。"
+                    ),
+                );
+            }
+            for reference_anchor_id in &reference.reference_anchor_ids {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!(
+                        "该素材仍被旧版参考锚点“{reference_anchor_id}”使用，请先解除 Anchor 关系。"
+                    ),
+                );
+            }
+            for shot_id in &reference.shot_reference_ids {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!(
+                        "该素材仍被镜头“{shot_id}”的旧版 Shot Reference 使用，请先解除镜头引用。"
+                    ),
+                );
+            }
+            for shot_id in &reference.selected_image_by_shot_ids {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!(
+                        "该素材仍被镜头“{shot_id}”选为图片关键帧，请先更换 selected image asset。"
+                    ),
+                );
+            }
+            for shot_id in &reference.selected_video_by_shot_ids {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!(
+                        "该素材仍被镜头“{shot_id}”选为视频关键帧，请先更换 selected video asset。"
+                    ),
+                );
+            }
+            for shot_id in &reference.selected_by_shot_ids {
+                if !reference.selected_image_by_shot_ids.contains(shot_id)
+                    && !reference.selected_video_by_shot_ids.contains(shot_id)
+                {
+                    push_unique_reason(
+                        &mut blocking_reasons,
+                        format!("该素材仍被镜头“{shot_id}”选为关键帧，请先更换选中的素材。"),
+                    );
+                }
+            }
             self.asset_store
                 .validate_delete_paths(&project_root, &asset)
                 .await
@@ -304,6 +354,12 @@ fn map_store_error(error: AssetStoreError) -> AssetDeletionError {
             AssetDeletionError::FilesystemBoundary(message)
         }
         other => AssetDeletionError::Store(other),
+    }
+}
+
+fn push_unique_reason(reasons: &mut Vec<String>, reason: String) {
+    if !reasons.contains(&reason) {
+        reasons.push(reason);
     }
 }
 
@@ -626,6 +682,43 @@ mod tests {
         assert!(inspection.blocked.is_empty());
         assert_eq!(inspection.historical_references, vec!["ast_reference"]);
         assert!(inspection.items[0].warnings[0].contains("基于该历史输入的重试"));
+    }
+
+    #[tokio::test]
+    async fn semantic_live_relations_are_concrete_blockers() {
+        let root = tempdir().expect("root");
+        let asset = image_asset(root.path(), "prj_default", "ast_semantic");
+        let service = service(
+            root.path(),
+            asset.clone(),
+            vec![AssetDeletionReferences {
+                asset_id: asset.id.clone(),
+                reference_set_ids: vec!["rs_character".to_owned()],
+                reference_anchor_ids: vec!["anc_character".to_owned()],
+                shot_reference_ids: vec!["shot_1".to_owned()],
+                selected_by_shot_ids: vec!["shot_2".to_owned()],
+                selected_image_by_shot_ids: vec!["shot_image".to_owned()],
+                selected_video_by_shot_ids: vec!["shot_video".to_owned()],
+                ..Default::default()
+            }],
+            false,
+            Arc::new(CleanupFailStore),
+        );
+        let inspection = service
+            .inspect("prj_default", &[asset.id.as_str().to_owned()])
+            .await
+            .expect("semantic usage should inspect");
+        let reasons = &inspection.items[0].blocking_reasons;
+        assert_eq!(reasons.len(), 6);
+        assert!(reasons.iter().any(|reason| reason.contains("rs_character")));
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("anc_character")));
+        assert!(reasons.iter().any(|reason| reason.contains("shot_1")));
+        assert!(reasons.iter().any(|reason| reason.contains("shot_image")));
+        assert!(reasons.iter().any(|reason| reason.contains("shot_video")));
+        assert!(reasons.iter().any(|reason| reason.contains("shot_2")));
+        assert!(!inspection.items[0].can_delete);
     }
 
     #[tokio::test]

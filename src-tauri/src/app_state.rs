@@ -1,11 +1,13 @@
 use crate::application::asset_deletion_service::AssetDeletionService;
 use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
+use crate::application::asset_usage_service::AssetUsageService;
 use crate::application::asset_video_prompt_service::AssetVideoPromptService;
 use crate::application::batch_workflow_preset_service::BatchWorkflowPresetService;
 use crate::application::comfy_memory_service::ComfyMemoryService;
 use crate::application::comfy_preflight_service::ComfyPreflightService;
 use crate::application::comfy_service::ComfyService;
+use crate::application::consistency_profile_service::ConsistencyProfileService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::episode_production_service::EpisodeProductionService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
@@ -28,6 +30,7 @@ use crate::application::prompt_library_service::PromptLibraryService;
 use crate::application::prompt_template_bulk_service::PromptTemplateBulkService;
 use crate::application::prompt_template_service::PromptTemplateService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
+use crate::application::reference_set_service::ReferenceSetService;
 use crate::application::scene_production_service::SceneProductionService;
 use crate::application::series_production_service::SeriesProductionService;
 use crate::application::settings_service::SettingsService;
@@ -61,9 +64,12 @@ pub struct AppState {
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
+    pub asset_usage_service: Arc<AssetUsageService>,
     pub production_structure_service: Arc<ProductionStructureService>,
     pub project_command_center_service: Arc<ProjectCommandCenterService>,
     pub reference_anchor_service: Arc<ReferenceAnchorService>,
+    pub consistency_profile_service: Arc<ConsistencyProfileService>,
+    pub reference_set_service: Arc<ReferenceSetService>,
     pub asset_deletion_service: Arc<AssetDeletionService>,
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
     pub task_history_service: Arc<TaskHistoryService>,
@@ -112,9 +118,12 @@ impl AppState {
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
+        asset_usage_service: Arc<AssetUsageService>,
         production_structure_service: Arc<ProductionStructureService>,
         project_command_center_service: Arc<ProjectCommandCenterService>,
         reference_anchor_service: Arc<ReferenceAnchorService>,
+        consistency_profile_service: Arc<ConsistencyProfileService>,
+        reference_set_service: Arc<ReferenceSetService>,
         asset_deletion_service: Arc<AssetDeletionService>,
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
         task_history_service: Arc<TaskHistoryService>,
@@ -161,9 +170,12 @@ impl AppState {
             task_query_service,
             asset_query_service,
             asset_library_service,
+            asset_usage_service,
             production_structure_service,
             project_command_center_service,
             reference_anchor_service,
+            consistency_profile_service,
+            reference_set_service,
             asset_deletion_service,
             asset_video_prompt_service,
             task_history_service,

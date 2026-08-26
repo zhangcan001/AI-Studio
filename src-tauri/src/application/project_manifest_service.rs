@@ -1,4 +1,7 @@
-use crate::domain::{derive_stage_status, ShotStage, TaskStatus};
+use crate::domain::{
+    derive_stage_status, BindingRole, InheritanceMode, ProfileType, ReferenceSetPurpose, ShotStage,
+    TaskStatus,
+};
 use crate::error::AppError;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -13,7 +16,7 @@ use std::{
 use uuid::Uuid;
 
 const MANIFEST_FORMAT: &str = "ai-studio-project-manifest";
-const MANIFEST_VERSION: u32 = 1;
+const MANIFEST_VERSION: u32 = 2;
 
 #[derive(Clone)]
 pub struct ProjectManifestService {
@@ -43,6 +46,22 @@ pub struct ProjectManifest {
     pub structure: ManifestStructure,
     pub shots: Vec<ManifestShot>,
     pub reference_anchors: Vec<ManifestReferenceAnchor>,
+    #[serde(default)]
+    pub profiles: Vec<ManifestProfile>,
+    #[serde(default)]
+    pub costume_variants: Vec<ManifestCostumeVariant>,
+    #[serde(default)]
+    pub reference_sets: Vec<ManifestReferenceSet>,
+    #[serde(default)]
+    pub reference_set_items: Vec<ManifestReferenceSetItem>,
+    #[serde(default)]
+    pub shot_profile_bindings: Vec<ManifestShotProfileBinding>,
+    #[serde(default)]
+    pub shot_reference_set_bindings: Vec<ManifestShotReferenceSetBinding>,
+    #[serde(default)]
+    pub scope_profile_bindings: Vec<ManifestScopeProfileBinding>,
+    #[serde(default)]
+    pub scope_reference_set_bindings: Vec<ManifestScopeReferenceSetBinding>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -142,6 +161,117 @@ pub struct ManifestReferenceAnchor {
     pub ordered_asset_ids: Vec<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestProfile {
+    pub id: String,
+    pub profile_type: String,
+    pub name: String,
+    pub description: String,
+    pub canonical_prompt: Option<String>,
+    pub negative_prompt: Option<String>,
+    pub environment_prompt: Option<String>,
+    pub lighting_prompt: Option<String>,
+    pub material_prompt: Option<String>,
+    pub scale_prompt: Option<String>,
+    pub style_prompt: Option<String>,
+    pub color_prompt: Option<String>,
+    pub line_prompt: Option<String>,
+    pub output_notes: Option<String>,
+    pub default_style_profile_id: Option<String>,
+    pub default_reference_set_id: Option<String>,
+    pub active_revision_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestCostumeVariant {
+    pub id: String,
+    pub character_profile_id: String,
+    pub name: String,
+    pub prompt_fragment: String,
+    pub reference_set_id: Option<String>,
+    pub is_default: bool,
+    pub ordinal: i64,
+    pub active_revision_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestReferenceSet {
+    pub id: String,
+    pub name: String,
+    pub purpose: String,
+    pub description: String,
+    pub owner_profile_type: Option<String>,
+    pub owner_profile_id: Option<String>,
+    pub active_revision_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestReferenceSetItem {
+    pub reference_set_id: String,
+    pub asset_id: String,
+    pub ordinal: i64,
+    pub role: Option<String>,
+    pub is_primary: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestShotProfileBinding {
+    pub id: String,
+    pub shot_id: String,
+    pub role: String,
+    pub profile_type: String,
+    pub profile_id: String,
+    pub costume_variant_id: Option<String>,
+    pub ordinal: i64,
+    pub inheritance_mode: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestShotReferenceSetBinding {
+    pub id: String,
+    pub shot_id: String,
+    pub role: String,
+    pub reference_set_id: String,
+    pub ordinal: i64,
+    pub required: bool,
+    pub inheritance_mode: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestScopeProfileBinding {
+    pub id: String,
+    pub project_id: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub role: String,
+    pub profile_type: String,
+    pub profile_id: String,
+    pub costume_variant_id: Option<String>,
+    pub ordinal: i64,
+    pub inheritance_mode: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestScopeReferenceSetBinding {
+    pub id: String,
+    pub project_id: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub role: String,
+    pub reference_set_id: String,
+    pub ordinal: i64,
+    pub required: bool,
+    pub inheritance_mode: String,
+}
+
 #[derive(FromRow)]
 struct ProjectRow {
     id: String,
@@ -233,7 +363,161 @@ struct AnchorAssetRow {
     ordinal: i64,
 }
 
+#[derive(FromRow)]
+struct CharacterProfileRow {
+    id: String,
+    name: String,
+    description: String,
+    canonical_prompt: String,
+    negative_prompt: String,
+    default_style_profile_id: Option<String>,
+    default_reference_set_id: Option<String>,
+    active_revision_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct SceneProfileRow {
+    id: String,
+    name: String,
+    description: String,
+    environment_prompt: String,
+    lighting_prompt: Option<String>,
+    negative_prompt: Option<String>,
+    default_style_profile_id: Option<String>,
+    default_reference_set_id: Option<String>,
+    active_revision_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct PropProfileRow {
+    id: String,
+    name: String,
+    description: String,
+    canonical_prompt: String,
+    material_prompt: Option<String>,
+    scale_prompt: Option<String>,
+    default_reference_set_id: Option<String>,
+    active_revision_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct StyleProfileRow {
+    id: String,
+    name: String,
+    style_prompt: String,
+    color_prompt: Option<String>,
+    line_prompt: Option<String>,
+    negative_prompt: Option<String>,
+    output_notes: Option<String>,
+    active_revision_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct CostumeVariantRow {
+    id: String,
+    character_profile_id: String,
+    name: String,
+    prompt_fragment: String,
+    reference_set_id: Option<String>,
+    is_default: i64,
+    ordinal: i64,
+    active_revision_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct ReferenceSetRow {
+    id: String,
+    name: String,
+    purpose: String,
+    description: String,
+    owner_profile_type: Option<String>,
+    owner_profile_id: Option<String>,
+    active_revision_id: Option<String>,
+}
+
+#[derive(FromRow)]
+struct ReferenceSetItemRow {
+    reference_set_id: String,
+    asset_id: String,
+    ordinal: i64,
+    role: Option<String>,
+    is_primary: i64,
+}
+
+#[derive(FromRow)]
+struct ShotProfileBindingRow {
+    id: String,
+    shot_id: String,
+    role: String,
+    profile_type: String,
+    profile_id: String,
+    costume_variant_id: Option<String>,
+    ordinal: i64,
+    inheritance_mode: String,
+}
+
+#[derive(FromRow)]
+struct ShotReferenceSetBindingRow {
+    id: String,
+    shot_id: String,
+    role: String,
+    reference_set_id: String,
+    ordinal: i64,
+    required: i64,
+    inheritance_mode: String,
+}
+
+#[derive(FromRow)]
+struct ScopeProfileBindingRow {
+    id: String,
+    project_id: String,
+    scope_type: String,
+    scope_id: String,
+    role: String,
+    profile_type: String,
+    profile_id: String,
+    costume_variant_id: Option<String>,
+    ordinal: i64,
+    inheritance_mode: String,
+}
+
+#[derive(FromRow)]
+struct ScopeReferenceSetBindingRow {
+    id: String,
+    project_id: String,
+    scope_type: String,
+    scope_id: String,
+    role: String,
+    reference_set_id: String,
+    ordinal: i64,
+    required: i64,
+    inheritance_mode: String,
+}
+
+struct ConsistencyManifestRows {
+    character_profiles: Vec<CharacterProfileRow>,
+    scene_profiles: Vec<SceneProfileRow>,
+    prop_profiles: Vec<PropProfileRow>,
+    style_profiles: Vec<StyleProfileRow>,
+    costume_variants: Vec<CostumeVariantRow>,
+    reference_sets: Vec<ReferenceSetRow>,
+    reference_set_items: Vec<ReferenceSetItemRow>,
+    shot_profile_bindings: Vec<ShotProfileBindingRow>,
+    shot_reference_set_bindings: Vec<ShotReferenceSetBindingRow>,
+    scope_profile_bindings: Vec<ScopeProfileBindingRow>,
+    scope_reference_set_bindings: Vec<ScopeReferenceSetBindingRow>,
+}
+
 impl ProjectManifestService {
+    pub fn parse(bytes: &[u8]) -> Result<ProjectManifest, AppError> {
+        let manifest = serde_json::from_slice::<ProjectManifest>(bytes)
+            .map_err(|error| AppError::backup_invalid(format!("项目清单 JSON 无效：{error}")))?;
+        if manifest.format != MANIFEST_FORMAT || !matches!(manifest.version, 1 | 2) {
+            return Err(AppError::backup_invalid("项目清单格式或版本不受支持"));
+        }
+        Ok(manifest)
+    }
+
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
@@ -339,6 +623,7 @@ impl ProjectManifestService {
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
         let (anchors, anchor_assets) = query_anchors(&mut transaction, project_id).await?;
+        let consistency = query_consistency(&mut transaction, project_id).await?;
         transaction
             .commit()
             .await
@@ -461,6 +746,7 @@ impl ProjectManifestService {
                 }
             })
             .collect();
+        let consistency = assemble_consistency(consistency)?;
         Ok(ProjectManifest {
             format: MANIFEST_FORMAT.to_owned(),
             version: MANIFEST_VERSION,
@@ -473,6 +759,14 @@ impl ProjectManifestService {
             structure,
             shots: manifest_shots,
             reference_anchors,
+            profiles: consistency.profiles,
+            costume_variants: consistency.costume_variants,
+            reference_sets: consistency.reference_sets,
+            reference_set_items: consistency.reference_set_items,
+            shot_profile_bindings: consistency.shot_profile_bindings,
+            shot_reference_set_bindings: consistency.shot_reference_set_bindings,
+            scope_profile_bindings: consistency.scope_profile_bindings,
+            scope_reference_set_bindings: consistency.scope_reference_set_bindings,
         })
     }
 }
@@ -662,6 +956,414 @@ async fn query_anchors(
     Ok((anchors, assets))
 }
 
+async fn query_consistency(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    project_id: &str,
+) -> Result<ConsistencyManifestRows, AppError> {
+    let character_profiles = sqlx::query_as::<_, CharacterProfileRow>(
+        "SELECT id, name, description, canonical_prompt, negative_prompt,
+                default_style_profile_id, default_reference_set_id, active_revision_id
+         FROM character_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let scene_profiles = sqlx::query_as::<_, SceneProfileRow>(
+        "SELECT id, name, description, environment_prompt, lighting_prompt,
+                negative_prompt, default_style_profile_id, default_reference_set_id,
+                active_revision_id
+         FROM scene_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let prop_profiles = sqlx::query_as::<_, PropProfileRow>(
+        "SELECT id, name, description, canonical_prompt, material_prompt, scale_prompt,
+                default_reference_set_id, active_revision_id
+         FROM prop_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let style_profiles = sqlx::query_as::<_, StyleProfileRow>(
+        "SELECT id, name, style_prompt, color_prompt, line_prompt, negative_prompt,
+                output_notes, active_revision_id
+         FROM style_profiles
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let costume_variants = sqlx::query_as::<_, CostumeVariantRow>(
+        "SELECT v.id, v.character_profile_id, v.name, v.prompt_fragment,
+                v.reference_set_id, v.is_default, v.ordinal, v.active_revision_id
+         FROM costume_variants v
+         JOIN character_profiles p ON p.id = v.character_profile_id
+         WHERE p.project_id = ?
+         ORDER BY v.character_profile_id, v.ordinal, v.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let reference_sets = sqlx::query_as::<_, ReferenceSetRow>(
+        "SELECT id, name, purpose, description, owner_profile_type,
+                owner_profile_id, active_revision_id
+         FROM reference_sets
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let reference_set_items = sqlx::query_as::<_, ReferenceSetItemRow>(
+        "SELECT i.reference_set_id, i.asset_id, i.ordinal, i.role, i.is_primary
+         FROM reference_set_items i
+         JOIN reference_sets r ON r.id = i.reference_set_id
+         WHERE r.project_id = ?
+         ORDER BY i.reference_set_id, i.ordinal, i.asset_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let shot_profile_bindings = sqlx::query_as::<_, ShotProfileBindingRow>(
+        "SELECT b.id, b.shot_id, b.role, b.profile_type, b.profile_id,
+                b.costume_variant_id, b.ordinal, b.inheritance_mode
+         FROM shot_profile_bindings b
+         JOIN shots s ON s.id = b.shot_id
+         WHERE s.project_id = ?
+         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let shot_reference_set_bindings = sqlx::query_as::<_, ShotReferenceSetBindingRow>(
+        "SELECT b.id, b.shot_id, b.role, b.reference_set_id, b.ordinal,
+                b.required, b.inheritance_mode
+         FROM shot_reference_set_bindings b
+         JOIN shots s ON s.id = b.shot_id
+         WHERE s.project_id = ?
+         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let scope_profile_bindings = sqlx::query_as::<_, ScopeProfileBindingRow>(
+        "SELECT id, project_id, scope_type, scope_id, role, profile_type,
+                profile_id, costume_variant_id, ordinal, inheritance_mode
+         FROM consistency_scope_profile_bindings
+         WHERE project_id = ?
+         ORDER BY scope_type, scope_id, role, ordinal, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let scope_reference_set_bindings = sqlx::query_as::<_, ScopeReferenceSetBindingRow>(
+        "SELECT id, project_id, scope_type, scope_id, role, reference_set_id,
+                ordinal, required, inheritance_mode
+         FROM consistency_scope_reference_set_bindings
+         WHERE project_id = ?
+         ORDER BY scope_type, scope_id, role, ordinal, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    Ok(ConsistencyManifestRows {
+        character_profiles,
+        scene_profiles,
+        prop_profiles,
+        style_profiles,
+        costume_variants,
+        reference_sets,
+        reference_set_items,
+        shot_profile_bindings,
+        shot_reference_set_bindings,
+        scope_profile_bindings,
+        scope_reference_set_bindings,
+    })
+}
+
+struct AssembledConsistency {
+    profiles: Vec<ManifestProfile>,
+    costume_variants: Vec<ManifestCostumeVariant>,
+    reference_sets: Vec<ManifestReferenceSet>,
+    reference_set_items: Vec<ManifestReferenceSetItem>,
+    shot_profile_bindings: Vec<ManifestShotProfileBinding>,
+    shot_reference_set_bindings: Vec<ManifestShotReferenceSetBinding>,
+    scope_profile_bindings: Vec<ManifestScopeProfileBinding>,
+    scope_reference_set_bindings: Vec<ManifestScopeReferenceSetBinding>,
+}
+
+fn assemble_consistency(rows: ConsistencyManifestRows) -> Result<AssembledConsistency, AppError> {
+    let mut profiles = Vec::with_capacity(
+        rows.character_profiles.len()
+            + rows.scene_profiles.len()
+            + rows.prop_profiles.len()
+            + rows.style_profiles.len(),
+    );
+    profiles.extend(
+        rows.character_profiles
+            .into_iter()
+            .map(|row| ManifestProfile {
+                id: row.id,
+                profile_type: ProfileType::Character.as_str().to_owned(),
+                name: row.name,
+                description: row.description,
+                canonical_prompt: Some(row.canonical_prompt),
+                negative_prompt: Some(row.negative_prompt),
+                environment_prompt: None,
+                lighting_prompt: None,
+                material_prompt: None,
+                scale_prompt: None,
+                style_prompt: None,
+                color_prompt: None,
+                line_prompt: None,
+                output_notes: None,
+                default_style_profile_id: row.default_style_profile_id,
+                default_reference_set_id: row.default_reference_set_id,
+                active_revision_id: row.active_revision_id,
+            }),
+    );
+    profiles.extend(rows.scene_profiles.into_iter().map(|row| ManifestProfile {
+        id: row.id,
+        profile_type: ProfileType::Scene.as_str().to_owned(),
+        name: row.name,
+        description: row.description,
+        canonical_prompt: None,
+        negative_prompt: row.negative_prompt,
+        environment_prompt: Some(row.environment_prompt),
+        lighting_prompt: row.lighting_prompt,
+        material_prompt: None,
+        scale_prompt: None,
+        style_prompt: None,
+        color_prompt: None,
+        line_prompt: None,
+        output_notes: None,
+        default_style_profile_id: row.default_style_profile_id,
+        default_reference_set_id: row.default_reference_set_id,
+        active_revision_id: row.active_revision_id,
+    }));
+    profiles.extend(rows.prop_profiles.into_iter().map(|row| ManifestProfile {
+        id: row.id,
+        profile_type: ProfileType::Prop.as_str().to_owned(),
+        name: row.name,
+        description: row.description,
+        canonical_prompt: Some(row.canonical_prompt),
+        negative_prompt: None,
+        environment_prompt: None,
+        lighting_prompt: None,
+        material_prompt: row.material_prompt,
+        scale_prompt: row.scale_prompt,
+        style_prompt: None,
+        color_prompt: None,
+        line_prompt: None,
+        output_notes: None,
+        default_style_profile_id: None,
+        default_reference_set_id: row.default_reference_set_id,
+        active_revision_id: row.active_revision_id,
+    }));
+    profiles.extend(rows.style_profiles.into_iter().map(|row| ManifestProfile {
+        id: row.id,
+        profile_type: ProfileType::Style.as_str().to_owned(),
+        name: row.name,
+        description: String::new(),
+        canonical_prompt: None,
+        negative_prompt: row.negative_prompt,
+        environment_prompt: None,
+        lighting_prompt: None,
+        material_prompt: None,
+        scale_prompt: None,
+        style_prompt: Some(row.style_prompt),
+        color_prompt: row.color_prompt,
+        line_prompt: row.line_prompt,
+        output_notes: row.output_notes,
+        default_style_profile_id: None,
+        default_reference_set_id: None,
+        active_revision_id: row.active_revision_id,
+    }));
+
+    let costume_variants = rows
+        .costume_variants
+        .into_iter()
+        .map(|row| {
+            Ok(ManifestCostumeVariant {
+                id: row.id,
+                character_profile_id: row.character_profile_id,
+                name: row.name,
+                prompt_fragment: row.prompt_fragment,
+                reference_set_id: row.reference_set_id,
+                is_default: sqlite_bool("costume variant is_default", row.is_default)?,
+                ordinal: row.ordinal,
+                active_revision_id: row.active_revision_id,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let reference_sets = rows
+        .reference_sets
+        .into_iter()
+        .map(|row| {
+            ReferenceSetPurpose::try_from_db(&row.purpose).map_err(|error| {
+                AppError::database(format!("Reference Set purpose 无效：{error}"))
+            })?;
+            Ok(ManifestReferenceSet {
+                id: row.id,
+                name: row.name,
+                purpose: row.purpose,
+                description: row.description,
+                owner_profile_type: row.owner_profile_type,
+                owner_profile_id: row.owner_profile_id,
+                active_revision_id: row.active_revision_id,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let reference_set_items = rows
+        .reference_set_items
+        .into_iter()
+        .map(|row| {
+            Ok(ManifestReferenceSetItem {
+                reference_set_id: row.reference_set_id,
+                asset_id: row.asset_id,
+                ordinal: row.ordinal,
+                role: row.role,
+                is_primary: sqlite_bool("reference set item is_primary", row.is_primary)?,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let shot_profile_bindings = rows
+        .shot_profile_bindings
+        .into_iter()
+        .map(|row| {
+            ProfileType::try_from_db(&row.profile_type).map_err(|error| {
+                AppError::database(format!("Shot Profile profile_type 无效：{error}"))
+            })?;
+            BindingRole::try_from_db(&row.role)
+                .map_err(|error| AppError::database(format!("Shot Profile role 无效：{error}")))?;
+            InheritanceMode::try_from_db(&row.inheritance_mode).map_err(|error| {
+                AppError::database(format!("Shot Profile inheritance_mode 无效：{error}"))
+            })?;
+            Ok(ManifestShotProfileBinding {
+                id: row.id,
+                shot_id: row.shot_id,
+                role: row.role,
+                profile_type: row.profile_type,
+                profile_id: row.profile_id,
+                costume_variant_id: row.costume_variant_id,
+                ordinal: row.ordinal,
+                inheritance_mode: row.inheritance_mode,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let shot_reference_set_bindings = rows
+        .shot_reference_set_bindings
+        .into_iter()
+        .map(|row| {
+            BindingRole::try_from_db(&row.role).map_err(|error| {
+                AppError::database(format!("Shot Reference Set role 无效：{error}"))
+            })?;
+            InheritanceMode::try_from_db(&row.inheritance_mode).map_err(|error| {
+                AppError::database(format!("Shot Reference Set inheritance_mode 无效：{error}"))
+            })?;
+            Ok(ManifestShotReferenceSetBinding {
+                id: row.id,
+                shot_id: row.shot_id,
+                role: row.role,
+                reference_set_id: row.reference_set_id,
+                ordinal: row.ordinal,
+                required: sqlite_bool("shot reference set required", row.required)?,
+                inheritance_mode: row.inheritance_mode,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let scope_profile_bindings = rows
+        .scope_profile_bindings
+        .into_iter()
+        .map(|row| {
+            BindingRole::try_from_db(&row.role)
+                .map_err(|error| AppError::database(format!("Scope Profile role 无效：{error}")))?;
+            ProfileType::try_from_db(&row.profile_type).map_err(|error| {
+                AppError::database(format!("Scope Profile profile_type 无效：{error}"))
+            })?;
+            InheritanceMode::try_from_db(&row.inheritance_mode).map_err(|error| {
+                AppError::database(format!("Scope Profile inheritance_mode 无效：{error}"))
+            })?;
+            Ok(ManifestScopeProfileBinding {
+                id: row.id,
+                project_id: row.project_id,
+                scope_type: row.scope_type,
+                scope_id: row.scope_id,
+                role: row.role,
+                profile_type: row.profile_type,
+                profile_id: row.profile_id,
+                costume_variant_id: row.costume_variant_id,
+                ordinal: row.ordinal,
+                inheritance_mode: row.inheritance_mode,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let scope_reference_set_bindings = rows
+        .scope_reference_set_bindings
+        .into_iter()
+        .map(|row| {
+            BindingRole::try_from_db(&row.role).map_err(|error| {
+                AppError::database(format!("Scope Reference Set role 无效：{error}"))
+            })?;
+            InheritanceMode::try_from_db(&row.inheritance_mode).map_err(|error| {
+                AppError::database(format!(
+                    "Scope Reference Set inheritance_mode 无效：{error}"
+                ))
+            })?;
+            Ok(ManifestScopeReferenceSetBinding {
+                id: row.id,
+                project_id: row.project_id,
+                scope_type: row.scope_type,
+                scope_id: row.scope_id,
+                role: row.role,
+                reference_set_id: row.reference_set_id,
+                ordinal: row.ordinal,
+                required: sqlite_bool("Scope Reference Set required", row.required)?,
+                inheritance_mode: row.inheritance_mode,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    Ok(AssembledConsistency {
+        profiles,
+        costume_variants,
+        reference_sets,
+        reference_set_items,
+        shot_profile_bindings,
+        shot_reference_set_bindings,
+        scope_profile_bindings,
+        scope_reference_set_bindings,
+    })
+}
+
+fn sqlite_bool(field: &str, value: i64) -> Result<bool, AppError> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => Err(AppError::database(format!(
+            "{field} 必须为 SQLite 布尔值 0/1，实际为 {other}"
+        ))),
+    }
+}
+
 pub fn suggested_manifest_filename(project_name: &str) -> String {
     let sanitized = sanitize_filename_component(project_name);
     format!("AI-Studio-{sanitized}-Manifest.json")
@@ -786,6 +1488,14 @@ mod tests {
                 description: String::new(),
                 ordered_asset_ids: vec!["ast_a".to_owned()],
             }],
+            profiles: Vec::new(),
+            costume_variants: Vec::new(),
+            reference_sets: Vec::new(),
+            reference_set_items: Vec::new(),
+            shot_profile_bindings: Vec::new(),
+            shot_reference_set_bindings: Vec::new(),
+            scope_profile_bindings: Vec::new(),
+            scope_reference_set_bindings: Vec::new(),
         }
     }
 
@@ -822,5 +1532,155 @@ mod tests {
         let name = suggested_manifest_filename(" Drama: S1/Final? ");
         assert_eq!(name, "AI-Studio-Drama_ S1_Final_-Manifest.json");
         assert!(!name.contains([':', '/', '?', '\\']));
+    }
+
+    #[test]
+    fn manifest_v1_defaults_consistency_sections_to_empty() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.insert("version".to_owned(), json!(1));
+        for field in [
+            "profiles",
+            "costumeVariants",
+            "referenceSets",
+            "referenceSetItems",
+            "shotProfileBindings",
+            "shotReferenceSetBindings",
+            "scopeProfileBindings",
+            "scopeReferenceSetBindings",
+        ] {
+            object.remove(field);
+        }
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let parsed = ProjectManifestService::parse(&bytes).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert!(parsed.profiles.is_empty());
+        assert!(parsed.reference_sets.is_empty());
+        assert!(parsed.shot_profile_bindings.is_empty());
+        assert!(parsed.scope_reference_set_bindings.is_empty());
+    }
+
+    #[test]
+    fn manifest_v2_roundtrip_keeps_logical_consistency_relations() {
+        let mut manifest = fixture();
+        manifest.profiles.push(ManifestProfile {
+            id: "cp_a".to_owned(),
+            profile_type: "CHARACTER".to_owned(),
+            name: "主角".to_owned(),
+            description: String::new(),
+            canonical_prompt: Some("hero".to_owned()),
+            negative_prompt: Some("blur".to_owned()),
+            environment_prompt: None,
+            lighting_prompt: None,
+            material_prompt: None,
+            scale_prompt: None,
+            style_prompt: None,
+            color_prompt: None,
+            line_prompt: None,
+            output_notes: None,
+            default_style_profile_id: Some("sp_a".to_owned()),
+            default_reference_set_id: Some("rs_a".to_owned()),
+            active_revision_id: Some("rev_a".to_owned()),
+        });
+        manifest.costume_variants.push(ManifestCostumeVariant {
+            id: "cv_a".to_owned(),
+            character_profile_id: "cp_a".to_owned(),
+            name: "外套".to_owned(),
+            prompt_fragment: "dark coat".to_owned(),
+            reference_set_id: Some("rs_a".to_owned()),
+            is_default: true,
+            ordinal: 0,
+            active_revision_id: None,
+        });
+        manifest.reference_sets.push(ManifestReferenceSet {
+            id: "rs_a".to_owned(),
+            name: "主角参考".to_owned(),
+            purpose: "CHARACTER".to_owned(),
+            description: String::new(),
+            owner_profile_type: Some("CHARACTER".to_owned()),
+            owner_profile_id: Some("cp_a".to_owned()),
+            active_revision_id: None,
+        });
+        manifest.reference_set_items.push(ManifestReferenceSetItem {
+            reference_set_id: "rs_a".to_owned(),
+            asset_id: "ast_a".to_owned(),
+            ordinal: 0,
+            role: Some("front".to_owned()),
+            is_primary: true,
+        });
+        manifest
+            .shot_profile_bindings
+            .push(ManifestShotProfileBinding {
+                id: "spb_a".to_owned(),
+                shot_id: "sht_a".to_owned(),
+                role: "CHARACTER".to_owned(),
+                profile_type: "CHARACTER".to_owned(),
+                profile_id: "cp_a".to_owned(),
+                costume_variant_id: Some("cv_a".to_owned()),
+                ordinal: 0,
+                inheritance_mode: "EXPLICIT".to_owned(),
+            });
+        manifest
+            .shot_reference_set_bindings
+            .push(ManifestShotReferenceSetBinding {
+                id: "srb_a".to_owned(),
+                shot_id: "sht_a".to_owned(),
+                role: "CHARACTER".to_owned(),
+                reference_set_id: "rs_a".to_owned(),
+                ordinal: 0,
+                required: true,
+                inheritance_mode: "REPLACE".to_owned(),
+            });
+        manifest
+            .scope_profile_bindings
+            .push(ManifestScopeProfileBinding {
+                id: "hpb_a".to_owned(),
+                project_id: "prj_a".to_owned(),
+                scope_type: "PROJECT".to_owned(),
+                scope_id: "prj_a".to_owned(),
+                role: "CHARACTER".to_owned(),
+                profile_type: "CHARACTER".to_owned(),
+                profile_id: "cp_a".to_owned(),
+                costume_variant_id: None,
+                ordinal: 0,
+                inheritance_mode: "INHERITED".to_owned(),
+            });
+        manifest
+            .scope_reference_set_bindings
+            .push(ManifestScopeReferenceSetBinding {
+                id: "hrb_a".to_owned(),
+                project_id: "prj_a".to_owned(),
+                scope_type: "PROJECT".to_owned(),
+                scope_id: "prj_a".to_owned(),
+                role: "CHARACTER".to_owned(),
+                reference_set_id: "rs_a".to_owned(),
+                ordinal: 0,
+                required: true,
+                inheritance_mode: "EXPLICIT".to_owned(),
+            });
+        let parsed = ProjectManifestService::parse(&manifest_bytes(&manifest).unwrap()).unwrap();
+        assert_eq!(parsed, manifest);
+        let json = serde_json::to_string(&parsed).unwrap();
+        for forbidden in [
+            "storagePath",
+            "thumbnail",
+            "comfyEndpoint",
+            "runtime",
+            "gpu",
+            "taskHistory",
+        ] {
+            assert!(!json.contains(forbidden), "found {forbidden}");
+        }
+    }
+
+    #[test]
+    fn manifest_parse_rejects_corrupt_format_and_version() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        value["format"] = json!("other-format");
+        assert!(ProjectManifestService::parse(&serde_json::to_vec(&value).unwrap()).is_err());
+        value["format"] = json!(MANIFEST_FORMAT);
+        value["version"] = json!(3);
+        assert!(ProjectManifestService::parse(&serde_json::to_vec(&value).unwrap()).is_err());
+        assert!(ProjectManifestService::parse(b"{not-json}").is_err());
     }
 }

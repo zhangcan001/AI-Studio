@@ -2,6 +2,7 @@ pub mod asset_deletion_service;
 pub mod asset_import_service;
 pub mod asset_library_service;
 pub mod asset_query_service;
+pub mod asset_usage_service;
 pub mod asset_video_prompt_service;
 pub mod batch_workflow_preset_service;
 pub mod build_info;

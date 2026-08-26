@@ -284,7 +284,7 @@ async fn dev036_backup_v12_preserves_template_source_and_frozen_stage_snapshot()
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&manifest).expect("manifest should be JSON")
             ["version"],
-        12
+        13
     );
     let mut project = String::new();
     archive

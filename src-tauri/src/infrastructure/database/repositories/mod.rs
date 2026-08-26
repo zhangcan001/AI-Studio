@@ -1,6 +1,7 @@
 mod asset;
 mod asset_browse;
 mod asset_deletion;
+mod asset_usage;
 mod asset_video_prompt;
 mod consistency_profile;
 mod consistency_scope;
@@ -27,6 +28,7 @@ mod workflow_runtime_state;
 pub use asset::SqliteAssetRepository;
 pub use asset_browse::SqliteAssetBrowseRepository;
 pub use asset_deletion::SqliteAssetDeletionRepository;
+pub use asset_usage::SqliteAssetUsageRepository;
 pub use asset_video_prompt::SqliteAssetVideoPromptRepository;
 pub use consistency_profile::SqliteConsistencyProfileRepository;
 pub use consistency_scope::SqliteConsistencyScopeRepository;

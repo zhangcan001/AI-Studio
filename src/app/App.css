@@ -5711,6 +5711,32 @@ textarea:focus {
   }
 }
 
+/* DEV-051 Asset Library 2.0: keep the three consistency workspaces usable
+   when the shell has less room than the desktop rail. */
+.asset-workspace,
+.asset-workspace-tabs,
+.consistency-profile-library,
+.reference-set-library {
+  min-width: 0;
+}
+
+.asset-workspace-tabs {
+  margin-bottom: 2px;
+}
+
+@media (max-width: 900px) {
+  .consistency-profile-library > div[style*="grid-template-columns"],
+  .reference-set-library > div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .asset-workspace-tabs button {
+    flex-basis: 100% !important;
+  }
+}
+
 @media (max-width: 420px) {
   .brand-mark {
     width: 42px;

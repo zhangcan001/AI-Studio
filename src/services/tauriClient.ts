@@ -76,6 +76,29 @@ import type {
 import type { WorkspaceResume } from "../types/workspaceResume";
 import type { ProjectCommandCenterAggregate } from "../types/projectCommandCenter";
 import type { ReferenceAnchorRequest, ReferenceAnchorUpdateRequest, ReferenceAnchorView } from "../types/referenceAnchor";
+import type {
+  AssetUsageSummary,
+  CharacterProfileRequest,
+  ConsistencyProfileView,
+  CostumeVariantRequest,
+  CostumeVariantUpdateRequest,
+  CostumeVariantView,
+  ProfileType,
+  ProfileUsageSummary,
+  PropProfileRequest,
+  PropProfileUpdateRequest,
+  ReferenceSetDetailView,
+  ReferenceSetPurpose,
+  ReferenceSetRequest,
+  ReferenceSetSummary,
+  ReferenceSetUpdateRequest,
+  ReferenceSetView,
+  ReferenceSetUsageSummary,
+  SceneProfileRequest,
+  SceneProfileUpdateRequest,
+  StyleProfileRequest,
+  StyleProfileUpdateRequest,
+} from "../types/consistency";
 import type { PresetView } from "../types/preset";
 import type {
   BatchWorkflowPreset,
@@ -705,6 +728,132 @@ export function exportProjectManifest(projectId: string, destination?: string): 
 
 export function listReferenceAnchors(projectId: string): Promise<ReferenceAnchorView[]> {
   return invoke<ReferenceAnchorView[]>("reference_anchors_list", { projectId });
+}
+
+export function listConsistencyProfiles(
+  projectId: string,
+  profileType?: ProfileType,
+): Promise<ConsistencyProfileView[]> {
+  const args = profileType ? { projectId, profileType } : { projectId };
+  return invoke<ConsistencyProfileView[]>("consistency_profile_list", args);
+}
+
+export function getConsistencyProfile(
+  projectId: string,
+  profileType: ProfileType,
+  profileId: string,
+): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("consistency_profile_get", { projectId, profileType, profileId });
+}
+
+export function createCharacterProfile(request: CharacterProfileRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("character_profile_create", { request });
+}
+
+export function updateCharacterProfile(request: CharacterProfileRequest & { profileId: string }): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("character_profile_update", { request });
+}
+
+export function createSceneProfile(request: SceneProfileRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("scene_profile_create", { request });
+}
+
+export function updateSceneProfile(request: SceneProfileUpdateRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("scene_profile_update", { request });
+}
+
+export function createPropProfile(request: PropProfileRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("prop_profile_create", { request });
+}
+
+export function updatePropProfile(request: PropProfileUpdateRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("prop_profile_update", { request });
+}
+
+export function createStyleProfile(request: StyleProfileRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("style_profile_create", { request });
+}
+
+export function updateStyleProfile(request: StyleProfileUpdateRequest): Promise<ConsistencyProfileView> {
+  return invoke<ConsistencyProfileView>("style_profile_update", { request });
+}
+
+export function deleteConsistencyProfile(
+  projectId: string,
+  profileType: ProfileType,
+  profileId: string,
+): Promise<void> {
+  return invoke<void>("consistency_profile_delete", { projectId, profileType, profileId });
+}
+
+export function listCostumeVariants(projectId: string, characterProfileId: string): Promise<CostumeVariantView[]> {
+  return invoke<CostumeVariantView[]>("costume_variant_list", { projectId, characterProfileId });
+}
+
+export function getCostumeVariant(projectId: string, costumeVariantId: string): Promise<CostumeVariantView> {
+  return invoke<CostumeVariantView>("costume_variant_get", { projectId, costumeVariantId });
+}
+
+export function createCostumeVariant(request: CostumeVariantRequest): Promise<CostumeVariantView> {
+  return invoke<CostumeVariantView>("costume_variant_create", { request });
+}
+
+export function updateCostumeVariant(request: CostumeVariantUpdateRequest): Promise<CostumeVariantView> {
+  return invoke<CostumeVariantView>("costume_variant_update", { request });
+}
+
+export function deleteCostumeVariant(projectId: string, costumeVariantId: string): Promise<void> {
+  return invoke<void>("costume_variant_delete", { projectId, costumeVariantId });
+}
+
+export function listReferenceSets(
+  projectId: string,
+  purpose?: ReferenceSetPurpose,
+): Promise<ReferenceSetSummary[]> {
+  const args = purpose ? { projectId, purpose } : { projectId };
+  return invoke<ReferenceSetSummary[]>("reference_set_list", args);
+}
+
+export function getReferenceSetDetail(projectId: string, referenceSetId: string): Promise<ReferenceSetDetailView> {
+  return invoke<ReferenceSetDetailView>("reference_set_detail_get", { projectId, referenceSetId });
+}
+
+export function createReferenceSet(request: ReferenceSetRequest): Promise<ReferenceSetView> {
+  return invoke<ReferenceSetView>("reference_set_create", { request });
+}
+
+export function updateReferenceSet(request: ReferenceSetUpdateRequest): Promise<ReferenceSetView> {
+  return invoke<ReferenceSetView>("reference_set_update", { request });
+}
+
+export function deleteReferenceSet(projectId: string, referenceSetId: string): Promise<void> {
+  return invoke<void>("reference_set_delete", { projectId, referenceSetId });
+}
+
+export function createReferenceSetFromAnchor(
+  projectId: string,
+  anchorId: string,
+  newName?: string,
+): Promise<ReferenceSetView> {
+  return invoke<ReferenceSetView>("reference_set_create_from_anchor", {
+    request: { projectId, anchorId, newName },
+  });
+}
+
+export function getAssetUsage(projectId: string, assetId: string): Promise<AssetUsageSummary> {
+  return invoke<AssetUsageSummary>("asset_usage_get", { projectId, assetId });
+}
+
+export function getProfileUsage(
+  projectId: string,
+  profileType: ProfileType,
+  profileId: string,
+): Promise<ProfileUsageSummary> {
+  return invoke<ProfileUsageSummary>("profile_usage_get", { projectId, profileType, profileId });
+}
+
+export function getReferenceSetUsage(projectId: string, referenceSetId: string): Promise<ReferenceSetUsageSummary> {
+  return invoke<ReferenceSetUsageSummary>("reference_set_usage_get", { projectId, referenceSetId });
 }
 
 export function getShot(projectId: string, shotId: string): Promise<ShotView> {

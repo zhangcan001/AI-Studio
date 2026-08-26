@@ -22,6 +22,32 @@ pub struct ReferenceSetItemRequest {
 pub type ReferenceSetItemInput = ReferenceSetItemRequest;
 pub type CreateReferenceSetItemRequest = ReferenceSetItemRequest;
 
+/// Asset data needed by the ReferenceSet editor.
+///
+/// This intentionally contains only the small, display-oriented projection
+/// required by the UI.  The full Asset entity remains behind AssetRepository.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceSetItemDetail {
+    pub asset_id: String,
+    pub ordinal: i64,
+    pub role: Option<String>,
+    pub is_primary: bool,
+    pub asset_name: String,
+    pub thumbnail_available: bool,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceSetDetailView {
+    pub reference_set: ReferenceSet,
+    pub items: Vec<ReferenceSetItemDetail>,
+}
+
+/// Compatibility alias for callers that prefer the shorter domain-facing
+/// name.  Commands should still map this to their stable wire DTO.
+pub type ReferenceSetDetail = ReferenceSetDetailView;
+
 #[derive(Clone, Debug)]
 pub struct CreateReferenceSetRequest {
     pub project_id: String,
@@ -96,6 +122,81 @@ impl ReferenceSetService {
             .find_reference_set(&project_id, &reference_set_id)
             .await?
             .ok_or_else(|| ReferenceSetError::not_found(reference_set_id))
+    }
+
+    /// Loads a ReferenceSet header and its editor-ready item projections.
+    ///
+    /// Item rows are read once and all referenced assets are loaded through the
+    /// repository bulk API.  A stale or cross-project relation is an error so
+    /// the UI never receives a silently incomplete detail response.
+    pub async fn get_detail(
+        &self,
+        project_id: &str,
+        reference_set_id: &str,
+    ) -> Result<ReferenceSetDetailView, ReferenceSetError> {
+        let reference_set = self.get(project_id, reference_set_id).await?;
+        let items = self.repository.list_items(&reference_set.id).await?;
+        let asset_ids = items
+            .iter()
+            .map(|item| {
+                AssetId::parse(item.asset_id.clone()).map_err(|error| {
+                    ReferenceSetError::invalid_input(format!(
+                        "REFERENCE_SET_ASSET_ID_INVALID: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let assets = if asset_ids.is_empty() {
+            Vec::new()
+        } else {
+            self.asset_repository.find_many_by_ids(&asset_ids).await?
+        };
+        let assets_by_id: HashMap<&str, _> = assets
+            .iter()
+            .map(|asset| (asset.id.as_str(), asset))
+            .collect();
+
+        let items = items
+            .into_iter()
+            .map(|item| {
+                let asset = assets_by_id
+                    .get(item.asset_id.as_str())
+                    .ok_or_else(|| ReferenceSetError::asset_not_found(item.asset_id.clone()))?;
+                if asset.project_id != reference_set.project_id {
+                    return Err(ReferenceSetError::project_mismatch(format!(
+                        "asset {} belongs to another project",
+                        item.asset_id
+                    )));
+                }
+                if asset.asset_type != AssetType::Image {
+                    return Err(ReferenceSetError::image_required(item.asset_id));
+                }
+                Ok(ReferenceSetItemDetail {
+                    asset_id: item.asset_id,
+                    ordinal: item.ordinal,
+                    role: item.role,
+                    is_primary: item.is_primary,
+                    asset_name: asset.name.clone(),
+                    thumbnail_available: asset.thumbnail_path.is_some(),
+                    width: asset.width,
+                    height: asset.height,
+                })
+            })
+            .collect::<Result<Vec<_>, ReferenceSetError>>()?;
+
+        Ok(ReferenceSetDetailView {
+            reference_set,
+            items,
+        })
+    }
+
+    /// Alias kept for service callers using the noun-style read API name.
+    pub async fn detail(
+        &self,
+        project_id: &str,
+        reference_set_id: &str,
+    ) -> Result<ReferenceSetDetailView, ReferenceSetError> {
+        self.get_detail(project_id, reference_set_id).await
     }
 
     pub async fn create(

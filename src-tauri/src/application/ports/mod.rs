@@ -4,6 +4,7 @@ pub mod asset_browse_repository;
 pub mod asset_deletion_repository;
 pub mod asset_repository;
 pub mod asset_store;
+pub mod asset_usage_repository;
 pub mod asset_video_prompt_repository;
 pub mod clock;
 pub mod comfy_adapter;
@@ -46,6 +47,10 @@ pub use asset_repository::{AssetRepository, TaskOutputAssetMapping};
 pub use asset_store::{
     AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile,
     StoredAssetFile,
+};
+pub use asset_usage_repository::{
+    AssetUsageItem, AssetUsageRepository, AssetUsageSummary, ProfileUsageSummary,
+    ReferenceSetUsageSummary,
 };
 pub use asset_video_prompt_repository::{AssetVideoPromptRecord, AssetVideoPromptRepository};
 pub use clock::{Clock, MonotonicEventClock};

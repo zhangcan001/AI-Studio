@@ -3,6 +3,7 @@ import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, getAssetVid
 import type { AssetView } from "../../types/asset";
 import type { AssetTag } from "../../types/organization";
 import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
+import { AssetUsagePanel } from "./AssetUsagePanel";
 
 interface Props {
   projectId: string;
@@ -230,6 +231,7 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
             <button type="button" className="quiet-button" onClick={() => void createAndAddTag()} disabled={organizationBusy || !newTagName.trim()}>新建并添加</button>
           </div>
         </section>
+        <AssetUsagePanel projectId={projectId} assetId={asset.id} assetName={displayName} />
       </section>
     </div>
   );
