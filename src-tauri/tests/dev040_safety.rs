@@ -285,6 +285,6 @@ fn dev040_architecture_reuses_shot_batch_and_has_no_second_runtime_path() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 21)
+            .is_some_and(|version| version <= 22)
     }));
 }

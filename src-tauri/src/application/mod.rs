@@ -11,6 +11,7 @@ mod cancellation_e2e;
 pub mod comfy_memory_service;
 pub mod comfy_preflight_service;
 pub mod comfy_service;
+pub mod consistency_profile_service;
 #[cfg(test)]
 mod dev027_e2e;
 #[cfg(test)]
@@ -51,6 +52,7 @@ pub mod prompt_library_service;
 pub mod prompt_template_bulk_service;
 pub mod prompt_template_service;
 pub mod reference_anchor_service;
+pub mod reference_set_service;
 pub mod scene_production_service;
 pub mod scheduler;
 pub mod series_production_service;

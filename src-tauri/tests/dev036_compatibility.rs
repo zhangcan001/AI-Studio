@@ -341,7 +341,14 @@ fn dev036_migration_and_backup_versions_remain_frozen() {
         .flatten()
         .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
         .collect::<Vec<_>>();
-    assert!(!migrations.iter().any(|name| name.starts_with("022_")));
+    assert_eq!(
+        migrations
+            .iter()
+            .filter(|name| name.starts_with("022_"))
+            .count(),
+        1
+    );
+    assert!(!migrations.iter().any(|name| name.starts_with("023_")));
     assert!(migrations.iter().any(|name| name.starts_with("021_")));
 
     let backup = read_text(root.join("src-tauri/src/application/project_backup_service.rs"));
