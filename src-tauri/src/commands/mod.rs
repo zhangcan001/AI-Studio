@@ -26,6 +26,7 @@ pub mod settings;
 pub mod shot;
 pub mod shot_batch;
 pub mod shot_bulk;
+pub mod shot_readiness;
 pub mod task;
 pub mod workflow_benchmark;
 pub mod workflow_library;

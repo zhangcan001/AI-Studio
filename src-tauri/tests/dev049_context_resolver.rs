@@ -1464,6 +1464,105 @@ mod resolver_contract_tests {
     }
 
     #[tokio::test]
+    async fn resolver_resolves_video_selected_image_and_hashes_it() {
+        let mut selected_a = base_fixture();
+        selected_a.shots[0].shot.selected_image_asset_id = Some("ast_selected_a".to_owned());
+        selected_a.assets = vec![asset("ast_selected_a", PID, AssetType::Image)];
+        let (resolver_a, _) = make_resolver(selected_a);
+        let context_a = resolver_a
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Video)
+            .await
+            .unwrap();
+
+        let mut selected_b = base_fixture();
+        selected_b.shots[0].shot.selected_image_asset_id = Some("ast_selected_b".to_owned());
+        selected_b.assets = vec![asset("ast_selected_b", PID, AssetType::Image)];
+        let (resolver_b, _) = make_resolver(selected_b);
+        let context_b = resolver_b
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Video)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            context_a.stage_input.selected_image_asset_id.as_deref(),
+            Some("ast_selected_a")
+        );
+        assert_eq!(
+            context_a.stage_input.selected_image_sha256.as_deref(),
+            Some("sha-ast_selected_a")
+        );
+        assert_ne!(
+            context_a.resolver_identity.context_hash,
+            context_b.resolver_identity.context_hash
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_image_stage_ignores_selected_image_for_input_and_hash() {
+        let mut selected_a = base_fixture();
+        selected_a.shots[0].shot.selected_image_asset_id = Some("ast_selected_a".to_owned());
+        let (resolver_a, _) = make_resolver(selected_a);
+        let context_a = resolver_a
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Image)
+            .await
+            .unwrap();
+
+        let mut selected_b = base_fixture();
+        selected_b.shots[0].shot.selected_image_asset_id = Some("ast_selected_b".to_owned());
+        let (resolver_b, _) = make_resolver(selected_b);
+        let context_b = resolver_b
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Image)
+            .await
+            .unwrap();
+
+        assert_eq!(context_a.stage_input, Default::default());
+        assert_eq!(context_b.stage_input, Default::default());
+        assert_eq!(
+            context_a.resolver_identity.context_hash,
+            context_b.resolver_identity.context_hash
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_validates_video_selected_image_boundaries() {
+        let mut missing = base_fixture();
+        missing.shots[0].shot.selected_image_asset_id = Some("ast_missing".to_owned());
+        let (resolver, _) = make_resolver(missing);
+        let context = resolver
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Video)
+            .await
+            .unwrap();
+        assert!(codes(&context).contains(&"CONTEXT_SELECTED_IMAGE_NOT_FOUND"));
+        assert!(context.partial);
+
+        let mut mismatch = base_fixture();
+        mismatch.shots[0].shot.selected_image_asset_id = Some("ast_other_project".to_owned());
+        mismatch.assets = vec![asset(
+            "ast_other_project",
+            "different-project",
+            AssetType::Image,
+        )];
+        let (resolver, _) = make_resolver(mismatch);
+        let context = resolver
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Video)
+            .await
+            .unwrap();
+        assert!(codes(&context).contains(&"CONTEXT_SELECTED_IMAGE_PROJECT_MISMATCH"));
+        assert!(context.partial);
+
+        let mut wrong_type = base_fixture();
+        wrong_type.shots[0].shot.selected_image_asset_id = Some("ast_video".to_owned());
+        wrong_type.assets = vec![asset("ast_video", PID, AssetType::Video)];
+        let (resolver, _) = make_resolver(wrong_type);
+        let context = resolver
+            .resolve_draft(PID, "shot-1", domain::ShotStage::Video)
+            .await
+            .unwrap();
+        assert!(codes(&context).contains(&"CONTEXT_SELECTED_IMAGE_TYPE_INVALID"));
+        assert!(context.partial);
+    }
+
+    #[tokio::test]
     async fn resolver_reports_revision_warning_missing_and_hash_diagnostics() {
         let mut missing = base_fixture();
         missing.profiles.push(character("char-live", None));

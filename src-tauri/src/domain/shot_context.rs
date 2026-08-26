@@ -273,6 +273,12 @@ pub struct ResolvedOutputSpec {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResolvedStageInput {
+    pub selected_image_asset_id: Option<String>,
+    pub selected_image_sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LegacyContext {
     pub has_reference_pack: bool,
     pub uses_legacy_shot_references: bool,
@@ -291,6 +297,7 @@ pub struct ResolvedShotContext {
     pub project_id: String,
     pub structure: ResolvedStructure,
     pub stage: ShotStage,
+    pub stage_input: ResolvedStageInput,
     pub reference_pack: ShotReferencePack,
     pub profiles: ResolvedProfiles,
     pub reference_assets: Vec<ResolvedReferenceAsset>,
@@ -308,6 +315,8 @@ pub struct ContextHashInput {
     pub project_id: String,
     pub structure: ResolvedStructure,
     pub stage: String,
+    pub selected_image_asset_id: Option<String>,
+    pub selected_image_sha256: Option<String>,
     pub profile_ids: Vec<String>,
     pub profile_content_hashes: Vec<String>,
     pub costume_ids: Vec<String>,

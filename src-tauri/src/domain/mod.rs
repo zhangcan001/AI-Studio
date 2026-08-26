@@ -17,6 +17,7 @@ pub mod recipe;
 pub mod reference_anchor;
 pub mod shot;
 pub mod shot_context;
+pub mod shot_readiness;
 pub mod task;
 pub mod workflow;
 
@@ -71,9 +72,13 @@ pub use shot_context::{
     ContextDiagnostic, ContextDiagnosticSeverity, ContextHashInput, ContextSourceScope,
     LegacyContext, PromptContext, PromptSegment, PromptSegmentKind, ResolvedCharacter,
     ResolvedOutputSpec, ResolvedProfile, ResolvedProfiles, ResolvedProp, ResolvedReferenceAsset,
-    ResolvedReferenceSet, ResolvedScene, ResolvedShotContext, ResolvedStructure,
-    ResolvedStructureNode, ResolvedStyle, ResolvedWorkflowContext, ResolverIdentity,
-    ShotReferencePack, SourceTrace,
+    ResolvedReferenceSet, ResolvedScene, ResolvedShotContext, ResolvedStageInput,
+    ResolvedStructure, ResolvedStructureNode, ResolvedStyle, ResolvedWorkflowContext,
+    ResolverIdentity, ShotReferencePack, SourceTrace,
+};
+pub use shot_readiness::{
+    ReadinessCheck, ReadinessCheckState, ReadinessGateKey, ReadinessGateResult, ShotReadiness,
+    ShotReadinessStatus,
 };
 pub use task::{
     NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskDomainError, TaskError,

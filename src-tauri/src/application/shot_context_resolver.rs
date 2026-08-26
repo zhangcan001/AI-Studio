@@ -26,8 +26,8 @@ use crate::domain::shot::ShotStage;
 use crate::domain::shot_context::{
     ContextDiagnostic, ContextHashInput, ContextSourceScope, LegacyContext, ResolvedCharacter,
     ResolvedOutputSpec, ResolvedProfile, ResolvedProfiles, ResolvedProp, ResolvedReferenceSet,
-    ResolvedScene, ResolvedShotContext, ResolvedStructure, ResolvedStructureNode, ResolvedStyle,
-    ResolvedWorkflowContext, ResolverIdentity, SourceTrace,
+    ResolvedScene, ResolvedShotContext, ResolvedStageInput, ResolvedStructure,
+    ResolvedStructureNode, ResolvedStyle, ResolvedWorkflowContext, ResolverIdentity, SourceTrace,
 };
 use crate::domain::{Asset, AssetId};
 use chrono::{DateTime, Utc};
@@ -265,6 +265,11 @@ impl ShotContextResolver {
                     .filter(|value| value.stage == stage)
                     .map(|value| value.asset_id.clone()),
             );
+            if stage == ShotStage::Video {
+                if let Some(asset_id) = data.shot.selected_image_asset_id.as_ref() {
+                    asset_ids.insert(asset_id.clone());
+                }
+            }
         }
         let parsed_asset_ids = asset_ids
             .iter()
@@ -749,6 +754,7 @@ fn build_context(
         shot_id,
     ));
     let output = output_spec(&workflow.scalar_values);
+    let stage_input = resolve_stage_input(data, loaded, &mut diagnostics);
     let prompt_context = build_prompt_context(&prompt);
     let structure = structure(loaded.tree, &data.shot, shot_id);
     let pack = build_shot_reference_pack(ShotReferencePackInput {
@@ -779,6 +785,8 @@ fn build_context(
         project_id: loaded.project_id.to_owned(),
         structure: structure.clone(),
         stage: loaded.stage.as_str().to_owned(),
+        selected_image_asset_id: stage_input.selected_image_asset_id.clone(),
+        selected_image_sha256: stage_input.selected_image_sha256.clone(),
         profile_ids: profile_ids(&resolved_profiles),
         profile_content_hashes: profile_hashes(&resolved_profiles),
         costume_ids: costume_ids(&resolved_profiles),
@@ -805,6 +813,7 @@ fn build_context(
         project_id: loaded.project_id.to_owned(),
         structure,
         stage: loaded.stage,
+        stage_input,
         reference_pack: pack,
         profiles: resolved_profiles,
         reference_assets,
@@ -973,6 +982,47 @@ fn fragment(value: &ResolvedProfile, negative: bool) -> PromptFragmentInput {
         ordinal: value.ordinal,
     }
 }
+
+fn resolve_stage_input(
+    data: &ShotData,
+    loaded: &LoadedContext<'_>,
+    diagnostics: &mut Vec<ContextDiagnostic>,
+) -> ResolvedStageInput {
+    if loaded.stage != ShotStage::Video {
+        return ResolvedStageInput::default();
+    }
+    let Some(asset_id) = data.shot.selected_image_asset_id.as_deref() else {
+        return ResolvedStageInput::default();
+    };
+    match loaded.assets.get(asset_id) {
+        None => {
+            diagnostics.push(ContextDiagnostic::error(
+                "CONTEXT_SELECTED_IMAGE_NOT_FOUND",
+                asset_id,
+            ));
+            ResolvedStageInput::default()
+        }
+        Some(asset) if asset.project_id != loaded.project_id => {
+            diagnostics.push(ContextDiagnostic::error(
+                "CONTEXT_SELECTED_IMAGE_PROJECT_MISMATCH",
+                asset_id,
+            ));
+            ResolvedStageInput::default()
+        }
+        Some(asset) if asset.asset_type != crate::domain::AssetType::Image => {
+            diagnostics.push(ContextDiagnostic::error(
+                "CONTEXT_SELECTED_IMAGE_TYPE_INVALID",
+                asset_id,
+            ));
+            ResolvedStageInput::default()
+        }
+        Some(asset) => ResolvedStageInput {
+            selected_image_asset_id: Some(asset_id.to_owned()),
+            selected_image_sha256: Some(asset.sha256.clone()),
+        },
+    }
+}
+
 fn stage_prompt(data: &ShotData, stage: ShotStage) -> String {
     let image = data
         .stage_prompts

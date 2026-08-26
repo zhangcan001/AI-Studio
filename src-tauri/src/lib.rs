@@ -62,6 +62,8 @@ use application::{
     settings_service::SettingsService,
     shot_batch_service::ShotBatchService,
     shot_bulk_service::ShotBulkService,
+    shot_context_resolver::ShotContextResolver,
+    shot_readiness_service::ShotReadinessService,
     shot_service::ShotService,
     source_asset_import_service::SourceAssetImportService,
     task_cancellation_service::TaskCancellationService,
@@ -235,6 +237,22 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(infrastructure::database::SqliteProductionStructureRepository::new(
                     database_pool.clone(),
                 ));
+            let consistency_scope_repository: Arc<dyn application::ports::ConsistencyScopeRepository> =
+                Arc::new(infrastructure::database::repositories::SqliteConsistencyScopeRepository::new(
+                    database_pool.clone(),
+                ));
+            let consistency_profile_repository: Arc<dyn application::ports::ConsistencyProfileRepository> =
+                Arc::new(infrastructure::database::SqliteConsistencyProfileRepository::new(
+                    database_pool.clone(),
+                ));
+            let reference_set_repository: Arc<dyn application::ports::ReferenceSetRepository> =
+                Arc::new(infrastructure::database::SqliteReferenceSetRepository::new(
+                    database_pool.clone(),
+                ));
+            let shot_consistency_repository: Arc<dyn application::ports::ShotConsistencyRepository> =
+                Arc::new(infrastructure::database::SqliteShotConsistencyRepository::new(
+                    database_pool.clone(),
+                ));
             let asset_deletion_repository: Arc<dyn application::ports::AssetDeletionRepository> =
                 Arc::new(SqliteAssetDeletionRepository::new(database_pool.clone()));
             let asset_video_prompt_repository: Arc<dyn application::ports::AssetVideoPromptRepository> =
@@ -278,6 +296,18 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 Arc::new(FileSystemProjectDirectoryStore::new(
                     data_dirs.projects.clone(),
                 ));
+
+            let shot_context_resolver = Arc::new(ShotContextResolver::new(
+                project_repository.clone(),
+                production_structure_repository.clone(),
+                shot_repository.clone(),
+                consistency_scope_repository,
+                consistency_profile_repository,
+                reference_set_repository,
+                shot_consistency_repository,
+                asset_repository.clone(),
+                clock.clone(),
+            ));
 
             let project_bootstrap =
                 DefaultProjectBootstrap::new(project_repository.clone(), clock.clone());
@@ -428,7 +458,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             ));
             let production_structure_service = Arc::new(ProductionStructureService::new(
-                production_structure_repository,
+                production_structure_repository.clone(),
                 clock.clone(),
             ));
             let asset_deletion_service = Arc::new(AssetDeletionService::new(
@@ -530,6 +560,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 comfy_service.clone(),
                 diagnostics_service.clone(),
                 workflow_lifecycle_service.clone(),
+            ));
+            let shot_readiness_service = Arc::new(ShotReadinessService::new(
+                shot_context_resolver,
+                comfy_preflight_service.clone(),
+                workflow_lifecycle_service.clone(),
+                production_structure_repository.clone(),
             ));
             let project_command_center_service = Arc::new(
                 ProjectCommandCenterService::new(database_pool.clone())
@@ -680,6 +716,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_audit_service,
                 diagnostics_service,
                 comfy_preflight_service,
+                shot_readiness_service,
                 settings_service,
                 batch_workflow_preset_service,
                 scene_production_service,
@@ -813,6 +850,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::comfy::comfy_save_endpoint,
             commands::comfy::comfy_free_memory,
             commands::preflight::comfy_preflight_current,
+            commands::shot_readiness::shot_readiness_cached,
+            commands::shot_readiness::shot_preflight,
+            commands::shot_readiness::scene_readiness_cached,
+            commands::shot_readiness::scene_preflight,
             commands::settings::comfy_environment_profiles_list,
             commands::settings::comfy_environment_profile_save,
             commands::settings::comfy_environment_profile_delete,

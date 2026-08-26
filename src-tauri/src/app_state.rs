@@ -33,6 +33,7 @@ use crate::application::series_production_service::SeriesProductionService;
 use crate::application::settings_service::SettingsService;
 use crate::application::shot_batch_service::ShotBatchService;
 use crate::application::shot_bulk_service::ShotBulkService;
+use crate::application::shot_readiness_service::ShotReadinessService;
 use crate::application::shot_service::ShotService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
 use crate::application::task_cancellation_service::TaskCancellationService;
@@ -87,6 +88,7 @@ pub struct AppState {
     pub production_audit_service: Arc<ProductionAuditService>,
     pub diagnostics_service: Arc<DiagnosticsService>,
     pub comfy_preflight_service: Arc<ComfyPreflightService>,
+    pub shot_readiness_service: Arc<ShotReadinessService>,
     pub settings_service: Arc<SettingsService>,
     pub batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
     pub scene_production_service: Arc<SceneProductionService>,
@@ -137,6 +139,7 @@ impl AppState {
         production_audit_service: Arc<ProductionAuditService>,
         diagnostics_service: Arc<DiagnosticsService>,
         comfy_preflight_service: Arc<ComfyPreflightService>,
+        shot_readiness_service: Arc<ShotReadinessService>,
         settings_service: Arc<SettingsService>,
         batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
         scene_production_service: Arc<SceneProductionService>,
@@ -185,6 +188,7 @@ impl AppState {
             production_audit_service,
             diagnostics_service,
             comfy_preflight_service,
+            shot_readiness_service,
             settings_service,
             batch_workflow_preset_service,
             scene_production_service,
