@@ -2,6 +2,7 @@ use crate::{
     app_state::AppState,
     application::episode_production_service::{
         EpisodeProductionError, EpisodeProductionPlan, EpisodeProductionPrepareResult,
+        EpisodeProductionReadinessSummary,
     },
     domain::ShotStage,
     error::AppError,
@@ -38,6 +39,24 @@ pub async fn episode_production_plan(
     state
         .episode_production_service
         .plan(&request.project_id, &request.episode_id, stage)
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn episode_production_readiness_summary(
+    state: State<'_, AppState>,
+    request: EpisodeProductionPlanRequest,
+) -> Result<EpisodeProductionReadinessSummary, AppError> {
+    let stage = parse_stage(&request.stage)?;
+    state
+        .episode_production_service
+        .readiness_summary(
+            &request.project_id,
+            &request.episode_id,
+            stage,
+            &state.shot_readiness_service,
+        )
         .await
         .map_err(map_error)
 }

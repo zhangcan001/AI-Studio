@@ -1,12 +1,20 @@
 use crate::application::episode_production_service::{
-    EpisodePrepareStatus, EpisodeProductionError, EpisodeProductionPlan, EpisodeProductionService,
+    EpisodePrepareStatus, EpisodeProductionError, EpisodeProductionPlan,
+    EpisodeProductionReadinessSummary, EpisodeProductionService,
 };
 use crate::application::production_structure_service::{
     ProductionEpisodeTreeView, ProductionStructureError, ProductionStructureService,
 };
+use crate::application::shot_readiness_service::{ShotReadinessService, ShotReadinessServiceError};
 use crate::domain::ShotStage;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::{collections::HashSet, error::Error, fmt, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    error::Error,
+    fmt,
+    sync::Arc,
+};
 
 pub const MAX_SERIES_PREPARE_EPISODES: usize = 20;
 pub const MAX_SERIES_PREPARE_SCENES: usize = 100;
@@ -105,6 +113,24 @@ pub struct SeriesProductionPrepareResult {
     pub episode_results: Vec<SeriesEpisodePrepareResult>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesProductionReadinessSummary {
+    pub project_id: String,
+    pub series_id: String,
+    pub series_name: String,
+    pub total: usize,
+    pub ready: usize,
+    pub incomplete: usize,
+    pub blocked: usize,
+    pub prepared: usize,
+    pub done: usize,
+    pub warning_count: usize,
+    pub existing_batch_ids: Vec<String>,
+    pub episodes: Vec<EpisodeProductionReadinessSummary>,
+    pub evaluated_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeriesScope {
     pub project_id: String,
@@ -197,6 +223,32 @@ impl SeriesProductionService {
         let scope = self.series_scope(project_id, series_id).await?;
         let selected = (0..scope.episodes.len()).collect::<Vec<_>>();
         self.plan_scope(&scope, &selected, stage).await
+    }
+
+    pub async fn readiness_summary(
+        &self,
+        project_id: &str,
+        series_id: &str,
+        stage: ShotStage,
+        readiness_service: &ShotReadinessService,
+    ) -> Result<SeriesProductionReadinessSummary, SeriesProductionError> {
+        let scope = self.series_scope(project_id, series_id).await?;
+        let mut episodes = Vec::with_capacity(scope.episodes.len());
+        for episode in &scope.episodes {
+            episodes.push(
+                self.episode_production_service
+                    .readiness_tree_scope(
+                        project_id,
+                        &scope.series_id,
+                        &scope.series_name,
+                        &episode.tree,
+                        stage,
+                        readiness_service,
+                    )
+                    .await?,
+            );
+        }
+        Ok(readiness_summary_from_episodes(&scope, episodes))
     }
 
     pub async fn prepare(
@@ -599,6 +651,7 @@ pub enum SeriesProductionError {
     Partial(SeriesProductionPrepareResult),
     Structure(ProductionStructureError),
     Episode(EpisodeProductionError),
+    Readiness(ShotReadinessServiceError),
 }
 
 impl fmt::Display for SeriesProductionError {
@@ -629,6 +682,7 @@ impl fmt::Display for SeriesProductionError {
             Self::Partial(_) => formatter.write_str("SERIES_PRODUCTION_PARTIAL"),
             Self::Structure(error) => error.fmt(formatter),
             Self::Episode(error) => error.fmt(formatter),
+            Self::Readiness(error) => error.fmt(formatter),
         }
     }
 }
@@ -644,6 +698,46 @@ impl From<ProductionStructureError> for SeriesProductionError {
 impl From<EpisodeProductionError> for SeriesProductionError {
     fn from(error: EpisodeProductionError) -> Self {
         Self::Episode(error)
+    }
+}
+
+impl From<ShotReadinessServiceError> for SeriesProductionError {
+    fn from(error: ShotReadinessServiceError) -> Self {
+        Self::Readiness(error)
+    }
+}
+
+fn readiness_summary_from_episodes(
+    scope: &SeriesScope,
+    episodes: Vec<EpisodeProductionReadinessSummary>,
+) -> SeriesProductionReadinessSummary {
+    let total = episodes.iter().map(|episode| episode.total).sum();
+    let ready = episodes.iter().map(|episode| episode.ready).sum();
+    let incomplete = episodes.iter().map(|episode| episode.incomplete).sum();
+    let blocked = episodes.iter().map(|episode| episode.blocked).sum();
+    let prepared = episodes.iter().map(|episode| episode.prepared).sum();
+    let done = episodes.iter().map(|episode| episode.done).sum();
+    let warning_count = episodes.iter().map(|episode| episode.warning_count).sum();
+    let existing_batch_ids = episodes
+        .iter()
+        .flat_map(|episode| episode.existing_batch_ids.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    SeriesProductionReadinessSummary {
+        project_id: scope.project_id.clone(),
+        series_id: scope.series_id.clone(),
+        series_name: scope.series_name.clone(),
+        total,
+        ready,
+        incomplete,
+        blocked,
+        prepared,
+        done,
+        warning_count,
+        existing_batch_ids,
+        episodes,
+        evaluated_at: Utc::now(),
     }
 }
 

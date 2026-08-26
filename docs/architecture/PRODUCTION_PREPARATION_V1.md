@@ -1,6 +1,6 @@
 # Production Preparation V1
 
-状态：DEV-046 冻结设计
+状态：DEV-052 实现基线
 适用版本：AI Studio 0.7.0 / Narrative Production V1
 
 ## 1. 目的
@@ -97,7 +97,7 @@ ShotProductionPlan[]
                     复用 ShotBatchService / ProductionQueueService
                               │
                               ▼
-                    返回已有 ProductionBatch detail
+                    返回已有 ProductionBatch detail + Preparation Snapshot
 ~~~
 
 “打开准备页”“刷新 readiness”“查看 context”“生成 plan”都不能触发 generation。
@@ -125,8 +125,9 @@ ShotProductionPlan[]
 2. 调用 ShotContextResolver。
 3. 调用 ShotReadinessService。
 4. 生成 ShotProductionPlan。
-5. 在显式确认时将 READY plan 映射为现有 CreateShotBatchRequest 或既有 ProductionBatch 输入。
-6. 返回 blocked、warning、already prepared、created batch summary。
+5. 在显式确认时从 ResolvedShotContext 生成冻结 values，并映射为现有 ProductionBatch 输入。
+6. 在同一 SQLite transaction 中写入 Batch、BatchItem、binding 与 Production Preparation Snapshot。
+7. 返回 blocked、warning、already prepared、stale、created batch summary。
 
 它不持有自己的执行队列，也不启动 task。
 
@@ -152,15 +153,20 @@ ShotProductionPlan[]
 - 返回 existingBatchIds 和 alreadyPrepared。
 - 如果 Profile/ReferenceSet revision 改变，新的 contextHash 可以产生新的准备尝试；旧 item 保持冻结。
 
+快照 JSON 的 `schemaVersion` 当前为 `1`。它记录 resolved context、profile revisions、ReferenceSet/asset
+checksums、最终 prompt、ordered references、workflow/recipe、output、stage input、frozen generation values、
+readiness gates/score 与最小 Comfy capability evidence。快照是历史 immutable evidence；备份恢复时外层
+`projectId/shotId/productionBatchId/productionBatchItemId` 会 remap，快照 JSON 内部的历史 identity 不作为实时 FK。
+
 ### 6.3 blocked 排除
 
 - BLOCKED 永远不能写入新的 ready batch。
 - INCOMPLETE 默认不能加入；未来如果某个 gate 被定义为可确认 warning，也必须在后端显式允许，不能由前端绕过。
 - READY 在创建 batch 前重新验证一次，防止页面缓存过期。
 
-## 7. 规划中的 commands
+## 7. Commands
 
-保持现有 scene_production_plan / scene_production_prepare 可兼容；新增接口只在需要表达完整 context/readiness 时使用：
+保持现有 `scene_production_plan` / `scene_production_prepare` 签名与返回兼容；准备页使用以下只读/准入接口：
 
 ~~~text
 shot_preflight(project_id, shot_id, stage)
@@ -169,27 +175,36 @@ shot_preflight(project_id, shot_id, stage)
 shot_resolve_context(project_id, shot_id, stage, mode)
   -> ResolvedShotContext
 
-scene_prepare_production({
+scene_production_preflight({
+  projectId,
+  sceneId,
+  stage
+})
+  -> ScenePreparationView
+
+scene_production_admit({
   projectId,
   sceneId,
   stage,
-  shotIds?,
-  allowPartial,
-  dryRun
+  shotIds,
+  allowPartial
 })
-  -> ScenePreparationView {
-       plans[],
+  -> AdmissionResult {
        readyCount,
        incompleteCount,
        blockedCount,
-       createdBatchId?,
        createdCount,
-       skippedCount,
+       skippedIncomplete,
+       skippedBlocked,
        existingBatchIds[]
      }
+
+shot_production_plan_detail({ projectId, shotId, stage })
+  -> resolved context + readiness + snapshot/admission status
 ~~~
 
-dryRun=true 只返回计划。dryRun=false 仍然只在明确的“加入队列”动作下创建既有 batch，不 start。
+`scene_production_preflight` 只读且不创建 Batch、Task 或 Generation。`scene_production_admit` 只接受 shot IDs，
+后端重新 resolve + live preflight 后，只为 READY 镜头写入现有 batch；它不 start queue、不提交 ComfyUI。
 
 ## 8. Scene Production UX
 
@@ -256,6 +271,9 @@ EpisodeProductionService 和 SeriesProductionService 当前已有 scene/episode 
 - ProductionQueuePanel 负责查看、start、pause、cancel、retry、resume。
 - ProductionRunPanel 负责明确的阶段按钮和人工候选选择。
 - Review regeneration 的 autoStart 只能作为用户点击“返工”后的明确动作，不扩展成全局自动链。
+
+Preparation ≠ Generation，Admission ≠ Start。ComfyUI 仍是唯一正式生成引擎；Queue/Runbook 中的 Start 仍由用户
+明确操作。
 
 ## 11. Review 与 Compare
 

@@ -15,10 +15,12 @@ use crate::application::production_queue_service::{
 };
 use crate::application::shot_service::scalar_values_from_json;
 use crate::compiler::{RecipeParser, WorkflowCompiler};
+use crate::domain::production_preparation::{PreparationSnapshotRecord, PreparedShotBatchRecord};
 use crate::domain::{
     derive_stage_status, AssetId, AssetType, CompileRequest, InputDefinition, OutputType,
     ProductionBatch, ProductionBatchDetail, ProductionBatchItem, ProductionBatchItemId,
-    ProductionBatchStatus, Recipe, ShotStage, TaskId, TaskStatus, WorkflowDocument,
+    ProductionBatchStatus, Recipe, ResolvedShotContext, ShotStage, TaskId, TaskStatus,
+    WorkflowDocument,
 };
 use serde::Serialize;
 use std::{
@@ -170,6 +172,141 @@ impl ShotBatchService {
             .list_active_shot_bindings(project_id, stage, shot_ids)
             .await
             .map_err(Into::into)
+    }
+
+    pub async fn list_prepared_shot_records(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<Vec<PreparedShotBatchRecord>, ShotBatchServiceError> {
+        validate_project(project_id)?;
+        self.shot_batch_repository
+            .list_prepared_shot_records(project_id, stage, shot_ids)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn find_preparation_snapshot(
+        &self,
+        project_id: &str,
+        production_batch_item_id: &str,
+    ) -> Result<Option<PreparationSnapshotRecord>, ShotBatchServiceError> {
+        validate_project(project_id)?;
+        self.shot_batch_repository
+            .find_preparation_snapshot(project_id, production_batch_item_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn insert_prepared_batch_with_bindings(
+        &self,
+        batch: &ProductionBatch,
+        items: &[ProductionBatchItem],
+        bindings: &[ShotBatchBinding],
+        snapshots: &[PreparationSnapshotRecord],
+    ) -> Result<(), ShotBatchServiceError> {
+        self.shot_batch_repository
+            .insert_prepared_batch_with_bindings(batch, items, bindings, snapshots)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Returns the durable stage state using one Shot query.  Task history is
+    /// intentionally not loaded here: Preparation owns readiness, while this
+    /// field is only the current UI status shown beside a plan card.
+    pub async fn current_stage_statuses(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<HashMap<String, String>, ShotBatchServiceError> {
+        validate_project(project_id)?;
+        let requested = shot_ids.iter().collect::<HashSet<_>>();
+        let mut statuses = HashMap::with_capacity(requested.len());
+        for data in self.shot_repository.list(project_id).await? {
+            if !requested.contains(&data.shot.id) {
+                continue;
+            }
+            let configured = data
+                .stage_configs
+                .iter()
+                .any(|config| config.stage == stage);
+            let selected = match stage {
+                ShotStage::Image => data.shot.selected_image_asset_id.is_some(),
+                ShotStage::Video => data.shot.selected_video_asset_id.is_some(),
+            };
+            statuses.insert(
+                data.shot.id,
+                derive_stage_status(stage, configured, selected, None)
+                    .as_str()
+                    .to_owned(),
+            );
+        }
+        Ok(statuses)
+    }
+
+    /// Maps one already-resolved context to the exact typed values stored in a
+    /// production batch.  It never reloads profiles, reference sets, or Shot
+    /// configuration; all semantic inputs come from `ResolvedShotContext`.
+    pub fn prepare_values_from_context(
+        stage: ShotStage,
+        context: &ResolvedShotContext,
+        recipe: &Recipe,
+    ) -> Result<BTreeMap<String, GenerationInputValue>, String> {
+        if context.stage != stage {
+            return Err("准备阶段与已解析上下文不一致".to_owned());
+        }
+        let mut values = scalar_values_from_json(&context.workflow.scalar_values)
+            .map_err(|error| error.to_string())?;
+        if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
+            matches!(input, InputDefinition::TextArea { .. }).then_some(key)
+        }) {
+            values.insert(
+                prompt_key.clone(),
+                GenerationInputValue::Text(context.prompt_context.rendered_text.clone()),
+            );
+        }
+
+        let image_input = recipe.inputs.iter().find_map(|(key, input)| match input {
+            InputDefinition::Image { .. } => Some((key.clone(), false)),
+            InputDefinition::Images { .. } => Some((key.clone(), true)),
+            _ => None,
+        });
+        let references = context
+            .reference_assets
+            .iter()
+            .map(|asset| {
+                AssetId::parse(asset.asset_id.clone())
+                    .map_err(|error| format!("参考素材 ID 无效：{error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        validate_ordered_reference_ids(&references, None)?;
+
+        match (stage, image_input) {
+            (ShotStage::Video, Some((key, true))) => {
+                values.insert(key, GenerationInputValue::ImageAssets(references));
+            }
+            (ShotStage::Video, Some((key, false))) => {
+                if let Some(asset_id) = context.stage_input.selected_image_asset_id.as_deref() {
+                    let asset_id = AssetId::parse(asset_id.to_owned())
+                        .map_err(|error| format!("关键帧素材 ID 无效：{error}"))?;
+                    values.insert(key, GenerationInputValue::ImageAsset(asset_id));
+                }
+            }
+            (ShotStage::Image, Some((key, true))) if !references.is_empty() => {
+                values.insert(key, GenerationInputValue::ImageAssets(references));
+            }
+            (ShotStage::Image, Some((key, false))) => match references.as_slice() {
+                [] => {}
+                [asset_id] => {
+                    values.insert(key, GenerationInputValue::ImageAsset(asset_id.clone()));
+                }
+                _ => return Err("单图片输入只能绑定一个有序参考素材".to_owned()),
+            },
+            _ => {}
+        }
+        freeze_shot_batch_values(stage, values, recipe)
     }
 
     pub async fn create(
@@ -745,7 +882,7 @@ fn ordered_reference_asset_ids(data: &ShotData, stage: ShotStage) -> Result<Vec<
 /// image inputs that map is also the durable reference manifest: vector order
 /// is the user-visible reference order and must not be rebuilt from the Shot
 /// when the queue later runs or retries the item.
-fn freeze_shot_batch_values(
+pub(crate) fn freeze_shot_batch_values(
     stage: ShotStage,
     values: BTreeMap<String, GenerationInputValue>,
     recipe: &Recipe,

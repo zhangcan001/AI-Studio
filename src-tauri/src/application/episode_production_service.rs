@@ -2,11 +2,19 @@ use crate::application::production_structure_service::{
     ProductionEpisodeTreeView, ProductionStructureError, ProductionStructureService,
 };
 use crate::application::scene_production_service::{
-    SceneProductionError, SceneProductionPlan, SceneProductionService,
+    SceneProductionError, SceneProductionPlan, SceneProductionReadinessSummary,
+    SceneProductionService,
 };
+use crate::application::shot_readiness_service::{ShotReadinessService, ShotReadinessServiceError};
 use crate::domain::ShotStage;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::{collections::HashSet, error::Error, fmt, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    error::Error,
+    fmt,
+    sync::Arc,
+};
 
 pub const MAX_EPISODE_PREPARE_SCENES: usize = 50;
 
@@ -113,6 +121,27 @@ pub struct EpisodeProductionPrepareResult {
     pub results: Vec<EpisodeProductionScenePrepareResult>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeProductionReadinessSummary {
+    pub project_id: String,
+    pub series_id: String,
+    pub series_name: String,
+    pub episode_id: String,
+    pub episode_name: String,
+    pub stage: String,
+    pub total: usize,
+    pub ready: usize,
+    pub incomplete: usize,
+    pub blocked: usize,
+    pub prepared: usize,
+    pub done: usize,
+    pub warning_count: usize,
+    pub existing_batch_ids: Vec<String>,
+    pub scenes: Vec<SceneProductionReadinessSummary>,
+    pub evaluated_at: DateTime<Utc>,
+}
+
 pub struct EpisodeProductionService {
     structure_service: Arc<ProductionStructureService>,
     scene_production_service: Arc<SceneProductionService>,
@@ -153,6 +182,18 @@ impl EpisodeProductionService {
             .await
     }
 
+    pub async fn readiness_summary(
+        &self,
+        project_id: &str,
+        episode_id: &str,
+        stage: ShotStage,
+        readiness_service: &ShotReadinessService,
+    ) -> Result<EpisodeProductionReadinessSummary, EpisodeProductionError> {
+        let scope = self.episode_scope(project_id, episode_id).await?;
+        self.readiness_summary_scope(&scope, stage, readiness_service)
+            .await
+    }
+
     pub(crate) async fn plan_tree_scope(
         &self,
         project_id: &str,
@@ -179,6 +220,37 @@ impl EpisodeProductionService {
         let selected_indices = select_scenes(&scope.scenes, scene_ids)?;
         self.prepare_scope(&scope, &selected_indices, stage, allow_partial)
             .await
+    }
+
+    pub(crate) async fn readiness_tree_scope(
+        &self,
+        project_id: &str,
+        series_id: &str,
+        series_name: &str,
+        episode: &ProductionEpisodeTreeView,
+        stage: ShotStage,
+        readiness_service: &ShotReadinessService,
+    ) -> Result<EpisodeProductionReadinessSummary, EpisodeProductionError> {
+        let scope = EpisodeScope::from_tree(project_id, series_id, series_name, episode);
+        self.readiness_summary_scope(&scope, stage, readiness_service)
+            .await
+    }
+
+    async fn readiness_summary_scope(
+        &self,
+        scope: &EpisodeScope,
+        stage: ShotStage,
+        readiness_service: &ShotReadinessService,
+    ) -> Result<EpisodeProductionReadinessSummary, EpisodeProductionError> {
+        let mut scenes = Vec::with_capacity(scope.scenes.len());
+        for scene in &scope.scenes {
+            scenes.push(
+                self.scene_production_service
+                    .readiness_summary(&scope.project_id, &scene.scene_id, stage, readiness_service)
+                    .await?,
+            );
+        }
+        Ok(readiness_summary_from_scenes(scope, stage, scenes))
     }
 
     async fn prepare_scope(
@@ -621,6 +693,7 @@ pub enum EpisodeProductionError {
     Partial(EpisodeProductionPrepareResult),
     Structure(ProductionStructureError),
     SceneProduction(SceneProductionError),
+    Readiness(ShotReadinessServiceError),
 }
 
 impl fmt::Display for EpisodeProductionError {
@@ -647,6 +720,7 @@ impl fmt::Display for EpisodeProductionError {
             Self::Partial(_) => formatter.write_str("EPISODE_PRODUCTION_PARTIAL"),
             Self::Structure(error) => error.fmt(formatter),
             Self::SceneProduction(error) => error.fmt(formatter),
+            Self::Readiness(error) => error.fmt(formatter),
         }
     }
 }
@@ -662,6 +736,50 @@ impl From<ProductionStructureError> for EpisodeProductionError {
 impl From<SceneProductionError> for EpisodeProductionError {
     fn from(error: SceneProductionError) -> Self {
         Self::SceneProduction(error)
+    }
+}
+
+impl From<ShotReadinessServiceError> for EpisodeProductionError {
+    fn from(error: ShotReadinessServiceError) -> Self {
+        Self::Readiness(error)
+    }
+}
+
+fn readiness_summary_from_scenes(
+    scope: &EpisodeScope,
+    stage: ShotStage,
+    scenes: Vec<SceneProductionReadinessSummary>,
+) -> EpisodeProductionReadinessSummary {
+    let total = scenes.iter().map(|scene| scene.total).sum();
+    let ready = scenes.iter().map(|scene| scene.ready).sum();
+    let incomplete = scenes.iter().map(|scene| scene.incomplete).sum();
+    let blocked = scenes.iter().map(|scene| scene.blocked).sum();
+    let prepared = scenes.iter().map(|scene| scene.prepared).sum();
+    let done = scenes.iter().map(|scene| scene.done).sum();
+    let warning_count = scenes.iter().map(|scene| scene.warning_count).sum();
+    let existing_batch_ids = scenes
+        .iter()
+        .flat_map(|scene| scene.existing_batch_ids.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    EpisodeProductionReadinessSummary {
+        project_id: scope.project_id.clone(),
+        series_id: scope.series_id.clone(),
+        series_name: scope.series_name.clone(),
+        episode_id: scope.episode_id.clone(),
+        episode_name: scope.episode_name.clone(),
+        stage: stage.as_str().to_owned(),
+        total,
+        ready,
+        incomplete,
+        blocked,
+        prepared,
+        done,
+        warning_count,
+        existing_batch_ids,
+        scenes,
+        evaluated_at: Utc::now(),
     }
 }
 

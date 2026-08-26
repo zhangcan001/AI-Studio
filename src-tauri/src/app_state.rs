@@ -19,6 +19,7 @@ use crate::application::production_audit_service::ProductionAuditService;
 use crate::application::production_batch_runbook_service::ProductionBatchRunbookService;
 use crate::application::production_item_review_service::ProductionItemReviewService;
 use crate::application::production_orchestrator_service::ProductionOrchestratorService;
+use crate::application::production_preparation_service::ProductionPreparationService;
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::production_structure_service::ProductionStructureService;
 use crate::application::project_backup_service::ProjectBackupService;
@@ -95,6 +96,7 @@ pub struct AppState {
     pub diagnostics_service: Arc<DiagnosticsService>,
     pub comfy_preflight_service: Arc<ComfyPreflightService>,
     pub shot_readiness_service: Arc<ShotReadinessService>,
+    pub production_preparation_service: Arc<ProductionPreparationService>,
     pub settings_service: Arc<SettingsService>,
     pub batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
     pub scene_production_service: Arc<SceneProductionService>,
@@ -149,6 +151,7 @@ impl AppState {
         diagnostics_service: Arc<DiagnosticsService>,
         comfy_preflight_service: Arc<ComfyPreflightService>,
         shot_readiness_service: Arc<ShotReadinessService>,
+        production_preparation_service: Arc<ProductionPreparationService>,
         settings_service: Arc<SettingsService>,
         batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
         scene_production_service: Arc<SceneProductionService>,
@@ -201,6 +204,7 @@ impl AppState {
             diagnostics_service,
             comfy_preflight_service,
             shot_readiness_service,
+            production_preparation_service,
             settings_service,
             batch_workflow_preset_service,
             scene_production_service,

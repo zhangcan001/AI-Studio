@@ -10,8 +10,9 @@ use crate::application::production_batch_runbook_service::{
     ProductionBatchRunbookRepository, ProductionBatchRunbookSourceRow,
 };
 use crate::domain::{
-    ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
-    ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus, ShotStage,
+    PreparationSnapshotRecord, PreparedShotBatchRecord, ProductionBatch, ProductionBatchDetail,
+    ProductionBatchId, ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
+    ProductionBatchStatus, ShotStage,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -486,6 +487,112 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
 
 #[async_trait]
 impl ShotBatchRepository for SqliteProductionQueueRepository {
+    async fn insert_prepared_batch_with_bindings(
+        &self,
+        batch: &ProductionBatch,
+        items: &[ProductionBatchItem],
+        bindings: &[ShotBatchBinding],
+        snapshots: &[PreparationSnapshotRecord],
+    ) -> Result<(), RepositoryError> {
+        validate_prepared_insert(batch, items, bindings, snapshots)?;
+
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        validate_shot_batch_bindings(&mut transaction, batch, items, bindings).await?;
+        insert_batch_records(&mut transaction, batch, items).await?;
+        insert_shot_batch_bindings(&mut transaction, batch, bindings).await?;
+        for snapshot in snapshots {
+            let snapshot_json = serde_json::to_string(&snapshot.snapshot).map_err(|error| {
+                RepositoryError::serialization("production preparation snapshot", error.to_string())
+            })?;
+            sqlx::query(
+                "INSERT INTO production_preparation_snapshots
+                 (id, project_id, shot_id, stage, context_hash, production_batch_id,
+                  production_batch_item_id, snapshot_json, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&snapshot.id)
+            .bind(&snapshot.project_id)
+            .bind(&snapshot.shot_id)
+            .bind(snapshot.stage.as_str())
+            .bind(&snapshot.context_hash)
+            .bind(&snapshot.production_batch_id)
+            .bind(&snapshot.production_batch_item_id)
+            .bind(snapshot_json)
+            .bind(format_datetime(snapshot.created_at))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn list_prepared_shot_records(
+        &self,
+        project_id: &str,
+        stage: ShotStage,
+        shot_ids: &[String],
+    ) -> Result<Vec<PreparedShotBatchRecord>, RepositoryError> {
+        if shot_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", shot_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "SELECT sps.shot_id, sps.stage, sps.context_hash,
+                    sps.production_batch_id, sps.production_batch_item_id,
+                    sps.id AS snapshot_id, i.status, sps.created_at
+             FROM production_preparation_snapshots sps
+             INNER JOIN production_batches b ON b.id = sps.production_batch_id
+             INNER JOIN production_batch_items i ON i.id = sps.production_batch_item_id
+             INNER JOIN shots s ON s.id = sps.shot_id
+             WHERE sps.project_id = ? AND b.project_id = ? AND s.project_id = ?
+               AND sps.stage = ?
+               AND i.status IN ('PENDING', 'DISPATCHING', 'DISPATCHED')
+               AND sps.shot_id IN ({placeholders})
+             ORDER BY sps.shot_id ASC, sps.created_at ASC, sps.id ASC"
+        );
+        let mut request = sqlx::query_as::<_, PreparedShotBatchRow>(&query)
+            .bind(project_id)
+            .bind(project_id)
+            .bind(project_id)
+            .bind(stage.as_str());
+        for shot_id in shot_ids {
+            request = request.bind(shot_id);
+        }
+        request
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?
+            .into_iter()
+            .map(PreparedShotBatchRow::try_into_domain)
+            .collect()
+    }
+
+    async fn find_preparation_snapshot(
+        &self,
+        project_id: &str,
+        production_batch_item_id: &str,
+    ) -> Result<Option<PreparationSnapshotRecord>, RepositoryError> {
+        let row = sqlx::query_as::<_, PreparationSnapshotRow>(
+            "SELECT sps.id, sps.project_id, sps.shot_id, sps.stage, sps.context_hash,
+                    sps.production_batch_id, sps.production_batch_item_id,
+                    sps.snapshot_json, sps.created_at
+             FROM production_preparation_snapshots sps
+             INNER JOIN production_batches b ON b.id = sps.production_batch_id
+             INNER JOIN production_batch_items i ON i.id = sps.production_batch_item_id
+             WHERE sps.project_id = ? AND b.project_id = ? AND sps.production_batch_item_id = ?",
+        )
+        .bind(project_id)
+        .bind(project_id)
+        .bind(production_batch_item_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        row.map(PreparationSnapshotRow::try_into_domain).transpose()
+    }
+
     async fn insert_batch_with_bindings(
         &self,
         batch: &ProductionBatch,
@@ -921,6 +1028,124 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
     }
 }
 
+fn validate_prepared_insert(
+    batch: &ProductionBatch,
+    items: &[ProductionBatchItem],
+    bindings: &[ShotBatchBinding],
+    snapshots: &[PreparationSnapshotRecord],
+) -> Result<(), RepositoryError> {
+    if snapshots.len() != items.len() || bindings.len() != items.len() {
+        return Err(RepositoryError::integrity(
+            "prepared Shot batch must provide exactly one binding and snapshot for every item",
+        ));
+    }
+    let item_ids = items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut binding_item_ids = std::collections::HashSet::new();
+    let mut snapshot_item_ids = std::collections::HashSet::new();
+    for item in items {
+        if item.batch_id != batch.id {
+            return Err(RepositoryError::integrity(
+                "every prepared Shot batch item must belong to the inserted production batch",
+            ));
+        }
+    }
+    for binding in bindings {
+        if !item_ids.contains(binding.production_batch_item_id.as_str())
+            || !binding_item_ids.insert(binding.production_batch_item_id.as_str())
+        {
+            return Err(RepositoryError::integrity(
+                "each prepared Shot batch item must be bound exactly once",
+            ));
+        }
+    }
+    for snapshot in snapshots {
+        if snapshot.project_id != batch.project_id
+            || snapshot.production_batch_id != batch.id.as_str()
+            || !item_ids.contains(snapshot.production_batch_item_id.as_str())
+            || !snapshot_item_ids.insert(snapshot.production_batch_item_id.as_str())
+            || snapshot.snapshot.project_id != snapshot.project_id
+            || snapshot.snapshot.shot_id != snapshot.shot_id
+            || snapshot.snapshot.stage != snapshot.stage.as_str()
+            || snapshot.snapshot.context_hash != snapshot.context_hash
+        {
+            return Err(RepositoryError::integrity(
+                "prepared snapshot identity must match its batch and item binding",
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn validate_shot_batch_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    batch: &ProductionBatch,
+    items: &[ProductionBatchItem],
+    bindings: &[ShotBatchBinding],
+) -> Result<(), RepositoryError> {
+    let item_ids = items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    for binding in bindings {
+        let shot_project =
+            sqlx::query_scalar::<_, String>("SELECT project_id FROM shots WHERE id = ?")
+                .bind(&binding.shot_id)
+                .fetch_optional(&mut **transaction)
+                .await
+                .map_err(map_sqlx_error)?
+                .ok_or_else(|| RepositoryError::not_found("shot", &binding.shot_id))?;
+        if shot_project != batch.project_id {
+            return Err(RepositoryError::integrity(
+                "prepared Shot batch cannot bind a Shot from another project",
+            ));
+        }
+        if !item_ids.contains(binding.production_batch_item_id.as_str()) {
+            return Err(RepositoryError::integrity(
+                "prepared Shot binding references an unknown item",
+            ));
+        }
+        let existing = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM shot_generation_links WHERE production_batch_item_id = ?",
+        )
+        .bind(&binding.production_batch_item_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        if existing != 0 {
+            return Err(RepositoryError::integrity(
+                "production batch item already has a Shot generation link",
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn insert_shot_batch_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    batch: &ProductionBatch,
+    bindings: &[ShotBatchBinding],
+) -> Result<(), RepositoryError> {
+    for binding in bindings {
+        sqlx::query(
+            "INSERT INTO shot_generation_links
+             (id, shot_id, stage, task_id, production_batch_item_id, created_at)
+             VALUES (?, ?, ?, NULL, ?, ?)",
+        )
+        .bind(format!("sgl_{}", uuid::Uuid::new_v4()))
+        .bind(&binding.shot_id)
+        .bind(binding.stage.as_str())
+        .bind(&binding.production_batch_item_id)
+        .bind(format_datetime(batch.created_at))
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+    }
+    Ok(())
+}
+
 async fn insert_batch_records(
     transaction: &mut Transaction<'_, Sqlite>,
     batch: &ProductionBatch,
@@ -1184,6 +1409,80 @@ impl ItemRow {
             error_message: self.error_message,
             created_at: parse_datetime("production batch item created_at", &self.created_at)?,
             updated_at: parse_datetime("production batch item updated_at", &self.updated_at)?,
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct PreparedShotBatchRow {
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    snapshot_id: String,
+    status: String,
+    created_at: String,
+}
+
+impl PreparedShotBatchRow {
+    fn try_into_domain(self) -> Result<PreparedShotBatchRecord, RepositoryError> {
+        Ok(PreparedShotBatchRecord {
+            shot_id: self.shot_id,
+            stage: ShotStage::try_from_str(&self.stage)
+                .map_err(|error| map_domain_error("preparation snapshot stage", error))?,
+            context_hash: self.context_hash,
+            production_batch_id: self.production_batch_id,
+            production_batch_item_id: self.production_batch_item_id,
+            item_status: ProductionBatchItemStatus::parse(&self.status)
+                .map_err(|error| map_domain_error("production batch item status", error))?,
+            snapshot_id: self.snapshot_id,
+            created_at: parse_datetime("preparation snapshot created_at", &self.created_at)?,
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct PreparationSnapshotRow {
+    id: String,
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    snapshot_json: String,
+    created_at: String,
+}
+
+impl PreparationSnapshotRow {
+    fn try_into_domain(self) -> Result<PreparationSnapshotRecord, RepositoryError> {
+        let stage = ShotStage::try_from_str(&self.stage)
+            .map_err(|error| map_domain_error("preparation snapshot stage", error))?;
+        let snapshot: crate::domain::PreparationSnapshotV1 =
+            serde_json::from_str(&self.snapshot_json).map_err(|error| {
+                RepositoryError::serialization("production preparation snapshot", error.to_string())
+            })?;
+        if snapshot.schema_version != crate::domain::PREPARATION_SNAPSHOT_SCHEMA_VERSION
+            || snapshot.project_id != self.project_id
+            || snapshot.shot_id != self.shot_id
+            || snapshot.stage != self.stage
+            || snapshot.context_hash != self.context_hash
+        {
+            return Err(RepositoryError::integrity(
+                "preparation snapshot JSON identity does not match its columns",
+            ));
+        }
+        Ok(PreparationSnapshotRecord {
+            id: self.id,
+            project_id: self.project_id,
+            shot_id: self.shot_id,
+            stage,
+            context_hash: self.context_hash,
+            production_batch_id: self.production_batch_id,
+            production_batch_item_id: self.production_batch_item_id,
+            snapshot,
+            created_at: parse_datetime("preparation snapshot created_at", &self.created_at)?,
         })
     }
 }

@@ -355,11 +355,17 @@ fn dev036_migration_and_backup_versions_remain_frozen() {
             .count(),
         1
     );
-    assert!(!migrations.iter().any(|name| name.starts_with("024_")));
+    assert_eq!(
+        migrations
+            .iter()
+            .filter(|name| name.starts_with("024_"))
+            .count(),
+        1
+    );
     assert!(migrations.iter().any(|name| name.starts_with("021_")));
 
     let backup = read_text(root.join("src-tauri/src/application/project_backup_service.rs"));
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 13;"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 14;"));
     assert!(backup.contains("prompt_versions"));
     assert!(backup.contains("shot_stage_prompts"));
 }

@@ -48,7 +48,7 @@ const plan: SceneProductionPlan = {
 };
 
 describe("SceneProductionPanel", () => {
-  it("renders scene/stage selectors, preset status, prompt actions, plan counts, rows, and safe prepare actions", () => {
+  it("renders the new preparation surface and keeps the old tools opt-in", () => {
     const html = renderToStaticMarkup(
       <SceneProductionPanel
         projectId="project-1"
@@ -71,18 +71,12 @@ describe("SceneProductionPanel", () => {
     );
 
     expect(html).toContain("场景选择");
-    expect(html).toContain("生产阶段");
-    expect(html).toContain("电影基础");
-    expect(html).toContain("应用图片预设到场景");
-    expect(html).toContain("提示词条目");
-    expect(html).toContain("应用图片提示词");
-    expect(html).toContain("已完成");
-    expect(html).toContain("已准备");
-    expect(html).toContain("可生产");
-    expect(html).toContain("被阻塞");
-    expect(html).toContain("缺少 Workflow");
-    expect(html).toContain("仅准备当前可生产镜头");
-    expect(html).toContain("启动生产");
+    expect(html).toContain("场景生产准备");
+    expect(html).toContain("准备阶段");
+    expect(html).toContain("选择全部 READY");
+    expect(html).toContain("加入生产");
+    expect(html).toContain("打开旧版批量配置工具");
+    expect(html).not.toContain("启动生产");
   });
 
   it("keeps preset snapshots free of media assets and confirms overwrite scope", () => {

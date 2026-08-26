@@ -110,6 +110,14 @@ import type {
   SceneProductionPrepareResult,
 } from "../types/sceneProduction";
 import type {
+  ScenePreparationView,
+  SceneProductionAdmissionRequest,
+  SceneProductionAdmissionResult,
+  SceneProductionPreflightRequest,
+  ShotProductionPlanDetail,
+  ShotProductionPlanDetailRequest,
+} from "../types/productionPreparation";
+import type {
   EpisodeProductionPlan,
   EpisodeProductionPlanRequest,
   EpisodeProductionPrepareRequest,
@@ -260,6 +268,22 @@ export function prepareSceneProduction(request: SceneProductionPrepareRequest): 
     batchId: result.detail?.id ?? null,
     skippedCount: 0,
   }));
+}
+
+export function getSceneProductionPreflight(request: SceneProductionPreflightRequest): Promise<ScenePreparationView> {
+  return invoke<ScenePreparationView>("scene_production_preflight", { request });
+}
+
+export function sceneProductionPreflight(request: SceneProductionPreflightRequest): Promise<ScenePreparationView> {
+  return getSceneProductionPreflight(request);
+}
+
+export function getShotProductionPlanDetail(request: ShotProductionPlanDetailRequest): Promise<ShotProductionPlanDetail> {
+  return invoke<ShotProductionPlanDetail>("shot_production_plan_detail", { request });
+}
+
+export function admitSceneProduction(request: SceneProductionAdmissionRequest): Promise<SceneProductionAdmissionResult> {
+  return invoke<SceneProductionAdmissionResult>("scene_production_admit", { request });
 }
 
 export function getEpisodeProductionPlan(request: EpisodeProductionPlanRequest): Promise<EpisodeProductionPlan> {

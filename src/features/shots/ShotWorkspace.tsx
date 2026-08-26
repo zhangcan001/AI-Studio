@@ -939,6 +939,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onRefresh={reload}
               onNotice={(message) => setNotice(message)}
               onNavigateToReview={(reviewStage) => setStage(reviewStage)}
+              onOpenProductionQueue={onOpenProductionQueue}
             />
           )}
         </div>

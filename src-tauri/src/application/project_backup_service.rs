@@ -20,7 +20,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 13;
+const BACKUP_VERSION: u32 = 14;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -154,7 +154,7 @@ impl ProjectBackupService {
                 .unwrap_or("AI-Studio-Project-Backup.zip")
                 .to_owned(),
             bytes,
-            entries: 5 + built.files.len(),
+            entries: 6 + built.files.len(),
             active_tasks_excluded: built.document.active_tasks_excluded,
         })
     }
@@ -269,6 +269,13 @@ impl ProjectBackupService {
         let mut item_ids = HashMap::new();
         for item in &document.items {
             item_ids.insert(item.id.clone(), format!("pbi_{}", Uuid::new_v4().simple()));
+        }
+        let mut preparation_snapshot_ids = HashMap::new();
+        for snapshot in &document.preparation_snapshots {
+            preparation_snapshot_ids.insert(
+                snapshot.id.clone(),
+                format!("pps_{}", Uuid::new_v4().simple()),
+            );
         }
         let mut benchmark_experiment_ids = HashMap::new();
         for experiment in &document.benchmark_experiments {
@@ -426,6 +433,7 @@ impl ProjectBackupService {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &preparation_snapshot_ids,
                 &benchmark_experiment_ids,
                 &benchmark_candidate_ids,
                 &production_run_ids,
@@ -569,6 +577,8 @@ impl ProjectBackupService {
         let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
         let batches = query_batches(&mut transaction, project_id).await?;
         let items = query_batch_items(&mut transaction, &batches).await?;
+        let preparation_snapshots =
+            query_production_preparation_snapshots(&mut transaction, project_id).await?;
         let benchmark_experiments =
             query_benchmark_experiments(&mut transaction, project_id).await?;
         let mut benchmark_candidates =
@@ -910,6 +920,7 @@ impl ProjectBackupService {
             prompt_versions,
             batches,
             items,
+            preparation_snapshots,
             workflow_refs,
             asset_tags,
             asset_tag_links,
@@ -962,6 +973,7 @@ impl ProjectBackupService {
         prompt_version_ids: &HashMap<String, String>,
         batch_ids: &HashMap<String, String>,
         item_ids: &HashMap<String, String>,
+        preparation_snapshot_ids: &HashMap<String, String>,
         benchmark_experiment_ids: &HashMap<String, String>,
         benchmark_candidate_ids: &HashMap<String, String>,
         production_run_ids: &HashMap<String, String>,
@@ -996,6 +1008,7 @@ impl ProjectBackupService {
             prompt_version_ids,
             batch_ids,
             item_ids,
+            preparation_snapshot_ids,
             benchmark_experiment_ids,
             benchmark_candidate_ids,
             production_run_ids,
@@ -1062,6 +1075,8 @@ struct BackupDocument {
     prompt_versions: Vec<BackupPromptVersion>,
     batches: Vec<BackupBatch>,
     items: Vec<BackupBatchItem>,
+    #[serde(default)]
+    preparation_snapshots: Vec<BackupProductionPreparationSnapshot>,
     workflow_refs: Vec<WorkflowReference>,
     #[serde(default)]
     asset_tags: Vec<BackupAssetTag>,
@@ -1659,6 +1674,44 @@ struct BackupBatchItem {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BackupProductionPreparationSnapshot {
+    id: String,
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    /// Immutable historical evidence. Runtime relations use the outer IDs above.
+    snapshot_json: String,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProductionPreparationSnapshotV1 {
+    schema_version: u32,
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    resolved_at: String,
+    prepared_at: String,
+    structure: Value,
+    profiles: Value,
+    reference_sets: Value,
+    reference_assets: Value,
+    prompt: Value,
+    workflow: Value,
+    output_spec: Value,
+    stage_input: Value,
+    frozen_generation_values: Value,
+    readiness: Value,
+    comfy_capability_evidence: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BackupBenchmarkExperiment {
     id: String,
     name: String,
@@ -2165,6 +2218,19 @@ struct DbBatchItem {
     error_message: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbProductionPreparationSnapshot {
+    id: String,
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    snapshot_json: String,
+    created_at: String,
 }
 
 #[derive(FromRow)]
@@ -2856,6 +2922,46 @@ async fn query_batch_items(
         }
     }
     Ok(result)
+}
+
+async fn query_production_preparation_snapshots(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProductionPreparationSnapshot>, AppError> {
+    let rows = sqlx::query_as::<_, DbProductionPreparationSnapshot>(
+        "SELECT p.id, p.project_id, p.shot_id, p.stage, p.context_hash,
+                p.production_batch_id, p.production_batch_item_id, p.snapshot_json,
+                p.created_at
+         FROM production_preparation_snapshots p
+         JOIN projects pr ON pr.id = p.project_id
+         JOIN shots s ON s.id = p.shot_id AND s.project_id = p.project_id
+         JOIN production_batches b
+           ON b.id = p.production_batch_id AND b.project_id = p.project_id
+         JOIN production_batch_items i
+           ON i.id = p.production_batch_item_id AND i.batch_id = p.production_batch_id
+         WHERE pr.id = ?
+         ORDER BY p.created_at, p.id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    rows.into_iter()
+        .map(|row| {
+            validate_production_preparation_snapshot_json(&row.snapshot_json)?;
+            Ok(BackupProductionPreparationSnapshot {
+                id: row.id,
+                project_id: row.project_id,
+                shot_id: row.shot_id,
+                stage: row.stage,
+                context_hash: row.context_hash,
+                production_batch_id: row.production_batch_id,
+                production_batch_item_id: row.production_batch_item_id,
+                snapshot_json: row.snapshot_json,
+                created_at: row.created_at,
+            })
+        })
+        .collect()
 }
 
 async fn query_benchmark_experiments(
@@ -3638,7 +3744,7 @@ fn write_zip_to_path(
     files: &[BackupFileSource],
     destination: &Path,
 ) -> Result<(), AppError> {
-    if files.len().saturating_add(5) > MAX_ENTRIES {
+    if files.len().saturating_add(6) > MAX_ENTRIES {
         return Err(AppError::backup_invalid("备份文件数量超过限制"));
     }
     let manifest = ProjectBackupManifest {
@@ -3664,6 +3770,12 @@ fn write_zip_to_path(
         &mut writer,
         "production_queue.json",
         &document.batches,
+        options,
+    )?;
+    write_zip_json(
+        &mut writer,
+        "production_preparation_snapshots.json",
+        &document.preparation_snapshots,
         options,
     )?;
     for file in files {
@@ -3853,7 +3965,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -3903,10 +4015,137 @@ fn validate_document_entries(
     validate_reference_anchor_document(document)?;
     validate_consistency_document(document, version)?;
     validate_production_structure_document(document, version)?;
+    validate_production_preparation_snapshot_document(document, version)?;
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
     validate_production_orchestrator_document(document)?;
     validate_shot_document(document, version)?;
+    Ok(())
+}
+
+fn validate_production_preparation_snapshot_document(
+    document: &BackupDocument,
+    version: u32,
+) -> Result<(), AppError> {
+    if version < 14 {
+        if !document.preparation_snapshots.is_empty() {
+            return Err(AppError::backup_invalid(
+                "旧版备份不应包含 Production Preparation Snapshot",
+            ));
+        }
+        return Ok(());
+    }
+
+    let mut snapshot_ids = HashSet::new();
+    for snapshot in &document.preparation_snapshots {
+        if !snapshot_ids.insert(snapshot.id.as_str())
+            || snapshot.project_id != document.project.id
+            || snapshot.id.trim().is_empty()
+            || snapshot.shot_id.trim().is_empty()
+            || snapshot.context_hash.trim().is_empty()
+            || snapshot.production_batch_id.trim().is_empty()
+            || snapshot.production_batch_item_id.trim().is_empty()
+            || !matches!(snapshot.stage.as_str(), "image" | "video")
+        {
+            return Err(AppError::backup_invalid(
+                "Production Preparation Snapshot 外层关系无效",
+            ));
+        }
+        if !document
+            .shots
+            .iter()
+            .any(|shot| shot.id == snapshot.shot_id && shot.project_id == document.project.id)
+        {
+            return Err(AppError::backup_invalid(
+                "Production Preparation Snapshot 镜头引用无效",
+            ));
+        }
+        if !document
+            .batches
+            .iter()
+            .any(|batch| batch.id == snapshot.production_batch_id)
+        {
+            return Err(AppError::backup_invalid(
+                "Production Preparation Snapshot 批次引用无效",
+            ));
+        }
+        if !document.items.iter().any(|item| {
+            item.id == snapshot.production_batch_item_id
+                && item.batch_id == snapshot.production_batch_id
+        }) {
+            return Err(AppError::backup_invalid(
+                "Production Preparation Snapshot 批次项目引用无效",
+            ));
+        }
+        validate_production_preparation_snapshot_json(&snapshot.snapshot_json)?;
+    }
+    Ok(())
+}
+
+fn validate_production_preparation_snapshot_json(snapshot_json: &str) -> Result<(), AppError> {
+    let snapshot = serde_json::from_str::<ProductionPreparationSnapshotV1>(snapshot_json).map_err(
+        |error| {
+            AppError::backup_invalid(format!(
+                "Production Preparation Snapshot JSON 无效：{error}"
+            ))
+        },
+    )?;
+    if snapshot.schema_version != 1
+        || snapshot.project_id.trim().is_empty()
+        || snapshot.shot_id.trim().is_empty()
+        || !matches!(snapshot.stage.as_str(), "image" | "video")
+        || snapshot.context_hash.trim().is_empty()
+        || snapshot.resolved_at.trim().is_empty()
+        || snapshot.prepared_at.trim().is_empty()
+        || !snapshot.reference_assets.is_array()
+    {
+        return Err(AppError::backup_invalid(
+            "Production Preparation Snapshot V1 字段无效",
+        ));
+    }
+
+    let _ = (
+        &snapshot.structure,
+        &snapshot.profiles,
+        &snapshot.reference_sets,
+        &snapshot.prompt,
+        &snapshot.workflow,
+        &snapshot.output_spec,
+        &snapshot.stage_input,
+        &snapshot.frozen_generation_values,
+        &snapshot.readiness,
+        &snapshot.comfy_capability_evidence,
+    );
+    for reference in snapshot
+        .reference_assets
+        .as_array()
+        .expect("reference_assets was checked to be an array")
+    {
+        let Some(reference) = reference.as_object() else {
+            return Err(AppError::backup_invalid(
+                "Production Preparation Snapshot referenceAssets 必须是对象数组",
+            ));
+        };
+        let valid_string = |key: &str| {
+            reference
+                .get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        };
+        let valid_ordinal = reference
+            .get("ordinal")
+            .and_then(Value::as_i64)
+            .is_some_and(|ordinal| ordinal >= 0);
+        if !valid_string("assetId")
+            || !valid_string("sha256")
+            || !valid_string("role")
+            || !valid_ordinal
+        {
+            return Err(AppError::backup_invalid(
+                "Production Preparation Snapshot referenceAsset 字段无效",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -5658,6 +5897,7 @@ async fn restore_rows_in_transaction(
     prompt_version_ids: &HashMap<String, String>,
     batch_ids: &HashMap<String, String>,
     item_ids: &HashMap<String, String>,
+    preparation_snapshot_ids: &HashMap<String, String>,
     benchmark_experiment_ids: &HashMap<String, String>,
     benchmark_candidate_ids: &HashMap<String, String>,
     production_run_ids: &HashMap<String, String>,
@@ -6855,6 +7095,41 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    // `snapshot_json` is immutable historical evidence. Only the outer
+    // relational IDs are remapped so live associations point at the restored
+    // project; IDs inside the evidence are intentionally left untouched.
+    for snapshot in &document.preparation_snapshots {
+        let snapshot_id = preparation_snapshot_ids
+            .get(&snapshot.id)
+            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot ID 映射缺失"))?;
+        let shot_id = shot_ids
+            .get(&snapshot.shot_id)
+            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot 镜头映射缺失"))?;
+        let batch_id = batch_ids
+            .get(&snapshot.production_batch_id)
+            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot 批次映射缺失"))?;
+        let item_id = item_ids
+            .get(&snapshot.production_batch_item_id)
+            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot 项目映射缺失"))?;
+        sqlx::query(
+            "INSERT INTO production_preparation_snapshots
+             (id, project_id, shot_id, stage, context_hash, production_batch_id,
+              production_batch_item_id, snapshot_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(snapshot_id)
+        .bind(&project.id)
+        .bind(shot_id)
+        .bind(&snapshot.stage)
+        .bind(&snapshot.context_hash)
+        .bind(batch_id)
+        .bind(item_id)
+        .bind(&snapshot.snapshot_json)
+        .bind(&snapshot.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for binding in &document.shot_profile_bindings {
         let binding_id = consistency_required_id(
             &consistency_ids.shot_profile_bindings,
@@ -7447,6 +7722,7 @@ mod tests {
             prompt_versions: Vec::new(),
             batches: Vec::new(),
             items: Vec::new(),
+            preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
             asset_tags: tags,
             asset_tag_links: links,
@@ -8080,6 +8356,62 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        let preparation_snapshot_json = serde_json::to_string(&json!({
+            "schemaVersion": 1,
+            "projectId": "project-backup",
+            "shotId": "sht_backup",
+            "stage": "image",
+            "contextHash": "context-backup",
+            "resolvedAt": "2026-01-01T00:03:00Z",
+            "preparedAt": "2026-01-01T00:03:01Z",
+            "structure": {"shotId": "sht_backup"},
+            "profiles": [],
+            "referenceSets": [],
+            "referenceAssets": [{
+                "assetId": "ast_backup",
+                "sha256": "sha-backup",
+                "role": "primary",
+                "ordinal": 0
+            }],
+            "prompt": {
+                "renderedText": "frozen prompt",
+                "negativePrompt": "",
+                "orderedSegments": []
+            },
+            "workflow": {
+                "workflowVersionId": "workflow-version-1",
+                "recipeId": "recipe-1"
+            },
+            "outputSpec": {"type": "image"},
+            "stageInput": null,
+            "frozenGenerationValues": {"prompt": "frozen prompt"},
+            "readiness": {
+                "status": "READY",
+                "score": 100,
+                "gates": [],
+                "evaluatedAt": "2026-01-01T00:03:00Z"
+            },
+            "comfyCapabilityEvidence": {"status": "READY"}
+        }))
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_preparation_snapshots
+             (id, project_id, shot_id, stage, context_hash, production_batch_id,
+              production_batch_item_id, snapshot_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("pps_backup")
+        .bind("project-backup")
+        .bind("sht_backup")
+        .bind("image")
+        .bind("context-backup")
+        .bind("pbt_backup")
+        .bind("pbi_backup")
+        .bind(&preparation_snapshot_json)
+        .bind("2026-01-01T00:03:01Z")
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at) VALUES ('pbt_h3_backup', 'project-backup', 'H3 成片批次', 'COMPLETED', 1, NULL, '2026-01-01T00:03:10Z', '2026-01-01T00:03:10Z')")
             .execute(&pool)
             .await
@@ -8377,11 +8709,17 @@ mod tests {
             .export("project-backup", archive_path.clone())
             .await
             .unwrap();
-        assert!(exported.entries >= 5);
-        let (manifest, _document, names) = inspect_archive(&archive_path).unwrap();
+        assert!(exported.entries >= 6);
+        let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 13);
+        assert_eq!(manifest.version, 14);
         assert_eq!(exported.entries, names.len());
+        assert!(names.contains("production_preparation_snapshots.json"));
+        assert_eq!(document.preparation_snapshots.len(), 1);
+        assert_eq!(
+            document.preparation_snapshots[0].snapshot_json,
+            preparation_snapshot_json
+        );
         assert!(!names.contains("app.db"));
         assert!(!names.contains("workflow_api.json"));
         assert!(!names.contains("recipe.yaml"));
@@ -8390,6 +8728,30 @@ mod tests {
         assert_eq!(preview.shots, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, "project-backup");
+        let restored_preparation_snapshot: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        ) = sqlx::query_as(
+            "SELECT id, project_id, shot_id, context_hash, production_batch_id,
+                        production_batch_item_id, snapshot_json
+                 FROM production_preparation_snapshots WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_preparation_snapshot.0, "pps_backup");
+        assert_eq!(restored_preparation_snapshot.1, restored.id);
+        assert_ne!(restored_preparation_snapshot.2, "sht_backup");
+        assert_eq!(restored_preparation_snapshot.3, "context-backup");
+        assert_ne!(restored_preparation_snapshot.4, "pbt_backup");
+        assert_ne!(restored_preparation_snapshot.5, "pbi_backup");
+        assert_eq!(restored_preparation_snapshot.6, preparation_snapshot_json);
         let restored_count =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM assets WHERE project_id = ?")
                 .bind(&restored.id)
@@ -8966,7 +9328,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_v5_through_v9_and_v12_fixtures_restore_with_empty_later_data() {
+    async fn fixed_v5_through_v9_and_v12_and_v13_fixtures_restore_with_empty_later_data() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
@@ -8976,7 +9338,7 @@ mod tests {
             data_dirs.cache.clone(),
         );
 
-        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32, 12_u32] {
+        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32, 12_u32, 13_u32] {
             let project_id = format!("legacy-v{version}-project");
             let project_name = format!("旧项目 v{version}");
             let archive_path = directory.path().join(format!("legacy-v{version}.zip"));
@@ -9062,6 +9424,14 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(consistency_count, 0);
+            let preparation_snapshot_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM production_preparation_snapshots WHERE project_id = ?",
+            )
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(preparation_snapshot_count, 0);
         }
     }
 
@@ -9189,6 +9559,7 @@ mod tests {
             }],
             batches: Vec::new(),
             items: Vec::new(),
+            preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
@@ -9256,6 +9627,7 @@ mod tests {
                 &prompt_version_ids,
                 &batch_ids,
                 &item_ids,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -9354,6 +9726,7 @@ mod tests {
             prompt_versions: Vec::new(),
             batches: Vec::new(),
             items: Vec::new(),
+            preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),

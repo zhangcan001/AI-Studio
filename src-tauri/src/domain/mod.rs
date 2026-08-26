@@ -8,6 +8,7 @@ pub mod consistency;
 pub mod generation_snapshot;
 pub mod preset;
 pub mod production_item_review;
+pub mod production_preparation;
 pub mod production_queue;
 pub mod production_run;
 pub mod production_structure;
@@ -40,6 +41,12 @@ pub use consistency::{
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
 pub use preset::{Preset, PresetDomainError, PresetId};
 pub use production_item_review::{ProductionReviewDomainError, ProductionReviewStatus};
+pub use production_preparation::{
+    ComfyCapabilityEvidence, PreparationSnapshotIdentity, PreparationSnapshotRecord,
+    PreparationSnapshotV1, PreparedShotBatchRecord, ProductionPreparationAdmission,
+    ResolvedShotContextView, ScenePreparationView, ShotProductionPlan, ShotProductionPlanSummary,
+    PREPARATION_SNAPSHOT_SCHEMA_VERSION,
+};
 pub use production_queue::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,

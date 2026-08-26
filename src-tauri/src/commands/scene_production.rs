@@ -2,6 +2,7 @@ use crate::{
     app_state::AppState,
     application::scene_production_service::{
         SceneProductionError, SceneProductionPlan, SceneProductionPrepareResult,
+        SceneProductionReadinessSummary,
     },
     commands::production_queue::ProductionBatchDetailView,
     domain::ShotStage,
@@ -50,6 +51,24 @@ pub async fn scene_production_plan(
     state
         .scene_production_service
         .plan(&request.project_id, &request.scene_id, stage)
+        .await
+        .map_err(map_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn scene_production_readiness_summary(
+    state: State<'_, AppState>,
+    request: SceneProductionPlanRequest,
+) -> Result<SceneProductionReadinessSummary, AppError> {
+    let stage = parse_stage(&request.stage)?;
+    state
+        .scene_production_service
+        .readiness_summary(
+            &request.project_id,
+            &request.scene_id,
+            stage,
+            &state.shot_readiness_service,
+        )
         .await
         .map_err(map_error)
 }
@@ -104,5 +123,6 @@ fn map_error(error: SceneProductionError) -> AppError {
         }
         SceneProductionError::Structure(error) => AppError::invalid_input(error.to_string()),
         SceneProductionError::ShotBatch(error) => AppError::invalid_input(error.to_string()),
+        SceneProductionError::Readiness(error) => AppError::invalid_input(error.to_string()),
     }
 }

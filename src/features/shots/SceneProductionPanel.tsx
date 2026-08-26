@@ -20,6 +20,7 @@ import type {
   SceneProductionPlan,
   SceneProductionStage,
 } from "../../types/sceneProduction";
+import { SceneProductionPreparation } from "./SceneProductionPreparation";
 import {
   sanitizeReusableGenerationValues,
   sceneProductionClassificationLabel,
@@ -41,7 +42,35 @@ interface PanelError {
 const STAGES: SceneProductionStage[] = ["image", "video"];
 const CLASSIFICATIONS: SceneProductionClassification[] = ["DONE", "PREPARED", "ELIGIBLE", "BLOCKED"];
 
-export function SceneProductionPanel({
+type SceneProductionPanelWithQueue = SceneProductionPanelProps & {
+  onOpenProductionQueue?: (batchId?: string) => void;
+};
+
+export function SceneProductionPanel(props: SceneProductionPanelWithQueue) {
+  const [showLegacyTools, setShowLegacyTools] = useState(false);
+
+  return (
+    <div className="scene-production-panel-shell">
+      <SceneProductionPreparation
+        projectId={props.projectId}
+        sceneOptions={props.sceneOptions}
+        currentSceneId={props.currentSceneId}
+        initialStage={props.initialPlan?.stage}
+        onOpenProductionQueue={props.onOpenProductionQueue}
+        onNotice={props.onNotice}
+      />
+      <div className="scene-production-legacy-toggle">
+        <button type="button" className="quiet-button" onClick={() => setShowLegacyTools((current) => !current)} aria-expanded={showLegacyTools}>
+          {showLegacyTools ? "收起旧版批量配置工具" : "打开旧版批量配置工具"}
+        </button>
+        <span>旧版预设与提示词批量编辑仍保留；它不会影响新的生产准备准入。</span>
+      </div>
+      {showLegacyTools && <LegacySceneProductionPanel {...props} />}
+    </div>
+  );
+}
+
+function LegacySceneProductionPanel({
   projectId,
   sceneOptions,
   currentSceneId,

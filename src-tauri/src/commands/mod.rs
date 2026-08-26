@@ -14,6 +14,7 @@ pub mod production_audit;
 pub mod production_batch_runbook;
 pub mod production_item_review;
 pub mod production_orchestrator;
+pub mod production_preparation;
 pub mod production_queue;
 pub mod production_structure;
 pub mod project;

@@ -48,6 +48,7 @@ use application::{
     production_batch_runbook_service::ProductionBatchRunbookService,
     production_item_review_service::ProductionItemReviewService,
     production_orchestrator_service::ProductionOrchestratorService,
+    production_preparation_service::ProductionPreparationService,
     production_queue_service::ProductionQueueService,
     production_structure_service::ProductionStructureService,
     project_backup_service::ProjectBackupService,
@@ -660,7 +661,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             .with_generation_snapshot_repository(snapshot_repository.clone()));
             let shot_batch_service = Arc::new(ShotBatchService::new(
                 shot_repository,
-                shot_batch_repository,
+                shot_batch_repository.clone(),
                 task_repository.clone(),
                 asset_repository.clone(),
                 definition_repository.clone(),
@@ -668,6 +669,14 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             )
             .with_stage_prompt_repository(shot_bulk_repository));
+            let production_preparation_service = Arc::new(ProductionPreparationService::new(
+                shot_batch_service.clone(),
+                shot_batch_repository.clone(),
+                shot_readiness_service.clone(),
+                definition_repository.clone(),
+                project_repository.clone(),
+                clock.clone(),
+            ));
             let batch_workflow_preset_service = Arc::new(BatchWorkflowPresetService::new(
                 settings_service.clone(),
                 definition_repository.clone(),
@@ -743,6 +752,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 diagnostics_service,
                 comfy_preflight_service,
                 shot_readiness_service,
+                production_preparation_service,
                 settings_service,
                 batch_workflow_preset_service,
                 scene_production_service,
@@ -1058,10 +1068,16 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::shot_batch::shot_batch_create,
             commands::scene_production::scene_production_plan,
             commands::scene_production::scene_production_prepare,
+            commands::scene_production::scene_production_readiness_summary,
             commands::episode_production::episode_production_plan,
             commands::episode_production::episode_production_prepare,
+            commands::episode_production::episode_production_readiness_summary,
             commands::series_production::series_production_plan,
             commands::series_production::series_production_prepare,
+            commands::series_production::series_production_readiness_summary,
+            commands::production_preparation::scene_production_preflight,
+            commands::production_preparation::scene_production_admit,
+            commands::production_preparation::shot_production_plan_detail,
             commands::shot_bulk::preview_shot_bulk_import,
             commands::shot_bulk::commit_shot_bulk_import,
             commands::shot_bulk::bulk_assign_shot_prompt,

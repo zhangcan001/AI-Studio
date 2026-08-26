@@ -1,5 +1,8 @@
 use super::RepositoryError;
-use crate::domain::{ProductionBatch, ProductionBatchItem, ShotStage};
+use crate::domain::{
+    PreparationSnapshotRecord, PreparedShotBatchRecord, ProductionBatch, ProductionBatchItem,
+    ShotStage,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -30,6 +33,46 @@ pub trait ShotBatchRepository: Send + Sync {
         items: &[ProductionBatchItem],
         bindings: &[ShotBatchBinding],
     ) -> Result<(), RepositoryError>;
+
+    /// Atomically inserts a preparation batch, its Shot links, and the
+    /// immutable preparation snapshots that prove the values were generated
+    /// from the same live context/readiness pass.
+    ///
+    /// The default keeps small in-memory repositories source-compatible while
+    /// failing closed if a caller attempts to persist snapshots without a
+    /// transaction-capable implementation.
+    async fn insert_prepared_batch_with_bindings(
+        &self,
+        batch: &ProductionBatch,
+        items: &[ProductionBatchItem],
+        bindings: &[ShotBatchBinding],
+        snapshots: &[PreparationSnapshotRecord],
+    ) -> Result<(), RepositoryError> {
+        let _ = (batch, items, bindings, snapshots);
+        Err(RepositoryError::database(
+            "prepared Shot batch persistence is not supported by this repository",
+        ))
+    }
+
+    /// Returns non-terminal preparation records for a project/stage/Shot set.
+    /// Implementations must keep the query project-scoped and set-based.
+    async fn list_prepared_shot_records(
+        &self,
+        _project_id: &str,
+        _stage: ShotStage,
+        _shot_ids: &[String],
+    ) -> Result<Vec<PreparedShotBatchRecord>, RepositoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Reads one immutable preparation snapshot by its queue item identity.
+    async fn find_preparation_snapshot(
+        &self,
+        _project_id: &str,
+        _production_batch_item_id: &str,
+    ) -> Result<Option<PreparationSnapshotRecord>, RepositoryError> {
+        Ok(None)
+    }
 
     /// Atomically binds a newly-created Task to a Shot item. Returns `true`
     /// when the item has a Shot placeholder link, and `false` for a generic

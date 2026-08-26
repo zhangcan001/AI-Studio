@@ -42,6 +42,7 @@ pub mod production_audit_service;
 pub mod production_batch_runbook_service;
 pub mod production_item_review_service;
 pub mod production_orchestrator_service;
+pub mod production_preparation_service;
 pub mod production_queue_service;
 pub mod production_structure_service;
 pub mod project_backup_service;

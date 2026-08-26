@@ -9,6 +9,7 @@ use crate::application::shot_readiness_evaluator::{
 use crate::application::workflow_lifecycle_service::{
     WorkflowLifecycleService, WorkflowProductionWorkspaceResponse,
 };
+use crate::domain::production_preparation::ComfyCapabilityEvidence;
 use crate::domain::shot::ShotStage;
 use crate::domain::shot_context::ResolvedShotContext;
 use crate::domain::shot_readiness::{ReadinessCheckState, ShotReadiness, ShotReadinessStatus};
@@ -88,6 +89,17 @@ pub struct SceneReadinessSummary {
     pub items: Vec<ShotReadinessSummaryItem>,
 }
 
+/// One live readiness pass shared by Production Preparation.  The contexts,
+/// readiness reports, timestamp, and the small Comfy evidence projection all
+/// come from the same resolver/preflight/workspace load.
+#[derive(Clone, Debug)]
+pub struct ReadinessBundle {
+    pub contexts: Vec<ResolvedShotContext>,
+    pub readiness: Vec<ShotReadiness>,
+    pub evaluated_at: DateTime<Utc>,
+    pub comfy_capability_evidence: ComfyCapabilityEvidence,
+}
+
 pub struct ShotReadinessService {
     resolver: Arc<ShotContextResolver>,
     comfy_preflight_service: Arc<ComfyPreflightService>,
@@ -165,6 +177,52 @@ impl ShotReadinessService {
         stage: ShotStage,
     ) -> Result<Vec<ShotReadiness>, ShotReadinessServiceError> {
         self.evaluate_many(project_id, shot_ids, stage, true).await
+    }
+
+    /// Resolve and live-preflight a bounded batch once.  Preparation and
+    /// admission must use this API so they do not resolve a context once for
+    /// the plan and again for frozen generation values.
+    pub async fn preflight_bundle_many(
+        &self,
+        project_id: &str,
+        shot_ids: &[String],
+        stage: ShotStage,
+    ) -> Result<ReadinessBundle, ShotReadinessServiceError> {
+        if shot_ids.len() > READINESS_BATCH_LIMIT {
+            return Err(ShotReadinessServiceError::BatchLimit {
+                limit: READINESS_BATCH_LIMIT,
+            });
+        }
+        if shot_ids.is_empty() {
+            return Ok(ReadinessBundle {
+                contexts: Vec::new(),
+                readiness: Vec::new(),
+                evaluated_at: Utc::now(),
+                comfy_capability_evidence: ComfyCapabilityEvidence::default(),
+            });
+        }
+
+        let contexts = self.resolve_many(project_id, shot_ids, stage).await?;
+        let report = self
+            .comfy_preflight_service
+            .current()
+            .await
+            .map_err(|error| ShotReadinessServiceError::Comfy(error.to_string()))?;
+        let workspace = self.workspace().await?;
+        let environment = ReadinessEnvironmentSnapshot::new(Some(report.clone()), workspace);
+        let evaluated_at = Utc::now();
+        let readiness = contexts
+            .iter()
+            .map(|context| evaluate_context(context.clone(), &environment, false, evaluated_at))
+            .collect::<Result<Vec<_>, _>>()?;
+        let evidence =
+            comfy_capability_evidence(&report, &environment.workflow_workspace, &contexts);
+        Ok(ReadinessBundle {
+            contexts,
+            readiness,
+            evaluated_at,
+            comfy_capability_evidence: evidence,
+        })
     }
 
     pub async fn preflight_many(
@@ -399,5 +457,51 @@ fn scene_summary_from_items(
         blocked,
         warning_count,
         items,
+    }
+}
+
+fn comfy_capability_evidence(
+    report: &crate::application::comfy_preflight_service::ComfyPreflightReport,
+    workspace: &WorkflowProductionWorkspaceResponse,
+    contexts: &[ResolvedShotContext],
+) -> ComfyCapabilityEvidence {
+    let selected_versions = contexts
+        .iter()
+        .filter_map(|context| context.workflow.workflow_version_id.as_deref())
+        .collect::<std::collections::HashSet<_>>();
+    let selected_workspace = workspace.items.iter().find(|item| {
+        item.workflow_version_id
+            .as_deref()
+            .is_some_and(|id| selected_versions.contains(id))
+    });
+    let selected_summary = report.workflow_summary.items.iter().find(|item| {
+        item.workflow_version_id
+            .as_deref()
+            .is_some_and(|id| selected_versions.contains(id))
+    });
+    let mut issue_codes = report
+        .issues
+        .iter()
+        .map(|issue| issue.code.clone())
+        .collect::<Vec<_>>();
+    issue_codes.sort();
+    issue_codes.dedup();
+    ComfyCapabilityEvidence {
+        checked_at: DateTime::parse_from_rfc3339(&report.checked_at)
+            .ok()
+            .map(|value| value.with_timezone(&Utc)),
+        status: Some(format!("{:?}", report.status).to_ascii_uppercase()),
+        connection: Some(format!("{:?}", report.connection).to_ascii_uppercase()),
+        workflow_version_id: selected_workspace
+            .and_then(|item| item.workflow_version_id.clone())
+            .or_else(|| selected_summary.and_then(|item| item.workflow_version_id.clone())),
+        workflow_ready: selected_workspace.is_some_and(|item| item.readiness == "READY")
+            || selected_summary.is_some_and(|item| item.status == "READY"),
+        workflow_total: report.workflow_summary.workflow_total,
+        runtime_busy: report.runtime_busy,
+        active_task_count: report.active_task_count,
+        production_busy: report.production_busy,
+        node_count: report.node_count,
+        issue_codes,
     }
 }

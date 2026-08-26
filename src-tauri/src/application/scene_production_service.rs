@@ -5,7 +5,11 @@ use crate::application::shot_batch_service::{
     CreateShotBatchRequest, ShotBatchPlanRow, ShotBatchService, ShotBatchServiceError,
     MAX_SHOT_BATCH_ITEMS,
 };
-use crate::domain::{ProductionBatchDetail, ShotStage};
+use crate::application::shot_readiness_service::{
+    SceneReadinessSummary, ShotReadinessService, ShotReadinessServiceError,
+};
+use crate::domain::{ProductionBatchDetail, ShotReadinessStatus, ShotStage};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 use tokio::sync::Mutex;
@@ -57,6 +61,47 @@ pub struct SceneProductionPrepareResult {
     pub already_prepared: bool,
     pub existing_batch_ids: Vec<String>,
     pub detail: Option<ProductionBatchDetail>,
+}
+
+/// Readiness-aware scene summary used by Episode/Series aggregation.
+///
+/// The new preparation service owns context freezing and admission. This
+/// compatibility-facing projection deliberately contains only live summary
+/// data, so callers cannot accidentally treat it as frozen generation input.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneProductionReadinessItem {
+    pub shot_id: String,
+    pub ordinal: u32,
+    pub name: String,
+    pub status: ShotReadinessStatus,
+    pub score: i32,
+    pub warning_count: usize,
+    pub incomplete_count: usize,
+    pub blocker_count: usize,
+    pub context_hash: String,
+    pub current_stage_status: String,
+    pub already_prepared: bool,
+    pub existing_batch_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneProductionReadinessSummary {
+    pub project_id: String,
+    pub scene_id: String,
+    pub scene_name: String,
+    pub stage: String,
+    pub total: usize,
+    pub ready: usize,
+    pub incomplete: usize,
+    pub blocked: usize,
+    pub prepared: usize,
+    pub done: usize,
+    pub warning_count: usize,
+    pub existing_batch_ids: Vec<String>,
+    pub items: Vec<SceneProductionReadinessItem>,
+    pub evaluated_at: DateTime<Utc>,
 }
 
 pub struct SceneProductionService {
@@ -135,6 +180,35 @@ impl SceneProductionService {
             allow_partial,
         )
         .await
+    }
+
+    /// Builds a readiness-aware projection for higher-level summaries.
+    ///
+    /// This is intentionally read-only. It calls the existing live readiness
+    /// service and the legacy plan projection only; batch creation remains in
+    /// the explicit prepare/admission paths.
+    pub async fn readiness_summary(
+        &self,
+        project_id: &str,
+        scene_id: &str,
+        stage: ShotStage,
+        readiness_service: &ShotReadinessService,
+    ) -> Result<SceneProductionReadinessSummary, SceneProductionError> {
+        let scene = self.scene(project_id, scene_id).await?;
+        let readiness = readiness_service
+            .scene_preflight(project_id, scene_id, stage)
+            .await?;
+        let plan = self
+            .plan_scope(project_id, scene_id, &scene.name, &scene.shot_ids, stage)
+            .await?;
+        Ok(readiness_summary_from_views(
+            project_id,
+            scene_id,
+            &scene.name,
+            stage,
+            readiness,
+            plan,
+        ))
     }
 
     pub(crate) async fn prepare_scope(
@@ -345,6 +419,7 @@ pub enum SceneProductionError {
     Blocked(SceneProductionPlan),
     Structure(ProductionStructureError),
     ShotBatch(ShotBatchServiceError),
+    Readiness(ShotReadinessServiceError),
 }
 
 impl fmt::Display for SceneProductionError {
@@ -358,6 +433,7 @@ impl fmt::Display for SceneProductionError {
             Self::Blocked(_) => formatter.write_str("SCENE_PRODUCTION_BLOCKED"),
             Self::Structure(error) => error.fmt(formatter),
             Self::ShotBatch(error) => error.fmt(formatter),
+            Self::Readiness(error) => error.fmt(formatter),
         }
     }
 }
@@ -376,11 +452,108 @@ impl From<ShotBatchServiceError> for SceneProductionError {
     }
 }
 
+impl From<ShotReadinessServiceError> for SceneProductionError {
+    fn from(error: ShotReadinessServiceError) -> Self {
+        Self::Readiness(error)
+    }
+}
+
+fn readiness_summary_from_views(
+    project_id: &str,
+    scene_id: &str,
+    scene_name: &str,
+    stage: ShotStage,
+    readiness: SceneReadinessSummary,
+    plan: SceneProductionPlan,
+) -> SceneProductionReadinessSummary {
+    let plan_by_id = plan
+        .rows
+        .iter()
+        .map(|row| (row.shot_id.as_str(), row))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut existing_batch_ids = BTreeSet::new();
+    let mut ready = 0;
+    let mut incomplete = 0;
+    let mut blocked = 0;
+    let mut warning_count = 0;
+    let mut prepared = 0;
+    let mut done = 0;
+    let items = readiness
+        .items
+        .into_iter()
+        .map(|item| {
+            match item.status {
+                ShotReadinessStatus::Ready => ready += 1,
+                ShotReadinessStatus::Incomplete => incomplete += 1,
+                ShotReadinessStatus::Blocked => blocked += 1,
+            }
+            warning_count += item.warning_count;
+            let plan_row = plan_by_id.get(item.shot_id.as_str()).copied();
+            let existing_batch_id = plan_row.and_then(|row| row.existing_batch_id.clone());
+            if let Some(batch_id) = existing_batch_id.as_deref() {
+                existing_batch_ids.insert(batch_id.to_owned());
+            }
+            if plan_row.is_some_and(|row| row.classification == SceneShotClassification::Done) {
+                done += 1;
+            } else if plan_row
+                .is_some_and(|row| row.classification == SceneShotClassification::Prepared)
+            {
+                prepared += 1;
+            }
+            let current_stage_status = plan_row
+                .map(|row| match row.classification {
+                    SceneShotClassification::Done => "DONE".to_owned(),
+                    SceneShotClassification::Prepared => "PREPARED".to_owned(),
+                    SceneShotClassification::Eligible => "READY".to_owned(),
+                    SceneShotClassification::Blocked => "BLOCKED".to_owned(),
+                })
+                .unwrap_or_else(|| "UNKNOWN".to_owned());
+            SceneProductionReadinessItem {
+                shot_id: item.shot_id,
+                ordinal: item.ordinal,
+                name: item.name,
+                status: item.status,
+                score: item.score,
+                warning_count: item.warning_count,
+                incomplete_count: item.incomplete_count,
+                blocker_count: item.blocker_count,
+                context_hash: item.context_hash,
+                current_stage_status,
+                already_prepared: plan_row
+                    .is_some_and(|row| row.classification == SceneShotClassification::Prepared),
+                existing_batch_id,
+            }
+        })
+        .collect::<Vec<_>>();
+    // Keep the summary status derived from live readiness, not the legacy
+    // eligibility classifier. The latter is retained only for stage status
+    // and existing-batch metadata.
+    SceneProductionReadinessSummary {
+        project_id: project_id.to_owned(),
+        scene_id: scene_id.to_owned(),
+        scene_name: scene_name.to_owned(),
+        stage: stage.as_str().to_owned(),
+        total: items.len(),
+        ready,
+        incomplete,
+        blocked,
+        prepared,
+        done,
+        warning_count,
+        existing_batch_ids: existing_batch_ids.into_iter().collect(),
+        items,
+        evaluated_at: Utc::now(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_done, make_plan, SceneShotClassification};
+    use super::{is_done, make_plan, readiness_summary_from_views, SceneShotClassification};
     use crate::application::shot_batch_service::ShotBatchPlanRow;
-    use crate::domain::ShotStage;
+    use crate::application::shot_readiness_service::{
+        SceneReadinessSummary, ShotReadinessSummaryItem,
+    };
+    use crate::domain::{ShotReadinessStatus, ShotStage};
     use std::collections::HashMap;
 
     fn row(id: &str, ordinal: i64, eligible: bool) -> ShotBatchPlanRow {
@@ -463,5 +636,94 @@ mod tests {
         );
         assert_eq!(plan.blocked, 1);
         assert!(!plan.can_prepare);
+    }
+
+    #[test]
+    fn readiness_summary_aggregates_live_status_and_legacy_batch_metadata() {
+        let plan = make_plan(
+            "prj_1",
+            "scene-1",
+            "Scene",
+            ShotStage::Image,
+            &[
+                "shot-1".to_owned(),
+                "shot-2".to_owned(),
+                "shot-3".to_owned(),
+            ],
+            vec![
+                {
+                    let mut value = row("shot-1", 1, false);
+                    value.selected_image_asset_id = Some("asset-1".to_owned());
+                    value
+                },
+                row("shot-2", 2, true),
+                row("shot-3", 3, false),
+            ],
+            HashMap::from([("shot-2".to_owned(), "batch-2".to_owned())]),
+        );
+        let readiness = SceneReadinessSummary {
+            project_id: "prj_1".to_owned(),
+            scene_id: "scene-1".to_owned(),
+            stage: "image".to_owned(),
+            total: 3,
+            ready: 1,
+            incomplete: 1,
+            blocked: 1,
+            warning_count: 2,
+            items: vec![
+                ShotReadinessSummaryItem {
+                    shot_id: "shot-1".to_owned(),
+                    ordinal: 1,
+                    name: "shot-1".to_owned(),
+                    status: ShotReadinessStatus::Ready,
+                    score: 95,
+                    warning_count: 1,
+                    incomplete_count: 0,
+                    blocker_count: 0,
+                    context_hash: "hash-1".to_owned(),
+                },
+                ShotReadinessSummaryItem {
+                    shot_id: "shot-2".to_owned(),
+                    ordinal: 2,
+                    name: "shot-2".to_owned(),
+                    status: ShotReadinessStatus::Incomplete,
+                    score: 80,
+                    warning_count: 0,
+                    incomplete_count: 1,
+                    blocker_count: 0,
+                    context_hash: "hash-2".to_owned(),
+                },
+                ShotReadinessSummaryItem {
+                    shot_id: "shot-3".to_owned(),
+                    ordinal: 3,
+                    name: "shot-3".to_owned(),
+                    status: ShotReadinessStatus::Blocked,
+                    score: 30,
+                    warning_count: 1,
+                    incomplete_count: 0,
+                    blocker_count: 1,
+                    context_hash: "hash-3".to_owned(),
+                },
+            ],
+        };
+
+        let summary = readiness_summary_from_views(
+            "prj_1",
+            "scene-1",
+            "Scene",
+            ShotStage::Image,
+            readiness,
+            plan,
+        );
+
+        assert_eq!(
+            (summary.ready, summary.incomplete, summary.blocked),
+            (1, 1, 1)
+        );
+        assert_eq!((summary.done, summary.prepared), (1, 1));
+        assert_eq!(summary.warning_count, 2);
+        assert_eq!(summary.existing_batch_ids, vec!["batch-2"]);
+        assert!(summary.items[0].current_stage_status == "DONE");
+        assert!(summary.items[1].already_prepared);
     }
 }
