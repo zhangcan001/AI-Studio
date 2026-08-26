@@ -17,6 +17,8 @@ impl SqliteShotConsistencyRepository {
     }
 }
 
+const BULK_QUERY_CHUNK: usize = 300;
+
 #[derive(FromRow)]
 struct ShotProfileBindingRow {
     id: String,
@@ -107,6 +109,40 @@ impl ShotConsistencyRepository for SqliteShotConsistencyRepository {
             .collect()
     }
 
+    async fn list_profile_bindings_many(
+        &self,
+        shot_ids: &[String],
+    ) -> Result<Vec<ShotProfileBinding>, RepositoryError> {
+        let mut bindings = Vec::new();
+        for ids in shot_ids.chunks(BULK_QUERY_CHUNK) {
+            if ids.is_empty() {
+                continue;
+            }
+            let placeholders = std::iter::repeat("?")
+                .take(ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id, shot_id, role, profile_type, profile_id, costume_variant_id,
+                        ordinal, inheritance_mode, created_at, updated_at
+                 FROM shot_profile_bindings
+                 WHERE shot_id IN ({placeholders})
+                 ORDER BY shot_id ASC, role ASC, ordinal ASC, id ASC"
+            );
+            let mut query = sqlx::query_as::<_, ShotProfileBindingRow>(&sql);
+            for id in ids {
+                query = query.bind(id);
+            }
+            let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+            bindings.extend(
+                rows.into_iter()
+                    .map(ShotProfileBindingRow::try_into_domain)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        Ok(bindings)
+    }
+
     async fn replace_profile_bindings(
         &self,
         shot_id: &str,
@@ -171,6 +207,40 @@ impl ShotConsistencyRepository for SqliteShotConsistencyRepository {
         rows.into_iter()
             .map(ShotReferenceSetBindingRow::try_into_domain)
             .collect()
+    }
+
+    async fn list_reference_set_bindings_many(
+        &self,
+        shot_ids: &[String],
+    ) -> Result<Vec<ShotReferenceSetBinding>, RepositoryError> {
+        let mut bindings = Vec::new();
+        for ids in shot_ids.chunks(BULK_QUERY_CHUNK) {
+            if ids.is_empty() {
+                continue;
+            }
+            let placeholders = std::iter::repeat("?")
+                .take(ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id, shot_id, role, reference_set_id, ordinal, required,
+                        inheritance_mode, created_at, updated_at
+                 FROM shot_reference_set_bindings
+                 WHERE shot_id IN ({placeholders})
+                 ORDER BY shot_id ASC, role ASC, ordinal ASC, id ASC"
+            );
+            let mut query = sqlx::query_as::<_, ShotReferenceSetBindingRow>(&sql);
+            for id in ids {
+                query = query.bind(id);
+            }
+            let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+            bindings.extend(
+                rows.into_iter()
+                    .map(ShotReferenceSetBindingRow::try_into_domain)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        Ok(bindings)
     }
 
     async fn replace_reference_set_bindings(

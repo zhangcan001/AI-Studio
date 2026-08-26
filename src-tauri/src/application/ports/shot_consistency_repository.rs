@@ -13,6 +13,19 @@ pub trait ShotConsistencyRepository: Send + Sync {
         shot_id: &str,
     ) -> Result<Vec<ShotProfileBinding>, RepositoryError>;
 
+    /// Bulk binding lookup. Implementations should override this with one
+    /// set-based query; the default preserves compatibility for small fakes.
+    async fn list_profile_bindings_many(
+        &self,
+        shot_ids: &[String],
+    ) -> Result<Vec<ShotProfileBinding>, RepositoryError> {
+        let mut bindings = Vec::new();
+        for shot_id in shot_ids {
+            bindings.extend(self.list_profile_bindings(shot_id).await?);
+        }
+        Ok(bindings)
+    }
+
     /// Atomically replaces all profile bindings for one shot.
     async fn replace_profile_bindings(
         &self,
@@ -24,6 +37,19 @@ pub trait ShotConsistencyRepository: Send + Sync {
         &self,
         shot_id: &str,
     ) -> Result<Vec<ShotReferenceSetBinding>, RepositoryError>;
+
+    /// Bulk binding lookup. Implementations should override this with one
+    /// set-based query; the default preserves compatibility for small fakes.
+    async fn list_reference_set_bindings_many(
+        &self,
+        shot_ids: &[String],
+    ) -> Result<Vec<ShotReferenceSetBinding>, RepositoryError> {
+        let mut bindings = Vec::new();
+        for shot_id in shot_ids {
+            bindings.extend(self.list_reference_set_bindings(shot_id).await?);
+        }
+        Ok(bindings)
+    }
 
     /// Atomically replaces all reference-set bindings for one shot.
     async fn replace_reference_set_bindings(

@@ -494,7 +494,7 @@ fn reference_binding(
 }
 
 #[tokio::test]
-async fn dev048_fresh_migration_001_to_022_creates_only_the_frozen_tables() {
+async fn dev048_fresh_migration_001_to_023_creates_only_the_frozen_tables() {
     let directory = tempdir().unwrap();
     let pool = initialize(&directory.path().join("fresh.db"))
         .await
@@ -504,7 +504,7 @@ async fn dev048_fresh_migration_001_to_022_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        22
+        23
     );
     let required_tables = [
         "profile_revisions",
@@ -543,7 +543,7 @@ async fn dev048_fresh_migration_001_to_022_creates_only_the_frozen_tables() {
 }
 
 #[tokio::test]
-async fn dev048_021_to_022_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
+async fn dev048_021_to_023_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
     let (directory, pool) = setup().await;
     insert_legacy_sentinels(&pool).await;
     let before = legacy_counts(&pool).await;
@@ -558,7 +558,7 @@ async fn dev048_021_to_022_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        22
+        23
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -1368,11 +1368,18 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
             .count(),
         1
     );
-    assert!(!migrations.iter().any(|name| name.starts_with("023_")));
+    assert_eq!(
+        migrations
+            .iter()
+            .filter(|name| name.starts_with("023_"))
+            .count(),
+        1
+    );
+    assert!(!migrations.iter().any(|name| name.starts_with("024_")));
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 22)
+            .is_some_and(|version| version <= 23)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"0.6.2\""));

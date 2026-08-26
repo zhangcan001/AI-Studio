@@ -15,6 +15,8 @@ impl SqliteReferenceSetRepository {
     }
 }
 
+const BULK_QUERY_CHUNK: usize = 300;
+
 const REFERENCE_SET_COLUMNS: &str =
     "id, project_id, name, purpose, description, owner_profile_type, owner_profile_id, active_revision_id, created_at, updated_at";
 
@@ -237,6 +239,39 @@ impl ReferenceSetRepository for SqliteReferenceSetRepository {
         rows.into_iter()
             .map(ReferenceSetItemRow::try_into_domain)
             .collect()
+    }
+
+    async fn list_items_many(
+        &self,
+        reference_set_ids: &[String],
+    ) -> Result<Vec<ReferenceSetItem>, RepositoryError> {
+        let mut items = Vec::new();
+        for ids in reference_set_ids.chunks(BULK_QUERY_CHUNK) {
+            if ids.is_empty() {
+                continue;
+            }
+            let placeholders = std::iter::repeat("?")
+                .take(ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT reference_set_id, asset_id, ordinal, role, is_primary, created_at
+                 FROM reference_set_items
+                 WHERE reference_set_id IN ({placeholders})
+                 ORDER BY reference_set_id ASC, ordinal ASC, asset_id ASC"
+            );
+            let mut query = sqlx::query_as::<_, ReferenceSetItemRow>(&sql);
+            for id in ids {
+                query = query.bind(id);
+            }
+            let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+            items.extend(
+                rows.into_iter()
+                    .map(ReferenceSetItemRow::try_into_domain)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        Ok(items)
     }
 
     async fn replace_items(

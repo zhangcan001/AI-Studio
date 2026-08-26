@@ -41,6 +41,19 @@ pub trait ReferenceSetRepository: Send + Sync {
         reference_set_id: &str,
     ) -> Result<Vec<ReferenceSetItem>, RepositoryError>;
 
+    /// Bulk item lookup. Implementations should override this with one
+    /// set-based query; the default preserves compatibility for small fakes.
+    async fn list_items_many(
+        &self,
+        reference_set_ids: &[String],
+    ) -> Result<Vec<ReferenceSetItem>, RepositoryError> {
+        let mut items = Vec::new();
+        for reference_set_id in reference_set_ids {
+            items.extend(self.list_items(reference_set_id).await?);
+        }
+        Ok(items)
+    }
+
     /// Atomically replaces all items belonging to one reference set.
     async fn replace_items(
         &self,

@@ -16,6 +16,7 @@ pub mod prompt_template;
 pub mod recipe;
 pub mod reference_anchor;
 pub mod shot;
+pub mod shot_context;
 pub mod task;
 pub mod workflow;
 
@@ -29,10 +30,11 @@ pub use consistency::{
     validate_prompt_fragment, validate_reference_set, validate_reference_set_binding,
     validate_reference_set_items, BindingDomainError, BindingRole, CharacterProfile,
     ConsistencyIdKind, ConsistencyIdValidationError, ConsistencyProfileRecord,
-    ConsistencyValidationError, CostumeVariant, InheritanceMode, ProfileDomainError,
-    ProfileRevision, ProfileRevisionStatus, ProfileType, PropProfile, ReferenceSet,
-    ReferenceSetItem, ReferenceSetPurpose, ReferenceSetPurposeError, SceneProfile,
-    ShotProfileBinding, ShotReferenceSetBinding, StyleProfile, ValidationError,
+    ConsistencyScopeType, ConsistencyScopeTypeError, ConsistencyValidationError, CostumeVariant,
+    InheritanceMode, ProfileDomainError, ProfileRevision, ProfileRevisionStatus, ProfileType,
+    PropProfile, ReferenceSet, ReferenceSetItem, ReferenceSetPurpose, ReferenceSetPurposeError,
+    SceneProfile, ScopedProfileBinding, ScopedReferenceSetBinding, ShotProfileBinding,
+    ShotReferenceSetBinding, StyleProfile, ValidationError,
 };
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
 pub use preset::{Preset, PresetDomainError, PresetId};
@@ -64,6 +66,14 @@ pub use reference_anchor::{
 pub use shot::{
     canonical_shot_name, derive_stage_status, validate_scalar_values, ShotDomainError, ShotStage,
     ShotViewStatus,
+};
+pub use shot_context::{
+    ContextDiagnostic, ContextDiagnosticSeverity, ContextHashInput, ContextSourceScope,
+    LegacyContext, PromptContext, PromptSegment, PromptSegmentKind, ResolvedCharacter,
+    ResolvedOutputSpec, ResolvedProfile, ResolvedProfiles, ResolvedProp, ResolvedReferenceAsset,
+    ResolvedReferenceSet, ResolvedScene, ResolvedShotContext, ResolvedStructure,
+    ResolvedStructureNode, ResolvedStyle, ResolvedWorkflowContext, ResolverIdentity,
+    ShotReferencePack, SourceTrace,
 };
 pub use task::{
     NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskDomainError, TaskError,

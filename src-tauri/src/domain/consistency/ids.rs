@@ -13,6 +13,8 @@ pub enum ConsistencyIdKind {
     ProfileRevision,
     ShotProfileBinding,
     ShotReferenceSetBinding,
+    HierarchyProfileBinding,
+    HierarchyReferenceSetBinding,
 }
 
 impl ConsistencyIdKind {
@@ -27,6 +29,8 @@ impl ConsistencyIdKind {
             Self::ProfileRevision => "prv_",
             Self::ShotProfileBinding => "spb_",
             Self::ShotReferenceSetBinding => "srb_",
+            Self::HierarchyProfileBinding => "hpb_",
+            Self::HierarchyReferenceSetBinding => "hrb_",
         }
     }
 
@@ -41,6 +45,8 @@ impl ConsistencyIdKind {
             Self::ProfileRevision => "profile revision",
             Self::ShotProfileBinding => "shot profile binding",
             Self::ShotReferenceSetBinding => "shot reference-set binding",
+            Self::HierarchyProfileBinding => "hierarchy profile binding",
+            Self::HierarchyReferenceSetBinding => "hierarchy reference-set binding",
         }
     }
 }

@@ -406,7 +406,7 @@ async fn dev035_migration_020_to_021_fresh_and_reopen_are_compatible() {
             .fetch_one(&pool)
             .await
             .expect("DEV035 migration version should be readable"),
-        22
+        23
     );
     assert_eq!(production_table_count(&pool).await, 4);
     assert_eq!(
@@ -439,7 +439,7 @@ async fn dev035_migration_020_to_021_fresh_and_reopen_are_compatible() {
             .fetch_one(&upgraded)
             .await
             .expect("DEV035 upgraded migration version should be readable"),
-        22
+        23
     );
 }
 

@@ -12,6 +12,7 @@ pub mod comfy_memory_service;
 pub mod comfy_preflight_service;
 pub mod comfy_service;
 pub mod consistency_profile_service;
+pub mod consistency_scope_binding_service;
 #[cfg(test)]
 mod dev027_e2e;
 #[cfg(test)]
@@ -48,6 +49,7 @@ pub mod project_command_center_service;
 pub mod project_manifest_service;
 pub mod project_service;
 pub mod project_template_service;
+pub mod prompt_context_builder;
 pub mod prompt_library_service;
 pub mod prompt_template_bulk_service;
 pub mod prompt_template_service;
@@ -59,6 +61,8 @@ pub mod series_production_service;
 pub mod settings_service;
 pub mod shot_batch_service;
 pub mod shot_bulk_service;
+pub mod shot_context_resolver;
+pub mod shot_reference_pack_builder;
 pub mod shot_service;
 pub mod source_asset_import_service;
 pub mod task_cancellation_service;

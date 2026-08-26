@@ -8,6 +8,7 @@ pub mod binding;
 pub mod ids;
 pub mod profile;
 pub mod reference_set;
+pub mod scope_binding;
 pub mod validation;
 
 #[cfg(test)]
@@ -26,6 +27,10 @@ pub use profile::{
 };
 pub use reference_set::{
     ReferenceSet, ReferenceSetItem, ReferenceSetPurpose, ReferenceSetPurposeError,
+};
+pub use scope_binding::{
+    ConsistencyScopeType, ConsistencyScopeTypeError, ScopedProfileBinding,
+    ScopedReferenceSetBinding,
 };
 pub use validation::{
     validate_metadata_json, validate_optional_text, validate_profile_binding,

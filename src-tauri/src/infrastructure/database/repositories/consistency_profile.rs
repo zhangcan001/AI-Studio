@@ -18,6 +18,8 @@ impl SqliteConsistencyProfileRepository {
     }
 }
 
+const BULK_QUERY_CHUNK: usize = 300;
+
 #[derive(sqlx::FromRow)]
 struct CharacterProfileRow {
     id: String,
@@ -822,6 +824,40 @@ impl ConsistencyProfileRepository for SqliteConsistencyProfileRepository {
             .collect()
     }
 
+    async fn list_costume_variants_many(
+        &self,
+        character_profile_ids: &[String],
+    ) -> Result<Vec<CostumeVariant>, RepositoryError> {
+        let mut variants = Vec::new();
+        for ids in character_profile_ids.chunks(BULK_QUERY_CHUNK) {
+            if ids.is_empty() {
+                continue;
+            }
+            let placeholders = std::iter::repeat("?")
+                .take(ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id, character_profile_id, name, prompt_fragment, reference_set_id,
+                        is_default, ordinal, active_revision_id, created_at, updated_at
+                 FROM costume_variants
+                 WHERE character_profile_id IN ({placeholders})
+                 ORDER BY character_profile_id ASC, ordinal ASC, name ASC, id ASC"
+            );
+            let mut query = sqlx::query_as::<_, CostumeVariantRow>(&sql);
+            for id in ids {
+                query = query.bind(id);
+            }
+            let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+            variants.extend(
+                rows.into_iter()
+                    .map(CostumeVariantRow::into_domain)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        Ok(variants)
+    }
+
     async fn find_costume_variant(
         &self,
         costume_variant_id: &str,
@@ -912,6 +948,40 @@ impl ConsistencyProfileRepository for SqliteConsistencyProfileRepository {
         .map_err(map_sqlx_error)?
         .map(ProfileRevisionRow::into_domain)
         .transpose()
+    }
+
+    async fn find_profile_revisions_many(
+        &self,
+        revision_ids: &[String],
+    ) -> Result<Vec<ProfileRevision>, RepositoryError> {
+        let mut revisions = Vec::new();
+        for ids in revision_ids.chunks(BULK_QUERY_CHUNK) {
+            if ids.is_empty() {
+                continue;
+            }
+            let placeholders = std::iter::repeat("?")
+                .take(ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id, profile_type, profile_id, revision_number, content_json,
+                        content_sha256, status, created_at, created_by
+                 FROM profile_revisions
+                 WHERE id IN ({placeholders})
+                 ORDER BY id ASC"
+            );
+            let mut query = sqlx::query_as::<_, ProfileRevisionRow>(&sql);
+            for id in ids {
+                query = query.bind(id);
+            }
+            let rows = query.fetch_all(&self.pool).await.map_err(map_sqlx_error)?;
+            revisions.extend(
+                rows.into_iter()
+                    .map(ProfileRevisionRow::into_domain)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        Ok(revisions)
     }
 
     async fn insert_profile_revision(
