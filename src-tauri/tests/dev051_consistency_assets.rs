@@ -750,7 +750,9 @@ fn command_contract_is_stable_camel_case_and_explicitly_wired_for_later_main_reg
         env!("CARGO_MANIFEST_DIR"),
         "/src/commands/consistency_assets.rs"
     );
-    let source = fs::read_to_string(command_path).expect("DEV-051 command source should exist");
+    let source = fs::read_to_string(command_path)
+        .expect("DEV-051 command source should exist")
+        .replace("\r\n", "\n");
     assert!(source.contains("#[serde(rename_all = \"camelCase\")]"));
     assert!(source.contains("#[tauri::command(rename_all = \"camelCase\")]"));
 
