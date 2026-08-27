@@ -2503,7 +2503,9 @@ outputs:
             _prompt_id: &str,
             _workflow: serde_json::Value,
         ) -> Result<PromptSubmission, ComfyAdapterError> {
-            std::future::pending().await
+            Err(ComfyAdapterError::Incompatible(
+                "production orchestrator lifecycle test does not execute GPU workflows".to_owned(),
+            ))
         }
 
         async fn subscribe_events(
@@ -2762,7 +2764,9 @@ outputs:
             .await
             .expect("Krea2 batch should be readable");
         assert_eq!(krea_batch.items.len(), 3);
-        wait_until_batch_item_is_observed(&pool, krea_batch.items[0].id.as_str()).await;
+        for item in &krea_batch.items {
+            wait_until_batch_item_is_observed(&pool, item.id.as_str()).await;
+        }
         for (item, task_id, asset_id, storage_path) in [
             (
                 &krea_batch.items[0],

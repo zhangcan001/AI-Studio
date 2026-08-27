@@ -408,7 +408,7 @@ mod tests {
                 .await
                 .expect("start_generation should return a task");
             assert_eq!(returned_task.status, TaskStatus::Created);
-            for _ in 0..100 {
+            for _ in 0..2_500 {
                 let current = task_repository
                     .list_recent("project-1", 1)
                     .await
@@ -418,7 +418,7 @@ mod tests {
                 if current.is_some_and(|task| task.status.is_terminal()) {
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(2));
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
                 tokio::task::yield_now().await;
             }
             Ok(())
