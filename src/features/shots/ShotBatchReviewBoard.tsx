@@ -38,7 +38,7 @@ interface Props {
   onOpenProductionQueue?: () => void;
 }
 
-type ReviewFilter = "ALL" | "NEEDS_REVIEW" | "APPROVED" | "REGENERATE" | "FAILED";
+export type ReviewFilter = "ALL" | "UNREVIEWED" | "APPROVED" | "STARRED" | "REGENERATE" | "REJECTED" | "FAILED";
 
 export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask, reviewBatchId, reviewBatchLoader = getProductionBatchReviewProductivity, onOpenProductionQueue }: Props) {
   const [review, setReview] = useState<ProductionBatchReviewProductivity>();
@@ -72,6 +72,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
   const filteredItems = useMemo(() => mappedItems.filter((item) => matchesFilter(item, filter)), [filter, mappedItems]);
   const failedItems = useMemo(() => (review?.items ?? []).filter((item) => isFailedReviewItem(item) && (normalizeStage(item.stage) === stage || !item.stage)), [review, stage]);
   const currentItem = filteredItems.find((item) => item.itemId === currentReviewItemId) ?? filteredItems[0];
+  const createReworkBatchAvailable = isVideoReviewReworkAvailable(currentItem);
   const reviewImageIds = useMemo(() => reviewImageIdsForItem(currentItem), [currentItem]);
   const [reviewImageUrls, setReviewImageUrls] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -125,9 +126,14 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
   }
 
   async function createReworkBatch(item: ReviewCompareItem) {
-    if (!reviewBatchId) return;
+    const sourceItem = mappedItems.find((candidate) => candidate.itemId === item.id);
+    if (!reviewBatchId || !sourceItem || !isVideoReviewReworkAvailable(sourceItem)) return;
+    const confirmed = typeof window !== "undefined" && typeof window.confirm === "function"
+      ? window.confirm("确定创建返工批次吗？\n创建后不会自动开始，仍需前往生产队列手动启动。")
+      : false;
+    if (!confirmed) return;
     try {
-      const result = await regenerateProductionItem({ projectId, batchId: reviewBatchId, itemId: item.id, durationSeconds: currentItem?.durationSeconds, width: currentItem?.width, height: currentItem?.height, useOriginalSeed: false, autoStart: false });
+      const result = await regenerateProductionItem({ projectId, batchId: reviewBatchId, itemId: item.id, durationSeconds: sourceItem.durationSeconds, width: sourceItem.width, height: sourceItem.height, useOriginalSeed: false, autoStart: false });
       setNotice(`已创建 READY 返工批次（${result.selectedCount} 项），请打开/手动开始队列。`);
       onOpenProductionQueue?.();
       await reloadReview();
@@ -153,7 +159,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
       <section className="shot-batch-review-board" aria-label={`${stageLabel(stage)}批量复核`}>
         <div className="shot-block-heading"><div><span className="section-label">人工复核</span><h3>{stage === "image" ? "关键帧候选复核" : "最终视频候选复核"}</h3></div><span className="shot-inline-note">A/B 仅用于比较；只有显式确认并通过才会选择 Shot。</span></div>
         <div className="shot-batch-review-filters" role="toolbar" aria-label="批量复核筛选">
-          {([ ["ALL", `全部 ${mappedItems.length}`], ["NEEDS_REVIEW", `待审 ${counts.needsReview}`], ["APPROVED", `已通过 ${counts.approved}`], ["REGENERATE", `待返工 ${counts.regenerate}`], ["FAILED", `失败 ${failedItems.length}`] ] as const).map(([value, label]) => <button key={value} type="button" className={filter === value ? "review-filter-active" : "quiet-button"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
+          {([ ["ALL", `全部 ${mappedItems.length}`], ["UNREVIEWED", `未审核 ${counts.unreviewed}`], ["APPROVED", `已通过 ${counts.approved}`], ["STARRED", `标星 ${counts.starred}`], ["REGENERATE", `待返工 ${counts.regenerate}`], ["REJECTED", `已拒绝 ${counts.rejected}`], ["FAILED", `失败 ${counts.failed}`] ] as const).map(([value, label]) => <button key={value} type="button" className={filter === value ? "review-filter-active" : "quiet-button"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
         </div>
         {reviewError && <p className="review-compare-error" role="alert">{reviewError}</p>}
         {notice && <p className="studio-notice" role="status">{notice}</p>}
@@ -162,7 +168,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
           currentItemId={currentReviewItemId}
           busy={busy}
           error={reviewError}
-          actionAvailability={{ confirmAndApprove: Boolean(reviewBatchId), approve: Boolean(reviewBatchId), star: Boolean(reviewBatchId), reject: Boolean(reviewBatchId), regenerate: Boolean(reviewBatchId), createReworkBatch: Boolean(reviewBatchId), saveNote: Boolean(reviewBatchId) }}
+          actionAvailability={{ confirmAndApprove: Boolean(reviewBatchId), approve: Boolean(reviewBatchId), star: Boolean(reviewBatchId), reject: Boolean(reviewBatchId), regenerate: Boolean(reviewBatchId), createReworkBatch: Boolean(reviewBatchId) && createReworkBatchAvailable, saveNote: Boolean(reviewBatchId) }}
           onItemChange={(item) => setCurrentReviewItemId(item.id)}
           onConfirmAndApprove={(candidate, item) => void confirmAndApprove(candidate, item)}
           onApprove={(_candidate, item) => void setReviewStatus("APPROVED", item)}
@@ -260,5 +266,14 @@ function placeholderAsset(candidate: { assetId: string; assetType: string; name:
 export function normalizeStage(value?: string): ShotStage | undefined { if (value?.toLowerCase() === "image") return "image"; if (value?.toLowerCase() === "video") return "video"; return undefined; }
 function assetMediaKind(value: string): "image" | "video" { return value.toLowerCase().includes("video") ? "video" : "image"; }
 function isFailedReviewItem(item: ProductionReviewProductivityItem): boolean { return item.productionItemStatus === "FAILED" || item.taskStatus === "FAILED" || item.reviewStatus === "FAILED"; }
-export function matchesFilter(item: ProductionReviewProductivityItem, filter: ReviewFilter): boolean { if (filter === "FAILED") return isFailedReviewItem(item); if (filter === "APPROVED") return item.reviewStatus === "APPROVED"; if (filter === "REGENERATE") return item.reviewStatus === "REGENERATE"; if (filter === "NEEDS_REVIEW") return item.reviewStatus === "UNREVIEWED"; return true; }
-export function reviewCounts(items: ProductionReviewProductivityItem[]) { return { needsReview: items.filter((item) => item.reviewStatus === "UNREVIEWED").length, approved: items.filter((item) => item.reviewStatus === "APPROVED").length, regenerate: items.filter((item) => item.reviewStatus === "REGENERATE").length }; }
+export function isVideoReviewReworkAvailable(item?: ProductionReviewProductivityItem): boolean {
+  return Boolean(item)
+    && normalizeStage(item?.stage) === "video"
+    && item?.reviewable === true
+    && item?.productionItemStatus.toUpperCase() === "SUCCEEDED"
+    && item?.taskStatus.toUpperCase() === "SUCCEEDED"
+    && item?.reviewStatus !== "FAILED"
+    && item?.reviewStatus !== "IN_PROGRESS";
+}
+export function matchesFilter(item: ProductionReviewProductivityItem, filter: ReviewFilter): boolean { if (filter === "ALL") return true; if (filter === "FAILED") return isFailedReviewItem(item); if (filter === "UNREVIEWED") return item.reviewStatus === "UNREVIEWED"; if (filter === "APPROVED") return item.reviewStatus === "APPROVED"; if (filter === "STARRED") return item.reviewStatus === "STARRED"; if (filter === "REGENERATE") return item.reviewStatus === "REGENERATE"; if (filter === "REJECTED") return item.reviewStatus === "REJECTED"; return false; }
+export function reviewCounts(items: ProductionReviewProductivityItem[]) { return { unreviewed: items.filter((item) => item.reviewStatus === "UNREVIEWED").length, approved: items.filter((item) => item.reviewStatus === "APPROVED").length, starred: items.filter((item) => item.reviewStatus === "STARRED").length, regenerate: items.filter((item) => item.reviewStatus === "REGENERATE").length, rejected: items.filter((item) => item.reviewStatus === "REJECTED").length, failed: items.filter(isFailedReviewItem).length }; }

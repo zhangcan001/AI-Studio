@@ -1130,12 +1130,7 @@ export function getProductionBatchReview(projectId: string, batchId: string): Pr
   return invoke<ProductionBatchReview>("production_item_review_get", { projectId, batchId });
 }
 
-/**
- * The review command returns the legacy batch DTO plus the optional shot and
- * preparation context needed by the compact compare board. Keeping this as a
- * refinement of ProductionBatchReview preserves the existing review client
- * contract while making the enriched response explicit for new consumers.
- */
+/** The enriched review payload used by the productivity/compare workspace. */
 export interface ProductionReviewProductivityCandidate {
   assetId: string;
   assetType: string;
@@ -1168,9 +1163,9 @@ export interface ProductionBatchReviewProductivity extends Omit<ProductionBatchR
   items: ProductionReviewProductivityItem[];
 }
 
-/** Reads the enriched review payload using the same compatible backend command. */
+/** Reads the enriched review payload through its dedicated read command. */
 export function getProductionBatchReviewProductivity(projectId: string, batchId: string): Promise<ProductionBatchReviewProductivity> {
-  return invoke<ProductionBatchReviewProductivity>("production_item_review_get", { projectId, batchId });
+  return invoke<ProductionBatchReviewProductivity>("production_item_review_productivity_get", { projectId, batchId });
 }
 
 export function setProductionReviewStatus(request: {

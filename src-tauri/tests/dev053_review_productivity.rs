@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -73,7 +73,7 @@ fn assert_contains_all(source: &str, needles: &[&str]) {
 }
 
 #[test]
-fn review_get_uses_the_bulk_productivity_facade() {
+fn review_get_uses_the_legacy_facade_and_productivity_get_is_separate() {
     let command = read_repo("src-tauri/src/commands/production_item_review.rs");
     let get = section(
         &command,
@@ -83,12 +83,19 @@ fn review_get_uses_the_bulk_productivity_facade() {
     assert_contains_all(
         get,
         &[
-            "get_productivity_view",
+            ".get(&project_id, &batch_id)",
             "ProductionBatchReviewView",
             ".map(Into::into)",
         ],
     );
-    assert!(!get.contains(".get(&project_id, &batch_id)"));
+    assert!(!get.contains("get_productivity_view"));
+    assert_contains_all(
+        &command,
+        &[
+            "pub async fn production_item_review_productivity_get",
+            ".get_productivity_view(&project_id, &batch_id)",
+        ],
+    );
     assert!(!command.contains("hydrate_productivity_view"));
     assert!(!command.contains("preparation_snapshot(project_id"));
     assert!(!command.contains("shot_service.list"));
@@ -337,7 +344,7 @@ impl AssetRepository for CountingAssets {
 
 struct CountingReviews {
     counters: Arc<ReviewCounters>,
-    reviews: Vec<ai_studio_lib::application::ports::ProductionItemReviewRecord>,
+    reviews: Arc<Mutex<Vec<ai_studio_lib::application::ports::ProductionItemReviewRecord>>>,
 }
 
 #[async_trait]
@@ -351,7 +358,7 @@ impl ProductionItemReviewRepository for CountingReviews {
         self.counters
             .review_list_batch
             .fetch_add(1, Ordering::SeqCst);
-        Ok(self.reviews.clone())
+        Ok(self.reviews.lock().expect("review fixture lock").clone())
     }
     async fn list_for_lineage(
         &self,
@@ -369,7 +376,7 @@ impl ProductionItemReviewRepository for CountingReviews {
     ) -> Result<Vec<ai_studio_lib::application::ports::ProductionItemReviewRecord>, RepositoryError>
     {
         self.counters.lineage_bulk.fetch_add(1, Ordering::SeqCst);
-        Ok(self.reviews.clone())
+        Ok(self.reviews.lock().expect("review fixture lock").clone())
     }
     async fn find_for_item(
         &self,
@@ -407,23 +414,41 @@ impl ProductionItemReviewRepository for CountingReviews {
     }
     async fn set_status(
         &self,
-        _: &str,
-        _: &str,
-        _: ProductionReviewStatus,
-        _: DateTime<Utc>,
+        project_id: &str,
+        item_id: &str,
+        status: ProductionReviewStatus,
+        updated_at: DateTime<Utc>,
     ) -> Result<ai_studio_lib::application::ports::ProductionItemReviewRecord, RepositoryError>
     {
-        Err(unsupported())
+        let mut reviews = self.reviews.lock().expect("review fixture lock");
+        let review = reviews
+            .iter_mut()
+            .find(|review| {
+                review.project_id == project_id && review.production_batch_item_id == item_id
+            })
+            .ok_or_else(|| RepositoryError::database("missing review fixture"))?;
+        review.review_status = status;
+        review.updated_at = updated_at;
+        Ok(review.clone())
     }
     async fn set_note(
         &self,
-        _: &str,
-        _: &str,
-        _: &str,
-        _: DateTime<Utc>,
+        project_id: &str,
+        item_id: &str,
+        note: &str,
+        updated_at: DateTime<Utc>,
     ) -> Result<ai_studio_lib::application::ports::ProductionItemReviewRecord, RepositoryError>
     {
-        Err(unsupported())
+        let mut reviews = self.reviews.lock().expect("review fixture lock");
+        let review = reviews
+            .iter_mut()
+            .find(|review| {
+                review.project_id == project_id && review.production_batch_item_id == item_id
+            })
+            .ok_or_else(|| RepositoryError::database("missing review fixture"))?;
+        review.review_note = note.to_owned();
+        review.updated_at = updated_at;
+        Ok(review.clone())
     }
 }
 
@@ -824,7 +849,13 @@ fn productivity_fixture() -> (
             ordinal,
             workflow_version_id: "wf_dev053".to_owned(),
             recipe_id: "recipe_dev053".to_owned(),
-            values_json: json!({"prompt": "legacy fallback prompt"}),
+            values_json: json!({
+                "prompt": {"type": "string", "value": "legacy prompt"},
+                "seed": {"type": "seed_fixed", "value": "123456"},
+                "duration_seconds": {"type": "integer", "value": 5},
+                "width": {"type": "integer", "value": 1024},
+                "height": {"type": "integer", "value": 576}
+            }),
             status: ProductionBatchItemStatus::Succeeded,
             task_id: Some(task_id.clone()),
             retry_of_item_id: None,
@@ -842,6 +873,7 @@ fn productivity_fixture() -> (
         );
         task.id = task_id_domain.clone();
         task.status = TaskStatus::Succeeded;
+        task.finished_at = Some(now);
         tasks.push(task);
         assets.push(Asset {
             id: AssetId::parse(asset_id.clone()).unwrap(),
@@ -877,10 +909,14 @@ fn productivity_fixture() -> (
                     ProductionReviewStatus::Unreviewed
                 },
                 review_note: String::new(),
-                version: 1,
-                lineage_key: format!("lineage_dev053_{ordinal:03}"),
-                parent_batch_id: None,
-                parent_item_id: None,
+                version: if ordinal == 0 { 3 } else { 1 },
+                lineage_key: if ordinal == 0 {
+                    "lineage-test".to_owned()
+                } else {
+                    format!("lineage_dev053_{ordinal:03}")
+                },
+                parent_batch_id: (ordinal == 0).then(|| "parent-batch".to_owned()),
+                parent_item_id: (ordinal == 0).then(|| "parent-item".to_owned()),
                 created_at: now,
                 updated_at: now,
             },
@@ -907,9 +943,10 @@ fn productivity_fixture() -> (
         counters: counters.clone(),
         assets,
     });
+    let review_records = Arc::new(Mutex::new(reviews));
     let review_repository: Arc<dyn ProductionItemReviewRepository> = Arc::new(CountingReviews {
         counters: counters.clone(),
-        reviews,
+        reviews: review_records,
     });
     let shot_repository: Arc<dyn ShotBatchRepository> = Arc::new(CountingShots {
         counters: counters.clone(),
@@ -994,4 +1031,93 @@ async fn productivity_facade_uses_bounded_bulk_reads_for_100_items() {
     assert_eq!(counters.snapshot_single.load(Ordering::SeqCst), 0);
     assert_eq!(counters.snapshot_batch.load(Ordering::SeqCst), 1);
     counters.print();
+}
+
+fn assert_legacy_review_fields(
+    view: &ai_studio_lib::application::production_item_review_service::ProductionBatchReview,
+) {
+    let item = &view.items[0];
+    let review = item
+        .review
+        .as_ref()
+        .expect("legacy review should be present");
+    assert_eq!(review.lineage_key, "lineage-test");
+    assert_eq!(review.parent_batch_id.as_deref(), Some("parent-batch"));
+    assert_eq!(review.parent_item_id.as_deref(), Some("parent-item"));
+    assert_eq!(review.version, 3);
+    assert_eq!(
+        item.task.as_ref().and_then(|task| task.finished_at),
+        Some(FixedClock.now())
+    );
+    assert_eq!(item.item.values_json["seed"]["type"], "seed_fixed");
+    assert_eq!(item.item.values_json["seed"]["value"], "123456");
+}
+
+#[tokio::test]
+async fn legacy_productivity_reads_and_mutations_preserve_wire_field_values() {
+    let (service, _counters, project_id, batch_id) = productivity_fixture();
+    let legacy = service
+        .get(&project_id, &batch_id)
+        .await
+        .expect("legacy review get should load");
+    assert_legacy_review_fields(&legacy);
+    assert_eq!(
+        legacy.items[0]
+            .review
+            .as_ref()
+            .expect("legacy review should be present")
+            .review_status
+            .as_str(),
+        "STARRED"
+    );
+
+    let productivity = service
+        .get_productivity_view(&project_id, &batch_id)
+        .await
+        .expect("productivity review get should load");
+    assert_eq!(productivity.total, 100);
+    assert_eq!(productivity.items[0].version, Some(3));
+    assert_eq!(
+        productivity.items[0].review_status.as_deref(),
+        Some("STARRED")
+    );
+
+    let after_status = service
+        .set_status(
+            &project_id,
+            &batch_id,
+            "pbi_dev053_000",
+            ProductionReviewStatus::Approved,
+        )
+        .await
+        .expect("set_status should return the legacy review view");
+    assert_legacy_review_fields(&after_status);
+    assert_eq!(
+        after_status.items[0]
+            .review
+            .as_ref()
+            .expect("legacy review should be present")
+            .review_status
+            .as_str(),
+        "APPROVED"
+    );
+
+    let after_note = service
+        .set_note(
+            &project_id,
+            &batch_id,
+            "pbi_dev053_000",
+            "compatibility note".to_owned(),
+        )
+        .await
+        .expect("set_note should return the legacy review view");
+    assert_legacy_review_fields(&after_note);
+    assert_eq!(
+        after_note.items[0]
+            .review
+            .as_ref()
+            .expect("legacy review should be present")
+            .review_note,
+        "compatibility note"
+    );
 }

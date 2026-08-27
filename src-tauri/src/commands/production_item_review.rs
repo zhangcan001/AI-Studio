@@ -199,6 +199,21 @@ pub async fn production_item_review_get(
     super::validate_project_id(&project_id)?;
     state
         .production_item_review_service
+        .get(&project_id, &batch_id)
+        .await
+        .map_err(map_review_error)
+        .map(Into::into)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_item_review_productivity_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    batch_id: String,
+) -> Result<ProductionBatchReviewView, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .production_item_review_service
         .get_productivity_view(&project_id, &batch_id)
         .await
         .map_err(map_review_error)

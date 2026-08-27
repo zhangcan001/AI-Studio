@@ -186,3 +186,119 @@ ComfyUI, candidate review, and image-to-video production. It may address
 cross-module UI consolidation, audit visualization, 500-shot validation, and a
 real ComfyUI smoke gate while preserving manual candidate selection, manual
 queue start, and ComfyUI as the sole generation engine.
+
+## Closure Fix
+
+### DEV053B_START_SHA
+
+`b69791f4a310869576ca39a99de18564b4cad777` (`master`, clean and equal to
+`origin/master` at task start).
+
+### Legacy GET Compatibility
+
+`production_item_review_get` is restored to the legacy
+`ProductionItemReviewService::get()` path and the original
+`ProductionBatchReview` to `ProductionBatchReviewView` conversion. The
+compatibility fixture uses a real batch/item/task/review with version `3`,
+lineage key `lineage-test`, parent batch/item IDs, a concrete `finishedAt`,
+prompt, fixed seed, duration, width, and height. The targeted test asserts the
+actual values for `lineageKey`, `parentBatchId`, `parentItemId`, `seed`,
+`finishedAt`, `promptText`, `version`, `preferred`, and `outputAssets`; status
+and note mutations retain the same wire values.
+
+### Productivity Command
+
+The legacy `production_item_review_get` command remains registered and
+compatible. The independent `production_item_review_productivity_get` command
+is registered separately and serves the enriched productivity DTO. The client
+keeps `getProductionBatchReview` on the legacy command and routes
+`getProductionBatchReviewProductivity` to the new command.
+
+### Filter Closure
+
+The review board exposes `ALL`, `UNREVIEWED`, `APPROVED`, `STARRED`,
+`REGENERATE`, `REJECTED`, and `FAILED`. Counts are derived from the loaded
+items as `unreviewed`, `approved`, `starred`, `regenerate`, `rejected`, and
+`failed`. `NEEDS_REVIEW` is not an external filter label or runtime match.
+
+### Image/Video Rework Boundary
+
+Creating a review rework batch is available only for a video-stage item that is
+reviewable and has successful production/task statuses. Image review never
+calls the review regenerate command; it retains the existing Shot workspace
+`onRetry` path. `REGENERATE` remains a separate review marker and does not
+create a batch by itself.
+
+### Rework Confirmation
+
+The batch creation path requires the exact confirmation text:
+
+> 确定创建返工批次吗？\n创建后不会自动开始，仍需前往生产队列手动启动。
+
+Cancel performs no regeneration, queue start, or navigation. Confirm sends
+`autoStart: false`, opens the existing production queue, and never invokes the
+queue-start command or ComfyUI.
+
+### DOM Interaction Tests
+
+The mandated `@testing-library/react` plus DOM-runtime test environment is not
+present in this repository (`package.json` has no `@testing-library/react`,
+jsdom, happy-dom, or linkedom), and DEV-053B forbids adding a dependency for
+this case. Agent C therefore reports `BLOCKED`; no custom test harness is
+claimed as a substitute. Supplemental real-browser Playwright checks passed
+for candidate-only selection, `1/2`, arrow navigation, Enter/Space safety,
+dirty-note cancel/confirm navigation, explicit confirm-and-approve, rework
+cancel/confirm, `autoStart: false`, and image-stage disablement.
+
+### 100 Item Performance Recheck
+
+The real productivity facade returned `total=100` and `items=100` with these
+exact counters:
+
+```text
+Task single=0, bulk=1
+Asset source single=0, bulk=1
+Review find=0, list_batch=1, ensure_many=0
+Lineage single=0, bulk=1
+Snapshot single=0, batch=1
+```
+
+The read path did not call ComfyUI, preflight, queue start, or media-byte
+hydration for the batch.
+
+### Full Regression
+
+- DEV-052 production preparation: 30 passed, 0 failed.
+- DEV-052 runtime integration: 6 passed, 0 failed.
+- DEV-053B backend targeted test: 7 passed, 0 failed.
+- Rust full serial suite: 783 passed, 0 failed, 1 ignored.
+- Frontend full suite: 90 files, 327 tests passed.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`: PASS.
+- `cargo check --manifest-path src-tauri/Cargo.toml`: PASS.
+- `pnpm build`: PASS.
+- `git diff --check`: PASS.
+
+### Multi-Agent Evidence
+
+Exactly three parallel child tasks were used with no nested agents:
+
+- Agent A — legacy command restoration, independent productivity command, and
+  compatibility/mutation/performance backend tests: `DONE`.
+- Agent B — review-board filters, counts, rework safety, confirmation, and
+  board tests: `DONE`.
+- Agent C — required `@testing-library/react` real DOM interaction tests:
+  `BLOCKED` because the mandated dependencies are absent.
+
+`ACTIVE_SUBAGENTS = 0`. No child agent committed or pushed.
+
+### Versions
+
+- Product: `0.6.2`.
+- Migrations: `001–024`; no migration `025`.
+- Backup: `14`.
+- Manifest: `2`.
+- `GITHUB_CI = NOT_CONFIGURED`; local validation was used.
+
+### Final Decision
+
+`DEV-053B BLOCKED — 现有仓库未提供任务规定的 @testing-library/react 与 DOM runtime，且任务要求不新增依赖，无法形成合规的真实 DOM Vitest 交互测试。`

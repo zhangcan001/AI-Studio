@@ -971,6 +971,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_partial_resume_plan,
             commands::production_queue::production_queue_partial_resume,
             commands::production_item_review::production_item_review_get,
+            commands::production_item_review::production_item_review_productivity_get,
             commands::production_item_review::production_item_review_set_status,
             commands::production_item_review::production_item_review_set_note,
             commands::production_item_review::production_item_review_regenerate,
