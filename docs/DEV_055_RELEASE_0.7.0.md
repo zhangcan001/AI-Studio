@@ -1,6 +1,6 @@
 # DEV-055 — AI Studio 0.7.0 Release Gate
 
-状态：Source RC 验收进行中，尚未发布
+状态：已发布（2026-08-27）
 产品目标：AI Studio 0.7.0 — Narrative Production V1
 
 本文件记录 DEV-055 的可复核证据。没有实际执行或仍受环境限制的门禁明确标为 pending / ENV_BLOCKED，不以测试夹具或历史资产代替发布证据。
@@ -161,7 +161,7 @@ The explicit live run produced new DEV-055 isolated artifacts:
 
 Manual image selection was explicit and passed. The H3 stage input asset was the selected Krea2 image with the same SHA-256. Snapshot, physical file, dimensions, and Comfy execution identities were verified by the live test.
 
-This live result predates the 0.7.0 version-only/docs-only RC changes; a post-RC connection/capability/preflight recheck remains required.
+The live result was captured before the final source-audit-only follow-up commits. No product runtime code changed after the live run; the frozen 0.7.0 artifacts were rebuilt from `SOURCE_RC_SHA=e4a643d4b31329e291c2fb40002f1554e8a1ab34`. A post-RC lightweight recheck returned `/system_stats` HTTP 200 and `/object_info` HTTP 200 with ComfyUI 0.33.4, 4525 nodes, and the required KSampler, LoadImage, and CLIPTextEncode nodes.
 
 ## 8. UI smoke status
 
@@ -173,7 +173,7 @@ The browser smoke used an isolated Tauri API mock and was not counted as a live 
 | 1200×800 | PASS; document width 1200 |
 | 1000×700 | PASS; document width 1000 |
 
-Upper-scope copy and Shot stage context were visible in the snapshots. Full Assets → Creation → Production → Review → Audit route smoke remains part of the RC/final UI gate.
+Upper-scope copy and Shot stage context were visible in the snapshots. The full Assets → Creation → Production → Review → Audit route smoke passed at all three required viewports; no horizontal overflow was observed.
 
 ## 9. Version identity and RC checklist
 
@@ -189,14 +189,56 @@ Backup             14
 Manifest           2
 ```
 
-Pending RC actions: Source RC commit/push, clean RC build, artifact identity/SHA-256, portable and installer gates, GitHub Actions result, annotated tag, draft-release download verification, publication, and post-publication docs commit.
+Completed release actions:
+
+- Source RC and follow-up test-stability/source-audit commits were pushed to `master`; final `SOURCE_RC_SHA` is `e4a643d4b31329e291c2fb40002f1554e8a1ab34`.
+- Clean 0.7.0 build completed. The frozen executable reports ProductName `AI Studio`, ProductVersion `0.7.0`, and FileVersion `0.7.0`.
+- Annotated tag `v0.7.0` was pushed with message `AI Studio v0.7.0 - Narrative Production V1`; tag object `d4b0b0cc8e706571857cfd844cd52caea891ca3c` peels to the source RC.
+- The draft release had exactly four assets. Independent downloads matched all frozen artifact names, byte counts, and SHA-256 values before publication.
+- The GitHub Release was published, and this record is the required post-publication docs-only commit.
 
 ## 10. Findings and release decision
 
-Current findings before RC build:
+Final findings:
 
 - P0: none observed.
 - P1: none observed.
-- P2: official binary/installer environment gates and GitHub runner status are pending; the compatibility fixture may report `ENV_BLOCKED/P2` when no official binary is supplied.
+- P2: MSI install execution was `ENV_BLOCKED/P2` because Windows returned Error 1925/1603 for both old and candidate installers; static upgrade-code/version checks passed. GitHub Actions reported only a Node 20 action deprecation annotation, not a product failure. REF2VA live execution passed and has no P2 finding.
 
-No release decision is made by this pre-RC record. The final decision is valid only after P0=0, P1=0, Krea2 and H3 live PASS, full regression PASS, upgrade PASS, artifact hash verification PASS, and a published GitHub Release with four independently verified assets.
+Release decision: `RELEASED`.
+
+The decision gates are satisfied: P0=0, P1=0, Krea2 and MiniMax H3 I2V live PASS, full regression PASS, isolated upgrade/backup/manifest PASS, artifact identity and independent hash verification PASS, and a published GitHub Release with exactly four assets.
+
+## 11. Published release evidence
+
+| item | result |
+| --- | --- |
+| source RC | `e4a643d4b31329e291c2fb40002f1554e8a1ab34` |
+| annotated tag | `v0.7.0` → `e4a643d4b31329e291c2fb40002f1554e8a1ab34` |
+| tag object | `d4b0b0cc8e706571857cfd844cd52caea891ca3c` |
+| GitHub Release | [AI Studio 0.7.0 — Narrative Production V1](https://github.com/zhangcan001/AI-Studio/releases/tag/v0.7.0) |
+| published at | `2026-08-27T09:25:32Z` |
+| draft / prerelease | `false / false` |
+| asset count | `4` |
+
+Frozen assets and independently verified downloads:
+
+| asset | bytes | SHA-256 |
+| --- | ---: | --- |
+| `ai-studio.exe` | 47374848 | `1BA8E43D0B5FC1762C346E3283E7A4A5E0AE14347C09B6E51209DF63A4440AF5` |
+| `AI.Studio_0.7.0_x64-setup.exe` | 10324107 | `F68866FF364E31952372F721DD451AF8BC9D375FC509E0B206162FD22081BAB1` |
+| `AI.Studio_0.7.0_x64_en-US.msi` | 16396288 | `5693A354AB74EB5BDB196AB2A5F4BBD6B1E57CBBBF98E50F58FFACB310F0A14F` |
+| `RELEASE_SHA256_0.7.0.txt` | 402 | `D68F94F8EF8C0FBA85AE191EC60EC2E931E60DC5BF56DA67B7563FC758C731C6` |
+
+The checksum manifest records the three binary hashes and `SOURCE_RC_SHA` above. No release asset was overwritten during the final four-asset verification.
+
+## 12. Compatibility and execution boundaries
+
+- Official 0.6.2 → 0.7.0 portable upgrade passed in an isolated data root: migration `024`, sentinel project and shot preserved, migration `025` absent; restart also passed.
+- Official NSIS upgrade, fresh install, and silent uninstall passed. MSI static checks confirmed the same UpgradeCode and 0.7.0 product version; MSI execution remains the documented environment-only P2.
+- The live Krea2, H3 I2V, and REF2VA runs used `ProductionQueueService → GenerationService → WorkflowCompiler → Comfy adapter → ComfyUI`. There was no direct `POST /prompt` bypass and no second execution engine.
+- Manual gate, candidate selection, queue start, and rework remain explicit user actions. Review regeneration paths use `autoStart=false`.
+
+## 13. Final CI record
+
+The final Windows Source-only CI run [33056416415](https://github.com/zhangcan001/AI-Studio/actions/runs/33056416415) passed all Rust, frontend test, TypeScript, and build steps: Rust library 640 passed / 0 failed / 1 ignored, all integration targets passed, frontend 92 files / 350 tests passed, TypeScript passed, and the frontend build passed. The only annotation was the non-blocking Node 20 action deprecation notice.

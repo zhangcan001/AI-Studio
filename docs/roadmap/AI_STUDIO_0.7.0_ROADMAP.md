@@ -1,6 +1,6 @@
 # AI Studio 0.7.0 Roadmap：AI 漫剧生产闭环 V1
 
-状态：Architecture Freeze（DEV-046，规划文档，不实现功能）
+状态：Released（DEV-055，2026-08-27）
 
 内部代号：Narrative Production V1
 基线版本：0.6.2
@@ -9,7 +9,7 @@ DEV-046_START_SHA：60385e09c4ed7ad066e153ad52170b06ad763f0b
 
 本文件冻结 0.7.0 的产品范围、数据边界、服务边界和交付顺序。DEV-046 不新增迁移、不修改现有命令、不修改生产执行器、队列语义、审核语义或正式 UI；实现从 DEV-047 开始。
 
-DEV-054 落地状态：DEV-047 至 DEV-053 已接入同一条 Narrative Production V1 路径。当前产品兼容版本仍为 0.6.2，migration 最大版本仍为 024，正式执行器仍为现有 Production Queue → GenerationService → WorkflowCompiler → ComfyUI；0.7.0 version bump 留给 DEV-055 Release Gate。详细实现记录见 docs/DEV_054_NARRATIVE_PRODUCTION_INTEGRATION.md。
+DEV-054 落地状态（Architecture Freeze 时的历史记录）：DEV-047 至 DEV-053 已接入同一条 Narrative Production V1 路径。正式执行器仍为现有 Production Queue → GenerationService → WorkflowCompiler → ComfyUI；当时的 0.7.0 version bump 留给 DEV-055 Release Gate。DEV-055 已完成版本发布、升级兼容性、真实 ComfyUI、性能、UI、回归和 GitHub Release 验收。详细实现记录见 docs/DEV_054_NARRATIVE_PRODUCTION_INTEGRATION.md 和 docs/DEV_055_RELEASE_0.7.0.md。
 
 ## 1. 产品愿景
 
@@ -474,4 +474,17 @@ flowchart TD
 - Manual Gate 仍保留：候选、关键帧、视频、审核、加入队列和 Queue Start 都由用户触发。
 - DEV-054 不新增 migration 025、第二执行器、第二 queue、Scheduler、auto-start、auto-select 或 unattended generation。
 
-下一任务：DEV-055 — AI Studio 0.7.0 Release Gate。
+当前状态：DEV-055 Release Gate 已完成，AI Studio 0.7.0 — Narrative Production V1 已发布。后续工作应从新的 roadmap 或明确的 DEV 任务开始，不回写本冻结文档中的历史范围和架构边界。
+
+## 20. DEV-055 发布结果
+
+DEV-055 在不新增执行器、不新增队列、不绕过现有 ComfyUI 适配链的前提下完成了 0.7.0 发布封口：
+
+- Source RC：`e4a643d4b31329e291c2fb40002f1554e8a1ab34`，`master` 与 `origin/master` 一致。
+- Tag：`v0.7.0`，annotated tag object `d4b0b0cc8e706571857cfd844cd52caea891ca3c`。
+- GitHub Release：[AI Studio 0.7.0 — Narrative Production V1](https://github.com/zhangcan001/AI-Studio/releases/tag/v0.7.0)，正式发布，恰好四个资产。
+- 硬门禁：P0=0、P1=0；Krea2、MiniMax H3 I2V、REF2VA 真实运行通过；500-shot 性能和 bulk 读取通过；全量 Rust/frontend/TypeScript/build 回归通过；升级、备份和 Manifest 兼容性通过。
+- 环境限定：MSI 静默安装在当前 Windows 权限策略下为 `ENV_BLOCKED/P2`（旧版与候选版均返回 1603/Error 1925），不影响 portable/NSIS 发布结论；GitHub 仅有 Node 20 action 弃用提示。
+- 可复现性：最终 prompt、context hash、reference asset checksum、workflow/recipe 和 stage input 继续由准备快照与现有生产链留存；手动候选、审核、加入队列和 Queue Start 没有被自动化。
+
+发布资产的完整字节数、SHA-256、CI 链接和兼容性证据见 [DEV-055 Release Gate 记录](../DEV_055_RELEASE_0.7.0.md)。
