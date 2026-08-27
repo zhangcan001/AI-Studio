@@ -2580,9 +2580,10 @@ async fn dev055_command_center_and_audit_keep_500_shots_identity_only() {
             "Command Center must not contain {forbidden}"
         );
     }
-    let audit_source = include_str!("../src/application/production_audit_service.rs");
+    let audit_source =
+        include_str!("../src/application/production_audit_service.rs").replace("\r\n", "\n");
     let load_graph = source_section(
-        audit_source,
+        &audit_source,
         "async fn load_graph",
         "\n}\n\n#[derive(Debug, FromRow)]\nstruct RunRow",
     );

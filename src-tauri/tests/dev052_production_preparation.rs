@@ -21,7 +21,9 @@ fn repo_root() -> PathBuf {
 }
 
 fn read_repo(path: &str) -> String {
-    fs::read_to_string(repo_root().join(path)).expect("DEV-052 source should be readable")
+    fs::read_to_string(repo_root().join(path))
+        .expect("DEV-052 source should be readable")
+        .replace("\r\n", "\n")
 }
 
 fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
