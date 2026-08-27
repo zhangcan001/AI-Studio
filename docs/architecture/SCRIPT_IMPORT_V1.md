@@ -250,3 +250,9 @@ Script system 是 optional。Product 仍为 0.7.0；DEV-057 新增 Migration 025
 - Backup 15 restore 保留 Script/Draft；Backup 14/13/12 继续兼容且 Script/Draft 为空。Manifest 2 不包含 `scriptSources`、`scriptDrafts`、`sourceText` 或 `payloadJson`，所以正式 semantic manifest contract 不变。
 - 已有 0.7.0 项目无 Script source 仍可打开和生产；旧 Shot 不会反向生成伪 Draft，也不会因没有 Draft 而变成 BLOCKED。
 - 不把 Draft 状态映射成 Readiness status，不把 Storyboard prompt 映射成已冻结 Prompt Snapshot。
+
+## Reparse Source Closure
+
+同一 Draft 的 revision chain 允许 `source A → source B → source C`：revision 1、2、3 的 `draft_id` 和 `project_id` 不变，但每个 `DraftRevision` 分别冻结自己的 `source_id`、source checksum 和 payload checksum。每次 reparse 仍创建不可变 revision，`previous_revision_id` 依次连接前一 revision；source 变化不改变 revision number 或 `expected_revision` 的并发门禁。
+
+同一 source、相同语义 payload 及相同 parser/provider metadata 可以 no-op；不同 source 即使 payload 语义完全相同，也必须产生新的 `REPARSED` revision，因为 source provenance 已变化。append 前必须验证新 source 存在、属于当前 project 且通过 source checksum/字节完整性校验，禁止跨项目引用。Backup 15 roundtrip 保留这条 multi-source chain、各 source text/checksum 及对应的 remapped source IDs；Manifest 2 继续排除 Script/Draft 工作数据。

@@ -3,11 +3,14 @@
 use ai_studio_lib::application::ports::ScriptDraftPageQuery;
 use ai_studio_lib::application::project_backup_service::ProjectBackupService;
 use ai_studio_lib::application::project_manifest_service::ProjectManifestService;
-use ai_studio_lib::application::script_draft_service::ScriptDraftService;
+use ai_studio_lib::application::script_draft_service::{
+    AppendScriptDraftRevisionRequest, CreateScriptDraftRequest, ScriptDraftService,
+    ScriptSourceCreateRequest,
+};
 use ai_studio_lib::domain::script_draft::{
     canonical_json, canonical_sha256, validate_structure, DraftEpisode, DraftId, DraftNodeId,
-    DraftNodeOrigin, DraftReviewState, DraftRevisionId, DraftScene, DraftShot, DraftStructureV1,
-    SourceId,
+    DraftNodeOrigin, DraftReviewState, DraftRevisionId, DraftRevisionKind, DraftScene, DraftShot,
+    DraftStructureV1, SourceId,
 };
 use ai_studio_lib::infrastructure::database::{
     SqliteScriptDraftRepository, SqliteScriptSourceRepository,
@@ -18,7 +21,7 @@ use ai_studio_lib::initialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use std::{fs, io::Read, path::Path, sync::Arc, time::Instant};
+use std::{collections::HashMap, fs, io::Read, path::Path, sync::Arc, time::Instant};
 use tempfile::{tempdir, TempDir};
 use uuid::Uuid;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
@@ -158,6 +161,25 @@ async fn insert_source(pool: &SqlitePool, project_id: &str, source_id: &str, tex
     .unwrap();
 }
 
+fn draft_service(pool: &SqlitePool) -> ScriptDraftService {
+    ScriptDraftService::new(
+        Arc::new(SqliteScriptSourceRepository::new(pool.clone())),
+        Arc::new(SqliteScriptDraftRepository::new(pool.clone())),
+        Arc::new(SystemClock),
+    )
+}
+
+async fn revision_count(pool: &SqlitePool, project_id: &str, draft_id: &DraftId) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM script_import_drafts WHERE project_id = ? AND draft_id = ?",
+    )
+    .bind(project_id)
+    .bind(draft_id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn insert_revision(
     pool: &SqlitePool,
     project_id: &str,
@@ -243,19 +265,25 @@ async fn backup15_roundtrip_remaps_sources_revisions_and_previous_links() {
     let (directory, dirs, pool) = database().await;
     let project_id = "dev057-backup15";
     insert_project(&pool, project_id, &directory.path().join("source-project")).await;
-    let source_id = id("scr_");
+    let source_ids = [id("scr_"), id("scr_"), id("scr_")];
     let draft_id = id("drf_");
     let revision_ids = [id("drev_"), id("drev_"), id("drev_")];
-    let source_text = "DEV057 source text — preserved once";
-    insert_source(&pool, project_id, &source_id, source_text).await;
+    let source_texts = [
+        "DEV057 source A — preserved once",
+        "DEV057 source B — preserved once",
+        "DEV057 source C — preserved once",
+    ];
+    for (source_id, source_text) in source_ids.iter().zip(source_texts) {
+        insert_source(&pool, project_id, source_id, source_text).await;
+    }
     let mut payloads = Vec::new();
     for (index, revision_id) in revision_ids.iter().enumerate() {
-        let structure = empty_structure(&draft_id, &source_id, revision_id);
+        let structure = empty_structure(&draft_id, &source_ids[index], revision_id);
         payloads.push(
             insert_revision(
                 &pool,
                 project_id,
-                &source_id,
+                &source_ids[index],
                 &draft_id,
                 (index + 1) as i64,
                 revision_id,
@@ -268,17 +296,12 @@ async fn backup15_roundtrip_remaps_sources_revisions_and_previous_links() {
         );
     }
 
-    let script_service = ScriptDraftService::new(
-        Arc::new(SqliteScriptSourceRepository::new(pool.clone())),
-        Arc::new(SqliteScriptDraftRepository::new(pool.clone())),
-        Arc::new(SystemClock),
-    );
+    let script_service = draft_service(&pool);
     let source_metadata = script_service.list_sources(project_id).await.unwrap();
-    assert_eq!(source_metadata.len(), 1);
-    assert_eq!(
-        source_metadata[0].original_filename.as_deref(),
-        Some("script.txt")
-    );
+    assert_eq!(source_metadata.len(), 3);
+    assert!(source_metadata
+        .iter()
+        .all(|source| source.original_filename.as_deref() == Some("script.txt")));
     let history = script_service
         .history(
             project_id,
@@ -302,35 +325,54 @@ async fn backup15_roundtrip_remaps_sources_revisions_and_previous_links() {
     service.export(project_id, archive.clone()).await.unwrap();
     let document = read_zip_json(&archive, "project.json");
     assert_eq!(read_zip_json(&archive, "manifest.json")["version"], 15);
-    assert_eq!(document["scriptSources"].as_array().unwrap().len(), 1);
+    assert_eq!(document["scriptSources"].as_array().unwrap().len(), 3);
     assert_eq!(
         document["scriptDraftRevisions"].as_array().unwrap().len(),
         3
     );
-    assert_eq!(document["scriptSources"][0]["sourceText"], source_text);
-    assert_eq!(
-        document["scriptSources"][0]["originalFilename"],
-        "script.txt"
-    );
+    for source_text in source_texts {
+        assert!(document["scriptSources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["sourceText"] == source_text));
+    }
     let document_text = serde_json::to_string(&document).unwrap();
-    assert_eq!(document_text.matches(source_text).count(), 1);
+    for source_text in source_texts {
+        assert_eq!(document_text.matches(source_text).count(), 1);
+    }
 
     let preview = service.inspect(archive).await.unwrap();
     assert_eq!(preview.project_name, "DEV-057 Project");
     let restored = service.restore(&preview.inspection_id).await.unwrap();
-    let restored_source: (String, Option<String>, String, i64, String) = sqlx::query_as(
+    let restored_sources: Vec<(String, Option<String>, String, i64, String)> = sqlx::query_as(
         "SELECT id, original_filename, source_checksum, source_bytes, source_text
          FROM script_sources WHERE project_id = ?",
     )
     .bind(&restored.id)
-    .fetch_one(&pool)
+    .fetch_all(&pool)
     .await
     .unwrap();
-    assert_ne!(restored_source.0, source_id);
-    assert_eq!(restored_source.1.as_deref(), Some("script.txt"));
-    assert_eq!(restored_source.2, sha256(source_text.as_bytes()));
-    assert_eq!(restored_source.3, source_text.len() as i64);
-    assert_eq!(restored_source.4, source_text);
+    assert_eq!(restored_sources.len(), 3);
+    let restored_source_ids: HashMap<String, String> = restored_sources
+        .iter()
+        .map(|(id, filename, checksum, bytes, text)| {
+            assert_eq!(filename.as_deref(), Some("script.txt"));
+            assert_eq!(*bytes, text.len() as i64);
+            assert_eq!(*checksum, sha256(text.as_bytes()));
+            (checksum.clone(), id.clone())
+        })
+        .collect();
+    for (source_id, source_text) in source_ids.iter().zip(source_texts) {
+        let checksum = sha256(source_text.as_bytes());
+        let restored_id = restored_source_ids.get(&checksum).unwrap();
+        assert_ne!(restored_id, source_id);
+        let restored_source = restored_sources
+            .iter()
+            .find(|row| row.0 == *restored_id)
+            .unwrap();
+        assert_eq!(restored_source.4, source_text);
+    }
 
     let restored_rows: Vec<(String, String, String, i64, Option<String>, String, String)> =
         sqlx::query_as(
@@ -346,7 +388,14 @@ async fn backup15_roundtrip_remaps_sources_revisions_and_previous_links() {
     for (index, row) in restored_rows.iter().enumerate() {
         assert_ne!(row.0, revision_ids[index]);
         assert_ne!(row.1, draft_id);
-        assert_eq!(row.2, restored_source.0);
+        let expected_checksum = sha256(source_texts[index].as_bytes());
+        assert_eq!(
+            row.2.as_str(),
+            restored_source_ids
+                .get(&expected_checksum)
+                .expect("each revision source must be restored")
+                .as_str()
+        );
         assert_eq!(row.3, (index + 1) as i64);
         assert_eq!(
             row.4.as_deref(),
@@ -409,6 +458,291 @@ async fn backup14_13_12_and_manifest2_import_compatibility_hold() {
             .version,
         2
     );
+}
+
+#[tokio::test]
+async fn reparsed_revisions_can_cross_sources_without_losing_provenance() {
+    let (directory, _dirs, pool) = database().await;
+    let project_id = "dev057-reparse";
+    insert_project(&pool, project_id, &directory.path().join("reparse-project")).await;
+    let service = draft_service(&pool);
+
+    let source_a = service
+        .create_source(ScriptSourceCreateRequest {
+            project_id: project_id.to_owned(),
+            format: ai_studio_lib::domain::script_draft::ScriptFormat::Txt,
+            source_text: "第一版剧本".as_bytes().to_vec(),
+            original_filename: Some("a.txt".to_owned()),
+        })
+        .await
+        .unwrap();
+    let source_b = service
+        .create_source(ScriptSourceCreateRequest {
+            project_id: project_id.to_owned(),
+            format: ai_studio_lib::domain::script_draft::ScriptFormat::Txt,
+            source_text: "第二版剧本".as_bytes().to_vec(),
+            original_filename: Some("b.txt".to_owned()),
+        })
+        .await
+        .unwrap();
+    let source_c = service
+        .create_source(ScriptSourceCreateRequest {
+            project_id: project_id.to_owned(),
+            format: ai_studio_lib::domain::script_draft::ScriptFormat::Txt,
+            source_text: "第三版剧本".as_bytes().to_vec(),
+            original_filename: Some("c.txt".to_owned()),
+        })
+        .await
+        .unwrap();
+    let source_d = service
+        .create_source(ScriptSourceCreateRequest {
+            project_id: project_id.to_owned(),
+            format: ai_studio_lib::domain::script_draft::ScriptFormat::Txt,
+            source_text: "第四版剧本".as_bytes().to_vec(),
+            original_filename: Some("d.txt".to_owned()),
+        })
+        .await
+        .unwrap();
+    let source_e = service
+        .create_source(ScriptSourceCreateRequest {
+            project_id: project_id.to_owned(),
+            format: ai_studio_lib::domain::script_draft::ScriptFormat::Txt,
+            source_text: "第五版剧本".as_bytes().to_vec(),
+            original_filename: Some("e.txt".to_owned()),
+        })
+        .await
+        .unwrap();
+    assert_ne!(source_a.id, source_b.id);
+    assert_ne!(source_b.id, source_c.id);
+    assert_ne!(source_c.id, source_d.id);
+    assert_ne!(source_d.id, source_e.id);
+
+    let revision1 = service
+        .create_draft(CreateScriptDraftRequest {
+            project_id: project_id.to_owned(),
+            source_id: source_a.id.clone(),
+            structure: DraftStructureV1::new(
+                DraftId::new(),
+                source_a.id.clone(),
+                DraftRevisionId::new(),
+            ),
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(revision1.metadata.revision, 1);
+    assert_eq!(revision1.metadata.source_id, source_a.id);
+    assert_eq!(revision1.metadata.revision_kind, DraftRevisionKind::Parsed);
+
+    let mut structure_b = revision1.structure.clone();
+    structure_b.source_id = source_b.id.clone();
+    let revision2 = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 1,
+            structure: structure_b,
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(revision2.metadata.draft_id, revision1.metadata.draft_id);
+    assert_eq!(revision2.metadata.revision, 2);
+    assert_eq!(revision2.metadata.source_id, source_b.id);
+    assert_eq!(
+        revision2.metadata.revision_kind,
+        DraftRevisionKind::Reparsed
+    );
+    assert_eq!(
+        revision2.metadata.previous_revision_id,
+        Some(revision1.metadata.id.clone())
+    );
+
+    let mut structure_c = revision2.structure.clone();
+    structure_c.source_id = source_c.id.clone();
+    let revision3 = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 2,
+            structure: structure_c,
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(revision3.metadata.revision, 3);
+    assert_eq!(revision3.metadata.source_id, source_c.id);
+    assert_eq!(
+        revision3.metadata.previous_revision_id,
+        Some(revision2.metadata.id.clone())
+    );
+    assert_eq!(
+        revision_count(&pool, project_id, &revision1.metadata.draft_id).await,
+        3
+    );
+
+    let same_source_retry = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 3,
+            structure: revision3.structure.clone(),
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(same_source_retry.metadata.id, revision3.metadata.id);
+    assert_eq!(same_source_retry.metadata.revision, 3);
+    assert_eq!(
+        revision_count(&pool, project_id, &revision1.metadata.draft_id).await,
+        3
+    );
+
+    let mut structure_d = revision3.structure.clone();
+    structure_d.source_id = source_d.id.clone();
+    let revision4 = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 3,
+            structure: structure_d,
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(revision4.metadata.revision, 4);
+    assert_eq!(revision4.metadata.source_id, source_d.id);
+    assert_eq!(
+        revision4.metadata.previous_revision_id,
+        Some(revision3.metadata.id.clone())
+    );
+    assert_eq!(
+        revision_count(&pool, project_id, &revision1.metadata.draft_id).await,
+        4
+    );
+
+    let other_project_id = "dev057-reparse-other";
+    insert_project(
+        &pool,
+        other_project_id,
+        &directory.path().join("reparse-other-project"),
+    )
+    .await;
+    let other_source = service
+        .create_source(ScriptSourceCreateRequest {
+            project_id: other_project_id.to_owned(),
+            format: ai_studio_lib::domain::script_draft::ScriptFormat::Txt,
+            source_text: "其他项目剧本".as_bytes().to_vec(),
+            original_filename: Some("other.txt".to_owned()),
+        })
+        .await
+        .unwrap();
+    let mut cross_project_structure = revision4.structure.clone();
+    cross_project_structure.source_id = other_source.id;
+    let cross_project_error = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 4,
+            structure: cross_project_structure,
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(cross_project_error.message.starts_with("SOURCE_NOT_FOUND"));
+    assert_eq!(
+        revision_count(&pool, project_id, &revision1.metadata.draft_id).await,
+        4
+    );
+
+    let mut missing_source_structure = revision4.structure.clone();
+    missing_source_structure.source_id = SourceId::new();
+    let missing_source_error = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 4,
+            structure: missing_source_structure,
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(missing_source_error.message.starts_with("SOURCE_NOT_FOUND"));
+    assert_eq!(
+        revision_count(&pool, project_id, &revision1.metadata.draft_id).await,
+        4
+    );
+
+    let mut stale_structure = revision4.structure.clone();
+    stale_structure.source_id = source_e.id;
+    let stale_error = service
+        .append_revision(AppendScriptDraftRevisionRequest {
+            project_id: project_id.to_owned(),
+            draft_id: revision1.metadata.draft_id.clone(),
+            expected_revision: 3,
+            structure: stale_structure,
+            revision_kind: DraftRevisionKind::Reparsed,
+            parser_version: "dev057-parser".to_owned(),
+            provider_metadata: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(stale_error.message.starts_with("DRAFT_REVISION_CONFLICT"));
+    assert_eq!(
+        revision_count(&pool, project_id, &revision1.metadata.draft_id).await,
+        4
+    );
+
+    for (revision, expected_source, expected_previous) in [
+        (&revision1, &source_a.id, None),
+        (
+            &revision2,
+            &source_b.id,
+            Some(revision1.metadata.id.clone()),
+        ),
+        (
+            &revision3,
+            &source_c.id,
+            Some(revision2.metadata.id.clone()),
+        ),
+        (
+            &revision4,
+            &source_d.id,
+            Some(revision3.metadata.id.clone()),
+        ),
+    ] {
+        let loaded = service
+            .get_revision(
+                project_id,
+                &revision1.metadata.draft_id,
+                revision.metadata.revision,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.metadata.id, revision.metadata.id);
+        assert_eq!(loaded.metadata.draft_id, revision1.metadata.draft_id);
+        assert_eq!(loaded.metadata.source_id, *expected_source);
+        assert_eq!(loaded.metadata.previous_revision_id, expected_previous);
+        assert_eq!(
+            loaded.metadata.payload_checksum,
+            revision.metadata.payload_checksum
+        );
+        assert_eq!(loaded.structure, revision.structure);
+    }
 }
 
 #[tokio::test]

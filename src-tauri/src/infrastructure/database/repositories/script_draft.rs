@@ -108,9 +108,6 @@ impl ScriptDraftRepository for SqliteScriptDraftRepository {
 
         if let Some(latest) = latest {
             let latest_metadata = latest.try_into_metadata()?;
-            if latest_metadata.source_id != request.source_id {
-                return Err(RepositoryError::integrity("DRAFT_SOURCE_ID_MISMATCH"));
-            }
             let latest_payload_json: String = sqlx::query_scalar(
                 "SELECT payload_json FROM script_import_drafts WHERE id = ? LIMIT 1",
             )

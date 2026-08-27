@@ -40,6 +40,14 @@ projects
 - 相同 payload 且 revision metadata 无语义变化时返回现有 revision，不产生伪 revision。
 - list/latest/history 只返回 metadata 和 summary，不读取 `payload_json`；默认 page size 50，最大 200，排序和 cursor 稳定。
 
+## Reparse Source Closure
+
+同一 Draft 的 revision chain 可以跨多个 `ScriptSource`：`source A → Draft revision 1`、`source B → Draft revision 2 (REPARSED)`、`source C → Draft revision 3 (REPARSED)`。Draft identity（`draft_id`、`project_id`）在 reparse 时保持不变；只有该 revision 的 `source_id`、payload 和 revision metadata 变化。
+
+每个 `DraftRevision` 都独立冻结自己的 `source_id`、source checksum 和 payload checksum。`previous_revision_id` 仍严格指向同一 project、同一 draft 的恰好上一 revision，与 source 是否变化无关；`expected_revision` 仍是跨 source append 的 optimistic concurrency gate。
+
+同一 source 加相同语义 payload 和 parser/provider metadata 仍是 no-op；source provenance 变化时，即使解析出的 payload 完全相同，也必须创建新的 `REPARSED` revision。新 source 必须存在且属于当前 project，不能跨 project 引用。
+
 ## 容量与安全
 
 - source 上限：16 MiB 原始 UTF-8 字节。
@@ -50,6 +58,7 @@ projects
 ## Backup 与 Manifest
 
 - Backup version 从 14 升至 15；Backup 15 包含 source text、source metadata 和全部 draft revision rows，恢复后保留 source checksum、draft/revision identity、revision order、previous links、payload 和 hash。
+- Backup 15 保留 multi-source revision provenance：同一 Draft 的 `source A → B → C` chain 恢复为三个 revision，并将每个 revision 指向对应的 remapped source；source text 与 checksum 保持一致，previous links 保持 `1 → 2 → 3` 顺序。
 - Backup 14/13/12 继续可恢复；旧版本没有 Script/Draft sections。
 - Manifest 仍为 version 2，故意不包含 `scriptSources`、`scriptDrafts`、`sourceText` 或 `payloadJson`。Script/Draft 是 backup-scoped working data，不改变正式 Project semantic manifest。
 - Project 删除通过 FK cascade 清理 Script/Draft；DEV-057 不提供正式 delete source/delete draft service。

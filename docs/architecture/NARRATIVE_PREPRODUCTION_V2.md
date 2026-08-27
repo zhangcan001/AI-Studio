@@ -198,6 +198,14 @@ source checksum B
 - 已 Confirm 的正式 Shot 永不被 reparse 静默覆盖；新版本只能产生影响预览或新的 Draft。
 - Confirm mapping 可追溯到 `sourceId + draftRevision + draftNodeId`，但不复制完整原文。
 
+## Reparse Source Closure
+
+同一 Draft 的生命周期可以跨多个 `ScriptSource`：`source A → Draft revision 1 → source B → Draft revision 2 (REPARSED) → source C → Draft revision 3 (REPARSED)`。reparse 保持同一 `draft_id` 和 `project_id`，不会把 Draft 永久绑定到单一 source；但每个 `DraftRevision` 都只属于一个明确 source，并冻结该 revision 的 `source_id`、source checksum 和 payload checksum。
+
+`previous_revision_id` 必须继续指向同一 project、同一 draft 的 immediate predecessor，revision number 严格递增，`expected_revision` 不因 source 变化而绕过。相同 source 加相同语义 payload/metadata 可 no-op；source provenance 变化即使 payload 相同也必须产生新的 `REPARSED` revision。新 source 必须先通过 project ownership 与 source integrity 校验，不能跨 project 引用。
+
+Backup 15 必须保留 multi-source revision provenance：恢复后 source A/B/C 各自的文本和 checksum 不变，三个 revision 指向对应的 remapped source IDs，previous chain 保持 `1 → 2 → 3`。这仍是 Draft working data，不进入 Manifest 2，也不触发正式生产写入。
+
 ## 10. Audit / Provenance
 
 正式 Shot 至少需要能回答：
