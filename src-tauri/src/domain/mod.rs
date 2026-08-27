@@ -16,11 +16,14 @@ pub mod project_id;
 pub mod prompt_template;
 pub mod recipe;
 pub mod reference_anchor;
+pub mod script_draft;
 pub mod shot;
 pub mod shot_context;
 pub mod shot_readiness;
 pub mod task;
 pub mod workflow;
+
+pub use script_draft::*;
 
 pub use asset::{
     Asset, AssetDomainError, AssetId, AssetType, GENERATED_IMAGE_CATEGORY,

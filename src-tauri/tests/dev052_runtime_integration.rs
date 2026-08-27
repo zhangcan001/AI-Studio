@@ -1158,14 +1158,14 @@ async fn runtime_500_shot_plan_uses_one_bounded_preflight_path() {
 }
 
 #[tokio::test]
-async fn runtime_database_is_fresh_migrated_through_024() {
+async fn runtime_database_is_fresh_migrated_through_025() {
     let harness = harness().await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
             .fetch_one(&harness.pool)
             .await
             .unwrap(),
-        24
+        25
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")

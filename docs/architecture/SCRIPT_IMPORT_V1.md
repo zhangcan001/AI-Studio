@@ -1,6 +1,8 @@
 # Script Import V1
 
-状态：DEV-056 架构规划，未实现。
+状态：DEV-057 Data Foundation 已落地；DEV-058 Parser 尚未实现。
+
+DEV-057 已冻结并持久化 `ScriptDocument`/`DraftStructureV1` 的数据 contract：Migration 025 使用 `script_sources` 与不可变的 `script_import_drafts`，Backup 升至 15；Manifest 仍为 2 且故意排除 Script/Draft 工作数据。本文的解析管线、Match、Storyboard、Review 和 Promote 仍属于后续 DEV。
 
 Script Import V1 把用户提供的 TXT、Markdown、JSON、小说或剧本转换为可审阅的 `ScriptDocument` 与 `DraftStructure`。它只产生草稿，不直接创建正式 Series、Episode、Scene、Shot、Profile、ReferenceSet、Batch、Task 或 Generation。
 
@@ -184,9 +186,13 @@ validation + human review
 
 LLM 不得返回或决定可信的 Profile ID、Asset ID、ReferenceSet、workflow、Batch、Task 或 Comfy 请求；它的文本结果只能标为 `ai`/`suggested`。DEV-056 不接入 OpenAI-compatible API、local LLM 或用户 endpoint，只保留未来 port 的输入输出边界。
 
-## 8. 建议的应用入口
+## 8. 应用入口状态
 
-以下是规划名称，具体 command 在 DEV-057 冻结：
+DEV-057 不新增 Tauri command，也不接 AppState。当前可由 application service/repository 直接构造和测试；正式用户入口留给 DEV-058/DEV-061。
+
+## 9. 未来应用入口
+
+以下仍是规划名称，具体 command 和 UI 在后续 DEV 冻结：
 
 | 入口 | 语义 | 写入边界 |
 | --- | --- | --- |
@@ -199,7 +205,7 @@ LLM 不得返回或决定可信的 Profile ID、Asset ID、ReferenceSet、workfl
 
 `script_import_confirm` 需要目标 Project 和目标结构位置；确认前应返回 promote preview。确认时不得由前端循环调用 `createShot` 代替一个后端事务。
 
-## 9. Draft 与正式层的绝对隔离
+## 10. Draft 与正式层的绝对隔离
 
 解析、LLM、Draft 编辑和 Match 都不得调用：
 
@@ -210,7 +216,7 @@ LLM 不得返回或决定可信的 Profile ID、Asset ID、ReferenceSet、workfl
 
 只有用户点击“确认写入正式结构”，并且后端完成二次校验后，才允许创建正式 Episode/Scene/Shot。Confirm 成功后只返回正式 ID mapping 和 provenance，不自动绑定、不自动准备、不自动入队、不自动 Start。
 
-## 10. 容量与恢复策略
+## 11. 容量与恢复策略
 
 目标规模为 100 Episodes、1000 Scenes、5000 Draft Shots。解析器和 Draft API 必须：
 
@@ -221,7 +227,7 @@ LLM 不得返回或决定可信的 Profile ID、Asset ID、ReferenceSet、workfl
 - Draft revision 可恢复；断电后不能半写入正式结构。
 - 正式生产仍遵守 0.7.0 的现有 500-shot/batch limits；5000 是草稿容量目标，不是一次生产目标。
 
-## 11. 测试与验收
+## 12. 测试与验收
 
 DEV-058 至少应覆盖：
 
@@ -236,6 +242,11 @@ DEV-058 至少应覆盖：
 9. provider/LLM 输出非法或超长时 fail-closed，且无生产副作用。
 10. 0.7.0 无 Script source 项目打开和生产不受影响。
 
-## 12. 兼容性
+## 13. DEV-057 持久化与兼容性
 
-Script system 是 optional。已有 0.7.0 项目不需要 ScriptDocument；旧 Shot 不会被反向生成伪 Draft，也不会因没有 Draft 而变成 BLOCKED。未来若将 `script_sources`/`script_import_drafts` 持久化，必须单独完成 migration、Backup、Manifest 和升级兼容评审。
+Script system 是 optional。Product 仍为 0.7.0；DEV-057 新增 Migration 025，并将 Backup 14 升为 Backup 15，Migration 024 的既有结构不被改写。
+
+- `script_sources` 以 project + checksum + format 去重，原始 UTF-8 文本只保存于 `source_text`；`script_import_drafts` 保存全部 immutable revision、summary、payload、provider/parser metadata 和 previous link。
+- Backup 15 restore 保留 Script/Draft；Backup 14/13/12 继续兼容且 Script/Draft 为空。Manifest 2 不包含 `scriptSources`、`scriptDrafts`、`sourceText` 或 `payloadJson`，所以正式 semantic manifest contract 不变。
+- 已有 0.7.0 项目无 Script source 仍可打开和生产；旧 Shot 不会反向生成伪 Draft，也不会因没有 Draft 而变成 BLOCKED。
+- 不把 Draft 状态映射成 Readiness status，不把 Storyboard prompt 映射成已冻结 Prompt Snapshot。

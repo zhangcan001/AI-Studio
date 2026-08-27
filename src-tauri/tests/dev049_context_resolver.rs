@@ -186,7 +186,7 @@ async fn remove_023_for_upgrade(pool: &SqlitePool) {
 }
 
 #[tokio::test]
-async fn dev049_fresh_001_to_024_creates_only_the_scope_tables() {
+async fn dev049_fresh_001_to_025_creates_only_the_scope_tables() {
     let (_directory, pool) = database().await;
 
     assert_eq!(
@@ -194,7 +194,7 @@ async fn dev049_fresh_001_to_024_creates_only_the_scope_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        24
+        25
     );
     for table in [
         "consistency_scope_profile_bindings",
@@ -216,7 +216,7 @@ async fn dev049_fresh_001_to_024_creates_only_the_scope_tables() {
 }
 
 #[tokio::test]
-async fn dev049_022_to_024_preserves_022_rows_and_leaves_scope_tables_empty() {
+async fn dev049_022_to_025_preserves_022_rows_and_leaves_scope_tables_empty() {
     let (directory, pool) = database().await;
     insert_022_fixture(&pool).await;
     remove_023_for_upgrade(&pool).await;
@@ -230,7 +230,7 @@ async fn dev049_022_to_024_preserves_022_rows_and_leaves_scope_tables_empty() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        24
+        25
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = 'dev049-project'",)

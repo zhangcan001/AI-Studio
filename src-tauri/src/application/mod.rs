@@ -59,6 +59,7 @@ pub mod reference_anchor_service;
 pub mod reference_set_service;
 pub mod scene_production_service;
 pub mod scheduler;
+pub mod script_draft_service;
 pub mod series_production_service;
 pub mod settings_service;
 pub mod shot_batch_service;

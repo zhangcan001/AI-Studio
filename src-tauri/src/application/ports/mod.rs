@@ -23,6 +23,8 @@ pub mod prompt_library_repository;
 pub mod reference_anchor_repository;
 pub mod reference_set_repository;
 pub mod repository_error;
+pub mod script_draft_repository;
+pub mod script_source_repository;
 pub mod settings_store;
 pub mod shot_batch_repository;
 pub mod shot_bulk_repository;
@@ -88,6 +90,13 @@ pub use prompt_library_repository::{
 pub use reference_anchor_repository::{ReferenceAnchorRecord, ReferenceAnchorRepository};
 pub use reference_set_repository::ReferenceSetRepository;
 pub use repository_error::RepositoryError;
+pub use script_draft_repository::{
+    InsertScriptDraftRevision, ScriptDraftPage, ScriptDraftPageQuery, ScriptDraftRepository,
+    ScriptDraftRevisionMetadata, ScriptDraftRevisionRecord,
+};
+pub use script_source_repository::{
+    ScriptSourceMetadata, ScriptSourceRecord, ScriptSourceRepository,
+};
 pub use settings_store::{
     AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,
     SettingsStore, WorkspaceResume,

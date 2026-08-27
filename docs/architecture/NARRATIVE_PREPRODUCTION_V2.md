@@ -1,6 +1,8 @@
 # Narrative Preproduction V2
 
-状态：DEV-056 架构规划，未实现。
+状态：DEV-057 Data Foundation 已落地；Import/Match/Storyboard/Review/Promote 尚未实现。
+
+DEV-057 仅落地 Script/Draft 的领域 contract、Migration 025、不可变 revision、校验和 Backup 15；产品版本继续为 0.7.0，Manifest 继续为 2。本文下游的正式生产链和后续交付边界保持不变。
 
 Narrative Preproduction V2 的职责是把“文本输入和创作建议”安全地接到 0.7.0 已验证的生产准备链。它不是新的生产执行系统，也不把 AI 草稿变成无人值守流水线。
 
@@ -61,7 +63,7 @@ Draft 层负责 Episode/Scene/Shot 候选树、Storyboard 字段、Profile Match
 
 ## 4. 关键接口 seam
 
-下面是架构形状，不是 DEV-056 的实现 API。
+下面是后续能力的架构形状，不是 DEV-057 的实现 API。DEV-057 不增加 command 或 AppState wiring。
 
 ```text
 ScriptImportPort
@@ -152,22 +154,24 @@ Provider 只负责文本分析、结构建议、候选别名和 Prompt draft。�
 
 ## 8. 最小持久化策略
 
-### 推荐模型
+### DEV-057 已落地模型
 
-初始 V2 只需要：
+DEV-057 实际使用两个核心表：
 
 ```text
 script_sources
-  source identity / project / format / checksum / storage ref / timestamps
+  source identity / project / format / checksum / original filename / source text / timestamps
 
 script_import_drafts
-  draft id / source id / revision / status / parser metadata
+  draft id / source id / revision / status / parser/provider metadata
   draft checksum / summary / payload_json / previous revision / timestamps
 ```
 
-`payload_json` 承载 DraftStructure、StoryboardDraft、diagnostics、source spans、matches 和 operation provenance。不要复制正式表的所有列，也不要在 DEV-056 添加 migration 025。
+`payload_json` 承载当前 DraftStructure、diagnostics、source spans 和后续可扩展的 Draft 文档字段。原始文本只存于 `script_sources.source_text`；不复制正式表列，也不建立 draft_episodes/draft_scenes/draft_shots/draft_entity_matches/draft_node_index 镜像表。Migration 025、Backup 15 和 Manifest 2 exclusion 已完成。
 
-对于 5000 Draft Shot，后端可以在一个 Draft session 内解析/建立可见节点索引，再以 page/cursor 返回；UI 必须 virtualization/pagination。若基准证明 JSON 全量读取成本不可接受，后续任务再引入一张可重建 `draft_node_index`，并单独经过 schema/backup/manifest/upgrade gate。
+服务端 append 在 SQLite transaction 内校验 latest、expected revision 和 previous link；revision 只 INSERT、不 UPDATE。默认列表页为 50、上限 200，list/history 只返回 metadata/summary，不加载完整 payload。
+
+对于 5000 Draft Shot，DEV-057 以 document-oriented payload 做真实 serialize/validate/hash/SQLite roundtrip benchmark；若 payload 超过 64 MiB 或 load+deserialize 超过 2000 ms，测试直接报告 `DEV-057 BLOCKED`，不在本 DEV 偷增 `draft_node_index`。通过时记录 `DRAFT_NODE_INDEX=NOT_NEEDED_V1`；UI virtualization/pagination 留给 DEV-061。
 
 ### 为什么不直接使用候选表
 
@@ -223,8 +227,9 @@ Provenance 使用关系和摘要，不把完整 ScriptDocument 写入每个 Shot
 
 - 没有 ScriptDocument 的 0.7.0 项目直接打开并继续生产。
 - 旧 Shot 没有 Draft/Reference Pack 时继续走现有 legacy fallback，不因为缺少 Script 而 BLOCKED。
-- 0.8.0 不修改 Product 0.7.0、migration 024、Backup 14、Manifest 2。
-- 未来新增 Draft 持久化必须提供 migration、backup/restore、manifest compatibility、旧项目 open 和 rollback 证据。
+- Product 仍为 0.7.0；DEV-057 新增 Migration 025，Backup 由 14 升为 15，Manifest 保持 2。
+- Backup 15 包含 Script source/draft revision 并支持 roundtrip；Backup 14/13/12 继续兼容且 Script/Draft 为空。Manifest 2 export/import contract 不包含 Script/Draft/source text/payload。
+- 0.7.0 项目无 Script source 仍可打开和生产。
 - 不把 Draft 状态映射成 Readiness status，不把 Storyboard prompt 映射成已冻结 Prompt Snapshot。
 
 ## 13. 分阶段实现边界

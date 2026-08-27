@@ -367,7 +367,7 @@ fn dev036_migration_and_backup_versions_remain_frozen() {
     assert!(migrations.iter().any(|name| name.starts_with("021_")));
 
     let backup = read_text(root.join("src-tauri/src/application/project_backup_service.rs"));
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 14;"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 15;"));
     assert!(backup.contains("prompt_versions"));
     assert!(backup.contains("shot_stage_prompts"));
 }

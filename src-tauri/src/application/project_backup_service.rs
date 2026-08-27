@@ -20,7 +20,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 14;
+const BACKUP_VERSION: u32 = 15;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -351,6 +351,20 @@ impl ProjectBackupService {
         for scene in &document.production_scenes {
             production_scene_ids.insert(scene.id.clone(), format!("scn_{}", Uuid::new_v4()));
         }
+        let mut script_source_ids = HashMap::new();
+        for source in &document.script_sources {
+            script_source_ids.insert(source.id.clone(), format!("scr_{}", Uuid::new_v4()));
+        }
+        let mut script_draft_ids = HashMap::new();
+        for revision in &document.script_draft_revisions {
+            script_draft_ids
+                .entry(revision.draft_id.clone())
+                .or_insert_with(|| format!("drf_{}", Uuid::new_v4()));
+        }
+        let mut script_revision_ids = HashMap::new();
+        for revision in &document.script_draft_revisions {
+            script_revision_ids.insert(revision.id.clone(), format!("drev_{}", Uuid::new_v4()));
+        }
         let mut consistency_ids = ConsistencyRestoreIds::default();
         for profile_id in document
             .character_profiles
@@ -449,6 +463,9 @@ impl ProjectBackupService {
                     episodes: production_episode_ids,
                     scenes: production_scene_ids,
                 },
+                &script_source_ids,
+                &script_draft_ids,
+                &script_revision_ids,
                 &consistency_ids,
                 &shot_ids,
                 &shot_generation_link_ids,
@@ -697,6 +714,9 @@ impl ProjectBackupService {
         .map_err(|error| AppError::database(error.to_string()))?;
         let (production_series, production_episodes, production_scenes, shot_scene_assignments) =
             query_production_structure(&mut transaction, project_id).await?;
+        let script_sources = query_script_sources(&mut transaction, project_id).await?;
+        let script_draft_revisions =
+            query_script_draft_revisions(&mut transaction, project_id).await?;
         let character_profiles = query_character_profiles(&mut transaction, project_id).await?;
         let scene_profiles = query_scene_profiles(&mut transaction, project_id).await?;
         let prop_profiles = query_prop_profiles(&mut transaction, project_id).await?;
@@ -931,6 +951,8 @@ impl ProjectBackupService {
             production_episodes,
             production_scenes,
             shot_scene_assignments,
+            script_sources,
+            script_draft_revisions,
             production_item_reviews,
             benchmark_experiments,
             benchmark_candidates,
@@ -985,6 +1007,9 @@ impl ProjectBackupService {
         tag_ids: &HashMap<String, String>,
         reference_anchor_ids: &HashMap<String, String>,
         production_structure_ids: &ProductionStructureIds,
+        script_source_ids: &HashMap<String, String>,
+        script_draft_ids: &HashMap<String, String>,
+        script_revision_ids: &HashMap<String, String>,
         consistency_ids: &ConsistencyRestoreIds,
         shot_ids: &HashMap<String, String>,
         shot_generation_link_ids: &HashMap<String, String>,
@@ -1020,6 +1045,9 @@ impl ProjectBackupService {
             tag_ids,
             reference_anchor_ids,
             production_structure_ids,
+            script_source_ids,
+            script_draft_ids,
+            script_revision_ids,
             consistency_ids,
             shot_ids,
             shot_generation_link_ids,
@@ -1096,6 +1124,10 @@ struct BackupDocument {
     production_scenes: Vec<BackupProductionScene>,
     #[serde(default)]
     shot_scene_assignments: Vec<BackupShotSceneAssignment>,
+    #[serde(default)]
+    script_sources: Vec<BackupScriptSource>,
+    #[serde(default)]
+    script_draft_revisions: Vec<BackupScriptDraftRevision>,
     #[serde(default)]
     production_item_reviews: Vec<BackupProductionItemReview>,
     #[serde(default)]
@@ -1460,6 +1492,42 @@ struct BackupShotSceneAssignment {
     ordinal: i64,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupScriptSource {
+    id: String,
+    project_id: String,
+    format: String,
+    original_filename: Option<String>,
+    source_checksum: String,
+    source_bytes: i64,
+    source_text: String,
+    schema_version: i64,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupScriptDraftRevision {
+    id: String,
+    draft_id: String,
+    project_id: String,
+    source_id: String,
+    revision: i64,
+    previous_revision_id: Option<String>,
+    schema_version: i64,
+    revision_kind: String,
+    parser_version: String,
+    contract_version: i64,
+    provider_kind: Option<String>,
+    provider_model: Option<String>,
+    provider_metadata_json: Option<String>,
+    payload_checksum: String,
+    summary_json: String,
+    payload_json: String,
+    created_at: String,
 }
 
 #[derive(Default)]
@@ -3737,6 +3805,43 @@ async fn query_scope_reference_set_bindings(
     .map_err(|error| AppError::database(error.to_string()))
 }
 
+async fn query_script_sources(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupScriptSource>, AppError> {
+    sqlx::query_as::<_, BackupScriptSource>(
+        "SELECT id, project_id, format, original_filename, source_checksum, source_bytes, source_text,
+                schema_version, created_at
+         FROM script_sources
+         WHERE project_id = ?
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
+async fn query_script_draft_revisions(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupScriptDraftRevision>, AppError> {
+    sqlx::query_as::<_, BackupScriptDraftRevision>(
+        "SELECT id, draft_id, project_id, source_id, revision, previous_revision_id,
+                schema_version, revision_kind, parser_version, contract_version,
+                provider_kind, provider_model, provider_metadata_json,
+                payload_checksum, summary_json, payload_json,
+                created_at
+         FROM script_import_drafts
+         WHERE project_id = ?
+         ORDER BY draft_id, revision, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
+}
+
 const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
 
 fn write_zip_to_path(
@@ -3965,7 +4070,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -4020,7 +4125,140 @@ fn validate_document_entries(
     validate_benchmark_document(document)?;
     validate_production_orchestrator_document(document)?;
     validate_shot_document(document, version)?;
+    validate_script_draft_document(document, version)?;
     Ok(())
+}
+
+fn validate_script_draft_document(document: &BackupDocument, version: u32) -> Result<(), AppError> {
+    if version < 15 {
+        if !document.script_sources.is_empty() || !document.script_draft_revisions.is_empty() {
+            return Err(AppError::backup_invalid(
+                "旧版备份不应包含 Script/Draft 数据",
+            ));
+        }
+        return Ok(());
+    }
+
+    let mut source_ids = HashSet::new();
+    for source in &document.script_sources {
+        if !source_ids.insert(source.id.as_str())
+            || source.project_id != document.project.id
+            || source.id.trim().is_empty()
+            || !matches!(source.format.as_str(), "TXT" | "MARKDOWN" | "JSON")
+            || !is_lower_hex_64(&source.source_checksum)
+            || source.source_bytes < 0
+            || source.source_bytes as usize != source.source_text.len()
+            || source.schema_version <= 0
+        {
+            return Err(AppError::backup_invalid("Script Source 元数据无效"));
+        }
+    }
+
+    let mut revision_ids = HashSet::new();
+    let mut draft_revisions = HashMap::new();
+    for revision in &document.script_draft_revisions {
+        if !revision_ids.insert(revision.id.as_str())
+            || revision.id.trim().is_empty()
+            || revision.draft_id.trim().is_empty()
+            || revision.project_id != document.project.id
+            || !source_ids.contains(revision.source_id.as_str())
+            || revision.revision <= 0
+            || revision.schema_version <= 0
+            || revision.contract_version <= 0
+            || !matches!(
+                revision.revision_kind.as_str(),
+                "PARSED" | "REPARSED" | "USER_EDIT" | "REVIEW" | "MERGE" | "SPLIT" | "REORDER"
+            )
+            || revision.parser_version.trim().is_empty()
+            || revision
+                .provider_kind
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(str::is_empty)
+            || !is_lower_hex_64(&revision.payload_checksum)
+            || serde_json::from_str::<Value>(&revision.summary_json).is_err()
+            || serde_json::from_str::<Value>(&revision.payload_json).is_err()
+            || hash_bytes(revision.payload_json.as_bytes()) != revision.payload_checksum
+        {
+            return Err(AppError::backup_invalid("Script Draft Revision 数据无效"));
+        }
+        if let Some(provider_metadata) = &revision.provider_metadata_json {
+            if serde_json::from_str::<Value>(provider_metadata).is_err() {
+                return Err(AppError::backup_invalid(
+                    "Script Draft Provider metadata 无效",
+                ));
+            }
+        }
+        draft_revisions.insert(revision.id.as_str(), revision);
+    }
+    let mut draft_identity_revisions: HashMap<&str, HashSet<i64>> = HashMap::new();
+    for revision in &document.script_draft_revisions {
+        let numbers = draft_identity_revisions
+            .entry(revision.draft_id.as_str())
+            .or_default();
+        if !numbers.insert(revision.revision) {
+            return Err(AppError::backup_invalid(
+                "Script Draft revision number 重复",
+            ));
+        }
+        match (&revision.previous_revision_id, revision.revision) {
+            (None, 1) => {}
+            (Some(_), 1) => {
+                return Err(AppError::backup_invalid(
+                    "Script Draft revision 1 不应包含 previous revision",
+                ));
+            }
+            (None, _) => {
+                return Err(AppError::backup_invalid(
+                    "Script Draft revision 缺少 immediate previous revision",
+                ));
+            }
+            (Some(previous_id), _) => {
+                let Some(previous) = draft_revisions.get(previous_id.as_str()) else {
+                    return Err(AppError::backup_invalid(
+                        "Script Draft previous revision 引用无效",
+                    ));
+                };
+                if previous.draft_id != revision.draft_id
+                    || previous.project_id != revision.project_id
+                    || previous.revision != revision.revision - 1
+                {
+                    return Err(AppError::backup_invalid(
+                        "Script Draft previous revision 链接无效",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_lower_hex_64(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn remap_exact_string_ids(value: &mut Value, ids: &HashMap<String, String>) {
+    match value {
+        Value::String(text) => {
+            if let Some(restored) = ids.get(text) {
+                *text = restored.clone();
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                remap_exact_string_ids(value, ids);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                remap_exact_string_ids(value, ids);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
 
 fn validate_production_preparation_snapshot_document(
@@ -5909,6 +6147,9 @@ async fn restore_rows_in_transaction(
     tag_ids: &HashMap<String, String>,
     reference_anchor_ids: &HashMap<String, String>,
     production_structure_ids: &ProductionStructureIds,
+    script_source_ids: &HashMap<String, String>,
+    script_draft_ids: &HashMap<String, String>,
+    script_revision_ids: &HashMap<String, String>,
     consistency_ids: &ConsistencyRestoreIds,
     shot_ids: &HashMap<String, String>,
     shot_generation_link_ids: &HashMap<String, String>,
@@ -7317,6 +7558,106 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| AppError::database(error.to_string()))?;
     }
+    for source in &document.script_sources {
+        let source_id = script_source_ids
+            .get(&source.id)
+            .ok_or_else(|| AppError::backup_invalid("Script Source ID 映射缺失"))?;
+        sqlx::query(
+            "INSERT INTO script_sources
+             (id, project_id, format, original_filename, source_checksum, source_bytes, source_text,
+              schema_version, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(source_id)
+        .bind(&project.id)
+        .bind(&source.format)
+        .bind(&source.original_filename)
+        .bind(&source.source_checksum)
+        .bind(source.source_bytes)
+        .bind(&source.source_text)
+        .bind(source.schema_version)
+        .bind(&source.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    let mut script_draft_revisions = document.script_draft_revisions.clone();
+    script_draft_revisions.sort_by(|left, right| {
+        left.draft_id
+            .cmp(&right.draft_id)
+            .then(left.revision.cmp(&right.revision))
+            .then(left.id.cmp(&right.id))
+    });
+    for revision in &script_draft_revisions {
+        let revision_id = script_revision_ids
+            .get(&revision.id)
+            .ok_or_else(|| AppError::backup_invalid("Script Draft Revision ID 映射缺失"))?;
+        let draft_id = script_draft_ids
+            .get(&revision.draft_id)
+            .ok_or_else(|| AppError::backup_invalid("Script Draft ID 映射缺失"))?;
+        let source_id = script_source_ids
+            .get(&revision.source_id)
+            .ok_or_else(|| AppError::backup_invalid("Script Draft Source 映射缺失"))?;
+        let previous_revision_id = revision
+            .previous_revision_id
+            .as_ref()
+            .map(|id| {
+                script_revision_ids.get(id).ok_or_else(|| {
+                    AppError::backup_invalid("Script Draft previous revision 映射缺失")
+                })
+            })
+            .transpose()?;
+        let mut payload = serde_json::from_str::<Value>(&revision.payload_json)
+            .map_err(|_| AppError::backup_invalid("Script Draft payload JSON 无效"))?;
+        let mut script_id_map = HashMap::new();
+        script_id_map.extend(
+            script_source_ids
+                .iter()
+                .map(|(old, new)| (old.clone(), new.clone())),
+        );
+        script_id_map.extend(
+            script_draft_ids
+                .iter()
+                .map(|(old, new)| (old.clone(), new.clone())),
+        );
+        script_id_map.extend(
+            script_revision_ids
+                .iter()
+                .map(|(old, new)| (old.clone(), new.clone())),
+        );
+        remap_exact_string_ids(&mut payload, &script_id_map);
+        let payload_json = serde_json::to_string(&payload)
+            .map_err(|_| AppError::backup_invalid("Script Draft payload 序列化失败"))?;
+        let payload_checksum = hash_bytes(payload_json.as_bytes());
+        sqlx::query(
+            "INSERT INTO script_import_drafts
+             (id, draft_id, project_id, source_id, revision, previous_revision_id,
+              schema_version, revision_kind, parser_version, contract_version,
+              provider_kind, provider_model, provider_metadata_json,
+              payload_checksum, summary_json, payload_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(revision_id)
+        .bind(draft_id)
+        .bind(&project.id)
+        .bind(source_id)
+        .bind(revision.revision)
+        .bind(previous_revision_id)
+        .bind(revision.schema_version)
+        .bind(&revision.revision_kind)
+        .bind(&revision.parser_version)
+        .bind(revision.contract_version)
+        .bind(&revision.provider_kind)
+        .bind(&revision.provider_model)
+        .bind(&revision.provider_metadata_json)
+        .bind(payload_checksum)
+        .bind(&revision.summary_json)
+        .bind(payload_json)
+        .bind(&revision.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
     for config in &document.shot_stage_configs {
         let shot_id = shot_ids
             .get(&config.shot_id)
@@ -7733,6 +8074,8 @@ mod tests {
             production_episodes: Vec::new(),
             production_scenes: Vec::new(),
             shot_scene_assignments: Vec::new(),
+            script_sources: Vec::new(),
+            script_draft_revisions: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
@@ -8712,7 +9055,7 @@ mod tests {
         assert!(exported.entries >= 6);
         let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 14);
+        assert_eq!(manifest.version, 15);
         assert_eq!(exported.entries, names.len());
         assert!(names.contains("production_preparation_snapshots.json"));
         assert_eq!(document.preparation_snapshots.len(), 1);
@@ -9570,6 +9913,8 @@ mod tests {
             production_episodes: Vec::new(),
             production_scenes: Vec::new(),
             shot_scene_assignments: Vec::new(),
+            script_sources: Vec::new(),
+            script_draft_revisions: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
@@ -9639,6 +9984,9 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &ProductionStructureIds::default(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
                 &super::ConsistencyRestoreIds::default(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -9737,6 +10085,8 @@ mod tests {
             production_episodes: Vec::new(),
             production_scenes: Vec::new(),
             shot_scene_assignments: Vec::new(),
+            script_sources: Vec::new(),
+            script_draft_revisions: Vec::new(),
             production_item_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),

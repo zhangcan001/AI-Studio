@@ -14,7 +14,8 @@ pub use repositories::{
     SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionItemReviewRepository,
     SqliteProductionQueueRepository, SqliteProductionStructureRepository, SqliteProjectRepository,
     SqlitePromptLibraryRepository, SqliteReferenceAnchorRepository, SqliteReferenceSetRepository,
-    SqliteShotConsistencyRepository, SqliteShotRepository, SqliteTaskHistoryRepository,
-    SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
-    SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
+    SqliteScriptDraftRepository, SqliteScriptSourceRepository, SqliteShotConsistencyRepository,
+    SqliteShotRepository, SqliteTaskHistoryRepository, SqliteTaskRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository, SqliteWorkflowRuntimeRepository,
+    SqliteWorkflowRuntimeStateRepository,
 };

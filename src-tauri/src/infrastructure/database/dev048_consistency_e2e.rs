@@ -297,11 +297,19 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 }
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS script_import_drafts")
+        .execute(pool)
+        .await
+        .expect("025 draft table should be removable in isolated upgrade fixture");
+    sqlx::query("DROP TABLE IF EXISTS script_sources")
+        .execute(pool)
+        .await
+        .expect("025 source table should be removable in isolated upgrade fixture");
     sqlx::query("DROP TABLE production_preparation_snapshots")
         .execute(pool)
         .await
         .expect("024 table should be removable in isolated fixture");
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 24")
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(pool)
         .await
         .expect("024 migration marker should be removable in isolated fixture");
@@ -505,7 +513,7 @@ fn reference_binding(
 }
 
 #[tokio::test]
-async fn dev048_fresh_migration_001_to_024_creates_only_the_frozen_tables() {
+async fn dev048_fresh_migration_001_to_025_creates_only_the_frozen_tables() {
     let directory = tempdir().unwrap();
     let pool = initialize(&directory.path().join("fresh.db"))
         .await
@@ -515,7 +523,7 @@ async fn dev048_fresh_migration_001_to_024_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        24
+        25
     );
     let required_tables = [
         "profile_revisions",
@@ -529,6 +537,8 @@ async fn dev048_fresh_migration_001_to_024_creates_only_the_frozen_tables() {
         "shot_profile_bindings",
         "shot_reference_set_bindings",
         "production_preparation_snapshots",
+        "script_sources",
+        "script_import_drafts",
     ];
     for table in required_tables {
         assert_eq!(
@@ -555,7 +565,7 @@ async fn dev048_fresh_migration_001_to_024_creates_only_the_frozen_tables() {
 }
 
 #[tokio::test]
-async fn dev048_021_to_024_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
+async fn dev048_021_to_025_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
     let (directory, pool) = setup().await;
     insert_legacy_sentinels(&pool).await;
     let before = legacy_counts(&pool).await;
@@ -570,7 +580,7 @@ async fn dev048_021_to_024_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        24
+        25
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -601,6 +611,8 @@ async fn dev048_021_to_024_preserves_all_legacy_sentinels_and_leaves_new_tables_
         "shot_profile_bindings",
         "shot_reference_set_bindings",
         "production_preparation_snapshots",
+        "script_sources",
+        "script_import_drafts",
     ] {
         assert_eq!(
             sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
@@ -614,7 +626,7 @@ async fn dev048_021_to_024_preserves_all_legacy_sentinels_and_leaves_new_tables_
 }
 
 #[tokio::test]
-async fn dev052_existing_023_to_024_creates_preparation_snapshot_table() {
+async fn dev052_existing_023_to_025_creates_preparation_snapshot_table() {
     let (directory, pool) = setup().await;
     remove_024_for_upgrade_fixture(&pool).await;
     pool.close().await;
@@ -627,7 +639,7 @@ async fn dev052_existing_023_to_024_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        24
+        25
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1433,7 +1445,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 24)
+            .is_some_and(|version| version <= 25)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"0.7.0\""));
@@ -1441,7 +1453,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(cargo.contains("version = \"0.7.0\""));
     let backup =
         fs::read_to_string(root.join("src/application/project_backup_service.rs")).unwrap();
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 14"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 15"));
     let manifest =
         fs::read_to_string(root.join("src/application/project_manifest_service.rs")).unwrap();
     assert!(manifest.contains("const MANIFEST_VERSION: u32 = 2"));

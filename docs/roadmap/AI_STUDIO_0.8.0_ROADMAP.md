@@ -1,6 +1,6 @@
 # AI Studio 0.8.0 Roadmap：Script → Storyboard Draft → Narrative Production V2
 
-状态：Planning（DEV-056，规划文档，不实现功能）
+状态：DEV-057 Data Foundation PASS；DEV-058 为下一步
 
 内部代号：Narrative Preproduction V2
 稳定基线：AI Studio 0.7.0 — Narrative Production V1
@@ -8,7 +8,7 @@
 0.7.0 `SOURCE_RC_SHA`：`e4a643d4b31329e291c2fb40002f1554e8a1ab34`
 `v0.7.0` peeled SHA：`e4a643d4b31329e291c2fb40002f1554e8a1ab34`
 
-本路线图来自 DEV-056 对实际仓库的四路只读审计。0.7.0 的正式生产能力已经存在；0.8.0 的首要缺口是把原始脚本变成可人工审阅的 Draft，而不是再造一个生成系统。
+本路线图来自 DEV-056 对实际仓库的四路只读审计。0.7.0 的正式生产能力已经存在；0.8.0 的首要缺口是把原始脚本变成可人工审阅的 Draft，而不是再造一个生成系统。DEV-057 已冻结并实现数据基础；解析器从 DEV-058 开始。
 
 ## 1. 目标与不变的执行边界
 
@@ -36,7 +36,7 @@ AI/解析器输出永远是 Draft。只有用户显式点击“确认写入正�
 - 唯一正式链路仍是 `ProductionQueue → GenerationService → WorkflowCompiler → Comfy Adapter → ComfyUI`。
 - 候选选择、人工审核、加入队列和 Queue Start 继续是 Manual Gate。
 - 不增加第二执行器、第二队列、Scheduler、自动选片、自动批准、自动 Start 或 unattended generation。
-- DEV-056 不修改 Product 0.7.0、migration 024、Backup 14、Manifest 2，不创建 migration 025。
+- DEV-057 保持 Product 0.7.0；新增 Migration 025、Backup 15，但 Manifest 仍为 2。Script/Draft 只进入 Backup 15，不进入 Manifest 2。
 
 ## 2. 当前仓库审计结论
 
@@ -95,16 +95,16 @@ Draft revision
 
 以下 9 个 DEV 是根据当前仓库缺口调整后的核心路线。每个条目明确目标、依赖、输入、输出、禁止事项和验收门禁。
 
-### DEV-057 — Script/Draft Data Foundation
+### DEV-057 — Script/Draft Data Foundation — PASS
 
 | 项目 | 规划 |
 | --- | --- |
-| 目标 | 冻结 ScriptDocument、DraftStructure、DraftRevision、source provenance 和最小存储策略 |
+| 目标 | 冻结并落地 ScriptDocument、DraftStructure、DraftRevision、source provenance 和最小存储策略 |
 | 依赖 | DEV-056、0.7.0 domain vocabulary |
 | 输入 | 本路线图、四路审计、TXT/Markdown/JSON 样例、5000 Draft Shot 容量目标 |
-| 输出 | domain/DTO/schema contract、revision/identity 规则、内存或 `script_sources` + `script_import_drafts` 决策、迁移提案（如需要，另案） |
-| 禁止事项 | 不写 production 表；不修改 migration 024/Backup 14/Manifest 2；不建立正式结构镜像表 |
-| 验收门禁 | schema version、project isolation、checksum、immutable revision、旧项目无 Script 仍可打开 |
+| 输出 | domain/DTO/schema contract、Migration 025、`script_sources` + `script_import_drafts`、Backup 15、revision/identity/hash/span/capacity contract |
+| 禁止事项 | 不写 production 表；不改写 migration 024；不升级 Manifest 2；不建立正式结构镜像表、parser、LLM 或 command |
+| 验收门禁 | schema version、project isolation、checksum、immutable revision、5000-node benchmark、Backup 15 roundtrip、旧项目无 Script 仍可打开 |
 
 ### DEV-058 — Script Import Parser
 
@@ -219,7 +219,7 @@ DEV-057
 | Production | 仍是 Readiness → Preparation → ProductionQueue → GenerationService → ComfyUI；手动 start |
 | Safety | 不自动创建 Profile/binding/Batch/Task；不自动选片/审核/生成；无 second executor/queue |
 | Scale | 100 Episodes、1000 Scenes、5000 Draft Shots 有 pagination/virtualization/内存和输入响应证据 |
-| Compatibility | 0.7.0 项目无 ScriptDocument 仍可打开和生产；migration 024、Backup 14、Manifest 2 不被 DEV-056 改动 |
+| Compatibility | 0.7.0 项目无 ScriptDocument 仍可打开和生产；Migration 025/Backup 15 可升级恢复，Manifest 2 contract 保持不变 |
 | Audit | provenance 可回答 manual/Script Import/Storyboard Draft 来源及 revision，不复制全文到每个 Shot |
 
 ## 7. 明确延期到 0.9+
@@ -235,6 +235,6 @@ DEV-057
 
 ## 8. 下一步
 
-下一任务：**DEV-057 — Script/Draft Data Foundation**。
+下一任务：**DEV-058 — Script Import Parser**。
 
-开始实现前必须重新确认：Draft 是否需要跨会话恢复、原文存储引用的安全边界，以及 5000 Draft Shot 基准是否需要可重建索引；这些决定不能在实现中隐式升级为正式结构表或 migration 025。
+DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略。通过时不增加 `draft_node_index`；DEV-058 可基于这些冻结 contract 实现 TXT/Markdown/JSON/小说解析，仍保持零 formal writes、零 Queue、零 Comfy。
