@@ -533,12 +533,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_recovery_service.clone(),
                 clock.clone(),
             ));
-            let production_item_review_service = Arc::new(ProductionItemReviewService::new(
+            let production_item_review_service = Arc::new(ProductionItemReviewService::new_with_shot_batch_repository(
                 production_item_review_repository,
                 production_queue_repository,
                 production_queue_service.clone(),
                 task_repository.clone(),
                 asset_repository.clone(),
+                shot_batch_repository.clone(),
                 clock.clone(),
             ));
             let production_audit_service = Arc::new(ProductionAuditService::new(database_pool.clone()));

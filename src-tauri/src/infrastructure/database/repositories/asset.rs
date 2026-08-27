@@ -125,6 +125,29 @@ impl AssetRepository for SqliteAssetRepository {
         rows.into_iter().map(AssetRow::try_into_domain).collect()
     }
 
+    async fn list_by_source_tasks(
+        &self,
+        task_ids: &[TaskId],
+    ) -> Result<Vec<Asset>, RepositoryError> {
+        if task_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut query =
+            QueryBuilder::<Sqlite>::new(format!("{ASSET_SELECT} WHERE source_task_id IN ("));
+        let mut separated = query.separated(", ");
+        for task_id in task_ids {
+            separated.push_bind(task_id.as_str());
+        }
+        separated.push_unseparated(") ORDER BY source_task_id ASC, created_at ASC, id ASC");
+        let rows = query
+            .build_query_as::<AssetRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        rows.into_iter().map(AssetRow::try_into_domain).collect()
+    }
+
     async fn list_recent(
         &self,
         project_id: &str,

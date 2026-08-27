@@ -36,6 +36,20 @@ pub trait ProductionItemReviewRepository: Send + Sync {
         lineage_key: &str,
     ) -> Result<Vec<ProductionItemReviewRecord>, RepositoryError>;
 
+    /// Loads all review lineage rows for a batch of lineage keys. SQLite
+    /// overrides this with one project-scoped `IN` query.
+    async fn list_for_lineages(
+        &self,
+        project_id: &str,
+        lineage_keys: &[String],
+    ) -> Result<Vec<ProductionItemReviewRecord>, RepositoryError> {
+        let mut records = Vec::new();
+        for lineage_key in lineage_keys {
+            records.extend(self.list_for_lineage(project_id, lineage_key).await?);
+        }
+        Ok(records)
+    }
+
     async fn find_for_item(
         &self,
         project_id: &str,
@@ -48,6 +62,20 @@ pub trait ProductionItemReviewRepository: Send + Sync {
         &self,
         record: &ProductionItemReviewRecord,
     ) -> Result<ProductionItemReviewRecord, RepositoryError>;
+
+    /// Ensures the missing review rows for one batch in one repository call.
+    /// The default preserves source compatibility for small test repositories;
+    /// production SQLite uses a single transaction and batch readback.
+    async fn ensure_for_items(
+        &self,
+        records: &[ProductionItemReviewRecord],
+    ) -> Result<Vec<ProductionItemReviewRecord>, RepositoryError> {
+        let mut ensured = Vec::with_capacity(records.len());
+        for record in records {
+            ensured.push(self.ensure_for_item(record).await?);
+        }
+        Ok(ensured)
+    }
 
     async fn insert(&self, record: &ProductionItemReviewRecord) -> Result<(), RepositoryError>;
 

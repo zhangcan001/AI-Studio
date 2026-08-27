@@ -92,7 +92,9 @@ pub use settings_store::{
     AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,
     SettingsStore, WorkspaceResume,
 };
-pub use shot_batch_repository::{ActiveShotBatchBinding, ShotBatchBinding, ShotBatchRepository};
+pub use shot_batch_repository::{
+    ActiveShotBatchBinding, ProductionBatchShotLink, ShotBatchBinding, ShotBatchRepository,
+};
 pub use shot_bulk_repository::{ShotBulkData, ShotBulkRepository, ShotStagePromptRecord};
 pub use shot_consistency_repository::ShotConsistencyRepository;
 pub use shot_repository::{

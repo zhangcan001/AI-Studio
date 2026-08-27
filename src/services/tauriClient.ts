@@ -160,8 +160,10 @@ import type {
 import type {
   ProductionBatchReview,
   ProductionReviewRegenerateResult,
+  ProductionReviewItem,
   ProductionReviewStatus,
 } from "../types/productionItemReview";
+import type { ReviewCompareContextSnapshot } from "../types/reviewProductivity";
 import type {
   ProductionAuditIntegrity,
   ProductionAuditLineage,
@@ -1128,6 +1130,49 @@ export function getProductionBatchReview(projectId: string, batchId: string): Pr
   return invoke<ProductionBatchReview>("production_item_review_get", { projectId, batchId });
 }
 
+/**
+ * The review command returns the legacy batch DTO plus the optional shot and
+ * preparation context needed by the compact compare board. Keeping this as a
+ * refinement of ProductionBatchReview preserves the existing review client
+ * contract while making the enriched response explicit for new consumers.
+ */
+export interface ProductionReviewProductivityCandidate {
+  assetId: string;
+  assetType: string;
+  name: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  thumbnailAvailable: boolean;
+  taskId?: string;
+  selected: boolean;
+  reviewResult?: string;
+}
+
+export interface ProductionReviewProductivityItem extends ProductionReviewItem {
+  shotId?: string;
+  stage?: string;
+  selectedAssetId?: string;
+  reviewable: boolean;
+  candidateAssets: ProductionReviewProductivityCandidate[];
+  context: ReviewCompareContextSnapshot & {
+    shotId?: string;
+    stage?: string;
+    snapshotAvailable: boolean;
+    promptText?: string;
+    readinessStatus?: string;
+  };
+}
+
+export interface ProductionBatchReviewProductivity extends Omit<ProductionBatchReview, "items"> {
+  items: ProductionReviewProductivityItem[];
+}
+
+/** Reads the enriched review payload using the same compatible backend command. */
+export function getProductionBatchReviewProductivity(projectId: string, batchId: string): Promise<ProductionBatchReviewProductivity> {
+  return invoke<ProductionBatchReviewProductivity>("production_item_review_get", { projectId, batchId });
+}
+
 export function setProductionReviewStatus(request: {
   projectId: string;
   batchId: string;
@@ -1157,7 +1202,9 @@ export function regenerateProductionItem(request: {
   useOriginalSeed: boolean;
   autoStart: boolean;
 }): Promise<ProductionReviewRegenerateResult> {
-  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate", { request });
+  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate", {
+    request: { ...request, autoStart: false },
+  });
 }
 
 export function regenerateMarkedProductionItems(request: {
@@ -1165,7 +1212,9 @@ export function regenerateMarkedProductionItems(request: {
   batchId: string;
   autoStart: boolean;
 }): Promise<ProductionReviewRegenerateResult> {
-  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate_marked", { request });
+  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate_marked", {
+    request: { ...request, autoStart: false },
+  });
 }
 
 export function listProjects(): Promise<ProjectView[]> {

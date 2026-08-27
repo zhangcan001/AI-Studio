@@ -2,17 +2,24 @@ use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::h3_local_import_service::is_supported_h3_output_resolution;
 use crate::application::ports::{
     AssetRepository, Clock, ProductionItemReviewRecord, ProductionItemReviewRepository,
-    ProductionQueueRepository, RepositoryError, TaskRepository,
+    ProductionQueueRepository, RepositoryError, ShotBatchRepository, TaskRepository,
 };
 use crate::application::production_queue_service::{
     generation_values_from_json, CreateProductionBatchItem, CreateProductionBatchRequest,
     ProductionQueueError, ProductionQueueService,
 };
 use crate::domain::{
-    Asset, AssetType, ProductionBatchDetail, ProductionBatchItem, ProductionBatchItemStatus,
-    ProductionReviewStatus, SeedValue, Task, TaskId, TaskStatus,
+    Asset, AssetType, PreparationSnapshotRecord, ProductionBatchDetail, ProductionBatchItem,
+    ProductionBatchItemStatus, ProductionReviewStatus, SeedValue, ShotStage, Task, TaskId,
+    TaskStatus,
 };
-use std::{collections::BTreeMap, error::Error, fmt, sync::Arc};
+use serde_json::{json, Value};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    error::Error,
+    fmt,
+    sync::Arc,
+};
 use uuid::Uuid;
 
 pub const MAX_REVIEW_NOTE_BYTES: usize = 4 * 1024;
@@ -30,6 +37,86 @@ pub struct ProductionReviewItem {
 pub struct ProductionBatchReview {
     pub detail: ProductionBatchDetail,
     pub items: Vec<ProductionReviewItem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewReferenceSetSummary {
+    pub reference_set_id: String,
+    pub role: String,
+    pub ordinal: i64,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewReferenceAssetSummary {
+    pub asset_id: String,
+    pub sha256: String,
+    pub role: String,
+    pub ordinal: i64,
+    pub source_reference_set_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductionReviewFrozenContext {
+    pub snapshot_available: bool,
+    pub context_hash: Option<String>,
+    pub prompt_text: Option<String>,
+    pub negative_prompt: Option<String>,
+    pub workflow_version_id: Option<String>,
+    pub recipe_id: Option<String>,
+    pub reference_sets: Vec<ReviewReferenceSetSummary>,
+    pub reference_assets: Vec<ReviewReferenceAssetSummary>,
+    pub output_spec: Value,
+    pub stage_input: Value,
+    pub readiness_status: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductionReviewCandidateAsset {
+    pub asset_id: String,
+    pub asset_type: String,
+    pub name: String,
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub thumbnail_available: bool,
+    pub task_id: Option<String>,
+    pub selected: bool,
+    pub review_result: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductionReviewProductivityItem {
+    pub item_id: String,
+    pub ordinal: u32,
+    pub task_id: Option<String>,
+    pub production_item_status: String,
+    pub task_status: Option<String>,
+    pub review_status: Option<String>,
+    pub review_note: String,
+    pub version: Option<i64>,
+    pub preferred: bool,
+    pub shot_id: Option<String>,
+    pub stage: Option<String>,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub candidate_assets: Vec<ProductionReviewCandidateAsset>,
+    pub frozen_context: ProductionReviewFrozenContext,
+    pub reviewable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductionReviewProductivityView {
+    pub detail: ProductionBatchDetail,
+    pub total: usize,
+    pub success_count: usize,
+    pub failed_count: usize,
+    pub unreviewed_count: usize,
+    pub approved_count: usize,
+    pub starred_count: usize,
+    pub regenerate_count: usize,
+    pub rejected_count: usize,
+    pub items: Vec<ProductionReviewProductivityItem>,
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +146,7 @@ pub struct ProductionItemReviewService {
     production_queue_service: Arc<ProductionQueueService>,
     task_repository: Arc<dyn TaskRepository>,
     asset_repository: Arc<dyn AssetRepository>,
+    shot_batch_repository: Option<Arc<dyn ShotBatchRepository>>,
     clock: Arc<dyn Clock>,
 }
 
@@ -77,6 +165,27 @@ impl ProductionItemReviewService {
             production_queue_service,
             task_repository,
             asset_repository,
+            shot_batch_repository: None,
+            clock,
+        }
+    }
+
+    pub fn new_with_shot_batch_repository(
+        review_repository: Arc<dyn ProductionItemReviewRepository>,
+        production_queue_repository: Arc<dyn ProductionQueueRepository>,
+        production_queue_service: Arc<ProductionQueueService>,
+        task_repository: Arc<dyn TaskRepository>,
+        asset_repository: Arc<dyn AssetRepository>,
+        shot_batch_repository: Arc<dyn ShotBatchRepository>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            review_repository,
+            production_queue_repository,
+            production_queue_service,
+            task_repository,
+            asset_repository,
+            shot_batch_repository: Some(shot_batch_repository),
             clock,
         }
     }
@@ -91,6 +200,27 @@ impl ProductionItemReviewService {
             .get(project_id, batch_id)
             .await?;
         self.build_view(project_id, detail).await
+    }
+
+    pub async fn get_productivity_view(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<ProductionReviewProductivityView, ProductionReviewError> {
+        let detail = self
+            .production_queue_service
+            .get(project_id, batch_id)
+            .await?;
+        self.build_productivity_view(project_id, detail).await
+    }
+
+    /// Explicit facade name for callers building a review productivity board.
+    pub async fn get_productivity(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<ProductionReviewProductivityView, ProductionReviewError> {
+        self.get_productivity_view(project_id, batch_id).await
     }
 
     pub async fn set_status(
@@ -334,76 +464,429 @@ impl ProductionItemReviewService {
         project_id: &str,
         detail: ProductionBatchDetail,
     ) -> Result<ProductionBatchReview, ProductionReviewError> {
-        let mut items = Vec::with_capacity(detail.items.len());
+        let (items, _) = self.build_review_items(project_id, &detail).await?;
+        Ok(ProductionBatchReview { detail, items })
+    }
+
+    async fn build_review_items(
+        &self,
+        project_id: &str,
+        detail: &ProductionBatchDetail,
+    ) -> Result<
+        (
+            Vec<ProductionReviewItem>,
+            Vec<ProductionReviewProductivityItem>,
+        ),
+        ProductionReviewError,
+    > {
+        let mut task_ids = Vec::new();
+        let mut seen_task_ids = HashSet::new();
         for item in &detail.items {
-            let task = match item.task_id.as_deref() {
-                Some(task_id) => {
-                    let task_id = TaskId::parse(task_id.to_owned())
-                        .map_err(|error| ProductionReviewError::InvalidState(error.to_string()))?;
-                    self.task_repository.find_by_id(&task_id).await?
+            if let Some(task_id) = &item.task_id {
+                let task_id = TaskId::parse(task_id.clone())
+                    .map_err(|error| ProductionReviewError::InvalidState(error.to_string()))?;
+                if seen_task_ids.insert(task_id.as_str().to_owned()) {
+                    task_ids.push(task_id);
                 }
-                None => None,
-            };
-            let output_assets = match task.as_ref() {
-                Some(task) if task.status == TaskStatus::Succeeded => {
-                    self.asset_repository.list_by_source_task(&task.id).await?
+            }
+        }
+        let tasks = self
+            .task_repository
+            .find_many_by_ids(&task_ids)
+            .await?
+            .into_iter()
+            .map(|task| (task.id.as_str().to_owned(), task))
+            .collect::<HashMap<_, _>>();
+        let assets = self
+            .asset_repository
+            .list_by_source_tasks(&task_ids)
+            .await?;
+        let assets_by_task =
+            assets
+                .into_iter()
+                .fold(HashMap::<String, Vec<Asset>>::new(), |mut map, asset| {
+                    if let Some(task_id) = &asset.source_task_id {
+                        map.entry(task_id.as_str().to_owned())
+                            .or_default()
+                            .push(asset);
+                    }
+                    map
+                });
+
+        let mut reviews = self
+            .review_repository
+            .list_for_batch(project_id, detail.batch.id.as_str())
+            .await?;
+        let mut reviews_by_item = reviews
+            .iter()
+            .cloned()
+            .map(|review| (review.production_batch_item_id.clone(), review))
+            .collect::<HashMap<_, _>>();
+        let now = self.clock.now();
+        let missing_reviews = detail
+            .items
+            .iter()
+            .filter(|item| {
+                item.status == ProductionBatchItemStatus::Succeeded
+                    && item
+                        .task_id
+                        .as_deref()
+                        .and_then(|task_id| tasks.get(task_id))
+                        .is_some_and(|task| task.status == TaskStatus::Succeeded)
+                    && !reviews_by_item.contains_key(item.id.as_str())
+            })
+            .map(|item| {
+                let result_asset_id = item
+                    .task_id
+                    .as_deref()
+                    .and_then(|task_id| assets_by_task.get(task_id))
+                    .into_iter()
+                    .flatten()
+                    .find(|asset| asset.asset_type == AssetType::Video)
+                    .map(|asset| asset.id.as_str().to_owned());
+                ProductionItemReviewRecord {
+                    id: format!("pri_{}", Uuid::new_v4().simple()),
+                    project_id: project_id.to_owned(),
+                    production_batch_id: detail.batch.id.as_str().to_owned(),
+                    production_batch_item_id: item.id.as_str().to_owned(),
+                    task_id: item.task_id.clone(),
+                    result_asset_id,
+                    review_status: ProductionReviewStatus::Unreviewed,
+                    review_note: String::new(),
+                    version: 1,
+                    lineage_key: item.id.as_str().to_owned(),
+                    parent_batch_id: None,
+                    parent_item_id: None,
+                    created_at: now,
+                    updated_at: now,
                 }
-                _ => Vec::new(),
-            };
-            let review = if item.status == ProductionBatchItemStatus::Succeeded
+            })
+            .collect::<Vec<_>>();
+        if !missing_reviews.is_empty() {
+            let ensured = self
+                .review_repository
+                .ensure_for_items(&missing_reviews)
+                .await?;
+            for review in ensured {
+                reviews_by_item.insert(review.production_batch_item_id.clone(), review.clone());
+                reviews.push(review);
+            }
+        }
+
+        let lineage_keys = reviews
+            .iter()
+            .map(|review| review.lineage_key.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let lineage_reviews = self
+            .review_repository
+            .list_for_lineages(project_id, &lineage_keys)
+            .await?;
+        let mut preferred_by_lineage = HashMap::new();
+        for lineage_key in &lineage_keys {
+            let lineage = lineage_reviews
+                .iter()
+                .chain(reviews.iter())
+                .filter(|review| &review.lineage_key == lineage_key)
+                .cloned()
+                .collect::<Vec<_>>();
+            if let Some(preferred) = preferred_review_id(&lineage) {
+                preferred_by_lineage.insert(lineage_key.clone(), preferred.to_owned());
+            }
+        }
+
+        let (snapshots, shot_links) = if let Some(repository) = &self.shot_batch_repository {
+            tokio::try_join!(
+                repository
+                    .list_preparation_snapshots_for_batch(project_id, detail.batch.id.as_str(),),
+                repository.list_shot_links_for_batch(project_id, detail.batch.id.as_str()),
+            )?
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let snapshots_by_item = snapshots
+            .into_iter()
+            .map(|snapshot| (snapshot.production_batch_item_id.clone(), snapshot))
+            .collect::<HashMap<_, _>>();
+        let links_by_item = shot_links
+            .into_iter()
+            .map(|link| (link.production_batch_item_id.clone(), link))
+            .collect::<HashMap<_, _>>();
+
+        let mut old_items = Vec::with_capacity(detail.items.len());
+        let mut productivity_items = Vec::with_capacity(detail.items.len());
+        for item in &detail.items {
+            let task = item
+                .task_id
+                .as_deref()
+                .and_then(|task_id| tasks.get(task_id).cloned());
+            let output_assets = task
+                .as_ref()
+                .filter(|task| task.status == TaskStatus::Succeeded)
+                .and_then(|task| assets_by_task.get(task.id.as_str()))
+                .cloned()
+                .unwrap_or_default();
+            let review = reviews_by_item.get(item.id.as_str()).cloned();
+            let reviewable = item.status == ProductionBatchItemStatus::Succeeded
                 && task
                     .as_ref()
                     .is_some_and(|task| task.status == TaskStatus::Succeeded)
-            {
-                let now = self.clock.now();
-                let result_asset_id = output_assets
-                    .iter()
-                    .find(|asset| asset.asset_type == AssetType::Video)
-                    .map(|asset| asset.id.as_str().to_owned());
-                Some(
-                    self.review_repository
-                        .ensure_for_item(&ProductionItemReviewRecord {
-                            id: format!("pri_{}", Uuid::new_v4().simple()),
-                            project_id: project_id.to_owned(),
-                            production_batch_id: detail.batch.id.as_str().to_owned(),
-                            production_batch_item_id: item.id.as_str().to_owned(),
-                            task_id: item.task_id.clone(),
-                            result_asset_id,
-                            review_status: ProductionReviewStatus::Unreviewed,
-                            review_note: String::new(),
-                            version: 1,
-                            lineage_key: item.id.as_str().to_owned(),
-                            parent_batch_id: None,
-                            parent_item_id: None,
-                            created_at: now,
-                            updated_at: now,
+                && review.is_some();
+            let preferred = review
+                .as_ref()
+                .and_then(|review| preferred_by_lineage.get(&review.lineage_key))
+                .is_some_and(|id| review.as_ref().is_some_and(|review| id == &review.id));
+            let link = links_by_item.get(item.id.as_str());
+            let snapshot = snapshots_by_item.get(item.id.as_str());
+            let mut frozen_context = snapshot
+                .map(snapshot_context)
+                .unwrap_or_else(|| legacy_context(item));
+            if frozen_context.workflow_version_id.is_none() {
+                frozen_context.workflow_version_id = Some(item.workflow_version_id.clone());
+            }
+            if frozen_context.recipe_id.is_none() {
+                frozen_context.recipe_id = Some(item.recipe_id.clone());
+            }
+            let selected_asset_id = match link {
+                Some(link) => match link.stage {
+                    ShotStage::Image => link.selected_image_asset_id.as_deref(),
+                    ShotStage::Video => link.selected_video_asset_id.as_deref(),
+                },
+                None => review
+                    .as_ref()
+                    .and_then(|review| review.result_asset_id.as_deref()),
+            };
+            let candidate_assets = output_assets
+                .iter()
+                .map(|asset| ProductionReviewCandidateAsset {
+                    asset_id: asset.id.as_str().to_owned(),
+                    asset_type: asset.asset_type.as_str().to_owned(),
+                    name: asset.name.clone(),
+                    mime_type: asset.mime_type.clone(),
+                    width: asset.width,
+                    height: asset.height,
+                    thumbnail_available: asset.thumbnail_path.is_some(),
+                    task_id: asset
+                        .source_task_id
+                        .as_ref()
+                        .map(|task_id| task_id.as_str().to_owned()),
+                    selected: selected_asset_id == Some(asset.id.as_str()),
+                    review_result: review
+                        .as_ref()
+                        .filter(|review| {
+                            review.result_asset_id.as_deref() == Some(asset.id.as_str())
                         })
-                        .await?,
-                )
-            } else {
-                self.review_repository
-                    .find_for_item(project_id, item.id.as_str())
-                    .await?
-            };
-            let is_preferred = if let Some(review) = &review {
-                let lineage = self
-                    .review_repository
-                    .list_for_lineage(project_id, &review.lineage_key)
-                    .await?;
-                preferred_review_id(&lineage) == Some(review.id.as_str())
-            } else {
-                false
-            };
-            items.push(ProductionReviewItem {
+                        .map(|review| review.review_status.as_str().to_owned()),
+                })
+                .collect();
+            old_items.push(ProductionReviewItem {
                 item: item.clone(),
-                task,
+                task: task.clone(),
                 output_assets,
-                review,
-                is_preferred,
+                review: review.clone(),
+                is_preferred: preferred,
+            });
+            productivity_items.push(ProductionReviewProductivityItem {
+                item_id: item.id.as_str().to_owned(),
+                ordinal: item.ordinal,
+                task_id: item.task_id.clone(),
+                production_item_status: item.status.as_str().to_owned(),
+                task_status: task.as_ref().map(|task| task.status.as_str().to_owned()),
+                review_status: if reviewable {
+                    review
+                        .as_ref()
+                        .map(|review| review.review_status.as_str().to_owned())
+                } else {
+                    None
+                },
+                review_note: review
+                    .as_ref()
+                    .map(|review| review.review_note.clone())
+                    .unwrap_or_default(),
+                version: review
+                    .as_ref()
+                    .filter(|_| reviewable)
+                    .map(|review| review.version),
+                preferred,
+                shot_id: link
+                    .map(|link| link.shot_id.clone())
+                    .or_else(|| snapshot.map(|snapshot| snapshot.shot_id.clone())),
+                stage: link
+                    .map(|link| link.stage.as_str().to_owned())
+                    .or_else(|| snapshot.map(|snapshot| snapshot.stage.as_str().to_owned())),
+                workflow_version_id: frozen_context
+                    .workflow_version_id
+                    .clone()
+                    .unwrap_or_else(|| item.workflow_version_id.clone()),
+                recipe_id: frozen_context
+                    .recipe_id
+                    .clone()
+                    .unwrap_or_else(|| item.recipe_id.clone()),
+                candidate_assets,
+                frozen_context,
+                reviewable,
             });
         }
-        Ok(ProductionBatchReview { detail, items })
+        Ok((old_items, productivity_items))
     }
+
+    async fn build_productivity_view(
+        &self,
+        project_id: &str,
+        detail: ProductionBatchDetail,
+    ) -> Result<ProductionReviewProductivityView, ProductionReviewError> {
+        let (_, items) = self.build_review_items(project_id, &detail).await?;
+        let mut view = ProductionReviewProductivityView {
+            detail,
+            total: items.len(),
+            success_count: 0,
+            failed_count: 0,
+            unreviewed_count: 0,
+            approved_count: 0,
+            starred_count: 0,
+            regenerate_count: 0,
+            rejected_count: 0,
+            items,
+        };
+        for item in &view.items {
+            if item.production_item_status == ProductionBatchItemStatus::Succeeded.as_str()
+                && item.task_status.as_deref() == Some(TaskStatus::Succeeded.as_str())
+            {
+                view.success_count += 1;
+            } else if item.production_item_status == ProductionBatchItemStatus::Failed.as_str()
+                || item.task_status.as_deref() == Some(TaskStatus::Failed.as_str())
+            {
+                view.failed_count += 1;
+            }
+            match item.review_status.as_deref() {
+                Some("UNREVIEWED") => view.unreviewed_count += 1,
+                Some("APPROVED") => view.approved_count += 1,
+                Some("STARRED") => view.starred_count += 1,
+                Some("REGENERATE") => view.regenerate_count += 1,
+                Some("REJECTED") => view.rejected_count += 1,
+                _ => {}
+            }
+        }
+        Ok(view)
+    }
+}
+
+fn snapshot_context(record: &PreparationSnapshotRecord) -> ProductionReviewFrozenContext {
+    let snapshot = &record.snapshot;
+    ProductionReviewFrozenContext {
+        snapshot_available: true,
+        context_hash: Some(record.context_hash.clone()),
+        prompt_text: Some(snapshot.prompt.rendered_text.clone()),
+        negative_prompt: Some(snapshot.prompt.negative_prompt.clone()),
+        workflow_version_id: snapshot.workflow.workflow_version_id.clone(),
+        recipe_id: snapshot.workflow.recipe_id.clone(),
+        reference_sets: snapshot
+            .reference_sets
+            .iter()
+            .map(|reference_set| ReviewReferenceSetSummary {
+                reference_set_id: reference_set.reference_set_id.clone(),
+                role: reference_set.role.as_str().to_owned(),
+                ordinal: reference_set.ordinal,
+                required: reference_set.required,
+            })
+            .collect(),
+        reference_assets: snapshot
+            .reference_assets
+            .iter()
+            .map(|asset| ReviewReferenceAssetSummary {
+                asset_id: asset.asset_id.clone(),
+                sha256: asset.sha256.clone(),
+                role: asset.role.as_str().to_owned(),
+                ordinal: asset.ordinal,
+                source_reference_set_id: asset.source_reference_set_id.clone(),
+            })
+            .collect(),
+        output_spec: json!({
+            "width": snapshot.output_spec.width,
+            "height": snapshot.output_spec.height,
+            "count": snapshot.output_spec.count,
+            "durationSeconds": snapshot.output_spec.duration_seconds,
+        }),
+        stage_input: json!({
+            "selectedImageAssetId": snapshot.stage_input.selected_image_asset_id,
+            "selectedImageSha256": snapshot.stage_input.selected_image_sha256,
+        }),
+        readiness_status: Some(snapshot.readiness.status.as_str().to_owned()),
+    }
+}
+
+fn legacy_context(item: &ProductionBatchItem) -> ProductionReviewFrozenContext {
+    let values = &item.values_json;
+    let prompt_text = legacy_string_value(values, |key| key.eq_ignore_ascii_case("prompt"))
+        .or_else(|| legacy_string_value(values, |key| key.to_ascii_lowercase().contains("prompt")));
+    let negative_prompt = legacy_string_value(values, |key| {
+        let key = key.to_ascii_lowercase();
+        key == "negative_prompt" || key == "negativeprompt"
+    });
+    let selected_image_asset_id = legacy_string_value(values, |key| {
+        matches!(
+            key.to_ascii_lowercase().as_str(),
+            "selected_image_asset_id" | "selectedimageassetid" | "image_asset_id"
+        )
+    });
+    let reference_assets = values
+        .get("reference_images")
+        .or_else(|| values.get("referenceImages"))
+        .and_then(|value| value.get("value").or(Some(value)))
+        .and_then(|value| value.get("assetIds"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .enumerate()
+        .map(|(ordinal, asset_id)| ReviewReferenceAssetSummary {
+            asset_id: asset_id.to_owned(),
+            sha256: String::new(),
+            role: "REFERENCE".to_owned(),
+            ordinal: ordinal as i64,
+            source_reference_set_id: String::new(),
+        })
+        .collect();
+    ProductionReviewFrozenContext {
+        snapshot_available: false,
+        context_hash: None,
+        prompt_text,
+        negative_prompt,
+        workflow_version_id: Some(item.workflow_version_id.clone()),
+        recipe_id: Some(item.recipe_id.clone()),
+        reference_sets: Vec::new(),
+        reference_assets,
+        output_spec: json!({
+            "width": legacy_integer_value(values, "width"),
+            "height": legacy_integer_value(values, "height"),
+            "durationSeconds": legacy_integer_value(values, "duration_seconds"),
+        }),
+        stage_input: json!({
+            "selectedImageAssetId": selected_image_asset_id,
+        }),
+        readiness_status: None,
+    }
+}
+
+fn legacy_string_value(values: &Value, predicate: impl Fn(&str) -> bool) -> Option<String> {
+    values.as_object()?.iter().find_map(|(key, value)| {
+        if !predicate(key) {
+            return None;
+        }
+        value
+            .get("value")
+            .and_then(Value::as_str)
+            .or_else(|| value.as_str())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn legacy_integer_value(values: &Value, key: &str) -> Option<i64> {
+    values
+        .get(key)
+        .and_then(|value| value.get("value").or(Some(value)))
+        .and_then(Value::as_i64)
 }
 
 fn ensure_reviewable_item(item: &ProductionReviewItem) -> Result<(), ProductionReviewError> {

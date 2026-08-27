@@ -3,8 +3,8 @@ use super::{
     parse_optional_datetime, serialize_json,
 };
 use crate::application::ports::{
-    ActiveProductionItem, ActiveShotBatchBinding, ProductionQueueRepository, RepositoryError,
-    ShotBatchBinding, ShotBatchRepository,
+    ActiveProductionItem, ActiveShotBatchBinding, ProductionBatchShotLink,
+    ProductionQueueRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository,
 };
 use crate::application::production_batch_runbook_service::{
     ProductionBatchRunbookRepository, ProductionBatchRunbookSourceRow,
@@ -591,6 +591,58 @@ impl ShotBatchRepository for SqliteProductionQueueRepository {
         .await
         .map_err(map_sqlx_error)?;
         row.map(PreparationSnapshotRow::try_into_domain).transpose()
+    }
+
+    async fn list_preparation_snapshots_for_batch(
+        &self,
+        project_id: &str,
+        production_batch_id: &str,
+    ) -> Result<Vec<PreparationSnapshotRecord>, RepositoryError> {
+        let rows = sqlx::query_as::<_, PreparationSnapshotRow>(
+            "SELECT sps.id, sps.project_id, sps.shot_id, sps.stage, sps.context_hash,
+                    sps.production_batch_id, sps.production_batch_item_id,
+                    sps.snapshot_json, sps.created_at
+             FROM production_preparation_snapshots sps
+             INNER JOIN production_batches b ON b.id = sps.production_batch_id
+             WHERE sps.project_id = ? AND b.project_id = ? AND sps.production_batch_id = ?
+             ORDER BY sps.production_batch_item_id ASC",
+        )
+        .bind(project_id)
+        .bind(project_id)
+        .bind(production_batch_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(PreparationSnapshotRow::try_into_domain)
+            .collect()
+    }
+
+    async fn list_shot_links_for_batch(
+        &self,
+        project_id: &str,
+        production_batch_id: &str,
+    ) -> Result<Vec<ProductionBatchShotLink>, RepositoryError> {
+        let rows = sqlx::query_as::<_, ProductionBatchShotLinkRow>(
+            "SELECT l.production_batch_item_id, l.shot_id, l.stage,
+                    s.selected_image_asset_id, s.selected_video_asset_id
+             FROM shot_generation_links l
+             INNER JOIN production_batch_items i ON i.id = l.production_batch_item_id
+             INNER JOIN production_batches b ON b.id = i.batch_id
+             INNER JOIN shots s ON s.id = l.shot_id
+             WHERE b.project_id = ? AND i.batch_id = ? AND s.project_id = ?
+               AND l.production_batch_item_id IS NOT NULL
+             ORDER BY i.ordinal ASC, l.id ASC",
+        )
+        .bind(project_id)
+        .bind(production_batch_id)
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(ProductionBatchShotLinkRow::try_into_domain)
+            .collect()
     }
 
     async fn insert_batch_with_bindings(
@@ -1500,6 +1552,28 @@ struct PreparationSnapshotRow {
     production_batch_item_id: String,
     snapshot_json: String,
     created_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ProductionBatchShotLinkRow {
+    production_batch_item_id: String,
+    shot_id: String,
+    stage: String,
+    selected_image_asset_id: Option<String>,
+    selected_video_asset_id: Option<String>,
+}
+
+impl ProductionBatchShotLinkRow {
+    fn try_into_domain(self) -> Result<ProductionBatchShotLink, RepositoryError> {
+        Ok(ProductionBatchShotLink {
+            production_batch_item_id: self.production_batch_item_id,
+            shot_id: self.shot_id,
+            stage: ShotStage::try_from_str(&self.stage)
+                .map_err(|error| map_domain_error("production batch Shot stage", error))?,
+            selected_image_asset_id: self.selected_image_asset_id,
+            selected_video_asset_id: self.selected_video_asset_id,
+        })
+    }
 }
 
 impl PreparationSnapshotRow {

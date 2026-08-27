@@ -25,6 +25,18 @@ pub struct ActiveShotBatchBinding {
     pub production_batch_item_id: String,
 }
 
+/// The small, batch-scoped Shot projection needed by review productivity.
+/// Keeping selected asset ids here avoids loading each Shot while building a
+/// review board.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionBatchShotLink {
+    pub production_batch_item_id: String,
+    pub shot_id: String,
+    pub stage: ShotStage,
+    pub selected_image_asset_id: Option<String>,
+    pub selected_video_asset_id: Option<String>,
+}
+
 #[async_trait]
 pub trait ShotBatchRepository: Send + Sync {
     async fn insert_batch_with_bindings(
@@ -72,6 +84,25 @@ pub trait ShotBatchRepository: Send + Sync {
         _production_batch_item_id: &str,
     ) -> Result<Option<PreparationSnapshotRecord>, RepositoryError> {
         Ok(None)
+    }
+
+    /// Loads all preparation snapshots belonging to a batch in one query.
+    async fn list_preparation_snapshots_for_batch(
+        &self,
+        _project_id: &str,
+        _production_batch_id: &str,
+    ) -> Result<Vec<PreparationSnapshotRecord>, RepositoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Loads the item → Shot/stage relationship and selected Shot assets in a
+    /// single batch-scoped query.
+    async fn list_shot_links_for_batch(
+        &self,
+        _project_id: &str,
+        _production_batch_id: &str,
+    ) -> Result<Vec<ProductionBatchShotLink>, RepositoryError> {
+        Ok(Vec::new())
     }
 
     /// Atomically binds a newly-created Task to a Shot item. Returns `true`

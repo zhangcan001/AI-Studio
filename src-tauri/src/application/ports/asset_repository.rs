@@ -33,6 +33,20 @@ pub trait AssetRepository: Send + Sync {
 
     async fn list_by_source_task(&self, task_id: &TaskId) -> Result<Vec<Asset>, RepositoryError>;
 
+    /// Loads generated candidates for a set of source tasks. SQLite overrides
+    /// this with one set-based query; the default keeps lightweight fakes
+    /// source-compatible.
+    async fn list_by_source_tasks(
+        &self,
+        task_ids: &[TaskId],
+    ) -> Result<Vec<Asset>, RepositoryError> {
+        let mut assets = Vec::new();
+        for task_id in task_ids {
+            assets.extend(self.list_by_source_task(task_id).await?);
+        }
+        Ok(assets)
+    }
+
     async fn list_recent(
         &self,
         project_id: &str,
