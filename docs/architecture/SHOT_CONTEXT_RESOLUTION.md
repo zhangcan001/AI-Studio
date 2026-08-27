@@ -136,3 +136,9 @@ DEV-049 明确不包含：
 - Tauri command、UI、GenerationService、ProductionQueue/Orchestrator 改动。
 
 上述能力以本文件定义的 `ResolvedShotContext` 为输入，进入 DEV-050 及后续任务。
+
+## 11. DEV-054 integration boundary
+
+Creation 一致性页通过 `shot_context_draft_get` 读取当前 Shot 的 resolved preview；该 command 只调用现有 `ShotContextResolver`，不运行 Comfy live preflight、不创建 queue/task，也不把继承 merge 逻辑复制到前端。Scope/Shot binding 的 GET 与 atomic replace 由 binding service 负责，解析结果仍以本文件定义的 source trace、legacy、partial、diagnostics 和 context hash 为准。
+
+Production Preparation 在用户明确准入时冻结 resolved context、prompt、reference order、stage input、readiness、workflow/recipe 和最小 Comfy capability evidence。后续 Profile 或 ReferenceSet 修改不改变已冻结 snapshot；没有有效新 ReferenceSet binding 的旧 Shot 继续使用 legacy reference path。

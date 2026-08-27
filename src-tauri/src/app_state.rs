@@ -8,6 +8,7 @@ use crate::application::comfy_memory_service::ComfyMemoryService;
 use crate::application::comfy_preflight_service::ComfyPreflightService;
 use crate::application::comfy_service::ComfyService;
 use crate::application::consistency_profile_service::ConsistencyProfileService;
+use crate::application::consistency_scope_binding_service::ConsistencyScopeBindingService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::episode_production_service::EpisodeProductionService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
@@ -37,6 +38,8 @@ use crate::application::series_production_service::SeriesProductionService;
 use crate::application::settings_service::SettingsService;
 use crate::application::shot_batch_service::ShotBatchService;
 use crate::application::shot_bulk_service::ShotBulkService;
+use crate::application::shot_consistency_binding_service::ShotConsistencyBindingService;
+use crate::application::shot_context_resolver::ShotContextResolver;
 use crate::application::shot_readiness_service::ShotReadinessService;
 use crate::application::shot_service::ShotService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
@@ -70,6 +73,9 @@ pub struct AppState {
     pub project_command_center_service: Arc<ProjectCommandCenterService>,
     pub reference_anchor_service: Arc<ReferenceAnchorService>,
     pub consistency_profile_service: Arc<ConsistencyProfileService>,
+    pub consistency_scope_binding_service: Arc<ConsistencyScopeBindingService>,
+    pub shot_consistency_binding_service: Arc<ShotConsistencyBindingService>,
+    pub shot_context_resolver: Arc<ShotContextResolver>,
     pub reference_set_service: Arc<ReferenceSetService>,
     pub asset_deletion_service: Arc<AssetDeletionService>,
     pub asset_video_prompt_service: Arc<AssetVideoPromptService>,
@@ -125,6 +131,9 @@ impl AppState {
         project_command_center_service: Arc<ProjectCommandCenterService>,
         reference_anchor_service: Arc<ReferenceAnchorService>,
         consistency_profile_service: Arc<ConsistencyProfileService>,
+        consistency_scope_binding_service: Arc<ConsistencyScopeBindingService>,
+        shot_consistency_binding_service: Arc<ShotConsistencyBindingService>,
+        shot_context_resolver: Arc<ShotContextResolver>,
         reference_set_service: Arc<ReferenceSetService>,
         asset_deletion_service: Arc<AssetDeletionService>,
         asset_video_prompt_service: Arc<AssetVideoPromptService>,
@@ -178,6 +187,9 @@ impl AppState {
             project_command_center_service,
             reference_anchor_service,
             consistency_profile_service,
+            consistency_scope_binding_service,
+            shot_consistency_binding_service,
+            shot_context_resolver,
             reference_set_service,
             asset_deletion_service,
             asset_video_prompt_service,

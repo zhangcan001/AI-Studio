@@ -3,6 +3,7 @@ import {
   getProductionAuditIntegrity,
   getProductionAuditLineage,
   getProductionAuditRecentActivity,
+  getProductionAuditSnapshotDetail,
   getProductionAuditSummary,
 } from "../../services/tauriClient";
 import type {
@@ -13,6 +14,7 @@ import type {
   ProductionAuditLineage,
   ProductionAuditLineageNode,
   ProductionAuditRootType,
+  ProductionAuditSnapshotDetail,
   ProductionAuditSummary,
 } from "../../types/productionAudit";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -30,11 +32,16 @@ export interface ProductionAuditCenterViewProps {
   activity?: ProductionAuditActivity[];
   integrity?: ProductionAuditIntegrity;
   lineage?: ProductionAuditLineage;
+  snapshotDetails?: Record<string, ProductionAuditSnapshotDetail>;
+  snapshotLoadingId?: string;
+  snapshotError?: string;
   loading?: boolean;
   error?: string;
   onOpenTask?: (taskId: string) => void;
   onOpenShot?: (shotId: string) => void;
   onInspectLineage?: (rootType: ProductionAuditRootType, rootId: string) => void;
+  onLoadSnapshotDetail?: (node: ProductionAuditLineageNode) => void;
+  onCopyContextHash?: (contextHash: string) => void | Promise<void>;
 }
 
 type ActivityFilter = "ALL" | "FAILED" | "RUNNING" | "RETRIED";
@@ -58,6 +65,9 @@ export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Pro
   const [activity, setActivity] = useState<ProductionAuditActivity[]>([]);
   const [integrity, setIntegrity] = useState<ProductionAuditIntegrity>();
   const [lineage, setLineage] = useState<ProductionAuditLineage>();
+  const [snapshotDetails, setSnapshotDetails] = useState<Record<string, ProductionAuditSnapshotDetail>>({});
+  const [snapshotLoadingId, setSnapshotLoadingId] = useState<string>();
+  const [snapshotError, setSnapshotError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
@@ -82,6 +92,9 @@ export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Pro
 
   useEffect(() => {
     setLineage(undefined);
+    setSnapshotDetails({});
+    setSnapshotLoadingId(undefined);
+    setSnapshotError(undefined);
     void refresh();
   }, [projectId, refresh]);
 
@@ -96,17 +109,51 @@ export function ProductionAuditCenter({ projectId, onOpenTask, onOpenShot }: Pro
     }
   }
 
+  async function loadSnapshotDetail(node: ProductionAuditLineageNode) {
+    if (snapshotDetails[node.id] || !node.itemId) return;
+    setSnapshotLoadingId(node.id);
+    setSnapshotError(undefined);
+    try {
+      const detail = await getProductionAuditSnapshotDetail({
+        projectId,
+        productionBatchItemId: node.itemId,
+      });
+      if (detail) {
+        setSnapshotDetails((current) => ({ ...current, [node.id]: detail }));
+      } else {
+        setSnapshotError("未找到该逻辑项的生产准备快照。");
+      }
+    } catch (loadError: unknown) {
+      setSnapshotError(toUserMessage(loadError));
+    } finally {
+      setSnapshotLoadingId(undefined);
+    }
+  }
+
+  async function copyContextHash(contextHash: string) {
+    try {
+      await navigator.clipboard?.writeText(contextHash);
+    } catch (copyError: unknown) {
+      setError(toUserMessage(copyError));
+    }
+  }
+
   return (
     <ProductionAuditCenterView
       summary={summary}
       activity={activity}
       integrity={integrity}
       lineage={lineage}
+      snapshotDetails={snapshotDetails}
+      snapshotLoadingId={snapshotLoadingId}
+      snapshotError={snapshotError}
       loading={loading}
       error={error}
       onOpenTask={onOpenTask}
       onOpenShot={onOpenShot}
       onInspectLineage={(nextRootType, nextRootId) => void inspectLineage(nextRootType, nextRootId)}
+      onLoadSnapshotDetail={(node) => void loadSnapshotDetail(node)}
+      onCopyContextHash={(contextHash) => void copyContextHash(contextHash)}
     />
   );
 }
@@ -116,16 +163,22 @@ export function ProductionAuditCenterView({
   activity = [],
   integrity,
   lineage,
+  snapshotDetails = {},
+  snapshotLoadingId,
+  snapshotError,
   loading = false,
   error,
   onOpenTask,
   onOpenShot,
   onInspectLineage,
+  onLoadSnapshotDetail,
+  onCopyContextHash,
 }: ProductionAuditCenterViewProps) {
   const [filter, setFilter] = useState<ActivityFilter>("ALL");
   const [keyword, setKeyword] = useState("");
   const [rootType, setRootType] = useState<ProductionAuditRootType>("RUN");
   const [rootId, setRootId] = useState("");
+  const [copiedContextHash, setCopiedContextHash] = useState<string>();
   const visibleActivity = useMemo(
     () => filterActivities(activity, filter, keyword),
     [activity, filter, keyword],
@@ -204,7 +257,25 @@ export function ProductionAuditCenterView({
           <label className="production-audit-id-input"><span>对象 ID</span><input value={rootId} onChange={(event) => setRootId(event.target.value)} placeholder="输入运行 / 批次 / 镜头 / 任务 ID" /></label>
           <button type="button" onClick={() => rootId.trim() && onInspectLineage?.(rootType, rootId.trim())} disabled={!rootId.trim() || !onInspectLineage || loading}>{onInspectLineage ? "查看链路" : "只读链路"}</button>
         </div>
-        {lineage ? <LineageTree nodes={lineage.nodes} onOpenTask={onOpenTask} onOpenShot={onOpenShot} /> : <p className="empty-state">选择最近活动或输入对象 ID 查看生产链路。</p>}
+        {lineage ? (
+          <>
+            <LineageTree
+              nodes={lineage.nodes}
+              onOpenTask={onOpenTask}
+              onOpenShot={onOpenShot}
+              snapshotDetails={snapshotDetails}
+              snapshotLoadingId={snapshotLoadingId}
+              snapshotError={snapshotError}
+              copiedContextHash={copiedContextHash}
+              onLoadSnapshotDetail={onLoadSnapshotDetail}
+              onCopyContextHash={async (contextHash) => {
+                await onCopyContextHash?.(contextHash);
+                setCopiedContextHash(contextHash);
+              }}
+            />
+            {!lineage.nodes.some(isPreparationSnapshotNode) && <p className="production-audit-muted">旧版生产记录，无准备快照</p>}
+          </>
+        ) : <p className="empty-state">选择最近活动或输入对象 ID 查看生产链路。</p>}
       </section>
 
       <section className="production-audit-section" aria-label="完整性检查">
@@ -264,10 +335,22 @@ function LineageTree({
   nodes,
   onOpenTask,
   onOpenShot,
+  snapshotDetails,
+  snapshotLoadingId,
+  snapshotError,
+  copiedContextHash,
+  onLoadSnapshotDetail,
+  onCopyContextHash,
 }: {
   nodes: ProductionAuditLineageNode[];
   onOpenTask?: (taskId: string) => void;
   onOpenShot?: (shotId: string) => void;
+  snapshotDetails: Record<string, ProductionAuditSnapshotDetail>;
+  snapshotLoadingId?: string;
+  snapshotError?: string;
+  copiedContextHash?: string;
+  onLoadSnapshotDetail?: (node: ProductionAuditLineageNode) => void;
+  onCopyContextHash?: (contextHash: string) => void | Promise<void>;
 }) {
   const parentById = new Map(nodes.map((node) => [node.id, node.parentId]));
   const depthOf = (node: ProductionAuditLineageNode) => {
@@ -289,10 +372,62 @@ function LineageTree({
         {node.status && <span className="production-audit-lineage-status">{auditStatusLabel(node.status)}</span>}
         {node.taskId && onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(node.taskId!)}>任务详情</button>}
         {node.shotId && <span className="production-audit-shot-link">镜头 {node.shotId}{onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(node.shotId!)}>查看镜头</button>}</span>}
+        {isPreparationSnapshotNode(node) && <SnapshotLineageSummary node={node} detail={snapshotDetails[node.id] ?? (node.snapshotId ? snapshotDetails[node.snapshotId] : undefined)} loading={snapshotLoadingId === node.id} error={snapshotError} copiedContextHash={copiedContextHash} onLoadDetail={onLoadSnapshotDetail} onCopyContextHash={onCopyContextHash} />}
       </div>
       )}
     </div>
   );
+}
+
+function SnapshotLineageSummary({
+  node,
+  detail,
+  loading,
+  error,
+  copiedContextHash,
+  onLoadDetail,
+  onCopyContextHash,
+}: {
+  node: ProductionAuditLineageNode;
+  detail?: ProductionAuditSnapshotDetail;
+  loading: boolean;
+  error?: string;
+  copiedContextHash?: string;
+  onLoadDetail?: (node: ProductionAuditLineageNode) => void;
+  onCopyContextHash?: (contextHash: string) => void | Promise<void>;
+}) {
+  const contextHash = node.contextHash ?? detail?.contextHash;
+  const hasDetail = Boolean(detail);
+  return (
+    <div className="production-audit-snapshot-summary">
+      {contextHash && <code title={contextHash}>contextHash: {contextHash}</code>}
+      {node.stage && <span className="production-audit-lineage-status">阶段 {node.stage}</span>}
+      {node.batchId && <span className="production-audit-lineage-status">批次 {node.batchId}</span>}
+      {node.itemId && <span className="production-audit-lineage-status">逻辑项 {node.itemId}</span>}
+      {node.createdAt && <time className="production-audit-lineage-status" dateTime={node.createdAt}>创建于 {formatDateTime(node.createdAt)}</time>}
+      {contextHash && <button type="button" className="quiet-button" onClick={() => void onCopyContextHash?.(contextHash)}>{copiedContextHash === contextHash ? "已复制" : "复制 contextHash"}</button>}
+      <button type="button" className="quiet-button" onClick={() => onLoadDetail?.(node)} disabled={!onLoadDetail || !node.itemId || loading} aria-expanded={hasDetail}>{loading ? "正在读取快照" : hasDetail ? "保留快照详情" : "查看快照详情"}</button>
+      {error && <small role="alert">快照详情读取失败：{error}</small>}
+      {detail && <SnapshotDetail detail={detail} />}
+    </div>
+  );
+}
+
+function SnapshotDetail({ detail }: { detail: ProductionAuditSnapshotDetail }) {
+  return (
+    <dl className="production-audit-snapshot-detail">
+      {detail.prompt && <div><dt>提示词</dt><dd>{detail.prompt}</dd></div>}
+      {detail.negativePrompt && <div><dt>负面提示</dt><dd>{detail.negativePrompt}</dd></div>}
+      {detail.workflowVersionId && <div><dt>工作流</dt><dd>{detail.workflowVersionId}</dd></div>}
+      {detail.recipeId && <div><dt>配方</dt><dd>{detail.recipeId}</dd></div>}
+      {detail.referenceSetIds.length ? <div><dt>参考集</dt><dd>{detail.referenceSetIds.join("、")}</dd></div> : null}
+      {detail.assetChecksums.length ? <div><dt>素材校验</dt><dd>{detail.assetChecksums.join("、")}</dd></div> : null}
+    </dl>
+  );
+}
+
+function isPreparationSnapshotNode(node: ProductionAuditLineageNode): boolean {
+  return node.entityType === "PREPARATION_SNAPSHOT";
 }
 
 function IssueList({ issues }: { issues: ProductionAuditIssue[] }) {
@@ -308,6 +443,7 @@ function auditEntityLabel(entityType: string): string {
     ATTEMPT: "尝试",
     TASK: "任务",
     SNAPSHOT: "快照",
+    PREPARATION_SNAPSHOT: "生产准备快照",
     ASSET: "素材",
     SHOT: "镜头",
   };
@@ -327,6 +463,7 @@ function auditActivityLabel(kind: string): string {
     TASK_SUCCEEDED: "任务已完成",
     TASK_FAILED: "任务失败",
     ASSET_CREATED: "素材已创建",
+    PREPARATION_CREATED: "生产准备快照已创建",
     SHOT_IMAGE_SELECTED: "已选择镜头图片",
     SHOT_VIDEO_SELECTED: "已选择镜头视频",
   };

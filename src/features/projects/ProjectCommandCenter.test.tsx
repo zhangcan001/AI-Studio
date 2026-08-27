@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSceneProgress,
   deriveProjectCommandCenterSummary,
@@ -10,6 +14,7 @@ import type { ComfyPreflightReport } from "../../types/settings";
 import type { ProjectView } from "../../types/project";
 import type { ProductionAuditIntegrity, ProductionAuditSummary } from "../../types/productionAudit";
 import type { ProductionStructureTree } from "../../types/productionStructure";
+import type { ProjectCommandCenterAggregate } from "../../types/projectCommandCenter";
 import type { ShotView } from "../../types/shot";
 import type { TaskView } from "../../types/task";
 
@@ -70,6 +75,8 @@ function audit(overrides: Partial<ProductionAuditSummary> = {}): ProductionAudit
 
 const integrity: ProductionAuditIntegrity = { projectId: project.id, health: "HEALTHY", issues: [], checkedAt: "2026-08-18T10:00:00Z" };
 
+afterEach(cleanup);
+
 function viewProps(shots: ShotView[] = [shot("shot-1", "complete"), shot("shot-2", "review"), shot("shot-3", "draft")], overrides: { summary?: ProductionAuditSummary; integrity?: ProductionAuditIntegrity; preflight?: ComfyPreflightReport } = {}) {
   return {
     project,
@@ -79,6 +86,29 @@ function viewProps(shots: ShotView[] = [shot("shot-1", "complete"), shot("shot-2
     structure,
     preflight: overrides.preflight ?? preflight,
     activity: [{ id: "activity-1", kind: "TASK_SUCCEEDED", timestamp: "2026-08-18T09:00:00Z", severity: "INFO" as const, title: "任务已完成", detail: "A very long activity detail that must wrap within the activity card rather than pushing the page horizontally." }],
+  };
+}
+
+function aggregate(overrides: Partial<ProjectCommandCenterAggregate> = {}): ProjectCommandCenterAggregate {
+  return {
+    project: { ...project },
+    structure: { seriesCount: 1, episodeCount: 1, sceneCount: 1, assignedShotCount: 2, unassignedShotCount: 0, firstUnassignedShotId: null, blocked: false, scenes: [{ id: "scene-1", name: "Opening", path: "Series A / Episode 1", total: 2, completed: 1 }] },
+    shots: { total: 2, draft: 0, ready: 0, generating: 0, imageReview: 0, imageSelected: 0, videoReview: 1, completed: 1, failed: 0, configured: 2, missingConfig: 0, firstGeneratingShotId: null, firstImageReviewShotId: null, firstVideoReviewShotId: "shot-2", firstMissingConfigShotId: null, firstReadyShotId: null },
+    queue: { totalQueues: 1, runningQueues: 0, pausedQueues: 0, completedQueues: 1, archivedQueues: 0, totalItems: 2, pendingItems: 0, activeItems: 0, succeededItems: 2, failedItems: 0, cancelledItems: 0, skippedItems: 0, autoResumableItems: 0, reviewRequiredItems: 0, firstActiveBatchId: null, firstAutoResumableBatchId: null, firstReviewRequiredBatchId: null },
+    tasksAssets: { taskCount: 2, activeTaskCount: 0, succeededTaskCount: 2, failedTaskCount: 0, assetCount: 4, imageAssetCount: 2, videoAssetCount: 2, audioAssetCount: 0, otherAssetCount: 0 },
+    referenceAnchors: { total: 0, usable: 0, character: 0, scene: 0, prop: 0, style: 0 },
+    promptTemplates: { total: 0, versions: 0, items: [] },
+    comfy: { status: null, preflight },
+    readiness: { status: "READY", connection: "CONNECTED", workflowReady: 1, workflowTotal: 1, runtimeBusy: false, activeTaskCount: 0, productionBusy: false },
+    content: { shots: 2, prompts: 2, assets: 4, scenes: 1, configuredShots: 2 },
+    production: { active: 0, completed: 1, failed: 0, reviewRequired: 0 },
+    issues: [],
+    audit: audit(),
+    recentActivity: [],
+    recommendedAction: { kind: "VIDEO_REVIEW", priority: 7, reasonCode: "VIDEO_REVIEW", reason: "video review required", shotId: "shot-2", batchId: "batch-1" },
+    quickActions: [],
+    checkedAt: "2026-08-18T10:00:00Z",
+    ...overrides,
   };
 }
 
@@ -174,5 +204,47 @@ describe("ProjectCommandCenter", () => {
     expect(html).toContain("项目指挥中心加载失败");
     expect(html).toContain("读取项目状态失败");
     expect(html).toContain("重试");
+  });
+
+  it("keeps legacy projects non-blocking and shows consistency plus preparation summaries", () => {
+    const { rerender } = render(<ProjectCommandCenterView project={project} aggregate={aggregate()} />);
+    expect(screen.getByRole("region", { name: "一致性与生产准备" }).textContent).toContain("未启用");
+    expect(screen.getByRole("region", { name: "一致性与生产准备" }).textContent).toContain("不阻塞现有生产");
+
+    rerender(
+      <ProjectCommandCenterView
+        project={project}
+        aggregate={aggregate({
+          consistency: { characterProfiles: 2, sceneProfiles: 1, propProfiles: 1, styleProfiles: 1, referenceSets: 3, shotProfileBindings: 2, shotReferenceSetBindings: 3, scopeProfileBindings: 4, scopeReferenceSetBindings: 2, consistencyInUse: true },
+          preparation: { snapshotCount: 4, preparedImageItems: 3, preparedVideoItems: 1, activePreparedItems: 2, latestPreparedAt: "2026-08-18T09:30:00Z" },
+        })}
+      />,
+    );
+    const summary = screen.getByRole("region", { name: "一致性与生产准备" });
+    expect(summary.textContent).toContain("已启用");
+    expect(summary.textContent).toContain("角色档案");
+    expect(summary.textContent).toContain("生产准备");
+    expect(summary.textContent).toContain("3");
+    expect(summary.textContent).toContain("4");
+  });
+
+  it("offers existing Assets and Production destinations from compact quick actions", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate()} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: /一致性资产/ }));
+    await user.click(screen.getByRole("button", { name: /生产准备/ }));
+
+    expect(onNavigate.mock.calls).toEqual([["assets"], ["shots"]]);
+  });
+
+  it("recommends binding configuration only for consistency projects with profiles but no bindings", () => {
+    const consistency = aggregate({
+      consistency: { characterProfiles: 1, sceneProfiles: 0, propProfiles: 0, styleProfiles: 0, referenceSets: 0, shotProfileBindings: 0, shotReferenceSetBindings: 0, scopeProfileBindings: 0, scopeReferenceSetBindings: 0, consistencyInUse: true },
+      recommendedAction: { kind: "READY", priority: 11, reasonCode: "READY", reason: "legacy backend recommendation" },
+    });
+    const { container } = render(<ProjectCommandCenterView project={project} aggregate={consistency} onNavigate={vi.fn()} />);
+    expect(container.textContent).toContain("配置镜头一致性");
   });
 });

@@ -3,12 +3,20 @@ import {
   getComfyStatus,
   getRuntimeActivityStatus,
   getProductionAdmissionStatus,
+  getConsistencyScopeBinding,
+  getShotConsistencyBinding,
+  getShotContextDraft,
   listGenerationCatalog,
+  listConsistencyProfiles,
+  listCostumeVariants,
+  listReferenceSets,
   listProjects,
   listRecentTasks,
   listShots,
   reconcileActiveTasks,
   refreshComfyCapabilities,
+  replaceConsistencyScopeBinding,
+  replaceShotConsistencyBinding,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
@@ -33,6 +41,14 @@ import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
+import type {
+  ConsistencyContextPreview,
+  ConsistencyBindingReplaceInput,
+  ConsistencyCostumeOption,
+  ConsistencyProfileOption,
+  ConsistencyReferenceSetOption,
+  ConsistencyScopeRef,
+} from "../types/consistencyBindings";
 import { resolveWorkspaceNavigation, type Workspace } from "../types/workspaceResume";
 import { toUserMessage } from "../i18n/errorMessages";
 import { comfyStatusLabel, projectDisplayName } from "../i18n/statusLabels";
@@ -90,6 +106,11 @@ function App() {
   const [reconciling, setReconciling] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [projectContextLoading, setProjectContextLoading] = useState(false);
+  const [consistencyProfiles, setConsistencyProfiles] = useState<ConsistencyProfileOption[]>([]);
+  const [consistencyReferenceSets, setConsistencyReferenceSets] = useState<ConsistencyReferenceSetOption[]>([]);
+  const [consistencyCostumes, setConsistencyCostumes] = useState<Record<string, ConsistencyCostumeOption[]>>({});
+  const [consistencyLoading, setConsistencyLoading] = useState(false);
+  const [consistencyError, setConsistencyError] = useState<string>();
   const [productionAdmission, setProductionAdmission] = useState<ProductionAdmissionStatus>({ busy: false });
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
@@ -242,6 +263,99 @@ function App() {
       cancelled = true;
     };
   }, [activeProjectId, setRecentTasks]);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setConsistencyProfiles([]);
+      setConsistencyReferenceSets([]);
+      setConsistencyCostumes({});
+      setConsistencyError(undefined);
+      setConsistencyLoading(false);
+      return;
+    }
+    const requestedProjectId = activeProjectId;
+    let cancelled = false;
+    setConsistencyLoading(true);
+    setConsistencyError(undefined);
+    void Promise.all([
+      listConsistencyProfiles(requestedProjectId),
+      listReferenceSets(requestedProjectId),
+    ])
+      .then(async ([profiles, referenceSets]) => {
+        const characterProfiles = profiles.filter((profile) => profile.profileType === "CHARACTER");
+        const costumeEntries = await Promise.all(
+          characterProfiles.map(async (profile) => [
+            profile.id,
+            await listCostumeVariants(requestedProjectId, profile.id).catch(() => []),
+          ] as const),
+        );
+        if (cancelled) return;
+        setConsistencyProfiles(profiles.map((profile) => ({
+          id: profile.id,
+          projectId: profile.projectId,
+          profileType: profile.profileType,
+          name: profile.name,
+          description: profile.description,
+        })));
+        setConsistencyReferenceSets(referenceSets.map((referenceSet) => ({
+          id: referenceSet.id,
+          projectId: referenceSet.projectId,
+          name: referenceSet.name,
+          purpose: referenceSet.purpose,
+          itemCount: referenceSet.itemCount,
+          imageCount: referenceSet.imageCount,
+        })));
+        setConsistencyCostumes(Object.fromEntries(costumeEntries.map(([profileId, costumes]) => [
+          profileId,
+          costumes.map((costume) => ({
+            id: costume.id,
+            characterProfileId: costume.characterProfileId,
+            name: costume.name,
+            promptFragment: costume.promptFragment,
+            referenceSetId: costume.referenceSetId,
+            isDefault: costume.isDefault,
+          })),
+        ])));
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setConsistencyError(toUserMessage(loadError));
+      })
+      .finally(() => {
+        if (!cancelled) setConsistencyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId]);
+
+  const loadConsistencyBindingPack = useCallback(async (scope: ConsistencyScopeRef) => {
+    if (scope.scopeType === "SHOT") {
+      return getShotConsistencyBinding(activeProjectId ?? scope.scopeId, scope.scopeId);
+    }
+    return getConsistencyScopeBinding(activeProjectId ?? scope.scopeId, scope.scopeType, scope.scopeId);
+  }, [activeProjectId]);
+
+  const saveConsistencyBindingPack = useCallback(async (input: ConsistencyBindingReplaceInput) => {
+    if (input.scopeType === "SHOT") {
+      await replaceShotConsistencyBinding(input);
+    } else {
+      await replaceConsistencyScopeBinding(input);
+    }
+  }, []);
+
+  const loadConsistencyContext = useCallback(async (scope: ConsistencyScopeRef): Promise<ConsistencyContextPreview> => {
+    if (scope.scopeType !== "SHOT") {
+      return {
+        contextHash: null,
+        partial: false,
+        diagnostics: [],
+        profiles: [],
+        referenceSets: [],
+        legacy: { usesLegacyShotReferences: false },
+      };
+    }
+    return getShotContextDraft(activeProjectId ?? scope.scopeId, scope.scopeId, "image");
+  }, [activeProjectId]);
 
   function navigateToRoute(nextWorkspace: Workspace, nextSection = defaultStudioSectionForWorkspace(nextWorkspace)) {
     if (nextWorkspace === workspace && nextSection === activeStudioSection) return;
@@ -661,6 +775,17 @@ function App() {
               navigateToWorkspace("tasks");
             }}
             onOpenProductionQueue={() => navigateToStudioSection("production")}
+            consistencyWorkspace={{
+              profiles: consistencyProfiles,
+              referenceSets: consistencyReferenceSets,
+              costumesByCharacter: consistencyCostumes,
+              loading: consistencyLoading,
+              error: consistencyError,
+              loadBindingPack: loadConsistencyBindingPack,
+              onSaveBindingPack: saveConsistencyBindingPack,
+              loadContext: loadConsistencyContext,
+              onOpenAssets: () => navigateToWorkspace("assets"),
+            }}
           />
         </WorkspaceErrorBoundary>
       )}

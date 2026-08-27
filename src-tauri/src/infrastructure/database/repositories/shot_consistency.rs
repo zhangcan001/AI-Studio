@@ -286,6 +286,85 @@ impl ShotConsistencyRepository for SqliteShotConsistencyRepository {
         }
         transaction.commit().await.map_err(map_sqlx_error)
     }
+
+    async fn replace_binding_pack(
+        &self,
+        shot_id: &str,
+        profile_bindings: &[ShotProfileBinding],
+        reference_set_bindings: &[ShotReferenceSetBinding],
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        ensure_shot_exists(&mut transaction, shot_id).await?;
+        for binding in profile_bindings {
+            if binding.shot_id != shot_id {
+                return Err(RepositoryError::integrity(
+                    "shot profile binding belongs to a different shot",
+                ));
+            }
+        }
+        for binding in reference_set_bindings {
+            if binding.shot_id != shot_id {
+                return Err(RepositoryError::integrity(
+                    "shot reference-set binding belongs to a different shot",
+                ));
+            }
+        }
+
+        sqlx::query("DELETE FROM shot_profile_bindings WHERE shot_id = ?")
+            .bind(shot_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        for binding in profile_bindings {
+            sqlx::query(
+                "INSERT INTO shot_profile_bindings
+                 (id, shot_id, role, profile_type, profile_id, costume_variant_id,
+                  ordinal, inheritance_mode, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&binding.id)
+            .bind(shot_id)
+            .bind(binding.role.as_str())
+            .bind(binding.profile_type.as_str())
+            .bind(&binding.profile_id)
+            .bind(&binding.costume_variant_id)
+            .bind(binding.ordinal)
+            .bind(binding.inheritance_mode.as_str())
+            .bind(format_datetime(binding.created_at))
+            .bind(format_datetime(binding.updated_at))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+
+        sqlx::query("DELETE FROM shot_reference_set_bindings WHERE shot_id = ?")
+            .bind(shot_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        for binding in reference_set_bindings {
+            sqlx::query(
+                "INSERT INTO shot_reference_set_bindings
+                 (id, shot_id, role, reference_set_id, ordinal, required,
+                  inheritance_mode, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&binding.id)
+            .bind(shot_id)
+            .bind(binding.role.as_str())
+            .bind(&binding.reference_set_id)
+            .bind(binding.ordinal)
+            .bind(i64::from(binding.required))
+            .bind(binding.inheritance_mode.as_str())
+            .bind(format_datetime(binding.created_at))
+            .bind(format_datetime(binding.updated_at))
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
+
+        transaction.commit().await.map_err(map_sqlx_error)
+    }
 }
 
 async fn ensure_shot_exists(

@@ -2,7 +2,7 @@ use crate::{
     app_state::AppState,
     application::production_audit_service::{
         ProductionAuditActivity, ProductionAuditError, ProductionAuditIntegrity,
-        ProductionAuditLineage, ProductionAuditSummary,
+        ProductionAuditLineage, ProductionAuditSnapshotDetail, ProductionAuditSummary,
     },
     error::AppError,
 };
@@ -29,6 +29,13 @@ pub struct ProductionAuditLineageRequest {
     pub project_id: String,
     pub root_type: String,
     pub root_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionAuditSnapshotDetailRequest {
+    pub project_id: String,
+    pub production_batch_item_id: String,
 }
 
 fn map_audit_error(error: ProductionAuditError) -> AppError {
@@ -86,6 +93,20 @@ pub async fn production_audit_integrity(
     state
         .production_audit_service
         .integrity(&request.project_id)
+        .await
+        .map_err(map_audit_error)
+}
+
+/// Loads one preparation snapshot payload for an explicitly opened inspector.
+/// Summary and lineage commands intentionally do not include snapshot JSON.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_audit_snapshot_detail(
+    state: State<'_, AppState>,
+    request: ProductionAuditSnapshotDetailRequest,
+) -> Result<Option<ProductionAuditSnapshotDetail>, AppError> {
+    state
+        .production_audit_service
+        .snapshot_detail(&request.project_id, &request.production_batch_item_id)
         .await
         .map_err(map_audit_error)
 }

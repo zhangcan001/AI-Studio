@@ -349,3 +349,9 @@ DEV-047 先交付数据契约和 repository contract。
 DEV-048 再交付 Profile 与 ReferenceSet CRUD。
 DEV-049 才接入 ShotReferencePack 和 Context Resolver。
 正式 UI 和生产准备不得在 DEV-047 提前实现。
+
+## 13. DEV-054 binding integration
+
+DEV-054 通过 `ConsistencyScopeBindingService` 和 `ShotConsistencyBindingService` 暴露 scope/shot binding pack 的 GET 与 atomic replace。Scope 路径固定为 Project → Series → Episode → Scene；Shot binding 额外支持 SHOT_REFERENCE。Profile、CostumeVariant、ReferenceSet 的 project/role/ordinal/conflict 校验仍由后端负责，保存时间由 backend Clock 生成。
+
+前端一致性编辑器只提交稳定的 camelCase binding DTO，新增关系提供 EXPLICIT、REPLACE、REMOVE；INHERITED 只读展示。`shot_context_draft_get` 复用同一个 `ShotContextResolver`，不在 React 中重写继承或触发 ComfyUI。已有 Profile/ReferenceSet CRUD 仍归 Assets 页面，binding UI 只负责选择和绑定。

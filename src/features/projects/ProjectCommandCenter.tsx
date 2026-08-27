@@ -8,7 +8,11 @@ import type { ProductionAuditActivity, ProductionAuditIntegrity, ProductionAudit
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProjectView } from "../../types/project";
 import type { ShotView } from "../../types/shot";
-import type { ProjectCommandCenterAggregate } from "../../types/projectCommandCenter";
+import type {
+  ProjectCommandCenterAggregate,
+  ProjectCommandCenterConsistencyView,
+  ProjectCommandCenterPreparationView,
+} from "../../types/projectCommandCenter";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, formatFileSize, projectDisplayName } from "../../i18n/statusLabels";
 import { deriveShotStatus } from "../shots/shotDomain";
@@ -91,8 +95,8 @@ export const COMMAND_CENTER_QUICK_ACTIONS: ReadonlyArray<{
   destination: ProjectCommandCenterDestination;
 }> = [
   { id: "create", label: "创作工作台", detail: "开始新的图片或视频创作。", destination: "studio" },
-  { id: "shots", label: "镜头生产", detail: "配置镜头、生成关键帧和视频。", destination: "shots" },
-  { id: "assets", label: "资产库", detail: "浏览并继续使用项目素材。", destination: "assets" },
+  { id: "shots", label: "生产准备", detail: "检查镜头就绪度并进入手动生产队列。", destination: "shots" },
+  { id: "assets", label: "一致性资产", detail: "管理档案、参考集并继续使用项目素材。", destination: "assets" },
   { id: "tasks", label: "任务历史", detail: "查看运行中的任务和结果。", destination: "tasks" },
   { id: "workflows", label: "工作流", detail: "检查运行包和生产就绪状态。", destination: "workflows" },
   { id: "settings", label: "运行时设置", detail: "检查 ComfyUI、GPU 和预检。", destination: "settings" },
@@ -248,7 +252,7 @@ export function ProjectCommandCenterView({
     : deriveProjectCommandCenterSummary(summary, integrity, preflight, shots, structure);
   const displayActivity = aggregate?.recentActivity ?? activity;
   const hasSnapshot = Boolean(aggregate || summary || integrity || preflight || displayActivity.length || shots.length || structure);
-  const action = aggregate ? recommendedActionFromAggregate(aggregate.recommendedAction) : recommendedAction(derived);
+  const action = aggregate ? recommendedActionFromAggregate(aggregate.recommendedAction, aggregate) : recommendedAction(derived);
   const busyNow = busy || refreshBusy || preflightBusy || loading;
   const refreshDisabled = busyNow || !onRefresh;
   const preflightDisabled = busyNow || !onRepreflight;
@@ -330,6 +334,11 @@ export function ProjectCommandCenterView({
               <small>{derived.runtime.gpu || "GPU 不可用"} · {derived.runtime.vram}</small>
             </SummaryCard>
           </div>
+
+          <ProjectCommandCenterIntegrationSummary
+            consistency={aggregate?.consistency}
+            preparation={aggregate?.preparation}
+          />
 
           {!project && (
             <section className="project-command-recommendation" aria-labelledby="project-command-recommendation-title">
@@ -496,7 +505,12 @@ export function deriveProjectCommandCenterAggregateSummary(aggregate: ProjectCom
   };
 }
 
-function recommendedActionFromAggregate(action: ProjectCommandCenterAggregate["recommendedAction"]): RecommendedAction {
+function recommendedActionFromAggregate(
+  action: ProjectCommandCenterAggregate["recommendedAction"],
+  aggregate: ProjectCommandCenterAggregate,
+): RecommendedAction {
+  const consistencyAction = consistencyRecommendedAction(aggregate);
+  if (consistencyAction) return consistencyAction;
   const actions: Record<string, RecommendedAction> = {
     STRUCTURAL_BLOCKED: { label: "修复项目结构", detail: "项目结构或生产链路存在阻断，先处理结构问题。", destination: "shots" },
     COMFY_BLOCKED: { label: "修复运行环境", detail: "当前 ComfyUI 或生产工作流被阻断，先完成运行时预检。", destination: "settings" },
@@ -512,6 +526,76 @@ function recommendedActionFromAggregate(action: ProjectCommandCenterAggregate["r
     COMPLETE: { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio" },
   };
   return actions[action.kind] ?? { label: "继续工作", detail: action.reason, destination: "shots" };
+}
+
+function consistencyRecommendedAction(aggregate: ProjectCommandCenterAggregate): RecommendedAction | undefined {
+  const consistency = aggregate.consistency;
+  if (!consistency?.consistencyInUse) return undefined;
+  const profileCount = consistency.characterProfiles + consistency.sceneProfiles + consistency.propProfiles + consistency.styleProfiles;
+  const bindingCount = consistency.shotProfileBindings + consistency.shotReferenceSetBindings + consistency.scopeProfileBindings + consistency.scopeReferenceSetBindings;
+  if (profileCount > 0 && bindingCount === 0) {
+    return { label: "配置镜头一致性", detail: "已有一致性档案或参考集，先为镜头配置绑定再进入生产。", destination: "shots" };
+  }
+  if (bindingCount > 0 && aggregate.preparation && aggregate.preparation.snapshotCount === 0 && aggregate.shots.total > 0) {
+    return { label: "生产准备", detail: "绑定已就绪，先为镜头生成生产准备快照，再手动加入队列。", destination: "shots" };
+  }
+  return undefined;
+}
+
+function ProjectCommandCenterIntegrationSummary({
+  consistency,
+  preparation,
+}: {
+  consistency?: ProjectCommandCenterConsistencyView;
+  preparation?: ProjectCommandCenterPreparationView;
+}) {
+  const current = consistency ?? {
+    characterProfiles: 0,
+    sceneProfiles: 0,
+    propProfiles: 0,
+    styleProfiles: 0,
+    referenceSets: 0,
+    shotProfileBindings: 0,
+    shotReferenceSetBindings: 0,
+    scopeProfileBindings: 0,
+    scopeReferenceSetBindings: 0,
+    consistencyInUse: false,
+  } satisfies ProjectCommandCenterConsistencyView;
+  const shotBindings = current.shotProfileBindings + current.shotReferenceSetBindings;
+  const scopeBindings = current.scopeProfileBindings + current.scopeReferenceSetBindings;
+
+  return (
+    <div className="project-command-columns" aria-label="一致性与生产准备" role="region">
+      <section className="project-command-card" aria-labelledby="project-command-consistency-title">
+        <CardHeading eyebrow="一致性" title="一致性摘要" id="project-command-consistency-title" />
+        <p className={current.consistencyInUse ? "project-command-healthy" : "project-command-muted"}>
+          {current.consistencyInUse ? "已启用" : "未启用（兼容旧项目）"} · 不阻塞现有生产
+        </p>
+        <div className="project-command-stat-row">
+          <Stat label="角色档案" value={current.characterProfiles} />
+          <Stat label="场景档案" value={current.sceneProfiles} />
+          <Stat label="道具档案" value={current.propProfiles} />
+          <Stat label="风格档案" value={current.styleProfiles} />
+        </div>
+        <small className="project-command-muted">参考集 {current.referenceSets} · 范围绑定 {scopeBindings} · 镜头绑定 {shotBindings}</small>
+      </section>
+
+      <section className="project-command-card" aria-labelledby="project-command-preparation-title">
+        <CardHeading eyebrow="生产准备" title="生产准备摘要" id="project-command-preparation-title" />
+        {preparation ? (
+          <>
+            <div className="project-command-stat-row">
+              <Stat label="已准备图片" value={preparation.preparedImageItems} />
+              <Stat label="已准备视频" value={preparation.preparedVideoItems} />
+              <Stat label="快照数" value={preparation.snapshotCount} />
+              <Stat label="活动准备" value={preparation.activePreparedItems} />
+            </div>
+            <small className="project-command-muted">最近准备：{preparation.latestPreparedAt ? formatDateTime(preparation.latestPreparedAt) : "暂无"}</small>
+          </>
+        ) : <p className="project-command-muted">当前后端未提供准备快照摘要；旧项目仍可按原流程生产。</p>}
+      </section>
+    </div>
+  );
 }
 
 export function buildSceneProgress(structure: ProductionStructureTree | undefined, shots: ShotView[]): ProjectCommandCenterSceneProgress[] {

@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProductionAuditCenterView, filterActivities } from "./ProductionAuditCenter";
 import type {
   ProductionAuditActivity,
@@ -80,6 +84,8 @@ const lineage: ProductionAuditLineage = {
   ],
 };
 
+afterEach(cleanup);
+
 describe("ProductionAuditCenter", () => {
   it.each(["HEALTHY", "WARNING", "BLOCKED"] as const)("renders %s health", (health) => {
     const html = renderToStaticMarkup(<ProductionAuditCenterView summary={{ ...summary, health }} />);
@@ -133,5 +139,60 @@ describe("ProductionAuditCenter", () => {
     expect(html).toContain("当前项目暂无生产审计数据");
     expect(html).toContain("当前筛选条件下没有审计活动");
     expect(html).toContain("选择最近活动或输入对象 ID 查看生产链路");
+  });
+
+  it("shows preparation snapshot lineage and loads detail only after expansion", async () => {
+    const user = userEvent.setup();
+    const onLoadSnapshotDetail = vi.fn();
+    const onCopyContextHash = vi.fn();
+    const snapshotId = "pps-1";
+    const contextHash = "context-hash-2026-08-18";
+    const preparationLineage: ProductionAuditLineage = {
+      ...lineage,
+      nodes: [
+        { id: "batch-1", entityType: "BATCH", label: "Batch 1" },
+        { id: snapshotId, entityType: "PREPARATION_SNAPSHOT", label: "生产准备快照", snapshotId, contextHash, snapshotSchemaVersion: 1, stage: "IMAGE", batchId: "batch-1", itemId: "item-1", createdAt: "2026-08-18T09:30:00Z", parentId: "batch-1" },
+      ],
+    };
+    const { rerender, container } = render(
+      <ProductionAuditCenterView
+        summary={summary}
+        lineage={preparationLineage}
+        onLoadSnapshotDetail={onLoadSnapshotDetail}
+        onCopyContextHash={onCopyContextHash}
+        snapshotDetails={{}}
+      />,
+    );
+
+    expect(container.textContent).toContain("生产准备快照");
+    expect(container.textContent).toContain(contextHash);
+    expect(container.textContent).toContain("IMAGE");
+    expect(container.textContent).toContain("item-1");
+    expect(container.textContent).not.toContain("冻结提示词");
+
+    await user.click(screen.getByRole("button", { name: "查看快照详情" }));
+    expect(onLoadSnapshotDetail).toHaveBeenCalledWith(expect.objectContaining({ id: snapshotId }));
+
+    rerender(
+      <ProductionAuditCenterView
+        summary={summary}
+        lineage={preparationLineage}
+        onLoadSnapshotDetail={onLoadSnapshotDetail}
+        onCopyContextHash={onCopyContextHash}
+        snapshotDetails={{ [snapshotId]: { id: snapshotId, projectId: "project-1", shotId: "shot-1", stage: "IMAGE", contextHash, snapshotSchemaVersion: 1, productionBatchId: "batch-1", productionBatchItemId: "item-1", createdAt: "2026-08-18T09:30:00Z", prompt: "冻结提示词", negativePrompt: "negative", workflowVersionId: "workflow-v1", recipeId: "recipe-v1", referenceSetIds: ["rs-1"], assetChecksums: ["sha-1"] } }}
+      />,
+    );
+    expect(container.textContent).toContain("冻结提示词");
+    expect(container.textContent).toContain("workflow-v1");
+    expect(container.textContent).toContain("rs-1");
+
+    await user.click(screen.getByRole("button", { name: "复制 contextHash" }));
+    expect(onCopyContextHash).toHaveBeenCalledWith(contextHash);
+  });
+
+  it("labels historical lineage without a preparation snapshot as legacy instead of an error", () => {
+    const { container } = render(<ProductionAuditCenterView summary={summary} lineage={lineage} />);
+    expect(container.textContent).toContain("旧版生产记录，无准备快照");
+    expect(container.textContent).not.toContain("生产准备快照缺失");
   });
 });

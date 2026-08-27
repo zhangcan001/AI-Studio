@@ -1,8 +1,17 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssetView } from "../../types/asset";
 import type { ShotView } from "../../types/shot";
 import { ShotCreationWorkspace, canConfirmShotCandidate, resolveShotPreviewAsset, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const asset = (id: string, type: "image" | "video"): AssetView => ({
   id,
@@ -96,5 +105,35 @@ describe("ShotCreationWorkspace", () => {
     const html = renderToStaticMarkup(<ShotCreationWorkspace projectId="project-1" stage="image" onStageChange={vi.fn()} onGenerate={vi.fn()} onCreateShot={vi.fn()} />);
     expect(html).toContain("选择一个镜头开始制作");
     expect(html).toContain("新建镜头");
+  });
+
+  it("opens the consistency tab without replacing the existing direct references tab", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShotCreationWorkspace
+        projectId="project-1"
+        shot={shot}
+        stage="image"
+        onStageChange={vi.fn()}
+        onGenerate={vi.fn()}
+        consistency={{
+          projectId: "project-1",
+          scope: { scopeType: "SHOT", scopeId: shot.id, scopeName: shot.name },
+          bindingPack: { scope: { scopeType: "SHOT", scopeId: shot.id, scopeName: shot.name }, ancestors: [], directProfileBindings: [], directReferenceSetBindings: [] },
+          onSaveBindingPack: vi.fn().mockResolvedValue(undefined),
+          profiles: [{ id: "profile-1", projectId: "project-1", profileType: "CHARACTER", name: "赤羽" }],
+          referenceSets: [],
+          context: { contextHash: "shot-context-hash", partial: false, diagnostics: [], promptText: "最终解析提示词", negativePrompt: "不要模糊", legacy: { usesLegacyShotReferences: false } },
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "一致性" }));
+    expect(screen.getByRole("heading", { level: 2, name: "镜头一致性" })).toBeTruthy();
+    expect(screen.getByText("shot-context-hash")).toBeTruthy();
+    expect(screen.getAllByText("最终解析提示词")).toHaveLength(2);
+
+    await user.click(within(screen.getByRole("tablist", { name: "镜头工作区" })).getByRole("tab", { name: "参考" }));
+    expect(screen.getByRole("heading", { level: 2, name: "参考素材总览" })).toBeTruthy();
   });
 });

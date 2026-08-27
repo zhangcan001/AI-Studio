@@ -6,10 +6,11 @@ import type { ShotGenerationLink, ShotStage, ShotView } from "../../types/shot";
 import { statusLabel } from "./shotDomain";
 import { ShotInspector, type ShotInspectorProps, type ShotInspectorTab } from "./ShotInspector";
 import { ZoomableImagePreview } from "./ZoomableImagePreview";
+import { ScopeConsistencyWorkspace, type ShotConsistencyPanelProps } from "./ScopeConsistencyWorkspace";
 import "./ShotCreationWorkspace.css";
 import "./ShotInspector.css";
 
-export type ShotCreationWorkspaceTab = "generate" | "references" | "history" | "settings";
+export type ShotCreationWorkspaceTab = "generate" | "consistency" | "references" | "history" | "settings";
 
 export type ShotCandidateStatus = "ready" | "selected" | "reviewed" | "failed" | "generating" | "queued";
 
@@ -43,6 +44,7 @@ export interface ShotCreationWorkspaceProps extends Omit<ShotInspectorProps, "pr
   onCopyPrompt?: (prompt: string) => void;
   workspaceTab?: ShotCreationWorkspaceTab;
   onWorkspaceTabChange?: (tab: ShotCreationWorkspaceTab) => void;
+  consistency?: ShotConsistencyPanelProps;
   inspectorTab?: ShotInspectorTab;
   onInspectorTabChange?: (tab: ShotInspectorTab) => void;
   notice?: string;
@@ -51,6 +53,7 @@ export interface ShotCreationWorkspaceProps extends Omit<ShotInspectorProps, "pr
 
 const workspaceTabs: Array<{ id: ShotCreationWorkspaceTab; label: string }> = [
   { id: "generate", label: "生成" },
+  { id: "consistency", label: "一致性" },
   { id: "references", label: "参考" },
   { id: "history", label: "历史" },
   { id: "settings", label: "设置" },
@@ -93,6 +96,7 @@ export function ShotCreationWorkspace({
   onCopyPrompt,
   workspaceTab,
   onWorkspaceTabChange,
+  consistency,
   inspectorTab,
   onInspectorTabChange,
   notice,
@@ -161,6 +165,7 @@ export function ShotCreationWorkspace({
             onCopyPrompt={onCopyPrompt}
             onEditPrompt={() => selectInspectorTab("prompt")}
           />}
+          {selectedWorkspaceTab === "consistency" && (consistency ? <ScopeConsistencyWorkspace {...consistency} /> : <div className="shot-creation-view shot-consistency-empty"><div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">一致性</span><h2>镜头一致性</h2></div></div><p className="shot-creation-muted">一致性绑定服务尚未接入当前工作区。</p></div>)}
           {selectedWorkspaceTab === "references" && <ReferenceWorkspace projectId={projectId} stage={stage} references={orderedReferences} keyframeAsset={inspectorProps.keyframeAsset} />}
           {selectedWorkspaceTab === "history" && <HistoryWorkspace history={stageHistory} onOpenTask={onOpenTask} onRetry={onRetry} busy={inspectorProps.busy ?? false} />}
           {selectedWorkspaceTab === "settings" && <SettingsWorkspace shot={shot} onDeleteShot={onDeleteShot} busy={inspectorProps.busy ?? false} />}

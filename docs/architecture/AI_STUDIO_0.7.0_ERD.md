@@ -157,3 +157,25 @@ GenerationService、WorkflowCompiler 和 ComfyUI 边界。
 - 不修改已进入 master 的 022，避免已执行数据库的 SQLx checksum mismatch。
 - fresh 001→024 与 023→024 均保留旧 consistency/production rows。
 - 产品兼容版本继续为 0.6.2；Manifest 保持 2，Backup 为 14；不得创建 Manifest 3 或修改 001–023。
+
+## 10. DEV-054 集成增量
+
+DEV-054 没有增加新的持久化事实表。已落地的应用层关系如下：
+
+    scope binding command
+      → ConsistencyScopeBindingService / ShotConsistencyBindingService
+      → ConsistencyScopeRepository / ShotConsistencyRepository
+      → SQLite combined replace transaction
+
+    shot_context_draft_get
+      → shared ShotContextResolver
+      → ResolvedShotContext
+      → Readiness / Preparation snapshot（仅用户明确准入时）
+      → existing ProductionBatch / ProductionQueue
+
+- Project、Series、Episode、Scene 的 binding 由一次 load_tree_data(project_id) 校验 scope path；Shot binding 复用 022 的两张 Shot binding 表。
+- UI wire DTO 不暴露完整 Rust domain struct，不提交 timestamp；backend 生成 binding ID/time，更新保留 created_at。
+- ResolvedShotContext 的 source trace、ordered ReferenceSet assets、prompt segments、selected video image id/sha256 和 context hash 都是派生结果；它们不在数据库中复制成第二份 live context。
+- Preparation snapshot 的 JSON 是 immutable evidence，包含 context、readiness、prompt、references、workflow/recipe、output、stage input 和最小 Comfy capability evidence；历史审计优先读取该 JSON。
+- 无有效新 ReferenceSet 时，resolver 仍从旧 Shot prompt/reference/stage config 构建 legacy context；legacy compatibility 不需要 backfill。
+- DEV-054 不创建 scene_profile_bindings、shot_context_snapshots、shot_readiness_cache、migration 025、第二 queue、第二 executor 或 graph database。

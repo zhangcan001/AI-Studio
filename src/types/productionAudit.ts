@@ -14,6 +14,7 @@ export type ProductionAuditActivityKind =
   | "TASK_SUCCEEDED"
   | "TASK_FAILED"
   | "ASSET_CREATED"
+  | "PREPARATION_CREATED"
   | "SHOT_IMAGE_SELECTED"
   | "SHOT_VIDEO_SELECTED"
   | string;
@@ -64,6 +65,10 @@ export interface ProductionAuditActivity {
   shotId?: string;
   shotName?: string;
   assetId?: string;
+  snapshotId?: string;
+  contextHash?: string;
+  stage?: string;
+  createdAt?: string;
   errorCode?: string;
   status?: string;
   retryOfItemId?: string;
@@ -79,6 +84,7 @@ export type ProductionAuditNodeType =
   | "ATTEMPT"
   | "TASK"
   | "SNAPSHOT"
+  | "PREPARATION_SNAPSHOT"
   | "ASSET"
   | "SHOT";
 
@@ -96,6 +102,12 @@ export interface ProductionAuditLineageNode {
   shotName?: string;
   assetId?: string;
   snapshotId?: string;
+  contextHash?: string;
+  snapshotSchemaVersion?: number;
+  stage?: string;
+  createdAt?: string;
+  errorCode?: string;
+  relatedIds?: string[];
 }
 
 export interface ProductionAuditLineage {
@@ -103,6 +115,30 @@ export interface ProductionAuditLineage {
   rootType: ProductionAuditRootType;
   rootId: string;
   nodes: ProductionAuditLineageNode[];
+  issues?: ProductionAuditIssue[];
+}
+
+export interface ProductionAuditSnapshotDetail {
+  id: string;
+  projectId: string;
+  shotId: string;
+  stage: string;
+  contextHash: string;
+  snapshotSchemaVersion: number;
+  productionBatchId: string;
+  productionBatchItemId: string;
+  createdAt: string;
+  prompt: string;
+  negativePrompt: string;
+  workflowVersionId?: string | null;
+  recipeId?: string | null;
+  referenceSetIds: string[];
+  assetChecksums: string[];
+}
+
+export interface ProductionAuditSnapshotDetailRequest {
+  projectId: string;
+  productionBatchItemId: string;
 }
 
 export interface ProductionAuditIntegrity {

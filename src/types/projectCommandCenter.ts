@@ -10,6 +10,27 @@ export interface ProjectCommandCenterSceneSummary {
   completed: number;
 }
 
+export interface ProjectCommandCenterConsistencyView {
+  characterProfiles: number;
+  sceneProfiles: number;
+  propProfiles: number;
+  styleProfiles: number;
+  referenceSets: number;
+  shotProfileBindings: number;
+  shotReferenceSetBindings: number;
+  scopeProfileBindings: number;
+  scopeReferenceSetBindings: number;
+  consistencyInUse: boolean;
+}
+
+export interface ProjectCommandCenterPreparationView {
+  snapshotCount: number;
+  preparedImageItems: number;
+  preparedVideoItems: number;
+  activePreparedItems: number;
+  latestPreparedAt?: string | null;
+}
+
 export interface ProjectCommandCenterAggregate {
   project: { id: string; name: string; description?: string | null; createdAt: string; updatedAt: string };
   structure: {
@@ -76,6 +97,8 @@ export interface ProjectCommandCenterAggregate {
   readiness: { status?: string | null; connection?: string | null; workflowReady: number; workflowTotal: number; runtimeBusy: boolean; activeTaskCount: number; productionBusy: boolean };
   content: { shots: number; prompts: number; assets: number; scenes: number; configuredShots: number };
   production: { active: number; completed: number; failed: number; reviewRequired: number };
+  consistency?: ProjectCommandCenterConsistencyView;
+  preparation?: ProjectCommandCenterPreparationView;
   issues: Array<{ id: string; severity: string; title: string; detail: string; source: string }>;
   audit: ProductionAuditSummary;
   recentActivity: ProductionAuditActivity[];

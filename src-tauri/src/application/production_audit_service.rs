@@ -8,9 +8,10 @@
 use crate::application::production_queue_service::{
     build_retry_lineages_from_edges, RetryLineage, RetryLineageEdge,
 };
-use crate::domain::validate_project_id;
+use crate::domain::{validate_project_id, PREPARATION_SNAPSHOT_SCHEMA_VERSION};
 use chrono::Utc;
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::{FromRow, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
@@ -89,6 +90,7 @@ pub struct ProductionAuditActivity {
     pub shot_id: Option<String>,
     pub asset_id: Option<String>,
     pub error_code: Option<String>,
+    pub snapshot_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -118,6 +120,29 @@ pub struct ProductionAuditLineageNode {
     pub stage: Option<String>,
     pub error_code: Option<String>,
     pub related_ids: Vec<String>,
+    pub snapshot_id: Option<String>,
+    pub context_hash: Option<String>,
+    pub snapshot_schema_version: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionAuditSnapshotDetail {
+    pub id: String,
+    pub project_id: String,
+    pub shot_id: String,
+    pub stage: String,
+    pub context_hash: String,
+    pub snapshot_schema_version: u32,
+    pub production_batch_id: String,
+    pub production_batch_item_id: String,
+    pub created_at: String,
+    pub prompt: String,
+    pub negative_prompt: String,
+    pub workflow_version_id: Option<String>,
+    pub recipe_id: Option<String>,
+    pub reference_set_ids: Vec<String>,
+    pub asset_checksums: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -512,6 +537,33 @@ impl ProductionAuditService {
                 ));
             }
         }
+        for snapshot in &graph.preparation_snapshots {
+            let task_id = graph
+                .batch_items
+                .iter()
+                .find(|item| item.id == snapshot.production_batch_item_id)
+                .and_then(|item| item.task_id.clone());
+            activities.push(ProductionAuditActivity {
+                id: format!("PREPARATION_CREATED:{}", snapshot.id),
+                kind: "PREPARATION_CREATED".to_owned(),
+                timestamp: snapshot.created_at.clone(),
+                severity: ProductionAuditSeverity::Info,
+                title: "生产准备已创建".to_owned(),
+                detail: format!(
+                    "{} · contextHash {}",
+                    snapshot.stage,
+                    short_context_hash(&snapshot.context_hash)
+                ),
+                run_id: None,
+                batch_id: Some(snapshot.production_batch_id.clone()),
+                item_id: Some(snapshot.production_batch_item_id.clone()),
+                task_id,
+                shot_id: Some(snapshot.shot_id.clone()),
+                asset_id: None,
+                error_code: None,
+                snapshot_id: Some(snapshot.id.clone()),
+            });
+        }
 
         activities.sort_by(|left, right| {
             right
@@ -621,6 +673,95 @@ impl ProductionAuditService {
         self.audit_integrity(project_id).await
     }
 
+    /// Loads only the selected snapshot payload for an on-demand inspector.
+    /// The summary, activity, and lineage paths deliberately load snapshot
+    /// identity columns only, so opening Audit never parses every payload.
+    pub async fn snapshot_detail(
+        &self,
+        project_id: &str,
+        production_batch_item_id: &str,
+    ) -> Result<Option<ProductionAuditSnapshotDetail>, ProductionAuditError> {
+        validate_project_id(project_id)
+            .map_err(|error| ProductionAuditError::InvalidInput(error.to_string()))?;
+        let row = sqlx::query_as::<_, SnapshotDetailRow>(
+            "SELECT s.id, s.project_id, s.shot_id, s.stage, s.context_hash,
+                    s.production_batch_id, s.production_batch_item_id,
+                    s.snapshot_json, s.created_at
+             FROM production_preparation_snapshots s
+             JOIN production_batches b ON b.id = s.production_batch_id
+             JOIN production_batch_items i ON i.id = s.production_batch_item_id
+             JOIN shots sh ON sh.id = s.shot_id
+             WHERE s.project_id = ? AND b.project_id = ? AND sh.project_id = ?
+               AND s.production_batch_item_id = ?",
+        )
+        .bind(project_id)
+        .bind(project_id)
+        .bind(project_id)
+        .bind(production_batch_item_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let payload: Value = serde_json::from_str(&row.snapshot_json).map_err(|error| {
+            ProductionAuditError::InvalidInput(format!(
+                "invalid preparation snapshot {}: {error}",
+                row.id
+            ))
+        })?;
+        let schema_version = payload
+            .get("schemaVersion")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(PREPARATION_SNAPSHOT_SCHEMA_VERSION);
+        let prompt = payload.get("prompt").cloned().unwrap_or(Value::Null);
+        let workflow = payload.get("workflow").cloned().unwrap_or(Value::Null);
+        let reference_set_ids = json_string_array(&payload, "referenceSets", "referenceSetId");
+        let asset_checksums = json_string_array(&payload, "referenceAssets", "sha256");
+
+        Ok(Some(ProductionAuditSnapshotDetail {
+            id: row.id,
+            project_id: row.project_id,
+            shot_id: row.shot_id,
+            stage: row.stage,
+            context_hash: row.context_hash,
+            snapshot_schema_version: schema_version,
+            production_batch_id: row.production_batch_id,
+            production_batch_item_id: row.production_batch_item_id,
+            created_at: row.created_at,
+            prompt: prompt
+                .get("renderedText")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            negative_prompt: prompt
+                .get("negativePrompt")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            workflow_version_id: workflow
+                .get("workflowVersionId")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            recipe_id: workflow
+                .get("recipeId")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            reference_set_ids,
+            asset_checksums,
+        }))
+    }
+
+    pub async fn get_snapshot_detail(
+        &self,
+        project_id: &str,
+        production_batch_item_id: &str,
+    ) -> Result<Option<ProductionAuditSnapshotDetail>, ProductionAuditError> {
+        self.snapshot_detail(project_id, production_batch_item_id)
+            .await
+    }
+
     async fn load_graph(&self, project_id: &str) -> Result<AuditGraph, ProductionAuditError> {
         validate_project_id(project_id)
             .map_err(|error| ProductionAuditError::InvalidInput(error.to_string()))?;
@@ -694,6 +835,21 @@ impl ProductionAuditService {
         .bind(project_id)
         .fetch_all(&self.pool)
         .await?;
+        let preparation_snapshots = sqlx::query_as::<_, PreparationSnapshotRow>(
+            "SELECT s.id, s.project_id, s.shot_id, s.stage, s.context_hash,
+                    s.production_batch_id, s.production_batch_item_id, s.created_at
+             FROM production_preparation_snapshots s
+             JOIN production_batches b ON b.id = s.production_batch_id
+             JOIN production_batch_items i ON i.id = s.production_batch_item_id
+             JOIN shots sh ON sh.id = s.shot_id
+             WHERE s.project_id = ? AND b.project_id = ? AND sh.project_id = ?
+             ORDER BY s.created_at ASC, s.id ASC",
+        )
+        .bind(project_id)
+        .bind(project_id)
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
         let assets = sqlx::query_as::<_, AssetRow>(
             "SELECT id, project_id, name, source_task_id, created_at, updated_at
              FROM assets WHERE project_id = ?",
@@ -734,6 +890,7 @@ impl ProductionAuditService {
             stage_items,
             tasks,
             snapshots,
+            preparation_snapshots,
             assets,
             task_outputs,
             shots,
@@ -824,6 +981,31 @@ struct SnapshotRow {
 }
 
 #[derive(Debug, FromRow)]
+struct PreparationSnapshotRow {
+    id: String,
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    created_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct SnapshotDetailRow {
+    id: String,
+    project_id: String,
+    shot_id: String,
+    stage: String,
+    context_hash: String,
+    production_batch_id: String,
+    production_batch_item_id: String,
+    snapshot_json: String,
+    created_at: String,
+}
+
+#[derive(Debug, FromRow)]
 struct AssetRow {
     id: String,
     project_id: String,
@@ -871,6 +1053,7 @@ struct AuditGraph {
     stage_items: Vec<StageItemRow>,
     tasks: Vec<TaskRow>,
     snapshots: Vec<SnapshotRow>,
+    preparation_snapshots: Vec<PreparationSnapshotRow>,
     assets: Vec<AssetRow>,
     task_outputs: Vec<TaskOutputRow>,
     shots: Vec<ShotRow>,
@@ -879,6 +1062,24 @@ struct AuditGraph {
 
 fn now_string() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn short_context_hash(value: &str) -> String {
+    value.chars().take(12).collect()
+}
+
+fn json_string_array(payload: &Value, array_key: &str, value_key: &str) -> Vec<String> {
+    payload
+        .get(array_key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            item.get(value_key)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 fn retry_lineages(items: &[&BatchItemRow]) -> Result<Vec<RetryLineage>, String> {
@@ -1154,6 +1355,7 @@ fn activity(
         shot_id,
         asset_id,
         error_code,
+        snapshot_id: None,
     }
 }
 
@@ -1304,6 +1506,13 @@ impl LineageBuilder {
                 self.add_task(graph, task, Some(item.id.clone()));
             }
         }
+        for snapshot in graph
+            .preparation_snapshots
+            .iter()
+            .filter(|snapshot| snapshot.production_batch_item_id == item.id)
+        {
+            self.add_preparation_snapshot(graph, snapshot, Some(item.id.clone()));
+        }
     }
 
     fn add_stage_item(
@@ -1381,6 +1590,14 @@ impl LineageBuilder {
                 None,
                 Vec::new(),
             ));
+        }
+        for snapshot in graph.preparation_snapshots.iter().filter(|snapshot| {
+            graph.batch_items.iter().any(|item| {
+                item.id == snapshot.production_batch_item_id
+                    && item.task_id.as_deref() == Some(task.id.as_str())
+            })
+        }) {
+            self.add_preparation_snapshot(graph, snapshot, Some(task.id.clone()));
         }
         for output in graph
             .task_outputs
@@ -1515,6 +1732,52 @@ impl LineageBuilder {
                 }
             }
         }
+        for snapshot in graph
+            .preparation_snapshots
+            .iter()
+            .filter(|snapshot| snapshot.shot_id == shot.id)
+        {
+            self.add_preparation_snapshot(graph, snapshot, Some(shot.id.clone()));
+        }
+    }
+
+    fn add_preparation_snapshot(
+        &mut self,
+        graph: &AuditGraph,
+        snapshot: &PreparationSnapshotRow,
+        parent_id: Option<String>,
+    ) {
+        if self.has("PREPARATION_SNAPSHOT", &snapshot.id) {
+            return;
+        }
+        let task_id = graph
+            .batch_items
+            .iter()
+            .find(|item| item.id == snapshot.production_batch_item_id)
+            .and_then(|item| item.task_id.clone());
+        self.push(preparation_snapshot_node(
+            snapshot,
+            task_id.clone(),
+            parent_id,
+        ));
+
+        if let Some(item) = graph
+            .batch_items
+            .iter()
+            .find(|item| item.id == snapshot.production_batch_item_id)
+        {
+            self.add_batch_item(graph, item, Some(snapshot.id.clone()));
+        }
+        if let Some(batch) = graph
+            .batches
+            .iter()
+            .find(|batch| batch.id == snapshot.production_batch_id)
+        {
+            self.add_batch(graph, batch, Some(snapshot.id.clone()));
+        }
+        if let Some(shot) = graph.shots.iter().find(|shot| shot.id == snapshot.shot_id) {
+            self.add_shot(graph, shot, Some(snapshot.id.clone()));
+        }
     }
 
     fn add_asset(&mut self, asset: &AssetRow, parent_id: Option<String>) {
@@ -1567,6 +1830,35 @@ fn node(
         stage,
         error_code: None,
         related_ids,
+        snapshot_id: None,
+        context_hash: None,
+        snapshot_schema_version: None,
+    }
+}
+
+fn preparation_snapshot_node(
+    snapshot: &PreparationSnapshotRow,
+    task_id: Option<String>,
+    parent_id: Option<String>,
+) -> ProductionAuditLineageNode {
+    ProductionAuditLineageNode {
+        entity_type: "PREPARATION_SNAPSHOT".to_owned(),
+        id: snapshot.id.clone(),
+        label: "生产准备快照".to_owned(),
+        status: None,
+        parent_id,
+        run_id: None,
+        batch_id: Some(snapshot.production_batch_id.clone()),
+        item_id: Some(snapshot.production_batch_item_id.clone()),
+        task_id,
+        shot_id: Some(snapshot.shot_id.clone()),
+        asset_id: None,
+        stage: Some(snapshot.stage.clone()),
+        error_code: None,
+        related_ids: Vec::new(),
+        snapshot_id: Some(snapshot.id.clone()),
+        context_hash: Some(snapshot.context_hash.clone()),
+        snapshot_schema_version: Some(PREPARATION_SNAPSHOT_SCHEMA_VERSION),
     }
 }
 

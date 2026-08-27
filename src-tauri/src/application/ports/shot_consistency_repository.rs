@@ -57,4 +57,19 @@ pub trait ShotConsistencyRepository: Send + Sync {
         shot_id: &str,
         bindings: &[ShotReferenceSetBinding],
     ) -> Result<(), RepositoryError>;
+
+    /// Atomically replaces both direct binding collections when the concrete
+    /// repository supports a transaction.  The default preserves compatibility
+    /// with small fakes that only implement the original two methods.
+    async fn replace_binding_pack(
+        &self,
+        shot_id: &str,
+        profile_bindings: &[ShotProfileBinding],
+        reference_set_bindings: &[ShotReferenceSetBinding],
+    ) -> Result<(), RepositoryError> {
+        self.replace_profile_bindings(shot_id, profile_bindings)
+            .await?;
+        self.replace_reference_set_bindings(shot_id, reference_set_bindings)
+            .await
+    }
 }

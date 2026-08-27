@@ -63,6 +63,7 @@ pub mod series_production_service;
 pub mod settings_service;
 pub mod shot_batch_service;
 pub mod shot_bulk_service;
+pub mod shot_consistency_binding_service;
 pub mod shot_context_resolver;
 pub mod shot_readiness_evaluator;
 pub mod shot_readiness_service;

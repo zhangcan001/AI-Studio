@@ -9,6 +9,8 @@ DEV-046_START_SHA：60385e09c4ed7ad066e153ad52170b06ad763f0b
 
 本文件冻结 0.7.0 的产品范围、数据边界、服务边界和交付顺序。DEV-046 不新增迁移、不修改现有命令、不修改生产执行器、队列语义、审核语义或正式 UI；实现从 DEV-047 开始。
 
+DEV-054 落地状态：DEV-047 至 DEV-053 已接入同一条 Narrative Production V1 路径。当前产品兼容版本仍为 0.6.2，migration 最大版本仍为 024，正式执行器仍为现有 Production Queue → GenerationService → WorkflowCompiler → ComfyUI；0.7.0 version bump 留给 DEV-055 Release Gate。详细实现记录见 docs/DEV_054_NARRATIVE_PRODUCTION_INTEGRATION.md。
+
 ## 1. 产品愿景
 
 0.7.0 的目标是把 AI Studio 从“能逐镜头生成”推进到“可控、可复用、可审核、可追踪、适合批量生产”的 AI 漫剧生产闭环 V1。
@@ -460,3 +462,16 @@ flowchart TD
 - 自动覆盖用户已经确认的正式 Shot。
 
 最终冻结结论：0.7.0 的价值在于“准备正确、输入可解释、资产可复用、执行可追踪”，而不是增加一个更大的自动化按钮。
+
+## 19. DEV-054 已落地集成事实
+
+- Creation workspace 在既有 shell 内增加 Project/Series/Episode/Scene/Shot 的一致性编辑与 resolved preview；没有新增全局 consistency rail。
+- Scope/Shot binding 已通过统一 pack command、后端校验和 SQLite combined transaction 开放给普通用户。
+- shot_context_draft_get 复用现有单例 ShotContextResolver；不运行 Comfy live preflight，不创建第二 resolver/cache。
+- Preparation snapshot 是用户明确准入时的历史证据；Profile/ReferenceSet 后续变化不会重算已冻结 prompt、asset order、context hash 或 stage input。
+- Project Command Center 与 Production Audit 现在可读 consistency/preparation 摘要和 snapshot lineage；读取路径不启动生产。
+- 无新 binding 的旧 Shot 保留 prompt/reference/stage-config legacy fallback。
+- Manual Gate 仍保留：候选、关键帧、视频、审核、加入队列和 Queue Start 都由用户触发。
+- DEV-054 不新增 migration 025、第二执行器、第二 queue、Scheduler、auto-start、auto-select 或 unattended generation。
+
+下一任务：DEV-055 — AI Studio 0.7.0 Release Gate。

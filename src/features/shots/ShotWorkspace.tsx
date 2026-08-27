@@ -55,6 +55,8 @@ import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunboo
 import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
 import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
+import { ScopeConsistencyWorkspace, type ScopeConsistencyWorkspaceProps } from "./ScopeConsistencyWorkspace";
+import type { ConsistencyScopeOption, ConsistencyScopeRef } from "../../types/consistencyBindings";
 import type { ShotInspectorTab } from "./ShotInspector";
 import {
   appendAnchorReferences,
@@ -105,6 +107,10 @@ interface Props {
   contextPathTarget?: ShotContextPathItem;
   onOpenTask?: (taskId: string) => void;
   onOpenProductionQueue?: () => void;
+  consistencyWorkspace?: Omit<ScopeConsistencyWorkspaceProps, "projectId" | "scope" | "scopeOptions" | "onScopeChange"> & {
+    scopeOptions?: ConsistencyScopeOption[];
+    onScopeChange?: (scope: ConsistencyScopeRef) => void;
+  };
 }
 
 type StageDraft = {
@@ -115,7 +121,7 @@ type StageDraft = {
 
 const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
-export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue }: Props) {
+export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
   const [stage, setStage] = useState<ShotStage>("image");
@@ -716,6 +722,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   );
   const contextSurface = shotContextSurface(mode, workspaceSelection.type);
   const showWorkspaceFeedback = contextSurface !== "shot";
+  const consistencyScope = consistencyScopeForSelection(workspaceSelection, projectId, projectName, productionStructure, shots);
+  const showConsistencyScope = mode === "creation" && Boolean(consistencyWorkspace) && Boolean(consistencyScope) && contextSurface !== "shot";
 
   if (loading) return <section className="workspace-panel shot-workspace"><p className="project-loading">正在加载镜头制作...</p></section>;
 
@@ -800,6 +808,13 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onCopyPrompt={(prompt) => void navigator.clipboard?.writeText(prompt).then(() => setNotice("提示词已复制。"))}
               workspaceTab={shotWorkspaceTab}
               onWorkspaceTabChange={setShotWorkspaceTab}
+              consistency={consistencyWorkspace && selectedShot ? {
+                ...consistencyWorkspace,
+                projectId,
+                scope: { scopeType: "SHOT", scopeId: selectedShot.id, scopeName: selectedShot.name },
+                scopeOptions: [],
+                onScopeChange: (nextScope) => consistencyWorkspace.onScopeChange?.(nextScope),
+              } : undefined}
               inspectorTab={inspectorTab}
               onInspectorTabChange={setInspectorTab}
               currentDraft={currentDraft}
@@ -851,6 +866,18 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onApplyPrompt={() => setNotice("当前提示词预览已应用到编辑框；点击保存镜头写入快照。")}
               notice={notice}
               error={error}
+            />
+          ) : showConsistencyScope && consistencyScope && consistencyWorkspace ? (
+            <ScopeConsistencyWorkspace
+              {...consistencyWorkspace}
+              projectId={projectId}
+              scope={consistencyScope}
+              scopeOptions={consistencyWorkspace.scopeOptions}
+              onScopeChange={(nextScope) => {
+                consistencyWorkspace.onScopeChange?.(nextScope);
+                const nextSelection = selectionForConsistencyScope(nextScope);
+                if (nextSelection) selectWorkspaceSelection(nextSelection);
+              }}
             />
           ) : contextSurface === "project" ? (
             <section className="shot-context-empty" data-surface="creation-project">
@@ -1136,4 +1163,46 @@ function preferredStageRecipe(catalog: RecipeViewModel[], stage: ShotStage): Rec
 
 function emptyRunbook(projectId: string): ProductionBatchRunbookView {
   return { projectId, rows: [] };
+}
+
+function consistencyScopeForSelection(
+  selection: WorkspaceSelection,
+  projectId: string,
+  projectName: string | undefined,
+  tree: ProductionStructureTree,
+  shots: readonly ShotView[],
+): ConsistencyScopeRef | undefined {
+  switch (selection.type) {
+    case "project":
+      return { scopeType: "PROJECT", scopeId: projectId, scopeName: projectName ?? projectId };
+    case "series": {
+      const series = orderedSeries(tree).find((item) => item.id === selection.seriesId);
+      return series ? { scopeType: "SERIES", scopeId: series.id, scopeName: series.name } : undefined;
+    }
+    case "episode": {
+      for (const series of orderedSeries(tree)) {
+        const episode = orderedEpisodes(series).find((item) => item.id === selection.episodeId);
+        if (episode) return { scopeType: "EPISODE", scopeId: episode.id, scopeName: episode.name };
+      }
+      return undefined;
+    }
+    case "scene": {
+      const parent = findProductionSceneParent(tree, selection.sceneId);
+      return parent ? { scopeType: "SCENE", scopeId: parent.scene.id, scopeName: parent.scene.name } : undefined;
+    }
+    case "shot": {
+      const shot = shots.find((item) => item.id === selection.shotId);
+      return shot ? { scopeType: "SHOT", scopeId: shot.id, scopeName: shot.name } : undefined;
+    }
+  }
+}
+
+function selectionForConsistencyScope(scope: ConsistencyScopeRef): WorkspaceSelection | undefined {
+  switch (scope.scopeType) {
+    case "PROJECT": return { type: "project", projectId: scope.scopeId };
+    case "SERIES": return { type: "series", seriesId: scope.scopeId };
+    case "EPISODE": return { type: "episode", episodeId: scope.scopeId };
+    case "SCENE": return { type: "scene", sceneId: scope.scopeId };
+    case "SHOT": return { type: "shot", shotId: scope.scopeId };
+  }
 }

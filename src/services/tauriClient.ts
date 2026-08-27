@@ -32,6 +32,22 @@ import type {
 } from "../types/benchmark";
 import type { ShotBatchPlan, ShotInputValues, ShotStage, ShotView } from "../types/shot";
 import type {
+  ConsistencyBindingPack,
+  ConsistencyBindingReplaceInput,
+  ConsistencyContextPreview,
+  ConsistencyContextSourceScope,
+  ConsistencyDiagnosticSeverity,
+  ConsistencyInheritanceMode,
+  ConsistencyProfileBindingInput,
+  ConsistencyProfileBindingRole,
+  ConsistencyProfileType,
+  ConsistencyReferenceSetBindingInput,
+  ConsistencyReferenceSetBindingRole,
+  ConsistencyScopeRef,
+  ConsistencyScopeType,
+  ConsistencySourceTrace,
+} from "../types/consistencyBindings";
+import type {
   ReusableGenerationDraft,
   TaskDetail,
   TaskHistoryPage,
@@ -169,6 +185,8 @@ import type {
   ProductionAuditLineage,
   ProductionAuditLineageRequest,
   ProductionAuditActivity,
+  ProductionAuditSnapshotDetail,
+  ProductionAuditSnapshotDetailRequest,
   ProductionAuditSummary,
 } from "../types/productionAudit";
 import type {
@@ -882,6 +900,47 @@ export function getReferenceSetUsage(projectId: string, referenceSetId: string):
   return invoke<ReferenceSetUsageSummary>("reference_set_usage_get", { projectId, referenceSetId });
 }
 
+export function getConsistencyScopeBinding(
+  projectId: string,
+  scopeType: ConsistencyScopeType,
+  scopeId: string,
+): Promise<ConsistencyBindingPack> {
+  return invoke<ConsistencyScopeBindingPackDto>("consistency_scope_binding_get", {
+    projectId,
+    scopeType,
+    scopeId,
+  }).then(mapConsistencyScopeBindingPack);
+}
+
+export function replaceConsistencyScopeBinding(request: ConsistencyBindingReplaceInput): Promise<void> {
+  return invoke<void>("consistency_scope_binding_replace", { request });
+}
+
+export function getShotConsistencyBinding(projectId: string, shotId: string): Promise<ConsistencyBindingPack> {
+  return invoke<ShotConsistencyBindingPackDto>("shot_consistency_binding_get", { projectId, shotId })
+    .then(mapShotConsistencyBindingPack);
+}
+
+export function replaceShotConsistencyBinding(request: ConsistencyBindingReplaceInput): Promise<void> {
+  return invoke<void>("shot_consistency_binding_replace", {
+    request: {
+      projectId: request.projectId,
+      shotId: request.scopeId,
+      profileBindings: request.profileBindings,
+      referenceSetBindings: request.referenceSetBindings,
+    },
+  });
+}
+
+export function getShotContextDraft(
+  projectId: string,
+  shotId: string,
+  stage: ShotStage,
+): Promise<ConsistencyContextPreview> {
+  return invoke<ShotContextDraftDto>("shot_context_draft_get", { projectId, shotId, stage })
+    .then(mapShotContextPreview);
+}
+
 export function getShot(projectId: string, shotId: string): Promise<ShotView> {
   return invoke<ShotView>("shot_get", { projectId, shotId });
 }
@@ -1405,6 +1464,10 @@ export function getProductionAuditLineage(request: ProductionAuditLineageRequest
   return invoke<ProductionAuditLineage>("production_audit_lineage", { request });
 }
 
+export function getProductionAuditSnapshotDetail(request: ProductionAuditSnapshotDetailRequest): Promise<ProductionAuditSnapshotDetail | null> {
+  return invoke<ProductionAuditSnapshotDetail | null>("production_audit_snapshot_detail", { request });
+}
+
 export function getProductionAuditIntegrity(projectId: string): Promise<ProductionAuditIntegrity> {
   return invoke<ProductionAuditIntegrity>("production_audit_integrity", { request: { projectId } });
 }
@@ -1565,4 +1628,245 @@ export function saveProductionQueueNamePreset(name: string): Promise<string[]> {
 
 export function deleteProductionQueueNamePreset(name: string): Promise<void> {
   return invoke<void>("production_queue_name_preset_delete", { name });
+}
+
+interface ConsistencyScopeRefDto {
+  scopeType: string;
+  scopeId: string;
+  scopeName: string;
+}
+
+interface ConsistencyBindingDto {
+  id?: string;
+  role: string;
+  profileType?: string;
+  profileId?: string;
+  costumeVariantId?: string | null;
+  referenceSetId?: string;
+  ordinal: number;
+  required?: boolean;
+  inheritanceMode: string;
+}
+
+interface ConsistencyScopeAncestorDto extends ConsistencyScopeRefDto {
+  profileBindings: ConsistencyBindingDto[];
+  referenceSetBindings: ConsistencyBindingDto[];
+}
+
+interface ConsistencyScopeBindingPackDto {
+  projectId: string;
+  scope: ConsistencyScopeRefDto;
+  ancestors: ConsistencyScopeAncestorDto[];
+  directProfileBindings: ConsistencyBindingDto[];
+  directReferenceSetBindings: ConsistencyBindingDto[];
+}
+
+interface ShotConsistencyBindingPackDto {
+  projectId: string;
+  shotId: string;
+  profileBindings: ConsistencyBindingDto[];
+  referenceSetBindings: ConsistencyBindingDto[];
+  structurePath: ConsistencyScopeRefDto[];
+  resolvedContextSummary?: ShotContextDraftDto | null;
+}
+
+interface BackendSourceTraceDto {
+  scope: string;
+  scope_id: string;
+  binding_id?: string | null;
+  entity_id: string;
+  inheritance_mode: string;
+}
+
+interface BackendResolvedProfileDto {
+  profile_id: string;
+  profile_type: string;
+  ordinal: number;
+  costume_variant_id?: string | null;
+  source: BackendSourceTraceDto;
+}
+
+interface BackendResolvedProfilesDto {
+  characters: BackendResolvedProfileDto[];
+  scene?: BackendResolvedProfileDto | null;
+  props: BackendResolvedProfileDto[];
+  style?: BackendResolvedProfileDto | null;
+}
+
+interface BackendResolvedReferenceSetDto {
+  reference_set_id: string;
+  role: string;
+  ordinal: number;
+  required: boolean;
+  source: BackendSourceTraceDto;
+}
+
+interface BackendResolvedReferenceAssetDto {
+  asset_id: string;
+  ordinal: number;
+  source_reference_set_id: string;
+}
+
+interface BackendPromptContextDto {
+  rendered_text: string;
+  negative_prompt: string;
+}
+
+interface BackendLegacyContextDto {
+  uses_legacy_shot_references: boolean;
+  prompt?: string | null;
+}
+
+interface BackendContextDiagnosticDto {
+  severity: string;
+  code: string;
+  message: string;
+}
+
+interface ShotContextDraftDto {
+  promptContext: BackendPromptContextDto;
+  sourceTrace: BackendSourceTraceDto[];
+  contextHash: string;
+  legacy: BackendLegacyContextDto;
+  partial: boolean;
+  diagnostics: BackendContextDiagnosticDto[];
+  referenceSets: BackendResolvedReferenceSetDto[];
+  referenceAssets: BackendResolvedReferenceAssetDto[];
+  profiles: BackendResolvedProfilesDto;
+}
+
+function mapConsistencyScopeRef(value: ConsistencyScopeRefDto): ConsistencyScopeRef {
+  return {
+    scopeType: value.scopeType as ConsistencyScopeType,
+    scopeId: value.scopeId,
+    scopeName: value.scopeName,
+  };
+}
+
+function mapConsistencyProfileBinding(value: ConsistencyBindingDto): ConsistencyProfileBindingInput {
+  return {
+    ...(value.id === undefined ? {} : { id: value.id }),
+    role: value.role as ConsistencyProfileBindingRole,
+    profileType: value.profileType as ConsistencyProfileType,
+    profileId: value.profileId ?? "",
+    costumeVariantId: value.costumeVariantId ?? null,
+    ordinal: value.ordinal,
+    inheritanceMode: value.inheritanceMode as ConsistencyInheritanceMode,
+  };
+}
+
+function mapConsistencyReferenceSetBinding(value: ConsistencyBindingDto): ConsistencyReferenceSetBindingInput {
+  return {
+    ...(value.id === undefined ? {} : { id: value.id }),
+    role: value.role as ConsistencyReferenceSetBindingRole,
+    referenceSetId: value.referenceSetId ?? "",
+    ordinal: value.ordinal,
+    required: value.required ?? false,
+    inheritanceMode: value.inheritanceMode as ConsistencyInheritanceMode,
+  };
+}
+
+function mapConsistencyScopeBindingPack(value: ConsistencyScopeBindingPackDto): ConsistencyBindingPack {
+  return {
+    scope: mapConsistencyScopeRef(value.scope),
+    ancestors: value.ancestors.map((ancestor) => ({
+      ...mapConsistencyScopeRef(ancestor),
+      profileBindings: ancestor.profileBindings.map(mapConsistencyProfileBinding),
+      referenceSetBindings: ancestor.referenceSetBindings.map(mapConsistencyReferenceSetBinding),
+    })),
+    directProfileBindings: value.directProfileBindings.map(mapConsistencyProfileBinding),
+    directReferenceSetBindings: value.directReferenceSetBindings.map(mapConsistencyReferenceSetBinding),
+  };
+}
+
+function mapShotConsistencyBindingPack(value: ShotConsistencyBindingPackDto): ConsistencyBindingPack {
+  const shotScope = value.structurePath.find((item) => item.scopeType === "SHOT") ?? {
+    scopeType: "SHOT",
+    scopeId: value.shotId,
+    scopeName: value.shotId,
+  };
+  return {
+    scope: mapConsistencyScopeRef(shotScope),
+    ancestors: value.structurePath
+      .filter((item) => item.scopeType !== "SHOT")
+      .map((item) => ({
+        ...mapConsistencyScopeRef(item),
+        profileBindings: [],
+        referenceSetBindings: [],
+      })),
+    directProfileBindings: value.profileBindings.map(mapConsistencyProfileBinding),
+    directReferenceSetBindings: value.referenceSetBindings.map(mapConsistencyReferenceSetBinding),
+  };
+}
+
+function mapConsistencySourceTrace(value: BackendSourceTraceDto): ConsistencySourceTrace {
+  return {
+    scope: value.scope as ConsistencyContextSourceScope,
+    scopeId: value.scope_id,
+    scopeName: null,
+  };
+}
+
+function mapResolvedProfile(value: BackendResolvedProfileDto): NonNullable<ConsistencyContextPreview["profiles"]>[number] {
+  const profileType = value.profile_type as ConsistencyProfileType;
+  return {
+    role: profileType as ConsistencyProfileBindingRole,
+    profileType,
+    profileId: value.profile_id,
+    name: value.profile_id,
+    ordinal: value.ordinal,
+    source: mapConsistencySourceTrace(value.source),
+    costumeVariantId: value.costume_variant_id ?? null,
+  };
+}
+
+function mapResolvedReferenceSets(
+  values: BackendResolvedReferenceSetDto[],
+  assets: BackendResolvedReferenceAssetDto[],
+): NonNullable<ConsistencyContextPreview["referenceSets"]> {
+  const assetsByReferenceSet = new Map<string, BackendResolvedReferenceAssetDto[]>();
+  for (const asset of assets) {
+    const current = assetsByReferenceSet.get(asset.source_reference_set_id) ?? [];
+    current.push(asset);
+    assetsByReferenceSet.set(asset.source_reference_set_id, current);
+  }
+  return values.map((value) => {
+    const previewAssets = assetsByReferenceSet.get(value.reference_set_id) ?? [];
+    return {
+      role: value.role as ConsistencyReferenceSetBindingRole,
+      referenceSetId: value.reference_set_id,
+      name: value.reference_set_id,
+      ordinal: value.ordinal,
+      required: value.required,
+      source: mapConsistencySourceTrace(value.source),
+      assetCount: previewAssets.length,
+      previewAssets: previewAssets.map((asset) => ({ assetId: asset.asset_id, ordinal: asset.ordinal })),
+    };
+  });
+}
+
+function mapShotContextPreview(value: ShotContextDraftDto): ConsistencyContextPreview {
+  return {
+    contextHash: value.contextHash,
+    partial: value.partial,
+    diagnostics: value.diagnostics.map((diagnostic) => ({
+      severity: diagnostic.severity as ConsistencyDiagnosticSeverity,
+      code: diagnostic.code,
+      message: diagnostic.message,
+    })),
+    sourceTrace: value.sourceTrace.map(mapConsistencySourceTrace),
+    profiles: [
+      ...value.profiles.characters.map(mapResolvedProfile),
+      ...(value.profiles.scene ? [mapResolvedProfile(value.profiles.scene)] : []),
+      ...value.profiles.props.map(mapResolvedProfile),
+      ...(value.profiles.style ? [mapResolvedProfile(value.profiles.style)] : []),
+    ],
+    referenceSets: mapResolvedReferenceSets(value.referenceSets, value.referenceAssets),
+    promptText: value.promptContext.rendered_text,
+    negativePrompt: value.promptContext.negative_prompt,
+    legacy: {
+      usesLegacyShotReferences: value.legacy.uses_legacy_shot_references,
+      prompt: value.legacy.prompt,
+    },
+  };
 }

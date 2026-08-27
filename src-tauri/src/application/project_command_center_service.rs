@@ -130,6 +130,31 @@ pub struct ProjectCommandCenterTaskAssetView {
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectCommandCenterConsistencyView {
+    pub character_profiles: usize,
+    pub scene_profiles: usize,
+    pub prop_profiles: usize,
+    pub style_profiles: usize,
+    pub reference_sets: usize,
+    pub shot_profile_bindings: usize,
+    pub shot_reference_set_bindings: usize,
+    pub scope_profile_bindings: usize,
+    pub scope_reference_set_bindings: usize,
+    pub consistency_in_use: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCommandCenterPreparationView {
+    pub snapshot_count: usize,
+    pub prepared_image_items: usize,
+    pub prepared_video_items: usize,
+    pub active_prepared_items: usize,
+    pub latest_prepared_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectCommandCenterReferenceAnchorView {
     pub total: usize,
     pub usable: usize,
@@ -248,6 +273,8 @@ pub struct ProjectCommandCenterView {
     pub shots: ProjectCommandCenterShotView,
     pub queue: ProjectCommandCenterQueueView,
     pub tasks_assets: ProjectCommandCenterTaskAssetView,
+    pub consistency: ProjectCommandCenterConsistencyView,
+    pub preparation: ProjectCommandCenterPreparationView,
     pub reference_anchors: ProjectCommandCenterReferenceAnchorView,
     pub prompt_templates: ProjectCommandCenterPromptTemplateSummary,
     pub comfy: ProjectCommandCenterComfyView,
@@ -347,6 +374,8 @@ impl ProjectCommandCenterService {
         let shots = load_shots(&self.pool, project_id).await?;
         let queue = load_queue(&self.pool, project_id).await?;
         let tasks_assets = load_tasks_assets(&self.pool, project_id).await?;
+        let consistency = load_consistency(&self.pool, project_id).await?;
+        let preparation = load_preparation(&self.pool, project_id).await?;
         let reference_anchors = load_reference_anchors(&self.pool, project_id).await?;
         let prompt_templates = load_prompt_templates(&self.pool, project_id).await?;
         let audit = self
@@ -399,6 +428,8 @@ impl ProjectCommandCenterService {
             shots,
             queue,
             tasks_assets,
+            consistency,
+            preparation,
             reference_anchors,
             prompt_templates,
             comfy,
@@ -1154,6 +1185,124 @@ async fn load_tasks_assets(
 }
 
 #[derive(Debug, FromRow)]
+struct ConsistencySummaryRow {
+    character_profiles: i64,
+    scene_profiles: i64,
+    prop_profiles: i64,
+    style_profiles: i64,
+    reference_sets: i64,
+    shot_profile_bindings: i64,
+    shot_reference_set_bindings: i64,
+    scope_profile_bindings: i64,
+    scope_reference_set_bindings: i64,
+}
+
+async fn load_consistency(
+    pool: &SqlitePool,
+    project_id: &str,
+) -> Result<ProjectCommandCenterConsistencyView, ProjectCommandCenterError> {
+    let row = sqlx::query_as::<_, ConsistencySummaryRow>(
+        "SELECT
+           (SELECT COUNT(*) FROM character_profiles WHERE project_id = ?) AS character_profiles,
+           (SELECT COUNT(*) FROM scene_profiles WHERE project_id = ?) AS scene_profiles,
+           (SELECT COUNT(*) FROM prop_profiles WHERE project_id = ?) AS prop_profiles,
+           (SELECT COUNT(*) FROM style_profiles WHERE project_id = ?) AS style_profiles,
+           (SELECT COUNT(*) FROM reference_sets WHERE project_id = ?) AS reference_sets,
+           (SELECT COUNT(*) FROM shot_profile_bindings b
+              JOIN shots s ON s.id = b.shot_id
+              WHERE s.project_id = ?) AS shot_profile_bindings,
+           (SELECT COUNT(*) FROM shot_reference_set_bindings b
+              JOIN shots s ON s.id = b.shot_id
+              WHERE s.project_id = ?) AS shot_reference_set_bindings,
+           (SELECT COUNT(*) FROM consistency_scope_profile_bindings
+              WHERE project_id = ?) AS scope_profile_bindings,
+           (SELECT COUNT(*) FROM consistency_scope_reference_set_bindings
+              WHERE project_id = ?) AS scope_reference_set_bindings",
+    )
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await?;
+
+    let consistency_in_use = [
+        row.character_profiles,
+        row.scene_profiles,
+        row.prop_profiles,
+        row.style_profiles,
+        row.reference_sets,
+        row.shot_profile_bindings,
+        row.shot_reference_set_bindings,
+        row.scope_profile_bindings,
+        row.scope_reference_set_bindings,
+    ]
+    .into_iter()
+    .any(|value| value > 0);
+
+    Ok(ProjectCommandCenterConsistencyView {
+        character_profiles: count(row.character_profiles),
+        scene_profiles: count(row.scene_profiles),
+        prop_profiles: count(row.prop_profiles),
+        style_profiles: count(row.style_profiles),
+        reference_sets: count(row.reference_sets),
+        shot_profile_bindings: count(row.shot_profile_bindings),
+        shot_reference_set_bindings: count(row.shot_reference_set_bindings),
+        scope_profile_bindings: count(row.scope_profile_bindings),
+        scope_reference_set_bindings: count(row.scope_reference_set_bindings),
+        consistency_in_use,
+    })
+}
+
+#[derive(Debug, FromRow)]
+struct PreparationSummaryRow {
+    snapshot_count: i64,
+    prepared_image_items: i64,
+    prepared_video_items: i64,
+    active_prepared_items: i64,
+    latest_prepared_at: Option<String>,
+}
+
+async fn load_preparation(
+    pool: &SqlitePool,
+    project_id: &str,
+) -> Result<ProjectCommandCenterPreparationView, ProjectCommandCenterError> {
+    let row = sqlx::query_as::<_, PreparationSummaryRow>(
+        "SELECT
+           COUNT(*) AS snapshot_count,
+           COALESCE(SUM(CASE WHEN s.stage = 'image' THEN 1 ELSE 0 END), 0)
+             AS prepared_image_items,
+           COALESCE(SUM(CASE WHEN s.stage = 'video' THEN 1 ELSE 0 END), 0)
+             AS prepared_video_items,
+           COALESCE(SUM(CASE WHEN i.status IN
+             ('PENDING', 'DISPATCHING', 'DISPATCHED') THEN 1 ELSE 0 END), 0)
+             AS active_prepared_items,
+           MAX(s.created_at) AS latest_prepared_at
+         FROM production_preparation_snapshots s
+         JOIN production_batches b ON b.id = s.production_batch_id
+         JOIN production_batch_items i ON i.id = s.production_batch_item_id
+         WHERE s.project_id = ? AND b.project_id = ?",
+    )
+    .bind(project_id)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(ProjectCommandCenterPreparationView {
+        snapshot_count: count(row.snapshot_count),
+        prepared_image_items: count(row.prepared_image_items),
+        prepared_video_items: count(row.prepared_video_items),
+        active_prepared_items: count(row.active_prepared_items),
+        latest_prepared_at: row.latest_prepared_at,
+    })
+}
+
+#[derive(Debug, FromRow)]
 struct AnchorRow {
     kind: String,
     asset_count: i64,
@@ -1333,7 +1482,8 @@ fn default_quick_actions() -> Vec<ProjectCommandCenterQuickActionView> {
     [
         ("create", "创作工作台", "studio"),
         ("shots", "镜头生产", "shots"),
-        ("assets", "资产库", "assets"),
+        ("assets", "一致性资产", "assets"),
+        ("preparation", "生产准备", "shots"),
         ("tasks", "任务历史", "tasks"),
         ("workflows", "工作流", "workflows"),
         ("settings", "运行时设置", "settings"),
@@ -1372,6 +1522,8 @@ mod tests {
             shots: ProjectCommandCenterShotView::default(),
             queue: ProjectCommandCenterQueueView::default(),
             tasks_assets: ProjectCommandCenterTaskAssetView::default(),
+            consistency: ProjectCommandCenterConsistencyView::default(),
+            preparation: ProjectCommandCenterPreparationView::default(),
             reference_anchors: ProjectCommandCenterReferenceAnchorView::default(),
             prompt_templates: ProjectCommandCenterPromptTemplateSummary::default(),
             comfy: ProjectCommandCenterComfyView::default(),

@@ -194,6 +194,45 @@ impl ConsistencyScopeRepository for SqliteConsistencyScopeRepository {
         insert_reference_bindings(&mut transaction, bindings).await?;
         transaction.commit().await.map_err(map_sqlx_error)
     }
+
+    async fn replace_binding_pack(
+        &self,
+        project_id: &str,
+        scope_type: ConsistencyScopeType,
+        scope_id: &str,
+        profile_bindings: &[ScopedProfileBinding],
+        reference_set_bindings: &[ScopedReferenceSetBinding],
+    ) -> Result<(), RepositoryError> {
+        validate_profile_binding_scope(project_id, scope_type, scope_id, profile_bindings)?;
+        validate_reference_binding_scope(project_id, scope_type, scope_id, reference_set_bindings)?;
+
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        sqlx::query(
+            "DELETE FROM consistency_scope_profile_bindings
+             WHERE project_id = ? AND scope_type = ? AND scope_id = ?",
+        )
+        .bind(project_id)
+        .bind(scope_type.as_str())
+        .bind(scope_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        insert_profile_bindings(&mut transaction, profile_bindings).await?;
+
+        sqlx::query(
+            "DELETE FROM consistency_scope_reference_set_bindings
+             WHERE project_id = ? AND scope_type = ? AND scope_id = ?",
+        )
+        .bind(project_id)
+        .bind(scope_type.as_str())
+        .bind(scope_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+        insert_reference_bindings(&mut transaction, reference_set_bindings).await?;
+
+        transaction.commit().await.map_err(map_sqlx_error)
+    }
 }
 
 fn validate_profile_binding_scope(

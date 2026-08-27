@@ -347,3 +347,9 @@ Frontend Shot Preparation Store 只保存：
 - queue start 仍是手动 command。
 - 500-shot scene 页面没有 N+1。
 - 0.6.2 legacy shot 没有 pack 时仍走旧 stage config/reference path。
+
+## 15. DEV-054 narrative integration
+
+DEV-054 将一致性 binding、ShotContextResolver、Readiness、Preparation、现有 ProductionBatch/Queue、Review 和 Audit 接入同一条读取与准入路径。Preparation 仍是 admission，不是 generation：创建 batch、创建 task、Queue Start 和 ComfyUI submit 都不会由一致性预览或只读 Command Center/Audit 自动触发。
+
+Production Audit 读取 preparation snapshot 的历史 context、contextHash、reference order、stage input 和 lineage；有 snapshot 时不重新解析当前 Profile，legacy batch 没有 snapshot 时保留兼容展示。正式生成仍只经由现有 ProductionQueueService → GenerationService → WorkflowCompiler → ComfyUI，人工候选选择、审核和手动 Queue Start 保持不变。
