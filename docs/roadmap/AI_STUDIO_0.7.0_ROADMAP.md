@@ -465,7 +465,7 @@ flowchart TD
 
 ## 19. DEV-054 已落地集成事实
 
-- Creation workspace 在既有 shell 内增加 Project/Series/Episode/Scene/Shot 的一致性编辑与 resolved preview；没有新增全局 consistency rail。
+- Creation workspace 在既有 shell 内增加 Project/Series/Episode/Scene/Shot 的一致性编辑；Project/Series/Episode/Scene 只展示 binding/inheritance truth，只有 Shot 页面展示最终 ResolvedShotContext、stage prompt 与 context hash；没有新增全局 consistency rail。
 - Scope/Shot binding 已通过统一 pack command、后端校验和 SQLite combined transaction 开放给普通用户。
 - shot_context_draft_get 复用现有单例 ShotContextResolver；不运行 Comfy live preflight，不创建第二 resolver/cache。
 - Preparation snapshot 是用户明确准入时的历史证据；Profile/ReferenceSet 后续变化不会重算已冻结 prompt、asset order、context hash 或 stage input。

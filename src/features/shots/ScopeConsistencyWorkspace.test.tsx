@@ -25,6 +25,14 @@ const pack: ConsistencyBindingPack = {
   directProfileBindings: [],
   directReferenceSetBindings: [],
 };
+const shotScope = { scopeType: "SHOT" as const, scopeId: "shot-1", scopeName: "镜头一" };
+const shotPack: ConsistencyBindingPack = { ...pack, scope: shotScope };
+const nonShotScopes = [
+  { scopeType: "PROJECT" as const, scopeId: "project-1", scopeName: "项目一" },
+  { scopeType: "SERIES" as const, scopeId: "series-1", scopeName: "系列一" },
+  { scopeType: "EPISODE" as const, scopeId: "episode-1", scopeName: "第一集" },
+  scope,
+];
 
 const context: ConsistencyContextPreview = {
   contextHash: "context-hash-123456",
@@ -68,10 +76,15 @@ describe("ScopeConsistencyWorkspace", () => {
     const user = userEvent.setup();
     const onScopeChange = vi.fn();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    renderWorkspace({ onScopeChange });
+    renderWorkspace({
+      scope: shotScope,
+      bindingPack: shotPack,
+      onScopeChange,
+    });
 
-    expect(screen.getByRole("heading", { level: 2, name: "场景一致性" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "镜头一致性" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "上级继承配置" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "图片解析上下文" })).toBeTruthy();
     expect(screen.getByText("context-hash-123456")).toBeTruthy();
     expect(screen.getByText("最终解析提示词")).toBeTruthy();
     expect(screen.getByText("赤羽站在雨巷")).toBeTruthy();
@@ -89,6 +102,21 @@ describe("ScopeConsistencyWorkspace", () => {
     confirm.mockReturnValue(true);
     await user.click(screen.getByRole("button", { name: "项目 · 项目一" }));
     expect(onScopeChange).toHaveBeenCalledWith({ scopeType: "PROJECT", scopeId: "project-1", scopeName: "项目一" });
+  });
+
+  it.each(nonShotScopes)("keeps $scopeType scope UI to bindings and inheritance only", (nonShotScope) => {
+    const loadContext = vi.fn().mockResolvedValue(context);
+    renderWorkspace({ scope: nonShotScope, bindingPack: { ...pack, scope: nonShotScope }, loadContext });
+
+    expect(screen.getByText("最终生成上下文在镜头层计算；当前页面展示本层配置和上级继承关系。")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "上级继承配置" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "图片解析上下文" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "视频解析上下文" })).toBeNull();
+    expect(screen.queryByText("context-hash-123456")).toBeNull();
+    expect(screen.queryByText("赤羽站在雨巷")).toBeNull();
+    expect(screen.queryByText("雨巷远景")).toBeNull();
+    expect(screen.queryByText("当前使用旧版镜头参考素材")).toBeNull();
+    expect(loadContext).not.toHaveBeenCalled();
   });
 
   it("saves one binding pack, keeps backend-returned rows, and preserves the form after a failed save", async () => {
@@ -123,6 +151,8 @@ describe("ScopeConsistencyWorkspace", () => {
 
   it("shows the legacy fallback without inventing a new reference pack", () => {
     renderWorkspace({
+      scope: shotScope,
+      bindingPack: shotPack,
       context: {
         contextHash: null,
         partial: false,

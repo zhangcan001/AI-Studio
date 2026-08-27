@@ -2,10 +2,13 @@
 
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssetView } from "../../types/asset";
-import type { ShotView } from "../../types/shot";
+import type { ConsistencyContextPreview, ConsistencyScopeRef } from "../../types/consistencyBindings";
+import type { ShotStage, ShotView } from "../../types/shot";
+import type { ScopeConsistencyWorkspaceProps } from "./ScopeConsistencyWorkspace";
 import { ShotCreationWorkspace, canConfirmShotCandidate, resolveShotPreviewAsset, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
 
 afterEach(() => {
@@ -45,11 +48,34 @@ const shot: ShotView = {
   referenceAssets: [],
   generationLinks: [],
 };
+const shotScope: ConsistencyScopeRef = { scopeType: "SHOT", scopeId: shot.id, scopeName: shot.name };
 
 const candidates: ShotWorkspaceCandidate[] = [
   { asset: asset("video-1", "video"), status: "ready", taskId: "task-1" },
   { asset: asset("video-2", "video"), status: "failed", error: "渲染超时" },
 ];
+
+function StageAwareShotCreation({ loadContext }: { loadContext: NonNullable<ScopeConsistencyWorkspaceProps["loadContext"]> }) {
+  const [stage, setStage] = useState<ShotStage>("image");
+  return (
+    <ShotCreationWorkspace
+      projectId="project-1"
+      shot={shot}
+      stage={stage}
+      onStageChange={setStage}
+      onGenerate={vi.fn()}
+      consistency={{
+        projectId: "project-1",
+        scope: shotScope,
+        bindingPack: { scope: shotScope, ancestors: [], directProfileBindings: [], directReferenceSetBindings: [] },
+        onSaveBindingPack: vi.fn().mockResolvedValue(undefined),
+        profiles: [],
+        referenceSets: [],
+        loadContext,
+      }}
+    />
+  );
+}
 
 describe("ShotCreationWorkspace", () => {
   it("renders the shot header, stage switch, workspace tabs, preview rail, prompt preview, and inspector contract", () => {
@@ -135,5 +161,33 @@ describe("ShotCreationWorkspace", () => {
 
     await user.click(within(screen.getByRole("tablist", { name: "镜头工作区" })).getByRole("tab", { name: "参考" }));
     expect(screen.getByRole("heading", { level: 2, name: "参考素材总览" })).toBeTruthy();
+  });
+
+  it("reloads the active shot context for image, video, then image stages", async () => {
+    const user = userEvent.setup();
+    const loadContext = vi.fn(async (_scope: ConsistencyScopeRef, stage: ShotStage): Promise<ConsistencyContextPreview> => ({
+      contextHash: stage === "image" ? "HASH_IMAGE" : "HASH_VIDEO",
+      partial: false,
+      diagnostics: [],
+      promptText: `${stage} prompt`,
+      negativePrompt: "",
+      legacy: { usesLegacyShotReferences: false },
+    }));
+    render(<StageAwareShotCreation loadContext={loadContext} />);
+
+    await user.click(screen.getByRole("tab", { name: "一致性" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "图片解析上下文" })).toBeTruthy();
+    expect(screen.getByText("HASH_IMAGE")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "视频" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "视频解析上下文" })).toBeTruthy();
+    expect(await screen.findByText("HASH_VIDEO")).toBeTruthy();
+    expect(screen.queryByText("HASH_IMAGE")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "图片" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "图片解析上下文" })).toBeTruthy();
+    expect(await screen.findByText("HASH_IMAGE")).toBeTruthy();
+    expect(screen.queryByText("HASH_VIDEO")).toBeNull();
+    expect(loadContext.mock.calls.map(([, requestedStage]) => requestedStage)).toEqual(["image", "video", "image"]);
   });
 });

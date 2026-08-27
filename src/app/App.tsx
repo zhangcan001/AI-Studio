@@ -41,6 +41,7 @@ import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
+import type { ShotStage } from "../types/shot";
 import type {
   ConsistencyContextPreview,
   ConsistencyBindingReplaceInput,
@@ -343,18 +344,11 @@ function App() {
     }
   }, []);
 
-  const loadConsistencyContext = useCallback(async (scope: ConsistencyScopeRef): Promise<ConsistencyContextPreview> => {
+  const loadConsistencyContext = useCallback(async (scope: ConsistencyScopeRef, stage: ShotStage): Promise<ConsistencyContextPreview | null> => {
     if (scope.scopeType !== "SHOT") {
-      return {
-        contextHash: null,
-        partial: false,
-        diagnostics: [],
-        profiles: [],
-        referenceSets: [],
-        legacy: { usesLegacyShotReferences: false },
-      };
+      return null;
     }
-    return getShotContextDraft(activeProjectId ?? scope.scopeId, scope.scopeId, "image");
+    return getShotContextDraft(activeProjectId ?? scope.scopeId, scope.scopeId, stage);
   }, [activeProjectId]);
 
   function navigateToRoute(nextWorkspace: Workspace, nextSection = defaultStudioSectionForWorkspace(nextWorkspace)) {

@@ -165,7 +165,7 @@ export function ShotCreationWorkspace({
             onCopyPrompt={onCopyPrompt}
             onEditPrompt={() => selectInspectorTab("prompt")}
           />}
-          {selectedWorkspaceTab === "consistency" && (consistency ? <ScopeConsistencyWorkspace {...consistency} /> : <div className="shot-creation-view shot-consistency-empty"><div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">一致性</span><h2>镜头一致性</h2></div></div><p className="shot-creation-muted">一致性绑定服务尚未接入当前工作区。</p></div>)}
+          {selectedWorkspaceTab === "consistency" && (consistency ? <ScopeConsistencyWorkspace {...consistency} stage={stage} /> : <div className="shot-creation-view shot-consistency-empty"><div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">一致性</span><h2>镜头一致性</h2></div></div><p className="shot-creation-muted">一致性绑定服务尚未接入当前工作区。</p></div>)}
           {selectedWorkspaceTab === "references" && <ReferenceWorkspace projectId={projectId} stage={stage} references={orderedReferences} keyframeAsset={inspectorProps.keyframeAsset} />}
           {selectedWorkspaceTab === "history" && <HistoryWorkspace history={stageHistory} onOpenTask={onOpenTask} onRetry={onRetry} busy={inspectorProps.busy ?? false} />}
           {selectedWorkspaceTab === "settings" && <SettingsWorkspace shot={shot} onDeleteShot={onDeleteShot} busy={inspectorProps.busy ?? false} />}

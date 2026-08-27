@@ -11,6 +11,7 @@ import type {
   ConsistencyScopeRef,
   ConsistencyScopeType,
 } from "../../types/consistencyBindings";
+import type { ShotStage } from "../../types/shot";
 import { roleLabel, scopeLabel, sourceLabel } from "../../types/consistencyBindings";
 import "./ShotWorkspace.css";
 
@@ -25,7 +26,8 @@ export interface ScopeConsistencyWorkspaceProps {
   referenceSets: ConsistencyReferenceSetOption[];
   costumesByCharacter?: Record<string, ConsistencyCostumeOption[]>;
   context?: ConsistencyContextPreview | null;
-  loadContext?: (scope: ConsistencyScopeRef) => Promise<ConsistencyContextPreview>;
+  stage?: ShotStage;
+  loadContext?: (scope: ConsistencyScopeRef, stage: ShotStage) => Promise<ConsistencyContextPreview | null>;
   loading?: boolean;
   saving?: boolean;
   error?: string | null;
@@ -54,6 +56,7 @@ export function ScopeConsistencyWorkspace({
   referenceSets,
   costumesByCharacter = {},
   context,
+  stage = "image",
   loadContext,
   loading: externalLoading = false,
   saving: externalSaving = false,
@@ -62,8 +65,10 @@ export function ScopeConsistencyWorkspace({
   onScopeChange,
 }: ScopeConsistencyWorkspaceProps) {
   const [pack, setPack] = useState<ConsistencyBindingPack>(() => bindingPack ?? emptyBindingPack(scope));
-  const [resolvedContext, setResolvedContext] = useState<ConsistencyContextPreview | null | undefined>(context);
+  const isShotScope = scope.scopeType === "SHOT";
+  const [resolvedContext, setResolvedContext] = useState<ConsistencyContextPreview | null | undefined>(() => isShotScope ? context : null);
   const [loading, setLoading] = useState(!bindingPack && Boolean(loadBindingPack));
+  const [contextLoading, setContextLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -76,13 +81,11 @@ export function ScopeConsistencyWorkspace({
     setLoading(Boolean(loadBindingPack));
     if (!loadBindingPack && bindingPack) {
       setPack(bindingPack);
-      setResolvedContext(context);
       setLoading(false);
       return () => { active = false; };
     }
     if (!loadBindingPack) {
       setPack(bindingPack ?? emptyBindingPack(scope));
-      setResolvedContext(context);
       setLoading(false);
       return () => { active = false; };
     }
@@ -100,21 +103,30 @@ export function ScopeConsistencyWorkspace({
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [bindingPack, context, loadBindingPack, scope.scopeId, scope.scopeType]);
+  }, [bindingPack, loadBindingPack, scope.scopeId, scope.scopeType]);
 
   useEffect(() => {
-    if (loadContext) return;
-    setResolvedContext(context);
-  }, [context, loadContext]);
-
-  useEffect(() => {
-    if (!loadContext) return;
     let active = true;
-    void loadContext(scope)
+    if (!isShotScope) {
+      setResolvedContext(null);
+      setContextLoading(false);
+      return () => { active = false; };
+    }
+    if (!loadContext) {
+      setResolvedContext(context);
+      setContextLoading(false);
+      return () => { active = false; };
+    }
+    setResolvedContext(null);
+    setContextLoading(true);
+    void loadContext(scope, stage)
       .then((nextContext) => { if (active) setResolvedContext(nextContext); })
-      .catch((loadErrorValue: unknown) => { if (active) setLoadError(errorMessage(loadErrorValue)); });
+      .catch((loadErrorValue: unknown) => { if (active) setLoadError(errorMessage(loadErrorValue)); })
+      .finally(() => {
+        if (active) setContextLoading(false);
+      });
     return () => { active = false; };
-  }, [loadContext, scope.scopeId, scope.scopeType]);
+  }, [context, isShotScope, loadContext, scope.scopeId, scope.scopeType, stage]);
 
   const inheritedProfiles = useMemo(
     () => pack.ancestors.flatMap((ancestor) => ancestor.profileBindings.map((binding) => ({ ...binding, inheritanceMode: "INHERITED" as const }))),
@@ -124,7 +136,7 @@ export function ScopeConsistencyWorkspace({
     () => pack.ancestors.flatMap((ancestor) => ancestor.referenceSetBindings.map((binding) => ({ ...binding, inheritanceMode: "INHERITED" as const }))),
     [pack.ancestors],
   );
-  const busy = externalLoading || loading || externalSaving || saving;
+  const busy = externalLoading || loading || contextLoading || externalSaving || saving;
   const error = externalError ?? loadError;
 
   async function save(input: ConsistencyBindingReplaceInput): Promise<ConsistencyBindingPack | void> {
@@ -138,7 +150,7 @@ export function ScopeConsistencyWorkspace({
         const backendPack = await loadBindingPack(scope);
         setPack(backendPack);
       }
-      if (loadContext) setResolvedContext(await loadContext(scope));
+      if (loadContext && isShotScope) setResolvedContext(await loadContext(scope, stage));
       setDirty(false);
       setNotice("一致性配置已保存，并已重新读取后端真值。 ");
       return saved;
@@ -201,16 +213,19 @@ export function ScopeConsistencyWorkspace({
       />
 
       {notice && <p className="consistency-notice" role="status">{notice}</p>}
-      <ResolvedContextPreview context={resolvedContext} onCopyHash={copyContextHash} />
+      {scope.scopeType === "SHOT"
+        ? <ResolvedContextPreview stage={stage} context={resolvedContext} onCopyHash={copyContextHash} />
+        : <p className="consistency-scope-boundary" role="note">最终生成上下文在镜头层计算；当前页面展示本层配置和上级继承关系。</p>}
     </section>
   );
 }
 
-function ResolvedContextPreview({ context, onCopyHash }: { context?: ConsistencyContextPreview | null; onCopyHash: (hash: string) => void }) {
+function ResolvedContextPreview({ stage, context, onCopyHash }: { stage: ShotStage; context?: ConsistencyContextPreview | null; onCopyHash: (hash: string) => void }) {
+  const title = stage === "video" ? "视频解析上下文" : "图片解析上下文";
   return (
-    <section className="consistency-resolved-panel" aria-label="最终解析摘要">
+    <section className="consistency-resolved-panel" aria-label={title}>
       <div className="consistency-workspace-section-heading">
-        <div><span className="section-label">Resolver</span><h3>最终解析摘要</h3></div>
+        <div><span className="section-label">Resolver</span><h3>{title}</h3></div>
         {context?.readinessStatus && <span className="consistency-readiness">Readiness: {context.readinessStatus}</span>}
       </div>
       {!context && <p className="consistency-empty-row">暂未加载最终解析上下文。</p>}

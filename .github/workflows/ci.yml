@@ -1,0 +1,57 @@
+name: Source-only CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-only:
+    name: Windows source checks
+    runs-on: windows-latest
+    env:
+      AI_STUDIO_LIVE_COMFY: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust stable
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Rust format check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Rust check
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
+
+      - name: Frontend tests
+        run: pnpm test -- --run
+
+      - name: TypeScript check
+        run: pnpm exec tsc --noEmit
+
+      - name: Frontend build
+        run: pnpm build

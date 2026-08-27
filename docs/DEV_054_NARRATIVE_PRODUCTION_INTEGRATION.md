@@ -54,8 +54,8 @@ DEV-054 将一致性数据、镜头上下文、就绪度、生产准备、现有
 ### 2.3 Creation / Production / Review IA
 
 - 不新增全局“一致性”或“绑定” rail。
-- Creation workspace 的 Project、Series、Episode、Scene scope 显示 ScopeConsistencyWorkspace，呈现 ancestor direct bindings、当前层 direct bindings、resolved preview、prompt、context hash、partial diagnostics 和 legacy 状态。
-- Shot creation workspace 增加“一致性”子页，支持 Shot binding、Costume、ReferenceSet 与上下文预览。
+- Creation workspace 的 Project、Series、Episode、Scene scope 显示 ScopeConsistencyWorkspace，呈现 ancestor direct bindings、当前层 direct bindings、继承关系和保存后的 backend truth；这些上层页面不冒充最终 Shot ResolvedShotContext，也不展示镜头级 context hash。
+- Shot creation workspace 增加“一致性”子页，支持 Shot binding、Costume、ReferenceSet，并通过 `shot_context_draft_get` 展示镜头级 ResolvedShotContext、当前 stage 的 prompt 和 context hash。
 - Preparation、Queue、Review 仍分别位于 Production、Review workspace；创建页不负责启动生成。
 - Dirty binding 草稿离开 scope 时有导航保护。
 
