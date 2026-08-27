@@ -24,7 +24,9 @@ fn workspace_root() -> PathBuf {
 }
 
 fn read_text(path: impl AsRef<Path>) -> String {
-    fs::read_to_string(path).expect("DEV-036 audit source must be readable")
+    fs::read_to_string(path)
+        .expect("DEV-036 audit source must be readable")
+        .replace("\r\n", "\n")
 }
 
 fn rust_sources(root: &Path) -> Vec<(PathBuf, String)> {
