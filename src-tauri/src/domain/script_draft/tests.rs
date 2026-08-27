@@ -16,6 +16,8 @@ fn draft_with_one_shot() -> DraftStructureV1 {
         contract_version: DRAFT_CONTRACT_VERSION,
         draft_id,
         source_id,
+        revision: 1,
+        title: None,
         revision_id: DraftRevisionId::new(),
         status: DraftStatus::Draft,
         episodes: vec![DraftEpisode {
@@ -42,7 +44,8 @@ fn draft_with_one_shot() -> DraftStructureV1 {
                 origin: DraftNodeOrigin::Imported,
                 original_suggestion: None,
                 current_value: None,
-                scene_mention: None,
+                location_suggestion: None,
+                time_suggestion: None,
                 shots: vec![DraftShot {
                     draft_node_id: shot_id,
                     parent_draft_node_id: Some(scene_id.clone()),
@@ -51,11 +54,11 @@ fn draft_with_one_shot() -> DraftStructureV1 {
                     name: "开场".to_owned(),
                     purpose: Some("建立空间".to_owned()),
                     description: None,
-                    character_mentions: Vec::new(),
-                    scene_mention: None,
-                    prop_mentions: Vec::new(),
+                    characters: Vec::new(),
+                    scene_suggestion: None,
+                    props: Vec::new(),
                     action: Some("人物走入".to_owned()),
-                    dialogue: None,
+                    dialogue: Vec::new(),
                     camera_suggestion: Some("中景".to_owned()),
                     lighting_suggestion: None,
                     duration_suggestion: Some(2.0),
@@ -70,6 +73,7 @@ fn draft_with_one_shot() -> DraftStructureV1 {
                 }],
             }],
         }],
+        mentions: Vec::new(),
         diagnostics: Vec::new(),
         metadata: Default::default(),
     }
@@ -136,7 +140,7 @@ fn source_spans_are_zero_based_end_exclusive_and_utf8_safe() {
     assert!(SourceSpan::new(0, 2).validate(raw).is_err());
     assert_eq!(
         SourceSpan::new(0, 7).validate(raw).unwrap_err().code(),
-        "SOURCE_SPAN_OUT_OF_BOUNDS"
+        "DRAFT_SOURCE_SPAN_INVALID"
     );
     assert!(SourceSpan::new(3, 2).validate(raw).is_err());
     assert!(SourceSpan::new(3, 3).validate(raw).is_ok());
@@ -224,21 +228,29 @@ fn capacity_and_schema_errors_are_stable_and_do_not_contain_payload() {
 fn entity_mentions_have_explicit_identity_text_and_confidence_contract() {
     let mut structure = draft_with_one_shot();
     structure.episodes[0].scenes[0].shots[0]
-        .character_mentions
+        .characters
         .push(EntityMention {
-            id: "mention-1".to_owned(),
+            mention_id: "mention-1".to_owned(),
             entity_type: EntityType::Character,
-            text: "阿明".to_owned(),
-            normalized_text: "阿明".to_owned(),
+            raw_text: "阿明".to_owned(),
+            normalized_text: Some("阿明".to_owned()),
+            draft_node_id: None,
             source_spans: vec![SourceSpan::new(0, 3)],
+            origin: DraftNodeOrigin::Imported,
             confidence: Some(0.8),
-            candidate_profile_ids: Vec::new(),
             evidence: Vec::new(),
-            selected_profile_id: None,
-            confirmed: false,
         });
     assert!(validate_structure(&structure, source_bytes(), 1).is_ok());
-    structure.episodes[0].scenes[0].shots[0].character_mentions[0].confidence = Some(1.5);
+    let encoded = serde_json::to_value(&structure).unwrap();
+    assert!(encoded["episodes"][0]["scenes"][0]["shots"][0]
+        .get("characters")
+        .is_some());
+    assert!(!encoded.to_string().contains("selectedProfileId"));
+    assert_eq!(
+        serde_json::to_string(&DraftReviewState::Pending).unwrap(),
+        "\"PENDING\""
+    );
+    structure.episodes[0].scenes[0].shots[0].characters[0].confidence = Some(1.5);
     assert_eq!(
         validate_structure(&structure, source_bytes(), 1)
             .unwrap_err()

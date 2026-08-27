@@ -2,10 +2,11 @@ use crate::application::ports::RepositoryError;
 use crate::domain::script_draft::{ScriptFormat, SourceId};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::fmt;
 
 /// The complete source row. `source_text` is intentionally only exposed by
 /// the explicit source lookup; list methods return `ScriptSourceMetadata`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ScriptSourceRecord {
     pub id: SourceId,
     pub project_id: String,
@@ -16,6 +17,23 @@ pub struct ScriptSourceRecord {
     pub source_text: Vec<u8>,
     pub schema_version: u32,
     pub created_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for ScriptSourceRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ScriptSourceRecord")
+            .field("id", &self.id)
+            .field("project_id", &self.project_id)
+            .field("format", &self.format)
+            .field("original_filename", &self.original_filename)
+            .field("source_checksum", &self.source_checksum)
+            .field("source_bytes", &self.source_bytes)
+            .field("source_text", &"<redacted>")
+            .field("schema_version", &self.schema_version)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

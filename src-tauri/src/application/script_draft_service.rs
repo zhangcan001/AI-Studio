@@ -17,7 +17,7 @@ use crate::domain::script_draft::{
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Arc};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 pub const MAX_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 /// A serialized draft is bounded independently from the source.  This keeps
@@ -46,6 +46,19 @@ pub struct ScriptSourceView {
     /// The filename is request metadata only.  Migration 025 intentionally
     /// stores source identity by project/checksum/format, not by filename.
     pub original_filename: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ScriptSourceContentView {
+    pub id: SourceId,
+    pub project_id: String,
+    pub format: ScriptFormat,
+    pub original_filename: Option<String>,
+    pub source_checksum: String,
+    pub source_bytes: u64,
+    pub source_text: String,
+    pub schema_version: u32,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -93,6 +106,13 @@ impl fmt::Debug for ScriptDraftRevisionView {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftSummary {
+    pub title: Option<String>,
+    pub episode_count: usize,
+    pub scene_count: usize,
+    pub shot_count: usize,
+    pub diagnostic_counts: BTreeMap<String, usize>,
+    pub review_counts: BTreeMap<String, usize>,
+    // Kept for metadata consumers that shipped with the first DEV-057 build.
     pub episodes: usize,
     pub scenes: usize,
     pub shots: usize,
@@ -184,11 +204,17 @@ impl ScriptDraftService {
         let source = self
             .load_source(&request.project_id, &request.source_id)
             .await?;
+        if request.structure.source_id != request.source_id {
+            return Err(invalid(
+                "PROJECT_MISMATCH: draft source_id must match the selected source",
+            ));
+        }
         let draft_id = DraftId::new();
         let revision_id = DraftRevisionId::new();
         let mut structure = request.structure;
         structure.draft_id = draft_id.clone();
         structure.source_id = request.source_id.clone();
+        structure.revision = 1;
         structure.revision_id = revision_id.clone();
         structure.status = crate::domain::script_draft::DraftStatus::Draft;
         let prepared = self.prepare_payload(&structure, &source.source_text)?;
@@ -226,50 +252,23 @@ impl ScriptDraftService {
         validate_project_id(&request.project_id)?;
         require_parser_version(&request.parser_version)?;
 
-        let latest = self
-            .draft_repository
-            .get_latest(&request.project_id, &request.draft_id)
-            .await
-            .map_err(map_repository_error)?
-            .ok_or_else(|| invalid("DRAFT_NOT_FOUND: draft does not exist"))?;
-        let latest_record = self
-            .draft_repository
-            .get_revision(&request.project_id, &request.draft_id, latest.revision)
-            .await
-            .map_err(map_repository_error)?
-            .ok_or_else(|| invalid("DRAFT_NOT_FOUND: latest draft revision does not exist"))?;
-        let latest_structure = self.decode_and_validate_record(&latest_record).await?;
-        let source = self
-            .load_source(&request.project_id, &latest.source_id)
-            .await?;
+        if request.structure.draft_id != request.draft_id {
+            return Err(invalid(
+                "PROJECT_MISMATCH: draft_id must match the draft being appended",
+            ));
+        }
+        let source_id = request.structure.source_id.clone();
+        let source = self.load_source(&request.project_id, &source_id).await?;
 
         let revision_id = DraftRevisionId::new();
         let mut structure = request.structure;
         structure.draft_id = request.draft_id.clone();
-        structure.source_id = latest.source_id.clone();
+        structure.source_id = source_id.clone();
+        structure.revision = u32::try_from(request.expected_revision.saturating_add(1))
+            .map_err(|_| invalid("DRAFT_REVISION_INVALID: revision is out of range"))?;
         structure.revision_id = revision_id.clone();
         structure.status = crate::domain::script_draft::DraftStatus::Draft;
-        // `revision_id` is part of the stored contract, but it is identity
-        // rather than user payload.  For a semantic retry, calculate the
-        // candidate checksum with the existing revision identity so the
-        // repository can perform its atomic same-payload no-op.
-        let same_payload = same_payload_ignoring_revision_id(&structure, &latest_structure);
-        let same_retry = same_payload
-            && request.revision_kind == latest.revision_kind
-            && request.parser_version == latest.parser_version
-            && structure.schema_version == latest.schema_version
-            && structure.contract_version == latest.contract_version
-            && provider_kind(request.provider_metadata.as_ref()) == latest.provider_kind
-            && provider_model(request.provider_metadata.as_ref()) == latest.provider_model
-            && request.provider_metadata == latest.provider_metadata;
-        let prepared_structure = if same_retry {
-            let mut value = structure.clone();
-            value.revision_id = latest_record.id.clone();
-            value
-        } else {
-            structure.clone()
-        };
-        let prepared = self.prepare_payload(&prepared_structure, &source.source_text)?;
+        let prepared = self.prepare_payload(&structure, &source.source_text)?;
 
         let metadata = self
             .draft_repository
@@ -277,7 +276,7 @@ impl ScriptDraftService {
                 id: revision_id,
                 draft_id: request.draft_id,
                 project_id: request.project_id,
-                source_id: latest.source_id,
+                source_id,
                 expected_revision: Some(request.expected_revision),
                 schema_version: structure.schema_version,
                 revision_kind: request.revision_kind,
@@ -342,6 +341,18 @@ impl ScriptDraftService {
         self.latest(project_id, draft_id).await
     }
 
+    pub async fn get_latest_revision(
+        &self,
+        project_id: &str,
+        draft_id: &DraftId,
+    ) -> Result<Option<ScriptDraftRevisionView>, AppError> {
+        let Some(metadata) = self.latest(project_id, draft_id).await? else {
+            return Ok(None);
+        };
+        self.get_revision(project_id, draft_id, metadata.revision)
+            .await
+    }
+
     pub async fn history(
         &self,
         project_id: &str,
@@ -364,6 +375,15 @@ impl ScriptDraftService {
         self.history(project_id, draft_id, query).await
     }
 
+    pub async fn list_revisions(
+        &self,
+        project_id: &str,
+        draft_id: &DraftId,
+        query: ScriptDraftPageQuery,
+    ) -> Result<ScriptDraftPage<ScriptDraftRevisionMetadata>, AppError> {
+        self.history(project_id, draft_id, query).await
+    }
+
     pub async fn list_latest(
         &self,
         project_id: &str,
@@ -374,6 +394,14 @@ impl ScriptDraftService {
             .list_latest(project_id, normalize_query(query))
             .await
             .map_err(map_repository_error)
+    }
+
+    pub async fn list_drafts(
+        &self,
+        project_id: &str,
+        query: ScriptDraftPageQuery,
+    ) -> Result<ScriptDraftPage<ScriptDraftRevisionMetadata>, AppError> {
+        self.list_latest(project_id, query).await
     }
 
     pub async fn list_sources(
@@ -387,6 +415,36 @@ impl ScriptDraftService {
             .map_err(map_repository_error)
     }
 
+    pub async fn get_source(
+        &self,
+        project_id: &str,
+        source_id: &SourceId,
+    ) -> Result<Option<ScriptSourceContentView>, AppError> {
+        validate_project_id(project_id)?;
+        let Some(source) = self
+            .source_repository
+            .find_by_id(project_id, source_id)
+            .await
+            .map_err(map_repository_error)?
+        else {
+            return Ok(None);
+        };
+        let source = self.validate_source_record(project_id, source)?;
+        let source_text = String::from_utf8(source.source_text.clone())
+            .map_err(|_| invalid("INVALID_SOURCE_UTF8: source must be UTF-8"))?;
+        Ok(Some(ScriptSourceContentView {
+            id: source.id,
+            project_id: source.project_id,
+            format: source.format,
+            original_filename: source.original_filename,
+            source_checksum: source.source_checksum,
+            source_bytes: source.source_bytes,
+            source_text,
+            schema_version: source.schema_version,
+            created_at: source.created_at,
+        }))
+    }
+
     async fn load_source(
         &self,
         project_id: &str,
@@ -398,6 +456,14 @@ impl ScriptDraftService {
             .await
             .map_err(map_repository_error)?
             .ok_or_else(|| invalid("SOURCE_NOT_FOUND: source does not exist"))?;
+        self.validate_source_record(project_id, source)
+    }
+
+    fn validate_source_record(
+        &self,
+        project_id: &str,
+        source: ScriptSourceRecord,
+    ) -> Result<ScriptSourceRecord, AppError> {
         if source.project_id != project_id {
             return Err(invalid("PROJECT_MISMATCH: source is outside the project"));
         }
@@ -439,13 +505,8 @@ impl ScriptDraftService {
         }
         let payload_checksum = draft_checksum(structure)
             .map_err(|_| invalid("INVALID_PAYLOAD: draft checksum cannot be computed"))?;
-        let counts = structure.counts();
-        let summary_json = canonical_json(&DraftSummary {
-            episodes: counts.episodes,
-            scenes: counts.scenes,
-            shots: counts.shots,
-        })
-        .map_err(|_| invalid("INVALID_PAYLOAD: draft summary cannot be computed"))?;
+        let summary_json = canonical_json(&summary_for_structure(structure))
+            .map_err(|_| invalid("INVALID_PAYLOAD: draft summary cannot be computed"))?;
         Ok(PreparedPayload {
             payload_json,
             payload_checksum,
@@ -473,6 +534,7 @@ impl ScriptDraftService {
             .await?;
         if structure.draft_id != record.draft_id
             || structure.source_id != record.source_id
+            || u64::from(structure.revision) != record.revision
             || structure.revision_id != record.id
         {
             return Err(invalid(
@@ -497,27 +559,74 @@ struct PreparedPayload {
     summary_json: String,
 }
 
-fn same_payload_ignoring_revision_id(
-    candidate: &DraftStructureV1,
-    latest: &DraftStructureV1,
-) -> bool {
-    let mut candidate = candidate.clone();
-    let mut latest = latest.clone();
-    candidate.revision_id = latest.revision_id.clone();
-    latest.revision_id = candidate.revision_id.clone();
-    candidate == latest
-}
-
 fn revision_view(
     metadata: ScriptDraftRevisionMetadata,
     mut structure: DraftStructureV1,
 ) -> ScriptDraftRevisionView {
     structure.draft_id = metadata.draft_id.clone();
     structure.source_id = metadata.source_id.clone();
+    structure.revision = u32::try_from(metadata.revision).unwrap_or(u32::MAX);
     structure.revision_id = metadata.id.clone();
     ScriptDraftRevisionView {
         metadata,
         structure,
+    }
+}
+
+fn summary_for_structure(structure: &DraftStructureV1) -> DraftSummary {
+    let counts = structure.counts();
+    let mut diagnostic_counts = BTreeMap::new();
+    let mut review_counts = BTreeMap::new();
+    let mut add_diagnostics = |diagnostics: &[crate::domain::script_draft::Diagnostic]| {
+        for diagnostic in diagnostics {
+            *diagnostic_counts
+                .entry(diagnostic.code.clone())
+                .or_insert(0) += 1;
+        }
+    };
+    let mut add_review = |state: crate::domain::script_draft::DraftReviewState| {
+        *review_counts
+            .entry(review_state_key(state).to_owned())
+            .or_insert(0) += 1;
+    };
+
+    add_diagnostics(&structure.diagnostics);
+    for episode in &structure.episodes {
+        add_review(episode.review_state);
+        add_diagnostics(&episode.diagnostics);
+        for scene in &episode.scenes {
+            add_review(scene.review_state);
+            add_diagnostics(&scene.diagnostics);
+            for shot in &scene.shots {
+                add_review(shot.review_state);
+                add_diagnostics(&shot.diagnostics);
+            }
+        }
+    }
+
+    DraftSummary {
+        title: structure.title.clone(),
+        episode_count: counts.episodes,
+        scene_count: counts.scenes,
+        shot_count: counts.shots,
+        diagnostic_counts,
+        review_counts,
+        episodes: counts.episodes,
+        scenes: counts.scenes,
+        shots: counts.shots,
+    }
+}
+
+const fn review_state_key(state: crate::domain::script_draft::DraftReviewState) -> &'static str {
+    match state {
+        crate::domain::script_draft::DraftReviewState::Pending => "PENDING",
+        crate::domain::script_draft::DraftReviewState::AiSuggested => "AI_SUGGESTED",
+        crate::domain::script_draft::DraftReviewState::PendingReview => "PENDING_REVIEW",
+        crate::domain::script_draft::DraftReviewState::Accepted => "ACCEPTED",
+        crate::domain::script_draft::DraftReviewState::Rejected => "REJECTED",
+        crate::domain::script_draft::DraftReviewState::Edited => "EDITED",
+        crate::domain::script_draft::DraftReviewState::Conflict => "CONFLICT",
+        crate::domain::script_draft::DraftReviewState::Unresolved => "UNRESOLVED",
     }
 }
 
@@ -528,6 +637,23 @@ fn normalize_query(mut query: ScriptDraftPageQuery) -> ScriptDraftPageQuery {
         query.limit.min(200)
     };
     query
+}
+
+#[cfg(test)]
+fn semantic_payload_json_equal(left: &str, right: &str) -> bool {
+    let Ok(mut left) = serde_json::from_str::<serde_json::Value>(left) else {
+        return false;
+    };
+    let Ok(mut right) = serde_json::from_str::<serde_json::Value>(right) else {
+        return false;
+    };
+    for value in [&mut left, &mut right] {
+        if let Some(object) = value.as_object_mut() {
+            object.remove("revision");
+            object.remove("revisionId");
+        }
+    }
+    left == right
 }
 
 fn validate_project_id(value: &str) -> Result<(), AppError> {
@@ -729,7 +855,7 @@ mod tests {
                 return Err(RepositoryError::integrity("DRAFT_REVISION_CONFLICT"));
             }
             if let Some(row) = latest.as_ref() {
-                if row.payload_checksum == request.payload_checksum
+                if semantic_payload_json_equal(&row.payload_json, &request.payload_json)
                     && row.revision_kind == request.revision_kind
                     && row.parser_version == request.parser_version
                     && row.provider_kind == request.provider_kind
@@ -884,9 +1010,16 @@ mod tests {
         let draft = DraftStructureV1::new(DraftId::new(), SourceId::new(), DraftRevisionId::new());
         let mut same = draft.clone();
         same.revision_id = DraftRevisionId::new();
-        assert!(same_payload_ignoring_revision_id(&draft, &same));
+        same.revision = 2;
+        assert!(semantic_payload_json_equal(
+            &canonical_json(&draft).unwrap(),
+            &canonical_json(&same).unwrap()
+        ));
         same.metadata.insert("edited".to_owned(), "yes".to_owned());
-        assert!(!same_payload_ignoring_revision_id(&draft, &same));
+        assert!(!semantic_payload_json_equal(
+            &canonical_json(&draft).unwrap(),
+            &canonical_json(&same).unwrap()
+        ));
     }
 
     #[tokio::test]
@@ -932,6 +1065,9 @@ mod tests {
             .unwrap();
         assert_eq!(created.metadata.revision, 1);
         assert!(created.metadata.summary_json.contains("episodes"));
+        assert!(created.metadata.summary_json.contains("episodeCount"));
+        assert!(created.metadata.summary_json.contains("diagnosticCounts"));
+        assert!(created.metadata.summary_json.contains("reviewCounts"));
 
         let appended = service
             .append_revision(AppendScriptDraftRevisionRequest {
@@ -993,7 +1129,7 @@ mod tests {
                 project_id: "prj_a".to_owned(),
                 draft_id: created.metadata.draft_id,
                 expected_revision: 1,
-                structure,
+                structure: created.structure,
                 revision_kind: DraftRevisionKind::Review,
                 parser_version: "test-parser".to_owned(),
                 provider_metadata: None,

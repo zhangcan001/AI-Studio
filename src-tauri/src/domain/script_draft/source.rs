@@ -121,7 +121,7 @@ impl SourceSpanError {
     pub const fn code(self) -> &'static str {
         match self {
             Self::InvalidRange => "DRAFT_SOURCE_SPAN_INVALID",
-            Self::OutOfBounds => "SOURCE_SPAN_OUT_OF_BOUNDS",
+            Self::OutOfBounds => "DRAFT_SOURCE_SPAN_INVALID",
             Self::InvalidUtf8 => "INVALID_SOURCE_UTF8",
             Self::NotUtf8Boundary => "DRAFT_SOURCE_SPAN_INVALID",
             Self::InvalidLineRange => "DRAFT_SOURCE_SPAN_INVALID",

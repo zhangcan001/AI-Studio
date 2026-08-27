@@ -4,10 +4,11 @@ use crate::domain::script_draft::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::fmt;
 
 /// A complete immutable revision. Payload is available only through an
 /// explicit revision lookup, never through list/history metadata.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ScriptDraftRevisionRecord {
     pub id: DraftRevisionId,
     pub draft_id: DraftId,
@@ -26,6 +27,31 @@ pub struct ScriptDraftRevisionRecord {
     pub summary_json: String,
     pub payload_json: String,
     pub created_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for ScriptDraftRevisionRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ScriptDraftRevisionRecord")
+            .field("id", &self.id)
+            .field("draft_id", &self.draft_id)
+            .field("project_id", &self.project_id)
+            .field("source_id", &self.source_id)
+            .field("revision", &self.revision)
+            .field("previous_revision_id", &self.previous_revision_id)
+            .field("schema_version", &self.schema_version)
+            .field("revision_kind", &self.revision_kind)
+            .field("parser_version", &self.parser_version)
+            .field("contract_version", &self.contract_version)
+            .field("provider_kind", &self.provider_kind)
+            .field("provider_model", &self.provider_model)
+            .field("provider_metadata", &self.provider_metadata)
+            .field("payload_checksum", &self.payload_checksum)
+            .field("summary_json", &self.summary_json)
+            .field("payload_json", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,7 +97,7 @@ impl From<ScriptDraftRevisionRecord> for ScriptDraftRevisionMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct InsertScriptDraftRevision {
     pub id: DraftRevisionId,
     pub draft_id: DraftId,
@@ -89,6 +115,30 @@ pub struct InsertScriptDraftRevision {
     pub summary_json: String,
     pub payload_json: String,
     pub created_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for InsertScriptDraftRevision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("InsertScriptDraftRevision")
+            .field("id", &self.id)
+            .field("draft_id", &self.draft_id)
+            .field("project_id", &self.project_id)
+            .field("source_id", &self.source_id)
+            .field("expected_revision", &self.expected_revision)
+            .field("schema_version", &self.schema_version)
+            .field("revision_kind", &self.revision_kind)
+            .field("parser_version", &self.parser_version)
+            .field("contract_version", &self.contract_version)
+            .field("provider_kind", &self.provider_kind)
+            .field("provider_model", &self.provider_model)
+            .field("provider_metadata", &self.provider_metadata)
+            .field("payload_checksum", &self.payload_checksum)
+            .field("summary_json", &self.summary_json)
+            .field("payload_json", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

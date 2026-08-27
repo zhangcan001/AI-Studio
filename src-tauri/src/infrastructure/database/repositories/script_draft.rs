@@ -101,11 +101,27 @@ impl ScriptDraftRepository for SqliteScriptDraftRepository {
             ));
         }
 
+        let payload_revision_id = payload_revision_id(&request.payload_json)?;
+        if payload_revision_id.as_deref() != Some(request.id.as_str()) {
+            return Err(RepositoryError::integrity("DRAFT_REVISION_ID_MISMATCH"));
+        }
+
         if let Some(latest) = latest {
             let latest_metadata = latest.try_into_metadata()?;
+            if latest_metadata.source_id != request.source_id {
+                return Err(RepositoryError::integrity("DRAFT_SOURCE_ID_MISMATCH"));
+            }
+            let latest_payload_json: String = sqlx::query_scalar(
+                "SELECT payload_json FROM script_import_drafts WHERE id = ? LIMIT 1",
+            )
+            .bind(latest_metadata.id.as_str())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
             if same_semantic_revision(
                 &latest_metadata,
                 &request,
+                &latest_payload_json,
                 provider_metadata_json.as_deref(),
             ) {
                 transaction.commit().await.map_err(map_sqlx_error)?;
@@ -113,12 +129,13 @@ impl ScriptDraftRepository for SqliteScriptDraftRepository {
             }
         }
 
-        let payload_revision_id = payload_revision_id(&request.payload_json)?;
-        if payload_revision_id.as_deref() != Some(request.id.as_str()) {
-            return Err(RepositoryError::integrity("DRAFT_REVISION_ID_MISMATCH"));
-        }
-
         let revision = latest_revision.map(|value| value + 1).unwrap_or(1);
+        let payload_revision = serde_json::from_str::<Value>(&request.payload_json)
+            .ok()
+            .and_then(|value| value.get("revision").and_then(Value::as_u64));
+        if payload_revision != Some(revision as u64) {
+            return Err(RepositoryError::integrity("DRAFT_REVISION_MISMATCH"));
+        }
         let previous_revision_id: Option<String> = if revision == 1 {
             None
         } else {
@@ -417,6 +434,7 @@ fn validate_checksum(value: &str) -> Result<(), RepositoryError> {
 fn same_semantic_revision(
     latest: &ScriptDraftRevisionMetadata,
     request: &InsertScriptDraftRevision,
+    latest_payload_json: &str,
     provider_metadata_json: Option<&str>,
 ) -> bool {
     latest.draft_id == request.draft_id
@@ -427,9 +445,25 @@ fn same_semantic_revision(
         && latest.contract_version == request.contract_version
         && latest.provider_kind == request.provider_kind
         && latest.provider_model == request.provider_model
-        && latest.payload_checksum == request.payload_checksum
         && latest.summary_json == request.summary_json
         && provider_json(latest.provider_metadata.as_ref()).as_deref() == provider_metadata_json
+        && semantic_payload_equal(latest_payload_json, &request.payload_json)
+}
+
+fn semantic_payload_equal(left: &str, right: &str) -> bool {
+    let Ok(mut left) = serde_json::from_str::<Value>(left) else {
+        return false;
+    };
+    let Ok(mut right) = serde_json::from_str::<Value>(right) else {
+        return false;
+    };
+    for value in [&mut left, &mut right] {
+        if let Some(object) = value.as_object_mut() {
+            object.remove("revision");
+            object.remove("revisionId");
+        }
+    }
+    left == right
 }
 
 fn provider_json(value: Option<&ProviderMetadata>) -> Option<String> {
@@ -818,8 +852,9 @@ mod tests {
         assert!(first.previous_revision_id.is_none());
 
         let revision_two_id = DraftRevisionId::new();
-        let structure_two =
+        let mut structure_two =
             DraftStructureV1::new(draft_id.clone(), source_id.clone(), revision_two_id.clone());
+        structure_two.revision = 2;
         let second = repository
             .insert_revision(request(
                 draft_id.clone(),
@@ -873,14 +908,17 @@ mod tests {
             .expect_err("stale append should conflict");
         assert!(stale.to_string().contains("DRAFT_REVISION_CONFLICT"));
 
+        let no_op_revision_id = DraftRevisionId::new();
+        let mut no_op_structure = structure_two.clone();
+        no_op_structure.revision_id = no_op_revision_id.clone();
         let no_op = repository
             .insert_revision(request(
                 draft_id.clone(),
                 source_id,
-                DraftRevisionId::new(),
+                no_op_revision_id,
                 Some(2),
                 DraftRevisionKind::UserEdit,
-                &structure_two,
+                &no_op_structure,
             ))
             .await
             .expect("same payload should be a no-op");

@@ -56,12 +56,12 @@ projects
 
 ## 5000-node benchmark
 
-本次实测：payload `3,565,644` bytes；serialize `177 ms`；validate `5 ms`；hash `223 ms`；SQLite insert `262 ms`；load `5 ms`；deserialize `65 ms`；load + deserialize `70 ms`。均低于门禁（64 MiB、2000 ms），因此 `DRAFT_NODE_INDEX=NOT_NEEDED_V1`，没有增加索引表。
+本次实测：payload `3,528,684` bytes；serialize `176 ms`；validate `5 ms`；hash `233 ms`；SQLite insert `281 ms`；load `5 ms`；deserialize `64 ms`；load + deserialize `69 ms`。均低于门禁（64 MiB、2000 ms），因此 `DRAFT_NODE_INDEX=NOT_NEEDED_V1`，没有增加索引表。
 
 ## 验证与后续
 
 验证范围包括 domain canonical/hash/span/capacity、source dedupe/isolation、revision chain/conflict/no-op、SQLite roundtrip、Backup 15 roundtrip、旧备份兼容、Manifest 2 exclusion、formal side-effect sentinel、Rust/frontend regression、build 和 Source-only CI。
 
-最终门禁：Rust `cargo test` 为 `821 passed / 0 failed / 1 ignored`（lib `660 / 0 / 1`，integration `161 / 0 / 1`）；`cargo check --tests`、rustfmt 和 `git diff --check` 通过。前端 `pnpm test` 为 `92 files / 350 tests / 0 failed`，TypeScript 检查和 production build 通过。
+最终门禁：Rust `cargo test` 为 `824 passed / 0 failed / 2 ignored`（lib `660 / 0 / 1`，integration `164 / 0 / 1`）；`cargo check --tests`、rustfmt 和 `git diff --check` 通过。前端 `pnpm test` 为 `92 files / 350 tests / 0 failed`，TypeScript 检查和 production build 通过。
 
 DEV-058 下一步是 Script Import Parser：基于本 DEV 的 `ScriptSource`、`DraftStructureV1` 和 immutable revision 实现 TXT/Markdown/版本化 JSON/保守小说解析、source blocks、spans 和 diagnostics。仍必须保持零 formal writes、零 Profile create、零 Queue、零 Comfy、零真实 LLM。

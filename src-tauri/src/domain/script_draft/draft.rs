@@ -80,7 +80,10 @@ pub enum DraftNodeOrigin {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DraftReviewState {
+    #[serde(rename = "PENDING")]
+    Pending,
     AiSuggested,
+    #[serde(rename = "PENDING_REVIEW")]
     PendingReview,
     Accepted,
     Rejected,
@@ -101,19 +104,20 @@ pub enum EntityType {
 #[serde(rename_all = "camelCase")]
 pub struct EntityMention {
     /// Stable within the revision payload; this is not a formal Profile ID.
-    pub id: String,
+    pub mention_id: String,
     pub entity_type: EntityType,
-    pub text: String,
-    pub normalized_text: String,
+    pub raw_text: String,
+    #[serde(default)]
+    pub normalized_text: Option<String>,
+    #[serde(default)]
+    pub draft_node_id: Option<DraftNodeId>,
     #[serde(default)]
     pub source_spans: Vec<SourceSpan>,
+    pub origin: DraftNodeOrigin,
+    #[serde(default)]
     pub confidence: Option<f32>,
     #[serde(default)]
-    pub candidate_profile_ids: Vec<String>,
-    #[serde(default)]
     pub evidence: Vec<String>,
-    pub selected_profile_id: Option<String>,
-    pub confirmed: bool,
 }
 
 impl Eq for EntityMention {}
@@ -122,9 +126,11 @@ impl Eq for EntityMention {}
 #[serde(rename_all = "camelCase")]
 pub struct DraftEpisode {
     pub draft_node_id: DraftNodeId,
+    #[serde(default)]
     pub parent_draft_node_id: Option<DraftNodeId>,
     pub ordinal: u32,
     pub name: String,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub source_spans: Vec<SourceSpan>,
@@ -132,7 +138,9 @@ pub struct DraftEpisode {
     pub diagnostics: Vec<Diagnostic>,
     pub review_state: DraftReviewState,
     pub origin: DraftNodeOrigin,
+    #[serde(default)]
     pub original_suggestion: Option<String>,
+    #[serde(default)]
     pub current_value: Option<String>,
     #[serde(default)]
     pub scenes: Vec<DraftScene>,
@@ -144,9 +152,11 @@ impl Eq for DraftEpisode {}
 #[serde(rename_all = "camelCase")]
 pub struct DraftScene {
     pub draft_node_id: DraftNodeId,
+    #[serde(default)]
     pub parent_draft_node_id: Option<DraftNodeId>,
     pub ordinal: u32,
     pub name: String,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub source_spans: Vec<SourceSpan>,
@@ -154,9 +164,14 @@ pub struct DraftScene {
     pub diagnostics: Vec<Diagnostic>,
     pub review_state: DraftReviewState,
     pub origin: DraftNodeOrigin,
+    #[serde(default)]
     pub original_suggestion: Option<String>,
+    #[serde(default)]
     pub current_value: Option<String>,
-    pub scene_mention: Option<EntityMention>,
+    #[serde(default)]
+    pub location_suggestion: Option<String>,
+    #[serde(default)]
+    pub time_suggestion: Option<String>,
     #[serde(default)]
     pub shots: Vec<DraftShot>,
 }
@@ -167,23 +182,34 @@ impl Eq for DraftScene {}
 #[serde(rename_all = "camelCase")]
 pub struct DraftShot {
     pub draft_node_id: DraftNodeId,
+    #[serde(default)]
     pub parent_draft_node_id: Option<DraftNodeId>,
     pub parent_scene_draft_id: DraftNodeId,
     pub ordinal: u32,
     pub name: String,
+    #[serde(default)]
     pub purpose: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub character_mentions: Vec<EntityMention>,
-    pub scene_mention: Option<EntityMention>,
+    pub characters: Vec<EntityMention>,
     #[serde(default)]
-    pub prop_mentions: Vec<EntityMention>,
+    pub scene_suggestion: Option<String>,
+    #[serde(default)]
+    pub props: Vec<EntityMention>,
+    #[serde(default)]
     pub action: Option<String>,
-    pub dialogue: Option<String>,
+    #[serde(default)]
+    pub dialogue: Vec<DraftDialogue>,
+    #[serde(default)]
     pub camera_suggestion: Option<String>,
+    #[serde(default)]
     pub lighting_suggestion: Option<String>,
+    #[serde(default)]
     pub duration_suggestion: Option<f32>,
+    #[serde(default)]
     pub image_prompt_draft: Option<String>,
+    #[serde(default)]
     pub video_prompt_draft: Option<String>,
     #[serde(default)]
     pub source_spans: Vec<SourceSpan>,
@@ -191,7 +217,9 @@ pub struct DraftShot {
     pub diagnostics: Vec<Diagnostic>,
     pub review_state: DraftReviewState,
     pub origin: DraftNodeOrigin,
+    #[serde(default)]
     pub original_suggestion: Option<String>,
+    #[serde(default)]
     pub current_value: Option<String>,
 }
 
@@ -204,6 +232,20 @@ pub type DraftEpisodeV1 = DraftEpisode;
 pub type DraftSceneV1 = DraftScene;
 pub type DraftShotV1 = DraftShot;
 
+pub type DraftEntityMention = EntityMention;
+pub type DraftOrigin = DraftNodeOrigin;
+pub type DraftEntityType = EntityType;
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftDialogue {
+    #[serde(default)]
+    pub speaker: Option<String>,
+    pub text: String,
+    #[serde(default)]
+    pub source_spans: Vec<SourceSpan>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftStructureV1 {
@@ -211,14 +253,24 @@ pub struct DraftStructureV1 {
     pub contract_version: u32,
     pub draft_id: DraftId,
     pub source_id: SourceId,
+    #[serde(default = "default_structure_revision")]
+    pub revision: u32,
+    #[serde(default)]
+    pub title: Option<String>,
     pub revision_id: DraftRevisionId,
     pub status: DraftStatus,
     #[serde(default)]
     pub episodes: Vec<DraftEpisode>,
     #[serde(default)]
+    pub mentions: Vec<EntityMention>,
+    #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
     #[serde(default)]
     pub metadata: BTreeMap<String, String>,
+}
+
+const fn default_structure_revision() -> u32 {
+    1
 }
 
 impl Eq for DraftStructureV1 {}
@@ -230,9 +282,12 @@ impl DraftStructureV1 {
             contract_version: DRAFT_CONTRACT_VERSION,
             draft_id,
             source_id,
+            revision: 1,
+            title: None,
             revision_id,
             status: DraftStatus::Draft,
             episodes: Vec::new(),
+            mentions: Vec::new(),
             diagnostics: Vec::new(),
             metadata: BTreeMap::new(),
         }

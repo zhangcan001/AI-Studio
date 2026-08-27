@@ -15,17 +15,17 @@ mod tests;
 
 pub use diagnostic::{
     Diagnostic, DiagnosticSeverity, CODE_DRAFT_CAPACITY_EXCEEDED,
-    CODE_DRAFT_CAPACITY_EXCEEDED as DRAFT_CAPACITY_DIAGNOSTIC, CODE_DUPLICATE_SOURCE_ID,
-    CODE_EMPTY_DRAFT_NODE, CODE_ENCODING_OR_BOM, CODE_INVALID_PARENT, CODE_MISSING_NAME,
-    CODE_PROVIDER_INVALID_JSON, CODE_SOURCE_SPAN_OUT_OF_BOUNDS, CODE_UNCERTAIN_SCENE_BOUNDARY,
-    CODE_UNKNOWN_JSON_SCHEMA, CODE_UNRESOLVED_SPEAKER,
+    CODE_DRAFT_CAPACITY_EXCEEDED as DRAFT_CAPACITY_DIAGNOSTIC, CODE_DRAFT_SOURCE_SPAN_INVALID,
+    CODE_DUPLICATE_SOURCE_ID, CODE_EMPTY_DRAFT_NODE, CODE_ENCODING_OR_BOM, CODE_INVALID_PARENT,
+    CODE_MISSING_NAME, CODE_PROVIDER_INVALID_JSON, CODE_SOURCE_SPAN_OUT_OF_BOUNDS,
+    CODE_UNCERTAIN_SCENE_BOUNDARY, CODE_UNKNOWN_JSON_SCHEMA, CODE_UNRESOLVED_SPEAKER,
 };
 pub use draft::{
-    has_blocking_diagnostics, has_unresolved_nodes, DraftCounts, DraftEpisode, DraftEpisodeV1,
-    DraftNodeOrigin, DraftReviewState, DraftRevision, DraftRevisionKind, DraftRevisionMetadata,
-    DraftScene, DraftSceneV1, DraftShot, DraftShotV1, DraftStatus, DraftStructureV1, EntityMention,
-    EntityType, Episode, Scene, Shot, DRAFT_CONTRACT_VERSION, DRAFT_SCHEMA_VERSION, MAX_EPISODES,
-    MAX_SCENES, MAX_SHOTS,
+    has_blocking_diagnostics, has_unresolved_nodes, DraftCounts, DraftDialogue, DraftEntityMention,
+    DraftEntityType, DraftEpisode, DraftEpisodeV1, DraftNodeOrigin, DraftOrigin, DraftReviewState,
+    DraftRevision, DraftRevisionKind, DraftRevisionMetadata, DraftScene, DraftSceneV1, DraftShot,
+    DraftShotV1, DraftStatus, DraftStructureV1, EntityMention, EntityType, Episode, Scene, Shot,
+    DRAFT_CONTRACT_VERSION, DRAFT_SCHEMA_VERSION, MAX_EPISODES, MAX_SCENES, MAX_SHOTS,
 };
 pub use ids::{
     validate_diagnostic_id, validate_draft_id, validate_draft_node_id, validate_draft_revision_id,

@@ -110,8 +110,16 @@ pub fn validate_structure(
             "this data foundation only creates DRAFT revisions",
         ));
     }
+    if structure.revision == 0 {
+        return Err(DraftValidationError::new(
+            "DRAFT_REVISION_INVALID",
+            "revision",
+            "draft revision must be positive",
+        ));
+    }
 
     let mut node_ids = BTreeSet::new();
+    let mut mention_ids = BTreeSet::new();
     validate_ordinals(
         structure.episodes.iter().map(|episode| episode.ordinal),
         "episodes.ordinal",
@@ -135,10 +143,19 @@ pub fn validate_structure(
         )?;
 
         for scene in &episode.scenes {
-            validate_scene(scene, &episode.draft_node_id, &mut node_ids, raw_source)?;
+            validate_scene(
+                scene,
+                &episode.draft_node_id,
+                &mut node_ids,
+                &mut mention_ids,
+                raw_source,
+            )?;
         }
     }
 
+    for mention in &structure.mentions {
+        validate_mention(mention, &mut mention_ids, &node_ids, raw_source, "mentions")?;
+    }
     validate_diagnostics(&structure.diagnostics, raw_source, &node_ids)
 }
 
@@ -263,6 +280,7 @@ fn validate_scene(
     scene: &DraftScene,
     parent_id: &crate::domain::script_draft::DraftNodeId,
     node_ids: &mut BTreeSet<String>,
+    mention_ids: &mut BTreeSet<String>,
     raw_source: &[u8],
 ) -> Result<(), DraftValidationError> {
     validate_node_id(&scene.draft_node_id, node_ids)?;
@@ -278,7 +296,13 @@ fn validate_scene(
     validate_diagnostics(&scene.diagnostics, raw_source, node_ids)?;
     validate_ordinals(scene.shots.iter().map(|shot| shot.ordinal), "shots.ordinal")?;
     for shot in &scene.shots {
-        validate_shot(shot, &scene.draft_node_id, node_ids, raw_source)?;
+        validate_shot(
+            shot,
+            &scene.draft_node_id,
+            node_ids,
+            mention_ids,
+            raw_source,
+        )?;
     }
     Ok(())
 }
@@ -287,6 +311,7 @@ fn validate_shot(
     shot: &DraftShot,
     parent_id: &crate::domain::script_draft::DraftNodeId,
     node_ids: &mut BTreeSet<String>,
+    mention_ids: &mut BTreeSet<String>,
     raw_source: &[u8],
 ) -> Result<(), DraftValidationError> {
     validate_node_id(&shot.draft_node_id, node_ids)?;
@@ -312,41 +337,76 @@ fn validate_shot(
     }
     validate_node_spans(&shot.source_spans, raw_source, "shots.sourceSpans")?;
     validate_diagnostics(&shot.diagnostics, raw_source, node_ids)?;
-    let mut mention_ids = BTreeSet::new();
-    for mention in shot
-        .character_mentions
-        .iter()
-        .chain(shot.prop_mentions.iter())
-        .chain(shot.scene_mention.iter())
-    {
-        if mention.id.trim().is_empty()
-            || !mention_ids.insert(mention.id.as_str())
-            || mention.text.trim().is_empty()
-            || mention.normalized_text.trim().is_empty()
-        {
+    for mention in shot.characters.iter().chain(shot.props.iter()) {
+        validate_mention(mention, mention_ids, node_ids, raw_source, "shots.mentions")?;
+    }
+    for dialogue in &shot.dialogue {
+        if dialogue.text.trim().is_empty() {
             return Err(DraftValidationError::new(
-                "INVALID_ENTITY_MENTION",
-                "shots.mentions",
-                "entity mention text is required",
-            ));
-        }
-        if mention
-            .confidence
-            .is_some_and(|confidence| !confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
-        {
-            return Err(DraftValidationError::new(
-                "INVALID_ENTITY_MENTION_CONFIDENCE",
-                "shots.mentions.confidence",
-                "confidence must be between zero and one",
+                "INVALID_DIALOGUE",
+                "shots.dialogue.text",
+                "dialogue text is required",
             ));
         }
         validate_node_spans(
-            &mention.source_spans,
+            &dialogue.source_spans,
             raw_source,
-            "shots.mentions.sourceSpans",
+            "shots.dialogue.sourceSpans",
         )?;
     }
     Ok(())
+}
+
+fn validate_mention(
+    mention: &crate::domain::script_draft::EntityMention,
+    mention_ids: &mut BTreeSet<String>,
+    node_ids: &BTreeSet<String>,
+    raw_source: &[u8],
+    field: &'static str,
+) -> Result<(), DraftValidationError> {
+    if mention.mention_id.trim().is_empty()
+        || !mention_ids.insert(mention.mention_id.clone())
+        || mention.raw_text.trim().is_empty()
+    {
+        return Err(DraftValidationError::new(
+            "INVALID_ENTITY_MENTION",
+            field,
+            "entity mention id and raw text are required",
+        ));
+    }
+    if mention
+        .normalized_text
+        .as_deref()
+        .is_some_and(|text| text.trim().is_empty())
+    {
+        return Err(DraftValidationError::new(
+            "INVALID_ENTITY_MENTION",
+            field,
+            "normalized entity mention text cannot be empty",
+        ));
+    }
+    if mention
+        .draft_node_id
+        .as_ref()
+        .is_some_and(|id| !node_ids.contains(id.as_str()))
+    {
+        return Err(DraftValidationError::new(
+            "UNKNOWN_DRAFT_NODE_ID",
+            field,
+            "entity mention node reference is unknown",
+        ));
+    }
+    if mention
+        .confidence
+        .is_some_and(|confidence| !confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
+    {
+        return Err(DraftValidationError::new(
+            "INVALID_ENTITY_MENTION_CONFIDENCE",
+            field,
+            "confidence must be between zero and one",
+        ));
+    }
+    validate_node_spans(&mention.source_spans, raw_source, field)
 }
 
 fn validate_node_id(
