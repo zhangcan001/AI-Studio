@@ -21,6 +21,7 @@ import type {
   H3LocalImportResult,
   H3ProjectSegmentDraft,
 } from "../types/h3LocalImport";
+import type { ProductionPackageInspection } from "../types/productionPackage";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type {
@@ -1436,6 +1437,52 @@ export function updateH3ProjectSegmentDraft(
   request: H3ProjectSegmentDraft,
 ): Promise<H3LocalImportInspection> {
   return invoke<H3LocalImportInspection>("h3_local_import_update_project_segment_draft", { request });
+}
+
+export type ProductionPackageInspectionResult = ProductionPackageInspection & {
+  inspectionId: string;
+};
+
+export interface ProductionPackageItemMapping {
+  packageItemId: string;
+  batchId: string;
+  batchItemId: string;
+  importedAssetIds: string[];
+}
+
+export interface ProductionPackageBatchMapping {
+  batchId: string;
+  batchName: string;
+  itemCount: number;
+  itemMappings: ProductionPackageItemMapping[];
+}
+
+export interface ProductionPackageCreateBatchesResult {
+  packageName: string;
+  batchCount: number;
+  itemCount: number;
+  autoStarted: boolean;
+  batches: ProductionPackageBatchMapping[];
+  itemMappings: ProductionPackageItemMapping[];
+  warnings: Array<{ code: string; message: string; severity: string; field?: string | null }>;
+}
+
+export function inspectProductionPackage(
+  projectId: string,
+  packageRoot: string,
+): Promise<ProductionPackageInspectionResult> {
+  return invoke<ProductionPackageInspectionResult>("production_package_inspect", {
+    request: { projectId, packageRoot },
+  });
+}
+
+export function createProductionPackageBatches(
+  inspectionId: string,
+  selectedItemIds: string[],
+): Promise<ProductionPackageCreateBatchesResult> {
+  return invoke<ProductionPackageCreateBatchesResult>("production_package_create_batches", {
+    request: { inspectionId, selectedItemIds },
+  });
 }
 
 export function taskHistoryPage(

@@ -20,6 +20,7 @@ use crate::application::production_audit_service::ProductionAuditService;
 use crate::application::production_batch_runbook_service::ProductionBatchRunbookService;
 use crate::application::production_item_review_service::ProductionItemReviewService;
 use crate::application::production_orchestrator_service::ProductionOrchestratorService;
+use crate::application::production_package_service::ProductionPackageService;
 use crate::application::production_preparation_service::ProductionPreparationService;
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::production_structure_service::ProductionStructureService;
@@ -82,6 +83,7 @@ pub struct AppState {
     pub task_history_service: Arc<TaskHistoryService>,
     pub source_asset_import_service: Arc<SourceAssetImportService>,
     pub h3_local_import_service: Arc<H3LocalImportService>,
+    pub production_package_service: Arc<ProductionPackageService>,
     pub task_cancellation_service: Arc<TaskCancellationService>,
     pub task_recovery_service: Arc<TaskRecoveryService>,
     pub project_service: Arc<ProjectService>,
@@ -140,6 +142,7 @@ impl AppState {
         task_history_service: Arc<TaskHistoryService>,
         source_asset_import_service: Arc<SourceAssetImportService>,
         h3_local_import_service: Arc<H3LocalImportService>,
+        production_package_service: Arc<ProductionPackageService>,
         task_cancellation_service: Arc<TaskCancellationService>,
         task_recovery_service: Arc<TaskRecoveryService>,
         project_service: Arc<ProjectService>,
@@ -196,6 +199,7 @@ impl AppState {
             task_history_service,
             source_asset_import_service,
             h3_local_import_service,
+            production_package_service,
             task_cancellation_service,
             task_recovery_service,
             project_service,

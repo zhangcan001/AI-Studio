@@ -49,6 +49,8 @@ use application::{
     production_batch_runbook_service::ProductionBatchRunbookService,
     production_item_review_service::ProductionItemReviewService,
     production_orchestrator_service::ProductionOrchestratorService,
+    production_package_inspector::ProductionPackageInspector,
+    production_package_service::{ProductionPackageH3Config, ProductionPackageService},
     production_preparation_service::ProductionPreparationService,
     production_queue_service::ProductionQueueService,
     production_structure_service::ProductionStructureService,
@@ -581,6 +583,44 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_queue_service.clone(),
                 clock.clone(),
             ));
+            let package_generation_definitions = tauri::async_runtime::block_on(
+                definition_repository.list_available(),
+            )
+            .unwrap_or_default();
+            let default_h3_definition = package_generation_definitions
+                .iter()
+                .find(|definition| definition.mode == "fl2va")
+                .or_else(|| {
+                    package_generation_definitions
+                        .iter()
+                        .find(|definition| definition.category == "video")
+                });
+            let ref2va_definition = package_generation_definitions
+                .iter()
+                .find(|definition| definition.mode == "ref2va");
+            let package_h3_config = ProductionPackageH3Config {
+                workflow_version_id: default_h3_definition
+                    .map(|definition| definition.workflow_version_id.clone())
+                    .unwrap_or_else(|| "unconfigured-h3-workflow".to_owned()),
+                recipe_id: default_h3_definition
+                    .map(|definition| definition.recipe_id.clone())
+                    .unwrap_or_else(|| "unconfigured-h3-recipe".to_owned()),
+                fl2va_workflow_version_id: None,
+                fl2va_recipe_id: None,
+                ref2va_workflow_version_id: ref2va_definition
+                    .map(|definition| definition.workflow_version_id.clone()),
+                ref2va_recipe_id: ref2va_definition.map(|definition| definition.recipe_id.clone()),
+                quality_profile: None,
+                quality_recipes: Vec::new(),
+            };
+            let production_package_service = Arc::new(ProductionPackageService::new(
+                ProductionPackageInspector::new(),
+                h3_local_import_service.clone(),
+                source_asset_import_service.clone(),
+                production_queue_service.clone(),
+                package_h3_config,
+                clock.clone(),
+            ));
             let diagnostics_service = Arc::new(DiagnosticsService::new(
                 database_pool.clone(),
                 task_repository.clone(),
@@ -754,6 +794,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_history_service,
                 source_asset_import_service,
                 h3_local_import_service,
+                production_package_service,
                 task_cancellation_service,
                 task_recovery_service,
                 project_service,
@@ -975,6 +1016,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::h3_local_import::h3_local_import_rescan,
             commands::h3_local_import::h3_local_import_commit,
             commands::h3_local_import::h3_local_import_update_project_segment_draft,
+            commands::production_package::production_package_inspect,
+            commands::production_package::production_package_create_batches,
             commands::production_queue::production_queue_create,
             commands::production_queue::production_queue_list,
             commands::production_queue::production_queue_overview,

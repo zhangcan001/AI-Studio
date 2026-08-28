@@ -1,6 +1,6 @@
-# AI Studio 0.8.0 Roadmap：Script → Storyboard Draft → Narrative Production V2
+# AI Studio 0.8.0 Roadmap：External Production Package → Batch Video Production
 
-状态：DEV-057 Data Foundation PASS；DEV-058 Script Import Parser PASS；DEV-059 NEXT
+状态：DEV-057 Data Foundation PASS；DEV-058 Script Import Parser PASS（可选能力）；DEV-059 ACTIVE
 
 内部代号：Narrative Preproduction V2
 稳定基线：AI Studio 0.7.0 — Narrative Production V1
@@ -9,6 +9,29 @@
 `v0.7.0` peeled SHA：`e4a643d4b31329e291c2fb40002f1554e8a1ab34`
 
 本路线图来自 DEV-056 对实际仓库的四路只读审计。0.7.0 的正式生产能力已经存在；0.8.0 的首要缺口是把原始脚本变成可人工审阅的 Draft，而不是再造一个生成系统。DEV-057 已冻结并实现数据基础；解析器从 DEV-058 开始。
+
+## 2026-08 Product Direction Pivot
+
+AI Studio 0.8.0 的核心定位冻结为 **AI 视频批量生产工作台**：外部智能体负责文本、图片和视频 Prompt，AI Studio 负责读取、校验、预览、导入现有 ProductionQueue，并由用户手动 Start 进入既有 H3/ComfyUI 链路。DEV-058 Script Import Parser 保留为 `OPTIONAL SCRIPT IMPORT CAPABILITY`，不再是生产主路径；不删除、不回滚、不重构该能力。
+
+原 Narrative Preproduction 路线保留为历史记录，但不再是 0.8.0 核心路线：
+
+| 旧路线 | 状态 |
+| --- | --- |
+| DEV-059 Entity Match | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+| DEV-060 Storyboard Draft | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+| DEV-061 Draft Review | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+| DEV-062 Promote | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+| DEV-063 Consistency | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+| DEV-064 Integration | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+| DEV-065 Release | SUPERSEDED BY PRODUCTION PACKAGE ROUTE |
+
+新的核心路线为：
+
+1. **DEV-059 External Production Package V1** — 外部生产包校验、预览与批量导入。
+2. **DEV-060 Production Package Workspace** — 文件夹入口、编辑和生产工作区。
+3. **DEV-061 Bulk Production Hardening** — 批量性能、恢复与审计硬化。
+4. **DEV-062 AI Studio 0.8.0 Release Gate** — 发布门禁与兼容性验收。
 
 ## 1. 目标与不变的执行边界
 
@@ -235,6 +258,6 @@ DEV-057
 
 ## 8. 下一步
 
-当前任务：**DEV-059 — Entity Match + Profile Suggestions**。
+当前任务：**DEV-059 — External Production Package V1**。
 
-DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略。DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects；不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。下一步是 **DEV-059 — Entity Match + Profile Suggestions**。
+DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略。DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects；不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。下一步是 **DEV-060 — Production Package Workspace**。
