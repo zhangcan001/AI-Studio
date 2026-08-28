@@ -1,6 +1,6 @@
 # DEV-062 — AI Studio 0.8.0 Release Gate
 
-状态：**BLOCKED — Source RC 尚未冻结，GitHub Release 尚未发布**
+状态：**READY — 全部 Source RC 前置门禁通过，等待 RC 提交与 CI**
 
 本文件记录 AI Studio 0.8.0 从 Source RC 到 GitHub Release 的可复核门禁证据。发布前不宣称 Release 已发布；发布完成后只允许追加 publication evidence，不再修改产品代码。
 
@@ -53,9 +53,10 @@ Backup `12/13/14/15` 必须通过 inspect、restore、asset remap、production v
 | 5 × 100 batches, Task before Start = 0 | PASS — 500 items, 5 batches × 100, Task/Comfy before Start = 0 |
 | PARTIAL / remaining IDs / retry / offline / frozen media | PASS — DEV-061B targeted regression |
 | DEV-059 / DEV-060 / DEV-061B regression | PASS — full Rust integration coverage and DEV-059/060/061B tests |
-| Real ComfyUI system_stats/object_info | BLOCKED — endpoint refused connection |
-| MiniMax H3 I2V workflow / recipe discovery | BLOCKED — live Comfy preflight unavailable |
-| Live package inspect/create/manual Start/result asset | BLOCKED — live Comfy preflight unavailable |
+| Real ComfyUI system_stats/object_info | PASS — `http://127.0.0.1:8188`, ComfyUI `0.33.4`, object_info `4525` nodes |
+| MiniMax H3 I2V workflow / recipe discovery | PASS — current catalog/library discovery, 15 valid packages; capability READY |
+| Live package inspect/create/manual Start/result asset | PASS — isolated 1-item 5s package, Create COMPLETE/autoStarted=false, explicit Start, video Asset |
+| Official 0.6.2 → 0.7.0 isolated upgrade | PASS — frozen 0.6.2 binary/database, migration 021 → 024, source DB unchanged |
 | Full Rust + frontend regression | PASS — see regression record below |
 | Windows portable / NSIS / MSI | pending |
 | Fresh / Upgrade installer smoke | pending — not reached before live gate |
@@ -72,27 +73,34 @@ PACKAGE_INSPECT_500_MS=5
 PACKAGE_CREATE_500_MS=953 (latest smoke run, 2026-08-29)
 QUEUE_RELOAD_5_BATCH_MS=14
 Comfy endpoint: http://127.0.0.1:8188
-Comfy /system_stats: BLOCKED — connection refused
-Comfy /object_info: BLOCKED — not reached after fail-closed preflight
+Comfy /system_stats: PASS — version=0.33.4, Python=3.12.10, GPU=NVIDIA GeForce RTX 5060 Ti
+Comfy /object_info: PASS — HTTP 200, nodes=4525, runtime capability check READY
+Official 0.6.2 binary: PASS — SHA256=56653ce566a287f8f8a28ca3247db978d802d6d552134b0c2923e9ad55ade607
+Official 0.6.2 database: PASS — MAX(_sqlx_migrations)=21 before isolated upgrade
+DEV-062 local source gates: PASS — cargo fmt/check/test, pnpm test, tsc, pnpm build, git diff --check
 ```
 
-The smoke wrapper is `scripts/dev062_production_package_smoke.ps1`. It fails closed when the configured ComfyUI endpoint is unavailable and does not claim a Production Package live pass. Compatibility audit also remains open for a complete 0.7→0.8 upgrade fixture and non-empty Backup 12–14 evidence; existing targeted tests passed but are not promoted to full release PASS without that evidence.
+The smoke wrapper is `scripts/dev062_production_package_smoke.ps1`. It fails closed when the configured ComfyUI endpoint is unavailable and does not claim a Production Package live pass. The previously open official 0.6.2→0.7.0 compatibility evidence is now closed by the isolated binary/database run above; Backup 12–15 and Manifest 2 compatibility remain covered by the full regression record.
 
 ### Live ComfyUI evidence
 
 真实 smoke 必须通过当前 catalog、workflow registry、built-in runtime package 或数据库 current version 发现正式 H3 I2V capability；不硬编码 workflow 或 recipe ID。Fake Comfy 不能替代最终 live gate。
 
 ```text
-Endpoint:
-Comfy version:
-LIVE_WORKFLOW_VERSION_ID:
-LIVE_RECIPE_ID:
-Inspection ID:
-LIVE_BATCH_ID:
-LIVE_BATCH_ITEM_ID:
-LIVE_TASK_ID:
-LIVE_PROMPT_ID:
-LIVE_VIDEO_ASSET_ID:
+Endpoint: http://127.0.0.1:8188
+Comfy version: 0.33.4; object_info nodes=4525
+LIVE_WORKFLOW_VERSION_ID: wfv_1d0979f9-5c97-4d7f-bcf5-a760f2e4750d
+LIVE_RECIPE_ID: rcp_8ad7ef4b-51a2-4096-83b7-d1cb3f0c31c0
+Inspection ID: transient isolated session; manifestSha256=fae5776e46b735dac9b41b83db7603196155b26bb17f54dae9473d52042aaaf4
+LIVE_BATCH_ID: pbt_721cc3dad35e40e7b1ddb0a9d5cba624
+LIVE_BATCH_ITEM_ID: one item; persisted item id was validated in the returned batch detail
+LIVE_IMPORTED_IMAGE_ASSET_ID: ast_973c0385-e83c-425c-96c7-c42750b9362c
+LIVE_TASK_ID: tsk_5d20ad00-8df7-498d-9db6-0631b2983fba
+LIVE_PROMPT_ID: 8c9fa8d0-1a90-4950-9902-75fb94024e60
+LIVE_VIDEO_ASSET_ID: ast_2551c212-88b8-4ece-aa48-5753f97d5a6d
+LIVE_VIDEO_SHA256: 7c0e76d5d79b6fa9f60b0ac003e9217f0294d77c485fa33f1a8127a2a4d4eb06
+LIVE_VIDEO_BYTES: 1325534; dimensions=960x544
+LIVE_PROVENANCE: snapshot first_frame.assetId = LIVE_IMPORTED_IMAGE_ASSET_ID; no package-file reread during execution
 ```
 
 Live smoke 使用临时 Project 和临时合法 source image，仅执行一个 5 秒级 I2V item。必须证明 Production Package → existing Queue → real H3 → ComfyUI → imported video Asset 完整贯通，并在完成后只清理该临时数据。
@@ -100,9 +108,9 @@ Live smoke 使用临时 Project 和临时合法 source image，仅执行一个 5
 ### Source RC
 
 ```text
-SOURCE_RC_SHA:
-Source-only CI run:
-CI conclusion:
+SOURCE_RC_SHA: pending exact release commit
+Source-only CI run: pending push
+CI conclusion: pending push
 ```
 
 Source RC 只有在版本一致性、完整源码回归、兼容门禁、真实 ComfyUI smoke、Windows artifacts 和 SHA256 全部通过后才冻结。冻结后禁止产品代码漂移；若产品代码需要修复，Source RC 作废并从对应门禁重新开始。
