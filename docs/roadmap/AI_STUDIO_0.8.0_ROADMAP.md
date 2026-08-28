@@ -1,6 +1,6 @@
 # AI Studio 0.8.0 Roadmap：External Production Package → Batch Video Production
 
-状态：DEV-057 Data Foundation PASS（可选能力）；DEV-058 Script Import Parser PASS（可选能力）；DEV-059 PASS；DEV-060 PASS；DEV-061 NEXT；DEV-062 PLANNED
+状态：DEV-057 Data Foundation PASS（可选能力）；DEV-058 Script Import Parser PASS（可选能力）；DEV-059 PASS；DEV-060 PASS；DEV-061 ✅ Complete；DEV-062 PLANNED
 
 内部代号：Narrative Preproduction V2
 稳定基线：AI Studio 0.7.0 — Narrative Production V1
@@ -30,7 +30,7 @@ AI Studio 0.8.0 的核心定位冻结为 **AI 视频批量生产工作台**：�
 
 1. **DEV-059 External Production Package V1** — 外部生产包校验、预览与批量导入（PASS）。
 2. **DEV-060 Production Package Workspace** — 文件夹入口、编辑和生产工作区（PASS）。
-3. **DEV-061 Bulk Production Hardening** — 批量性能、恢复与审计硬化（NEXT）。
+3. **DEV-061 Bulk Production Hardening** — 项目级批量导入预检、确认写入与错误隔离（✅ Complete）。
 4. **DEV-062 AI Studio 0.8.0 Release Gate** — 发布门禁与兼容性验收（PLANNED）。
 
 ## 1. 目标与不变的执行边界
@@ -258,6 +258,6 @@ DEV-057
 
 ## 8. 下一步
 
-当前任务：**DEV-061 — Bulk Production Hardening**。
+当前任务：**DEV-061 — Bulk Production Hardening（✅ Complete）**。
 
-DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略；DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects，均为可选能力。DEV-059 与 DEV-060 已完成外部生产包 V1 和批量视频生产工作区，并保持不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。下一步是 **DEV-061 — Bulk Production Hardening**，随后进入 **DEV-062 — AI Studio 0.8.0 Release Gate**。
+DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略；DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects，均为可选能力。DEV-059 与 DEV-060 已完成外部生产包 V1 和批量视频生产工作区，并保持不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。DEV-061 已完成项目级镜头批量导入预检工作区：复用现有 JSON/TSV preview 与原子 CREATE ONLY commit，未新增通用实体导入系统。下一步是 **DEV-062 — AI Studio 0.8.0 Release Gate**。

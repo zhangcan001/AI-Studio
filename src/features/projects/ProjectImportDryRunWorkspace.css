@@ -1,0 +1,48 @@
+.project-import-workspace { display: grid; gap: 16px; min-width: 0; }
+.project-import-file-card, .project-import-summary, .project-import-rows, .project-import-issues, .project-import-dry-run-card, .project-import-success { display: grid; gap: 12px; min-width: 0; padding: 18px; border: 1px solid var(--ux-border, #31425d); border-radius: var(--ux-radius-md, 12px); background: rgb(9 20 35 / 78%); }
+.project-import-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
+.project-import-card-heading h3 { margin: 4px 0 0; }
+.project-import-file-picker { display: grid; gap: 8px; padding: 16px; border: 1px dashed #52729f; border-radius: 10px; color: var(--ux-text, #e7edf8); background: rgb(22 37 61 / 58%); cursor: pointer; }
+.project-import-file-picker span { font-weight: 700; }
+.project-import-file-picker input { min-width: 0; color: var(--ux-muted, #a9b6ca); }
+.project-import-help, .project-import-dry-run-card p, .project-import-success p, .project-import-no-issues { margin: 0; color: var(--ux-muted, #a9b6ca); }
+.project-import-file-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.project-import-file-meta div { min-width: 0; padding: 10px; border-radius: 8px; background: rgb(20 33 55 / 64%); }
+.project-import-file-meta dt { color: var(--ux-muted, #a9b6ca); font-size: 0.75rem; }
+.project-import-file-meta dd { min-width: 0; margin: 4px 0 0; color: var(--ux-text, #e7edf8); overflow-wrap: anywhere; }
+.project-import-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-import-stage, .project-import-ready, .project-import-blocked { padding: 5px 9px; border-radius: 999px; font-size: 0.76rem; font-weight: 700; }
+.project-import-stage-parsed, .project-import-stage-idle { color: #b9c8df; background: #263b5c; }
+.project-import-stage-ready, .project-import-ready { color: #b9f5cd; background: #1d5535; }
+.project-import-stage-failed, .project-import-stage-validated, .project-import-blocked { color: #ffd2b8; background: #5b2b31; }
+.project-import-stage-parsing, .project-import-stage-validating, .project-import-stage-executing { color: #ffe3a6; background: #59431e; }
+.project-import-stage-completed { color: #cdeaff; background: #244b70; }
+.project-import-summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.project-import-summary-grid span { display: grid; gap: 5px; min-width: 0; padding: 12px; border-radius: 8px; background: rgb(20 33 55 / 64%); }
+.project-import-summary-grid small { color: var(--ux-muted, #a9b6ca); }
+.project-import-summary-grid strong { color: var(--ux-text, #e7edf8); font-size: 1.25rem; }
+.project-import-table-wrap { min-width: 0; overflow-x: auto; }
+.project-import-table-wrap table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.project-import-table-wrap th, .project-import-table-wrap td { padding: 9px 10px; border-bottom: 1px solid var(--ux-border, #31425d); text-align: left; vertical-align: top; }
+.project-import-table-wrap th { color: var(--ux-muted, #a9b6ca); font-size: 0.75rem; white-space: nowrap; }
+.project-import-table-wrap td { color: var(--ux-text, #e7edf8); font-size: 0.82rem; max-width: 260px; overflow-wrap: anywhere; }
+.project-import-issues ul { display: grid; gap: 8px; max-height: 420px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.project-import-issue { padding: 10px 12px; border-left: 3px solid #e7a44c; border-radius: 7px; background: rgb(29 42 63 / 72%); }
+.project-import-issue-error { border-left-color: #ef8b8b; }
+.project-import-issue-info { border-left-color: #75b8e8; }
+.project-import-issue div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--ux-muted, #a9b6ca); font-size: 0.78rem; }
+.project-import-issue strong { color: var(--ux-text, #e7edf8); }
+.project-import-issue code { color: #ffd2b8; }
+.project-import-issue p { margin: 6px 0 0; color: var(--ux-text, #e7edf8); overflow-wrap: anywhere; }
+.project-import-formal-capability { display: grid; gap: 3px; padding: 11px 12px; border-left: 3px solid #75b8e8; color: var(--ux-muted, #a9b6ca); background: rgb(22 45 69 / 58%); }
+.project-import-formal-capability strong { color: var(--ux-text, #e7edf8); }
+.project-import-success { border-color: #438c66; background: rgb(20 65 46 / 42%); }
+.project-import-success strong { color: #b9f5cd; }
+
+@media (max-width: 900px) {
+  .project-import-file-meta, .project-import-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .project-import-file-meta, .project-import-summary-grid { grid-template-columns: 1fr; }
+}

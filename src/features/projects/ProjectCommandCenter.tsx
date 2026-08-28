@@ -17,6 +17,7 @@ import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, formatFileSize, projectDisplayName } from "../../i18n/statusLabels";
 import { deriveShotStatus } from "../shots/shotDomain";
 import { shotProgressSummary, type ShotProgressSummary } from "../shots/shotBatchDomain";
+import { ProjectImportDryRunWorkspace } from "./ProjectImportDryRunWorkspace";
 import "./ProjectCommandCenter.css";
 
 export type ProjectCommandCenterDestination =
@@ -125,6 +126,7 @@ export interface ProjectCommandCenterViewProps {
   onRetry?: () => void;
   onRepreflight?: () => void;
   onNavigate?: (destination: ProjectCommandCenterDestination) => void;
+  onOpenImport?: () => void;
 }
 
 export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCenterProps) {
@@ -139,6 +141,7 @@ export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCent
   const [loading, setLoading] = useState(Boolean(projectId));
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [preflightBusy, setPreflightBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [error, setError] = useState<string>();
   const requestId = useRef(0);
 
@@ -207,24 +210,34 @@ export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCent
   }
 
   return (
-    <ProjectCommandCenterView
-      project={project}
-      summary={summary}
-      activity={activity}
-      integrity={integrity}
-      shots={shots}
-      structure={structure}
-      preflight={preflight}
-      aggregate={aggregate}
-      loading={loading}
-      error={error}
-      refreshBusy={refreshBusy}
-      preflightBusy={preflightBusy}
-      onRefresh={() => void refresh()}
-      onRetry={() => void loadSnapshot()}
-      onRepreflight={() => void repreflight()}
-      onNavigate={onNavigate}
-    />
+    <>
+      <ProjectCommandCenterView
+        project={project}
+        summary={summary}
+        activity={activity}
+        integrity={integrity}
+        shots={shots}
+        structure={structure}
+        preflight={preflight}
+        aggregate={aggregate}
+        loading={loading}
+        error={error}
+        refreshBusy={refreshBusy}
+        preflightBusy={preflightBusy}
+        onRefresh={() => void refresh()}
+        onRetry={() => void loadSnapshot()}
+        onRepreflight={() => void repreflight()}
+        onNavigate={onNavigate}
+        onOpenImport={() => setImportOpen(true)}
+      />
+      {projectId && importOpen && (
+        <ProjectImportDryRunWorkspace
+          projectId={projectId}
+          onClose={() => setImportOpen(false)}
+          onImported={() => loadSnapshot()}
+        />
+      )}
+    </>
   );
 }
 
@@ -246,6 +259,7 @@ export function ProjectCommandCenterView({
   onRetry,
   onRepreflight,
   onNavigate,
+  onOpenImport,
 }: ProjectCommandCenterViewProps) {
   const derived = aggregate
     ? deriveProjectCommandCenterAggregateSummary(aggregate)
@@ -266,6 +280,7 @@ export function ProjectCommandCenterView({
           <p className="section-description">从项目状态、运行环境到镜头进度，集中决定下一步工作。</p>
         </div>
         <div className="project-command-heading-actions">
+          {project && onOpenImport && <button type="button" className="quiet-button" onClick={onOpenImport} disabled={busyNow}>批量导入预检</button>}
           <button type="button" onClick={onRefresh} disabled={refreshDisabled}>
             {refreshBusy || loading ? "正在刷新……" : "刷新项目"}
           </button>

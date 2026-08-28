@@ -239,6 +239,15 @@ describe("ProjectCommandCenter", () => {
     expect(onNavigate.mock.calls).toEqual([["assets"], ["shots"]]);
   });
 
+  it("offers the project-level bulk import dry-run entry without changing navigation", async () => {
+    const user = userEvent.setup();
+    const onOpenImport = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate()} onOpenImport={onOpenImport} />);
+
+    await user.click(screen.getByRole("button", { name: "批量导入预检" }));
+    expect(onOpenImport).toHaveBeenCalledTimes(1);
+  });
+
   it("recommends binding configuration only for consistency projects with profiles but no bindings", () => {
     const consistency = aggregate({
       consistency: { characterProfiles: 1, sceneProfiles: 0, propProfiles: 0, styleProfiles: 0, referenceSets: 0, shotProfileBindings: 0, shotReferenceSetBindings: 0, scopeProfileBindings: 0, scopeReferenceSetBindings: 0, consistencyInUse: true },
