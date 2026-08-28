@@ -119,8 +119,15 @@ export interface ProductionPackageBatchMapping {
   itemMappings: ProductionPackageItemMapping[];
 }
 
+export type ProductionPackageCreateStatus = "COMPLETE" | "PARTIAL" | string;
+
 export interface ProductionPackageCreateBatchesResult {
   packageName: string;
+  status: ProductionPackageCreateStatus;
+  requestedCount: number;
+  createdCount: number;
+  remainingCount: number;
+  remainingItemIds: string[];
   batchCount: number;
   itemCount: number;
   autoStarted: boolean;

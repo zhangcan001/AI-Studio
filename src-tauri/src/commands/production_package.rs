@@ -66,6 +66,11 @@ pub struct ProductionPackageBatchMappingView {
 #[serde(rename_all = "camelCase")]
 pub struct ProductionPackageCreateBatchesView {
     pub package_name: String,
+    pub status: String,
+    pub requested_count: usize,
+    pub created_count: usize,
+    pub remaining_count: usize,
+    pub remaining_item_ids: Vec<String>,
     pub batch_count: usize,
     pub item_count: usize,
     pub auto_started: bool,
@@ -126,8 +131,14 @@ pub async fn production_package_create_batches(
 fn create_batches_view(
     result: ProductionPackageCreateBatchesResult,
 ) -> ProductionPackageCreateBatchesView {
+    let status = result.status.as_str().to_owned();
     ProductionPackageCreateBatchesView {
         package_name: result.package_name,
+        status,
+        requested_count: result.requested_count,
+        created_count: result.created_count,
+        remaining_count: result.remaining_count,
+        remaining_item_ids: result.remaining_item_ids,
         batch_count: result.batch_count,
         item_count: result.item_count,
         auto_started: result.auto_started,

@@ -235,16 +235,25 @@
   border-radius: var(--studio-radius-md, 8px);
   background: rgba(6, 78, 59, .16);
 }
+.production-package-workspace-created-partial { border-color: rgba(245, 158, 11, .4); background: rgba(120, 77, 12, .14); }
 
 .production-package-workspace-created-heading { align-items: flex-start; }
 .production-package-workspace-created-heading h3 { margin-top: 2px; }
 .production-package-workspace-created-count { color: var(--package-success); font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.production-package-workspace-created-partial .production-package-workspace-created-count { color: var(--package-warning); }
 .production-package-workspace-created p { margin: 0; color: #b9f5cd; font-size: .8rem; }
+.production-package-workspace-created-partial p { color: #f7dba0; }
+.production-package-workspace-created-summary { display: flex; min-width: 0; gap: 8px 16px; align-items: center; flex-wrap: wrap; color: var(--package-muted); font-size: .78rem; }
+.production-package-workspace-created-summary strong { color: var(--package-success); }
+.production-package-workspace-created-partial .production-package-workspace-created-summary strong,
+.production-package-workspace-created-partial .production-package-workspace-created-summary span:last-of-type { color: var(--package-warning); }
 .production-package-workspace-batch-list { display: grid; min-width: 0; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .production-package-workspace-batch-list li { display: flex; min-width: 0; gap: 8px; align-items: baseline; justify-content: space-between; padding: 8px 9px; border: 1px solid rgba(52, 211, 153, .16); border-radius: var(--studio-radius-sm, 6px); background: rgba(255, 255, 255, .025); }
 .production-package-workspace-batch-list strong { min-width: 0; overflow-wrap: anywhere; }
 .production-package-workspace-batch-list span { flex: 0 1 auto; color: var(--package-muted); font-size: .7rem; overflow-wrap: anywhere; text-align: right; }
 .production-package-workspace-created > button { justify-self: start; }
+.production-package-workspace-remaining { display: grid; gap: 8px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(245, 158, 11, .25); border-radius: var(--studio-radius-sm, 6px); background: rgba(255, 255, 255, .025); }
+.production-package-workspace-remaining button { justify-self: start; }
 
 .production-package-workspace-footer { align-items: flex-start; flex-wrap: wrap; }
 .production-package-workspace-create-button { min-height: 40px; border-color: var(--package-accent); background: var(--studio-accent-strong, #7c3aed); font-weight: 700; }

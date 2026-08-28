@@ -80,8 +80,28 @@ pub struct ProductionPackageBatchMapping {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProductionPackageCreateStatus {
+    Complete,
+    Partial,
+}
+
+impl ProductionPackageCreateStatus {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Complete => "COMPLETE",
+            Self::Partial => "PARTIAL",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductionPackageCreateBatchesResult {
     pub package_name: String,
+    pub status: ProductionPackageCreateStatus,
+    pub requested_count: usize,
+    pub created_count: usize,
+    pub remaining_count: usize,
+    pub remaining_item_ids: Vec<String>,
     pub batch_count: usize,
     pub item_count: usize,
     pub auto_started: bool,
@@ -302,39 +322,66 @@ impl ProductionPackageService {
 
         // Consume the package session before side effects. A retry after a
         // partial downstream failure must be explicit, never an accidental
-        // duplicate batch import.
-        self.sessions.lock().await.remove(session_id);
+        // duplicate batch import. Checking removal also closes the race where
+        // two callers validated the same session concurrently.
+        if self.sessions.lock().await.remove(session_id).is_none() {
+            return Err(ProductionPackageError::SessionNotFound);
+        }
 
         let chunk_size = MAX_PRODUCTION_PACKAGE_ITEMS.min(100);
         let chunk_count = current_selected.len().div_ceil(chunk_size);
         let mut batches = Vec::with_capacity(chunk_count);
         let mut item_mappings = Vec::with_capacity(current_selected.len());
         for (chunk_index, chunk) in current_selected.chunks(chunk_size).enumerate() {
-            let staging_root = stage_chunk(chunk)?;
-            let batch_name = format!(
-                "{} · {}/{}",
-                current.package_name,
-                chunk_index + 1,
-                chunk_count
-            );
-            let result = self
-                .commit_staged_chunk(&session.project_id, &staging_root, &batch_name, chunk)
-                .await;
-            let _ = fs::remove_dir_all(&staging_root);
-            let batch = result?;
-            item_mappings.extend(batch.item_mappings.iter().cloned());
-            batches.push(batch);
+            let result = match stage_chunk(chunk) {
+                Ok(staging_root) => {
+                    let batch_name = format!(
+                        "{} · {}/{}",
+                        current.package_name,
+                        chunk_index + 1,
+                        chunk_count
+                    );
+                    let result = self
+                        .commit_staged_chunk(&session.project_id, &staging_root, &batch_name, chunk)
+                        .await;
+                    let _ = fs::remove_dir_all(&staging_root);
+                    result
+                }
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(batch) => {
+                    item_mappings.extend(batch.item_mappings.iter().cloned());
+                    batches.push(batch);
+                }
+                Err(_error) if !batches.is_empty() => {
+                    let remaining_item_ids = current_selected[chunk_index * chunk_size..]
+                        .iter()
+                        .map(|item| item.id.clone())
+                        .collect::<Vec<_>>();
+                    return Ok(create_batches_result(
+                        current.package_name,
+                        ProductionPackageCreateStatus::Partial,
+                        current_selected.len(),
+                        batches,
+                        item_mappings,
+                        remaining_item_ids,
+                        current.warnings,
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
         }
 
-        Ok(ProductionPackageCreateBatchesResult {
-            package_name: current.package_name,
-            batch_count: batches.len(),
-            item_count: item_mappings.len(),
-            auto_started: false,
+        Ok(create_batches_result(
+            current.package_name,
+            ProductionPackageCreateStatus::Complete,
+            current_selected.len(),
             batches,
             item_mappings,
-            warnings: current.warnings,
-        })
+            Vec::new(),
+            current.warnings,
+        ))
     }
 
     async fn commit_staged_chunk(
@@ -423,6 +470,31 @@ impl ProductionPackageService {
         self.sessions.lock().await.retain(|session_id, session| {
             keep_session_id.is_some_and(|keep| keep == session_id) || session.expires_at > now
         });
+    }
+}
+
+fn create_batches_result(
+    package_name: String,
+    status: ProductionPackageCreateStatus,
+    requested_count: usize,
+    batches: Vec<ProductionPackageBatchMapping>,
+    item_mappings: Vec<ProductionPackageItemMapping>,
+    remaining_item_ids: Vec<String>,
+    warnings: Vec<ProductionPackageDiagnostic>,
+) -> ProductionPackageCreateBatchesResult {
+    ProductionPackageCreateBatchesResult {
+        package_name,
+        status,
+        requested_count,
+        created_count: item_mappings.len(),
+        remaining_count: remaining_item_ids.len(),
+        remaining_item_ids,
+        batch_count: batches.len(),
+        item_count: item_mappings.len(),
+        auto_started: false,
+        batches,
+        item_mappings,
+        warnings,
     }
 }
 

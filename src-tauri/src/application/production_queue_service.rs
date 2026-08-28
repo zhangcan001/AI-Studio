@@ -901,7 +901,10 @@ impl ProductionQueueService {
                 TaskStatus::Succeeded => Some((ProductionBatchItemStatus::Succeeded, None, None)),
                 TaskStatus::Failed => Some((
                     ProductionBatchItemStatus::Failed,
-                    task.error.as_ref().map(|error| error.code.as_str()),
+                    normalize_queue_failure_code(
+                        task.error.as_ref().map(|error| error.code.as_str()),
+                        task.error.as_ref().map(|error| error.message.as_str()),
+                    ),
                     task.error.as_ref().map(|error| error.message.as_str()),
                 )),
                 TaskStatus::Cancelled => Some((ProductionBatchItemStatus::Cancelled, None, None)),
@@ -1057,7 +1060,10 @@ impl ProductionQueueService {
                     }
                     TaskStatus::Failed => Some((
                         ProductionBatchItemStatus::Failed,
-                        task.error.as_ref().map(|error| error.code.as_str()),
+                        normalize_queue_failure_code(
+                            task.error.as_ref().map(|error| error.code.as_str()),
+                            task.error.as_ref().map(|error| error.message.as_str()),
+                        ),
                         task.error.as_ref().map(|error| error.message.as_str()),
                     )),
                     TaskStatus::Cancelled => {
@@ -1163,7 +1169,11 @@ impl ProductionQueueService {
                                 self.clock.now(),
                             )
                             .await?;
-                        if !detail.batch.continue_on_failure {
+                        if should_pause_after_terminal(
+                            ProductionBatchItemStatus::Failed,
+                            Some("QUEUE_VALUES_INVALID"),
+                            detail.batch.continue_on_failure,
+                        ) {
                             self.repository
                                 .set_batch_status(
                                     project_id,
@@ -1193,7 +1203,11 @@ impl ProductionQueueService {
                                 self.clock.now(),
                             )
                             .await?;
-                        if !detail.batch.continue_on_failure {
+                        if should_pause_after_terminal(
+                            ProductionBatchItemStatus::Failed,
+                            Some("QUEUE_VALUES_INVALID"),
+                            detail.batch.continue_on_failure,
+                        ) {
                             self.repository
                                 .set_batch_status(
                                     project_id,
@@ -1276,7 +1290,11 @@ impl ProductionQueueService {
                                 self.clock.now(),
                             )
                             .await?;
-                        if !detail.batch.continue_on_failure {
+                        if should_pause_after_terminal(
+                            ProductionBatchItemStatus::Failed,
+                            Some(code),
+                            detail.batch.continue_on_failure,
+                        ) {
                             self.repository
                                 .set_batch_status(
                                     project_id,
@@ -1705,7 +1723,22 @@ fn should_pause_after_terminal(
     continue_on_failure: bool,
 ) -> bool {
     status != ProductionBatchItemStatus::Succeeded
-        && (!continue_on_failure || error_code == Some("EXECUTION_ERROR"))
+        && (!continue_on_failure || matches!(error_code, Some("EXECUTION_ERROR" | "COMFY_OFFLINE")))
+}
+
+fn normalize_queue_failure_code<'a>(
+    code: Option<&'a str>,
+    message: Option<&str>,
+) -> Option<&'a str> {
+    if code == Some("SUBMISSION_STATE_UNCERTAIN")
+        && message.is_some_and(|message| {
+            message.contains("COMFY_OFFLINE") || message.contains("ComfyUI is offline")
+        })
+    {
+        Some("COMFY_OFFLINE")
+    } else {
+        code
+    }
 }
 
 fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
@@ -2171,6 +2204,11 @@ mod tests {
         assert!(should_pause_after_terminal(
             ProductionBatchItemStatus::Failed,
             Some("EXECUTION_ERROR"),
+            true,
+        ));
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("COMFY_OFFLINE"),
             true,
         ));
         assert!(should_pause_after_terminal(

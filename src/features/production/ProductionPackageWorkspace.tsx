@@ -110,6 +110,7 @@ export function ProductionPackageWorkspace({
   const [notice, setNotice] = useState<string>();
   const requestIdRef = useRef(0);
   const observedFolderKeyRef = useRef<string | undefined>(undefined);
+  const preferredSelectionIdsRef = useRef<Set<string> | undefined>(undefined);
 
   const pickFolder = onChooseFolder ?? onPickFolder ?? onSelectFolder ?? onOpenFolderPicker ?? folderPicker;
   const busy = isInspecting || isPickingFolder || isCreating || isOpeningQueue;
@@ -119,6 +120,7 @@ export function ProductionPackageWorkspace({
     setInspection(undefined);
     setSelectedItemIds(new Set());
     setCreatedResult(undefined);
+    preferredSelectionIdsRef.current = undefined;
     setIsInspecting(false);
     setError(undefined);
     setNotice(undefined);
@@ -133,6 +135,8 @@ export function ProductionPackageWorkspace({
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const preferredSelectionIds = preferredSelectionIdsRef.current;
+    preferredSelectionIdsRef.current = undefined;
     setIsInspecting(true);
     setInspection(undefined);
     setSelectedItemIds(new Set());
@@ -145,11 +149,7 @@ export function ProductionPackageWorkspace({
       if (requestId !== requestIdRef.current) return;
       const nextInspection = result as WorkspaceInspection;
       setInspection(nextInspection);
-      setSelectedItemIds(new Set(
-        nextInspection.items
-          .filter((item) => item.status === "READY")
-          .map((item) => item.id),
-      ));
+      setSelectedItemIds(initialSelection(nextInspection.items, preferredSelectionIds));
       setNotice(`已检查「${displayFolderName(packageRoot)}」，请确认项目后创建批次。`);
     } catch (inspectionError: unknown) {
       if (requestId !== requestIdRef.current) return;
@@ -209,6 +209,12 @@ export function ProductionPackageWorkspace({
     void inspectFolder(currentFolderPath);
   }
 
+  function reinspectRemaining() {
+    if (busy || !currentFolderPath || !createdResult?.remainingItemIds.length) return;
+    preferredSelectionIdsRef.current = new Set(createdResult.remainingItemIds);
+    void inspectFolder(currentFolderPath);
+  }
+
   const items = inspection?.items ?? [];
   const counts = useMemo(() => summarizeItems(inspection), [inspection]);
   const derivedInspectionState = deriveInspectionState(inspection);
@@ -234,6 +240,10 @@ export function ProductionPackageWorkspace({
       && !requiresReinspect
       && (derivedInspectionState === "READY" || derivedInspectionState === "PARTIAL"),
   );
+  const createdCount = createdResult?.createdCount ?? createdResult?.itemCount ?? 0;
+  const requestedCount = createdResult?.requestedCount ?? createdCount + (createdResult?.remainingCount ?? 0);
+  const remainingCount = createdResult?.remainingCount ?? createdResult?.remainingItemIds?.length ?? 0;
+  const isPartialCreate = createdResult?.status === "PARTIAL" || remainingCount > 0;
   const workspaceState: ProductionPackageWorkspaceState = isInspecting || isPickingFolder
     ? "INSPECTING"
     : isCreating
@@ -241,7 +251,7 @@ export function ProductionPackageWorkspace({
       : error
         ? "ERROR"
         : createdResult
-          ? "CREATED"
+          ? isPartialCreate ? "PARTIAL" : "CREATED"
           : derivedInspectionState;
   const hasQueueCallback = Boolean(onOpenQueue || onOpenProductionQueue);
 
@@ -262,7 +272,11 @@ export function ProductionPackageWorkspace({
     try {
       const result = await createProductionPackageBatches(inspection.inspectionId, ids);
       setCreatedResult(result);
-      setNotice(`已创建 ${result.batchCount} 个生产批次，共 ${result.itemCount} 个项目；不会自动启动队列。`);
+      const createdCount = result.createdCount ?? result.itemCount;
+      const remainingCount = result.remainingCount ?? result.remainingItemIds?.length ?? 0;
+      setNotice(result.status === "PARTIAL"
+        ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚未加入 ${remainingCount} 个项目；不会自动启动队列。`
+        : `已创建 ${result.batchCount} 个生产批次，共 ${createdCount} 个项目；不会自动启动队列。`);
     } catch (createError: unknown) {
       setError(toWorkspaceError(createError, "create"));
     } finally {
@@ -285,7 +299,11 @@ export function ProductionPackageWorkspace({
     }
   }
 
-  const statusMessage = statusMessageForState(workspaceState, counts, selectedItems.length);
+  const statusMessage = createdResult
+    ? isPartialCreate
+      ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚有 ${remainingCount} 个项目待重新检查。`
+      : "批次已创建；不会自动打开或启动生产队列。"
+    : statusMessageForState(workspaceState, counts, selectedItems.length);
 
   return (
     <section
@@ -403,17 +421,25 @@ export function ProductionPackageWorkspace({
       )}
 
       {createdResult && (
-        <section className="production-package-workspace-created" aria-label="生产包创建结果">
+        <section
+          className={`production-package-workspace-created${isPartialCreate ? " production-package-workspace-created-partial" : ""}`}
+          aria-label="生产包创建结果"
+        >
           <div className="production-package-workspace-created-heading">
             <div>
               <span className="section-label">CREATE RESULT</span>
-              <h3>已创建 {createdResult.batchCount} 个生产批次</h3>
+              <h3>{isPartialCreate ? "批次创建部分完成" : `已创建 ${createdResult.batchCount} 个生产批次`}</h3>
             </div>
-            <span className="production-package-workspace-created-count">{createdResult.itemCount} 个项目</span>
+            <span className="production-package-workspace-created-count">{isPartialCreate ? `${createdCount} 个项目已加入` : `${createdCount} 个项目`}</span>
           </div>
-          <p role="status">
-            创建成功；自动启动：{createdResult.autoStarted ? "是" : "否"}。队列不会自动打开或启动，请在需要时手动打开生产队列。
-          </p>
+          <div className="production-package-workspace-created-summary" role="status">
+            <strong>已加入生产：{createdCount}</strong>
+            <span>请求项目：{requestedCount}</span>
+            <span>尚未加入：{remainingCount}</span>
+            <span>状态：{isPartialCreate ? "部分完成" : "完成"}</span>
+            <span>自动启动：{createdResult.autoStarted ? "是" : "否"}</span>
+          </div>
+          <p>队列不会自动打开或启动，请在需要时手动打开生产队列。</p>
           <ul className="production-package-workspace-batch-list" aria-label="已创建生产批次">
             {createdResult.batches.map((batch, index) => (
               <li key={batch.batchId}>
@@ -422,6 +448,14 @@ export function ProductionPackageWorkspace({
               </li>
             ))}
           </ul>
+          {isPartialCreate && remainingCount > 0 && (
+            <div className="production-package-workspace-remaining">
+              <p>保留 {remainingCount} 个未加入项目的外部 ID；重新检查后只会按最新检查结果选择仍可生产的剩余项目。</p>
+              <button type="button" onClick={reinspectRemaining} disabled={busy || !currentFolderPath}>
+                重新检查剩余项目
+              </button>
+            </div>
+          )}
           <button type="button" onClick={() => void openQueue()} disabled={!hasQueueCallback || isOpeningQueue}>
             {isOpeningQueue ? "正在打开…" : "打开生产队列"}
           </button>
@@ -463,6 +497,18 @@ function summarizeItems(inspection: WorkspaceInspection | undefined): { total: n
     warning: inspection.warningCount ?? items.filter((item) => item.status === "WARNING").length,
     blocked: inspection.blockedCount ?? items.filter((item) => item.status === "BLOCKED").length,
   };
+}
+
+function initialSelection(
+  items: ProductionPackageInspectionItem[],
+  preferredIds?: Set<string>,
+): Set<string> {
+  return new Set(
+    items
+      .filter((item) => item.status === "READY")
+      .filter((item) => !preferredIds || preferredIds.has(item.id))
+      .map((item) => item.id),
+  );
 }
 
 function deriveInspectionState(inspection: WorkspaceInspection | undefined): ProductionPackageWorkspaceState {

@@ -1,6 +1,6 @@
 # AI Studio 0.8.0 Roadmap：External Production Package → Batch Video Production
 
-状态：DEV-057 Data Foundation PASS（可选能力）；DEV-058 Script Import Parser PASS（可选能力）；DEV-059 PASS；DEV-060 PASS；DEV-061 ✅ Complete；DEV-062 PLANNED
+状态：DEV-057 PASS / OPTIONAL；DEV-058 PASS / OPTIONAL；DEV-059 PASS；DEV-060 PASS；DEV-061A PASS / OPTIONAL；DEV-061B PASS（本地 Gate），CI 待验证；DEV-062 NEXT
 
 内部代号：Narrative Preproduction V2
 稳定基线：AI Studio 0.7.0 — Narrative Production V1
@@ -13,6 +13,18 @@
 ## 2026-08 Product Direction Pivot
 
 AI Studio 0.8.0 的核心定位冻结为 **AI 视频批量生产工作台**：外部智能体负责文本、图片和视频 Prompt，AI Studio 负责读取、校验、预览、导入现有 ProductionQueue，并由用户手动 Start 进入既有 H3/ComfyUI 链路。DEV-058 Script Import Parser 保留为 `OPTIONAL SCRIPT IMPORT CAPABILITY`，不再是生产主路径；不删除、不回滚、不重构该能力。
+
+当前交付状态账本：
+
+| 任务 | 状态 | 主路径角色 |
+| --- | --- | --- |
+| DEV-057 Script/Draft Data Foundation | PASS / OPTIONAL | 可选数据基础，不进入生产包主路径 |
+| DEV-058 Script Import Parser | PASS / OPTIONAL | 可选 Draft 能力，不参与生产包执行 |
+| DEV-059 External Production Package V1 | PASS | 外部生产包校验、预览、导入 |
+| DEV-060 Production Package Workspace | PASS | 文件夹工作区与人工确认 |
+| DEV-061A Project Bulk Import Dry-Run | PASS / OPTIONAL | 保留的项目级 dry-run 能力 |
+| DEV-061B Bulk Production Hardening | PASS / CI PENDING | COMPLETE/PARTIAL、restart、offline、retry、冻结媒体 |
+| DEV-062 AI Studio 0.8.0 Release Gate | NEXT | 最终回归、兼容性、发布与 CI |
 
 原 Narrative Preproduction 路线保留为历史记录，但不再是 0.8.0 核心路线：
 
@@ -30,8 +42,9 @@ AI Studio 0.8.0 的核心定位冻结为 **AI 视频批量生产工作台**：�
 
 1. **DEV-059 External Production Package V1** — 外部生产包校验、预览与批量导入（PASS）。
 2. **DEV-060 Production Package Workspace** — 文件夹入口、编辑和生产工作区（PASS）。
-3. **DEV-061 Bulk Production Hardening** — 项目级批量导入预检、确认写入与错误隔离（✅ Complete）。
-4. **DEV-062 AI Studio 0.8.0 Release Gate** — 发布门禁与兼容性验收（PLANNED）。
+3. **DEV-061A Project Bulk Import Dry-Run** — 保留的可选项目级预检能力（PASS / OPTIONAL）。
+4. **DEV-061B Bulk Production Hardening** — Production Package 批量创建、恢复和人工启动硬化（本地 Gate PASS，CI 待验证）。
+5. **DEV-062 AI Studio 0.8.0 Release Gate** — 发布门禁与兼容性验收（NEXT）。
 
 ## 1. 目标与不变的执行边界
 
@@ -258,6 +271,6 @@ DEV-057
 
 ## 8. 下一步
 
-当前任务：**DEV-061 — Bulk Production Hardening（✅ Complete）**。
+当前任务：**DEV-061B — Production Package Bulk Production Hardening（本地 Gate PASS，CI 待验证）**。
 
-DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略；DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects，均为可选能力。DEV-059 与 DEV-060 已完成外部生产包 V1 和批量视频生产工作区，并保持不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。DEV-061 已完成项目级镜头批量导入预检工作区：复用现有 JSON/TSV preview 与原子 CREATE ONLY commit，未新增通用实体导入系统。下一步是 **DEV-062 — AI Studio 0.8.0 Release Gate**。
+DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略；DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects，均为可选能力。DEV-059 与 DEV-060 已完成外部生产包 V1 和批量视频生产工作区，并保持不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。DEV-061A 保留为 PASS / OPTIONAL 的项目级 dry-run；DEV-061B 负责 Production Package 的 COMPLETE/PARTIAL、restart、offline、retry 和 frozen media closure。DEV-061B 通过最终 Gate 后，下一步是 **DEV-062 — AI Studio 0.8.0 Release Gate**。

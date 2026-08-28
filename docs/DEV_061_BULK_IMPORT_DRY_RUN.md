@@ -1,6 +1,8 @@
-# DEV-061 — Bulk Production Hardening / Import Dry-Run
+# DEV-061A — Project Bulk Import Dry-Run
 
-状态：**Complete**
+状态：**PASS / OPTIONAL**
+
+> 本文记录的是 Project Bulk Import Dry-Run 能力，不是 Production Package Bulk Production Hardening。DEV-061B 单独记录于 `docs/DEV_061B_BULK_PRODUCTION_HARDENING.md`。
 
 ## 仓库检查结论
 
@@ -43,4 +45,4 @@ DEV-060 Production Package Workspace、Project Settings、既有 Studio 导航�
 
 ## 后续
 
-下一步只建议 **DEV-062 — AI Studio 0.8.0 Release Gate**：围绕当前 0.8.0 核心生产路线做最终发布门禁、兼容性、回归和手动生产链路验收。本任务不实现 DEV-062。
+本能力保持可选，不扩展为通用 Project / Episode / Scene / Character 导入系统。生产包批量生产稳定性由 DEV-061B 负责；DEV-062 在 DEV-061B 通过后进入最终发布门禁。

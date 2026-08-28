@@ -2524,6 +2524,11 @@ outputs:
         storage_path: &str,
     ) {
         let now = "2026-08-16T00:00:00Z";
+        let (category, output_id) = match asset_type {
+            "image" => ("generated_image", "generated_image"),
+            "video" => ("generated_video", "generated_video"),
+            other => panic!("unsupported generated asset type: {other}"),
+        };
         sqlx::query(
             "INSERT INTO tasks
              (id, project_id, workflow_id, workflow_version_id, recipe_id, status,
@@ -2543,10 +2548,11 @@ outputs:
              (id, project_id, type, category, name, original_name, storage_path, sha256,
               mime_type, width, height, file_size, source_task_id, metadata_json,
               created_at, updated_at)
-             VALUES (?, 'prj_default', ?, 'generated', ?, ?, ?, ?, ?, 864, 480, 4, ?, '{}', ?, ?)",
+             VALUES (?, 'prj_default', ?, ?, ?, ?, ?, ?, ?, 864, 480, 4, ?, '{}', ?, ?)",
         )
         .bind(asset_id)
         .bind(asset_type)
+        .bind(category)
         .bind(format!("{asset_id}.media"))
         .bind(format!("{asset_id}.media"))
         .bind(storage_path)
@@ -2569,7 +2575,7 @@ outputs:
              VALUES (?, ?, 0, ?, ?)",
         )
         .bind(task_id)
-        .bind(format!("output-{asset_id}"))
+        .bind(output_id)
         .bind(asset_id)
         .bind(now)
         .execute(pool)
@@ -2798,6 +2804,18 @@ outputs:
             .execute(&pool)
             .await
             .expect("Krea2 item truth should persist");
+            sqlx::query(
+                "UPDATE production_stage_items
+                 SET status = 'SUCCEEDED', task_id = ?, asset_id = ?, updated_at = ?
+                 WHERE production_batch_item_id = ?",
+            )
+            .bind(task_id)
+            .bind(asset_id)
+            .bind(now)
+            .bind(item.id.as_str())
+            .execute(&pool)
+            .await
+            .expect("Krea2 stage asset lineage should persist");
         }
         sqlx::query(
             "UPDATE production_batches SET status = 'COMPLETED', updated_at = ? WHERE id = ?",

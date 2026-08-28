@@ -164,6 +164,35 @@ describe("ProductionPackageWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "重新检查" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
   });
+
+  it("shows partial truth and reinspects only the remaining external IDs", async () => {
+    const user = userEvent.setup();
+    const openQueue = vi.fn();
+    inspectMock
+      .mockResolvedValueOnce(makeInspection(4, ["READY", "READY", "READY", "READY"]))
+      .mockResolvedValueOnce(makeInspection(4, ["READY", "READY", "READY", "WARNING"]));
+    createMock.mockResolvedValueOnce(makePartialCreateResult());
+    render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenQueue={openQueue} />);
+
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "创建生产批次（4 项）" }));
+    await waitFor(() => expect(screen.getByRole("region", { name: "生产包创建结果" })).toBeTruthy());
+
+    const createdRegion = screen.getByRole("region", { name: "生产包创建结果" });
+    expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-state")).toBe("PARTIAL");
+    expect(within(createdRegion).getByText("已加入生产：2")).toBeTruthy();
+    expect(within(createdRegion).getByText("尚未加入：2")).toBeTruthy();
+    expect(within(createdRegion).getByText("状态：部分完成")).toBeTruthy();
+    expect(within(createdRegion).getByText(/请求项目：4/)).toBeTruthy();
+    expect(openQueue).not.toHaveBeenCalled();
+
+    await user.click(within(createdRegion).getByRole("button", { name: "重新检查剩余项目" }));
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
+    expect((screen.getByRole("checkbox", { name: "选择项目 item-001" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: "选择项目 item-002" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: "选择项目 item-003" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "选择项目 item-004" }) as HTMLInputElement).checked).toBe(false);
+  });
 });
 
 function makeInspection(count: number, statuses?: ProductionPackageItemStatus[]): ProductionPackageInspectionResult {
@@ -198,12 +227,36 @@ function makeInspection(count: number, statuses?: ProductionPackageItemStatus[])
 function makeCreateResult(itemCount: number): ProductionPackageCreateBatchesResult {
   return {
     packageName: "EP01 · 雨夜",
+    status: "COMPLETE",
+    requestedCount: itemCount,
+    createdCount: itemCount,
+    remainingCount: 0,
+    remainingItemIds: [],
     batchCount: 2,
     itemCount,
     autoStarted: false,
     batches: [
       { batchId: "batch-1", batchName: "EP01 · 雨夜 · 1/2", itemCount: 100, itemMappings: [] },
       { batchId: "batch-2", batchName: "EP01 · 雨夜 · 2/2", itemCount: 50, itemMappings: [] },
+    ],
+    itemMappings: [],
+    warnings: [],
+  };
+}
+
+function makePartialCreateResult(): ProductionPackageCreateBatchesResult {
+  return {
+    packageName: "EP01 · 雨夜",
+    status: "PARTIAL",
+    requestedCount: 4,
+    createdCount: 2,
+    remainingCount: 2,
+    remainingItemIds: ["item-003", "item-004"],
+    batchCount: 1,
+    itemCount: 2,
+    autoStarted: false,
+    batches: [
+      { batchId: "batch-1", batchName: "EP01 · 雨夜 · 1/1", itemCount: 2, itemMappings: [] },
     ],
     itemMappings: [],
     warnings: [],
