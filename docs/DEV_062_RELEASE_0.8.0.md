@@ -1,8 +1,8 @@
 # DEV-062 — AI Studio 0.8.0 Release Gate
 
-状态：**READY — 全部 Source RC 前置门禁通过，等待 RC 提交与 CI**
+状态：**PUBLISHED — AI Studio 0.8.0**
 
-本文件记录 AI Studio 0.8.0 从 Source RC 到 GitHub Release 的可复核门禁证据。发布前不宣称 Release 已发布；发布完成后只允许追加 publication evidence，不再修改产品代码。
+本文件记录 AI Studio 0.8.0 从 Source RC 到 GitHub Release 的可复核门禁证据。发布完成后只允许追加 publication evidence，不再修改产品代码。
 
 ## 发布定位
 
@@ -58,8 +58,8 @@ Backup `12/13/14/15` 必须通过 inspect、restore、asset remap、production v
 | Live package inspect/create/manual Start/result asset | PASS — isolated 1-item 5s package, Create COMPLETE/autoStarted=false, explicit Start, video Asset |
 | Official 0.6.2 → 0.7.0 isolated upgrade | PASS — frozen 0.6.2 binary/database, migration 021 → 024, source DB unchanged |
 | Full Rust + frontend regression | PASS — see regression record below |
-| Windows portable / NSIS / MSI | pending |
-| Fresh / Upgrade installer smoke | pending — not reached before live gate |
+| Windows portable / NSIS / MSI | PASS — `pnpm tauri build` on Source RC; exact 0.8.0 metadata and SHA256 staged outside the repository |
+| Fresh / Upgrade installer smoke | PASS — isolated 0.8.0 NSIS/MSI installation checks; MSI per-machine install required elevated RunAs |
 
 ### Current verification record
 
@@ -78,6 +78,13 @@ Comfy /object_info: PASS — HTTP 200, nodes=4525, runtime capability check READ
 Official 0.6.2 binary: PASS — SHA256=56653ce566a287f8f8a28ca3247db978d802d6d552134b0c2923e9ad55ade607
 Official 0.6.2 database: PASS — MAX(_sqlx_migrations)=21 before isolated upgrade
 DEV-062 local source gates: PASS — cargo fmt/check/test, pnpm test, tsc, pnpm build, git diff --check
+Windows artifacts: PASS — portable 48,395,776 bytes; NSIS 10,518,358 bytes; MSI 16,678,912 bytes
+Artifact staging: PASS — `C:\Users\ADMIN\AppData\Local\Temp\AI-Studio-0.8.0-release-b5a5cd69b06a4fd8b69ddf9d3b4386ad`
+Portable SHA256: 10C989102C036B84CEE12BE94728EE08D4118CEF64B7BFE967D4BFE639A3BE88
+NSIS SHA256: 3255A1A9E648B2A10C240B88169C06E35F96F1D62C991BF3B59742D4E23A2DD2
+MSI SHA256: AE9B0F858192595D00585959DDD40C71C6FAE280789EC0A8E645E4004664B78C
+Installer smoke: NSIS PASS (installed ProductVersion 0.8.0); MSI PASS with elevated per-machine install (ProductVersion 0.8.0)
+Remote release download/hash: PASS — all four published assets matched the staged binaries/manifest
 ```
 
 The smoke wrapper is `scripts/dev062_production_package_smoke.ps1`. It fails closed when the configured ComfyUI endpoint is unavailable and does not claim a Production Package live pass. The previously open official 0.6.2→0.7.0 compatibility evidence is now closed by the isolated binary/database run above; Backup 12–15 and Manifest 2 compatibility remain covered by the full regression record.
@@ -108,9 +115,9 @@ Live smoke 使用临时 Project 和临时合法 source image，仅执行一个 5
 ### Source RC
 
 ```text
-SOURCE_RC_SHA: pending exact release commit
-Source-only CI run: pending push
-CI conclusion: pending push
+SOURCE_RC_SHA: c6b8e5f9a6338a873756d5fad61ab96a0c44c22e
+Source-only CI run: 33208177679
+CI conclusion: success
 ```
 
 Source RC 只有在版本一致性、完整源码回归、兼容门禁、真实 ComfyUI smoke、Windows artifacts 和 SHA256 全部通过后才冻结。冻结后禁止产品代码漂移；若产品代码需要修复，Source RC 作废并从对应门禁重新开始。
@@ -133,19 +140,31 @@ RELEASE_SHA256_0.8.0.txt
 
 ## Publication evidence（发布完成后追加）
 
-在 GitHub Release 实际创建成功前，不填写以下字段：
+GitHub Release 已实际创建，发布证据如下：
 
 ```text
 Tag: v0.8.0
-Tag object SHA:
-Peeled SHA:
-GitHub Release ID:
+Tag object SHA: 7a5e032a31fdf201da7ff9b2f1a83d6524bb298c
+Peeled SHA: c6b8e5f9a6338a873756d5fad61ab96a0c44c22e
+GitHub Release ID: RE_kwDOTuxMh84Wk2AH
 Release name: AI Studio 0.8.0 — External Production Package
-Published:
-Draft:
-Prerelease:
-Assets:
+Published: 2026-08-28T20:50:21Z
+Draft: false
+Prerelease: false
+Assets: 4
+
 ```
+
+远端资产名称由 GitHub 对安装包空格做了点号规范化；以下名称、大小和 SHA256 是远端下载复核结果：
+
+| Remote asset | Bytes | SHA256 |
+| --- | ---: | --- |
+| `ai-studio.exe` | 48395776 | `10C989102C036B84CEE12BE94728EE08D4118CEF64B7BFE967D4BFE639A3BE88` |
+| `AI.Studio_0.8.0_x64-setup.exe` | 10518358 | `3255A1A9E648B2A10C240B88169C06E35F96F1D62C991BF3B59742D4E23A2DD2` |
+| `AI.Studio_0.8.0_x64_en-US.msi` | 16678912 | `AE9B0F858192595D00585959DDD40C71C6FAE280789EC0A8E645E4004664B78C` |
+| `RELEASE_SHA256_0.8.0.txt` | 507 | `B1ECFF3ECCA0901C21C9F928E3A031B754F137F69BA92D39D71A4400B2F60A7E` |
+
+Remote hash verification: PASS — downloaded all four assets to a new temporary directory and matched the release manifest.
 
 发布完成后，唯一允许的后续提交是 docs-only：
 

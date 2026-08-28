@@ -1,6 +1,6 @@
 # AI Studio 0.8.0 Roadmap：External Production Package → Batch Video Production
 
-状态：DEV-057 PASS / OPTIONAL；DEV-058 PASS / OPTIONAL；DEV-059 PASS；DEV-060 PASS；DEV-061A PASS / OPTIONAL；DEV-061B PASS；DEV-062 ACTIVE
+状态：DEV-057 PASS / OPTIONAL；DEV-058 PASS / OPTIONAL；DEV-059 PASS；DEV-060 PASS；DEV-061A PASS / OPTIONAL；DEV-061B PASS；DEV-062 PASS / RELEASED
 
 内部代号：Narrative Preproduction V2
 稳定基线：AI Studio 0.7.0 — Narrative Production V1
@@ -24,7 +24,7 @@ AI Studio 0.8.0 的核心定位冻结为 **AI 视频批量生产工作台**：�
 | DEV-060 Production Package Workspace | PASS | 文件夹工作区与人工确认 |
 | DEV-061A Project Bulk Import Dry-Run | PASS / OPTIONAL | 保留的项目级 dry-run 能力 |
 | DEV-061B Bulk Production Hardening | PASS | COMPLETE/PARTIAL、restart、offline、retry、冻结媒体 |
-| DEV-062 AI Studio 0.8.0 Release Gate | ACTIVE | 最终回归、兼容性、发布与 CI |
+| DEV-062 AI Studio 0.8.0 Release Gate | PASS / RELEASED | 最终回归、兼容性、发布与 CI |
 
 原 Narrative Preproduction 路线保留为历史记录，但不再是 0.8.0 核心路线。以下内容标记为 **HISTORICAL / SUPERSEDED**，不应被解释为当前 0.8.0 主路径：
 
@@ -271,6 +271,6 @@ DEV-057
 
 ## 8. 下一步
 
-当前任务：**DEV-062 — AI Studio 0.8.0 Release Gate**。
+当前任务：**DEV-062 — AI Studio 0.8.0 Release Gate（PASS / RELEASED）**。
 
-DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略；DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects，均为可选能力。DEV-059 与 DEV-060 已完成外部生产包 V1 和批量视频生产工作区，并保持不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。DEV-061A 保留为 PASS / OPTIONAL 的项目级 dry-run；DEV-061B 已完成 Production Package 的 COMPLETE/PARTIAL、restart、offline、retry 和 frozen media closure，并通过 Source-only CI。当前进入 **DEV-062 — AI Studio 0.8.0 Release Gate**。
+DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略；DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects，均为可选能力。DEV-059 与 DEV-060 已完成外部生产包 V1 和批量视频生产工作区，并保持不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。DEV-061A 保留为 PASS / OPTIONAL 的项目级 dry-run；DEV-061B 已完成 Production Package 的 COMPLETE/PARTIAL、restart、offline、retry 和 frozen media closure，并通过 Source-only CI。DEV-062 已完成完整 Source-only CI、真实 ComfyUI H3 I2V、兼容门禁、Windows portable/NSIS/MSI 产物、远端 hash 复核，并发布 `v0.8.0` GitHub Release。Source RC 为 `c6b8e5f9a6338a873756d5fad61ab96a0c44c22e`，Source-only CI 为 `33208177679`，GitHub Release ID 为 `RE_kwDOTuxMh84Wk2AH`。
