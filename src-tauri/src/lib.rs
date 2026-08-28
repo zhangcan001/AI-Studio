@@ -1016,6 +1016,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::h3_local_import::h3_local_import_rescan,
             commands::h3_local_import::h3_local_import_commit,
             commands::h3_local_import::h3_local_import_update_project_segment_draft,
+            commands::production_package::production_package_pick_root,
             commands::production_package::production_package_inspect,
             commands::production_package::production_package_create_batches,
             commands::production_queue::production_queue_create,

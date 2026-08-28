@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createElement, useState } from "react";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
 import {
   addOrderedReference,
@@ -6,6 +11,7 @@ import {
   ensurePrimaryReference,
   isRef2vaRecipe,
   moveOrderedReference,
+  ProductionModeTabs,
   removeOrderedReference,
   referenceImagesField,
   shotContextSurface,
@@ -18,6 +24,10 @@ import {
 } from "../runtime/productRuntimeScope";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { WorkspaceSelection } from "../../types/workspaceSelection";
+
+afterEach(() => {
+  cleanup();
+});
 
 const structure: ProductionStructureTree = {
   projectId: "project-1",
@@ -118,5 +128,60 @@ describe("Shot workspace context path", () => {
     expect(shotContextSurface("creation", "shot")).toBe("shot");
     expect(shotContextSurface("production", "shot")).toBe("production");
     expect(shotContextSurface("review", "series")).toBe("review");
+  });
+});
+
+describe("Production mode tabs", () => {
+  it("defaults to 生产包 and exposes the tablist, tabs, and tabpanels accessibly", () => {
+    render(createElement(ProductionModeTabs, {
+      packagePanel: createElement("div", null, "Production Package 工作区"),
+      projectProductionPanel: createElement("div", null, "生产批次执行清单", "项目生产流水线"),
+    }));
+
+    const tablist = screen.getByRole("tablist", { name: "生产模式工作区" });
+    const packageTab = within(tablist).getByRole("tab", { name: "生产包" });
+    const projectTab = within(tablist).getByRole("tab", { name: "项目生产" });
+    const panels = screen.getAllByRole("tabpanel", { hidden: true });
+
+    expect(packageTab.getAttribute("aria-selected")).toBe("true");
+    expect(projectTab.getAttribute("aria-selected")).toBe("false");
+    expect(panels).toHaveLength(2);
+    expect(panels.map((panel) => panel.getAttribute("aria-labelledby"))).toEqual([
+      packageTab.id,
+      projectTab.id,
+    ]);
+    expect(panels[0].hidden).toBe(false);
+    expect(panels[0].getAttribute("aria-hidden")).toBe("false");
+    expect(panels[1].hidden).toBe(true);
+    expect(panels[1].getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("shows both legacy production panels and preserves the package panel when switching tabs", async () => {
+    const user = userEvent.setup();
+    function StatefulPackagePanel() {
+      const [state, setState] = useState("检查结果保留");
+      return createElement("button", { type: "button", onClick: () => setState("已检查状态") }, state);
+    }
+
+    render(createElement(ProductionModeTabs, {
+      packagePanel: createElement(StatefulPackagePanel),
+      projectProductionPanel: createElement(
+        "div",
+        null,
+        createElement("div", null, "生产批次执行清单"),
+        createElement("div", null, "项目生产流水线"),
+      ),
+    }));
+
+    await user.click(screen.getByRole("button", { name: "检查结果保留" }));
+    await user.click(screen.getByRole("tab", { name: "项目生产" }));
+
+    expect(screen.getByText("生产批次执行清单")).toBeTruthy();
+    expect(screen.getByText("项目生产流水线")).toBeTruthy();
+    expect(screen.getByRole("tabpanel", { name: "项目生产" }).hidden).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "生产包" }));
+    expect(screen.getByRole("button", { name: "已检查状态" })).toBeTruthy();
+    expect(screen.getByRole("tabpanel", { name: "生产包" }).hidden).toBe(false);
   });
 });

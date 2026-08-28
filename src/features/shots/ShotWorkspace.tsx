@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createShot,
   bulkAssignShotPrompt,
@@ -17,6 +17,7 @@ import {
   listRecentAssets,
   listShots,
   pauseProductionQueue,
+  pickProductionPackageRoot,
   requeueProductionQueueItemByItem,
   replaceShotReferences,
   selectShotResult,
@@ -52,6 +53,7 @@ import { SceneProductionPanel } from "./SceneProductionPanel";
 import { EpisodeProductionPanel } from "./EpisodeProductionPanel";
 import { SeriesProductionPanel } from "./SeriesProductionPanel";
 import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunbookPanel";
+import { ProductionPackageWorkspace } from "../production/ProductionPackageWorkspace";
 import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
 import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
@@ -93,6 +95,76 @@ export function shotContextSurface(mode: ShotWorkspaceMode, selectionType: Works
   if (mode === "production") return "production";
   if (mode === "review") return "review";
   return selectionType;
+}
+
+type ProductionModeTab = "package" | "project";
+
+export interface ProductionModeTabsProps {
+  packagePanel: ReactNode;
+  projectProductionPanel: ReactNode;
+}
+
+export function ProductionModeTabs({ packagePanel, projectProductionPanel }: ProductionModeTabsProps) {
+  const [activeTab, setActiveTab] = useState<ProductionModeTab>("package");
+  const idPrefix = useId();
+  const packageTabId = `${idPrefix}-production-package-tab`;
+  const projectTabId = `${idPrefix}-project-production-tab`;
+  const packagePanelId = `${idPrefix}-production-package-panel`;
+  const projectPanelId = `${idPrefix}-project-production-panel`;
+
+  return (
+    <div className="shot-production-mode-tabs" data-surface="production" data-active-tab={activeTab}>
+      <div className="shot-production-mode-tablist" role="tablist" aria-label="生产模式工作区">
+        <button
+          type="button"
+          id={packageTabId}
+          className="shot-production-mode-tab"
+          role="tab"
+          aria-selected={activeTab === "package"}
+          aria-controls={packagePanelId}
+          tabIndex={activeTab === "package" ? 0 : -1}
+          onClick={() => setActiveTab("package")}
+        >
+          生产包
+        </button>
+        <button
+          type="button"
+          id={projectTabId}
+          className="shot-production-mode-tab"
+          role="tab"
+          aria-selected={activeTab === "project"}
+          aria-controls={projectPanelId}
+          tabIndex={activeTab === "project" ? 0 : -1}
+          onClick={() => setActiveTab("project")}
+        >
+          项目生产
+        </button>
+      </div>
+
+      <section
+        id={packagePanelId}
+        className="shot-production-mode-tabpanel"
+        role="tabpanel"
+        aria-labelledby={packageTabId}
+        aria-hidden={activeTab !== "package"}
+        hidden={activeTab !== "package"}
+        data-tab-panel="production-package"
+      >
+        {packagePanel}
+      </section>
+      <section
+        id={projectPanelId}
+        className="shot-production-mode-tabpanel"
+        role="tabpanel"
+        aria-labelledby={projectTabId}
+        aria-hidden={activeTab !== "project"}
+        hidden={activeTab !== "project"}
+        data-tab-panel="project-production"
+      >
+        {projectProductionPanel}
+      </section>
+    </div>
+  );
 }
 
 interface Props {
@@ -677,32 +749,43 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }
 
   const productionSurface = (
-    <div className="shot-production-surfaces" data-surface="production">
-      <ProductionBatchRunbookPanel
-        projectId={projectId}
-        runbook={productionBatchRunbook}
-        onRefresh={reload}
-        onStartBatch={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
-        onOpenProductionQueue={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
-        onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
-        onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
-      />
-      <ProjectProductionPipeline
-        projectId={projectId}
-        shots={shots}
-        onRefresh={reload}
-        onNotice={(message) => setNotice(message)}
-        onError={(message) => setError(message)}
-        onConfigureStage={configureBulkStage}
-        onBulkPrompt={assignBulkPrompt}
-        busy={busy}
-        onOpenReview={(reviewStage, shotIds) => {
-          if (busy || !shotIds.length) return;
-          setStage(reviewStage);
-          selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
-        }}
-      />
-    </div>
+    <ProductionModeTabs
+      packagePanel={(
+        <ProductionPackageWorkspace
+          projectId={projectId}
+          onChooseFolder={pickProductionPackageRoot}
+          onOpenQueue={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+        />
+      )}
+      projectProductionPanel={(
+        <div className="shot-production-surfaces" data-surface="project-production">
+          <ProductionBatchRunbookPanel
+            projectId={projectId}
+            runbook={productionBatchRunbook}
+            onRefresh={reload}
+            onStartBatch={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
+            onOpenProductionQueue={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+            onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
+            onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
+          />
+          <ProjectProductionPipeline
+            projectId={projectId}
+            shots={shots}
+            onRefresh={reload}
+            onNotice={(message) => setNotice(message)}
+            onError={(message) => setError(message)}
+            onConfigureStage={configureBulkStage}
+            onBulkPrompt={assignBulkPrompt}
+            busy={busy}
+            onOpenReview={(reviewStage, shotIds) => {
+              if (busy || !shotIds.length) return;
+              setStage(reviewStage);
+              selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
+            }}
+          />
+        </div>
+      )}
+    />
   );
 
   const reviewSurface = (

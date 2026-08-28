@@ -17,7 +17,10 @@ use crate::{
     error::AppError,
 };
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+
+const PRODUCTION_PACKAGE_PICK_ROOT_DIALOG_TITLE: &str = "选择 Production Package 文件夹";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -70,6 +73,25 @@ pub struct ProductionPackageCreateBatchesView {
     pub item_mappings: Vec<ProductionPackageItemMappingView>,
     pub warnings:
         Vec<crate::application::production_package_inspector::ProductionPackageDiagnostic>,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_package_pick_root(
+    app_handle: AppHandle,
+) -> Result<Option<String>, AppError> {
+    let Some(folder) = app_handle
+        .dialog()
+        .file()
+        .set_title(PRODUCTION_PACKAGE_PICK_ROOT_DIALOG_TITLE)
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+
+    let root_path = folder
+        .into_path()
+        .map_err(|_| AppError::filesystem("所选 Production Package 文件夹无法读取"))?;
+    Ok(Some(root_path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -160,5 +182,50 @@ fn map_package_error(error: ProductionPackageError) -> AppError {
         ProductionPackageError::SessionExpired => {
             AppError::invalid_input("production package inspection session expired")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{from_value, json};
+
+    #[test]
+    fn pick_root_contract_keeps_the_user_facing_dialog_title() {
+        assert_eq!(
+            PRODUCTION_PACKAGE_PICK_ROOT_DIALOG_TITLE,
+            "选择 Production Package 文件夹"
+        );
+    }
+
+    #[test]
+    fn package_requests_use_camel_case_and_create_only_accepts_selection() {
+        let inspect: ProductionPackageInspectRequest = from_value(json!({
+            "projectId": "project-1",
+            "packageRoot": "C:/packages/ep01"
+        }))
+        .expect("inspect request should accept the stable camelCase contract");
+        assert_eq!(inspect.project_id, "project-1");
+        assert_eq!(inspect.package_root, "C:/packages/ep01");
+
+        let create: ProductionPackageCreateBatchesRequest = from_value(json!({
+            "inspectionId": "inspection-1",
+            "selectedItemIds": ["external-item-1"]
+        }))
+        .expect("create request should accept the stable camelCase contract");
+        assert_eq!(create.inspection_id, "inspection-1");
+        assert_eq!(create.selected_item_ids, vec!["external-item-1".to_owned()]);
+
+        let rejected = from_value::<ProductionPackageCreateBatchesRequest>(json!({
+            "inspectionId": "inspection-1",
+            "selectedItemIds": ["external-item-1"],
+            "packageRoot": "C:/packages/ep01",
+            "media": ["images/shot.png"],
+            "workflowVersionId": "must-not-be-client-input"
+        }));
+        assert!(
+            rejected.is_err(),
+            "create must not accept package or execution inputs"
+        );
     }
 }

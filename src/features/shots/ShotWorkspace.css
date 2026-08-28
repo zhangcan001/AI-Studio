@@ -376,6 +376,48 @@
   margin-block: 0;
 }
 
+.shot-production-mode-tabs {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.shot-production-mode-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-md);
+  background: var(--ux-surface-2);
+}
+
+.shot-production-mode-tab {
+  min-width: 120px;
+  border: 0;
+  color: var(--ux-muted);
+  background: transparent;
+}
+
+.shot-production-mode-tab[aria-selected="true"] {
+  color: var(--ux-text);
+  background: var(--ux-surface-1);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
+}
+
+.shot-production-mode-tab:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 1px;
+}
+
+.shot-production-mode-tabpanel {
+  min-width: 0;
+}
+
+.shot-production-mode-tabpanel[hidden] {
+  display: none;
+}
+
 .shot-production-layout {
   display: grid;
   grid-template-columns: minmax(250px, 290px) minmax(0, 1fr);

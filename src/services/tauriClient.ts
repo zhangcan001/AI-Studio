@@ -21,7 +21,20 @@ import type {
   H3LocalImportResult,
   H3ProjectSegmentDraft,
 } from "../types/h3LocalImport";
-import type { ProductionPackageInspection } from "../types/productionPackage";
+import type {
+  ProductionPackageCreateBatchesRequest,
+  ProductionPackageCreateBatchesResult,
+  ProductionPackageInspectRequest,
+  ProductionPackageInspectionResult,
+} from "../types/productionPackage";
+export type {
+  ProductionPackageBatchMapping,
+  ProductionPackageCreateBatchesRequest,
+  ProductionPackageCreateBatchesResult,
+  ProductionPackageInspectRequest,
+  ProductionPackageInspectionResult,
+  ProductionPackageItemMapping,
+} from "../types/productionPackage";
 import type { AssetTag, ProjectTemplate, TemplateProjectResult } from "../types/organization";
 import type { GenerationValues, RecipeViewModel } from "../types/generation";
 import type {
@@ -1439,40 +1452,17 @@ export function updateH3ProjectSegmentDraft(
   return invoke<H3LocalImportInspection>("h3_local_import_update_project_segment_draft", { request });
 }
 
-export type ProductionPackageInspectionResult = ProductionPackageInspection & {
-  inspectionId: string;
-};
-
-export interface ProductionPackageItemMapping {
-  packageItemId: string;
-  batchId: string;
-  batchItemId: string;
-  importedAssetIds: string[];
-}
-
-export interface ProductionPackageBatchMapping {
-  batchId: string;
-  batchName: string;
-  itemCount: number;
-  itemMappings: ProductionPackageItemMapping[];
-}
-
-export interface ProductionPackageCreateBatchesResult {
-  packageName: string;
-  batchCount: number;
-  itemCount: number;
-  autoStarted: boolean;
-  batches: ProductionPackageBatchMapping[];
-  itemMappings: ProductionPackageItemMapping[];
-  warnings: Array<{ code: string; message: string; severity: string; field?: string | null }>;
+export function pickProductionPackageRoot(): Promise<string | null> {
+  return invoke<string | null>("production_package_pick_root");
 }
 
 export function inspectProductionPackage(
   projectId: string,
   packageRoot: string,
 ): Promise<ProductionPackageInspectionResult> {
+  const request: ProductionPackageInspectRequest = { projectId, packageRoot };
   return invoke<ProductionPackageInspectionResult>("production_package_inspect", {
-    request: { projectId, packageRoot },
+    request,
   });
 }
 
@@ -1480,8 +1470,9 @@ export function createProductionPackageBatches(
   inspectionId: string,
   selectedItemIds: string[],
 ): Promise<ProductionPackageCreateBatchesResult> {
+  const request: ProductionPackageCreateBatchesRequest = { inspectionId, selectedItemIds };
   return invoke<ProductionPackageCreateBatchesResult>("production_package_create_batches", {
-    request: { inspectionId, selectedItemIds },
+    request,
   });
 }
 
