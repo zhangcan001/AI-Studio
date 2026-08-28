@@ -1448,9 +1448,9 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
             .is_some_and(|version| version <= 25)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
-    assert!(package.contains("\"version\": \"0.7.0\""));
+    assert!(package.contains("\"version\": \"0.8.0\""));
     let cargo = fs::read_to_string(root.join("Cargo.toml")).unwrap();
-    assert!(cargo.contains("version = \"0.7.0\""));
+    assert!(cargo.contains("version = \"0.8.0\""));
     let backup =
         fs::read_to_string(root.join("src/application/project_backup_service.rs")).unwrap();
     assert!(backup.contains("const BACKUP_VERSION: u32 = 15"));

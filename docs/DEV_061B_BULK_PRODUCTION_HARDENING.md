@@ -1,6 +1,10 @@
 # DEV-061B — Production Package Bulk Production Hardening
 
-状态：**本地 Release Gate PASS，CI 证据待封存**
+状态：**DEV-061B PASS**
+
+Commit: `99d3730bf4b0c65bf8ae80dd2c63c0f16ce7b8d8`
+Source-only CI: `33179819595`
+Conclusion: `success`
 
 DEV-061B 把外部 Production Package 的批量创建、失败恢复和人工启动边界收敛到现有生产链：
 
@@ -62,4 +66,4 @@ QUEUE_RELOAD_5_BATCH_MS = 10
 
 其中 `QUEUE_RELOAD_5_BATCH_MS` 包含重建 ProductionPackage/Queue 依赖后的一次 queue list 和 5 次 bounded batch detail read；测试断言重启后仍为 5 batches / 500 items。数值用于回归基线，不代表真实 H3/Comfy 执行耗时。
 
-版本边界保持不变：Product `0.7.0`、Migration `025`、Backup `15`、Manifest `2`，Migration 026 不存在。DEV-062 是下一步发布门禁，不在本文内提前宣称 CI 通过。
+版本边界保持不变：Migration `025`、Backup `15`、Manifest `2`，Migration 026 不存在。DEV-061B 的实现提交和 Source-only CI 已通过；DEV-062 负责将产品版本升级到 `0.8.0` 并完成最终发布门禁。
