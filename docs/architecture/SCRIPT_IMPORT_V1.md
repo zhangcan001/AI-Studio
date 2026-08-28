@@ -1,6 +1,6 @@
 # Script Import V1
 
-状态：DEV-057 Data Foundation 已落地；DEV-058 Parser 尚未实现。
+状态：DEV-057 Data Foundation 已落地；DEV-058 deterministic parser 已实现。
 
 DEV-057 已冻结并持久化 `ScriptDocument`/`DraftStructureV1` 的数据 contract：Migration 025 使用 `script_sources` 与不可变的 `script_import_drafts`，Backup 升至 15；Manifest 仍为 2 且故意排除 Script/Draft 工作数据。本文的解析管线、Match、Storyboard、Review 和 Promote 仍属于后续 DEV。
 
@@ -54,6 +54,11 @@ ScriptDocument
 每个 `sourceBlock` 至少保存：稳定 block ID、原文起止 byte/line/character span、短预览、block kind、父级结构提示和解析警告。原始内容只保留一份；不能把整篇原文复制到每个 Draft Shot 或正式 Shot。
 
 `sourceChecksum` 是 reparse 和 provenance 的稳定依据。文件重命名但内容不变时，不应无故产生新的 source identity；内容变化必须产生可比较的新导入 revision。
+
+DEV-058 实现将 parser identity 固定为 `script-import-v1`，并以共享
+`SourceMap` 保证 TXT、Markdown、JSON 使用同一套原始 byte/line/Unicode
+scalar character span 规则。UTF-8 BOM 参与 source checksum 但不参与语义文本，
+CRLF 的两个原始 bytes 保留在 span 中。
 
 ## 4. 解析管线
 
@@ -186,11 +191,19 @@ validation + human review
 
 LLM 不得返回或决定可信的 Profile ID、Asset ID、ReferenceSet、workflow、Batch、Task 或 Comfy 请求；它的文本结果只能标为 `ai`/`suggested`。DEV-056 不接入 OpenAI-compatible API、local LLM 或用户 endpoint，只保留未来 port 的输入输出边界。
 
-## 8. 应用入口状态
+## 8. DEV-058 应用服务
 
-DEV-057 不新增 Tauri command，也不接 AppState。当前可由 application service/repository 直接构造和测试；正式用户入口留给 DEV-058/DEV-061。
+`ScriptImportService` 只依赖现有 `ScriptDraftService`，提供 preview、从 source
+创建 `PARSED` revision、以及跨 source 的 `REPARSED` revision。preview 零写入；
+reparse 使用 `scriptImport.anchorMap.v1` 保留节点身份、更新 source spans、保留
+人工值并返回摘要 diff。取消、非法 UTF-8、JSON schema/type/capacity 错误均
+fail-closed，不会写入半成功 revision。
 
-## 9. 未来应用入口
+## 9. 应用入口状态
+
+DEV-057/DEV-058 不新增 Tauri command，也不接 AppState。当前可由 application service/repository 直接构造和测试；正式用户入口留给后续 Workspace 任务。
+
+## 10. 未来应用入口
 
 以下仍是规划名称，具体 command 和 UI 在后续 DEV 冻结：
 
@@ -205,7 +218,7 @@ DEV-057 不新增 Tauri command，也不接 AppState。当前可由 application 
 
 `script_import_confirm` 需要目标 Project 和目标结构位置；确认前应返回 promote preview。确认时不得由前端循环调用 `createShot` 代替一个后端事务。
 
-## 10. Draft 与正式层的绝对隔离
+## 11. Draft 与正式层的绝对隔离
 
 解析、LLM、Draft 编辑和 Match 都不得调用：
 

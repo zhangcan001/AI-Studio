@@ -1,6 +1,6 @@
 # AI Studio 0.8.0 Roadmap：Script → Storyboard Draft → Narrative Production V2
 
-状态：DEV-057 Data Foundation PASS；DEV-058 为下一步
+状态：DEV-057 Data Foundation PASS；DEV-058 Script Import Parser PASS；DEV-059 NEXT
 
 内部代号：Narrative Preproduction V2
 稳定基线：AI Studio 0.7.0 — Narrative Production V1
@@ -106,7 +106,7 @@ Draft revision
 | 禁止事项 | 不写 production 表；不改写 migration 024；不升级 Manifest 2；不建立正式结构镜像表、parser、LLM 或 command |
 | 验收门禁 | schema version、project isolation、checksum、immutable revision、5000-node benchmark、Backup 15 roundtrip、旧项目无 Script 仍可打开 |
 
-### DEV-058 — Script Import Parser
+### DEV-058 — Script Import Parser — PASS
 
 | 项目 | 规划 |
 | --- | --- |
@@ -235,6 +235,6 @@ DEV-057
 
 ## 8. 下一步
 
-下一任务：**DEV-058 — Script Import Parser**。
+当前任务：**DEV-059 — Entity Match + Profile Suggestions**。
 
-DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略。通过时不增加 `draft_node_index`；DEV-058 可基于这些冻结 contract 实现 TXT/Markdown/JSON/小说解析，仍保持零 formal writes、零 Queue、零 Comfy。
+DEV-057 已决定 Draft 需要跨应用重启恢复，原始 UTF-8 文本只存于 `script_sources.source_text`，并以 5000-node benchmark 决定索引策略。DEV-058 已完成 TXT/Markdown/JSON v1/小说解析、source map、诊断、reparse 与 zero formal side effects；不增加 `draft_node_index`、Migration 026、Backup 16 或 Manifest 3。下一步是 **DEV-059 — Entity Match + Profile Suggestions**。

@@ -60,6 +60,8 @@ pub mod reference_set_service;
 pub mod scene_production_service;
 pub mod scheduler;
 pub mod script_draft_service;
+pub mod script_import_parser;
+pub mod script_import_service;
 pub mod series_production_service;
 pub mod settings_service;
 pub mod shot_batch_service;
