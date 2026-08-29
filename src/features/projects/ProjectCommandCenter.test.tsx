@@ -248,6 +248,15 @@ describe("ProjectCommandCenter", () => {
     expect(onOpenImport).toHaveBeenCalledTimes(1);
   });
 
+  it("always exposes project management when a project is already active", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView {...viewProps()} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "管理项目" }));
+    expect(onNavigate).toHaveBeenCalledWith("projects");
+  });
+
   it("recommends binding configuration only for consistency projects with profiles but no bindings", () => {
     const consistency = aggregate({
       consistency: { characterProfiles: 1, sceneProfiles: 0, propProfiles: 0, styleProfiles: 0, referenceSets: 0, shotProfileBindings: 0, shotReferenceSetBindings: 0, scopeProfileBindings: 0, scopeReferenceSetBindings: 0, consistencyInUse: true },

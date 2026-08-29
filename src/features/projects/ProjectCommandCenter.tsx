@@ -280,6 +280,7 @@ export function ProjectCommandCenterView({
           <p className="section-description">从项目状态、运行环境到镜头进度，集中决定下一步工作。</p>
         </div>
         <div className="project-command-heading-actions">
+          <button type="button" className="quiet-button" onClick={() => onNavigate?.("projects")} disabled={!onNavigate || busyNow}>管理项目</button>
           {project && onOpenImport && <button type="button" className="quiet-button" onClick={onOpenImport} disabled={busyNow}>批量导入预检</button>}
           <button type="button" onClick={onRefresh} disabled={refreshDisabled}>
             {refreshBusy || loading ? "正在刷新……" : "刷新项目"}

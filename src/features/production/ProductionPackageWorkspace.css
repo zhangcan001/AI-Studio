@@ -88,6 +88,7 @@
 .production-package-workspace-folder-row { align-items: stretch; }
 .production-package-workspace-folder-row input { min-width: 0; flex: 1 1 260px; }
 .production-package-workspace-folder-row button { flex: 0 0 auto; min-height: 40px; }
+.production-package-workspace-folder-status { display: block; }
 .production-package-workspace-folder small,
 .production-package-workspace-footer small,
 .production-package-workspace-queue-note { color: var(--package-muted); font-size: .72rem; line-height: 1.45; }

@@ -116,6 +116,18 @@ describe("ProductionPackageWorkspace", () => {
     expect(folderPathInput.getAttribute("aria-readonly")).toBe("true");
   });
 
+  it("shows the complete selected path and a truthful inspection status", async () => {
+    inspectMock.mockResolvedValue(makeInspection(1, ["READY"]));
+    const fullPath = "D:\\AI漫剧\\第一集\\生产包";
+    render(<ProductionPackageWorkspace projectId="project-1" folderPath={fullPath} />);
+
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledWith("project-1", fullPath));
+    const folderPathInput = screen.getByLabelText("Production Package 文件夹路径") as HTMLInputElement;
+    expect(folderPathInput.value).toBe(fullPath);
+    expect(folderPathInput.title).toBe(fullPath);
+    expect(screen.getByText("已选择 · 检查完成")).toBeTruthy();
+  });
+
   it("creates 150 selected items as two batches, never opens the queue automatically, and exposes a manual open callback", async () => {
     const user = userEvent.setup();
     const openQueue = vi.fn();

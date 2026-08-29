@@ -150,4 +150,23 @@ describe("ProductionQueueDrawer", () => {
     expect(html).not.toContain("Scheduler");
     expect(html).not.toContain("Auto Start Next");
   });
+
+  it("puts a focused batch first while keeping every queue visible", () => {
+    const html = renderToStaticMarkup(
+      <ProductionQueueDrawer
+        queues={[
+          { id: "batch-1", projectId: "project-1", name: "第一批", status: "READY", continueOnFailure: false, createdAt: "", updatedAt: "" },
+          { id: "batch-2", projectId: "project-1", name: "第二批", status: "READY", continueOnFailure: false, createdAt: "", updatedAt: "" },
+          { id: "batch-3", projectId: "project-1", name: "第三批", status: "READY", continueOnFailure: false, createdAt: "", updatedAt: "" },
+        ]}
+        runbook={{ projectId: "project-1", rows: [] }}
+        focusBatchId="batch-2"
+        defaultExpanded
+      />,
+    );
+
+    expect(html).toContain('data-batch-id="batch-2" data-focused="true"');
+    expect(html.indexOf('data-batch-id="batch-2"')).toBeLessThan(html.indexOf('data-batch-id="batch-1"'));
+    expect(html).toContain('data-batch-id="batch-3"');
+  });
 });

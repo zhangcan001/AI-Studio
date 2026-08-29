@@ -254,6 +254,14 @@ export function ProductionPackageWorkspace({
           ? isPartialCreate ? "PARTIAL" : "CREATED"
           : derivedInspectionState;
   const hasQueueCallback = Boolean(onOpenQueue || onOpenProductionQueue);
+  const folderStatusMessage = folderStatusLabel({
+    hasPath: Boolean(currentFolderPath),
+    isInspecting: isInspecting || isPickingFolder,
+    hasCreatedResult: Boolean(createdResult),
+    hasError: Boolean(error),
+    isBlocked: workspaceState === "BLOCKED",
+    hasInspection: Boolean(inspection),
+  });
 
   function handlePreviewSelectionChange(nextSelection: Set<string>) {
     if (busy) return;
@@ -330,10 +338,11 @@ export function ProductionPackageWorkspace({
           <input
             id="production-package-folder-path"
             type="text"
-            value={currentFolderPath ? displayFolderName(currentFolderPath) : ""}
+            value={currentFolderPath}
             placeholder="尚未选择生产包文件夹"
             readOnly
             aria-readonly="true"
+            title={currentFolderPath || undefined}
             disabled={isCreating || isPickingFolder}
             aria-describedby="production-package-folder-help"
           />
@@ -346,6 +355,7 @@ export function ProductionPackageWorkspace({
             {isInspecting ? "检查中…" : inspection || error ? "重新检查" : "检查文件夹"}
           </button>
         </div>
+        <small className="production-package-workspace-folder-status" role="status" aria-live="polite">{folderStatusMessage}</small>
         <small id="production-package-folder-help">选择结果会自动检查；检查只读，创建批次前后端仍会重新校验路径、媒体和提示词。</small>
         {currentFolderPath && (
           <details className="production-package-workspace-folder-details">
@@ -567,6 +577,22 @@ function normalizePath(path: string | null | undefined): string {
 function displayFolderName(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
   return normalized.split(/[\\/]/).pop() || normalized;
+}
+
+function folderStatusLabel(input: {
+  hasPath: boolean;
+  isInspecting: boolean;
+  hasCreatedResult: boolean;
+  hasError: boolean;
+  isBlocked: boolean;
+  hasInspection: boolean;
+}): string {
+  if (!input.hasPath) return "尚未选择 Production Package 文件夹";
+  if (input.isInspecting) return "已选择 · 正在检查";
+  if (input.hasCreatedResult) return "已选择 · 已创建生产批次";
+  if (input.hasError || input.isBlocked) return "已选择 · 检查发现问题";
+  if (input.hasInspection) return "已选择 · 检查完成";
+  return "已选择";
 }
 
 function statusErrorCode(error: unknown): string | undefined {

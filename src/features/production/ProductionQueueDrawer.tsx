@@ -34,6 +34,8 @@ export interface ProductionQueueDrawerProps {
   /** Controlled expansion; omit it to use the collapsed-by-default local state. */
   expanded?: boolean;
   defaultExpanded?: boolean;
+  /** Optional batch to place first and visually identify without hiding other queues. */
+  focusBatchId?: string;
   onToggle?: (expanded: boolean) => void;
   onStart?: (batchId: string) => void | Promise<void>;
   onPause?: (batchId: string) => void | Promise<void>;
@@ -80,6 +82,7 @@ export function ProductionQueueDrawer({
   queues = [],
   expanded,
   defaultExpanded = false,
+  focusBatchId,
   onToggle,
   onStart,
   onPause,
@@ -91,7 +94,10 @@ export function ProductionQueueDrawer({
   const drawerId = useId().replace(/:/g, "");
   const contentId = `production-queue-drawer-${drawerId}-content`;
   const isExpanded = expanded ?? localExpanded;
-  const rows = useMemo(() => buildRows(details, queues, runbook), [details, queues, runbook]);
+  const rows = useMemo(
+    () => prioritizeRows(buildRows(details, queues, runbook), focusBatchId),
+    [details, focusBatchId, queues, runbook],
+  );
   const visibleRows = rows.slice(0, MAX_VISIBLE_ROWS);
   const itemRows = useMemo(
     () => items?.length ? [...items] : details.flatMap((detail) => detail.items),
@@ -148,6 +154,7 @@ export function ProductionQueueDrawer({
                 <BatchRow
                   key={row.id}
                   row={row}
+                  focused={row.id === focusBatchId}
                   busyAction={busyAction}
                   onStart={onStart ? (id) => void runAction("start", id, onStart) : undefined}
                   onPause={onPause ? (id) => void runAction("pause", id, onPause) : undefined}
@@ -192,6 +199,7 @@ export function ProductionQueueDrawer({
 
 function BatchRow({
   row,
+  focused,
   busyAction,
   onStart,
   onPause,
@@ -199,6 +207,7 @@ function BatchRow({
   onOpen,
 }: {
   row: DrawerBatchRow;
+  focused: boolean;
   busyAction?: string;
   onStart?: (id: string) => void;
   onPause?: (id: string) => void;
@@ -211,7 +220,7 @@ function BatchRow({
   const retryable = row.status === "FAILED";
 
   return (
-    <li className="production-queue-drawer-row" data-batch-id={row.id}>
+    <li className="production-queue-drawer-row" data-batch-id={row.id} data-focused={focused ? "true" : undefined}>
       <Thumbnail data={row} label={row.name} />
       <div className="production-queue-drawer-row-copy">
         <div className="production-queue-drawer-row-heading">
@@ -225,6 +234,7 @@ function BatchRow({
           {row.total !== undefined && <span>{row.succeeded ?? 0}/{row.total}</span>}
         </div>
         {row.name !== row.shotName && <small className="production-queue-drawer-row-name" title={row.name}>{row.name}</small>}
+        <small className="production-queue-drawer-row-id" title={row.id}>批次 ID · <code>{row.id}</code></small>
         {progress !== undefined && (
           <div className="production-queue-drawer-progress" aria-label={`完成 ${progress}%`}>
             <span><i style={{ width: `${progress}%` }} /></span>
@@ -348,6 +358,13 @@ function buildRows(
   if (details.length) return details.map(detailToRow);
   if (queues.length) return queues.map(summaryToRow);
   return (runbook?.rows ?? []).map(runbookToRow);
+}
+
+function prioritizeRows(rows: DrawerBatchRow[], focusBatchId?: string): DrawerBatchRow[] {
+  if (!focusBatchId) return rows;
+  const focused = rows.find((row) => row.id === focusBatchId);
+  if (!focused) return rows;
+  return [focused, ...rows.filter((row) => row.id !== focusBatchId)];
 }
 
 function detailToRow(detail: ProductionBatchDetail): DrawerBatchRow {

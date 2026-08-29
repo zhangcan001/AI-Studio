@@ -9,8 +9,10 @@ import {
   getAsset,
   getShot,
   getProductionBatchRunbook,
+  getProductionQueueOverview,
   getSeriesProductionPlan,
   listPromptLibrary,
+  listProductionQueues,
   listProductionStructure,
   listReferenceAnchors,
   listBatchWorkflowPresets,
@@ -28,12 +30,14 @@ import {
   startProductionQueue,
   updateShot,
 } from "../../services/tauriClient";
+import type { ProductionPackageCreateBatchesResult } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
+import type { ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
 import type {
   SeriesPromptBulkRequest,
   SeriesPresetApplyRequest,
@@ -204,6 +208,10 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [referenceAnchors, setReferenceAnchors] = useState<ReferenceAnchorView[]>([]);
   const [productionStructure, setProductionStructure] = useState<ProductionStructureTree>(() => EMPTY_PRODUCTION_STRUCTURE(projectId));
   const [productionBatchRunbook, setProductionBatchRunbook] = useState<ProductionBatchRunbookView>(() => emptyRunbook(projectId));
+  const [productionQueues, setProductionQueues] = useState<ProductionBatchSummary[]>([]);
+  const [productionQueueOverview, setProductionQueueOverview] = useState<ProductionQueueOverview>();
+  const [productionQueueExpanded, setProductionQueueExpanded] = useState(false);
+  const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [batchWorkflowPresets, setBatchWorkflowPresets] = useState<BatchWorkflowPreset[]>([]);
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
@@ -327,7 +335,26 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     }
   }, [projectId]);
 
+  const reloadProductionQueues = useCallback(async () => {
+    try {
+      const [nextQueues, nextOverview] = await Promise.all([
+        listProductionQueues(projectId),
+        getProductionQueueOverview(projectId),
+      ]);
+      setProductionQueues(nextQueues);
+      setProductionQueueOverview(nextOverview);
+    } catch (queueError: unknown) {
+      setError(toUserMessage(queueError));
+    }
+  }, [projectId]);
+
   useEffect(() => { void reload(); }, [reload]);
+
+  useEffect(() => {
+    if (mode !== "production") return;
+    setProductionQueueExpanded(true);
+    void reloadProductionQueues();
+  }, [mode, reloadProductionQueues]);
 
   useEffect(() => {
     onContextPathChange?.(contextPath);
@@ -748,13 +775,26 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     openStructureManagement(context);
   }
 
+  const openProductionQueue = useCallback(async (result?: ProductionPackageCreateBatchesResult) => {
+    const firstBatchId = result?.batches[0]?.batchId;
+    if (firstBatchId) setFocusedProductionBatchId(firstBatchId);
+    setProductionQueueExpanded(true);
+    await reloadProductionQueues();
+    onOpenProductionQueue?.();
+  }, [onOpenProductionQueue, reloadProductionQueues]);
+
+  const focusProductionQueueBatch = useCallback((batchId: string) => {
+    setFocusedProductionBatchId(batchId);
+    setProductionQueueExpanded(true);
+  }, []);
+
   const productionSurface = (
     <ProductionModeTabs
       packagePanel={(
         <ProductionPackageWorkspace
           projectId={projectId}
           onChooseFolder={pickProductionPackageRoot}
-          onOpenQueue={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+          onOpenProductionQueue={openProductionQueue}
         />
       )}
       projectProductionPanel={(
@@ -764,7 +804,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
             runbook={productionBatchRunbook}
             onRefresh={reload}
             onStartBatch={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
-            onOpenProductionQueue={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+            onOpenProductionQueue={onOpenProductionQueue ? () => { void openProductionQueue(); } : undefined}
             onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
             onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
           />
@@ -1066,12 +1106,19 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         onError={(message) => setError(message || undefined)}
       />
       </section>}
-      {mode !== "production" && <ProductionQueueDrawer
+      <ProductionQueueDrawer
+        overview={mode === "production" ? productionQueueOverview : undefined}
+        queues={mode === "production" ? productionQueues : undefined}
         runbook={productionBatchRunbook}
-        onStart={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
-        onPause={async (batchId) => { await pauseProductionQueue(projectId, batchId); await reload(); }}
-        onOpen={onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
-      />}
+        expanded={mode === "production" ? productionQueueExpanded : undefined}
+        onToggle={mode === "production" ? setProductionQueueExpanded : undefined}
+        focusBatchId={mode === "production" ? focusedProductionBatchId : undefined}
+        onStart={async (batchId) => { await startProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
+        onPause={async (batchId) => { await pauseProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
+        onOpen={mode === "production"
+          ? (batchId) => focusProductionQueueBatch(batchId)
+          : onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+      />
       {showWorkspaceFeedback && notice && <p className="studio-notice">{notice}</p>}
       {showWorkspaceFeedback && error && <p className="error-message">{error}</p>}
     </section>
