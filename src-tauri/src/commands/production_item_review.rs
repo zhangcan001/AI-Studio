@@ -10,7 +10,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -77,6 +78,15 @@ pub struct ProductionReviewBulkRegenerateRequest {
     pub auto_start: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionReviewOpenAssetRequest {
+    pub project_id: String,
+    pub batch_id: String,
+    pub item_id: String,
+    pub asset_id: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductionBatchReviewView {
@@ -133,6 +143,8 @@ pub struct ProductionReviewCandidateAssetView {
     pub asset_type: String,
     pub name: String,
     pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub thumbnail_available: bool,
@@ -218,6 +230,56 @@ pub async fn production_item_review_productivity_get(
         .await
         .map_err(map_review_error)
         .map(Into::into)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_item_review_reveal_asset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: ProductionReviewOpenAssetRequest,
+) -> Result<(), AppError> {
+    super::validate_project_id(&request.project_id)?;
+    let path = state
+        .production_item_review_service
+        .resolve_candidate_asset_path(
+            &request.project_id,
+            &request.batch_id,
+            &request.item_id,
+            &request.asset_id,
+        )
+        .await
+        .map_err(map_review_error)?;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| AppError::filesystem(format!("failed to reveal review asset: {error}")))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_item_review_open_output_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: ProductionReviewOpenAssetRequest,
+) -> Result<(), AppError> {
+    super::validate_project_id(&request.project_id)?;
+    let path = state
+        .production_item_review_service
+        .resolve_candidate_asset_path(
+            &request.project_id,
+            &request.batch_id,
+            &request.item_id,
+            &request.asset_id,
+        )
+        .await
+        .map_err(map_review_error)?;
+    let folder = path
+        .parent()
+        .map(|path| path.to_path_buf())
+        .ok_or_else(|| AppError::filesystem("review asset has no output folder"))?;
+    app.opener()
+        .open_path(folder.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|error| {
+            AppError::filesystem(format!("failed to open review output folder: {error}"))
+        })
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -459,6 +521,7 @@ impl From<crate::application::production_item_review_service::ProductionReviewCa
             asset_type: value.asset_type,
             name: value.name,
             mime_type: value.mime_type,
+            local_path: value.local_path,
             width: (value.width > 0).then_some(value.width),
             height: (value.height > 0).then_some(value.height),
             thumbnail_available: value.thumbnail_available,
@@ -630,6 +693,7 @@ impl From<crate::application::production_item_review_service::ProductionReviewIt
                 asset_type: asset.asset_type.as_str().to_owned(),
                 name: asset.name.clone(),
                 mime_type: asset.mime_type.clone(),
+                local_path: Some(asset.storage_path.clone()),
                 width: (asset.width > 0).then_some(asset.width),
                 height: (asset.height > 0).then_some(asset.height),
                 thumbnail_available: asset.thumbnail_path.is_some(),

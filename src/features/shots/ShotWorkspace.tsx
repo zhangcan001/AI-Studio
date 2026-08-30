@@ -7,8 +7,11 @@ import {
   exportProjectManifest,
   generateShot,
   getAsset,
+  getAssetMediaUrl,
   getShot,
   getProductionBatchRunbook,
+  getProductionBatchReviewProductivity,
+  getProductionQueue,
   getProductionQueueOverview,
   getSeriesProductionPlan,
   listPromptLibrary,
@@ -18,9 +21,12 @@ import {
   listBatchWorkflowPresets,
   listRecentAssets,
   listShots,
+  openProductionReviewOutputFolder,
   pauseProductionQueue,
   pickProductionPackageRoot,
+  requeueProductionQueueItem,
   requeueProductionQueueItemByItem,
+  revealProductionReviewAsset,
   replaceShotReferences,
   selectShotResult,
   prepareSeriesProduction,
@@ -38,6 +44,10 @@ import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
 import type { ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
+import type { ProductionBatchDetail } from "../../types/productionQueue";
+import type {
+  ProductionBatchReviewProductivity,
+} from "../../services/tauriClient";
 import type {
   SeriesPromptBulkRequest,
   SeriesPresetApplyRequest,
@@ -59,6 +69,13 @@ import { SeriesProductionPanel } from "./SeriesProductionPanel";
 import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunbookPanel";
 import { ProductionPackageWorkspace } from "../production/ProductionPackageWorkspace";
 import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
+import { ProductionMonitor as ProductionMonitorComponent } from "../production/ProductionMonitor";
+import type {
+  ProductionMonitorBatchReadModel,
+  ProductionMonitorItemReadModel,
+  ProductionMonitorProps,
+} from "../production/ProductionMonitor";
+import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
 import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
 import { ScopeConsistencyWorkspace, type ScopeConsistencyWorkspaceProps } from "./ScopeConsistencyWorkspace";
@@ -202,6 +219,142 @@ interface ProductionQueueSnapshot {
   overview: ProductionQueueOverview;
 }
 
+const ProductionMonitor = ProductionMonitorComponent;
+
+function isTerminalProductionBatch(batch?: ProductionBatchDetail | null): boolean {
+  if (!batch) return false;
+  const terminalItemCount = batch.succeeded + batch.failed + batch.cancelled + batch.skipped;
+  return Boolean(
+    batch.archivedAt
+      || batch.status === "COMPLETED"
+      || ["FAILED", "CANCELLED", "CANCELED"].includes(batch.status as string)
+      || (batch.total > 0 && terminalItemCount >= batch.total),
+  );
+}
+
+function recentFirst<T extends { updatedAt?: string; createdAt?: string }>(left: T, right: T): number {
+  const leftTime = Date.parse(left.updatedAt ?? left.createdAt ?? "") || 0;
+  const rightTime = Date.parse(right.updatedAt ?? right.createdAt ?? "") || 0;
+  return rightTime - leftTime;
+}
+
+export function selectDefaultProductionBatchId(
+  queues: readonly ProductionBatchSummary[],
+  focusedBatchId?: string,
+): string | undefined {
+  const available = queues.filter((queue) => !queue.archivedAt);
+  const focused = focusedBatchId && available.some((queue) => queue.id === focusedBatchId)
+    ? focusedBatchId
+    : undefined;
+  if (focused) return focused;
+  return [...available].filter((queue) => queue.status === "RUNNING").sort(recentFirst)[0]?.id
+    ?? [...available].sort(recentFirst)[0]?.id;
+}
+
+function monitorReadModelFor(
+  batch: ProductionBatchDetail | undefined,
+  review: ProductionBatchReviewProductivity | undefined,
+  projectId: string,
+): ProductionMonitorBatchReadModel | undefined {
+  const source = batch ?? review?.batch;
+  if (!source) return undefined;
+  const reviewItems = new Map((review?.items ?? []).map((item) => [item.itemId, item]));
+  const sourceItems = source.items.length
+    ? source.items
+    : (review?.items ?? []).map((item) => ({
+      id: item.itemId,
+      ordinal: item.ordinal,
+      workflowVersionId: item.workflowVersionId,
+      recipeId: item.recipeId,
+      status: item.productionItemStatus as ProductionBatchDetail["items"][number]["status"],
+      taskId: item.taskId,
+      errorCode: undefined,
+      errorMessage: undefined,
+    }));
+  const items: ProductionMonitorItemReadModel[] = sourceItems.map((item) => {
+    const reviewItem = reviewItems.get(item.id);
+    const outputAssets = reviewItem?.outputAssets ?? [];
+    const candidates = reviewItem?.candidateAssets ?? [];
+    const explicitlySelectedAsset = outputAssets.find((asset) => asset.id === reviewItem?.selectedAssetId);
+    const selectedAsset = (explicitlySelectedAsset && isVideoAsset(explicitlySelectedAsset))
+      ? explicitlySelectedAsset
+      : outputAssets.find(isVideoAsset) ?? explicitlySelectedAsset ?? outputAssets[0];
+    const candidateOutputs = candidates.map((candidate) => ({
+      assetId: candidate.assetId,
+      assetType: candidate.assetType,
+      name: candidate.name,
+      mimeType: candidate.mimeType,
+      localPath: candidate.localPath,
+      width: candidate.width,
+      height: candidate.height,
+      thumbnailAvailable: candidate.thumbnailAvailable,
+      selected: candidate.selected,
+      reviewResult: candidate.reviewResult,
+      asset: outputAssets.find((asset) => asset.id === candidate.assetId),
+    }));
+    const candidateWithLocation = candidates.find((candidate) => candidate.assetId === selectedAsset?.id && candidate.localPath);
+    const assetOutput = selectedAsset ? {
+      ...selectedAsset,
+      candidates: candidateOutputs,
+    } : candidates.length ? { candidates: candidateOutputs } : undefined;
+    return {
+      id: item.id,
+      ordinal: item.ordinal,
+      status: item.status,
+      name: reviewItem?.shotId ?? reviewItem?.promptText ?? item.id,
+      promptText: reviewItem?.promptText ?? ("promptText" in item ? item.promptText : undefined),
+      errorCode: item.errorCode,
+      errorMessage: item.errorMessage,
+      assetId: selectedAsset?.id ?? candidates[0]?.assetId,
+      videoUrl: selectedAsset && (selectedAsset.assetType === "video" || selectedAsset.category === "generated_video")
+        ? getAssetMediaUrl(projectId, selectedAsset.id, "video")
+        : undefined,
+      localPath: candidateWithLocation?.localPath,
+      output: assetOutput,
+      media: assetOutput,
+      recordAvailable: Boolean(selectedAsset || candidates.length),
+    };
+  });
+  return {
+    id: source.id,
+    name: source.name,
+    status: source.status,
+    total: source.total,
+    pending: source.pending,
+    running: source.running,
+    succeeded: source.succeeded,
+    failed: source.failed,
+    cancelled: source.cancelled,
+    skipped: source.skipped,
+    items,
+  };
+}
+
+type MonitorReviewItem = ProductionBatchReviewProductivity["items"][number];
+
+function monitorCandidateFor(item: MonitorReviewItem, videoOnly = false) {
+  const candidates = item.candidateAssets;
+  return candidates.find((candidate) => candidate.assetId === item.selectedAssetId && (!videoOnly || isVideoCandidate(candidate)))
+    ?? candidates.find((candidate) => !videoOnly || isVideoCandidate(candidate));
+}
+
+function isVideoCandidate(candidate: { assetType?: string; mimeType?: string }): boolean {
+  return `${candidate.assetType ?? ""} ${candidate.mimeType ?? ""}`.toLowerCase().includes("video");
+}
+
+function firstFinishedMonitorAsset(review?: ProductionBatchReviewProductivity): { itemId: string; assetId: string; localPath?: string } | undefined {
+  for (const item of review?.items ?? []) {
+    if (item.productionItemStatus !== "SUCCEEDED") continue;
+    const candidate = monitorCandidateFor(item, true);
+    if (candidate) return { itemId: item.itemId, assetId: candidate.assetId, localPath: candidate.localPath };
+  }
+  return undefined;
+}
+
+function safeManifestPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+|\.+$/g, "") || "batch";
+}
+
 export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
@@ -217,6 +370,12 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [productionQueueOverview, setProductionQueueOverview] = useState<ProductionQueueOverview>();
   const [productionQueueExpanded, setProductionQueueExpanded] = useState(false);
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
+  const [productionMonitorBatch, setProductionMonitorBatch] = useState<ProductionBatchDetail>();
+  const [productionMonitorReview, setProductionMonitorReview] = useState<ProductionBatchReviewProductivity>();
+  const [productionMonitorLoading, setProductionMonitorLoading] = useState(false);
+  const [productionMonitorError, setProductionMonitorError] = useState<string>();
+  const [monitorPreviewAsset, setMonitorPreviewAsset] = useState<AssetView>();
+  const [productionPackageFolderPath, setProductionPackageFolderPath] = useState<string | null>(null);
   const [recentlyCreatedProductionBatchIds, setRecentlyCreatedProductionBatchIds] = useState<string[]>([]);
   const [batchWorkflowPresets, setBatchWorkflowPresets] = useState<BatchWorkflowPreset[]>([]);
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
@@ -240,8 +399,16 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [shotListControls, setShotListControls] = useState<ShotListControls>(defaultShotListControls);
   const reloadGeneration = useRef(0);
+  const productionMonitorRequest = useRef(false);
+  const productionMonitorPendingBatch = useRef<string | undefined>(undefined);
+  const productionMonitorMounted = useRef(true);
+  const productionMonitorBatchRef = useRef<string | undefined>(undefined);
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
+  const selectedProductionBatchId = useMemo(
+    () => selectDefaultProductionBatchId(productionQueues, focusedProductionBatchId),
+    [focusedProductionBatchId, productionQueues],
+  );
   const shotSceneIds = useMemo(() => shotSceneIndex(productionStructure), [productionStructure]);
   const sceneFilterOptions = useMemo(() => productionSceneOptions(productionStructure), [productionStructure]);
   const selectedPromptEntry = promptEntries.find((entry) => entry.id === selectedPromptId);
@@ -357,7 +524,72 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     }
   }, [projectId]);
 
+  const refreshProductionMonitor = useCallback(async (batchId: string) => {
+    if (!productionMonitorMounted.current) return;
+    if (productionMonitorRequest.current) {
+      productionMonitorPendingBatch.current = batchId;
+      return;
+    }
+    productionMonitorRequest.current = true;
+    setProductionMonitorLoading(true);
+    setProductionMonitorError(undefined);
+    try {
+      const [nextBatch, nextReview] = await Promise.all([
+        getProductionQueue(projectId, batchId),
+        getProductionBatchReviewProductivity(projectId, batchId),
+      ]);
+      if (!productionMonitorMounted.current || productionMonitorBatchRef.current !== batchId) return;
+      setProductionMonitorBatch(nextBatch);
+      setProductionMonitorReview(nextReview);
+    } catch (monitorError: unknown) {
+      if (productionMonitorMounted.current && productionMonitorBatchRef.current === batchId) {
+        setProductionMonitorError(toUserMessage(monitorError));
+      }
+    } finally {
+      productionMonitorRequest.current = false;
+      if (productionMonitorMounted.current) setProductionMonitorLoading(false);
+      const pendingBatchId = productionMonitorPendingBatch.current;
+      productionMonitorPendingBatch.current = undefined;
+      if (pendingBatchId && pendingBatchId !== batchId && productionMonitorBatchRef.current === pendingBatchId) {
+        void refreshProductionMonitor(pendingBatchId);
+      }
+    }
+  }, [projectId]);
+
   useEffect(() => { void reload(); }, [reload]);
+
+  useEffect(() => {
+    productionMonitorMounted.current = true;
+    return () => { productionMonitorMounted.current = false; };
+  }, []);
+
+  useEffect(() => {
+    productionMonitorBatchRef.current = selectedProductionBatchId;
+    setProductionMonitorBatch(undefined);
+    setProductionMonitorReview(undefined);
+    setProductionMonitorError(undefined);
+    setMonitorPreviewAsset(undefined);
+    if (mode !== "production" || !selectedProductionBatchId) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    void refreshProductionMonitor(selectedProductionBatchId);
+  }, [mode, refreshProductionMonitor, selectedProductionBatchId]);
+
+  useEffect(() => {
+    if (mode !== "production" || !selectedProductionBatchId || isTerminalProductionBatch(productionMonitorBatch)) return;
+    const refreshIfVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshProductionMonitor(selectedProductionBatchId);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshIfVisible();
+    };
+    const intervalId = window.setInterval(refreshIfVisible, 3000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [mode, productionMonitorBatch, refreshProductionMonitor, selectedProductionBatchId]);
 
   useEffect(() => {
     if (mode !== "production") return;
@@ -802,11 +1034,153 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     setProductionQueueExpanded(true);
   }, []);
 
+  const openProductionMonitorBatch = useCallback((batchId: string) => {
+    focusProductionQueueBatch(batchId);
+    if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+      void refreshProductionMonitor(batchId);
+    }
+  }, [focusProductionQueueBatch, refreshProductionMonitor]);
+
+  const startProductionBatch = useCallback(async (batchId: string) => {
+    focusProductionQueueBatch(batchId);
+    await startProductionQueue(projectId, batchId);
+    await reloadProductionQueues();
+    await reload();
+    await refreshProductionMonitor(batchId);
+  }, [focusProductionQueueBatch, projectId, refreshProductionMonitor, reload, reloadProductionQueues]);
+
+  const requeueProductionMonitorItem = useCallback(async (itemId: string) => {
+    const batchId = selectedProductionBatchId;
+    if (!batchId) return;
+    setProductionMonitorError(undefined);
+    try {
+      await requeueProductionQueueItem(projectId, batchId, itemId);
+      await reloadProductionQueues();
+      await refreshProductionMonitor(batchId);
+      setNotice("已重新加入当前批次等待队列；不会自动开始。 ");
+    } catch (requeueError: unknown) {
+      setProductionMonitorError(toUserMessage(requeueError));
+    }
+  }, [projectId, refreshProductionMonitor, reloadProductionQueues, selectedProductionBatchId]);
+
+  const productionMonitorReadModel = useMemo(
+    () => monitorReadModelFor(productionMonitorBatch, productionMonitorReview, projectId),
+    [productionMonitorBatch, productionMonitorReview, projectId],
+  );
+  const finishedMonitorAsset = useMemo(
+    () => firstFinishedMonitorAsset(productionMonitorReview),
+    [productionMonitorReview],
+  );
+  const openMonitorAssetPreviewForItem = useCallback((itemId: string, assetId: string) => {
+    const item = productionMonitorReview?.items.find((candidate) => candidate.itemId === itemId);
+    const asset = item?.outputAssets.find((candidate) => candidate.id === assetId);
+    if (asset && isVideoAsset(asset)) setMonitorPreviewAsset(asset);
+  }, [productionMonitorReview]);
+  const revealMonitorAssetLocation = useCallback(async (itemId: string, filePath?: string) => {
+    const batchId = selectedProductionBatchId;
+    const item = productionMonitorReview?.items.find((candidate) => candidate.itemId === itemId);
+    const candidate = item?.candidateAssets.find((asset) => filePath && asset.localPath === filePath)
+      ?? (item ? monitorCandidateFor(item, true) : undefined);
+    if (!batchId || !candidate?.localPath) {
+      setProductionMonitorError("该成品没有可用的数据库文件位置。");
+      return;
+    }
+    try {
+      await revealProductionReviewAsset({ projectId, batchId, itemId, assetId: candidate.assetId });
+    } catch (openError: unknown) {
+      setProductionMonitorError(toUserMessage(openError));
+    }
+  }, [projectId, productionMonitorReview, selectedProductionBatchId]);
+  const openMonitorOutputFolder = useCallback(async () => {
+    const batchId = selectedProductionBatchId;
+    const finished = finishedMonitorAsset;
+    if (!batchId || !finished?.localPath) {
+      setProductionMonitorError("没有可打开的数据库成品目录。");
+      return;
+    }
+    try {
+      await openProductionReviewOutputFolder({
+        projectId,
+        batchId,
+        itemId: finished.itemId,
+        assetId: finished.assetId,
+      });
+    } catch (openError: unknown) {
+      setProductionMonitorError(toUserMessage(openError));
+    }
+  }, [finishedMonitorAsset, projectId, selectedProductionBatchId]);
+  const exportLocalDeliveryManifest = useCallback(() => {
+    const batch = productionMonitorReadModel;
+    const review = productionMonitorReview;
+    if (!batch || !review || typeof document === "undefined" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      setProductionMonitorError("当前批次交付数据尚未准备好。");
+      return;
+    }
+    const items = review.items.map((item) => {
+      const candidate = monitorCandidateFor(item, true);
+      return {
+        externalId: item.shotId ?? item.itemId,
+        itemId: item.itemId,
+        status: item.productionItemStatus,
+        videoAssetId: candidate?.assetId,
+        videoPath: candidate?.localPath,
+      };
+    });
+    const manifest = {
+      manifestType: "LOCAL_DELIVERY_MANIFEST",
+      manifestVersion: 1,
+      batchId: batch.id,
+      batchName: batch.name,
+      generatedAt: new Date().toISOString(),
+      total: batch.total,
+      succeeded: batch.succeeded,
+      failed: batch.failed,
+      items,
+    };
+    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `LOCAL_DELIVERY_MANIFEST_${safeManifestPart(String(batch.id))}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setNotice("LOCAL_DELIVERY_MANIFEST 已导出；仅包含数据库成品索引。");
+  }, [productionMonitorReadModel, productionMonitorReview]);
+  const selectNextProductionPackage = useCallback(async () => {
+    try {
+      const nextPath = await pickProductionPackageRoot();
+      if (nextPath) {
+        setProductionPackageFolderPath(nextPath);
+        setNotice("已选择下一个生产包，正在检查；不会自动创建或开始批次。");
+      }
+    } catch (pickError: unknown) {
+      setProductionMonitorError(toUserMessage(pickError));
+    }
+  }, []);
+  const monitorProps: ProductionMonitorProps = {
+    batch: productionMonitorReadModel,
+    readModel: productionMonitorReadModel,
+    onRetry: requeueProductionMonitorItem,
+    onRetryItem: requeueProductionMonitorItem,
+    onPlay: openMonitorAssetPreviewForItem,
+    onOpenFileLocation: revealMonitorAssetLocation,
+    onViewAllFinishedProducts: () => {
+      if (selectedProductionBatchId) openProductionMonitorBatch(selectedProductionBatchId);
+    },
+    onOpenFinishedProductsFolder: finishedMonitorAsset?.localPath ? openMonitorOutputFolder : undefined,
+    onExportManifest: productionMonitorReview ? exportLocalDeliveryManifest : undefined,
+    onSelectNextProductionPackage: selectNextProductionPackage,
+  };
+
   const productionSurface = (
     <ProductionModeTabs
       packagePanel={(
         <ProductionPackageWorkspace
           projectId={projectId}
+          folderPath={productionPackageFolderPath}
+          onFolderPathChange={setProductionPackageFolderPath}
           onChooseFolder={pickProductionPackageRoot}
           onOpenProductionQueue={openProductionQueue}
         />
@@ -817,7 +1191,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
             projectId={projectId}
             runbook={productionBatchRunbook}
             onRefresh={reload}
-            onStartBatch={async (batchId) => { await startProductionQueue(projectId, batchId); await reload(); }}
+            onStartBatch={startProductionBatch}
             onOpenProductionQueue={onOpenProductionQueue ? () => { void openProductionQueue(); } : undefined}
             onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
             onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
@@ -1128,12 +1502,27 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         onToggle={mode === "production" ? setProductionQueueExpanded : undefined}
         focusBatchId={mode === "production" ? focusedProductionBatchId : undefined}
         createdBatchIds={mode === "production" ? recentlyCreatedProductionBatchIds : undefined}
-        onStart={async (batchId) => { await startProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
+        onStart={startProductionBatch}
         onPause={async (batchId) => { await pauseProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
         onOpen={mode === "production"
-          ? (batchId) => focusProductionQueueBatch(batchId)
+          ? (batchId) => openProductionMonitorBatch(batchId)
           : onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
       />
+      {mode === "production" && (
+        <>
+          {productionMonitorLoading && !productionMonitorReadModel && <p className="project-loading" role="status">正在加载生产监控...</p>}
+          {productionMonitorError && <p className="error-message" role="alert">{productionMonitorError}</p>}
+          <ProductionMonitor {...monitorProps} />
+          {monitorPreviewAsset && (
+            <ProductionAssetPreview
+              projectId={projectId}
+              asset={monitorPreviewAsset}
+              onClose={() => setMonitorPreviewAsset(undefined)}
+              onOpenTask={onOpenTask}
+            />
+          )}
+        </>
+      )}
       {showWorkspaceFeedback && notice && <p className="studio-notice">{notice}</p>}
       {showWorkspaceFeedback && error && <p className="error-message">{error}</p>}
     </section>

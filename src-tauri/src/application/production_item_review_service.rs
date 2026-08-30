@@ -9,15 +9,16 @@ use crate::application::production_queue_service::{
     ProductionQueueError, ProductionQueueService,
 };
 use crate::domain::{
-    Asset, AssetType, PreparationSnapshotRecord, ProductionBatchDetail, ProductionBatchItem,
-    ProductionBatchItemStatus, ProductionReviewStatus, SeedValue, ShotStage, Task, TaskId,
-    TaskStatus,
+    Asset, AssetId, AssetType, PreparationSnapshotRecord, ProductionBatchDetail,
+    ProductionBatchItem, ProductionBatchItemStatus, ProductionReviewStatus, SeedValue, ShotStage,
+    Task, TaskId, TaskStatus,
 };
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fmt,
+    path::PathBuf,
     sync::Arc,
 };
 use uuid::Uuid;
@@ -77,6 +78,7 @@ pub struct ProductionReviewCandidateAsset {
     pub asset_type: String,
     pub name: String,
     pub mime_type: String,
+    pub local_path: Option<String>,
     pub width: u32,
     pub height: u32,
     pub thumbnail_available: bool,
@@ -221,6 +223,54 @@ impl ProductionItemReviewService {
         batch_id: &str,
     ) -> Result<ProductionReviewProductivityView, ProductionReviewError> {
         self.get_productivity_view(project_id, batch_id).await
+    }
+
+    /// Resolve an output candidate from the database before allowing a desktop
+    /// open action. The caller supplies identifiers only; the path is never
+    /// accepted from the client.
+    pub async fn resolve_candidate_asset_path(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        item_id: &str,
+        asset_id: &str,
+    ) -> Result<PathBuf, ProductionReviewError> {
+        let detail = self
+            .production_queue_service
+            .get(project_id, batch_id)
+            .await?;
+        let item = detail
+            .items
+            .iter()
+            .find(|item| item.id.as_str() == item_id)
+            .ok_or_else(|| ProductionReviewError::NotFound(item_id.to_owned()))?;
+        let task_id = item
+            .task_id
+            .as_deref()
+            .ok_or_else(|| ProductionReviewError::NotFound(asset_id.to_owned()))
+            .and_then(|task_id| {
+                TaskId::parse(task_id.to_owned())
+                    .map_err(|error| ProductionReviewError::InvalidState(error.to_string()))
+            })?;
+        let asset_id = AssetId::parse(asset_id.to_owned())
+            .map_err(|error| ProductionReviewError::InvalidInput(error.to_string()))?;
+        let asset = self
+            .asset_repository
+            .find_by_id(&asset_id)
+            .await?
+            .ok_or_else(|| ProductionReviewError::NotFound(asset_id.as_str().to_owned()))?;
+        if asset.project_id != project_id || asset.source_task_id.as_ref() != Some(&task_id) {
+            return Err(ProductionReviewError::NotFound(
+                asset_id.as_str().to_owned(),
+            ));
+        }
+        let path = PathBuf::from(asset.storage_path);
+        if !path.is_absolute() {
+            return Err(ProductionReviewError::InvalidState(
+                "Asset storage path must be absolute before it can be opened.".to_owned(),
+            ));
+        }
+        Ok(path)
     }
 
     pub async fn set_status(
@@ -664,6 +714,7 @@ impl ProductionItemReviewService {
                     asset_type: asset.asset_type.as_str().to_owned(),
                     name: asset.name.clone(),
                     mime_type: asset.mime_type.clone(),
+                    local_path: Some(asset.storage_path.clone()),
                     width: asset.width,
                     height: asset.height,
                     thumbnail_available: asset.thumbnail_path.is_some(),

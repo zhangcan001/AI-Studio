@@ -148,6 +148,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
     }));
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .register_asynchronous_uri_scheme_protocol(
             "aistudio-media",
             move |_context, request, responder| {
@@ -1037,6 +1038,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_partial_resume,
             commands::production_item_review::production_item_review_get,
             commands::production_item_review::production_item_review_productivity_get,
+            commands::production_item_review::production_item_review_reveal_asset,
+            commands::production_item_review::production_item_review_open_output_folder,
             commands::production_item_review::production_item_review_set_status,
             commands::production_item_review::production_item_review_set_note,
             commands::production_item_review::production_item_review_regenerate,

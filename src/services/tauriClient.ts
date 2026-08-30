@@ -191,6 +191,7 @@ import type {
   ProductionBatchReview,
   ProductionReviewRegenerateResult,
   ProductionReviewItem,
+  ProductionReviewCandidateAsset,
   ProductionReviewStatus,
 } from "../types/productionItemReview";
 import type { ReviewCompareContextSnapshot } from "../types/reviewProductivity";
@@ -1204,18 +1205,7 @@ export function getProductionBatchReview(projectId: string, batchId: string): Pr
 }
 
 /** The enriched review payload used by the productivity/compare workspace. */
-export interface ProductionReviewProductivityCandidate {
-  assetId: string;
-  assetType: string;
-  name: string;
-  mimeType: string;
-  width?: number;
-  height?: number;
-  thumbnailAvailable: boolean;
-  taskId?: string;
-  selected: boolean;
-  reviewResult?: string;
-}
+export type ProductionReviewProductivityCandidate = ProductionReviewCandidateAsset;
 
 export interface ProductionReviewProductivityItem extends ProductionReviewItem {
   shotId?: string;
@@ -1239,6 +1229,21 @@ export interface ProductionBatchReviewProductivity extends Omit<ProductionBatchR
 /** Reads the enriched review payload through its dedicated read command. */
 export function getProductionBatchReviewProductivity(projectId: string, batchId: string): Promise<ProductionBatchReviewProductivity> {
   return invoke<ProductionBatchReviewProductivity>("production_item_review_productivity_get", { projectId, batchId });
+}
+
+export interface ProductionReviewOpenAssetRequest {
+  projectId: string;
+  batchId: string;
+  itemId: string;
+  assetId: string;
+}
+
+export function revealProductionReviewAsset(request: ProductionReviewOpenAssetRequest): Promise<void> {
+  return invoke<void>("production_item_review_reveal_asset", { request });
+}
+
+export function openProductionReviewOutputFolder(request: ProductionReviewOpenAssetRequest): Promise<void> {
+  return invoke<void>("production_item_review_open_output_folder", { request });
 }
 
 export function setProductionReviewStatus(request: {

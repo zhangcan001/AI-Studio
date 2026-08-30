@@ -10,6 +10,21 @@ export type ProductionReviewStatus =
   | "FAILED"
   | "IN_PROGRESS";
 
+export interface ProductionReviewCandidateAsset {
+  assetId: string;
+  assetType: string;
+  name: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  thumbnailAvailable: boolean;
+  taskId?: string;
+  /** Absolute path projected from the database Asset.storage_path. */
+  localPath?: string;
+  selected: boolean;
+  reviewResult?: string;
+}
+
 export interface ProductionReviewItem {
   itemId: string;
   ordinal: number;
