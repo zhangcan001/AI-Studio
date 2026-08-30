@@ -36,6 +36,8 @@ export interface ProductionQueueDrawerProps {
   defaultExpanded?: boolean;
   /** Optional batch to place first and visually identify without hiding other queues. */
   focusBatchId?: string;
+  /** Batch IDs created by the latest quick-flow action; they stay visible and are marked. */
+  createdBatchIds?: readonly string[];
   onToggle?: (expanded: boolean) => void;
   onStart?: (batchId: string) => void | Promise<void>;
   onPause?: (batchId: string) => void | Promise<void>;
@@ -83,6 +85,7 @@ export function ProductionQueueDrawer({
   expanded,
   defaultExpanded = false,
   focusBatchId,
+  createdBatchIds,
   onToggle,
   onStart,
   onPause,
@@ -155,6 +158,7 @@ export function ProductionQueueDrawer({
                   key={row.id}
                   row={row}
                   focused={row.id === focusBatchId}
+                  recentlyCreated={createdBatchIds?.includes(row.id) ?? false}
                   busyAction={busyAction}
                   onStart={onStart ? (id) => void runAction("start", id, onStart) : undefined}
                   onPause={onPause ? (id) => void runAction("pause", id, onPause) : undefined}
@@ -200,6 +204,7 @@ export function ProductionQueueDrawer({
 function BatchRow({
   row,
   focused,
+  recentlyCreated,
   busyAction,
   onStart,
   onPause,
@@ -208,6 +213,7 @@ function BatchRow({
 }: {
   row: DrawerBatchRow;
   focused: boolean;
+  recentlyCreated: boolean;
   busyAction?: string;
   onStart?: (id: string) => void;
   onPause?: (id: string) => void;
@@ -220,11 +226,17 @@ function BatchRow({
   const retryable = row.status === "FAILED";
 
   return (
-    <li className="production-queue-drawer-row" data-batch-id={row.id} data-focused={focused ? "true" : undefined}>
+    <li
+      className={`production-queue-drawer-row${recentlyCreated ? " production-queue-drawer-row-recent" : ""}`}
+      data-batch-id={row.id}
+      data-focused={focused ? "true" : undefined}
+      data-recently-created={recentlyCreated ? "true" : undefined}
+    >
       <Thumbnail data={row} label={row.name} />
       <div className="production-queue-drawer-row-copy">
         <div className="production-queue-drawer-row-heading">
           <strong title={row.shotName ?? row.name}>{row.shotName ?? row.name}</strong>
+          {recentlyCreated && <span className="production-queue-drawer-recent-label">刚刚创建</span>}
           <StatusChip status={row.status} />
         </div>
         <div className="production-queue-drawer-row-meta">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragDropEvent } from "@tauri-apps/api/webview";
 import {
   createProductionPackageBatches,
   inspectProductionPackage,
@@ -17,6 +18,7 @@ export const PRODUCTION_PACKAGE_WORKSPACE_PAGE_SIZE = 50;
 
 export type ProductionPackageWorkspaceState =
   | "EMPTY"
+  | "DRAG_OVER"
   | "INSPECTING"
   | "READY"
   | "PARTIAL"
@@ -51,9 +53,9 @@ export interface ProductionPackageWorkspaceProps {
   onSelectFolder?: ProductionPackageFolderPicker;
   onOpenFolderPicker?: ProductionPackageFolderPicker;
   folderPicker?: ProductionPackageFolderPicker;
-  /** The queue remains a manual gate; this callback is never invoked after create automatically. */
+  /** Legacy queue callback. When provided, it is invoked after a successful create. */
   onOpenQueue?: () => void | Promise<void>;
-  /** Optional richer queue callback for hosts that need the created batch mapping. */
+  /** Optional richer queue callback that receives the created batch mapping. */
   onOpenProductionQueue?: (result: ProductionPackageCreateBatchesResult) => void | Promise<void>;
   defaultFolderPath?: string;
 }
@@ -106,11 +108,16 @@ export function ProductionPackageWorkspace({
   const [isCreating, setIsCreating] = useState(false);
   const [isOpeningQueue, setIsOpeningQueue] = useState(false);
   const [createdResult, setCreatedResult] = useState<ProductionPackageCreateBatchesResult>();
+  const [queueOpenFailed, setQueueOpenFailed] = useState(false);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(true);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [dropSupport, setDropSupport] = useState<"unknown" | "available" | "unavailable">("unknown");
   const [error, setError] = useState<WorkspaceError>();
   const [notice, setNotice] = useState<string>();
   const requestIdRef = useRef(0);
   const observedFolderKeyRef = useRef<string | undefined>(undefined);
   const preferredSelectionIdsRef = useRef<Set<string> | undefined>(undefined);
+  const dropHandlerRef = useRef<(paths: readonly string[]) => void>(() => undefined);
 
   const pickFolder = onChooseFolder ?? onPickFolder ?? onSelectFolder ?? onOpenFolderPicker ?? folderPicker;
   const busy = isInspecting || isPickingFolder || isCreating || isOpeningQueue;
@@ -120,6 +127,9 @@ export function ProductionPackageWorkspace({
     setInspection(undefined);
     setSelectedItemIds(new Set());
     setCreatedResult(undefined);
+    setQueueOpenFailed(false);
+    setIsPreviewExpanded(true);
+    setIsDragOver(false);
     preferredSelectionIdsRef.current = undefined;
     setIsInspecting(false);
     setError(undefined);
@@ -150,6 +160,8 @@ export function ProductionPackageWorkspace({
       const nextInspection = result as WorkspaceInspection;
       setInspection(nextInspection);
       setSelectedItemIds(initialSelection(nextInspection.items, preferredSelectionIds));
+      setIsPreviewExpanded(nextInspection.items.length <= 10);
+      setQueueOpenFailed(false);
       setNotice(`已检查「${displayFolderName(packageRoot)}」，请确认项目后创建批次。`);
     } catch (inspectionError: unknown) {
       if (requestId !== requestIdRef.current) return;
@@ -186,6 +198,68 @@ export function ProductionPackageWorkspace({
     else void inspectFolder(normalized);
   }
 
+  function handleDroppedPaths(paths: readonly string[]) {
+    setIsDragOver(false);
+    if (busy) return;
+    if (paths.length !== 1) {
+      setError({
+        message: "一次只能拖入一个 Production Package 文件夹。",
+        code: "PACKAGE_DROP_INVALID",
+        requiresReinspect: false,
+      });
+      setNotice(undefined);
+      return;
+    }
+
+    const droppedPath = normalizePath(paths[0]);
+    if (!droppedPath || isLikelyDroppedFile(droppedPath)) {
+      setError({
+        message: "请拖入包含 production-package.json 的整个 Production Package 文件夹。",
+        code: "PACKAGE_DROP_INVALID",
+        requiresReinspect: false,
+      });
+      setNotice(undefined);
+      return;
+    }
+    adoptFolderPath(droppedPath);
+  }
+
+  dropHandlerRef.current = handleDroppedPaths;
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    async function registerDropListener() {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        if (disposed) return;
+        const listener = await getCurrentWebview().onDragDropEvent((event) => {
+          const payload = event.payload as DragDropEvent;
+          if (payload.type === "enter" || payload.type === "over") {
+            if (!busy) setIsDragOver(true);
+            return;
+          }
+          setIsDragOver(false);
+          if (payload.type === "drop") dropHandlerRef.current(payload.paths);
+        });
+        if (disposed) listener();
+        else {
+          unlisten = listener;
+          setDropSupport("available");
+        }
+      } catch {
+        if (!disposed) setDropSupport("unavailable");
+      }
+    }
+
+    void registerDropListener();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   async function chooseFolder() {
     if (!pickFolder || busy) return;
     setIsPickingFolder(true);
@@ -213,6 +287,17 @@ export function ProductionPackageWorkspace({
     if (busy || !currentFolderPath || !createdResult?.remainingItemIds.length) return;
     preferredSelectionIdsRef.current = new Set(createdResult.remainingItemIds);
     void inspectFolder(currentFolderPath);
+  }
+
+  function chooseNextPackage() {
+    if (busy) return;
+    if (isControlledFolderPath) {
+      observedFolderKeyRef.current = `${projectId}\u0000`;
+      onFolderPathChange?.("");
+    } else {
+      setLocalFolderPath("");
+    }
+    resetWorkspace();
   }
 
   const items = inspection?.items ?? [];
@@ -244,15 +329,17 @@ export function ProductionPackageWorkspace({
   const requestedCount = createdResult?.requestedCount ?? createdCount + (createdResult?.remainingCount ?? 0);
   const remainingCount = createdResult?.remainingCount ?? createdResult?.remainingItemIds?.length ?? 0;
   const isPartialCreate = createdResult?.status === "PARTIAL" || remainingCount > 0;
-  const workspaceState: ProductionPackageWorkspaceState = isInspecting || isPickingFolder
-    ? "INSPECTING"
-    : isCreating
-      ? "CREATING_BATCHES"
-      : error
-        ? "ERROR"
-        : createdResult
-          ? isPartialCreate ? "PARTIAL" : "CREATED"
-          : derivedInspectionState;
+  const workspaceState: ProductionPackageWorkspaceState = isDragOver && !busy
+    ? "DRAG_OVER"
+    : isInspecting || isPickingFolder
+      ? "INSPECTING"
+      : isCreating
+        ? "CREATING_BATCHES"
+        : error
+          ? "ERROR"
+          : createdResult
+            ? isPartialCreate ? "PARTIAL" : "CREATED"
+            : derivedInspectionState;
   const hasQueueCallback = Boolean(onOpenQueue || onOpenProductionQueue);
   const folderStatusMessage = folderStatusLabel({
     hasPath: Boolean(currentFolderPath),
@@ -280,11 +367,15 @@ export function ProductionPackageWorkspace({
     try {
       const result = await createProductionPackageBatches(inspection.inspectionId, ids);
       setCreatedResult(result);
+      setQueueOpenFailed(false);
       const createdCount = result.createdCount ?? result.itemCount;
       const remainingCount = result.remainingCount ?? result.remainingItemIds?.length ?? 0;
-      setNotice(result.status === "PARTIAL"
-        ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚未加入 ${remainingCount} 个项目；不会自动启动队列。`
-        : `已创建 ${result.batchCount} 个生产批次，共 ${createdCount} 个项目；不会自动启动队列。`);
+      setNotice(hasQueueCallback
+        ? "批次已创建，正在打开生产队列…"
+        : result.status === "PARTIAL"
+          ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚未加入 ${remainingCount} 个项目；不会自动启动队列。`
+          : `已创建 ${result.batchCount} 个生产批次，共 ${createdCount} 个项目；不会自动启动队列。`);
+      if (hasQueueCallback) await openQueue(result);
     } catch (createError: unknown) {
       setError(toWorkspaceError(createError, "create"));
     } finally {
@@ -292,16 +383,24 @@ export function ProductionPackageWorkspace({
     }
   }
 
-  async function openQueue() {
-    if (!createdResult || !hasQueueCallback || isOpeningQueue) return;
+  async function openQueue(resultOverride?: ProductionPackageCreateBatchesResult) {
+    const resultToOpen = resultOverride ?? createdResult;
+    if (!resultToOpen || !hasQueueCallback || isOpeningQueue) return;
     setIsOpeningQueue(true);
     setError(undefined);
     try {
-      if (onOpenQueue) await onOpenQueue();
-      else await onOpenProductionQueue?.(createdResult);
-      setNotice("已请求打开生产队列；队列仍需由用户手动启动。 ");
+      if (onOpenProductionQueue) await onOpenProductionQueue(resultToOpen);
+      else await onOpenQueue?.();
+      setQueueOpenFailed(false);
+      setNotice("已打开生产队列；请点击“开始”后才会提交生成任务。 ");
     } catch (openError: unknown) {
-      setError(toWorkspaceError(openError, "open"));
+      const openFailure = toWorkspaceError(openError, "open");
+      setQueueOpenFailed(true);
+      setError({
+        ...openFailure,
+        message: "生产批次已创建，但生产队列暂时无法打开。",
+        requiresReinspect: false,
+      });
     } finally {
       setIsOpeningQueue(false);
     }
@@ -325,14 +424,24 @@ export function ProductionPackageWorkspace({
         <div>
           <span className="section-label">External Production Package V1</span>
           <h2>{inspection?.packageName || "批量视频生产"}</h2>
-          <p className="section-description">选择由外部智能体准备好的 Production Package 文件夹；确认项目后只创建批次，不自动启动生产。</p>
+          <p className="section-description">选择或拖入外部智能体准备好的 Production Package 文件夹；检查后创建并打开队列，开始生产仍由你明确点击。</p>
         </div>
         <span className={`production-package-workspace-state production-package-workspace-state-${workspaceState.toLowerCase()}`}>
           {workspaceStateLabel(workspaceState)}
         </span>
       </div>
 
-      <div className="production-package-workspace-folder" aria-label="生产包文件夹入口">
+      <div className="production-package-workspace-folder" aria-label="生产包文件夹入口" data-drop-support={dropSupport}>
+        <div
+          className={`production-package-workspace-drop-zone${isDragOver ? " production-package-workspace-drop-zone-active" : ""}`}
+          aria-label="Production Package 文件夹拖放区域"
+          data-drop-state={isDragOver ? "DRAG_OVER" : "IDLE"}
+        >
+          <strong>{isDragOver ? "松开以检查 Production Package 文件夹" : "将 Production Package 文件夹拖到这里"}</strong>
+          <span>或使用下方的文件夹选择器</span>
+          <small>目录中必须包含 <code>production-package.json</code></small>
+          {dropSupport === "unavailable" && <small>桌面拖放 API 不可用，请使用文件夹选择器。</small>}
+        </div>
         <label htmlFor="production-package-folder-path">Production Package 文件夹路径</label>
         <div className="production-package-workspace-folder-row">
           <input
@@ -376,7 +485,7 @@ export function ProductionPackageWorkspace({
             <li>schemaVersion 必须为 1，packageType 必须为 AI_STUDIO_VIDEO_PRODUCTION。</li>
             <li>每个项目需要唯一 ID、名称和非空 videoPrompt；完整提示词不会在预览中展开。</li>
             <li>项目最多 500 个；READY 默认选中，WARNING 需要手动确认，BLOCKED 不可选。</li>
-            <li>创建只会加入现有生产队列，不会自动打开或启动队列。</li>
+            <li>创建并打开只会加入现有生产队列，不会自动启动生成；开始按钮仍是唯一生产闸门。</li>
           </ul>
         </div>
       </details>
@@ -389,7 +498,9 @@ export function ProductionPackageWorkspace({
         <div className="production-package-workspace-error" role="alert" aria-live="assertive">
           <strong>{error.code ? `操作失败 · ${error.code}` : "操作失败"}</strong>
           <p>{error.message}</p>
-          {currentFolderPath && <small>请点击“重新检查”获取最新检查结果后再继续。</small>}
+          {queueOpenFailed
+            ? <small>请点击“重新打开生产队列”；已创建的批次不会重复创建。</small>
+            : currentFolderPath && <small>请点击“重新检查”获取最新检查结果后再继续。</small>}
         </div>
       )}
 
@@ -419,14 +530,21 @@ export function ProductionPackageWorkspace({
             已选择 {selectedItems.length} 项（READY {selectedReadyCount}，WARNING {selectedWarningCount}）；WARNING 需手动选择，BLOCKED 不可选。
           </p>
 
-          <fieldset disabled={busy} className="production-package-workspace-preview-fieldset">
-            <ProductionPackagePreview
-              inspection={inspection}
-              selectedItemIds={selectedItemIds}
-              onSelectionChange={handlePreviewSelectionChange}
-              pageSize={50}
-            />
-          </fieldset>
+          <details
+            className="production-package-workspace-preview-details"
+            open={isPreviewExpanded}
+            onToggle={(event) => setIsPreviewExpanded(event.currentTarget.open)}
+          >
+            <summary>{isPreviewExpanded ? "收起镜头明细" : `查看 ${items.length} 个镜头明细`}</summary>
+            <fieldset disabled={busy} className="production-package-workspace-preview-fieldset">
+              <ProductionPackagePreview
+                inspection={inspection}
+                selectedItemIds={selectedItemIds}
+                onSelectionChange={handlePreviewSelectionChange}
+                pageSize={50}
+              />
+            </fieldset>
+          </details>
         </>
       )}
 
@@ -449,15 +567,22 @@ export function ProductionPackageWorkspace({
             <span>状态：{isPartialCreate ? "部分完成" : "完成"}</span>
             <span>自动启动：{createdResult.autoStarted ? "是" : "否"}</span>
           </div>
-          <p>队列不会自动打开或启动，请在需要时手动打开生产队列。</p>
-          <ul className="production-package-workspace-batch-list" aria-label="已创建生产批次">
-            {createdResult.batches.map((batch, index) => (
-              <li key={batch.batchId}>
-                <strong>{batch.batchName || `批次 ${index + 1}`}</strong>
-                <span>{batch.itemCount} 个项目 · {batch.batchId}</span>
-              </li>
-            ))}
-          </ul>
+          <p>{queueOpenFailed
+            ? "生产批次已创建，但生产队列暂时无法打开。"
+            : hasQueueCallback
+              ? "生产队列已打开；不会自动开始生成，请在队列中点击“开始”。"
+              : "批次已创建；父层未接入队列打开回调，不会自动启动生成。"}</p>
+          <details className="production-package-workspace-batch-details">
+            <summary>查看批次详细信息（{createdResult.batchCount} 个）</summary>
+            <ul className="production-package-workspace-batch-list" aria-label="已创建生产批次">
+              {createdResult.batches.map((batch, index) => (
+                <li key={batch.batchId}>
+                  <strong>{batch.batchName || `批次 ${index + 1}`}</strong>
+                  <span>{batch.itemCount} 个项目 · {batch.batchId}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
           {isPartialCreate && remainingCount > 0 && (
             <div className="production-package-workspace-remaining">
               <p>保留 {remainingCount} 个未加入项目的外部 ID；重新检查后只会按最新检查结果选择仍可生产的剩余项目。</p>
@@ -467,9 +592,10 @@ export function ProductionPackageWorkspace({
             </div>
           )}
           <button type="button" onClick={() => void openQueue()} disabled={!hasQueueCallback || isOpeningQueue}>
-            {isOpeningQueue ? "正在打开…" : "打开生产队列"}
+            {isOpeningQueue ? "正在打开…" : queueOpenFailed ? "重新打开生产队列" : isPartialCreate ? "打开已创建队列" : "打开生产队列"}
           </button>
           {!hasQueueCallback && <small className="production-package-workspace-queue-note">父层尚未接入打开生产队列回调。</small>}
+          <button type="button" className="quiet-button" onClick={chooseNextPackage} disabled={busy}>选择下一个生产包</button>
         </section>
       )}
 
@@ -480,7 +606,7 @@ export function ProductionPackageWorkspace({
           onClick={() => void createBatches()}
           disabled={!canCreate}
         >
-          {isCreating ? "正在创建批次…" : createdResult ? "批次已创建" : `创建生产批次${selectionIdsForCreate.length ? `（${selectionIdsForCreate.length} 项）` : ""}`}
+          {isCreating ? "正在创建批次…" : createdResult ? "批次已创建" : `创建并打开生产队列${selectionIdsForCreate.length ? `（${selectionIdsForCreate.length} 项）` : ""}`}
         </button>
         {workspaceState === "BLOCKED" && <small>没有可创建的 READY/WARNING 项目，请修复生产包后重新检查。</small>}
         {workspaceState === "ERROR" && !requiresReinspect && <small>可先重新检查，也可修复错误后再次创建批次。</small>}
@@ -537,11 +663,12 @@ function isSelectableItem(item: ProductionPackageInspectionItem): boolean {
 
 function workspaceStateLabel(state: ProductionPackageWorkspaceState): string {
   switch (state) {
-    case "EMPTY": return "等待选择文件夹";
-    case "INSPECTING": return "正在检查";
-    case "READY": return "检查通过";
-    case "PARTIAL": return "部分可生产";
-    case "BLOCKED": return "无法创建";
+    case "EMPTY": return "等待生产包";
+    case "DRAG_OVER": return "拖放到这里";
+    case "INSPECTING": return "正在检查生产包…";
+    case "READY": return "检查完成";
+    case "PARTIAL": return "部分项目需要确认";
+    case "BLOCKED": return "生产包存在问题";
     case "CREATING_BATCHES": return "正在创建批次";
     case "CREATED": return "批次已创建";
     case "ERROR": return "需要处理错误";
@@ -554,13 +681,14 @@ function statusMessageForState(
   selectedCount: number,
 ): string {
   switch (state) {
-    case "EMPTY": return "尚未选择 Production Package 文件夹。请选择包含 production-package.json 的目录。";
+    case "EMPTY": return "尚未选择生产包。请拖入或选择包含 production-package.json 的目录。";
+    case "DRAG_OVER": return "已识别拖放操作；松开后将自动检查生产包。";
     case "INSPECTING": return "正在检查 Production Package，请稍候。";
     case "READY": return `检查完成：${counts.total} 个项目全部 READY，可创建批次。`;
     case "PARTIAL": return `检查完成：${counts.ready} 个 READY、${counts.warning} 个 WARNING、${counts.blocked} 个 BLOCKED；当前已选择 ${selectedCount} 项。`;
     case "BLOCKED": return "检查完成，但没有可创建的 READY 或 WARNING 项目。请修复生产包后重新检查。";
     case "CREATING_BATCHES": return `正在创建批次，${selectedCount} 个已选择项目处理中；操作完成前控件已禁用。`;
-    case "CREATED": return "批次已创建；不会自动打开或启动生产队列。";
+    case "CREATED": return "生产批次已创建；队列不会自动开始生成。";
     case "ERROR": return "操作遇到错误；请根据提示重新检查后继续。";
   }
 }
@@ -577,6 +705,12 @@ function normalizePath(path: string | null | undefined): string {
 function displayFolderName(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
   return normalized.split(/[\\/]/).pop() || normalized;
+}
+
+function isLikelyDroppedFile(path: string): boolean {
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(path)) return true;
+  const basename = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop()?.trim().toLowerCase() ?? "";
+  return basename === "production-package.json" || /\.[^./\\]+$/.test(basename);
 }
 
 function folderStatusLabel(input: {

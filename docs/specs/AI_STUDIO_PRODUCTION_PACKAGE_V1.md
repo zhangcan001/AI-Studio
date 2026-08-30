@@ -1,6 +1,6 @@
 # AI Studio Production Package V1
 
-这是一份给 ChatGPT、Claude、Gemini 或人工工具使用的可复制输入规范。生成一个目录，放入 `production-package.json`，再按 JSON 中的相对路径放入媒体文件。AI Studio 会先预览和校验；只有用户确认后才会创建生产批次。
+这是一份给 ChatGPT、Claude、Gemini 或人工工具使用的可复制输入规范。生成一个目录，放入 `production-package.json`，再按 JSON 中的相对路径放入媒体文件。AI Studio 会先自动检查、预览和校验；用户确认后可用“创建并打开生产队列”一次加入现有队列。创建和打开都不会开始生成，只有用户明确点击队列中的“开始”才会执行生产。
 
 ## 完整示例
 
@@ -127,6 +127,14 @@
 
 数组顺序会冻结到现有 H3 generation values；不要依赖文件名排序。
 
+## 快速生产操作
+
+在 Production 页面选择或拖入包含 `production-package.json` 的整个文件夹。文件夹选择器成功后会自动 Inspect；桌面拖放若当前 WebView 不可用，则使用同一选择器。Inspect 完成后先查看项目总数、READY、WARNING 和 BLOCKED 摘要：READY 默认选中，WARNING 必须人工选择，BLOCKED 不可选择。
+
+确认选择后点击“创建并打开生产队列（N 项）”。创建成功的批次会自动显示在现有 Production Queue 中，队列自动展开并聚焦第一批；多个批次仍分别显示。用户必须在目标批次上点击“开始”，不会自动 Start、Start All、Auto Next 或提交 ComfyUI。若创建成功但队列暂时无法打开，已创建结果会保留，只提供“重新打开生产队列”，不会允许重复创建。
+
+生产包处理完成后可点击“选择下一个生产包”清理当前文件夹、Inspect 结果和选择状态；已有批次及正在运行的批次不会被删除或停止。
+
 ## 目录结构与文件名
 
 ```text
@@ -158,7 +166,7 @@ ProductionPackage/
 - `videoPrompt` 必须为非空 UTF-8，单项不超过 64 KiB。
 - Inspector 预览 Prompt 最多 300 个字符；完整 Prompt 仅用于后端生成，不写入日志预览。
 - 图片、参考图片、音频和视频必须通过现有媒体校验与 SourceAssetImport；格式、大小、尺寸和 SHA-256 不合格会阻止提交。
-- 包最多按现有 ProductionQueue/H3 下游上限分块创建批次，保持 JSON item 顺序；不会自动 Start。
+- 包最多按现有 ProductionQueue/H3 下游上限分块创建批次，保持 JSON item 顺序；创建后自动打开现有 Queue，但不会自动 Start。
 - `workflowVersionId`、`recipeId`、`taskId`、`batchId`、`assetId`、`comfyPromptId`、`selectedVideoAssetId` 即使出现在未知字段中也不会执行。
 
 ## 错误排查

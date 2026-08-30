@@ -212,6 +212,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [productionQueueOverview, setProductionQueueOverview] = useState<ProductionQueueOverview>();
   const [productionQueueExpanded, setProductionQueueExpanded] = useState(false);
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
+  const [recentlyCreatedProductionBatchIds, setRecentlyCreatedProductionBatchIds] = useState<string[]>([]);
   const [batchWorkflowPresets, setBatchWorkflowPresets] = useState<BatchWorkflowPreset[]>([]);
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
@@ -335,7 +336,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     }
   }, [projectId]);
 
-  const reloadProductionQueues = useCallback(async () => {
+  const reloadProductionQueues = useCallback(async (throwOnError = false) => {
     try {
       const [nextQueues, nextOverview] = await Promise.all([
         listProductionQueues(projectId),
@@ -344,6 +345,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       setProductionQueues(nextQueues);
       setProductionQueueOverview(nextOverview);
     } catch (queueError: unknown) {
+      if (throwOnError) throw queueError;
       setError(toUserMessage(queueError));
     }
   }, [projectId]);
@@ -776,10 +778,12 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }
 
   const openProductionQueue = useCallback(async (result?: ProductionPackageCreateBatchesResult) => {
-    const firstBatchId = result?.batches[0]?.batchId;
+    const createdBatchIds = result?.batches.map((batch) => batch.batchId) ?? [];
+    const firstBatchId = createdBatchIds[0];
+    if (result) setRecentlyCreatedProductionBatchIds(createdBatchIds);
     if (firstBatchId) setFocusedProductionBatchId(firstBatchId);
     setProductionQueueExpanded(true);
-    await reloadProductionQueues();
+    await reloadProductionQueues(true);
     onOpenProductionQueue?.();
   }, [onOpenProductionQueue, reloadProductionQueues]);
 
@@ -1113,6 +1117,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         expanded={mode === "production" ? productionQueueExpanded : undefined}
         onToggle={mode === "production" ? setProductionQueueExpanded : undefined}
         focusBatchId={mode === "production" ? focusedProductionBatchId : undefined}
+        createdBatchIds={mode === "production" ? recentlyCreatedProductionBatchIds : undefined}
         onStart={async (batchId) => { await startProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
         onPause={async (batchId) => { await pauseProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
         onOpen={mode === "production"

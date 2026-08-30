@@ -169,4 +169,25 @@ describe("ProductionQueueDrawer", () => {
     expect(html.indexOf('data-batch-id="batch-2"')).toBeLessThan(html.indexOf('data-batch-id="batch-1"'));
     expect(html).toContain('data-batch-id="batch-3"');
   });
+
+  it("marks every batch from the latest quick flow while focusing the first one", () => {
+    const html = renderToStaticMarkup(
+      <ProductionQueueDrawer
+        queues={[
+          { id: "batch-1", projectId: "project-1", name: "第一批", status: "READY", continueOnFailure: false, createdAt: "", updatedAt: "" },
+          { id: "batch-2", projectId: "project-1", name: "第二批", status: "READY", continueOnFailure: false, createdAt: "", updatedAt: "" },
+        ]}
+        createdBatchIds={["batch-1", "batch-2"]}
+        focusBatchId="batch-1"
+        defaultExpanded
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('data-batch-id="batch-1" data-focused="true" data-recently-created="true"');
+    expect(html).toContain('data-batch-id="batch-2" data-recently-created="true"');
+    expect(html.match(/刚刚创建/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="开始队列 batch-1"');
+    expect(html).toContain('aria-label="开始队列 batch-2"');
+  });
 });

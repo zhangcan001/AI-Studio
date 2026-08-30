@@ -152,20 +152,21 @@ afterEach(() => {
 });
 
 describe("ShotWorkspace production package queue integration", () => {
-  it("keeps a created generic batch visible and manually startable with an empty runbook", async () => {
+  it("quick-creates, opens, focuses, and keeps a created generic batch manually startable", async () => {
     const user = userEvent.setup();
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
 
     await user.click(await screen.findByRole("button", { name: "选择生产包文件夹" }));
     await waitFor(() => expect(mocks.inspectProductionPackage).toHaveBeenCalledWith("project-1", "C:/uat"));
-    await user.click(screen.getByRole("button", { name: "创建生产批次（1 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
 
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "打开生产队列" }));
 
     const drawer = await screen.findByRole("region", { name: "生产队列" });
     expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-focused")).toBe("true");
+    expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-recently-created")).toBe("true");
+    expect(within(drawer).getByText("刚刚创建")).toBeTruthy();
     expect(within(drawer).getByText("pbt_uat_001")).toBeTruthy();
     expect(within(drawer).getByRole("button", { name: "开始队列 pbt_uat_001" })).toBeTruthy();
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();

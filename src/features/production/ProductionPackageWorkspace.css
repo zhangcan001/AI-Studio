@@ -72,6 +72,7 @@
 .production-package-workspace-status.status-blocked { color: var(--package-danger); background: rgba(248, 113, 113, .1); }
 .production-package-workspace-state-inspecting,
 .production-package-workspace-state-creating_batches { color: #a5b4fc; background: rgba(129, 140, 248, .12); }
+.production-package-workspace-state-drag_over { color: #ddd6fe; border-color: rgba(139, 92, 246, .5); background: rgba(139, 92, 246, .18); }
 .production-package-workspace-state-created { color: var(--package-success); background: rgba(52, 211, 153, .1); }
 
 .production-package-workspace-folder {
@@ -93,6 +94,24 @@
 .production-package-workspace-footer small,
 .production-package-workspace-queue-note { color: var(--package-muted); font-size: .72rem; line-height: 1.45; }
 .production-package-workspace-folder-row input[readonly] { cursor: default; color: var(--package-muted); }
+.production-package-workspace-drop-zone {
+  display: grid;
+  min-height: 116px;
+  gap: 5px;
+  place-content: center;
+  padding: 18px;
+  border: 1px dashed var(--package-border-strong);
+  border-radius: var(--studio-radius-md, 8px);
+  color: var(--package-muted);
+  background: rgba(139, 92, 246, .035);
+  text-align: center;
+  transition: border-color .16s ease, background .16s ease;
+}
+.production-package-workspace-drop-zone strong { color: var(--package-text); font-size: .9rem; }
+.production-package-workspace-drop-zone span { font-size: .76rem; }
+.production-package-workspace-drop-zone small { font-size: .7rem; }
+.production-package-workspace-drop-zone code { color: #c4b5fd; }
+.production-package-workspace-drop-zone-active { border-color: var(--package-accent); background: rgba(139, 92, 246, .16); box-shadow: inset 0 0 0 1px rgba(139, 92, 246, .18); }
 .production-package-workspace-folder-details,
 .production-package-workspace-spec { min-width: 0; border-top: 1px solid var(--package-border); color: var(--package-muted); font-size: .75rem; }
 .production-package-workspace-folder-details summary,
@@ -107,6 +126,16 @@
 .production-package-workspace-spec p { margin: 9px 0 0; }
 .production-package-workspace-spec ul { display: grid; gap: 5px; margin: 8px 0 0; padding-left: 18px; }
 .production-package-workspace-spec code { color: #c4b5fd; }
+
+.production-package-workspace-preview-details,
+.production-package-workspace-batch-details { min-width: 0; }
+.production-package-workspace-preview-details > summary,
+.production-package-workspace-batch-details > summary { padding: 10px 12px; border: 1px solid var(--package-border); border-radius: var(--studio-radius-sm, 6px); color: var(--package-text); background: var(--package-surface-raised); cursor: pointer; font-size: .78rem; font-weight: 700; }
+.production-package-workspace-preview-details[open] > summary,
+.production-package-workspace-batch-details[open] > summary { border-radius: var(--studio-radius-sm, 6px) var(--studio-radius-sm, 6px) 0 0; }
+.production-package-workspace-preview-details .production-package-workspace-preview-fieldset { min-width: 0; margin: 8px 0 0; padding: 0; border: 0; }
+.production-package-workspace-batch-details > summary { padding: 8px 9px; color: var(--package-muted); font-size: .72rem; font-weight: 600; }
+.production-package-workspace-batch-details[open] .production-package-workspace-batch-list { margin-top: 6px; }
 
 .production-package-workspace-state-message,
 .production-package-workspace-notice,

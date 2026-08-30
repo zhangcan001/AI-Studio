@@ -13,7 +13,8 @@ AI Studio 0.8.1 是针对 0.8.0 真实 Production Package UAT P1 问题的最小
 | Tag | `v0.8.1` |
 | Tag object | `a032778f3fc4a40ae67f3f9dead148472db5d34b` |
 | Tag peeled SHA | `78180e2136a39d6b739d086bf5610c90f4e11240` |
-| Release ID | `RE_kwDOTuxMh84WmWAU` |
+| Release numeric ID | `379150356` |
+| Release node ID | `RE_kwDOTuxMh84WmWAU` |
 | GitHub Release | <https://github.com/zhangcan001/AI-Studio/releases/tag/v0.8.1> |
 | Source-only CI | `33227945425` — success |
 | Release state | `draft=false`, `prerelease=false` |
