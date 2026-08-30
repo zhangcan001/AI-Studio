@@ -34,12 +34,14 @@ DEV-067 把已发布的 AI Studio 0.8.1 Production Package 路径收敛为三次
 
 ## DEV-067 CLOSURE 验证记录
 
-- 状态：`DEV-067 CLOSURE = PENDING INTERACTIVE UAT`；本次只修复 Quick Flow 成功状态文案与 Queue open failure footer，不新增功能。
+- 状态：`DEV-067 = PASS`；DEV-067A 已完成最新 release build 的安装版回归与真实 H3 验收。
 - `COPY_CONTRADICTION = FIXED`：成功状态统一为“生产批次已创建并已打开生产队列；不会自动开始生成。”；失败状态明确批次已创建且不会重复创建。
-- 本地目标测试：ProductionPackageWorkspace `11/11`、ProductionQueueDrawer `6/6`、ShotWorkspace `8/8`；TypeScript、Frontend build、`git diff --check` 均通过。
-- 本地完整门禁：Rust all-targets `869 passed / 0 failed / 1 ignored`；Frontend `97 files / 386 tests passed`；Rust format/check、TypeScript、Frontend build 均通过。
-- Release build：`pnpm tauri build` 成功，版本仍为 `0.8.1`，未创建新版本、tag 或 GitHub Release。
-- Installed-app smoke：release executable 已启动并显示 `ComfyUI 已连接`。当前 Computer Use 环境的 WebView2 截图/输入几何不可用（`SetIsBorderRequired: 0x80004002`、`coordinate input geometry is unavailable`），因此 `FOLDER_PICK`、`AUTO_INSPECT`、`QUICK_CREATE_OPEN`、`MANUAL_START`、`REAL_H3`、`VIDEO_ASSET`、`NEXT_PACKAGE` 与 `RESTART_QUEUE_TRUTH` 未执行，不能记为 PASS。
+- 本地目标测试：ProductionPackageWorkspace `11/11`、ProductionQueueDrawer `7/7`、ShotWorkspace production `2/2`；TypeScript、Frontend build、`git diff --check` 均通过。
+- 本地完整门禁：Rust all-targets `697 passed / 0 failed / 1 ignored`；Frontend `97 files / 388 tests passed`；Rust format/check、TypeScript、Frontend build 均通过。
+- Release build：基于 tested SHA `a49d516d1aab20cd9a7240866ab3b3707218a5c6` 的 `pnpm tauri build` 成功，版本仍为 `0.8.1`，未创建新版本、tag 或 GitHub Release。
+- Installed-app UAT：`QUEUE_BEFORE_CREATE = COLLAPSED`；3-item Production Package 的 `FOLDER_PICK`、`AUTO_INSPECT`、`READY_SUMMARY (3 READY)`、`QUEUE_AUTO_OPEN`、created Batch 可见、Start 可见全部 PASS。创建前 Task `253`、Comfy queue `running=0/pending=0/history=9`；创建后 Task 仍为 `253`、Comfy queue/history 无变化，`AUTO_START = NO`。
+- Manual Start 与真实生产：新 Batch `pbt_dc9d2538a82141c5bc91c81668554b00` 手动启动后首个 Task `SUCCEEDED`，对应 MP4 Asset 存在且为 `1,001,766` bytes；随后 3 个 Batch items 与 3 个视频 Assets 均 `SUCCEEDED`/存在。`MANUAL_START = PASS`、`REAL_H3 = PASS`、`VIDEO_ASSET = PASS`。
+- Next Package / Restart：选择下一个生产包后工作区清空且 Batch 保留；重启 release 后 Batch 仍存在。`NEXT_PACKAGE = PASS`、`RESTART_QUEUE_TRUTH = PASS`。
 - `DRAG_DROP = ENV_UNVERIFIED`：同一 WebView2 输入限制影响拖放验证；不将其归类为产品失败。CI 结果以本次 closure 提交对应的 Source-only CI 为准。
 
 ## DEV-067A 自动展开回归修复记录
@@ -51,4 +53,23 @@ DEV-067 把已发布的 AI Studio 0.8.1 Production Package 路径收敛为三次
 - `OUTER_CALLBACK_EFFECT =` App 的 `onOpenProductionQueue` 仅导航到 Production section；已在 Production section 时为 no-op，不负责展开 Queue，也没有发现会主动折叠 Queue 的 callback。
 - `RELOAD_EFFECT =` reload 只更新队列/overview state；修复后返回同一份 `{ queues, overview }` 快照，Quick Flow 先校验创建批次可见，再设置 `expanded = true`，最后执行外层 callback。
 - 修复文件：`src/features/shots/ShotWorkspace.tsx`、`src/features/shots/ShotWorkspace.production.test.tsx`；受控 Drawer 行为由 `src/features/production/ProductionQueueDrawer.test.tsx` 覆盖。`SETTIMEOUT_USED = NO`、`DOM_CLICK_HACK = NO`、`BACKEND_CHANGED = NO`。
-- 回归测试已覆盖真实 `ShotWorkspace → ProductionPackageWorkspace → ProductionQueueDrawer` 链路的 `COLLAPSED → CREATE → EXPANDED`，并断言 created batch 聚焦、`刚刚创建`、Start 可见且未调用 start；当前 installed-app UAT 尚未重测。
+- 回归测试已覆盖真实 `ShotWorkspace → ProductionPackageWorkspace → ProductionQueueDrawer` 链路的 `COLLAPSED → CREATE → EXPANDED`，并断言 created batch 聚焦、`刚刚创建`、Start 可见且未调用 start。修复提交为 `ae9509dcbb8806f06b98a319ad8c0e2a0c084ee5`，最终测试提交为 `a49d516d1aab20cd9a7240866ab3b3707218a5c6`；Source-only CI `33293998261 = success`。
+
+## DEV-067A FINAL INSTALLED UAT
+
+- `QUEUE_BEFORE_CREATE = COLLAPSED`
+- `FOLDER_PICK = PASS`
+- `AUTO_INSPECT = PASS`
+- `READY_SUMMARY = PASS (3 READY)`
+- `QUEUE_AUTO_OPEN = PASS`
+- `CREATED_BATCH_VISIBLE = PASS`
+- `START_BUTTON_VISIBLE = PASS`
+- `TASK_AFTER_CREATE_OPEN = 0`
+- `COMFY_AFTER_CREATE_OPEN = 0`
+- `AUTO_START = NO`
+- `MANUAL_START = PASS`
+- `REAL_H3 = PASS`
+- `VIDEO_ASSET = PASS`
+- `NEXT_PACKAGE = PASS`
+- `RESTART_QUEUE_TRUTH = PASS`
+- `P0 = NONE`、`P1 = NONE`；focused/recent label 未单独作为人工回复项记录，代码回归测试已覆盖，按任务规则不阻塞主 Gate（`P2 = NOTE`）。
