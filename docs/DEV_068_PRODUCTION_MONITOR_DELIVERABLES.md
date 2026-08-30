@@ -54,15 +54,61 @@ Targeted tests:
 - `pnpm test -- ProductionQueueDrawer`
 - `pnpm test -- ShotWorkspace.production`
 
-最终验收记录（由主线串行 gate 更新）：
+## 最终验收记录
+
+本次真人 UAT 使用 `0.8.1` 最新 release build，ComfyUI `/system_stats` 与
+`/object_info` 均返回 HTTP 200。已验证 Batch B 的生产、监控、播放、文件位置、
+筛选、成品查看、清单导出、外部生产包暂时改名后的数据库真相，以及重启后的恢复。
+
+Batch B：`pbt_53a0c3e2ea2f48f998995dcc5af6490f`，3/3 item 成功，3/3 Task 成功。
+对应视频 Asset 与文件大小为：
+
+- `ast_0145b8d8-7e39-48c6-8a71-96f023056a12` — 958896 bytes
+- `ast_525382a2-f3f6-44d5-b0bc-9808ebf75220` — 1941922 bytes
+- `ast_71ef68a5-9694-46c8-83b7-34f149d9840a` — 1083272 bytes
+
+Selected-batch manifest UAT：Batch B 导出为
+`LOCAL_DELIVERY_MANIFEST_pbt_53a0c3e2ea2f48f998995dcc5af6490f (1).json`；历史 Batch A
+`pbt_3e7baa7941d744869970d4dbddc24c0a` 导出为独立的
+`LOCAL_DELIVERY_MANIFEST_pbt_3e7baa7941d744869970d4dbddc24c0a (1).json`。A → B
+快速切换后再次导出仍为 Batch B，3 个 item 均与对应数据库 Batch 和 Asset truth
+一致，未混入 A/B item。
 
 ```text
-RUST = PASS (cargo check --all-targets; 697 lib tests + integration suites)
-FRONTEND = PASS (98 files / 400 tests)
+IMPLEMENTATION_SHA = 053b1942487414a6dc1ddd913a0e900a555dcae7
+MANIFEST_FIX_SHA = 50d502f15289020bcf1edc3f5c5dbb5ead5b830b
+SOURCE_CI = 33319070741 success
+
+RUST = PASS (cargo fmt/check/test --all-targets; 697 passed, 0 failed, 1 ignored)
+FRONTEND = PASS (98 files / 402 tests)
 TSC = PASS
 BUILD = PASS (pnpm build; pnpm tauri build)
-LIVE_UAT = BLOCKED (0.8.1 installer launch and initial project view passed; the installed-app
-production flow was not triggered because desktop screenshot capture is unsupported and
-accessibility click geometry was unavailable in the test environment)
-REAL_H3 = NOT_TRIGGERED
+LIVE_UAT = PASS
+COMFY_PREFLIGHT = PASS
+MONITOR_VISIBLE = PASS
+MONITOR_SELECTED_BATCH = B
+LIVE_PROGRESS = PASS
+RUNNING_STATE = PASS
+REAL_H3 = PASS
+VIDEO_ASSET = PASS
+VIDEO_OPEN = PASS
+OPEN_FILE_LOCATION = PASS
+COMPLETED_STATE = PASS
+FILTER_SUCCEEDED = PASS
+MANIFEST_BATCH_B = PASS
+SELECTED_BATCH_MANIFEST = PASS
+STALE_MANIFEST_GUARD = PASS
+MANIFEST_ASSET_TRUTH = PASS
+MANIFEST_ID_GUARD_TEST = PASS
+MANIFEST_REFRESH_TEST = PASS
+PACKAGE_SOURCE_REQUIRED_AFTER_IMPORT = NO
+RESTART_MONITOR_TRUTH = PASS
+AUTO_START = NO
+AUTO_RETRY = NO
+MANUAL_RETRY = NOT_TRIGGERED
+FILTER_FAILED = NOT_TRIGGERED
+COMPLETED_STOP = AUTOMATED_PASS
+MIGRATION = 025
+MIGRATION026 = ABSENT
+DEV_068 = PASS
 ```
