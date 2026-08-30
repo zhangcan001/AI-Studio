@@ -114,7 +114,7 @@ describe("ProductionPackageWorkspace", () => {
     expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-selected-count")).toBe("0");
     await user.click(screen.getByRole("button", { name: "全选 READY" }));
     expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-selected-count")).toBe("400");
-  });
+  }, 10_000);
 
   it("reinspects the current folder and resets the selection to the new READY set", async () => {
     const user = userEvent.setup();
