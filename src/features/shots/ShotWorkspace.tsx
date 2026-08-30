@@ -355,6 +355,58 @@ function safeManifestPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+|\.+$/g, "") || "batch";
 }
 
+export function buildLocalDeliveryManifest(
+  batch: ProductionMonitorBatchReadModel,
+  review: ProductionBatchReviewProductivity,
+  expectedBatchId: string,
+) {
+  const batchId = String(batch.id ?? batch.batchId ?? "");
+  const reviewBatchId = String(review.batch.id ?? "");
+  const batchItems = batch.items ?? [];
+  const reviewItems = review.items ?? [];
+  const batchItemIds = new Set(batchItems.map((item) => String(item.id ?? item.itemId ?? "")));
+  const reviewItemIds = new Set(reviewItems.map((item) => item.itemId));
+  const itemsMatch = batchItems.length === reviewItems.length
+    && batchItemIds.size === batchItems.length
+    && reviewItemIds.size === reviewItems.length
+    && [...batchItemIds].every((itemId) => reviewItemIds.has(itemId));
+
+  if (
+    !expectedBatchId
+    || batchId !== expectedBatchId
+    || reviewBatchId !== expectedBatchId
+    || (batch.total !== undefined && review.total !== undefined && batch.total !== review.total)
+    || !itemsMatch
+  ) {
+    return undefined;
+  }
+
+  const items = [...reviewItems]
+    .sort((left, right) => left.ordinal - right.ordinal || left.itemId.localeCompare(right.itemId))
+    .map((item) => {
+      const candidate = monitorCandidateFor(item, true);
+      return {
+        externalId: item.shotId ?? item.itemId,
+        itemId: item.itemId,
+        status: item.productionItemStatus,
+        videoAssetId: candidate?.assetId,
+        videoPath: candidate?.localPath,
+      };
+    });
+
+  return {
+    manifestType: "LOCAL_DELIVERY_MANIFEST" as const,
+    manifestVersion: 1 as const,
+    batchId,
+    batchName: batch.name ?? batch.batchName ?? review.batch.name,
+    generatedAt: new Date().toISOString(),
+    total: batch.total ?? review.total ?? items.length,
+    succeeded: batch.succeeded ?? review.successCount,
+    failed: batch.failed ?? review.failedCount,
+    items,
+  };
+}
+
 export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
@@ -1016,23 +1068,24 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     openStructureManagement(context);
   }
 
+  const focusProductionQueueBatch = useCallback((batchId: string) => {
+    productionMonitorBatchRef.current = batchId;
+    setFocusedProductionBatchId(batchId);
+    setProductionQueueExpanded(true);
+  }, []);
+
   const openProductionQueue = useCallback(async (result?: ProductionPackageCreateBatchesResult) => {
     const createdBatchIds = result?.batches.map((batch) => batch.batchId) ?? [];
     const firstBatchId = createdBatchIds[0];
     if (result) setRecentlyCreatedProductionBatchIds(createdBatchIds);
-    if (firstBatchId) setFocusedProductionBatchId(firstBatchId);
+    if (firstBatchId) focusProductionQueueBatch(firstBatchId);
     const snapshot = await reloadProductionQueues(true);
     if (firstBatchId && !snapshot?.queues.some((queue) => queue.id === firstBatchId)) {
       throw new Error("Created production batch is not visible in queue projection");
     }
     setProductionQueueExpanded(true);
     onOpenProductionQueue?.();
-  }, [onOpenProductionQueue, reloadProductionQueues]);
-
-  const focusProductionQueueBatch = useCallback((batchId: string) => {
-    setFocusedProductionBatchId(batchId);
-    setProductionQueueExpanded(true);
-  }, []);
+  }, [focusProductionQueueBatch, onOpenProductionQueue, reloadProductionQueues]);
 
   const openProductionMonitorBatch = useCallback((batchId: string) => {
     focusProductionQueueBatch(batchId);
@@ -1109,45 +1162,41 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       setProductionMonitorError(toUserMessage(openError));
     }
   }, [finishedMonitorAsset, projectId, selectedProductionBatchId]);
-  const exportLocalDeliveryManifest = useCallback(() => {
-    const batch = productionMonitorReadModel;
-    const review = productionMonitorReview;
-    if (!batch || !review || typeof document === "undefined" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+  const exportLocalDeliveryManifest = useCallback(async () => {
+    const batchId = selectedProductionBatchId;
+    if (!batchId || typeof document === "undefined" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
       setProductionMonitorError("当前批次交付数据尚未准备好。");
       return;
     }
-    const items = review.items.map((item) => {
-      const candidate = monitorCandidateFor(item, true);
-      return {
-        externalId: item.shotId ?? item.itemId,
-        itemId: item.itemId,
-        status: item.productionItemStatus,
-        videoAssetId: candidate?.assetId,
-        videoPath: candidate?.localPath,
-      };
-    });
-    const manifest = {
-      manifestType: "LOCAL_DELIVERY_MANIFEST",
-      manifestVersion: 1,
-      batchId: batch.id,
-      batchName: batch.name,
-      generatedAt: new Date().toISOString(),
-      total: batch.total,
-      succeeded: batch.succeeded,
-      failed: batch.failed,
-      items,
-    };
-    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `LOCAL_DELIVERY_MANIFEST_${safeManifestPart(String(batch.id))}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setNotice("LOCAL_DELIVERY_MANIFEST 已导出；仅包含数据库成品索引。");
-  }, [productionMonitorReadModel, productionMonitorReview]);
+    try {
+      const [detail, review] = await Promise.all([
+        getProductionQueue(projectId, batchId),
+        getProductionBatchReviewProductivity(projectId, batchId),
+      ]);
+      if (productionMonitorBatchRef.current !== batchId || selectedProductionBatchId !== batchId) {
+        setProductionMonitorError("当前监控批次已切换，请重新打开当前批次后再导出成品清单。");
+        return;
+      }
+      const batch = monitorReadModelFor(detail, review, projectId);
+      const manifest = batch ? buildLocalDeliveryManifest(batch, review, batchId) : undefined;
+      if (!manifest) {
+        setProductionMonitorError("当前监控批次数据不一致，请重新打开当前批次后再导出成品清单。");
+        return;
+      }
+      const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `LOCAL_DELIVERY_MANIFEST_${safeManifestPart(manifest.batchId)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice("LOCAL_DELIVERY_MANIFEST 已导出；仅包含数据库成品索引。");
+    } catch (exportError: unknown) {
+      setProductionMonitorError(toUserMessage(exportError));
+    }
+  }, [projectId, selectedProductionBatchId]);
   const selectNextProductionPackage = useCallback(async () => {
     try {
       const nextPath = await pickProductionPackageRoot();

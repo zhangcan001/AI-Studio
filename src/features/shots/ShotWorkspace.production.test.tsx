@@ -7,7 +7,7 @@ import type { ProductionBatchDetail, ProductionBatchSummary, ProductionQueueOver
 import type { ProductionPackageCreateBatchesResult, ProductionPackageInspectionResult } from "../../services/tauriClient";
 import type { ProductionBatchReviewProductivity } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
-import { ShotWorkspace } from "./ShotWorkspace";
+import { buildLocalDeliveryManifest, ShotWorkspace } from "./ShotWorkspace";
 
 const mocks = vi.hoisted(() => ({
   listShots: vi.fn(),
@@ -75,6 +75,7 @@ vi.mock("../production/ProductionMonitor", () => ({
       onRetryItem?: (itemId: string) => void | Promise<void>;
       onPlay?: (itemId: string, assetId: string) => void | Promise<void>;
       onOpenFileLocation?: (itemId: string, filePath?: string) => void | Promise<void>;
+      onExportManifest?: () => void | Promise<void>;
     }) => (
       <section aria-label="生产监控">
         <strong data-testid="monitor-batch-status">{props.batch?.status ?? "EMPTY"}</strong>
@@ -82,6 +83,7 @@ vi.mock("../production/ProductionMonitor", () => ({
         <button type="button" onClick={() => void props.onRetryItem?.("item-1")}>监控项重试</button>
         <button type="button" onClick={() => void props.onPlay?.("item-1", "asset-success")}>监控资产预览</button>
         <button type="button" onClick={() => void props.onOpenFileLocation?.("item-1", "D:/AIStudio/outputs/success.mp4")}>监控资产位置</button>
+        <button type="button" onClick={() => void props.onExportManifest?.()}>监控导出成品清单</button>
       </section>
     ),
 }));
@@ -361,6 +363,59 @@ describe("ShotWorkspace production package queue integration", () => {
       assetId: "asset-success",
     }));
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a delivery manifest when monitor, review, and selected batch IDs disagree", () => {
+    const detail = makeBatchDetail("COMPLETED");
+    const reviewForDetail = { ...makeReview([successAsset]), batch: detail };
+
+    expect(buildLocalDeliveryManifest(detail, reviewForDetail, detail.id)).toMatchObject({
+      batchId: detail.id,
+      total: 1,
+      items: [{ itemId: "item-1", videoAssetId: "asset-success" }],
+    });
+    expect(buildLocalDeliveryManifest(detail, reviewForDetail, "pbt_other")).toBeUndefined();
+    expect(buildLocalDeliveryManifest(
+      detail,
+      { ...reviewForDetail, batch: { ...detail, id: "pbt_stale" } },
+      detail.id,
+    )).toBeUndefined();
+  });
+
+  it("refreshes the selected batch before exporting a delivery manifest", async () => {
+    const user = userEvent.setup();
+    queues = [makeQueue("COMPLETED")];
+    batchStatus = "COMPLETED";
+    const staleDetail = { ...makeBatchDetail("COMPLETED"), id: "pbt_stale" };
+    const currentDetail = makeBatchDetail("COMPLETED");
+    const staleReview = { ...makeReview([successAsset]), batch: staleDetail };
+    const currentReview = { ...makeReview([successAsset]), batch: currentDetail };
+    let queueCall = 0;
+    let reviewCall = 0;
+    mocks.getProductionQueue.mockImplementation(async () => queueCall++ === 0 ? staleDetail : currentDetail);
+    mocks.getProductionBatchReviewProductivity.mockImplementation(async () => reviewCall++ === 0 ? staleReview : currentReview);
+
+    let manifestBlob: Blob | undefined;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        manifestBlob = blob;
+        return "blob:uat-manifest";
+      }),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+    await waitFor(() => expect(mocks.getProductionBatchReviewProductivity).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: "监控导出成品清单" }));
+
+    await waitFor(() => expect(manifestBlob).toBeDefined());
+    const manifest = JSON.parse(await manifestBlob!.text()) as { batchId: string; items: Array<{ itemId: string }> };
+    expect(manifest.batchId).toBe("pbt_uat_001");
+    expect(manifest.items).toHaveLength(1);
+    expect(manifest.items[0].itemId).toBe("item-1");
+    expect(mocks.getProductionQueue).toHaveBeenLastCalledWith("project-1", "pbt_uat_001");
+    expect(mocks.getProductionBatchReviewProductivity).toHaveBeenLastCalledWith("project-1", "pbt_uat_001");
   });
 
   it("requeues a failed monitor item without starting it", async () => {
