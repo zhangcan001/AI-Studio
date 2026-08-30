@@ -187,6 +187,8 @@ describe("ProductionPackageWorkspace", () => {
     expect(within(createdRegion).getByText(/自动启动：否/)).toBeTruthy();
     await waitFor(() => expect(openQueue).toHaveBeenCalledWith(created));
     expect(openQueue).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("生产批次已创建并已打开生产队列；不会自动开始生成。")).toBeTruthy();
+    expect(screen.queryByText("批次已创建；不会自动打开或启动生产队列。")).toBeNull();
     expect((screen.getByRole("button", { name: "批次已创建" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -269,6 +271,8 @@ describe("ProductionPackageWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("生产批次已创建，但生产队列暂时无法打开");
+    expect(screen.getByText("批次已经创建，可重新打开生产队列；不会重复创建批次。")).toBeTruthy();
+    expect(screen.queryByText(/再次创建批次|重新创建批次/)).toBeNull();
     expect(screen.getByRole("button", { name: "重新打开生产队列" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "批次已创建" }) as HTMLButtonElement).disabled).toBe(true);
     expect(createMock).toHaveBeenCalledTimes(1);
@@ -277,7 +281,7 @@ describe("ProductionPackageWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "重新打开生产队列" }));
     await waitFor(() => expect(openQueue).toHaveBeenCalledTimes(2));
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/已打开生产队列/)).toBeTruthy();
+    expect(screen.getByText("生产批次已创建并已打开生产队列；不会自动开始生成。")).toBeTruthy();
   });
 
   it("clears only the package workspace for the next package", async () => {
@@ -290,6 +294,7 @@ describe("ProductionPackageWorkspace", () => {
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
+    expect(screen.getByText("生产批次已创建；不会自动开始生成。")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "选择下一个生产包" }));
 
     expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-state")).toBe("EMPTY");

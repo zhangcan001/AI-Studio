@@ -407,9 +407,13 @@ export function ProductionPackageWorkspace({
   }
 
   const statusMessage = createdResult
-    ? isPartialCreate
-      ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚有 ${remainingCount} 个项目待重新检查。`
-      : "批次已创建；不会自动打开或启动生产队列。"
+    ? queueOpenFailed
+      ? "生产批次已创建，但生产队列暂时无法打开。"
+      : isPartialCreate
+        ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚有 ${remainingCount} 个项目待重新检查。`
+        : hasQueueCallback
+          ? "生产批次已创建并已打开生产队列；不会自动开始生成。"
+          : "生产批次已创建；不会自动开始生成。"
     : statusMessageForState(workspaceState, counts, selectedItems.length);
 
   return (
@@ -499,7 +503,7 @@ export function ProductionPackageWorkspace({
           <strong>{error.code ? `操作失败 · ${error.code}` : "操作失败"}</strong>
           <p>{error.message}</p>
           {queueOpenFailed
-            ? <small>请点击“重新打开生产队列”；已创建的批次不会重复创建。</small>
+            ? <small>批次已经创建，可重新打开生产队列；不会重复创建批次。</small>
             : currentFolderPath && <small>请点击“重新检查”获取最新检查结果后再继续。</small>}
         </div>
       )}
@@ -609,7 +613,7 @@ export function ProductionPackageWorkspace({
           {isCreating ? "正在创建批次…" : createdResult ? "批次已创建" : `创建并打开生产队列${selectionIdsForCreate.length ? `（${selectionIdsForCreate.length} 项）` : ""}`}
         </button>
         {workspaceState === "BLOCKED" && <small>没有可创建的 READY/WARNING 项目，请修复生产包后重新检查。</small>}
-        {workspaceState === "ERROR" && !requiresReinspect && <small>可先重新检查，也可修复错误后再次创建批次。</small>}
+        {workspaceState === "ERROR" && !requiresReinspect && !queueOpenFailed && <small>可先重新检查，也可修复错误后再次创建批次。</small>}
       </div>
     </section>
   );
