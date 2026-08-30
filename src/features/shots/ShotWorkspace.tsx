@@ -197,6 +197,11 @@ type StageDraft = {
 
 const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
+interface ProductionQueueSnapshot {
+  queues: ProductionBatchSummary[];
+  overview: ProductionQueueOverview;
+}
+
 export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
@@ -336,7 +341,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     }
   }, [projectId]);
 
-  const reloadProductionQueues = useCallback(async (throwOnError = false) => {
+  const reloadProductionQueues = useCallback(async (throwOnError = false): Promise<ProductionQueueSnapshot | undefined> => {
     try {
       const [nextQueues, nextOverview] = await Promise.all([
         listProductionQueues(projectId),
@@ -344,9 +349,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       ]);
       setProductionQueues(nextQueues);
       setProductionQueueOverview(nextOverview);
+      return { queues: nextQueues, overview: nextOverview };
     } catch (queueError: unknown) {
       if (throwOnError) throw queueError;
       setError(toUserMessage(queueError));
+      return undefined;
     }
   }, [projectId]);
 
@@ -782,8 +789,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     const firstBatchId = createdBatchIds[0];
     if (result) setRecentlyCreatedProductionBatchIds(createdBatchIds);
     if (firstBatchId) setFocusedProductionBatchId(firstBatchId);
+    const snapshot = await reloadProductionQueues(true);
+    if (firstBatchId && !snapshot?.queues.some((queue) => queue.id === firstBatchId)) {
+      throw new Error("Created production batch is not visible in queue projection");
+    }
     setProductionQueueExpanded(true);
-    await reloadProductionQueues(true);
     onOpenProductionQueue?.();
   }, [onOpenProductionQueue, reloadProductionQueues]);
 

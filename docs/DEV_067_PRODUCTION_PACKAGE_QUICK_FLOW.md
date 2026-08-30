@@ -41,3 +41,14 @@ DEV-067 把已发布的 AI Studio 0.8.1 Production Package 路径收敛为三次
 - Release build：`pnpm tauri build` 成功，版本仍为 `0.8.1`，未创建新版本、tag 或 GitHub Release。
 - Installed-app smoke：release executable 已启动并显示 `ComfyUI 已连接`。当前 Computer Use 环境的 WebView2 截图/输入几何不可用（`SetIsBorderRequired: 0x80004002`、`coordinate input geometry is unavailable`），因此 `FOLDER_PICK`、`AUTO_INSPECT`、`QUICK_CREATE_OPEN`、`MANUAL_START`、`REAL_H3`、`VIDEO_ASSET`、`NEXT_PACKAGE` 与 `RESTART_QUEUE_TRUTH` 未执行，不能记为 PASS。
 - `DRAG_DROP = ENV_UNVERIFIED`：同一 WebView2 输入限制影响拖放验证；不将其归类为产品失败。CI 结果以本次 closure 提交对应的 Source-only CI 为准。
+
+## DEV-067A 自动展开回归修复记录
+
+- 基线：`a6be8b60ed5ec1af54ef00afa6d2bdfbec93c300`；此前正式桌面 UAT 的真实结论为 `QUEUE_AUTO_OPEN = PRODUCT_FAIL`。创建批次成功，但生产队列没有自动展开，因此 UAT 在 Manual Start 前停止；此前记录不改写为 PASS。
+- `OLD_TEST_FALSE_POSITIVE_RISK = YES`：原有 ShotWorkspace 集成测试直接从 production mode 渲染，而 production mode effect 会先把队列设为展开，未覆盖“先手动折叠、再 Quick Create”的回归路径。
+- `EXPANDED_STATE_WRITERS =` production mode effect（`true`）、Quick Flow `openProductionQueue`（修复后在 reload 成功后写 `true`）、focused batch handler（`true`）、ProductionQueueDrawer 的受控 toggle（用户显式输入）；审计未发现创建后将其写为 `false` 的生产路径。
+- `ROOT_CAUSE =` Quick Flow 的 queue-open 语义没有绑定到 reload 后的真实队列快照：`reloadProductionQueues` 原先返回 `void`，且展开请求发生在异步 reload 之前，没有确认创建批次已经投影到队列；旧测试因此无法暴露实际桌面回归。
+- `OUTER_CALLBACK_EFFECT =` App 的 `onOpenProductionQueue` 仅导航到 Production section；已在 Production section 时为 no-op，不负责展开 Queue，也没有发现会主动折叠 Queue 的 callback。
+- `RELOAD_EFFECT =` reload 只更新队列/overview state；修复后返回同一份 `{ queues, overview }` 快照，Quick Flow 先校验创建批次可见，再设置 `expanded = true`，最后执行外层 callback。
+- 修复文件：`src/features/shots/ShotWorkspace.tsx`、`src/features/shots/ShotWorkspace.production.test.tsx`；受控 Drawer 行为由 `src/features/production/ProductionQueueDrawer.test.tsx` 覆盖。`SETTIMEOUT_USED = NO`、`DOM_CLICK_HACK = NO`、`BACKEND_CHANGED = NO`。
+- 回归测试已覆盖真实 `ShotWorkspace → ProductionPackageWorkspace → ProductionQueueDrawer` 链路的 `COLLAPSED → CREATE → EXPANDED`，并断言 created batch 聚焦、`刚刚创建`、Start 可见且未调用 start；当前 installed-app UAT 尚未重测。

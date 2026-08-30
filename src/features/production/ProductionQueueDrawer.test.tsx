@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+
+import { cleanup, render } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import type { ProductionBatchDetail, ProductionBatchItemView, ProductionQueueOverview } from "../../types/productionQueue";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
 import { ProductionQueueDrawer } from "./ProductionQueueDrawer";
@@ -77,6 +80,10 @@ const runbook: ProductionBatchRunbookView = {
 };
 
 describe("ProductionQueueDrawer", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("is collapsed by default and shows real overview counts without rendering rows", () => {
     const html = renderToStaticMarkup(<ProductionQueueDrawer overview={overview} details={[detail()]} />);
 
@@ -96,6 +103,21 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain("图片");
     expect(html).toContain("8");
     expect(html).toContain('data-action="start"');
+  });
+
+  it("honors controlled expansion changes from collapsed to expanded", () => {
+    const { rerender } = render(<ProductionQueueDrawer expanded={false} details={[detail()]} />);
+
+    const drawer = document.querySelector("[aria-label='生产队列']") as HTMLElement;
+    const toggle = drawer.querySelector("button[aria-controls]") as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(drawer.querySelector(".production-queue-drawer-body")).toBeNull();
+
+    rerender(<ProductionQueueDrawer expanded details={[detail()]} />);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(drawer.querySelector(".production-queue-drawer-body")).not.toBeNull();
+    expect(drawer.textContent).toContain("第一季 · 第01集 · Scene 04");
   });
 
   it("renders real detail and item rows plus optional display slots", () => {
