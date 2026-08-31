@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,8 +19,10 @@ const mocks = vi.hoisted(() => ({
   getProductionBatchRunbook: vi.fn(),
   listBatchWorkflowPresets: vi.fn(),
   pickProductionPackageRoot: vi.fn(),
+  discoverProductionPackages: vi.fn(),
   inspectProductionPackage: vi.fn(),
   createProductionPackageBatches: vi.fn(),
+  listProductionPackageBindings: vi.fn(),
   listProductionQueues: vi.fn(),
   getProductionQueue: vi.fn(),
   getProductionBatchReviewProductivity: vi.fn(),
@@ -29,6 +32,12 @@ const mocks = vi.hoisted(() => ({
   requeueProductionQueueItem: vi.fn(),
   revealProductionReviewAsset: vi.fn(),
   openProductionReviewOutputFolder: vi.fn(),
+}));
+
+const multiPackageTestKeys = vi.hoisted(() => ({
+  ready: "C:/season/ep01\u0000sha-ready",
+  warning: "C:/season/ep02\u0000sha-warning",
+  blocked: "C:/season/ep03\u0000sha-blocked",
 }));
 
 vi.mock("../../services/tauriClient", async () => {
@@ -43,8 +52,10 @@ vi.mock("../../services/tauriClient", async () => {
     getProductionBatchRunbook: mocks.getProductionBatchRunbook,
     listBatchWorkflowPresets: mocks.listBatchWorkflowPresets,
     pickProductionPackageRoot: mocks.pickProductionPackageRoot,
+    discoverProductionPackages: mocks.discoverProductionPackages,
     inspectProductionPackage: mocks.inspectProductionPackage,
     createProductionPackageBatches: mocks.createProductionPackageBatches,
+    listProductionPackageBindings: mocks.listProductionPackageBindings,
     listProductionQueues: mocks.listProductionQueues,
     getProductionQueue: mocks.getProductionQueue,
     getProductionBatchReviewProductivity: mocks.getProductionBatchReviewProductivity,
@@ -54,6 +65,32 @@ vi.mock("../../services/tauriClient", async () => {
     requeueProductionQueueItem: mocks.requeueProductionQueueItem,
     revealProductionReviewAsset: mocks.revealProductionReviewAsset,
     openProductionReviewOutputFolder: mocks.openProductionReviewOutputFolder,
+  };
+});
+
+vi.mock("../production/MultiPackageProductionBoard", () => {
+  type TestBoardProps = {
+    onChooseRoot?: () => void | Promise<void>;
+    onCreateSelected?: (keys: string[]) => void | Promise<void>;
+  };
+  return {
+    MultiPackageProductionBoard: (props: TestBoardProps) => {
+      const [error, setError] = useState<string>();
+      const submit = (keys: string[]) => {
+        void Promise.resolve(props.onCreateSelected?.(keys)).catch((reason: unknown) => {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        });
+      };
+      return (
+        <section aria-label="测试多生产包看板">
+          <button type="button" onClick={() => void props.onChooseRoot?.()}>选择批量根目录</button>
+          <button type="button" onClick={() => submit([multiPackageTestKeys.ready])}>程序化提交 READY 包</button>
+          <button type="button" onClick={() => submit([multiPackageTestKeys.warning])}>程序化提交 WARNING 包</button>
+          <button type="button" onClick={() => submit([multiPackageTestKeys.blocked])}>程序化提交 BLOCKED 包</button>
+          {error && <p role="alert">{error}</p>}
+        </section>
+      );
+    },
   };
 });
 
@@ -161,6 +198,45 @@ const created: ProductionPackageCreateBatchesResult = {
   warnings: [],
 };
 
+const multiPackageDiscovery = {
+  rootPath: "C:/season",
+  packages: [
+    { packageRoot: "C:/season/ep01", relativePath: "ep01", manifestPath: "C:/season/ep01/production-package.json", manifestSha256: "sha-ready" },
+    { packageRoot: "C:/season/ep02", relativePath: "ep02", manifestPath: "C:/season/ep02/production-package.json", manifestSha256: "sha-warning" },
+    { packageRoot: "C:/season/ep03", relativePath: "ep03", manifestPath: "C:/season/ep03/production-package.json", manifestSha256: "sha-blocked" },
+  ],
+};
+
+function makeMultiPackageInspection(
+  packageName: string,
+  inspectionId: string,
+  manifestSha256: string,
+  statuses: Array<"READY" | "WARNING" | "BLOCKED">,
+): ProductionPackageInspectionResult {
+  const readyCount = statuses.filter((status) => status === "READY").length;
+  const warningCount = statuses.filter((status) => status === "WARNING").length;
+  const blockedCount = statuses.filter((status) => status === "BLOCKED").length;
+  return {
+    ...inspection,
+    inspectionId,
+    packageName,
+    manifestSha256,
+    itemCount: statuses.length,
+    readyCount,
+    warningCount,
+    blockedCount,
+    status: warningCount ? "WARNING" : blockedCount ? "BLOCKED" : "READY",
+    items: statuses.map((status, index) => ({
+      ...inspection.items[0],
+      id: `${inspectionId}-item-${index + 1}`,
+      name: `${packageName} 镜头 ${index + 1}`,
+      status,
+      warnings: status === "WARNING" ? ["需要人工确认"] : [],
+      errors: status === "BLOCKED" ? ["存在阻塞问题"] : [],
+    })),
+  };
+}
+
 function makeQueue(status: ProductionBatchSummary["status"] = "READY"): ProductionBatchSummary {
   return {
     id: "pbt_uat_001",
@@ -241,6 +317,20 @@ function makeReview(outputAssets: AssetView[] = []): ProductionBatchReviewProduc
   };
 }
 
+function setupMultiPackageInspectionMocks() {
+  const inspections: Record<string, ProductionPackageInspectionResult> = {
+    "C:/season/ep01": makeMultiPackageInspection("READY package", "inspection-ready", "sha-ready", ["READY", "READY", "READY"]),
+    "C:/season/ep02": makeMultiPackageInspection("WARNING package", "inspection-warning", "sha-warning", ["READY", "WARNING", "READY"]),
+    "C:/season/ep03": makeMultiPackageInspection("BLOCKED package", "inspection-blocked", "sha-blocked", ["READY", "BLOCKED"]),
+  };
+  mocks.discoverProductionPackages.mockResolvedValue(multiPackageDiscovery);
+  mocks.inspectProductionPackage.mockImplementation(async (_projectId: string, packageRoot: string) => {
+    const result = inspections[packageRoot];
+    if (!result) throw new Error(`未知生产包：${packageRoot}`);
+    return result;
+  });
+}
+
 beforeEach(() => {
   queues = [];
   batchStatus = "READY";
@@ -253,11 +343,13 @@ beforeEach(() => {
   mocks.getProductionBatchRunbook.mockResolvedValue({ projectId: "project-1", rows: [] });
   mocks.listBatchWorkflowPresets.mockResolvedValue([]);
   mocks.pickProductionPackageRoot.mockResolvedValue("C:/uat");
+  mocks.discoverProductionPackages.mockResolvedValue({ rootPath: "C:/season", packages: [] });
   mocks.inspectProductionPackage.mockResolvedValue(inspection);
   mocks.createProductionPackageBatches.mockImplementation(async () => {
     queues = [makeQueue()];
     return created;
   });
+  mocks.listProductionPackageBindings.mockResolvedValue([]);
   mocks.listProductionQueues.mockImplementation(async () => queues);
   mocks.getProductionQueue.mockImplementation(async () => makeBatchDetail());
   mocks.getProductionBatchReviewProductivity.mockImplementation(async () => review);
@@ -282,6 +374,44 @@ afterEach(() => {
 });
 
 describe("ShotWorkspace production package queue integration", () => {
+  it("blocks programmatic WARNING and BLOCKED package creation at the Host", async () => {
+    const user = userEvent.setup();
+    setupMultiPackageInspectionMocks();
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+
+    await user.click(await screen.findByRole("tab", { name: "批量生产包" }));
+    await user.click(screen.getByRole("button", { name: "选择批量根目录" }));
+    await waitFor(() => expect(mocks.discoverProductionPackages).toHaveBeenCalledWith("C:/uat"));
+
+    await user.click(screen.getByRole("button", { name: "程序化提交 WARNING 包" }));
+    await waitFor(() => expect(screen.getByText(/该生产包包含需要人工确认的警告镜头，请先在单生产包中处理。/)).toBeTruthy());
+    expect(mocks.createProductionPackageBatches).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "程序化提交 BLOCKED 包" }));
+    await waitFor(() => expect(screen.getByText(/该生产包包含阻塞项目，不能批量创建。/)).toBeTruthy());
+    expect(mocks.createProductionPackageBatches).not.toHaveBeenCalled();
+    expect(mocks.inspectProductionPackage).toHaveBeenCalledTimes(5);
+  });
+
+  it("re-inspects a READY package, creates only READY items, and never starts the queue", async () => {
+    const user = userEvent.setup();
+    setupMultiPackageInspectionMocks();
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+
+    await user.click(await screen.findByRole("tab", { name: "批量生产包" }));
+    await user.click(screen.getByRole("button", { name: "选择批量根目录" }));
+    await waitFor(() => expect(mocks.discoverProductionPackages).toHaveBeenCalledWith("C:/uat"));
+    await user.click(screen.getByRole("button", { name: "程序化提交 READY 包" }));
+
+    await waitFor(() => expect(mocks.createProductionPackageBatches).toHaveBeenCalledTimes(1));
+    expect(mocks.createProductionPackageBatches).toHaveBeenCalledWith(
+      "inspection-ready",
+      ["inspection-ready-item-1", "inspection-ready-item-2", "inspection-ready-item-3"],
+    );
+    expect(mocks.inspectProductionPackage).toHaveBeenCalledTimes(4);
+    expect(mocks.startProductionQueue).not.toHaveBeenCalled();
+  });
+
   it("reopens a manually collapsed production queue after production package quick create", async () => {
     const user = userEvent.setup();
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);

@@ -771,11 +771,18 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         if (!multiPackageMounted.current) return;
         const packageKey = packageKeys[index];
         const discoveredPackage = multiPackagePackages.find((item) => multiPackageIdentity(item) === packageKey);
-        const inspection = multiPackageInspections[packageKey];
         try {
-          if (!discoveredPackage || !inspection) {
+          if (!discoveredPackage) {
             throw new Error("该生产包尚未完成检查，请先重新检查。");
           }
+          const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
+          if (!multiPackageMounted.current) return;
+          if (inspection.manifestSha256 && inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
+            throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
+          }
+          setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
+          const safetyError = multiPackageInspectionSafetyError(inspection);
+          if (safetyError) throw new Error(safetyError);
           setMultiPackageCreateMessages((current) => {
             const next = { ...current };
             delete next[packageKey];
@@ -787,7 +794,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               .flatMap((binding) => binding.packageItemIds),
           );
           const selectedItemIds = inspection.items
-            .filter((item) => (item.status === "READY" || item.status === "WARNING") && !boundItemIds.has(item.id))
+            .filter((item) => item.status === "READY" && !boundItemIds.has(item.id))
             .map((item) => item.id);
           if (!selectedItemIds.length) continue;
           const result = await createProductionPackageBatches(inspection.inspectionId, selectedItemIds);
@@ -799,7 +806,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           }
         } catch (packageError: unknown) {
           if (!multiPackageMounted.current) return;
-          const message = toUserMessage(packageError);
+          const message = packageError instanceof Error ? packageError.message : toUserMessage(packageError);
           setMultiPackageCreateMessages((current) => {
             const next = {
               ...current,
@@ -822,7 +829,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         await refreshMultiPackageBoard();
       }
     }
-  }, [multiPackageBindings, multiPackageCreating, multiPackageInspections, multiPackagePackages, refreshMultiPackageBoard]);
+  }, [inspectProductionPackage, multiPackageBindings, multiPackageCreating, multiPackagePackages, projectId, refreshMultiPackageBoard]);
 
   const multiPackageBoardPackages = useMemo(
     () => multiPackagePackages.map((discoveredPackage) => {
@@ -2063,6 +2070,25 @@ function emptyRunbook(projectId: string): ProductionBatchRunbookView {
 
 function multiPackageIdentity(discoveredPackage: ProductionPackageDiscoveryPackage): string {
   return `${discoveredPackage.packageRoot}\u0000${discoveredPackage.manifestSha256}`;
+}
+
+function multiPackageInspectionSafetyError(inspection: ProductionPackageInspectionResult): string | undefined {
+  const hasWarning = inspection.status === "WARNING"
+    || inspection.warningCount > 0
+    || inspection.items.some((item) => item.status === "WARNING")
+    || Boolean(inspection.warnings?.length);
+  if (hasWarning) return "该生产包包含需要人工确认的警告镜头，请先在单生产包中处理。";
+
+  const hasBlocked = inspection.status === "BLOCKED"
+    || inspection.blockedCount > 0
+    || inspection.items.some((item) => item.status === "BLOCKED")
+    || Boolean(inspection.errors?.length);
+  if (hasBlocked) return "该生产包包含阻塞项目，不能批量创建。";
+
+  const hasUnsupportedStatus = inspection.status !== undefined && inspection.status !== "READY";
+  const hasUnsupportedItem = inspection.items.some((item) => item.status !== "READY");
+  if (hasUnsupportedStatus || hasUnsupportedItem) return "该生产包当前检查状态不是 READY，不能批量创建。";
+  return undefined;
 }
 
 function buildMultiPackageBoardPackage(input: {

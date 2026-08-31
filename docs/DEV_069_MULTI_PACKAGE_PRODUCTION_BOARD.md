@@ -1,10 +1,12 @@
 # DEV-069 — Multi-Package Production Board V1
 
-状态：实现已接入；最终回归/构建/真人 UAT 待完成
+状态：DEV-069A WARNING safety fix 已实现；最终回归/构建/真人 UAT 待完成
 
 验收标记：`PENDING HUMAN UAT`
 
 本文是 DEV-069 V1 的可执行验收契约。实现已接入当前工作树；最终回归、桌面构建和真人 UAT 尚待主线程完成。本文件不声明这些门禁已通过。
+
+DEV-069A 冻结的安全规则：`READY` 才允许从 Multi-Package Board 批量创建；`WARNING` 不得在 Board 创建，必须进入单生产包工作区人工处理；`BLOCKED` 禁止创建。Board 的禁用 checkbox 不是唯一安全门，Host 创建前仍会重新 inspection 并执行 package-level gate。
 
 ## 1. Scope / Non-goals
 
@@ -93,14 +95,15 @@ board 是 discovery/inspection/provenance/aggregation 的 UI 与协调层，没�
 3. 首个失败即停止后续未开始的 package/chunk，并返回已成功创建的 lineage 与第一个失败的稳定 error code。
 4. 不做跨 package rollback；已经写入的 binding/batch 保留并在 board 中显示。单次数据库 transaction 只保护其自身的 binding 与 batch/item 写入。
 5. Resume 只处理未绑定 item；Repository 发现同一 `project_id + package_key` 的 `package_item_ids_json` 已包含该 item ID 时必须跳过，不可重复创建；若选择项全部已绑定，则返回明确的 all-items-already-bound 错误。
-6. 创建结束后不自动打开 Queue、不自动 Start；用户可手动打开既有 Queue，并在目标 batch 上点击唯一的 Start。
+6. Host 创建前重新检查每个 package；存在任何 `WARNING` item、`BLOCKED` item 或对应 package-level warning/blocker 时，整个 package 被拒绝，不得静默只创建其中的 READY items。用户必须进入单生产包工作区处理 warning。
+7. 创建结束后不自动打开 Queue、不自动 Start；用户可手动打开既有 Queue，并在目标 batch 上点击唯一的 Start。
 
 ## 5. UI requirements and state contract
 
 ### Selection、filters、caps
 
 - board package 行显示实现中的 `READY`、`WARNING`、`BLOCKED`、`NOT_CREATED`、`UPDATED`、`CREATING`、`CREATE_FAILED`、`CREATED`、`RUNNING`、`COMPLETED`、`COMPLETED_WITH_FAILURE`；底层 item 的 succeeded/failed/pending 作为现有 batch 聚合计数展示。
-- `READY` 默认 checked；`WARNING` 默认 unchecked 但可由用户逐项选择；`BLOCKED` disabled 且必须展示 blocker；已 `CREATED` 默认不重复勾选。
+- `READY` 默认 checked 且可批量创建；`WARNING` checkbox unchecked 且 disabled，只显示“在单生产包中处理”入口和“请进入单生产包确认警告镜头。”辅助文案；`BLOCKED` disabled 且禁止创建、必须展示 blocker；已 `CREATED` 默认不重复勾选。Multi-Package Board 不提供“确认全部 WARNING”或逐 item WARNING confirmation。
 - 支持当前实现的“全部/未创建/问题/已创建/运行中/已完成”筛选；筛选不能丢失选择。
 - hard cap 为 `100 packages / 10000 items`。cap 违反时显示总数和稳定错误，禁止用分页掩盖超限。
 
@@ -112,7 +115,7 @@ board 是 discovery/inspection/provenance/aggregation 的 UI 与协调层，没�
 | `DISCOVERING` | 扫描 root；显示已访问目录/package 计数，禁止重复扫描和创建。 |
 | `INSPECTING` | 逐包 inspection；显示当前包与进度，禁止创建。 |
 | `READY` | 至少一个 READY item 可选；用户可刷新、检查详情、选择项、点击串行创建。 |
-| `WARNING` | 有 warning 或混合结果；warning 未经人工选择不得创建，READY 仍可按选择创建。 |
+| `WARNING` | 有 warning 或混合结果；Multi-Package Board 整包不可创建，必须进入单生产包工作区人工处理 warning。 |
 | `BLOCKED` | 存在不可生产 package/item 或 root error；blocked 项不可选，必要时只允许修复后重新发现。 |
 | `CREATING` | 串行创建进行中；锁定重复提交，显示当前 package/chunk、已创建数、失败数。 |
 | `CREATED` | 已有 binding/batch；显示 batch IDs 与现有聚合进度，以及“打开生产队列”手动动作；chunk/package item 详情留在 provenance read model。 |
@@ -142,7 +145,7 @@ board 是 discovery/inspection/provenance/aggregation 的 UI 与协调层，没�
 | Package | 初始 board 状态 | item 示例 | 用户动作/后续状态 |
 | --- | --- | --- | --- |
 | `EP1` | `READY` | 2 × `READY`（默认 checked） | 可选并等待创建 |
-| `EP2` | `WARNING` | 1 × `READY`、1 × `WARNING`（warning 默认 unchecked） | 人工勾选 warning 后才可纳入 |
+| `EP2` | `WARNING` | 1 × `READY`、1 × `WARNING`（warning checkbox disabled） | 进入单生产包工作区人工处理；Board 不创建该包 |
 | `EP3` | `BLOCKED` | 1 × `BLOCKED` | disabled，不能创建 |
 | `EP4` | `RUNNING` | 真实 batch 聚合：`RUNNING`、`COMPLETED` | timer 期间反映真实 queue |
 | `EP5` | `COMPLETED` | 真实 batch 聚合：全部完成 | 展示既有 batch；有失败时使用 `COMPLETED_WITH_FAILURE` |
@@ -158,8 +161,8 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 | Rust discovery | `cargo test --manifest-path src-tauri/Cargo.toml --test dev069_production_package_discovery -- --test-threads=1` | root depth 0、manifest stop、canonical 后越界 symlink 跳过、100 package/5000 directory caps、自然排序 `EP2 < EP10`、真实 manifest SHA-256、稳定 `DISCOVERY_*` errors；depth 4 package 发现与继续向下的 `DISCOVERY_MAX_DEPTH_EXCEEDED` 需作为最终验收断言。 |
 | Rust package/provenance | `cargo test --manifest-path src-tauri/Cargo.toml --test dev059_production_package -- --test-threads=1` and `cargo test --manifest-path src-tauri/Cargo.toml provenance_key_changes_with_manifest_or_normalized_root -- --test-threads=1` | 既有 package inspection/mapping/chunk contract 不回归；key 随 manifest/root 变化，Migration 026 实际字段与 `PRODUCTION_PACKAGE` source kind 可读。 |
 | Rust partial creation | `cargo test --manifest-path src-tauri/Cargo.toml --test dev061b_production_package_hardening -- --test-threads=1` | 500 item chunk、后续 chunk 失败的 partial truth、已创建结果不 rollback、session 不隐式重试；创建仍不 Start 或提交 Comfy。 |
-| Frontend board | `pnpm test -- MultiPackageProductionBoard` | 五包 summary、READY 默认选择、WARNING unchecked、BLOCKED/CREATED disabled、问题/运行中筛选、100/10000 caps、按顺序只调用一次 create、失败不隐式 retry、进度与 blocked actions。 |
-| Frontend parent/queue compatibility | `pnpm test -- ShotWorkspace.production` and `pnpm test -- ShotWorkspace` | multi-package tab 接入、package discovery/inspection/create 串行协调、既有 Queue 手动 Start 边界、无 Start All/board executor；DEV-068 Queue/Monitor 回归保持可测。 |
+| Frontend board | `pnpm test -- MultiPackageProductionBoard` | 五包 summary、READY 默认选择且 enabled、WARNING unchecked 且 disabled、BLOCKED/CREATED disabled、WARNING 单包入口、问题/运行中筛选、100/10000 caps、按顺序只调用一次 create、失败不隐式 retry、进度与 blocked actions。 |
+| Frontend parent/queue compatibility | `pnpm test -- ShotWorkspace.production` and `pnpm test -- ShotWorkspace` | multi-package tab 接入、每包创建前 fresh inspection、WARNING/BLOCKED package-level gate、只传 READY item IDs、既有 Queue 手动 Start 边界、无 Start All/board executor；DEV-068 Queue/Monitor 回归保持可测。 |
 | Existing package/queue UI | `pnpm test -- ProductionPackageWorkspace ProductionQueueDrawer` | 单包工作区、Queue Drawer 和现有手动生产路径不回归。 |
 | Timer lifecycle | `pnpm test -- MultiPackageProductionBoard` and `pnpm test -- ShotWorkspace.production` | board 默认 5 秒、hidden 跳过、in-flight guard、卸载清理；父层只在 `multi-package` tab 且有 `CREATED`/`RUNNING` 时传入 polling enabled。 |
 | Migration compatibility | `cargo test --manifest-path src-tauri/Cargo.toml --test dev055_release_compatibility dev055_migration_matrix_reaches_026 -- --test-threads=1` | 025 → 026 可升级；旧 project/batch/queue 数据可读；026 新表可启动；binding FK/unique/cascade 规则正确；无旧表语义破坏。 |
@@ -185,7 +188,7 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 ### Steps and evidence placeholders
 
 - [ ] 选择 root：root 自身 package、depth 0..4、manifest stop、自然排序 `EP2 < EP10` 正确。
-- [ ] 确认 package/item 摘要、真实 manifest SHA-256、READY 默认 checked、WARNING unchecked、BLOCKED disabled。
+- [ ] 确认 package/item 摘要、真实 manifest SHA-256、READY 默认 checked/enabled、WARNING unchecked/disabled 且进入单生产包处理、BLOCKED disabled。
 - [ ] 验证 filters、100 packages/10000 items cap、空态、进度态、错误态和 partial summary 文案。
 - [ ] 点击创建：观察 package/chunk 串行顺序、首次失败停止后续、已成功 batch 保留、无自动打开/Start/Start All。
 - [ ] Resume：确认已绑定 item 被跳过且不重复创建，失败项可进入既有 Queue 的人工处理。

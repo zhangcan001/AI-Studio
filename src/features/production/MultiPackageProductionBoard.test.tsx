@@ -54,17 +54,26 @@ describe("MultiPackageProductionBoard", () => {
     expect(screen.getAllByText("已完成").length).toBeGreaterThan(0);
   });
 
-  it("selects READY by default, leaves WARNING unchecked, and disables blocked and created rows", () => {
+  it("selects READY by default and disables WARNING, blocked, and created rows", () => {
     render(<MultiPackageProductionBoard packages={[
       pkg(),
       pkg({ packageKey: "warning", packageName: "警告包", status: "WARNING" }),
       pkg({ packageKey: "blocked", packageName: "阻塞包", status: "BLOCKED" }),
       pkg({ packageKey: "created", packageName: "已创建包", status: "CREATED" }),
     ]} />);
-    expect((screen.getByRole("checkbox", { name: "选择生产包 第 01 集" }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole("checkbox", { name: "选择生产包 警告包" }) as HTMLInputElement).checked).toBe(false);
-    expect((screen.getByRole("checkbox", { name: "选择生产包 阻塞包" }) as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("checkbox", { name: "选择生产包 已创建包" }) as HTMLInputElement).disabled).toBe(true);
+    const readyCheckbox = screen.getByRole("checkbox", { name: "选择生产包 第 01 集" }) as HTMLInputElement;
+    const warningCheckbox = screen.getByRole("checkbox", { name: "选择生产包 警告包" }) as HTMLInputElement;
+    const blockedCheckbox = screen.getByRole("checkbox", { name: "选择生产包 阻塞包" }) as HTMLInputElement;
+    const createdCheckbox = screen.getByRole("checkbox", { name: "选择生产包 已创建包" }) as HTMLInputElement;
+    expect(readyCheckbox.checked).toBe(true);
+    expect(readyCheckbox.disabled).toBe(false);
+    expect(warningCheckbox.checked).toBe(false);
+    expect(warningCheckbox.disabled).toBe(true);
+    expect(blockedCheckbox.checked).toBe(false);
+    expect(blockedCheckbox.disabled).toBe(true);
+    expect(createdCheckbox.checked).toBe(false);
+    expect(createdCheckbox.disabled).toBe(true);
+    expect(screen.getByText("请进入单生产包确认警告镜头。")).toBeTruthy();
   });
 
   it("filters all, issues, and running packages", async () => {
@@ -94,17 +103,38 @@ describe("MultiPackageProductionBoard", () => {
     const user = userEvent.setup();
     const onCreateSelected = vi.fn().mockResolvedValue(undefined);
     render(<MultiPackageProductionBoard packages={[
-      pkg({ packageKey: "first", packageName: "第一包", itemCount: 4 }),
-      pkg({ packageKey: "second", packageName: "第二包", itemCount: 6 }),
-      pkg({ packageKey: "warning", packageName: "警告包", status: "WARNING", itemCount: 3 }),
+      pkg({ packageKey: "A", packageName: "A", relativePath: "A", itemCount: 4 }),
+      pkg({ packageKey: "B", packageName: "B", relativePath: "B", itemCount: 6 }),
+      pkg({ packageKey: "C", packageName: "C", relativePath: "C", status: "WARNING", itemCount: 3 }),
     ]} onCreateSelected={onCreateSelected} />);
-    await user.click(screen.getByRole("checkbox", { name: "选择生产包 警告包" }));
-    const button = screen.getByRole("button", { name: "创建所选生产批次（3 个生产包 · 13 个镜头）" });
+    const button = screen.getByRole("button", { name: "创建所选生产批次（2 个生产包 · 10 个镜头）" });
     expect((button as HTMLButtonElement).disabled).toBe(false);
     await user.click(button);
     await vi.waitFor(() => expect(onCreateSelected).toHaveBeenCalledTimes(1));
-    expect(onCreateSelected).toHaveBeenCalledWith(["first", "second", "warning"]);
+    expect(onCreateSelected).toHaveBeenCalledWith(["A", "B"]);
     expect(screen.queryByText("开始生成")).toBeNull();
+  });
+
+  it("does not create an externally selected WARNING package", async () => {
+    const user = userEvent.setup();
+    const onCreateSelected = vi.fn().mockResolvedValue(undefined);
+    render(<MultiPackageProductionBoard packages={[
+      pkg({ packageKey: "A", packageName: "A", relativePath: "A", itemCount: 4 }),
+      pkg({ packageKey: "B", packageName: "B", relativePath: "B", itemCount: 6 }),
+      pkg({ packageKey: "C", packageName: "C", relativePath: "C", status: "WARNING", itemCount: 3 }),
+    ]} selectedPackageKeys={["A", "B", "C"]} onCreateSelected={onCreateSelected} />);
+    const button = screen.getByRole("button", { name: "创建所选生产批次（2 个生产包 · 10 个镜头）" });
+    await user.click(button);
+    await vi.waitFor(() => expect(onCreateSelected).toHaveBeenCalledTimes(1));
+    expect(onCreateSelected).toHaveBeenCalledWith(["A", "B"]);
+  });
+
+  it("keeps the WARNING single-package handling entry", async () => {
+    const user = userEvent.setup();
+    const onHandleWarning = vi.fn();
+    render(<MultiPackageProductionBoard packages={[pkg({ packageKey: "C", packageName: "C", relativePath: "C", status: "WARNING", itemCount: 3 })]} onHandleWarning={onHandleWarning} />);
+    await user.click(screen.getByRole("button", { name: "在单生产包中处理" }));
+    expect(onHandleWarning).toHaveBeenCalledWith("C");
   });
 
   it("shows creating and failure state after onCreateSelected rejects without retrying implicitly", async () => {

@@ -341,7 +341,7 @@ function PackageRow({
       <td>{item.itemCount}</td>
       <td><span className={`multi-package-production-board-status status-${status.toLowerCase()}`}>{STATUS_LABELS[status]}</span></td>
       <td><div className="multi-package-production-board-progress" aria-label={`${progress}%，${succeeded}/${progressTotal}`}><span style={{ width: `${progress}%` }} /><small>{item.batchIds?.length ? `批次 ${item.batchIds.join("、")}` : "尚未创建"} · {item.pending ?? Math.max(0, progressTotal - succeeded)} 待处理 / {item.running ?? 0} 运行中 / {succeeded} 已完成{item.failed ? ` / ${item.failed} 失败` : ""}</small></div></td>
-      <td>{issue ? <span className="multi-package-production-board-issue">{issue}</span> : <span className="multi-package-production-board-muted">—</span>}</td>
+      <td>{issue ? <span className="multi-package-production-board-issue">{issue}</span> : <span className="multi-package-production-board-muted">—</span>}{status === "WARNING" && <small className="multi-package-production-board-muted">请进入单生产包确认警告镜头。</small>}</td>
       <td><div className="multi-package-production-board-actions">
         {canOpenBatch ? <button type="button" onClick={() => onOpenBatch?.(item.packageKey, item.batchIds ?? [])} disabled={!onOpenBatch}>打开生产批次</button> : <button type="button" className="multi-package-production-board-quiet" onClick={() => onOpenPackage?.(item.packageKey)} disabled={!onOpenPackage}>打开生产包</button>}
         {status === "WARNING" && <button type="button" className="multi-package-production-board-quiet" onClick={() => onHandleWarning?.(item.packageKey)} disabled={!onHandleWarning}>在单生产包中处理</button>}
@@ -363,7 +363,7 @@ function SummaryCard({ label, value, tone }: { label: string; value: number; ton
 }
 
 function isSelectableStatus(status: MultiPackageBoardPackageStatus): boolean {
-  return ["READY", "WARNING", "NOT_CREATED", "UPDATED", "CREATE_FAILED"].includes(status);
+  return ["READY", "NOT_CREATED", "UPDATED", "CREATE_FAILED"].includes(status);
 }
 
 function matchesFilter(status: MultiPackageBoardPackageStatus, filter: BoardFilter): boolean {
