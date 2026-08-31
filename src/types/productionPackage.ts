@@ -146,3 +146,29 @@ export interface ProductionPackageCreateBatchesRequest {
   inspectionId: string;
   selectedItemIds: string[];
 }
+
+export interface ProductionPackageDiscoveryPackage {
+  packageRoot: string;
+  relativePath: string;
+  manifestPath: string;
+  manifestSha256: string;
+}
+
+export interface ProductionPackageDiscoveryResult {
+  rootPath: string;
+  packages: ProductionPackageDiscoveryPackage[];
+}
+
+export interface ProductionPackageBatchBinding {
+  packageKey: string;
+  packageRoot: string;
+  manifestSha256: string;
+  packageId?: string | null;
+  packageName: string;
+  batchId: string;
+  chunkIndex: number;
+  chunkCount: number;
+  packageItemIds: string[];
+  createdAt: string;
+  sourceKind: string;
+}

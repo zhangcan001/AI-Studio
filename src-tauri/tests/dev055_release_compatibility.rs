@@ -834,6 +834,10 @@ fn migration_versions() -> Vec<u64> {
 }
 
 async fn remove_migrations_after_021(pool: &SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS production_package_batch_bindings")
+        .execute(pool)
+        .await
+        .expect("026 provenance table should be removable from the isolated fixture");
     sqlx::query("DROP TABLE IF EXISTS script_import_drafts")
         .execute(pool)
         .await
@@ -879,6 +883,10 @@ async fn remove_migrations_after_021(pool: &SqlitePool) {
 }
 
 async fn remove_migration_024(pool: &SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS production_package_batch_bindings")
+        .execute(pool)
+        .await
+        .expect("026 provenance table should be removable from the isolated fixture");
     sqlx::query("DROP TABLE IF EXISTS script_import_drafts")
         .execute(pool)
         .await
@@ -898,8 +906,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 25);
-    assert_eq!(migration_marker_count(pool, 26).await, 0);
+    assert_eq!(max_migration(pool).await, 26);
+    assert_eq!(migration_marker_count(pool, 27).await, 0);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1061,13 +1069,13 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_025_without_026() {
+async fn dev055_migration_matrix_reaches_026() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(25));
+    assert_eq!(versions.last().copied(), Some(26));
     assert!(
-        !versions.contains(&26),
-        "repository must not contain migration 026"
+        versions.contains(&26),
+        "repository must contain migration 026"
     );
 
     let (_fresh_directory, fresh_pool) = database().await;

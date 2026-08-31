@@ -1020,6 +1020,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_package::production_package_pick_root,
             commands::production_package::production_package_inspect,
             commands::production_package::production_package_create_batches,
+            commands::production_package_discovery::production_package_discover,
+            commands::production_package_provenance::production_package_bindings_list,
             commands::production_queue::production_queue_create,
             commands::production_queue::production_queue_list,
             commands::production_queue::production_queue_overview,

@@ -184,4 +184,18 @@ describe("Production mode tabs", () => {
     expect(screen.getByRole("button", { name: "已检查状态" })).toBeTruthy();
     expect(screen.getByRole("tabpanel", { name: "生产包" }).hidden).toBe(false);
   });
+
+  it("places the multi-package board between the package and project tabs", () => {
+    render(createElement(ProductionModeTabs, {
+      packagePanel: createElement("div", null, "生产包"),
+      multiPackagePanel: createElement("div", null, "批量生产包"),
+      projectProductionPanel: createElement("div", null, "项目生产"),
+    }));
+
+    expect(within(screen.getByRole("tablist", { name: "生产模式工作区" })).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "生产包",
+      "批量生产包",
+      "项目生产",
+    ]);
+  });
 });

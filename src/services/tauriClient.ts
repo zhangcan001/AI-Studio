@@ -24,13 +24,18 @@ import type {
 import type {
   ProductionPackageCreateBatchesRequest,
   ProductionPackageCreateBatchesResult,
+  ProductionPackageBatchBinding,
+  ProductionPackageDiscoveryResult,
   ProductionPackageInspectRequest,
   ProductionPackageInspectionResult,
 } from "../types/productionPackage";
 export type {
   ProductionPackageBatchMapping,
+  ProductionPackageBatchBinding,
   ProductionPackageCreateBatchesRequest,
   ProductionPackageCreateBatchesResult,
+  ProductionPackageDiscoveryPackage,
+  ProductionPackageDiscoveryResult,
   ProductionPackageInspectRequest,
   ProductionPackageInspectionResult,
   ProductionPackageItemMapping,
@@ -1459,6 +1464,14 @@ export function updateH3ProjectSegmentDraft(
 
 export function pickProductionPackageRoot(): Promise<string | null> {
   return invoke<string | null>("production_package_pick_root");
+}
+
+export function discoverProductionPackages(rootPath: string): Promise<ProductionPackageDiscoveryResult> {
+  return invoke<ProductionPackageDiscoveryResult>("production_package_discover", { rootPath });
+}
+
+export function listProductionPackageBindings(projectId: string): Promise<ProductionPackageBatchBinding[]> {
+  return invoke<ProductionPackageBatchBinding[]>("production_package_bindings_list", { projectId });
 }
 
 export function inspectProductionPackage(
