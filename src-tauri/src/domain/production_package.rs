@@ -5,8 +5,14 @@
 //! labels; they must never be parsed as `ProductionBatchId`, `AssetId`, or any
 //! other formal database identifier.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt, path::Path};
+use sha2::{Digest, Sha256};
+use std::{
+    error::Error,
+    fmt,
+    path::{Component, Path, PathBuf},
+};
 
 pub const PRODUCTION_PACKAGE_SCHEMA_VERSION: u32 = 1;
 pub const PRODUCTION_PACKAGE_TYPE: &str = "AI_STUDIO_VIDEO_PRODUCTION";
@@ -91,6 +97,95 @@ pub const PACKAGE_ITEM_FIELDS: &[&str] = &[
 
 pub const fn is_supported_package_schema(version: u32) -> bool {
     version == PRODUCTION_PACKAGE_SCHEMA_VERSION
+}
+
+/// Durable provenance for a package-backed production batch.  These labels
+/// describe the external source only; they are never queue/workflow IDs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionPackageProvenance {
+    pub source_package_key: String,
+    pub source_package_root: String,
+    pub source_package_manifest_sha256: String,
+    pub source_package_id: Option<String>,
+    pub source_package_name: String,
+    pub source_package_chunk_index: u32,
+    pub source_package_chunk_count: u32,
+    pub package_item_ids: Vec<String>,
+}
+
+impl ProductionPackageProvenance {
+    pub fn new(
+        package_root: &Path,
+        manifest_sha256: impl Into<String>,
+        package_id: Option<String>,
+        package_name: impl Into<String>,
+        chunk_index: u32,
+        chunk_count: u32,
+        package_item_ids: Vec<String>,
+    ) -> Self {
+        let source_package_root = normalize_package_root(package_root);
+        let source_package_manifest_sha256 = manifest_sha256.into();
+        let source_package_key =
+            production_package_source_key(&source_package_root, &source_package_manifest_sha256);
+        Self {
+            source_package_key,
+            source_package_root,
+            source_package_manifest_sha256,
+            source_package_id: package_id,
+            source_package_name: package_name.into(),
+            source_package_chunk_index: chunk_index,
+            source_package_chunk_count: chunk_count,
+            package_item_ids,
+        }
+    }
+}
+
+/// The durable relationship between one package chunk and its queue batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionPackageBatchBinding {
+    pub project_id: String,
+    pub package_key: String,
+    pub package_root: String,
+    pub manifest_sha256: String,
+    pub package_id: Option<String>,
+    pub package_name: String,
+    pub batch_id: String,
+    pub chunk_index: u32,
+    pub chunk_count: u32,
+    pub package_item_ids: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub source_kind: String,
+}
+
+pub fn normalize_package_root(path: &Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let absolute = std::fs::canonicalize(&absolute).unwrap_or(absolute);
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(value) => normalized.push(value),
+        }
+    }
+    normalized.to_string_lossy().replace('/', "\\")
+}
+
+pub fn production_package_source_key(package_root: &str, manifest_sha256: &str) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(format!("{package_root}\0{manifest_sha256}").as_bytes())
+    )
 }
 
 pub fn is_supported_package_type(value: &str) -> bool {
@@ -664,5 +759,55 @@ mod tests {
         );
         assert!(is_supported_h3_generation_mode("FL2VA_FIRST_LAST"));
         assert!(!is_supported_h3_generation_mode("SECOND_EXECUTOR"));
+    }
+
+    #[test]
+    fn provenance_key_changes_with_manifest_or_normalized_root() {
+        let root = Path::new("C:/packages/../packages/ep01");
+        let same_root = Path::new("C:\\packages\\ep01");
+        let first = ProductionPackageProvenance::new(
+            root,
+            "a".repeat(64),
+            Some("external-ep01".to_owned()),
+            "EP01",
+            0,
+            2,
+            vec!["item-1".to_owned()],
+        );
+        let same = ProductionPackageProvenance::new(
+            same_root,
+            "a".repeat(64),
+            None,
+            "EP01",
+            1,
+            2,
+            vec!["item-2".to_owned()],
+        );
+        let changed_manifest = ProductionPackageProvenance::new(
+            same_root,
+            "b".repeat(64),
+            None,
+            "EP01",
+            0,
+            1,
+            vec!["item-1".to_owned()],
+        );
+        let changed_root = ProductionPackageProvenance::new(
+            Path::new("C:/packages/ep02"),
+            "a".repeat(64),
+            None,
+            "EP02",
+            0,
+            1,
+            vec!["item-1".to_owned()],
+        );
+
+        assert_eq!(first.source_package_key, same.source_package_key);
+        assert_ne!(
+            first.source_package_key,
+            changed_manifest.source_package_key
+        );
+        assert_ne!(first.source_package_key, changed_root.source_package_key);
+        assert_eq!(first.source_package_root, same.source_package_root);
     }
 }

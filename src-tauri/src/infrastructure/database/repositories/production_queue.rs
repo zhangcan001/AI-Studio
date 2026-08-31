@@ -12,7 +12,7 @@ use crate::application::production_batch_runbook_service::{
 use crate::domain::{
     PreparationSnapshotRecord, PreparedShotBatchRecord, ProductionBatch, ProductionBatchDetail,
     ProductionBatchId, ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
-    ProductionBatchStatus, ShotStage,
+    ProductionBatchStatus, ProductionPackageBatchBinding, ProductionPackageProvenance, ShotStage,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -75,6 +75,56 @@ impl ProductionQueueRepository for SqliteProductionQueueRepository {
         insert_batch_records(&mut transaction, batch, items).await?;
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(())
+    }
+
+    async fn insert_with_provenance(
+        &self,
+        batch: &ProductionBatch,
+        items: &[ProductionBatchItem],
+        provenance: &ProductionPackageProvenance,
+    ) -> Result<(), RepositoryError> {
+        let unique_package_item_count = provenance
+            .package_item_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if provenance.package_item_ids.len() != items.len()
+            || provenance
+                .package_item_ids
+                .iter()
+                .any(|id| id.trim().is_empty())
+            || unique_package_item_count != provenance.package_item_ids.len()
+        {
+            return Err(RepositoryError::integrity(
+                "production package binding must contain one unique id for every batch item",
+            ));
+        }
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        insert_batch_records(&mut transaction, batch, items).await?;
+        insert_package_binding(&mut transaction, batch, provenance).await?;
+        transaction.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn list_package_bindings(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProductionPackageBatchBinding>, RepositoryError> {
+        let rows = sqlx::query_as::<_, PackageBindingRow>(
+            "SELECT project_id, package_key, package_root, manifest_sha256,
+                    package_id, package_name, batch_id, chunk_index, chunk_count,
+                    package_item_ids_json, created_at, source_kind
+             FROM production_package_batch_bindings
+             WHERE project_id = ?
+             ORDER BY created_at ASC, batch_id ASC",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(PackageBindingRow::try_into_domain)
+            .collect()
     }
 
     async fn list(&self, project_id: &str) -> Result<Vec<ProductionBatch>, RepositoryError> {
@@ -1305,6 +1355,64 @@ async fn insert_batch_records(
     Ok(())
 }
 
+async fn insert_package_binding(
+    transaction: &mut Transaction<'_, Sqlite>,
+    batch: &ProductionBatch,
+    provenance: &ProductionPackageProvenance,
+) -> Result<(), RepositoryError> {
+    let existing_json = sqlx::query_scalar::<_, String>(
+        "SELECT package_item_ids_json
+         FROM production_package_batch_bindings
+         WHERE project_id = ? AND package_key = ?",
+    )
+    .bind(&batch.project_id)
+    .bind(&provenance.source_package_key)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    for json in existing_json {
+        let existing_ids = serde_json::from_str::<Vec<String>>(&json).map_err(|error| {
+            RepositoryError::serialization("production package item ids", error.to_string())
+        })?;
+        if existing_ids.iter().any(|id| {
+            provenance
+                .package_item_ids
+                .iter()
+                .any(|new_id| new_id == id)
+        }) {
+            return Err(RepositoryError::integrity(
+                "production package item is already bound to a production batch",
+            ));
+        }
+    }
+    let package_item_ids_json =
+        serde_json::to_string(&provenance.package_item_ids).map_err(|error| {
+            RepositoryError::serialization("production package item ids", error.to_string())
+        })?;
+    sqlx::query(
+        "INSERT INTO production_package_batch_bindings
+         (project_id, package_key, package_root, manifest_sha256, package_id,
+          package_name, batch_id, chunk_index, chunk_count, package_item_ids_json,
+          created_at, source_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PRODUCTION_PACKAGE')",
+    )
+    .bind(&batch.project_id)
+    .bind(&provenance.source_package_key)
+    .bind(&provenance.source_package_root)
+    .bind(&provenance.source_package_manifest_sha256)
+    .bind(&provenance.source_package_id)
+    .bind(&provenance.source_package_name)
+    .bind(batch.id.as_str())
+    .bind(i64::from(provenance.source_package_chunk_index))
+    .bind(i64::from(provenance.source_package_chunk_count))
+    .bind(package_item_ids_json)
+    .bind(format_datetime(batch.created_at))
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
 async fn insert_requeue_item_record(
     transaction: &mut Transaction<'_, Sqlite>,
     item: &ProductionBatchItem,
@@ -1343,6 +1451,57 @@ struct BatchRow {
     archived_at: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct PackageBindingRow {
+    project_id: String,
+    package_key: String,
+    package_root: String,
+    manifest_sha256: String,
+    package_id: Option<String>,
+    package_name: String,
+    batch_id: String,
+    chunk_index: i64,
+    chunk_count: i64,
+    package_item_ids_json: String,
+    created_at: String,
+    source_kind: String,
+}
+
+impl PackageBindingRow {
+    fn try_into_domain(self) -> Result<ProductionPackageBatchBinding, RepositoryError> {
+        let package_item_ids = serde_json::from_str::<Vec<String>>(&self.package_item_ids_json)
+            .map_err(|error| {
+                RepositoryError::serialization("production package item ids", error.to_string())
+            })?;
+        let chunk_index = u32::try_from(self.chunk_index).map_err(|_| {
+            RepositoryError::serialization(
+                "production package chunk index",
+                format!("invalid value {}", self.chunk_index),
+            )
+        })?;
+        let chunk_count = u32::try_from(self.chunk_count).map_err(|_| {
+            RepositoryError::serialization(
+                "production package chunk count",
+                format!("invalid value {}", self.chunk_count),
+            )
+        })?;
+        Ok(ProductionPackageBatchBinding {
+            project_id: self.project_id,
+            package_key: self.package_key,
+            package_root: self.package_root,
+            manifest_sha256: self.manifest_sha256,
+            package_id: self.package_id,
+            package_name: self.package_name,
+            batch_id: self.batch_id,
+            chunk_index,
+            chunk_count,
+            package_item_ids,
+            created_at: parse_datetime("production package binding created_at", &self.created_at)?,
+            source_kind: self.source_kind,
+        })
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -1620,7 +1779,7 @@ mod tests {
     };
     use crate::domain::{
         ProductionBatch, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
-        ProductionBatchItemStatus, ProductionBatchStatus, ShotStage,
+        ProductionBatchItemStatus, ProductionBatchStatus, ProductionPackageProvenance, ShotStage,
     };
     use crate::infrastructure::database::{
         pool::initialize, repositories::test_support::seed_task_dependencies,
@@ -1629,6 +1788,161 @@ mod tests {
     use serde_json::json;
     use sqlx::SqlitePool;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn package_binding_is_atomic_project_scoped_restartable_and_cascades() {
+        let directory = tempdir().unwrap();
+        let database_path = directory.path().join("package-binding.db");
+        let pool = initialize(&database_path).await.unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 31, 1, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let item = fixture_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            json!({"prompt": "package"}),
+        );
+        let batch = fixture_batch(&batch_id, ProductionBatchStatus::Ready, now);
+        let provenance = ProductionPackageProvenance::new(
+            std::path::Path::new("C:/packages/ep01"),
+            "a".repeat(64),
+            Some("ep01".to_owned()),
+            "EP01",
+            0,
+            2,
+            vec!["package-item-1".to_owned()],
+        );
+        repository
+            .insert_with_provenance(&batch, std::slice::from_ref(&item), &provenance)
+            .await
+            .unwrap();
+        let bindings = repository.list_package_bindings("project-1").await.unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].package_item_ids, vec!["package-item-1"]);
+        assert_eq!(bindings[0].chunk_index, 0);
+        assert_eq!(bindings[0].chunk_count, 2);
+        assert!(repository
+            .list_package_bindings("other-project")
+            .await
+            .unwrap()
+            .is_empty());
+
+        let second_batch_id = ProductionBatchId::new();
+        let second_item = fixture_item(
+            &second_batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            json!({"prompt": "package-2"}),
+        );
+        let second_provenance = ProductionPackageProvenance::new(
+            std::path::Path::new("C:/packages/ep01"),
+            "a".repeat(64),
+            Some("ep01".to_owned()),
+            "EP01",
+            1,
+            2,
+            vec!["package-item-2".to_owned()],
+        );
+        repository
+            .insert_with_provenance(
+                &fixture_batch(&second_batch_id, ProductionBatchStatus::Ready, now),
+                std::slice::from_ref(&second_item),
+                &second_provenance,
+            )
+            .await
+            .unwrap();
+        let bindings = repository.list_package_bindings("project-1").await.unwrap();
+        assert_eq!(bindings.len(), 2);
+        assert!(bindings
+            .iter()
+            .all(|binding| binding.package_key == provenance.source_package_key));
+
+        pool.close().await;
+        let reopened_pool = initialize(&database_path).await.unwrap();
+        let reopened = SqliteProductionQueueRepository::new(reopened_pool.clone());
+        assert_eq!(
+            reopened
+                .list_package_bindings("project-1")
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(reopened.delete_batch("project-1", &batch_id).await.unwrap());
+        assert_eq!(
+            reopened
+                .list_package_bindings("project-1")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(reopened
+            .delete_batch("project-1", &second_batch_id)
+            .await
+            .unwrap());
+        assert!(reopened
+            .list_package_bindings("project-1")
+            .await
+            .unwrap()
+            .is_empty());
+        reopened_pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn package_binding_insert_rolls_back_batch_when_item_insert_fails() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("package-binding-rollback.db"))
+            .await
+            .unwrap();
+        seed_task_dependencies(&pool).await;
+        let repository = SqliteProductionQueueRepository::new(pool.clone());
+        let now = Utc.with_ymd_and_hms(2026, 8, 31, 1, 0, 0).unwrap();
+        let batch_id = ProductionBatchId::new();
+        let mut item = fixture_item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Pending,
+            None,
+            json!({"prompt": "package"}),
+        );
+        item.recipe_id = "recipe-missing".to_owned();
+        let provenance = ProductionPackageProvenance::new(
+            std::path::Path::new("C:/packages/ep01"),
+            "a".repeat(64),
+            None,
+            "EP01",
+            0,
+            1,
+            vec!["package-item-1".to_owned()],
+        );
+        assert!(repository
+            .insert_with_provenance(
+                &fixture_batch(&batch_id, ProductionBatchStatus::Ready, now),
+                &[item],
+                &provenance,
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches WHERE id = ?")
+                .bind(batch_id.as_str())
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(repository
+            .list_package_bindings("project-1")
+            .await
+            .unwrap()
+            .is_empty());
+        pool.close().await;
+    }
 
     #[tokio::test]
     async fn uncertain_dispatch_is_failed_and_batch_is_paused_on_recovery() {

@@ -17,6 +17,9 @@ use crate::application::production_package_inspector::{
 };
 use crate::application::production_queue_service::ProductionQueueService;
 use crate::application::source_asset_import_service::SourceAssetImportService;
+use crate::domain::{
+    normalize_package_root, production_package_source_key, ProductionPackageProvenance,
+};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -320,6 +323,30 @@ impl ProductionPackageService {
             current_selected.push(current_item.clone());
         }
 
+        let package_root = normalize_package_root(&current.package_root);
+        let package_key = production_package_source_key(&package_root, &current.manifest_sha256);
+        let persisted_bindings = self
+            .production_queue_service
+            .list_package_bindings(&session.project_id)
+            .await
+            .map_err(|error| ProductionPackageError::Queue(error.to_string()))?;
+        let already_created = persisted_bindings
+            .iter()
+            .filter(|binding| binding.package_key == package_key)
+            .flat_map(|binding| binding.package_item_ids.iter().cloned())
+            .collect::<HashSet<_>>();
+        let remaining_selected = current_selected
+            .iter()
+            .filter(|item| !already_created.contains(&item.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if remaining_selected.is_empty() {
+            return Err(ProductionPackageError::InvalidInput(
+                "all selected production package items are already bound to production batches"
+                    .to_owned(),
+            ));
+        }
+
         // Consume the package session before side effects. A retry after a
         // partial downstream failure must be explicit, never an accidental
         // duplicate batch import. Checking removal also closes the race where
@@ -333,7 +360,15 @@ impl ProductionPackageService {
         let mut batches = Vec::with_capacity(chunk_count);
         let mut item_mappings = Vec::with_capacity(current_selected.len());
         for (chunk_index, chunk) in current_selected.chunks(chunk_size).enumerate() {
-            let result = match stage_chunk(chunk) {
+            let chunk = chunk
+                .iter()
+                .filter(|item| !already_created.contains(&item.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            if chunk.is_empty() {
+                continue;
+            }
+            let result = match stage_chunk(&chunk) {
                 Ok(staging_root) => {
                     let batch_name = format!(
                         "{} · {}/{}",
@@ -342,7 +377,18 @@ impl ProductionPackageService {
                         chunk_count
                     );
                     let result = self
-                        .commit_staged_chunk(&session.project_id, &staging_root, &batch_name, chunk)
+                        .commit_staged_chunk(
+                            &session.project_id,
+                            &staging_root,
+                            &batch_name,
+                            &chunk,
+                            &current.package_root,
+                            &current.manifest_sha256,
+                            current.package_id.clone(),
+                            &current.package_name,
+                            chunk_index as u32,
+                            chunk_count as u32,
+                        )
                         .await;
                     let _ = fs::remove_dir_all(&staging_root);
                     result
@@ -357,6 +403,7 @@ impl ProductionPackageService {
                 Err(_error) if !batches.is_empty() => {
                     let remaining_item_ids = current_selected[chunk_index * chunk_size..]
                         .iter()
+                        .filter(|item| !already_created.contains(&item.id))
                         .map(|item| item.id.clone())
                         .collect::<Vec<_>>();
                     return Ok(create_batches_result(
@@ -390,6 +437,12 @@ impl ProductionPackageService {
         staging_root: &Path,
         package_batch_name: &str,
         package_items: &[ProductionPackageItemInspection],
+        package_root: &Path,
+        manifest_sha256: &str,
+        package_id: Option<String>,
+        package_name: &str,
+        chunk_index: u32,
+        chunk_count: u32,
     ) -> Result<ProductionPackageBatchMapping, ProductionPackageError> {
         let (h3_session_id, inspection) = self
             .h3_local_import_service
@@ -408,7 +461,7 @@ impl ProductionPackageService {
         }
         let result = self
             .h3_local_import_service
-            .commit(
+            .commit_with_provenance(
                 &h3_session_id,
                 H3LocalImportCommitRequest {
                     batch_name: Some(package_batch_name.to_owned()),
@@ -427,6 +480,15 @@ impl ProductionPackageService {
                     quality_profile: self.h3_config.quality_profile.clone(),
                     quality_recipes: self.h3_config.quality_recipes.clone(),
                 },
+                Some(ProductionPackageProvenance::new(
+                    package_root,
+                    manifest_sha256,
+                    package_id,
+                    package_name,
+                    chunk_index,
+                    chunk_count,
+                    package_items.iter().map(|item| item.id.clone()).collect(),
+                )),
             )
             .await
             .map_err(map_h3_error)?;

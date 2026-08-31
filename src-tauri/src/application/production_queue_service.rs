@@ -14,7 +14,8 @@ use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
 use crate::domain::{
     AssetId, InputDefinition, ProductionBatch, ProductionBatchDetail, ProductionBatchId,
     ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
-    Recipe, SeedValue, TaskId, TaskStatus,
+    ProductionPackageBatchBinding, ProductionPackageProvenance, Recipe, SeedValue, TaskId,
+    TaskStatus,
 };
 use serde_json::{json, Map, Value};
 use std::{
@@ -165,6 +166,14 @@ impl ProductionQueueService {
         &self,
         request: CreateProductionBatchRequest,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        self.create_with_provenance(request, None).await
+    }
+
+    pub async fn create_with_provenance(
+        &self,
+        request: CreateProductionBatchRequest,
+        provenance: Option<ProductionPackageProvenance>,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
         crate::domain::validate_project_id(&request.project_id)
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         let name = request.name.trim();
@@ -222,8 +231,44 @@ impl ProductionQueueService {
                 updated_at: now,
             });
         }
-        self.repository.insert(&batch, &items).await?;
+        if let Some(provenance) = provenance.as_ref() {
+            let expected_package_key = crate::domain::production_package_source_key(
+                &provenance.source_package_root,
+                &provenance.source_package_manifest_sha256,
+            );
+            if provenance.source_package_key != expected_package_key {
+                return Err(ProductionQueueError::InvalidInput(
+                    "production package provenance key does not match root and manifest".to_owned(),
+                ));
+            }
+            if provenance.package_item_ids.len() != items.len() {
+                return Err(ProductionQueueError::InvalidInput(
+                    "production package provenance must cover every batch item".to_owned(),
+                ));
+            }
+            if provenance.source_package_chunk_count == 0
+                || provenance.source_package_chunk_index >= provenance.source_package_chunk_count
+            {
+                return Err(ProductionQueueError::InvalidInput(
+                    "production package chunk index/count is invalid".to_owned(),
+                ));
+            }
+            self.repository
+                .insert_with_provenance(&batch, &items, provenance)
+                .await?;
+        } else {
+            self.repository.insert(&batch, &items).await?;
+        }
         Ok(ProductionBatchDetail { batch, items })
+    }
+
+    pub async fn list_package_bindings(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProductionPackageBatchBinding>, ProductionQueueError> {
+        crate::domain::validate_project_id(project_id)
+            .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+        Ok(self.repository.list_package_bindings(project_id).await?)
     }
 
     async fn load_recipe(

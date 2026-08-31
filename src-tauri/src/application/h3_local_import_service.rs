@@ -9,7 +9,7 @@ use crate::application::source_asset_import_service::{
     SourceAssetImportService, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES,
     MAX_SOURCE_VIDEO_BYTES,
 };
-use crate::domain::{Asset, SeedValue};
+use crate::domain::{Asset, ProductionPackageProvenance, SeedValue};
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -828,6 +828,15 @@ impl H3LocalImportService {
         session_id: &str,
         request: H3LocalImportCommitRequest,
     ) -> Result<H3LocalImportResult, H3LocalImportError> {
+        self.commit_with_provenance(session_id, request, None).await
+    }
+
+    pub async fn commit_with_provenance(
+        &self,
+        session_id: &str,
+        request: H3LocalImportCommitRequest,
+        provenance: Option<ProductionPackageProvenance>,
+    ) -> Result<H3LocalImportResult, H3LocalImportError> {
         self.cleanup_expired_sessions(Some(session_id)).await;
         validate_commit_request(&request)?;
         let session = {
@@ -848,8 +857,13 @@ impl H3LocalImportService {
         if session.inspection.mode == H3LocalImportMode::ProjectFolder {
             apply_project_drafts(&mut inspection, &session.project_drafts)?;
             return self
-                .commit_project_folder(session, inspection, request)
+                .commit_project_folder(session, inspection, request, provenance)
                 .await;
+        }
+        if provenance.is_some() {
+            return Err(H3LocalImportError::InvalidInput(
+                "production package provenance requires PROJECT_FOLDER import mode".to_owned(),
+            ));
         }
         if inspection.error_count > 0 || inspection.ready_count == 0 {
             return Err(H3LocalImportError::Inspection(format!(
@@ -1160,6 +1174,7 @@ impl H3LocalImportService {
         session: LocalImportSession,
         inspection: H3LocalImportInspection,
         request: H3LocalImportCommitRequest,
+        provenance: Option<ProductionPackageProvenance>,
     ) -> Result<H3LocalImportResult, H3LocalImportError> {
         let project = inspection.project_folder.as_ref().ok_or_else(|| {
             H3LocalImportError::Inspection("PROJECT_FOLDER 扫描结果缺少 Segment 数据".to_owned())
@@ -1405,12 +1420,15 @@ impl H3LocalImportService {
             });
         let detail = self
             .production_queue_service
-            .create(CreateProductionBatchRequest {
-                project_id: session.project_id.clone(),
-                name: batch_name.clone(),
-                continue_on_failure: true,
-                items,
-            })
+            .create_with_provenance(
+                CreateProductionBatchRequest {
+                    project_id: session.project_id.clone(),
+                    name: batch_name.clone(),
+                    continue_on_failure: true,
+                    items,
+                },
+                provenance,
+            )
             .await
             .map_err(|error| {
                 H3LocalImportError::Queue(format!(

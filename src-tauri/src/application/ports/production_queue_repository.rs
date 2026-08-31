@@ -1,6 +1,7 @@
 use crate::domain::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,
     ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
+    ProductionPackageBatchBinding, ProductionPackageProvenance,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -20,6 +21,28 @@ pub trait ProductionQueueRepository: Send + Sync {
         batch: &ProductionBatch,
         items: &[ProductionBatchItem],
     ) -> Result<(), RepositoryError>;
+
+    /// Inserts a package-backed batch and its durable source binding as one
+    /// unit. Lightweight repositories can retain the legacy insert behavior;
+    /// SQLite overrides this with a real transaction.
+    async fn insert_with_provenance(
+        &self,
+        batch: &ProductionBatch,
+        items: &[ProductionBatchItem],
+        provenance: &ProductionPackageProvenance,
+    ) -> Result<(), RepositoryError> {
+        let _ = provenance;
+        self.insert(batch, items).await
+    }
+
+    /// Lists package bindings belonging to one project. Implementations must
+    /// keep the project predicate in the repository query.
+    async fn list_package_bindings(
+        &self,
+        _project_id: &str,
+    ) -> Result<Vec<ProductionPackageBatchBinding>, RepositoryError> {
+        Ok(Vec::new())
+    }
 
     async fn list(&self, project_id: &str) -> Result<Vec<ProductionBatch>, RepositoryError>;
 
