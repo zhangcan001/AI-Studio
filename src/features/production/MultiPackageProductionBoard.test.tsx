@@ -41,8 +41,14 @@ describe("MultiPackageProductionBoard", () => {
   it("renders five package rows and summary metrics", () => {
     render(<MultiPackageProductionBoard packages={fixtures} />);
     expect(screen.getByRole("table", { name: "批量生产包列表" })).toBeTruthy();
-    expect(within(screen.getByLabelText("批量生产摘要")).getByText("5")).toBeTruthy();
+    const summary = screen.getByLabelText("批量生产摘要");
+    expect(within(summary).getByText("5")).toBeTruthy();
     expect(screen.getByText("65")).toBeTruthy();
+    for (const [label, value] of [["READY · 可创建", "1"], ["WARNING · 警告", "1"], ["BLOCKED · 阻塞", "1"]]) {
+      const card = screen.getByText(label).parentElement;
+      expect(card).toBeTruthy();
+      expect(within(card as HTMLElement).getByText(value)).toBeTruthy();
+    }
     for (const item of fixtures) expect(screen.getByText(item.relativePath)).toBeTruthy();
     expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
     expect(screen.getAllByText("已完成").length).toBeGreaterThan(0);

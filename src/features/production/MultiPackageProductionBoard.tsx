@@ -248,6 +248,9 @@ export function MultiPackageProductionBoard({
           <div className="multi-package-production-board-summary" aria-label="批量生产摘要">
             <SummaryCard label="生产包数" value={summary.packageCount} />
             <SummaryCard label="镜头总数" value={summary.itemCount} />
+            <SummaryCard label="READY · 可创建" value={summary.readyCount} tone="success" />
+            <SummaryCard label="WARNING · 警告" value={summary.warningCount} tone="accent" />
+            <SummaryCard label="BLOCKED · 阻塞" value={summary.blockedCount} tone="danger" />
             <SummaryCard label="已创建" value={summary.createdCount} tone="success" />
             <SummaryCard label="运行中" value={summary.runningCount} tone="accent" />
             <SummaryCard label="已完成" value={summary.completedCount} tone="success" />
@@ -383,8 +386,10 @@ function summarizePackages(packages: MultiPackageBoardPackage[], statusOf: (item
     if (["CREATED", "RUNNING", "COMPLETED", "COMPLETED_WITH_FAILURE"].includes(status)) summary.createdCount += 1;
     if (status === "RUNNING") summary.runningCount += 1;
     if (["COMPLETED", "COMPLETED_WITH_FAILURE"].includes(status)) summary.completedCount += 1;
+    if (status === "READY") summary.readyCount += 1;
+    if (status === "WARNING") summary.warningCount += 1;
     if (status === "BLOCKED") summary.blockedCount += 1;
     if (["CREATE_FAILED", "COMPLETED_WITH_FAILURE"].includes(status)) summary.failedCount += 1;
     return summary;
-  }, { packageCount: packages.length, itemCount: 0, createdCount: 0, runningCount: 0, completedCount: 0, blockedCount: 0, failedCount: 0 });
+  }, { packageCount: packages.length, itemCount: 0, readyCount: 0, warningCount: 0, blockedCount: 0, createdCount: 0, runningCount: 0, completedCount: 0, failedCount: 0 });
 }
