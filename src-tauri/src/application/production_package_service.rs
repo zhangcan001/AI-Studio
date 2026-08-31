@@ -101,8 +101,12 @@ impl ProductionPackageCreateStatus {
 pub struct ProductionPackageCreateBatchesResult {
     pub package_name: String,
     pub status: ProductionPackageCreateStatus,
+    /// Number of selected items still requiring creation after durable
+    /// package bindings are excluded for this call.
     pub requested_count: usize,
+    /// Number of package items newly bound to batches during this call.
     pub created_count: usize,
+    /// Number of effective requests left unbound after a partial failure.
     pub remaining_count: usize,
     pub remaining_item_ids: Vec<String>,
     pub batch_count: usize,
@@ -356,18 +360,10 @@ impl ProductionPackageService {
         }
 
         let chunk_size = MAX_PRODUCTION_PACKAGE_ITEMS.min(100);
-        let chunk_count = current_selected.len().div_ceil(chunk_size);
+        let chunk_count = remaining_selected.len().div_ceil(chunk_size);
         let mut batches = Vec::with_capacity(chunk_count);
-        let mut item_mappings = Vec::with_capacity(current_selected.len());
-        for (chunk_index, chunk) in current_selected.chunks(chunk_size).enumerate() {
-            let chunk = chunk
-                .iter()
-                .filter(|item| !already_created.contains(&item.id))
-                .cloned()
-                .collect::<Vec<_>>();
-            if chunk.is_empty() {
-                continue;
-            }
+        let mut item_mappings = Vec::with_capacity(remaining_selected.len());
+        for (chunk_index, chunk) in remaining_selected.chunks(chunk_size).enumerate() {
             let result = match stage_chunk(&chunk) {
                 Ok(staging_root) => {
                     let batch_name = format!(
@@ -401,15 +397,14 @@ impl ProductionPackageService {
                     batches.push(batch);
                 }
                 Err(_error) if !batches.is_empty() => {
-                    let remaining_item_ids = current_selected[chunk_index * chunk_size..]
+                    let remaining_item_ids = remaining_selected[chunk_index * chunk_size..]
                         .iter()
-                        .filter(|item| !already_created.contains(&item.id))
                         .map(|item| item.id.clone())
                         .collect::<Vec<_>>();
                     return Ok(create_batches_result(
                         current.package_name,
                         ProductionPackageCreateStatus::Partial,
-                        current_selected.len(),
+                        remaining_selected.len(),
                         batches,
                         item_mappings,
                         remaining_item_ids,
@@ -423,7 +418,7 @@ impl ProductionPackageService {
         Ok(create_batches_result(
             current.package_name,
             ProductionPackageCreateStatus::Complete,
-            current_selected.len(),
+            remaining_selected.len(),
             batches,
             item_mappings,
             Vec::new(),

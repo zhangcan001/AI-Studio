@@ -3,6 +3,7 @@ import "./MultiPackageProductionBoard.css";
 
 export type MultiPackageBoardPackageStatus =
   | "READY"
+  | "PARTIAL"
   | "WARNING"
   | "BLOCKED"
   | "NOT_CREATED"
@@ -24,6 +25,12 @@ export interface MultiPackageBoardPackage {
   readyCount?: number;
   warningCount?: number;
   blockedCount?: number;
+  boundItemCount?: number;
+  remainingCount?: number;
+  remainingReadyCount?: number;
+  remainingWarningCount?: number;
+  remainingBlockedCount?: number;
+  canCreate?: boolean;
   batchIds?: string[];
   pending?: number;
   running?: number;
@@ -76,6 +83,7 @@ const FILTERS: Array<{ value: BoardFilter; label: string }> = [
 
 const STATUS_LABELS: Record<MultiPackageBoardPackageStatus, string> = {
   READY: "可创建",
+  PARTIAL: "部分已创建",
   WARNING: "有警告",
   BLOCKED: "已阻塞",
   NOT_CREATED: "未创建",
@@ -108,13 +116,13 @@ export function MultiPackageProductionBoard({
 }: MultiPackageProductionBoardProps) {
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [localSelection, setLocalSelection] = useState<Set<string>>(() => new Set(
-    selectedPackageKeys ?? packages.filter((item) => item.status === "READY").map((item) => item.packageKey),
+    selectedPackageKeys ?? packages.filter((item) => isSelectablePackage(item)).map((item) => item.packageKey),
   ));
   const [operationStatuses, setOperationStatuses] = useState<Record<string, { status: MultiPackageBoardPackageStatus; observedStatus: MultiPackageBoardPackageStatus }>>({});
   const [createError, setCreateError] = useState<string>();
   const [isCreatingLocally, setIsCreatingLocally] = useState(false);
   const lastExternalSelectionRef = useRef(selectedPackageKeys === undefined ? "__unset__" : selectedPackageKeys.join("\u0000"));
-  const lastPackageSignatureRef = useRef(packages.map((item) => `${item.packageKey}:${item.status}`).join("\u0000"));
+  const lastPackageSignatureRef = useRef(packages.map(packageStateSignature).join("\u0000"));
   const refreshInFlightRef = useRef(false);
 
   const externalSelectionSignature = selectedPackageKeys === undefined ? "__unset__" : selectedPackageKeys.join("\u0000");
@@ -124,7 +132,7 @@ export function MultiPackageProductionBoard({
     setLocalSelection(new Set(selectedPackageKeys));
   }, [externalSelectionSignature, selectedPackageKeys]);
 
-  const packageSignature = packages.map((item) => `${item.packageKey}:${item.status}`).join("\u0000");
+  const packageSignature = packages.map(packageStateSignature).join("\u0000");
   useEffect(() => {
     if (selectedPackageKeys !== undefined || packageSignature === lastPackageSignatureRef.current) return;
     lastPackageSignatureRef.current = packageSignature;
@@ -132,7 +140,7 @@ export function MultiPackageProductionBoard({
       const packageKeys = new Set(packages.map((item) => item.packageKey));
       const next = new Set([...previous].filter((key) => packageKeys.has(key)));
       packages.forEach((item) => {
-        if (item.status === "READY" && !previous.has(item.packageKey)) next.add(item.packageKey);
+        if (isSelectablePackage(item) && !previous.has(item.packageKey)) next.add(item.packageKey);
       });
       return next;
     });
@@ -160,14 +168,14 @@ export function MultiPackageProductionBoard({
     [filter, operationStatuses, packages],
   );
   const selectablePackages = useMemo(
-    () => packages.filter((item) => isSelectableStatus(effectiveStatus(item))),
+    () => packages.filter((item) => isSelectablePackage(item, effectiveStatus(item))),
     [operationStatuses, packages],
   );
   const selectedPackages = useMemo(
-    () => packages.filter((item) => localSelection.has(item.packageKey) && isSelectableStatus(effectiveStatus(item))),
+    () => packages.filter((item) => localSelection.has(item.packageKey) && isSelectablePackage(item, effectiveStatus(item))),
     [localSelection, operationStatuses, packages],
   );
-  const selectedItemCount = selectedPackages.reduce((sum, item) => sum + Math.max(0, item.itemCount), 0);
+  const selectedItemCount = selectedPackages.reduce((sum, item) => sum + packageCreateCount(item), 0);
   const isOverPackageLimit = packages.length > MAX_PACKAGES || selectedPackages.length > MAX_PACKAGES;
   const isOverItemLimit = selectedItemCount > MAX_SELECTED_ITEMS;
   const isBusy = isCreating || isCreatingLocally || isDiscovering;
@@ -184,9 +192,20 @@ export function MultiPackageProductionBoard({
     setCreateError(undefined);
   }
 
+  function handleReinspect(packageKey: string) {
+    setOperationStatuses((previous) => {
+      if (!previous[packageKey]) return previous;
+      const next = { ...previous };
+      delete next[packageKey];
+      return next;
+    });
+    setCreateError(undefined);
+    onReinspect?.(packageKey);
+  }
+
   async function createSelected() {
     if (!canCreate || isCreatingLocally) return;
-    const keys = packages.filter((item) => localSelection.has(item.packageKey) && isSelectableStatus(effectiveStatus(item))).map((item) => item.packageKey);
+    const keys = packages.filter((item) => localSelection.has(item.packageKey) && isSelectablePackage(item, effectiveStatus(item))).map((item) => item.packageKey);
     if (!keys.length) return;
     setIsCreatingLocally(true);
     setCreateError(undefined);
@@ -198,7 +217,7 @@ export function MultiPackageProductionBoard({
       await onCreateSelected?.(keys);
       setOperationStatuses((previous) => ({ ...previous, ...Object.fromEntries(keys.map((key) => {
         const item = packages.find((candidate) => candidate.packageKey === key);
-        return [key, { status: "CREATED", observedStatus: item?.status ?? "READY" }];
+        return [key, { status: item?.status === "PARTIAL" ? "PARTIAL" : "CREATED", observedStatus: item?.status ?? "READY" }];
       })) }));
       setLocalSelection((previous) => new Set([...previous].filter((key) => !keys.includes(key))));
     } catch (error: unknown) {
@@ -279,13 +298,13 @@ export function MultiPackageProductionBoard({
                   key={item.packageKey}
                   item={item}
                   status={effectiveStatus(item)}
-                  checked={localSelection.has(item.packageKey)}
-                  disabled={!isSelectableStatus(effectiveStatus(item)) || isBusy}
+                  checked={localSelection.has(item.packageKey) && isSelectablePackage(item, effectiveStatus(item))}
+                  disabled={!isSelectablePackage(item, effectiveStatus(item)) || isBusy}
                   onCheckedChange={setPackageSelected}
                   onOpenPackage={onOpenPackage}
                   onHandleWarning={onHandleWarning}
                   onViewIssues={onViewIssues}
-                  onReinspect={onReinspect}
+                  onReinspect={handleReinspect}
                   onOpenBatch={onOpenBatch}
                 />)}
               </tbody>
@@ -332,7 +351,13 @@ function PackageRow({
   const succeeded = Math.max(0, item.succeeded ?? 0);
   const progress = progressTotal ? Math.min(100, Math.round((succeeded / progressTotal) * 100)) : 0;
   const issue = item.firstError || item.issueSummary;
-  const canOpenBatch = ["CREATED", "RUNNING", "COMPLETED", "COMPLETED_WITH_FAILURE"].includes(status);
+  const canOpenBatch = Boolean(item.batchIds?.length) && ["PARTIAL", "CREATED", "RUNNING", "COMPLETED", "COMPLETED_WITH_FAILURE"].includes(status);
+  const remainingCount = Math.max(0, item.remainingCount ?? 0);
+  const remainingReadyCount = Math.max(0, item.remainingReadyCount ?? 0);
+  const remainingWarningCount = Math.max(0, item.remainingWarningCount ?? 0);
+  const remainingBlockedCount = Math.max(0, item.remainingBlockedCount ?? 0);
+  const hasRemainingIssues = status === "PARTIAL" && (remainingWarningCount > 0 || remainingBlockedCount > 0);
+  const showSinglePackageHandling = status === "WARNING" || hasRemainingIssues;
 
   return (
     <tr data-package-key={item.packageKey}>
@@ -340,12 +365,17 @@ function PackageRow({
       <td className="multi-package-production-board-package-cell"><strong>{item.packageName}</strong><code>{item.relativePath || item.packageRoot}</code></td>
       <td>{item.itemCount}</td>
       <td><span className={`multi-package-production-board-status status-${status.toLowerCase()}`}>{STATUS_LABELS[status]}</span></td>
-      <td><div className="multi-package-production-board-progress" aria-label={`${progress}%，${succeeded}/${progressTotal}`}><span style={{ width: `${progress}%` }} /><small>{item.batchIds?.length ? `批次 ${item.batchIds.join("、")}` : "尚未创建"} · {item.pending ?? Math.max(0, progressTotal - succeeded)} 待处理 / {item.running ?? 0} 运行中 / {succeeded} 已完成{item.failed ? ` / ${item.failed} 失败` : ""}</small></div></td>
-      <td>{issue ? <span className="multi-package-production-board-issue">{issue}</span> : <span className="multi-package-production-board-muted">—</span>}{status === "WARNING" && <small className="multi-package-production-board-muted">请进入单生产包确认警告镜头。</small>}</td>
+      <td>
+        {(item.boundItemCount !== undefined || item.remainingCount !== undefined) && <div className="multi-package-production-board-muted"><span>已创建 {Math.max(0, item.boundItemCount ?? 0)}</span><span> · 剩余 {remainingCount}</span></div>}
+        <div className="multi-package-production-board-progress" aria-label={`${progress}%，${succeeded}/${progressTotal}`}><span style={{ width: `${progress}%` }} /><small>{item.batchIds?.length ? `批次 ${item.batchIds.join("、")}` : "尚未创建"} · {item.pending ?? Math.max(0, progressTotal - succeeded)} 待处理 / {item.running ?? 0} 运行中 / {succeeded} 已完成{item.failed ? ` / ${item.failed} 失败` : ""}</small></div>
+        {status === "PARTIAL" && <small className="multi-package-production-board-muted">剩余 {remainingCount} · {remainingReadyCount} 可创建{remainingWarningCount ? ` · ${remainingWarningCount} 需要人工确认` : ""}{remainingBlockedCount ? ` · ${remainingBlockedCount} 个阻塞项目` : ""}</small>}
+      </td>
+      <td>{issue ? <span className="multi-package-production-board-issue">{issue}</span> : <span className="multi-package-production-board-muted">—</span>}{status === "WARNING" && <small className="multi-package-production-board-muted">请进入单生产包确认警告镜头。</small>}{hasRemainingIssues && <small className="multi-package-production-board-muted">剩余项目需先完成人工确认。</small>}</td>
       <td><div className="multi-package-production-board-actions">
         {canOpenBatch ? <button type="button" onClick={() => onOpenBatch?.(item.packageKey, item.batchIds ?? [])} disabled={!onOpenBatch}>打开生产批次</button> : <button type="button" className="multi-package-production-board-quiet" onClick={() => onOpenPackage?.(item.packageKey)} disabled={!onOpenPackage}>打开生产包</button>}
-        {status === "WARNING" && <button type="button" className="multi-package-production-board-quiet" onClick={() => onHandleWarning?.(item.packageKey)} disabled={!onHandleWarning}>在单生产包中处理</button>}
+        {showSinglePackageHandling && <button type="button" className="multi-package-production-board-quiet" onClick={() => onHandleWarning?.(item.packageKey)} disabled={!onHandleWarning}>在单生产包中处理</button>}
         {status === "BLOCKED" && <><button type="button" className="multi-package-production-board-quiet" onClick={() => onViewIssues?.(item.packageKey)} disabled={!onViewIssues}>查看问题</button><button type="button" className="multi-package-production-board-quiet" onClick={() => onReinspect?.(item.packageKey)} disabled={!onReinspect}>重新检查</button></>}
+        {status === "CREATE_FAILED" && <button type="button" className="multi-package-production-board-quiet" onClick={() => onReinspect?.(item.packageKey)} disabled={!onReinspect}>重新检查</button>}
       </div></td>
     </tr>
   );
@@ -362,13 +392,37 @@ function SummaryCard({ label, value, tone }: { label: string; value: number; ton
   return <div className={`multi-package-production-board-summary-card${tone ? ` tone-${tone}` : ""}`}><strong>{value}</strong><span>{label}</span></div>;
 }
 
-function isSelectableStatus(status: MultiPackageBoardPackageStatus): boolean {
-  return ["READY", "NOT_CREATED", "UPDATED", "CREATE_FAILED"].includes(status);
+function isSelectablePackage(item: MultiPackageBoardPackage, status = item.status): boolean {
+  if (item.canCreate !== true) return false;
+  if (status === "PARTIAL") {
+    const remainingCount = item.remainingCount ?? 0;
+    return remainingCount > 0
+      && (item.remainingReadyCount ?? 0) === remainingCount
+      && (item.remainingWarningCount ?? 0) === 0
+      && (item.remainingBlockedCount ?? 0) === 0;
+  }
+  return ["READY", "NOT_CREATED", "UPDATED"].includes(status);
+}
+
+function packageCreateCount(item: MultiPackageBoardPackage): number {
+  return Math.max(0, item.status === "PARTIAL" && item.remainingCount !== undefined ? item.remainingCount : item.itemCount);
+}
+
+function packageStateSignature(item: MultiPackageBoardPackage): string {
+  return [
+    item.packageKey,
+    item.status,
+    item.canCreate,
+    item.remainingCount,
+    item.remainingReadyCount,
+    item.remainingWarningCount,
+    item.remainingBlockedCount,
+  ].join(":");
 }
 
 function matchesFilter(status: MultiPackageBoardPackageStatus, filter: BoardFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "not-created") return ["READY", "WARNING", "BLOCKED", "NOT_CREATED", "UPDATED", "CREATE_FAILED"].includes(status);
+  if (filter === "not-created") return ["READY", "PARTIAL", "WARNING", "BLOCKED", "NOT_CREATED", "UPDATED", "CREATE_FAILED"].includes(status);
   if (filter === "issues") return ["WARNING", "BLOCKED", "CREATE_FAILED", "COMPLETED_WITH_FAILURE"].includes(status);
   if (filter === "created") return ["CREATED", "UPDATED"].includes(status);
   if (filter === "running") return status === "RUNNING" || status === "CREATING";

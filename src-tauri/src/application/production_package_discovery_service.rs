@@ -3,6 +3,7 @@
 //! Discovery deliberately does not inspect manifest JSON or touch application
 //! state. It only identifies package roots and hashes the manifest bytes.
 
+use crate::domain::{normalize_package_root, production_package_source_key};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -29,6 +30,7 @@ pub struct ProductionPackageDiscoveryResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductionPackageDiscoveryPackage {
+    pub package_key: String,
     pub package_root: String,
     pub relative_path: String,
     pub manifest_path: String,
@@ -217,11 +219,16 @@ fn discover_manifest(
         .strip_prefix(root)
         .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         .unwrap_or_default();
+    let package_root = path_string(directory);
+    let manifest_sha256 = format!("{:x}", Sha256::digest(bytes));
+    let normalized_root = normalize_package_root(directory);
+    let package_key = production_package_source_key(&normalized_root, &manifest_sha256);
     Ok(Some(ProductionPackageDiscoveryPackage {
-        package_root: path_string(directory),
+        package_key,
+        package_root,
         relative_path,
         manifest_path: path_string(&manifest),
-        manifest_sha256: format!("{:x}", Sha256::digest(bytes)),
+        manifest_sha256,
     }))
 }
 

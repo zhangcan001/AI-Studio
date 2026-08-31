@@ -148,6 +148,7 @@ export interface ProductionPackageCreateBatchesRequest {
 }
 
 export interface ProductionPackageDiscoveryPackage {
+  packageKey: string;
   packageRoot: string;
   relativePath: string;
   manifestPath: string;

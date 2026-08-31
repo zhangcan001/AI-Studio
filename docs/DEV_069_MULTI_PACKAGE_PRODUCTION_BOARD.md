@@ -1,6 +1,8 @@
 # DEV-069 — Multi-Package Production Board V1
 
-状态：DEV-069A WARNING safety fix 已实现；最终回归/构建/真人 UAT 待完成
+状态：DEV-069A WARNING safety fix、DEV-069B durable packageKey 与 partial resume 已实现；最终回归/构建/真人 UAT 待完成
+
+DEV-069A WARNING safety = PASS
 
 验收标记：`PENDING HUMAN UAT`
 
@@ -60,6 +62,8 @@ Migration 026 新增 `production_package_batch_bindings`，只承载 board 创�
 
 因此 package 被移动/重命名，或 manifest bytes 发生变化，都会产生新的 package key。旧 key 与其既有 binding 仍保留。
 
+Discovery 返回非 Optional 的 `packageKey`，其值直接来自 backend 正式 domain 函数；Board、Host create、reinspect 和 binding join 全链路只使用该 durable identity。`packageRoot` 仅用于展示、打开和重新检查，`manifestSha256` 仅用于 revalidation/change hint；前端不再复制 package key 算法或以路径字符串拼接 fake identity。
+
 ### 最小持久化事实
 
 Migration 026 的 `production_package_batch_bindings` 实际持久化以下字段，并带 `project_id` 隔离：
@@ -94,15 +98,24 @@ board 是 discovery/inspection/provenance/aggregation 的 UI 与协调层，没�
 2. 按自然排序的 package 顺序串行创建；package 内沿用现有 item 顺序与下游 chunk 上限，chunk 也串行提交。
 3. 首个失败即停止后续未开始的 package/chunk，并返回已成功创建的 lineage 与第一个失败的稳定 error code。
 4. 不做跨 package rollback；已经写入的 binding/batch 保留并在 board 中显示。单次数据库 transaction 只保护其自身的 binding 与 batch/item 写入。
-5. Resume 只处理未绑定 item；Repository 发现同一 `project_id + package_key` 的 `package_item_ids_json` 已包含该 item ID 时必须跳过，不可重复创建；若选择项全部已绑定，则返回明确的 all-items-already-bound 错误。
+5. Resume 只处理未绑定 item；Repository 发现同一 `project_id + package_key` 的 `package_item_ids_json` 已包含该 item ID 时必须跳过，不可重复创建。backend 先计算 `remaining_selected`，再按本次剩余集合重新计算 `chunkCount` 并从 `chunkIndex=0` 写入 provenance；若选择项全部已绑定，则返回明确的 all-items-already-bound 错误。
 6. Host 创建前重新检查每个 package；存在任何 `WARNING` item、`BLOCKED` item 或对应 package-level warning/blocker 时，整个 package 被拒绝，不得静默只创建其中的 READY items。用户必须进入单生产包工作区处理 warning。
 7. 创建结束后不自动打开 Queue、不自动 Start；用户可手动打开既有 Queue，并在目标 batch 上点击唯一的 Start。
+
+### Partial create / restart / resume closure
+
+- Board 从 fresh inspection 的 `items` 与当前 `packageKey` 的 bindings 求交集，计算 `boundItemCount`、`remainingCount`、`remainingReadyCount`、`remainingWarningCount` 和 `remainingBlockedCount`；bindings 中不属于当前 inspection 的旧 item ID 不计入 bound。
+- `0 < boundItemCount < itemCount` 且没有 active batch 时，状态为 `PARTIAL`（部分已创建），显示已创建数量、剩余数量和已有 Batch IDs。剩余项全部为 READY 时 `canCreate=true`；任何剩余 WARNING/BLOCKED 都禁止 bulk create，必须进入单生产包处理。
+- `CREATED` 只表示当前 inspection 的全部 item 已有 binding 但关联 batch 尚未全部 terminal；全部 terminal 且无失败才是 `COMPLETED`，有失败则是 `COMPLETED_WITH_FAILURE`。`CREATE_FAILED` 不可直接重试，必须先重新检查。
+- App restart 后不依赖 React local create state：重新 Discovery、fresh Inspect、list Bindings 即可重建 PARTIAL/CREATED/COMPLETED truth。重新检查会以当前 `packageKey` 更新 inspection、清除 create failure message 并刷新 Board，不创建 batch。
+- Manifest bytes 变化产生 V2 `packageKey`；V1 bindings 不会被 join 到 V2，V2 可按新的 inspection 重新生产。
+- Backend result 的 `requestedCount` 是本次排除已绑定 item 后的有效请求数，`createdCount` 是本次新建数，`remainingCount` 是本次失败后仍未绑定数；部分 resume 的新 provenance 使用本次 remaining 集合的 chunk index/count，旧 bindings 不修改。
 
 ## 5. UI requirements and state contract
 
 ### Selection、filters、caps
 
-- board package 行显示实现中的 `READY`、`WARNING`、`BLOCKED`、`NOT_CREATED`、`UPDATED`、`CREATING`、`CREATE_FAILED`、`CREATED`、`RUNNING`、`COMPLETED`、`COMPLETED_WITH_FAILURE`；底层 item 的 succeeded/failed/pending 作为现有 batch 聚合计数展示。
+- board package 行显示实现中的 `READY`、`PARTIAL`、`WARNING`、`BLOCKED`、`NOT_CREATED`、`UPDATED`、`CREATING`、`CREATE_FAILED`、`CREATED`、`RUNNING`、`COMPLETED`、`COMPLETED_WITH_FAILURE`；底层 item 的 succeeded/failed/pending 作为现有 batch 聚合计数展示。
 - `READY` 默认 checked 且可批量创建；`WARNING` checkbox unchecked 且 disabled，只显示“在单生产包中处理”入口和“请进入单生产包确认警告镜头。”辅助文案；`BLOCKED` disabled 且禁止创建、必须展示 blocker；已 `CREATED` 默认不重复勾选。Multi-Package Board 不提供“确认全部 WARNING”或逐 item WARNING confirmation。
 - 支持当前实现的“全部/未创建/问题/已创建/运行中/已完成”筛选；筛选不能丢失选择。
 - hard cap 为 `100 packages / 10000 items`。cap 违反时显示总数和稳定错误，禁止用分页掩盖超限。
@@ -119,6 +132,7 @@ board 是 discovery/inspection/provenance/aggregation 的 UI 与协调层，没�
 | `BLOCKED` | 存在不可生产 package/item 或 root error；blocked 项不可选，必要时只允许修复后重新发现。 |
 | `CREATING` | 串行创建进行中；锁定重复提交，显示当前 package/chunk、已创建数、失败数。 |
 | `CREATED` | 已有 binding/batch；显示 batch IDs 与现有聚合进度，以及“打开生产队列”手动动作；chunk/package item 详情留在 provenance read model。 |
+| `PARTIAL` | 已创建部分 item；显示已创建数、剩余数和已有 Batch IDs。剩余全部 READY 且 `canCreate=true` 时可 resume；剩余含 WARNING/BLOCKED 时禁用 bulk create 并进入单生产包处理。 |
 | `RUNNING` / `COMPLETED` / `COMPLETED_WITH_FAILURE` | 从现有 ProductionBatch/ProductionQueue 聚合；显示真实计数、失败原因和“打开队列/手动 retry”入口（retry 仍由既有 Queue 执行）。 |
 | `ERROR` | 请求失败或 stale inspection；保留可用历史摘要，显示稳定 code，并提供“重新发现/重新检查”，不自动重试或重复创建。 |
 
@@ -159,10 +173,10 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 | Area | Targeted command | Minimum assertions |
 | --- | --- | --- |
 | Rust discovery | `cargo test --manifest-path src-tauri/Cargo.toml --test dev069_production_package_discovery -- --test-threads=1` | root depth 0、manifest stop、canonical 后越界 symlink 跳过、100 package/5000 directory caps、自然排序 `EP2 < EP10`、真实 manifest SHA-256、稳定 `DISCOVERY_*` errors；depth 4 package 发现与继续向下的 `DISCOVERY_MAX_DEPTH_EXCEEDED` 需作为最终验收断言。 |
-| Rust package/provenance | `cargo test --manifest-path src-tauri/Cargo.toml --test dev059_production_package -- --test-threads=1` and `cargo test --manifest-path src-tauri/Cargo.toml provenance_key_changes_with_manifest_or_normalized_root -- --test-threads=1` | 既有 package inspection/mapping/chunk contract 不回归；key 随 manifest/root 变化，Migration 026 实际字段与 `PRODUCTION_PACKAGE` source kind 可读。 |
-| Rust partial creation | `cargo test --manifest-path src-tauri/Cargo.toml --test dev061b_production_package_hardening -- --test-threads=1` | 500 item chunk、后续 chunk 失败的 partial truth、已创建结果不 rollback、session 不隐式重试；创建仍不 Start 或提交 Comfy。 |
-| Frontend board | `pnpm test -- MultiPackageProductionBoard` | 五包 summary、READY 默认选择且 enabled、WARNING unchecked 且 disabled、BLOCKED/CREATED disabled、WARNING 单包入口、问题/运行中筛选、100/10000 caps、按顺序只调用一次 create、失败不隐式 retry、进度与 blocked actions。 |
-| Frontend parent/queue compatibility | `pnpm test -- ShotWorkspace.production` and `pnpm test -- ShotWorkspace` | multi-package tab 接入、每包创建前 fresh inspection、WARNING/BLOCKED package-level gate、只传 READY item IDs、既有 Queue 手动 Start 边界、无 Start All/board executor；DEV-068 Queue/Monitor 回归保持可测。 |
+| Rust package/provenance | `cargo test --manifest-path src-tauri/Cargo.toml --test dev059_production_package -- --test-threads=1` and `cargo test --manifest-path src-tauri/Cargo.toml provenance_key_changes_with_manifest_or_normalized_root -- --test-threads=1` | 既有 package inspection/mapping/chunk contract 不回归；Discovery `packageKey` 与 `ProductionPackageProvenance.source_package_key` 一致，key 随 manifest/root 变化，Migration 026 实际字段与 `PRODUCTION_PACKAGE` source kind 可读。 |
+| Rust partial creation | `cargo test --manifest-path src-tauri/Cargo.toml --test dev061b_production_package_hardening -- --test-threads=1` | 500 item chunk、后续 chunk 失败的 partial truth、resume 只按 `remaining_selected` 分 chunk、chunk provenance 从 0/本次 count 重新开始、已创建结果不 rollback、session 不隐式重试；创建仍不 Start 或提交 Comfy。 |
+| Frontend board | `pnpm test -- MultiPackageProductionBoard` | 五包 summary、READY 默认选择且 enabled、PARTIAL 数量/可创建门禁、WARNING unchecked 且 disabled、BLOCKED/CREATED disabled、WARNING 单包入口、问题/运行中筛选、100/10000 caps、按顺序只调用一次 create、失败不隐式 retry、进度与 blocked actions。 |
+| Frontend parent/queue compatibility | `pnpm test -- ShotWorkspace.production` and `pnpm test -- ShotWorkspace` | multi-package tab 接入、`packageKey` binding join、restart PARTIAL/全绑定去重、partial resume 精确剩余 ID、V2 manifest 新 key、CREATE_FAILED fresh reinspection、WARNING/BLOCKED package-level gate、只传 READY item IDs、既有 Queue 手动 Start 边界、无 Start All/board executor；DEV-068 Queue/Monitor 回归保持可测。 |
 | Existing package/queue UI | `pnpm test -- ProductionPackageWorkspace ProductionQueueDrawer` | 单包工作区、Queue Drawer 和现有手动生产路径不回归。 |
 | Timer lifecycle | `pnpm test -- MultiPackageProductionBoard` and `pnpm test -- ShotWorkspace.production` | board 默认 5 秒、hidden 跳过、in-flight guard、卸载清理；父层只在 `multi-package` tab 且有 `CREATED`/`RUNNING` 时传入 polling enabled。 |
 | Migration compatibility | `cargo test --manifest-path src-tauri/Cargo.toml --test dev055_release_compatibility dev055_migration_matrix_reaches_026 -- --test-threads=1` | 025 → 026 可升级；旧 project/batch/queue 数据可读；026 新表可启动；binding FK/unique/cascade 规则正确；无旧表语义破坏。 |
@@ -189,9 +203,12 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 
 - [ ] 选择 root：root 自身 package、depth 0..4、manifest stop、自然排序 `EP2 < EP10` 正确。
 - [ ] 确认 package/item 摘要、真实 manifest SHA-256、READY 默认 checked/enabled、WARNING unchecked/disabled 且进入单生产包处理、BLOCKED disabled。
+- [ ] 重启/重新加载后仅靠 Discovery、fresh Inspect 和 Bindings 重建 PARTIAL；核对已创建数量、剩余数量、Batch IDs，剩余全 READY 时可继续 resume。
+- [ ] 对 PARTIAL + WARNING/BLOCKED 样本确认 checkbox disabled、40 可创建/10 需人工确认等剩余计数正确，且不会偷偷 bulk create。
+- [ ] 修改 manifest 后重新发现，确认得到 V2 packageKey，V1 binding 不会被计入 V2 的已创建数据。
 - [ ] 验证 filters、100 packages/10000 items cap、空态、进度态、错误态和 partial summary 文案。
 - [ ] 点击创建：观察 package/chunk 串行顺序、首次失败停止后续、已成功 batch 保留、无自动打开/Start/Start All。
-- [ ] Resume：确认已绑定 item 被跳过且不重复创建，失败项可进入既有 Queue 的人工处理。
+- [ ] Resume：确认已绑定 item 被跳过且不重复创建；新 chunk provenance 从本次 remaining 的 `chunkIndex=0` 开始，失败项可进入既有 Queue 的人工处理。
 - [ ] 在既有 Queue 手动点击一个 batch 的 Start；确认 board 只聚合 CREATED/RUNNING/COMPLETED/COMPLETED_WITH_FAILURE，不产生第二 executor 或直接 Comfy POST。
 - [ ] 删除/移动 source directory 或修改 manifest 后重新发现；确认出现新 key/新 inspection，旧 DB binding/batch/item truth 仍可读。
 - [ ] 切换 project/root、隐藏窗口、恢复窗口、离开页面；确认只有一个 timer、无重复请求、无旧响应污染。

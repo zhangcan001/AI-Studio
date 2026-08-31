@@ -1,6 +1,9 @@
+#[path = "../src/domain/production_package.rs"]
+pub mod domain;
 #[path = "../src/application/production_package_discovery_service.rs"]
 mod production_package_discovery_service;
 
+use domain::ProductionPackageProvenance;
 use production_package_discovery_service::{
     ProductionPackageDiscoveryError, ProductionPackageDiscoveryService, MAX_DIRECTORIES,
     MAX_PACKAGES,
@@ -76,6 +79,57 @@ fn discovers_a_manifest_at_the_root_itself() {
         result.packages[0].manifest_sha256,
         format!("{:x}", Sha256::digest(contents))
     );
+}
+
+#[test]
+fn package_key_matches_formal_provenance_and_serializes_as_package_key() {
+    let fixture = tempdir().expect("fixture root should exist");
+    write_manifest(&fixture.path().join("EP01"), b"package-v1");
+
+    let result = ProductionPackageDiscoveryService::new()
+        .discover(fixture.path())
+        .expect("package should be discovered");
+    let package = &result.packages[0];
+    let provenance = ProductionPackageProvenance::new(
+        Path::new(&package.package_root),
+        package.manifest_sha256.clone(),
+        None,
+        "EP01",
+        0,
+        1,
+        Vec::new(),
+    );
+
+    assert_eq!(package.package_key, provenance.source_package_key);
+    let serialized = serde_json::to_value(package).expect("package should serialize");
+    assert_eq!(serialized["packageKey"], package.package_key);
+    assert!(serialized.get("package_key").is_none());
+}
+
+#[test]
+fn changing_manifest_bytes_changes_sha_and_package_key() {
+    let fixture = tempdir().expect("fixture root should exist");
+    let package_root = fixture.path().join("EP01");
+    let manifest_v1 = b"package-v1";
+    let manifest_v2 = b"package-v2";
+    write_manifest(&package_root, manifest_v1);
+
+    let first = ProductionPackageDiscoveryService::new()
+        .discover(fixture.path())
+        .expect("v1 package should be discovered")
+        .packages
+        .remove(0);
+    write_manifest_bytes(&package_root, manifest_v2);
+    let second = ProductionPackageDiscoveryService::new()
+        .discover(fixture.path())
+        .expect("v2 package should be discovered")
+        .packages
+        .remove(0);
+
+    assert_ne!(manifest_v1, manifest_v2);
+    assert_eq!(first.package_root, second.package_root);
+    assert_ne!(first.manifest_sha256, second.manifest_sha256);
+    assert_ne!(first.package_key, second.package_key);
 }
 
 #[test]

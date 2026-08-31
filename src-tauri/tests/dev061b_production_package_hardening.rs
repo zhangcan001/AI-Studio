@@ -520,3 +520,199 @@ async fn later_chunk_failure_returns_partial_truth_consumes_session_and_reinspec
     assert_eq!(reinspected.items[0].id, "DEV061B-TXT-001");
     assert_eq!(reinspected.items.last().unwrap().id, "DEV061B-TXT-400");
 }
+
+#[tokio::test]
+async fn partial_resume_uses_only_remaining_items_and_restarts_chunk_provenance() {
+    let directory = tempdir().expect("partial resume workspace should exist");
+    let pool = initialize(&directory.path().join("dev061b-resume.db"))
+        .await
+        .expect("SQLite should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("project storage should exist");
+    seed_database(&pool, &project_root).await;
+
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("package root should exist");
+    write_text_package(&package_root, 150).await;
+
+    let comfy = Arc::new(NoSubmitComfyAdapter::new());
+    let service = build_service(&pool, comfy);
+    let (initial_session_id, ids) = selected_ids(&service, package_root.clone()).await;
+    let initial_result = service
+        .create_batches(&initial_session_id, &ids[..100].to_vec())
+        .await
+        .expect("the initial 100 items should be created");
+    assert_eq!(initial_result.requested_count, 100);
+    assert_eq!(initial_result.created_count, 100);
+    assert_eq!(initial_result.remaining_count, 0);
+
+    let queue_repository = SqliteProductionQueueRepository::new(pool.clone());
+    let old_bindings = queue_repository
+        .list_package_bindings(PROJECT_ID)
+        .await
+        .expect("initial package binding should be readable");
+    assert_eq!(old_bindings.len(), 1);
+    let old_binding = old_bindings[0].clone();
+
+    let (resume_session_id, resume_ids) = selected_ids(&service, package_root).await;
+    let result = service
+        .create_batches(&resume_session_id, &resume_ids)
+        .await
+        .expect("the remaining 50 items should be created");
+
+    assert_eq!(result.status, ProductionPackageCreateStatus::Complete);
+    assert_eq!(result.requested_count, 50);
+    assert_eq!(result.created_count, 50);
+    assert_eq!(result.remaining_count, 0);
+    assert!(result.remaining_item_ids.is_empty());
+    assert_eq!(result.batch_count, 1);
+    assert_eq!(result.item_count, 50);
+    assert_eq!(
+        result
+            .item_mappings
+            .iter()
+            .map(|mapping| mapping.package_item_id.as_str())
+            .collect::<Vec<_>>(),
+        ids[100..]
+    );
+
+    let bindings = queue_repository
+        .list_package_bindings(PROJECT_ID)
+        .await
+        .expect("resumed package bindings should be readable");
+    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings[0], old_binding);
+    assert_eq!(bindings[1].chunk_index, 0);
+    assert_eq!(bindings[1].chunk_count, 1);
+    assert_eq!(bindings[1].package_item_ids, ids[100..]);
+}
+
+#[tokio::test]
+async fn partial_resume_failure_reports_remaining_chunks_and_preserves_old_bindings() {
+    let directory = tempdir().expect("partial failure workspace should exist");
+    let pool = initialize(&directory.path().join("dev061b-resume-partial.db"))
+        .await
+        .expect("SQLite should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("project storage should exist");
+    seed_database(&pool, &project_root).await;
+
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("package root should exist");
+    write_text_package(&package_root, 350).await;
+
+    let comfy = Arc::new(NoSubmitComfyAdapter::new());
+    let service = build_service(&pool, comfy);
+    let (initial_session_id, ids) = selected_ids(&service, package_root.clone()).await;
+    service
+        .create_batches(&initial_session_id, &ids[..100].to_vec())
+        .await
+        .expect("the initial 100 items should be created");
+
+    let queue_repository = SqliteProductionQueueRepository::new(pool.clone());
+    let old_bindings = queue_repository
+        .list_package_bindings(PROJECT_ID)
+        .await
+        .expect("initial package binding should be readable");
+    assert_eq!(old_bindings.len(), 1);
+    let old_binding = old_bindings[0].clone();
+
+    sqlx::query(
+        "CREATE TRIGGER dev061b_fail_second_resume_chunk
+         BEFORE INSERT ON production_batches
+         WHEN NEW.name LIKE '%2/3'
+         BEGIN SELECT RAISE(ABORT, 'DEV-061B forced resume chunk failure'); END",
+    )
+    .execute(&pool)
+    .await
+    .expect("resume failure trigger should install");
+
+    let (resume_session_id, resume_ids) = selected_ids(&service, package_root).await;
+    let result = service
+        .create_batches(&resume_session_id, &resume_ids)
+        .await
+        .expect("a later resume chunk failure should be represented as partial");
+
+    assert_eq!(result.status, ProductionPackageCreateStatus::Partial);
+    assert_eq!(result.requested_count, 250);
+    assert_eq!(result.created_count, 100);
+    assert_eq!(result.remaining_count, 150);
+    assert_eq!(result.remaining_item_ids, ids[200..]);
+    assert_eq!(result.batch_count, 1);
+    assert_eq!(result.batches[0].batch_name, "DEV-061B text package · 1/3");
+    assert_eq!(result.item_mappings.len(), 100);
+    assert_eq!(
+        result
+            .item_mappings
+            .iter()
+            .map(|mapping| mapping.package_item_id.as_str())
+            .collect::<Vec<_>>(),
+        ids[100..200]
+    );
+
+    let bindings = queue_repository
+        .list_package_bindings(PROJECT_ID)
+        .await
+        .expect("partial resume bindings should be readable");
+    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings[0], old_binding);
+    assert_eq!(bindings[1].chunk_index, 0);
+    assert_eq!(bindings[1].chunk_count, 3);
+    assert_eq!(bindings[1].package_item_ids, ids[100..200]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches")
+            .fetch_one(&pool)
+            .await
+            .expect("batch count should be readable"),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batch_items")
+            .fetch_one(&pool)
+            .await
+            .expect("batch item count should be readable"),
+        200
+    );
+}
+
+#[tokio::test]
+async fn all_bound_package_does_not_create_a_duplicate_batch() {
+    let directory = tempdir().expect("duplicate protection workspace should exist");
+    let pool = initialize(&directory.path().join("dev061b-duplicate.db"))
+        .await
+        .expect("SQLite should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("project storage should exist");
+    seed_database(&pool, &project_root).await;
+
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("package root should exist");
+    write_text_package(&package_root, 3).await;
+
+    let service = build_service(&pool, Arc::new(NoSubmitComfyAdapter::new()));
+    let (initial_session_id, ids) = selected_ids(&service, package_root.clone()).await;
+    service
+        .create_batches(&initial_session_id, &ids)
+        .await
+        .expect("the package should be created once");
+    let batch_count_before =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches")
+            .fetch_one(&pool)
+            .await
+            .expect("initial batch count should be readable");
+
+    let (duplicate_session_id, duplicate_ids) = selected_ids(&service, package_root).await;
+    let duplicate = service
+        .create_batches(&duplicate_session_id, &duplicate_ids)
+        .await;
+    assert!(matches!(
+        duplicate,
+        Err(ai_studio_lib::application::production_package_service::ProductionPackageError::InvalidInput(message))
+            if message == "all selected production package items are already bound to production batches"
+    ));
+    let batch_count_after = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches")
+        .fetch_one(&pool)
+        .await
+        .expect("duplicate batch count should be readable");
+    assert_eq!(batch_count_after, batch_count_before);
+}

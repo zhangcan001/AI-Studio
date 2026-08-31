@@ -8,16 +8,20 @@ import { MultiPackageProductionBoard } from "./MultiPackageProductionBoard";
 
 afterEach(cleanup);
 
-const pkg = (overrides: Partial<MultiPackageBoardPackage> = {}): MultiPackageBoardPackage => ({
-  packageKey: "ep01",
-  packageRoot: "D:/season/ep01",
-  relativePath: "ep01",
-  packageName: "第 01 集",
-  itemCount: 10,
-  status: "READY",
-  readyCount: 10,
-  ...overrides,
-});
+const pkg = (overrides: Partial<MultiPackageBoardPackage> = {}): MultiPackageBoardPackage => {
+  const status = overrides.status ?? "READY";
+  return {
+    packageKey: "ep01",
+    packageRoot: "D:/season/ep01",
+    relativePath: "ep01",
+    packageName: "第 01 集",
+    itemCount: 10,
+    status,
+    canCreate: status === "READY",
+    readyCount: 10,
+    ...overrides,
+  };
+};
 
 const fixtures = [
   pkg(),
@@ -76,6 +80,104 @@ describe("MultiPackageProductionBoard", () => {
     expect(screen.getByText("请进入单生产包确认警告镜头。")).toBeTruthy();
   });
 
+  it("requires an explicit canCreate flag instead of inferring eligibility from READY", () => {
+    render(<MultiPackageProductionBoard packages={[pkg({ canCreate: false })]} onCreateSelected={vi.fn()} />);
+    const checkbox = screen.getByRole("checkbox", { name: "选择生产包 第 01 集" }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    expect(checkbox.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /创建所选生产批次/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows a resumable PARTIAL package with remaining READY items", () => {
+    render(<MultiPackageProductionBoard packages={[pkg({
+      packageKey: "partial-ready",
+      packageName: "部分已创建包",
+      status: "PARTIAL",
+      itemCount: 150,
+      boundItemCount: 100,
+      remainingCount: 50,
+      remainingReadyCount: 50,
+      remainingWarningCount: 0,
+      remainingBlockedCount: 0,
+      batchIds: ["batch-existing"],
+      canCreate: true,
+    })]} onCreateSelected={vi.fn()} />);
+    const row = screen.getByRole("row", { name: /部分已创建包/ });
+    const checkbox = within(row).getByRole("checkbox") as HTMLInputElement;
+    expect(screen.getByText("部分已创建")).toBeTruthy();
+    expect(screen.getByText("已创建 100")).toBeTruthy();
+    expect(row.textContent).toContain("剩余 50");
+    expect(screen.getByText(/批次 batch-existing/)).toBeTruthy();
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(false);
+  });
+
+  it("blocks PARTIAL bulk creation when remaining items include WARNING", async () => {
+    const user = userEvent.setup();
+    const onCreateSelected = vi.fn();
+    const onHandleWarning = vi.fn();
+    render(<MultiPackageProductionBoard packages={[pkg({
+      packageKey: "partial-warning",
+      packageName: "待人工确认的部分包",
+      status: "PARTIAL",
+      itemCount: 150,
+      boundItemCount: 100,
+      remainingCount: 50,
+      remainingReadyCount: 40,
+      remainingWarningCount: 10,
+      remainingBlockedCount: 0,
+      batchIds: ["batch-existing"],
+      canCreate: false,
+    })]} onCreateSelected={onCreateSelected} onHandleWarning={onHandleWarning} />);
+    const row = screen.getByRole("row", { name: /待人工确认的部分包/ });
+    const checkbox = within(row).getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    expect(checkbox.disabled).toBe(true);
+    expect(screen.getByText(/40 可创建/)).toBeTruthy();
+    expect(screen.getByText(/10 需要人工确认/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /创建所选生产批次/ }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(row).getByRole("button", { name: "在单生产包中处理" }));
+    expect(onHandleWarning).toHaveBeenCalledWith("partial-warning");
+    expect(onCreateSelected).not.toHaveBeenCalled();
+  });
+
+  it("keeps packageKey as the durable identity when display paths use different representations", async () => {
+    const user = userEvent.setup();
+    const onOpenBatch = vi.fn();
+    render(<MultiPackageProductionBoard packages={[pkg({
+      packageKey: "abc",
+      packageRoot: "D:\\Season\\EP01",
+      relativePath: "\\\\?\\D:\\Season\\EP01",
+      packageName: "第 01 集",
+      status: "CREATED",
+      itemCount: 150,
+      boundItemCount: 150,
+      remainingCount: 0,
+      batchIds: ["batch-abc"],
+      canCreate: false,
+    })]} onOpenBatch={onOpenBatch} />);
+    const row = screen.getByRole("row", { name: /第 01 集/ });
+    expect(row.getAttribute("data-package-key")).toBe("abc");
+    await user.click(within(row).getByRole("button", { name: "打开生产批次" }));
+    expect(onOpenBatch).toHaveBeenCalledWith("abc", ["batch-abc"]);
+  });
+
+  it("keeps CREATE_FAILED disabled until the package is re-inspected", async () => {
+    const user = userEvent.setup();
+    const onReinspect = vi.fn();
+    render(<MultiPackageProductionBoard packages={[pkg({
+      packageKey: "failed",
+      packageName: "创建失败包",
+      status: "CREATE_FAILED",
+      canCreate: false,
+      firstError: "上次创建失败",
+    })]} onReinspect={onReinspect} />);
+    const row = screen.getByRole("row", { name: /创建失败包/ });
+    expect((within(row).getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
+    await user.click(within(row).getByRole("button", { name: "重新检查" }));
+    expect(onReinspect).toHaveBeenCalledWith("failed");
+  });
+
   it("filters all, issues, and running packages", async () => {
     const user = userEvent.setup();
     render(<MultiPackageProductionBoard packages={fixtures} />);
@@ -123,6 +225,7 @@ describe("MultiPackageProductionBoard", () => {
       pkg({ packageKey: "B", packageName: "B", relativePath: "B", itemCount: 6 }),
       pkg({ packageKey: "C", packageName: "C", relativePath: "C", status: "WARNING", itemCount: 3 }),
     ]} selectedPackageKeys={["A", "B", "C"]} onCreateSelected={onCreateSelected} />);
+    expect((screen.getByRole("checkbox", { name: "选择生产包 C" }) as HTMLInputElement).checked).toBe(false);
     const button = screen.getByRole("button", { name: "创建所选生产批次（2 个生产包 · 10 个镜头）" });
     await user.click(button);
     await vi.waitFor(() => expect(onCreateSelected).toHaveBeenCalledTimes(1));

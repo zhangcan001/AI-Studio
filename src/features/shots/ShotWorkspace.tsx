@@ -717,11 +717,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           warningCount,
           blockedCount,
         });
-        const packageKey = multiPackageIdentity(discoveredPackage);
+        const packageKey = discoveredPackage.packageKey;
         try {
           const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
           if (!multiPackageMounted.current || runId !== multiPackageRunId.current) return;
-          if (inspection.manifestSha256 && inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
+          if (inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
             throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
           }
           setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
@@ -770,14 +770,14 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       for (let index = 0; index < packageKeys.length; index += 1) {
         if (!multiPackageMounted.current) return;
         const packageKey = packageKeys[index];
-        const discoveredPackage = multiPackagePackages.find((item) => multiPackageIdentity(item) === packageKey);
+        const discoveredPackage = multiPackagePackages.find((item) => item.packageKey === packageKey);
         try {
           if (!discoveredPackage) {
             throw new Error("该生产包尚未完成检查，请先重新检查。");
           }
           const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
           if (!multiPackageMounted.current) return;
-          if (inspection.manifestSha256 && inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
+          if (inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
             throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
           }
           setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
@@ -790,7 +790,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           });
           const boundItemIds = new Set(
             multiPackageBindings
-              .filter((binding) => binding.packageRoot === discoveredPackage.packageRoot && binding.manifestSha256 === discoveredPackage.manifestSha256)
+              .filter((binding) => binding.packageKey === discoveredPackage.packageKey)
               .flatMap((binding) => binding.packageItemIds),
           );
           const selectedItemIds = inspection.items
@@ -802,7 +802,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           await refreshMultiPackageBoard();
           if (!multiPackageMounted.current) return;
           if (result.status === "PARTIAL" || result.remainingCount > 0) {
-            throw new Error(`「${inspection.packageName}」已部分创建；请从剩余项目继续。`);
+            setNotice(`「${inspection.packageName}」已部分创建；请从剩余项目继续。`);
+            break;
           }
         } catch (packageError: unknown) {
           if (!multiPackageMounted.current) return;
@@ -833,7 +834,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
 
   const multiPackageBoardPackages = useMemo(
     () => multiPackagePackages.map((discoveredPackage) => {
-      const packageKey = multiPackageIdentity(discoveredPackage);
+      const packageKey = discoveredPackage.packageKey;
       return buildMultiPackageBoardPackage({
         discoveredPackage,
         inspection: multiPackageInspections[packageKey],
@@ -1491,6 +1492,39 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     setProductionModeTab("package");
     setNotice(`已打开「${discoveredPackage.relativePath || discoveredPackage.packageRoot}」单生产包工作区；不会自动创建或开始批次。`);
   }, [multiPackagePackages]);
+  const reinspectMultiPackage = useCallback(async (packageKey: string) => {
+    if (multiPackageDiscovering || multiPackageCreating || !multiPackageMounted.current) return;
+    const discoveredPackage = multiPackagePackages.find((item) => item.packageKey === packageKey);
+    if (!discoveredPackage) {
+      setError("该生产包尚未完成发现，请重新选择根目录。");
+      return;
+    }
+    setError(undefined);
+    try {
+      const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
+      if (!multiPackageMounted.current) return;
+      if (inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
+        throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
+      }
+      setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
+      setMultiPackageInspectionErrors((current) => {
+        const next = { ...current };
+        delete next[packageKey];
+        return next;
+      });
+      setMultiPackageCreateMessages((current) => {
+        const next = { ...current };
+        delete next[packageKey];
+        return next;
+      });
+      await refreshMultiPackageBoard();
+    } catch (inspectionError: unknown) {
+      if (!multiPackageMounted.current) return;
+      const message = toUserMessage(inspectionError);
+      setMultiPackageInspectionErrors((current) => ({ ...current, [packageKey]: message }));
+      setError("重新检查生产包失败：" + message);
+    }
+  }, [inspectProductionPackage, multiPackageCreating, multiPackageDiscovering, multiPackagePackages, projectId, refreshMultiPackageBoard]);
   const openMultiPackageBatch = useCallback((_packageKey: string, batchIds: string[]) => {
     const batchId = batchIds.reduce<string | undefined>((selected, candidate) => {
       if (!selected) return candidate;
@@ -1575,7 +1609,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           onOpenPackage={openBoardPackage}
           onHandleWarning={openBoardPackage}
           onViewIssues={openBoardPackage}
-          onReinspect={openBoardPackage}
+          onReinspect={reinspectMultiPackage}
           onOpenBatch={openMultiPackageBatch}
           onCreateSelected={createMultiPackageBatches}
           onRefresh={refreshMultiPackageBoard}
@@ -2069,7 +2103,7 @@ function emptyRunbook(projectId: string): ProductionBatchRunbookView {
 }
 
 function multiPackageIdentity(discoveredPackage: ProductionPackageDiscoveryPackage): string {
-  return `${discoveredPackage.packageRoot}\u0000${discoveredPackage.manifestSha256}`;
+  return discoveredPackage.packageKey;
 }
 
 function multiPackageInspectionSafetyError(inspection: ProductionPackageInspectionResult): string | undefined {
@@ -2101,8 +2135,7 @@ function buildMultiPackageBoardPackage(input: {
 }): MultiPackageBoardPackage {
   const { discoveredPackage, inspection, inspectionError, bindings, batchDetails, createMessage } = input;
   const packageBindings = bindings.filter(
-    (binding) => binding.packageRoot === discoveredPackage.packageRoot
-      && binding.manifestSha256 === discoveredPackage.manifestSha256,
+    (binding) => binding.packageKey === discoveredPackage.packageKey,
   );
   const packageBatchIds = [...new Set(packageBindings.map((binding) => binding.batchId))];
   const details = packageBatchIds
@@ -2114,33 +2147,70 @@ function buildMultiPackageBoardPackage(input: {
     succeeded: current.succeeded + detail.succeeded,
     failed: current.failed + detail.failed,
   }), { pending: 0, running: 0, succeeded: 0, failed: 0 });
-  const boundItemIds = new Set(packageBindings.flatMap((binding) => binding.packageItemIds));
-  const itemCount = inspection?.itemCount ?? 0;
+  const currentItems = inspection?.items ?? [];
+  const currentItemIds = new Set(currentItems.map((item) => item.id));
+  const boundItemIds = new Set(
+    packageBindings
+      .flatMap((binding) => binding.packageItemIds)
+      .filter((itemId) => currentItemIds.has(itemId)),
+  );
+  const itemCount = inspection?.itemCount ?? currentItems.length;
+  const remainingItems = currentItems.filter((item) => !boundItemIds.has(item.id));
+  const boundItemCount = boundItemIds.size;
+  const remainingCount = remainingItems.length;
+  const remainingReadyCount = remainingItems.filter((item) => item.status === "READY").length;
+  const remainingWarningCount = remainingItems.filter((item) => item.status === "WARNING").length;
+  const remainingBlockedCount = remainingItems.filter((item) => item.status === "BLOCKED").length;
   const hasActiveBatch = details.some((detail) => detail.status === "RUNNING" || detail.running > 0);
-  const allBatchesTerminal = details.length > 0 && details.every((detail) => (
+  const allBatchDetailsAvailable = details.length === packageBatchIds.length;
+  const allBatchesTerminal = packageBatchIds.length > 0 && allBatchDetailsAvailable && details.every((detail) => (
     detail.status === "COMPLETED"
       || detail.succeeded + detail.failed + detail.cancelled + detail.skipped >= detail.total
   ));
-  const allItemsBound = itemCount > 0 && boundItemIds.size >= itemCount;
+  const allItemsBound = itemCount > 0 && currentItems.length === itemCount && remainingCount === 0;
   const hasInspectionWarnings = Boolean(
-    inspection?.status === "WARNING" || (inspection?.warnings?.length ?? 0) > 0,
+    inspection?.status === "WARNING"
+      || (inspection?.warnings?.length ?? 0) > 0
+      || (inspection?.warningCount ?? 0) > 0
+      || currentItems.some((item) => item.status === "WARNING"),
+  );
+  const hasInspectionBlocked = Boolean(
+    inspection?.status === "BLOCKED"
+      || (inspection?.errors?.length ?? 0) > 0
+      || (inspection?.blockedCount ?? 0) > 0
+      || currentItems.some((item) => item.status === "BLOCKED"),
   );
   let status: MultiPackageBoardPackage["status"];
   if (createMessage) status = createMessage.status;
   else if (inspectionError || !inspection) status = "BLOCKED";
-  else if (!packageBindings.length) status = (inspection.errors ?? []).length || inspection.readyCount === 0
+  else if (!packageBindings.length) status = hasInspectionBlocked
     ? "BLOCKED"
-    : hasInspectionWarnings || inspection.warningCount > 0 || inspection.blockedCount > 0 ? "WARNING" : "READY";
+    : hasInspectionWarnings ? "WARNING" : "READY";
   else if (hasActiveBatch) status = "RUNNING";
   else if (allItemsBound && allBatchesTerminal && stats.failed > 0) status = "COMPLETED_WITH_FAILURE";
   else if (allItemsBound && allBatchesTerminal) status = "COMPLETED";
-  else status = "CREATED";
+  else if (allItemsBound) status = "CREATED";
+  else status = "PARTIAL";
+
+  const canCreate = !createMessage
+    ? (status === "READY" || status === "PARTIAL")
+      && remainingCount > 0
+      && remainingReadyCount === remainingCount
+      && remainingWarningCount === 0
+      && remainingBlockedCount === 0
+    : createMessage.status === "NOT_CREATED"
+      && remainingCount > 0
+      && remainingReadyCount === remainingCount
+      && remainingWarningCount === 0
+      && remainingBlockedCount === 0;
+  const inspectionWarningCount = inspection?.warningCount ?? 0;
+  const inspectionBlockedCount = inspection?.blockedCount ?? 0;
 
   const issueSummary = createMessage?.message
     ?? inspectionError
     ?? (inspection?.errors?.length ? inspection.errors.map(packageDiagnosticText).join("；") : undefined)
-    ?? (inspection && (hasInspectionWarnings || inspection.warningCount > 0 || inspection.blockedCount > 0)
-      ? `READY ${inspection.readyCount} · WARNING ${inspection.warningCount} · BLOCKED ${inspection.blockedCount}`
+    ?? (inspection && (hasInspectionWarnings || inspectionWarningCount > 0 || inspectionBlockedCount > 0)
+      ? `READY ${inspection.readyCount} · WARNING ${inspectionWarningCount} · BLOCKED ${inspectionBlockedCount}`
       : undefined);
   const firstError = createMessage?.message
     ?? details.flatMap((detail) => detail.items)
@@ -2156,8 +2226,14 @@ function buildMultiPackageBoardPackage(input: {
     readyCount: inspection?.readyCount ?? 0,
     warningCount: inspection?.warningCount ?? 0,
     blockedCount: inspection?.blockedCount ?? 0,
+    boundItemCount,
+    remainingCount,
+    remainingReadyCount,
+    remainingWarningCount,
+    remainingBlockedCount,
+    canCreate,
     batchIds: packageBatchIds,
-    pending: stats.pending + Math.max(0, itemCount - boundItemIds.size),
+    pending: stats.pending + remainingCount,
     running: stats.running,
     succeeded: stats.succeeded,
     failed: stats.failed,
