@@ -803,6 +803,16 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
           if (!multiPackageMounted.current) return;
           if (result.status === "PARTIAL" || result.remainingCount > 0) {
             setNotice(`「${inspection.packageName}」已部分创建；请从剩余项目继续。`);
+            setMultiPackageCreateMessages((current) => {
+              const next = { ...current };
+              for (const deferredKey of packageKeys.slice(index + 1)) {
+                next[deferredKey] = {
+                  status: "NOT_CREATED",
+                  message: "未执行：前一个生产包仅部分创建；请先处理剩余项后再继续。",
+                };
+              }
+              return next;
+            });
             break;
           }
         } catch (packageError: unknown) {

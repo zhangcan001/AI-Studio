@@ -217,6 +217,85 @@ describe("MultiPackageProductionBoard", () => {
     expect(screen.queryByText("开始生成")).toBeNull();
   });
 
+  it("does not mark deferred packages as created when bulk creation stops on PARTIAL", async () => {
+    const user = userEvent.setup();
+    const onCreateSelected = vi.fn().mockResolvedValue(undefined);
+    const initialPackages = [
+      pkg({ packageKey: "EP01", packageName: "EP01", relativePath: "EP01" }),
+      pkg({ packageKey: "EP02", packageName: "EP02", relativePath: "EP02" }),
+      pkg({ packageKey: "EP03", packageName: "EP03", relativePath: "EP03" }),
+    ];
+    const { rerender } = render(<MultiPackageProductionBoard packages={initialPackages} onCreateSelected={onCreateSelected} />);
+
+    await user.click(screen.getByRole("button", { name: "创建所选生产批次（3 个生产包 · 30 个镜头）" }));
+    await vi.waitFor(() => expect(onCreateSelected).toHaveBeenCalledWith(["EP01", "EP02", "EP03"]));
+
+    expect(within(screen.getByRole("row", { name: /EP01/ })).getByText("可创建")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /EP02/ })).getByText("可创建")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /EP03/ })).getByText("可创建")).toBeTruthy();
+    expect((within(screen.getByRole("row", { name: /EP02/ })).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    expect((within(screen.getByRole("row", { name: /EP03/ })).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+
+    rerender(<MultiPackageProductionBoard packages={[
+      pkg({ packageKey: "EP01", packageName: "EP01", relativePath: "EP01", status: "PARTIAL", itemCount: 10, boundItemCount: 5, remainingCount: 5, remainingReadyCount: 5, canCreate: true, batchIds: ["batch-ep01"] }),
+      pkg({ packageKey: "EP02", packageName: "EP02", relativePath: "EP02", status: "NOT_CREATED", canCreate: true }),
+      pkg({ packageKey: "EP03", packageName: "EP03", relativePath: "EP03", status: "NOT_CREATED", canCreate: true }),
+    ]} onCreateSelected={onCreateSelected} />);
+
+    expect(within(screen.getByRole("row", { name: /EP01/ })).getByText("部分已创建")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /EP02/ })).getByText("未创建")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /EP03/ })).getByText("未创建")).toBeTruthy();
+    expect(screen.queryByText("已创建", { selector: ".multi-package-production-board-status" })).toBeNull();
+  });
+
+  it("renders Host success, failure, and deferred statuses after an error stop", async () => {
+    const user = userEvent.setup();
+    const onCreateSelected = vi.fn().mockRejectedValue(new Error("EP02 创建失败"));
+    const initialPackages = [
+      pkg({ packageKey: "EP01", packageName: "EP01", relativePath: "EP01" }),
+      pkg({ packageKey: "EP02", packageName: "EP02", relativePath: "EP02" }),
+      pkg({ packageKey: "EP03", packageName: "EP03", relativePath: "EP03" }),
+    ];
+    const { rerender } = render(<MultiPackageProductionBoard packages={initialPackages} onCreateSelected={onCreateSelected} />);
+
+    await user.click(screen.getByRole("button", { name: "创建所选生产批次（3 个生产包 · 30 个镜头）" }));
+    await vi.waitFor(() => expect(screen.getByRole("alert").textContent).toContain("EP02 创建失败"));
+    expect(screen.getAllByText("可创建")).toHaveLength(3);
+
+    rerender(<MultiPackageProductionBoard packages={[
+      pkg({ packageKey: "EP01", packageName: "EP01", relativePath: "EP01", status: "COMPLETED", itemCount: 10, boundItemCount: 10, remainingCount: 0, canCreate: false }),
+      pkg({ packageKey: "EP02", packageName: "EP02", relativePath: "EP02", status: "CREATE_FAILED", canCreate: false, firstError: "EP02 创建失败" }),
+      pkg({ packageKey: "EP03", packageName: "EP03", relativePath: "EP03", status: "NOT_CREATED", canCreate: true }),
+    ]} onCreateSelected={onCreateSelected} />);
+
+    expect(within(screen.getByRole("row", { name: /EP01/ })).getByText("已完成")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /EP02/ })).getByText("创建失败")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /EP03/ })).getByText("未创建")).toBeTruthy();
+    expect((within(screen.getByRole("row", { name: /EP03/ })).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("returns to the Host status immediately after a successful create resolves", async () => {
+    const user = userEvent.setup();
+    const onCreateSelected = vi.fn().mockResolvedValue(undefined);
+    const readyPackage = pkg({ packageKey: "EP01", packageName: "EP01", relativePath: "EP01" });
+    const { rerender } = render(<MultiPackageProductionBoard packages={[readyPackage]} onCreateSelected={onCreateSelected} />);
+
+    await user.click(screen.getByRole("button", { name: /创建所选生产批次/ }));
+    await vi.waitFor(() => expect(onCreateSelected).toHaveBeenCalledTimes(1));
+    expect(within(screen.getByRole("row", { name: /EP01/ })).getByText("可创建")).toBeTruthy();
+
+    rerender(<MultiPackageProductionBoard packages={[pkg({
+      packageKey: "EP01",
+      packageName: "EP01",
+      relativePath: "EP01",
+      status: "COMPLETED",
+      boundItemCount: 10,
+      remainingCount: 0,
+      canCreate: false,
+    })]} onCreateSelected={onCreateSelected} />);
+    expect(within(screen.getByRole("row", { name: /EP01/ })).getByText("已完成")).toBeTruthy();
+  });
+
   it("does not create an externally selected WARNING package", async () => {
     const user = userEvent.setup();
     const onCreateSelected = vi.fn().mockResolvedValue(undefined);
@@ -240,12 +319,14 @@ describe("MultiPackageProductionBoard", () => {
     expect(onHandleWarning).toHaveBeenCalledWith("C");
   });
 
-  it("shows creating and failure state after onCreateSelected rejects without retrying implicitly", async () => {
+  it("shows creating and a top-level error after onCreateSelected rejects without package-level failure truth", async () => {
     const user = userEvent.setup();
     const onCreateSelected = vi.fn().mockRejectedValue(new Error("父层创建失败"));
     render(<MultiPackageProductionBoard packages={[pkg()]} onCreateSelected={onCreateSelected} />);
     await user.click(screen.getByRole("button", { name: /创建所选生产批次/ }));
-    await vi.waitFor(() => expect(screen.getByText("创建失败")).toBeTruthy());
+    await vi.waitFor(() => expect(screen.getByRole("alert").textContent).toContain("父层创建失败"));
+    expect(within(screen.getByRole("row", { name: /第 01 集/ })).getByText("可创建")).toBeTruthy();
+    expect(screen.queryByText("创建失败", { selector: ".multi-package-production-board-status" })).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("父层创建失败");
     expect(screen.getByRole("alert").textContent).toContain("失败后可从未创建 / 剩余项继续");
     expect(onCreateSelected).toHaveBeenCalledTimes(1);

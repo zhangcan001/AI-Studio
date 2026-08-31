@@ -118,7 +118,7 @@ export function MultiPackageProductionBoard({
   const [localSelection, setLocalSelection] = useState<Set<string>>(() => new Set(
     selectedPackageKeys ?? packages.filter((item) => isSelectablePackage(item)).map((item) => item.packageKey),
   ));
-  const [operationStatuses, setOperationStatuses] = useState<Record<string, { status: MultiPackageBoardPackageStatus; observedStatus: MultiPackageBoardPackageStatus }>>({});
+  const [operationStatuses, setOperationStatuses] = useState<Record<string, { status: "CREATING"; observedStatus: MultiPackageBoardPackageStatus }>>({});
   const [createError, setCreateError] = useState<string>();
   const [isCreatingLocally, setIsCreatingLocally] = useState(false);
   const lastExternalSelectionRef = useRef(selectedPackageKeys === undefined ? "__unset__" : selectedPackageKeys.join("\u0000"));
@@ -215,18 +215,19 @@ export function MultiPackageProductionBoard({
     })) }));
     try {
       await onCreateSelected?.(keys);
-      setOperationStatuses((previous) => ({ ...previous, ...Object.fromEntries(keys.map((key) => {
-        const item = packages.find((candidate) => candidate.packageKey === key);
-        return [key, { status: item?.status === "PARTIAL" ? "PARTIAL" : "CREATED", observedStatus: item?.status ?? "READY" }];
-      })) }));
-      setLocalSelection((previous) => new Set([...previous].filter((key) => !keys.includes(key))));
+      setOperationStatuses((previous) => {
+        const next = { ...previous };
+        keys.forEach((key) => delete next[key]);
+        return next;
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : typeof error === "string" ? error : "创建所选生产批次失败，请检查后从未创建或剩余项继续。";
       setCreateError(message);
-      setOperationStatuses((previous) => ({ ...previous, ...Object.fromEntries(keys.map((key) => {
-        const item = packages.find((candidate) => candidate.packageKey === key);
-        return [key, { status: "CREATE_FAILED", observedStatus: item?.status ?? "READY" }];
-      })) }));
+      setOperationStatuses((previous) => {
+        const next = { ...previous };
+        keys.forEach((key) => delete next[key]);
+        return next;
+      });
     } finally {
       setIsCreatingLocally(false);
     }

@@ -98,6 +98,7 @@ vi.mock("../production/MultiPackageProductionBoard", () => {
       return (
         <section aria-label="测试多生产包看板">
           <button type="button" onClick={() => void props.onChooseRoot?.()}>选择批量根目录</button>
+          <button type="button" onClick={() => submit(props.packages?.filter((item) => item.canCreate).map((item) => item.packageKey) ?? [])}>创建全部可创建包</button>
           <button type="button" onClick={() => submit([multiPackageTestKeys.ready])}>程序化提交 READY 包</button>
           <button type="button" onClick={() => submit([multiPackageTestKeys.warning])}>程序化提交 WARNING 包</button>
           <button type="button" onClick={() => submit([multiPackageTestKeys.blocked])}>程序化提交 BLOCKED 包</button>
@@ -376,6 +377,15 @@ function setupMultiPackageInspectionMocks() {
   });
 }
 
+function setupAllReadyMultiPackageMocks(inspections: Record<string, ProductionPackageInspectionResult>) {
+  mocks.discoverProductionPackages.mockResolvedValue(multiPackageDiscovery);
+  mocks.inspectProductionPackage.mockImplementation(async (_projectId: string, packageRoot: string) => {
+    const result = inspections[packageRoot];
+    if (!result) throw new Error(`未知生产包：${packageRoot}`);
+    return result;
+  });
+}
+
 function setupSingleMultiPackageFixture(
   discoveredPackage: (typeof multiPackageDiscovery.packages)[number],
   packageInspection: ProductionPackageInspectionResult,
@@ -468,6 +478,84 @@ describe("ShotWorkspace production package queue integration", () => {
     );
     expect(mocks.inspectProductionPackage).toHaveBeenCalledTimes(4);
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
+  });
+
+  it("does not mark deferred packages as created when bulk creation stops on PARTIAL", async () => {
+    const user = userEvent.setup();
+    const inspections = {
+      [multiPackageDiscovery.packages[0].packageRoot]: makeMultiPackageInspection("EP01", "inspection-ep01", "sha-ready", Array.from({ length: 150 }, () => "READY" as const)),
+      [multiPackageDiscovery.packages[1].packageRoot]: makeMultiPackageInspection("EP02", "inspection-ep02", "sha-warning", ["READY"]),
+      [multiPackageDiscovery.packages[2].packageRoot]: makeMultiPackageInspection("EP03", "inspection-ep03", "sha-blocked", ["READY"]),
+    };
+    setupAllReadyMultiPackageMocks(inspections);
+    let bindings: ProductionPackageBatchBinding[] = [];
+    mocks.listProductionPackageBindings.mockImplementation(async () => bindings);
+    mocks.createProductionPackageBatches.mockImplementation(async (_inspectionId: string, itemIds: string[]) => {
+      bindings = [makePackageBinding({
+        packageItemIds: itemIds.slice(0, 100),
+        packageName: "EP01",
+        batchId: "batch-ep01",
+      })];
+      return {
+        ...created,
+        packageName: "EP01",
+        status: "PARTIAL",
+        requestedCount: 150,
+        createdCount: 100,
+        remainingCount: 50,
+        remainingItemIds: itemIds.slice(100),
+        itemCount: 150,
+        batchCount: 1,
+        batches: [{ batchId: "batch-ep01", batchName: "EP01", itemCount: 100, itemMappings: [] }],
+      };
+    });
+
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+    await user.click(await screen.findByRole("tab", { name: "批量生产包" }));
+    await user.click(screen.getByRole("button", { name: "选择批量根目录" }));
+    await waitFor(() => expect(screen.getByTestId("board-status-" + multiPackageTestKeys.ready).textContent).toBe("READY"));
+    await user.click(screen.getByRole("button", { name: "创建全部可创建包" }));
+
+    await waitFor(() => expect(screen.getByTestId("board-status-" + multiPackageTestKeys.ready).textContent).toBe("PARTIAL"));
+    expect(screen.getByTestId("board-status-" + multiPackageTestKeys.warning).textContent).toBe("NOT_CREATED");
+    expect(screen.getByTestId("board-status-" + multiPackageTestKeys.blocked).textContent).toBe("NOT_CREATED");
+    expect(mocks.createProductionPackageBatches).toHaveBeenCalledTimes(1);
+    expect(mocks.createProductionPackageBatches).toHaveBeenCalledWith(
+      "inspection-ep01",
+      inspections[multiPackageDiscovery.packages[0].packageRoot].items.map((item) => item.id),
+    );
+  });
+
+  it("keeps the successful package truth and defers later packages after a create error", async () => {
+    const user = userEvent.setup();
+    const inspections = {
+      [multiPackageDiscovery.packages[0].packageRoot]: makeMultiPackageInspection("EP01", "inspection-ep01", "sha-ready", ["READY"]),
+      [multiPackageDiscovery.packages[1].packageRoot]: makeMultiPackageInspection("EP02", "inspection-ep02", "sha-warning", ["READY"]),
+      [multiPackageDiscovery.packages[2].packageRoot]: makeMultiPackageInspection("EP03", "inspection-ep03", "sha-blocked", ["READY"]),
+    };
+    setupAllReadyMultiPackageMocks(inspections);
+    let bindings: ProductionPackageBatchBinding[] = [];
+    mocks.listProductionPackageBindings.mockImplementation(async () => bindings);
+    mocks.createProductionPackageBatches.mockImplementation(async (inspectionId: string, itemIds: string[]) => {
+      if (inspectionId === "inspection-ep02") throw new Error("EP02 创建失败");
+      bindings = [makePackageBinding({ packageItemIds: itemIds, packageName: "EP01", batchId: "batch-ep01" })];
+      return { ...created, packageName: "EP01" };
+    });
+
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+    await user.click(await screen.findByRole("tab", { name: "批量生产包" }));
+    await user.click(screen.getByRole("button", { name: "选择批量根目录" }));
+    await waitFor(() => expect(screen.getByTestId("board-status-" + multiPackageTestKeys.ready).textContent).toBe("READY"));
+    await user.click(screen.getByRole("button", { name: "创建全部可创建包" }));
+
+    await waitFor(() => expect(screen.getByTestId("board-status-" + multiPackageTestKeys.ready).textContent).toBe("CREATED"));
+    expect(screen.getByTestId("board-status-" + multiPackageTestKeys.warning).textContent).toBe("CREATE_FAILED");
+    expect(screen.getByTestId("board-status-" + multiPackageTestKeys.blocked).textContent).toBe("NOT_CREATED");
+    expect(mocks.createProductionPackageBatches).toHaveBeenCalledTimes(2);
+    expect(mocks.createProductionPackageBatches.mock.calls.map(([inspectionId]) => inspectionId)).toEqual([
+      "inspection-ep01",
+      "inspection-ep02",
+    ]);
   });
 
   it("rebuilds PARTIAL state from discovery, fresh inspection, and durable bindings after restart", async () => {

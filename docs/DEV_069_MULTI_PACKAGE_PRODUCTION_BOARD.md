@@ -1,6 +1,6 @@
 # DEV-069 — Multi-Package Production Board V1
 
-状态：DEV-069A WARNING safety fix、DEV-069B durable packageKey 与 partial resume 已实现；最终回归/构建/真人 UAT 待完成
+状态：DEV-069A WARNING safety fix、DEV-069B durable packageKey 与 partial resume、DEV-069C operation truth closure 已实现；最终回归/构建/真人 UAT 待完成
 
 DEV-069A WARNING safety = PASS
 
@@ -108,6 +108,7 @@ board 是 discovery/inspection/provenance/aggregation 的 UI 与协调层，没�
 - `0 < boundItemCount < itemCount` 且没有 active batch 时，状态为 `PARTIAL`（部分已创建），显示已创建数量、剩余数量和已有 Batch IDs。剩余项全部为 READY 时 `canCreate=true`；任何剩余 WARNING/BLOCKED 都禁止 bulk create，必须进入单生产包处理。
 - `CREATED` 只表示当前 inspection 的全部 item 已有 binding 但关联 batch 尚未全部 terminal；全部 terminal 且无失败才是 `COMPLETED`，有失败则是 `COMPLETED_WITH_FAILURE`。`CREATE_FAILED` 不可直接重试，必须先重新检查。
 - App restart 后不依赖 React local create state：重新 Discovery、fresh Inspect、list Bindings 即可重建 PARTIAL/CREATED/COMPLETED truth。重新检查会以当前 `packageKey` 更新 inspection、清除 create failure message 并刷新 Board，不创建 batch。
+- DEV-069C operation truth closure：Board local operation state 只允许短暂表示 `CREATING`。create resolve/reject 后清除该状态，不在本地断言 `CREATED`、`PARTIAL` 或 `CREATE_FAILED`，也不粗暴删除选中的 package keys；后续 package 的 `NOT_CREATED`、成功/部分/失败包状态均由 Host 的 discovery、inspection、durable bindings 和 batch truth 重建。
 - Manifest bytes 变化产生 V2 `packageKey`；V1 bindings 不会被 join 到 V2，V2 可按新的 inspection 重新生产。
 - Backend result 的 `requestedCount` 是本次排除已绑定 item 后的有效请求数，`createdCount` 是本次新建数，`remainingCount` 是本次失败后仍未绑定数；部分 resume 的新 provenance 使用本次 remaining 集合的 chunk index/count，旧 bindings 不修改。
 
@@ -175,7 +176,7 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 | Rust discovery | `cargo test --manifest-path src-tauri/Cargo.toml --test dev069_production_package_discovery -- --test-threads=1` | root depth 0、manifest stop、canonical 后越界 symlink 跳过、100 package/5000 directory caps、自然排序 `EP2 < EP10`、真实 manifest SHA-256、稳定 `DISCOVERY_*` errors；depth 4 package 发现与继续向下的 `DISCOVERY_MAX_DEPTH_EXCEEDED` 需作为最终验收断言。 |
 | Rust package/provenance | `cargo test --manifest-path src-tauri/Cargo.toml --test dev059_production_package -- --test-threads=1` and `cargo test --manifest-path src-tauri/Cargo.toml provenance_key_changes_with_manifest_or_normalized_root -- --test-threads=1` | 既有 package inspection/mapping/chunk contract 不回归；Discovery `packageKey` 与 `ProductionPackageProvenance.source_package_key` 一致，key 随 manifest/root 变化，Migration 026 实际字段与 `PRODUCTION_PACKAGE` source kind 可读。 |
 | Rust partial creation | `cargo test --manifest-path src-tauri/Cargo.toml --test dev061b_production_package_hardening -- --test-threads=1` | 500 item chunk、后续 chunk 失败的 partial truth、resume 只按 `remaining_selected` 分 chunk、chunk provenance 从 0/本次 count 重新开始、已创建结果不 rollback、session 不隐式重试；创建仍不 Start 或提交 Comfy。 |
-| Frontend board | `pnpm test -- MultiPackageProductionBoard` | 五包 summary、READY 默认选择且 enabled、PARTIAL 数量/可创建门禁、WARNING unchecked 且 disabled、BLOCKED/CREATED disabled、WARNING 单包入口、问题/运行中筛选、100/10000 caps、按顺序只调用一次 create、失败不隐式 retry、进度与 blocked actions。 |
+| Frontend board | `pnpm test -- MultiPackageProductionBoard` | 五包 summary、READY 默认选择且 enabled、PARTIAL 数量/可创建门禁、WARNING unchecked 且 disabled、BLOCKED/CREATED disabled、WARNING 单包入口、问题/运行中筛选、100/10000 caps、按顺序只调用一次 create、resolve/reject 后不保留 optimistic CREATED/CREATE_FAILED、PARTIAL stop 后 deferred package truth、失败不隐式 retry、进度与 blocked actions。 |
 | Frontend parent/queue compatibility | `pnpm test -- ShotWorkspace.production` and `pnpm test -- ShotWorkspace` | multi-package tab 接入、`packageKey` binding join、restart PARTIAL/全绑定去重、partial resume 精确剩余 ID、V2 manifest 新 key、CREATE_FAILED fresh reinspection、WARNING/BLOCKED package-level gate、只传 READY item IDs、既有 Queue 手动 Start 边界、无 Start All/board executor；DEV-068 Queue/Monitor 回归保持可测。 |
 | Existing package/queue UI | `pnpm test -- ProductionPackageWorkspace ProductionQueueDrawer` | 单包工作区、Queue Drawer 和现有手动生产路径不回归。 |
 | Timer lifecycle | `pnpm test -- MultiPackageProductionBoard` and `pnpm test -- ShotWorkspace.production` | board 默认 5 秒、hidden 跳过、in-flight guard、卸载清理；父层只在 `multi-package` tab 且有 `CREATED`/`RUNNING` 时传入 polling enabled。 |
@@ -205,6 +206,7 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 - [ ] 确认 package/item 摘要、真实 manifest SHA-256、READY 默认 checked/enabled、WARNING unchecked/disabled 且进入单生产包处理、BLOCKED disabled。
 - [ ] 重启/重新加载后仅靠 Discovery、fresh Inspect 和 Bindings 重建 PARTIAL；核对已创建数量、剩余数量、Batch IDs，剩余全 READY 时可继续 resume。
 - [ ] 对 PARTIAL + WARNING/BLOCKED 样本确认 checkbox disabled、40 可创建/10 需人工确认等剩余计数正确，且不会偷偷 bulk create。
+- [ ] 对三包 bulk create 的 PARTIAL stop 样本确认首包显示 PARTIAL、后续未执行包显示 NOT_CREATED；首失败样本确认已成功包不显示 CREATE_FAILED、失败包显示 CREATE_FAILED、后续包显示 NOT_CREATED。
 - [ ] 修改 manifest 后重新发现，确认得到 V2 packageKey，V1 binding 不会被计入 V2 的已创建数据。
 - [ ] 验证 filters、100 packages/10000 items cap、空态、进度态、错误态和 partial summary 文案。
 - [ ] 点击创建：观察 package/chunk 串行顺序、首次失败停止后续、已成功 batch 保留、无自动打开/Start/Start All。
