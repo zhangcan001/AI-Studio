@@ -6,6 +6,7 @@ import type { AssetView } from "../../types/asset";
 import type { ProductionBatchDetail, ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
 import type { ProductionPackageBatchBinding, ProductionPackageDiscoveryPackage, ProductionPackageInspectionResult } from "../../types/productionPackage";
 import type { ProductionBatchReviewProductivity } from "../../services/tauriClient";
+import type { TaskView } from "../../types/task";
 import { ShotWorkspace } from "./ShotWorkspace";
 
 const ids = {
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   requeueProductionQueueItem: vi.fn(),
   revealProductionReviewAsset: vi.fn(),
   openProductionReviewOutputFolder: vi.fn(),
+  subscribeTaskUpdates: vi.fn(),
 }));
 
 vi.mock("../../services/tauriClient", async () => {
@@ -70,6 +72,10 @@ vi.mock("../../services/tauriClient", async () => {
     openProductionReviewOutputFolder: mocks.openProductionReviewOutputFolder,
   };
 });
+
+vi.mock("../../services/taskEvents", () => ({
+  subscribeTaskUpdates: mocks.subscribeTaskUpdates,
+}));
 
 vi.mock("./ProjectStructureTree", () => ({
   ProjectStructureTree: () => <div aria-label="项目结构" />,
@@ -111,6 +117,7 @@ const videoAsset: AssetView = {
 
 let ep2Status: "RUNNING" | "COMPLETED";
 let activeBindings: ProductionPackageBatchBinding[];
+let taskUpdateListener: ((task: TaskView) => void) | undefined;
 
 const discoveredPackages: ProductionPackageDiscoveryPackage[] = [
   {
@@ -358,6 +365,13 @@ beforeEach(() => {
   mocks.discoverProductionPackages.mockResolvedValue({ rootPath: "C:/season", packages: discoveredPackages });
   mocks.inspectProductionPackage.mockImplementation(async (_projectId: string, packageRoot: string) => inspections[packageRoot]);
   activeBindings = bindings;
+  taskUpdateListener = undefined;
+  mocks.subscribeTaskUpdates.mockImplementation(async (listener: (task: TaskView) => void) => {
+    taskUpdateListener = listener;
+    return () => {
+      if (taskUpdateListener === listener) taskUpdateListener = undefined;
+    };
+  });
   mocks.listProductionPackageBindings.mockImplementation(async () => activeBindings);
 
   mocks.listProductionQueues.mockImplementation(async () => [
@@ -387,16 +401,42 @@ afterEach(() => {
 
 describe("ShotWorkspace multi-package completion convergence", () => {
   it("converges a running multi-package batch to completed without manual refresh", async () => {
+    let holdNextEp2Detail = false;
+    let releaseStaleDetail: ((detail: ProductionBatchDetail) => void) | undefined;
+    const staleDetail = new Promise<ProductionBatchDetail>((resolve) => {
+      releaseStaleDetail = resolve;
+    });
+    mocks.getProductionQueue.mockImplementation(async (_projectId: string, batchId: string) => {
+      if (batchId === ids.ep2Batch && holdNextEp2Detail) {
+        holdNextEp2Detail = false;
+        return staleDetail;
+      }
+      return batchId === ids.ep2Batch
+        ? makeDetail(ids.ep2Batch, "EP2", ids.ep2Item, ep2Status)
+        : makeDetail(ids.ep10Batch, "EP10", ids.ep10Item, "READY");
+    });
+
     await renderRunningMultiPackageFixture();
 
     expect(within(boardRow("EP2")).getByText("运行中")).toBeTruthy();
     expect(within(queueRow(ids.ep2Batch)).getByText("运行中")).toBeTruthy();
     expect(screen.getByTestId("production-monitor").querySelector(".production-monitor-batch-status")?.textContent).toContain("生成中");
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    holdNextEp2Detail = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await flushAsyncWork();
+    expect(releaseStaleDetail).toBeTypeOf("function");
+
     ep2Status = "COMPLETED";
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
+    releaseStaleDetail?.(makeDetail(ids.ep2Batch, "EP2", ids.ep2Item, "RUNNING"));
     await flushAsyncWork();
 
     expect(within(boardRow("EP2")).getByText("已完成")).toBeTruthy();
@@ -406,6 +446,52 @@ describe("ShotWorkspace multi-package completion convergence", () => {
     expect(monitor.querySelector(".production-monitor-batch-status")?.textContent).toContain("已完成");
     expect(within(monitor).getByText("成品记录可用")).toBeTruthy();
 
+  });
+
+  it("refreshes the board immediately when visibility returns after completion", async () => {
+    await renderRunningMultiPackageFixture();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    ep2Status = "COMPLETED";
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    await flushAsyncWork();
+    expect(within(boardRow("EP2")).getByText("运行中")).toBeTruthy();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flushAsyncWork();
+
+    expect(within(boardRow("EP2")).getByText("已完成")).toBeTruthy();
+    expect(within(boardRow("EP2")).getByLabelText("100%，1/1")).toBeTruthy();
+  });
+
+  it("converges all production surfaces after a terminal task event", async () => {
+    await renderRunningMultiPackageFixture();
+
+    expect(taskUpdateListener).toBeTypeOf("function");
+    ep2Status = "COMPLETED";
+    taskUpdateListener?.({
+      id: "task-ep2",
+      projectId: "project-1",
+      status: "SUCCEEDED",
+      progress: { mode: "step", current: 1, total: 1 },
+      createdAt: "2026-09-01T00:00:00Z",
+      finishedAt: "2026-09-01T00:00:01Z",
+      outputAssetIds: [videoAsset.id],
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+    await flushAsyncWork();
+
+    expect(within(boardRow("EP2")).getByText("已完成")).toBeTruthy();
+    expect(within(boardRow("EP2")).getByLabelText("100%，1/1")).toBeTruthy();
+    expect(within(queueRow(ids.ep2Batch)).getByText("已完成")).toBeTruthy();
+    expect(screen.getByTestId("production-monitor").querySelector(".production-monitor-batch-status")?.textContent).toContain("已完成");
   });
 
   it("production queue summary converges after the running batch completes", async () => {

@@ -124,6 +124,7 @@ export function MultiPackageProductionBoard({
   const lastExternalSelectionRef = useRef(selectedPackageKeys === undefined ? "__unset__" : selectedPackageKeys.join("\u0000"));
   const lastPackageSignatureRef = useRef(packages.map(packageStateSignature).join("\u0000"));
   const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
 
   const externalSelectionSignature = selectedPackageKeys === undefined ? "__unset__" : selectedPackageKeys.join("\u0000");
   useEffect(() => {
@@ -147,15 +148,37 @@ export function MultiPackageProductionBoard({
   }, [packageSignature, packages, selectedPackageKeys]);
 
   useEffect(() => {
-    if (!pollingEnabled || !onRefresh || isDiscovering || refreshIntervalMs <= 0) return undefined;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "hidden" || refreshInFlightRef.current) return;
+    if (!pollingEnabled || !onRefresh || isDiscovering || refreshIntervalMs <= 0) {
+      refreshPendingRef.current = false;
+      return undefined;
+    }
+    let active = true;
+    const refresh = () => {
+      if (!active || document.visibilityState === "hidden") return;
+      if (refreshInFlightRef.current) {
+        refreshPendingRef.current = true;
+        return;
+      }
       refreshInFlightRef.current = true;
-      void Promise.resolve(onRefresh()).finally(() => {
+      void Promise.resolve().then(onRefresh).finally(() => {
         refreshInFlightRef.current = false;
+        if (active && refreshPendingRef.current) {
+          refreshPendingRef.current = false;
+          refresh();
+        }
       });
-    }, refreshIntervalMs);
-    return () => window.clearInterval(timer);
+    };
+    const timer = window.setInterval(refresh, refreshIntervalMs);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      refreshPendingRef.current = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [isDiscovering, onRefresh, pollingEnabled, refreshIntervalMs]);
 
   const effectiveStatus = (item: MultiPackageBoardPackage): MultiPackageBoardPackageStatus => {

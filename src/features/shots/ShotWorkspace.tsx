@@ -57,6 +57,7 @@ import type {
 import type {
   ProductionBatchReviewProductivity,
 } from "../../services/tauriClient";
+import { subscribeTaskUpdates } from "../../services/taskEvents";
 import type {
   SeriesPromptBulkRequest,
   SeriesPresetApplyRequest,
@@ -499,6 +500,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [multiPackageProgress, setMultiPackageProgress] = useState<MultiPackageBoardInspectProgress>();
   const multiPackageRunId = useRef(0);
   const multiPackageRefreshInFlight = useRef(false);
+  const multiPackageRefreshPending = useRef(false);
   const multiPackageMounted = useRef(true);
   const [recentlyCreatedProductionBatchIds, setRecentlyCreatedProductionBatchIds] = useState<string[]>([]);
   const [batchWorkflowPresets, setBatchWorkflowPresets] = useState<BatchWorkflowPreset[]>([]);
@@ -533,6 +535,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     return () => {
       multiPackageMounted.current = false;
       multiPackageRunId.current += 1;
+      multiPackageRefreshPending.current = false;
     };
   }, []);
 
@@ -657,7 +660,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }, [projectId]);
 
   const refreshMultiPackageBoard = useCallback(async () => {
-    if (!multiPackageMounted.current || multiPackageRefreshInFlight.current) return;
+    if (!multiPackageMounted.current) return;
+    if (multiPackageRefreshInFlight.current) {
+      multiPackageRefreshPending.current = true;
+      return;
+    }
     multiPackageRefreshInFlight.current = true;
     try {
       const bindings = await listProductionPackageBindings(projectId);
@@ -683,6 +690,10 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       if (multiPackageMounted.current) setError(`多生产包看板刷新失败：${toUserMessage(error)}`);
     } finally {
       multiPackageRefreshInFlight.current = false;
+      if (multiPackageMounted.current && multiPackageRefreshPending.current) {
+        multiPackageRefreshPending.current = false;
+        void refreshMultiPackageBoard();
+      }
     }
   }, [projectId, reloadProductionQueues]);
 
@@ -924,6 +935,39 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [mode, productionMonitorBatch, refreshProductionMonitor, selectedProductionBatchId]);
+
+  useEffect(() => {
+    if (mode !== "production") return undefined;
+    let active = true;
+    let refreshTimer: number | undefined;
+    let unlisten: (() => void) | undefined;
+    void subscribeTaskUpdates((task) => {
+      if (!active || task.projectId !== projectId || !["SUCCEEDED", "FAILED", "CANCELLED"].includes(task.status)) return;
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      // The queue runner persists the terminal batch projection shortly after the Task event.
+      refreshTimer = window.setTimeout(() => {
+        if (!active) return;
+        refreshTimer = undefined;
+        if (productionModeTab === "multi-package") {
+          void refreshMultiPackageBoard();
+        } else {
+          void reloadProductionQueues();
+        }
+        const batchId = productionMonitorBatchRef.current;
+        if (batchId) void refreshProductionMonitor(batchId);
+      }, 900);
+    })
+      .then((cleanup) => {
+        if (active) unlisten = cleanup;
+        else cleanup();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      unlisten?.();
+    };
+  }, [mode, productionModeTab, projectId, refreshMultiPackageBoard, refreshProductionMonitor, reloadProductionQueues]);
 
   useEffect(() => {
     if (mode !== "production") return;
