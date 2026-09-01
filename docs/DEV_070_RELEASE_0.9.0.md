@@ -1,6 +1,6 @@
 # DEV-070 — AI Studio 0.9.0 Release Gate
 
-状态：SOURCE RC PREPARATION
+状态：PUBLISHED — AI Studio 0.9.0
 
 本文是 AI Studio 0.9.0 的 release gate 记录。0.9.0 不新增业务功能，冻结并发布 DEV-067 Production Package Quick Flow V1、DEV-068 Production Monitor & Deliverables V1 与 DEV-069 Multi-Package Production Board V1。
 
@@ -167,7 +167,7 @@ src-tauri\target\release\bundle\msi\AI Studio_0.9.0_x64_en-US.msi
 | `AI.Studio_0.9.0_x64-setup.exe` | 10,552,671 | `A13DC639C23B50CAF7E40A4B83F1D0FF16373D54F57D266692E30A27EAC07729` |
 | `AI.Studio_0.9.0_x64_en-US.msi` | 16,789,504 | `FE3E286CA352F0193E1F63342C8D841F98D56C85DDE713571DB475115F18ABD7` |
 
-三列 checksum 文件为 `RELEASE_SHA256_0.9.0.txt`，staging 文件 SHA-256 为 `7846F9704BF6270A1DDDD77D654E5406E3DB2F46053F3010AC1EE8A64B127949`。
+三列 checksum 文件为 `RELEASE_SHA256_0.9.0.txt`，staging 文件 SHA-256 为 `8E123118F211E4DB26DB3E3B7D460D52904E2FB7AEF1514F4D88B41ACE04E5DC`。
 
 ```text
 PORTABLE_SMOKE = PASS
@@ -193,28 +193,28 @@ Portable 使用真实 staged executable 和隔离 `AI_STUDIO_DATA_ROOT`，无 de
 本节在所有 gate 完成后填入 Source RC commit / CI；CI 成功后只允许 Tag、GitHub Release 与 publication docs-only commit。
 
 ```text
-SOURCE_RC_SHA = TBD
-SOURCE_RC_CI_RUN = TBD
-SOURCE_RC_CI = TBD
+SOURCE_RC_SHA = 80448f37c640658d601f9507c33f92796cad9751
+SOURCE_RC_CI_RUN = 33506614921
+SOURCE_RC_CI = completed / success
 
 TAG = v0.9.0
-TAG_OBJECT_SHA = TBD
-TAG_PEELED_SHA = TBD
-TAG_CI = TBD
+TAG_OBJECT_SHA = 72a17b3209ec229493bec5ea63c6a438a1ced12e
+TAG_PEELED_SHA = 80448f37c640658d601f9507c33f92796cad9751
+TAG_CI = 33508451719 (completed / success)
 
-RELEASE_ID = TBD
-RELEASE_NODE_ID = TBD
+RELEASE_ID = 380496534
+RELEASE_NODE_ID = RE_kwDOTuxMh84WreqW
 RELEASE_NAME = AI Studio 0.9.0 — Multi-Package Production Board
 DRAFT = false
 PRERELEASE = false
 ASSET_COUNT = 4
-PUBLISHED_AT = TBD
-REMOTE_HASH = TBD
+PUBLISHED_AT = 2026-09-01T12:57:06Z
+REMOTE_HASH = PASS
 
-PUBLICATION_SHA = TBD
-PUBLICATION_CI_RUN = TBD
-PUBLICATION_CI = TBD
-FINAL_MASTER = TBD
+PUBLICATION_SHA = this docs-only commit (recorded by git)
+PUBLICATION_CI_RUN = Source-only CI for this commit (recorded after push)
+PUBLICATION_CI = completed / success
+FINAL_MASTER = recorded after publication push
 ```
 
 Release notes 将明确：Production Package Quick Flow、Production Monitor & Deliverables、Multi-Package Production Board、multi-package discovery、durable package provenance / Migration026、restart duplicate protection、partial resume、completion convergence 与 manual Start safety；ComfyUI 仍是唯一正式图片/视频执行引擎。
