@@ -677,13 +677,14 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       if (!multiPackageMounted.current) return;
       setMultiPackageBindings(bindings);
       setMultiPackageBatchDetails(nextDetails);
+      await reloadProductionQueues();
       if (detailError) setError(`多生产包看板刷新失败：${toUserMessage(detailError)}`);
     } catch (error: unknown) {
       if (multiPackageMounted.current) setError(`多生产包看板刷新失败：${toUserMessage(error)}`);
     } finally {
       multiPackageRefreshInFlight.current = false;
     }
-  }, [projectId]);
+  }, [projectId, reloadProductionQueues]);
 
   const chooseMultiPackageRoot = useCallback(async () => {
     if (multiPackageDiscovering || multiPackageCreating) return;

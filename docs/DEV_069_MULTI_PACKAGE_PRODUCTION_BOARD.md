@@ -1,12 +1,28 @@
 # DEV-069 — Multi-Package Production Board V1
 
-状态：DEV-069A WARNING safety fix、DEV-069B durable packageKey 与 partial resume、DEV-069C operation truth closure 已实现；最终回归/构建/真人 UAT 待完成
+状态：DEV-069D 修复前真人 UAT 失败，保留失败证据；DEV-069 最终真人 UAT 待完成
 
 DEV-069A WARNING safety = PASS
 
 验收标记：`PENDING HUMAN UAT`
 
 本文是 DEV-069 V1 的可执行验收契约。实现已接入当前工作树；最终回归、桌面构建和真人 UAT 尚待主线程完成。本文件不声明这些门禁已通过。
+
+## DEV-069D Live UAT Failure Record（保留）
+
+本节记录修复前真实生产失败，不得删除、覆盖或改写为 PASS。
+
+```text
+TESTED_SHA = 12c8fbbbc7ab15bb27afda2422bdd73cafa63d5f
+REAL_H3 = PASS
+VIDEO_ASSET = PASS
+VIDEO_FILE_SIZE = 457274 bytes
+MANUAL_START_ISOLATION = PASS
+BOARD_PROGRESS_TRUTH = FAIL
+DEV-069 = BLOCKED
+```
+
+EP2 的数据库 Batch 已为 `COMPLETED`，ProductionBatchItem 已为 `SUCCEEDED`，Task 已为 `SUCCEEDED`，视频文件存在且大小为 457274 bytes；EP10 保持 `READY/PENDING`，无 Task、无 ComfyUI 提交。真实 H3 完成后等待 20 秒，未点击刷新、未切换 Tab、未重启应用，Multi-Package Board 仍显示“生成中”、`0 / 1`、`0%`。因此该轮 `REAL_H3`、`VIDEO_ASSET` 与 `MANUAL_START_ISOLATION` 通过，但 `BOARD_PROGRESS_TRUTH` 失败，DEV-069 保持 `BLOCKED`。
 
 DEV-069A 冻结的安全规则：`READY` 才允许从 Multi-Package Board 批量创建；`WARNING` 不得在 Board 创建，必须进入单生产包工作区人工处理；`BLOCKED` 禁止创建。Board 的禁用 checkbox 不是唯一安全门，Host 创建前仍会重新 inspection 并执行 package-level gate。
 
