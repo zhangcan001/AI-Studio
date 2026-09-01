@@ -1,12 +1,12 @@
 # DEV-069 — Multi-Package Production Board V1
 
-状态：DEV-069D 修复前真人 UAT 失败，保留失败证据；DEV-069 最终真人 UAT 待完成
+状态：DEV-069 = PASS（DEV-069D Live Completion Convergence 修复及最终真人 UAT 已完成）
 
 DEV-069A WARNING safety = PASS
 
-验收标记：`PENDING HUMAN UAT`
+验收标记：`PASS`
 
-本文是 DEV-069 V1 的可执行验收契约。实现已接入当前工作树；最终回归、桌面构建和真人 UAT 尚待主线程完成。本文件不声明这些门禁已通过。
+本文是 DEV-069 V1 的可执行验收契约。实现、最终回归、桌面构建和最终真人 UAT 均已完成。下方保留 DEV-069D 修复前的真实失败记录，当前最终状态以本次 closure evidence 为准。
 
 ## DEV-069D Live UAT Failure Record（保留）
 
@@ -23,6 +23,12 @@ DEV-069 = BLOCKED
 ```
 
 EP2 的数据库 Batch 已为 `COMPLETED`，ProductionBatchItem 已为 `SUCCEEDED`，Task 已为 `SUCCEEDED`，视频文件存在且大小为 457274 bytes；EP10 保持 `READY/PENDING`，无 Task、无 ComfyUI 提交。真实 H3 完成后等待 20 秒，未点击刷新、未切换 Tab、未重启应用，Multi-Package Board 仍显示“生成中”、`0 / 1`、`0%`。因此该轮 `REAL_H3`、`VIDEO_ASSET` 与 `MANUAL_START_ISOLATION` 通过，但 `BOARD_PROGRESS_TRUTH` 失败，DEV-069 保持 `BLOCKED`。
+
+## DEV-069D Live Completion Closure
+
+修复提交：`9478defe94dacf9de2c539dfcee380af09c38803`（`fix: converge multi-package production surfaces`）。Board 增加 in-flight pending refresh 与 visible 恢复刷新，ShotWorkspace 接入既有 Task terminal event，使真实 H3 完成后 Board、Queue、Monitor 收敛到同一 Host/DB truth；没有新增 Queue、executor、scheduler 或 ComfyUI 直连路径。
+
+修复后的 Source-only CI：`33476280604`，`completed / success`。本地最终回归：Frontend `100` 个测试文件、`437` 个测试通过；Rust `700` passed、`0` failed、`1` ignored；TypeScript、build、Rust format/check 均通过。最新 0.8.1 release executable 已完成构建，SHA-256 为 `3CFC58744CA0C37775252E595C0CAFDBD9757F37E20C5B9AF62ADD43E26014E0`。
 
 DEV-069A 冻结的安全规则：`READY` 才允许从 Multi-Package Board 批量创建；`WARNING` 不得在 Board 创建，必须进入单生产包工作区人工处理；`BLOCKED` 禁止创建。Board 的禁用 checkbox 不是唯一安全门，Host 创建前仍会重新 inspection 并执行 package-level gate。
 
@@ -207,42 +213,105 @@ Fixture 还必须验证 EP4/EP5 的 batch、chunk 与 package item IDs 可追溯
 
 ## 7. Human UAT checklist
 
-状态标记：`PENDING HUMAN UAT`
+状态标记：`PASS`
 
 ### Prerequisites
 
 - Windows desktop build 基于产品版本 `0.8.1`，数据库可从 Migration 025 升级到 026。
-- 已准备一个测试 root，包含 5 个 package（含 nested depth、自然排序、一个 symlink/junction boundary、一个重复 canonical alias）和总量在 caps 内的真实 `production-package.json`；不得把该 fixture 提交到仓库。
+- 本次最终真人 UAT 使用独立外部 root `SeasonDemo_UAT_20260901B`，发现 4 个真实 `production-package.json`（`EP2_NEW`、`EP03_WARNING_NEW`、`EP04_BLOCKED_NEW`、`EP10_NEW`）；fixture 未提交到仓库。深度、symlink/junction boundary、canonical alias、caps 与 partial/failure 语义由自动化回归覆盖。
 - 已准备可验证的既有 batch truth：至少一个 CREATED、一个 RUNNING、一个 COMPLETED、一个 FAILED item/batch；若要验证真实生产，ComfyUI endpoint、workflow、模型和 GPU 必须由人工确认可用。
 - DEV-068 的真实 Production Monitor/Queue UAT 可作为 queue/monitor 基线前置条件，参考 [DEV_068_PRODUCTION_MONITOR_DELIVERABLES.md](</C:/Users/ADMIN/Documents/ChatGPT/AI%20Studio/docs/DEV_068_PRODUCTION_MONITOR_DELIVERABLES.md>)；它不是 DEV-069 board 的通过证明。
 
-### Steps and evidence placeholders
+### Steps and evidence
 
-- [ ] 选择 root：root 自身 package、depth 0..4、manifest stop、自然排序 `EP2 < EP10` 正确。
-- [ ] 确认 package/item 摘要、真实 manifest SHA-256、READY 默认 checked/enabled、WARNING unchecked/disabled 且进入单生产包处理、BLOCKED disabled。
-- [ ] 重启/重新加载后仅靠 Discovery、fresh Inspect 和 Bindings 重建 PARTIAL；核对已创建数量、剩余数量、Batch IDs，剩余全 READY 时可继续 resume。
-- [ ] 对 PARTIAL + WARNING/BLOCKED 样本确认 checkbox disabled、40 可创建/10 需人工确认等剩余计数正确，且不会偷偷 bulk create。
-- [ ] 对三包 bulk create 的 PARTIAL stop 样本确认首包显示 PARTIAL、后续未执行包显示 NOT_CREATED；首失败样本确认已成功包不显示 CREATE_FAILED、失败包显示 CREATE_FAILED、后续包显示 NOT_CREATED。
-- [ ] 修改 manifest 后重新发现，确认得到 V2 packageKey，V1 binding 不会被计入 V2 的已创建数据。
-- [ ] 验证 filters、100 packages/10000 items cap、空态、进度态、错误态和 partial summary 文案。
-- [ ] 点击创建：观察 package/chunk 串行顺序、首次失败停止后续、已成功 batch 保留、无自动打开/Start/Start All。
-- [ ] Resume：确认已绑定 item 被跳过且不重复创建；新 chunk provenance 从本次 remaining 的 `chunkIndex=0` 开始，失败项可进入既有 Queue 的人工处理。
-- [ ] 在既有 Queue 手动点击一个 batch 的 Start；确认 board 只聚合 CREATED/RUNNING/COMPLETED/COMPLETED_WITH_FAILURE，不产生第二 executor 或直接 Comfy POST。
-- [ ] 删除/移动 source directory 或修改 manifest 后重新发现；确认出现新 key/新 inspection，旧 DB binding/batch/item truth 仍可读。
-- [ ] 切换 project/root、隐藏窗口、恢复窗口、离开页面；确认只有一个 timer、无重复请求、无旧响应污染。
+真人执行通过：
 
-证据占位（完成真人 UAT 后填写，当前不得填 PASS）：
+- [x] Discovery、自然排序 `EP2_NEW < EP10_NEW`、自动 inspection、READY/WARNING/BLOCKED 状态与默认选择。
+- [x] Bulk create 只创建 EP2/EP10，按 Board 顺序串行写入；没有自动 Start、Task 或 ComfyUI prompt。
+- [x] 只手动 Start EP2；EP10 始终没有 Task/prompt。EP2 真实 H3 完成后 Board 自动收敛为完成。
+- [x] Restart 后重新 Discovery/Inspect/Binding join，识别既有 Batch 并禁用重复创建。
+- [x] EP10 manifest 合法 metadata 修改产生 V2 packageKey；V1 binding 保留，V2 未创建。
+- [x] EP2 source 移动为 `EP2_MOVED` 后，既有 Batch/Task/Asset 仍可从 Production Monitor 播放并打开文件位置；Board 不删除历史 truth。
+- [x] `EP03_WARNING_NEW` 通过【在单生产包中处理】进入单包工作区；未从 Board 创建 WARNING 包。
+
+自动化证据：
+
+- [x] PARTIAL stop、failure stop、restart、partial resume、chunk provenance、WARNING/BLOCKED package gate、filters/caps、visibility/in-flight/unmount 及 DEV-069D completion convergence 回归通过。
+
+最终证据：
 
 ```text
-UAT_STATUS = PENDING HUMAN UAT
-BUILD_ARTIFACT = [待填写：0.8.1 artifact/path]
-DB_MIGRATION = [待填写：实际 migration evidence]
-DISCOVERY_EVIDENCE = [待填写：截图/日志/fixture 摘要]
-PROVENANCE_EVIDENCE = [待填写：project/package/batch/chunk/package item IDs]
-SERIAL_CREATE_EVIDENCE = [待填写：顺序与 first-failure 记录]
-QUEUE_EVIDENCE = [待填写：既有 Queue 手动 Start 记录]
-TIMER_EVIDENCE = [待填写：visibility/in-flight/unmount 记录]
-COMFYUI_LIVE = [NOT RUN / 待填写：若人工执行，注明不是 board executor]
+UAT_STATUS = PASS
+UAT_ROOT = SeasonDemo_UAT_20260901B (external isolated root)
+BUILD_ARTIFACT = C:\Users\ADMIN\Documents\ChatGPT\AI Studio\src-tauri\target\release\ai-studio.exe
+BUILD_SHA256 = 3CFC58744CA0C37775252E595C0CAFDBD9757F37E20C5B9AF62ADD43E26014E0
+DB_MIGRATION = 026 applied; Migration027 absent
+DISCOVERY = PASS
+DISCOVER_COUNT = 4
+NATURAL_ORDER = PASS (EP2_NEW before EP10_NEW)
+AUTO_INSPECT = PASS
+READY_DEFAULT_SELECTED = PASS
+WARNING_SELECTABLE = NO
+WARNING_SINGLE_PACKAGE_ENTRY = PASS
+BLOCKED_SELECTABLE = NO
+BULK_CREATE = PASS
+SERIAL_CREATE = PASS (EP2 binding 2026-09-01T09:07:15.603505600Z; EP10 binding 2026-09-01T09:07:15.639527500Z)
+AUTO_START = NO
+DURABLE_BINDING = PASS (source_kind=PRODUCTION_PACKAGE)
+
+EP2_PACKAGE_KEY = c6cbdf4c57a2a35245296540b643d52c91935c8ce36203f941e595faf72ff1db
+EP2_MANIFEST_SHA256 = 12d8f14519a565e5127d6c3353e264649e1aba5dfa26ad145976817d529b3789
+EP2_BATCH_ID = pbt_0905270ee3ec4fa0abf5d0116480423f
+EP2_BATCH_ITEM_ID = pbi_4b0102ed234d449da712a47cab584a14
+EP2_SOURCE_ITEM_ID = EP2-NEW-SH001
+EP2_TASK_ID = tsk_3d9bc5f4-4f37-4292-a734-740f5158659e
+EP2_PROMPT_ID = 5f87a182-9919-4dcb-9231-2f0e5382b646
+EP2_ASSET_ID = ast_2a915c52-bae0-4204-98e1-737d75da7e48
+EP2_VIDEO_FILE_SIZE = 682613 bytes
+
+EP10_PACKAGE_KEY_V1 = d07526c1c9a6b769fa2edbc542eb03591803510a8bd5aa17cb20e7d2475b8187
+EP10_MANIFEST_SHA256_V1 = 5a2d8d8a106310e876082a04e6ca85b022e9f152e7a926c064f53a076c93a1be
+EP10_V1_BATCH_ID = pbt_d9fbf530e2c849cabe5763f1e7421d21
+EP10_V1_STATUS = READY/PENDING; no Task; no prompt
+EP10_PACKAGE_KEY_V2 = 0ba041c58ba0195f9820f0dd5fb9b1b9db464bdaca38172183a24491477ca148
+EP10_MANIFEST_SHA256_V2 = 34546a00e31e45be0a717ed35a8fe98bb6130977dfee8941c98d2cc65679f237
+EP10_V2_BATCH = NONE
+NEW_VERSION_DETECTION = PASS
+OLD_VERSION_PRESERVED = PASS
+
+EP2_MANUAL_START = PASS
+EP10_AUTO_START = NO
+BOARD_LIVE_PROGRESS = PASS
+REAL_H3 = PASS
+VIDEO_ASSET = PASS
+BOARD_PROGRESS_TRUTH = PASS
+MANUAL_START_ISOLATION = PASS
+RESTART_BINDING = PASS
+RESTART_DUPLICATE_PROTECTION = PASS
+RESTART_BOARD_TRUTH = PASS
+SOURCE_REMOVAL_SAFE = PASS (EP2_NEW renamed to EP2_MOVED)
+PARTIAL_STOP_TRUTH = AUTOMATED_PASS
+FAILURE_STOP_TRUTH = AUTOMATED_PASS
+PARTIAL_RESTART = AUTOMATED_PASS
+PARTIAL_RESUME = AUTOMATED_PASS
+RESUME_CHUNK_PROVENANCE = AUTOMATED_PASS
+QUEUE_EVIDENCE = PASS (existing Queue opened Production Monitor; playback/file location verified)
+TIMER_EVIDENCE = AUTOMATED_PASS (single timer, visibility, in-flight, terminal event convergence)
+COMFYUI_LIVE = PASS (/system_stats=200; /object_info=200)
+
+IMPLEMENTATION_SHA = 56a40aad924a4d9fe2ec0de43fe36291fd6094da
+WARNING_FIX_SHA = af67df035160b9bba72246960d491ea026af38cc
+IDENTITY_RESUME_FIX_SHA = 57d397adb7168e3ba14813741d1361705fde6fa3
+OPERATION_TRUTH_FIX_SHA = 12c8fbbbc7ab15bb27afda2422bdd73cafa63d5f
+LIVE_COMPLETION_FIX_SHA = 9478defe94dacf9de2c539dfcee380af09c38803
+SOURCE_CI = 33476280604 success
+PRODUCT_VERSION = 0.8.1
+MIGRATION = 026
+MIGRATION027 = ABSENT
+P0 = NONE
+P1 = NONE
+P2 = NONE
+P3 = NONE
 ```
 
 ## 8. Risks, rollback and observability
@@ -255,6 +324,6 @@ COMFYUI_LIVE = [NOT RUN / 待填写：若人工执行，注明不是 board execu
 ## 9. Release guard
 
 - Product/package/Cargo 版本保持 `0.8.1`。
-- DEV-069 不创建 `v0.8.2`、`v0.9.0`、任何 release、tag 或 push。
-- 若未来在 push 前运行 CI，必须是 source-only CI，并记录真实 URL/SHA/status；本文件不预填 CI、build 或 UAT 结果。
+- DEV-069 不创建 `v0.8.2`、`v0.9.0`、任何 release 或 tag；本次 closure 仅允许 docs-only commit 推送到 `master`。
+- 本次 closure 的 Source-only CI、build 和 UAT 证据已记录在上方；docs-only commit 对应的最终 CI run 在交付报告中记录。
 - `pnpm tauri build` 只是本地验证命令，不构成 release 证据。
