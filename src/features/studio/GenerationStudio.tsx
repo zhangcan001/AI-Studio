@@ -8,6 +8,7 @@ import {
   deletePreset,
   getPreferredPreset,
   getPromptLibraryEntry,
+  getProjectWorkflowConfig,
   listPresets,
   refreshWorkflowLibrary,
   startProductionQueue,
@@ -20,6 +21,7 @@ import type { RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ReusableGenerationDraft } from "../../types/history";
 import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
+import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
@@ -57,15 +59,12 @@ import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime
 import { splitPromptBlocks } from "../assets/assetVideoBatch";
 import { WorkflowSelector } from "../runtime/WorkflowSelector";
 import {
-  clearSelectedRecipeRef,
   filterImageRecipes,
   findRecipe,
   imageRecipeCapability,
   migrateGenerationValues,
-  readSelectedRecipeRef,
   recipeRef,
   sameRecipeRef,
-  writeSelectedRecipeRef,
   type SelectedRecipeRef,
 } from "../runtime/workflowCapabilities";
 
@@ -128,8 +127,9 @@ export function GenerationStudio({
     [catalog],
   );
   const [manualSelection, setManualSelection] = useState<SelectedRecipeRef | undefined>(
-    () => readSelectedRecipeRef(projectId, "image"),
+    undefined,
   );
+  const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
   const recommendedWorkflow = useMemo(
     () => productCatalog.find((recipe) => recipe.workflowId === KERA2_WORKFLOW_ID && kera2RecipeContract(recipe).ok)
       ?? productCatalog[0],
@@ -138,6 +138,16 @@ export function GenerationStudio({
   const manualWorkflow = useMemo(
     () => findRecipe(productCatalog, manualSelection),
     [manualSelection, productCatalog],
+  );
+  const projectDefaultWorkflow = useMemo(
+    () => projectWorkflowConfig?.imageDefault?.available
+      ? findRecipe(productCatalog, projectWorkflowConfig.imageDefault)
+      : undefined,
+    [productCatalog, projectWorkflowConfig],
+  );
+  const staleProjectDefault = Boolean(
+    projectWorkflowConfig?.imageDefault
+      && (!projectWorkflowConfig.imageDefault.available || !projectDefaultWorkflow),
   );
   const values = useStudioStore((state) => state.values);
   const draftDirty = useStudioStore((state) => state.draftDirty);
@@ -213,7 +223,11 @@ export function GenerationStudio({
     setDashboardPromptTargetFieldKey("");
     setPresetEditorOpen(false);
     setTemplateEditorOpen(false);
-    setManualSelection(readSelectedRecipeRef(projectId, "image"));
+    setManualSelection(undefined);
+    setProjectWorkflowConfig(undefined);
+    void getProjectWorkflowConfig(projectId)
+      .then(setProjectWorkflowConfig)
+      .catch(() => setProjectWorkflowConfig({ projectId, videoModeOverrides: [] }));
   }, [projectId]);
 
   async function saveProjectTemplate() {
@@ -233,7 +247,7 @@ export function GenerationStudio({
         && recipe.recipeId === selectedWorkflow.recipeId
       ))
       : undefined;
-    const next = explicitDraft ?? manualWorkflow ?? recommendedWorkflow;
+    const next = explicitDraft ?? manualWorkflow ?? projectDefaultWorkflow ?? recommendedWorkflow;
     if (
       next?.workflowVersionId !== selectedWorkflow?.workflowVersionId ||
       next?.recipeId !== selectedWorkflow?.recipeId
@@ -241,14 +255,13 @@ export function GenerationStudio({
       setSelectedWorkflow(next);
       setMissingAssetFields(new Set());
     }
-  }, [manualWorkflow, productCatalog, recommendedWorkflow, selectedWorkflow, setSelectedWorkflow]);
+  }, [manualWorkflow, productCatalog, projectDefaultWorkflow, recommendedWorkflow, selectedWorkflow, setSelectedWorkflow]);
 
   useEffect(() => {
     if (!manualSelection || manualWorkflow || !productCatalog.length) return;
-    clearSelectedRecipeRef(projectId, "image");
     setManualSelection(undefined);
-    setNotice("上次使用的工作流当前不可用，已切换到推荐工作流。");
-  }, [manualSelection, manualWorkflow, productCatalog.length, projectId]);
+    setNotice("本次手动选择的工作流当前不可用，已切换到项目默认或推荐工作流。");
+  }, [manualSelection, manualWorkflow, productCatalog.length]);
 
   function applyPendingAsset(field: RecipeField, replaceSingle: boolean) {
     if (!selectedWorkflow || !pendingAssetIntent) return;
@@ -865,7 +878,6 @@ export function GenerationStudio({
   function selectWorkflowFromUx(workflow: RecipeViewModel) {
     if (workflow.workflowVersionId === selectedWorkflow?.workflowVersionId && workflow.recipeId === selectedWorkflow.recipeId) return;
     if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认切换工作流吗？")) return;
-    writeSelectedRecipeRef(projectId, "image", recipeRef(workflow));
     setManualSelection(recipeRef(workflow));
     const currentState = useStudioStore.getState();
     if (currentState.selectedWorkflow) {
@@ -883,13 +895,14 @@ export function GenerationStudio({
   function restoreRecommendedWorkflow() {
     if (!recommendedWorkflow) return;
     if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认恢复推荐工作流吗？")) return;
-    clearSelectedRecipeRef(projectId, "image");
     setManualSelection(undefined);
+    const fallbackWorkflow = projectDefaultWorkflow ?? recommendedWorkflow;
+    if (!fallbackWorkflow) return;
     const currentState = useStudioStore.getState();
     if (currentState.selectedWorkflow) {
-      currentState.loadDraft(recommendedWorkflow, migrateGenerationValues(currentState.selectedWorkflow, recommendedWorkflow, currentState.values));
+      currentState.loadDraft(fallbackWorkflow, migrateGenerationValues(currentState.selectedWorkflow, fallbackWorkflow, currentState.values));
     } else {
-      setSelectedWorkflow(recommendedWorkflow);
+      setSelectedWorkflow(fallbackWorkflow);
     }
     setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
@@ -968,12 +981,13 @@ export function GenerationStudio({
           stage="image"
           candidates={productCatalog}
           selected={selectedWorkflow}
-          recommended={recommendedWorkflow}
-          selectionSource={selectedWorkflow && manualSelection && sameRecipeRef(selectedWorkflow, manualSelection) ? "manual" : selectedWorkflow && recommendedWorkflow && sameRecipeRef(selectedWorkflow, recommendedWorkflow) ? "recommended" : "compatible"}
+          recommended={projectDefaultWorkflow ?? recommendedWorkflow}
+          selectionSource={selectedWorkflow && manualSelection && sameRecipeRef(selectedWorkflow, manualSelection) ? "manual" : selectedWorkflow && projectDefaultWorkflow && sameRecipeRef(selectedWorkflow, projectDefaultWorkflow) ? "project_default" : selectedWorkflow && recommendedWorkflow && sameRecipeRef(selectedWorkflow, recommendedWorkflow) ? "recommended" : "compatible"}
           onSelect={selectWorkflowFromUx}
           onRestoreRecommendation={restoreRecommendedWorkflow}
           onOpenWorkflows={onOpenWorkflows ? () => onOpenWorkflows() : undefined}
         />
+        {staleProjectDefault && <p className="settings-warning" role="alert">项目图片默认工作流已失效，当前仅临时使用兼容/推荐工作流；请在项目设置中重新选择或清除绑定。</p>}
         {selectedWorkflow && (
           <>
             {studioMode !== "batch" && <>

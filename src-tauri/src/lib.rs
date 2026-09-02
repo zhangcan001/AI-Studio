@@ -10,7 +10,8 @@ pub use application::ports::{
     AssetDeletionRepository, AssetRepository, AssetStore, AssetUsageRepository,
     AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProductionItemReviewRepository, ProductionQueueRepository,
-    ProjectRecord, ProjectRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
+    ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
+    ProjectWorkflowBindingRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
     WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
@@ -19,8 +20,8 @@ pub use infrastructure::database::{
     SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
     SqliteProductionItemReviewRepository, SqliteProductionQueueRepository, SqliteProjectRepository,
-    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRunRepository,
+    SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository, SqliteTaskRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -60,6 +61,7 @@ use application::{
     project_manifest_service::ProjectManifestService,
     project_service::ProjectService,
     project_template_service::ProjectTemplateService,
+    project_workflow_binding_service::ProjectWorkflowBindingService,
     prompt_library_service::PromptLibraryService,
     prompt_template_bulk_service::PromptTemplateBulkService,
     prompt_template_service::PromptTemplateService,
@@ -440,8 +442,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_library_source.clone(),
                 workflow_library_service.clone(),
                 workflow_onboarding_service.clone(),
-                runtime_repository,
-                runtime_state_repository,
+                runtime_repository.clone(),
+                runtime_state_repository.clone(),
                 package_store,
                 clock.clone(),
             ));
@@ -680,6 +682,18 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 data_dirs.cache.clone(),
             ));
             let project_manifest_service = Arc::new(ProjectManifestService::new(database_pool.clone()));
+            let project_workflow_binding_repository: Arc<dyn application::ports::ProjectWorkflowBindingRepository> = Arc::new(
+                infrastructure::database::SqliteProjectWorkflowBindingRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let project_workflow_binding_service = Arc::new(ProjectWorkflowBindingService::new(
+                project_workflow_binding_repository,
+                project_repository.clone(),
+                runtime_repository,
+                runtime_state_repository,
+                clock.clone(),
+            ));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository.clone(),
                 definition_repository.clone(),
@@ -801,6 +815,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_service,
                 project_backup_service,
                 project_manifest_service,
+                project_workflow_binding_service,
                 preset_service,
                 prompt_library_service,
                 prompt_template_service,
@@ -1066,6 +1081,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::project::project_list,
             commands::project::project_create,
             commands::project::project_update,
+            commands::project::project_workflow_config_get,
+            commands::project::project_workflow_config_replace,
             commands::project::project_backup_export,
             commands::project::project_backup_inspect,
             commands::project::project_backup_restore,

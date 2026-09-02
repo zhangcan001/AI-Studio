@@ -305,6 +305,15 @@ export function writeProjectWorkflowOverrides(
   }
 }
 
+export function clearProjectWorkflowOverrides(projectId: string): void {
+  if (typeof globalThis.localStorage === "undefined") return;
+  try {
+    globalThis.localStorage.removeItem(projectWorkflowOverridesStorageKey(projectId));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function findTextarea(
   recipe: RecipeViewModel,
   keys: ReadonlySet<string>,

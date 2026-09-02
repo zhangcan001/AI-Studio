@@ -9,7 +9,7 @@ interface Props {
   candidates: RecipeViewModel[];
   selected?: RecipeViewModel;
   recommended?: RecipeViewModel;
-  selectionSource?: "manual" | "recommended" | "compatible";
+  selectionSource?: "manual" | "project_mode" | "project_default" | "recommended" | "compatible";
   onSelect: (recipe: RecipeViewModel) => void;
   onRestoreRecommendation: () => void;
   onOpenWorkflows?: (recipe?: RecipeViewModel) => void;
@@ -60,7 +60,7 @@ export function WorkflowSelector({
         </div>
         <div className="workflow-selector-status">
           <span className={selectionSource === "manual" ? "workflow-selector-badge workflow-selector-badge-manual" : "workflow-selector-badge"}>
-            {selectionSource === "manual" ? "手动选择" : isRecommended ? "推荐" : "兼容"}
+            {selectionSource === "manual" ? "手动选择" : selectionSource === "project_mode" ? "项目模式" : selectionSource === "project_default" ? "项目默认" : isRecommended ? "推荐" : "兼容"}
           </span>
           {selected && <span className="workflow-selector-origin">{isBuiltin ? "内置" : "自定义"}</span>}
           <button

@@ -190,7 +190,7 @@ fn dev036_renderer_enforces_expanded_prompt_limit() {
 }
 
 #[tokio::test]
-async fn dev036_backup_v15_preserves_template_source_and_frozen_stage_snapshot() {
+async fn dev036_backup_v16_preserves_template_source_and_frozen_stage_snapshot() {
     let directory = tempdir().expect("temporary directory should be created");
     let pool = initialize(&directory.path().join("app.db"))
         .await
@@ -261,15 +261,15 @@ async fn dev036_backup_v15_preserves_template_source_and_frozen_stage_snapshot()
         directory.path().join("projects"),
         directory.path().join("cache"),
     );
-    let archive_path = directory.path().join("dev036-v15.zip");
+    let archive_path = directory.path().join("dev036-v16.zip");
     service
         .export("dev036-backup", archive_path.clone())
         .await
-        .expect("v15 backup should export");
+        .expect("v16 backup should export");
     let inspection = service
         .inspect(archive_path.clone())
         .await
-        .expect("v15 backup should inspect");
+        .expect("v16 backup should inspect");
     assert_eq!(inspection.prompt_entries, 1);
     assert_eq!(inspection.shots, 1);
 
@@ -284,7 +284,7 @@ async fn dev036_backup_v15_preserves_template_source_and_frozen_stage_snapshot()
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&manifest).expect("manifest should be JSON")
             ["version"],
-        15
+        16
     );
     let mut project = String::new();
     archive

@@ -79,7 +79,7 @@ mod tests {
                'shot_reference_set_bindings', 'consistency_scope_profile_bindings',
                'consistency_scope_reference_set_bindings', 'production_preparation_snapshots',
                'script_sources', 'script_import_drafts',
-               'production_package_batch_bindings')",
+               'production_package_batch_bindings', 'project_workflow_bindings')",
         )
         .fetch_one(pool)
         .await
@@ -95,13 +95,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 55);
+        assert_eq!(table_count(&pool).await, 56);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            26
+            27
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -135,6 +135,35 @@ mod tests {
         .await
         .expect("workflow version metadata should be readable");
         assert_eq!(workflow_version_columns, vec!["package_name"]);
+        let project_workflow_binding_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('project_workflow_bindings') ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("project workflow binding columns should be readable");
+        assert_eq!(
+            project_workflow_binding_columns,
+            vec![
+                "project_id",
+                "stage",
+                "mode",
+                "workflow_version_id",
+                "recipe_id",
+                "created_at",
+                "updated_at"
+            ]
+        );
+        let project_workflow_binding_primary_key = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('project_workflow_bindings')
+             WHERE pk > 0 ORDER BY pk",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("project workflow binding primary key should be readable");
+        assert_eq!(
+            project_workflow_binding_primary_key,
+            vec!["project_id", "stage", "mode"]
+        );
         let runtime_state_columns = sqlx::query_scalar::<_, String>(
             "SELECT name FROM pragma_table_info('workflow_runtime_states') WHERE name IN ('archived', 'archived_at') ORDER BY cid",
         )
@@ -232,7 +261,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 55);
+        assert_eq!(table_count(&second_pool).await, 56);
         second_pool.close().await;
     }
 

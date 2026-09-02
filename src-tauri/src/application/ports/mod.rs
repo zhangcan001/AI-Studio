@@ -19,6 +19,7 @@ pub mod production_queue_repository;
 pub mod production_structure_repository;
 pub mod project_directory_store;
 pub mod project_repository;
+pub mod project_workflow_binding_repository;
 pub mod prompt_library_repository;
 pub mod reference_anchor_repository;
 pub mod reference_set_repository;
@@ -84,6 +85,9 @@ pub use production_structure_repository::{
 };
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
+pub use project_workflow_binding_repository::{
+    ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository,
+};
 pub use prompt_library_repository::{
     PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
 };

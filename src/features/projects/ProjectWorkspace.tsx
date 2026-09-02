@@ -11,13 +11,16 @@ import {
   updateProjectTemplate,
 } from "../../services/tauriClient";
 import type { ProjectBackupPreview, ProjectView } from "../../types/project";
+import type { RecipeViewModel } from "../../types/generation";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
 import type { ProjectTemplate, TemplateProjectResult } from "../../types/organization";
+import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
 
 interface Props {
   projects: ProjectView[];
   activeProjectId?: string;
+  catalog: RecipeViewModel[];
   onOpen: (projectId: string) => void;
   onProjectUpdated: (project: ProjectView) => void;
   onProjectRestored: (project: ProjectView) => void;
@@ -26,7 +29,7 @@ interface Props {
 
 type FormMode = { kind: "create" } | { kind: "edit"; project: ProjectView };
 
-export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectUpdated, onProjectRestored, onTemplateProjectCreated }: Props) {
+export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, onProjectUpdated, onProjectRestored, onTemplateProjectCreated }: Props) {
   const [formMode, setFormMode] = useState<FormMode>();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -233,6 +236,8 @@ export function ProjectWorkspace({ projects, activeProjectId, onOpen, onProjectU
           </div>
         </form>
       )}
+
+      {activeProjectId && <ProjectWorkflowSettings projectId={activeProjectId} catalog={catalog} />}
 
       <section className="project-templates" aria-labelledby="project-templates-title">
         <div className="section-heading"><div><span className="section-label">可复用创作起点</span><h3 id="project-templates-title">项目模板</h3><p className="section-description">从已保存的工作流和无素材参数创建新项目。</p></div></div>

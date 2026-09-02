@@ -20,7 +20,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 15;
+const BACKUP_VERSION: u32 = 16;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -522,6 +522,42 @@ impl ProjectBackupService {
                 missing.push(reference.workflow_id.clone());
             }
         }
+        for binding in &document.project_workflow_bindings {
+            if let Some(workflow_id) = &binding.workflow_id {
+                let exists =
+                    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+                        .bind(workflow_id)
+                        .fetch_one(&self.pool)
+                        .await
+                        .map_err(|error| AppError::database(error.to_string()))?
+                        > 0;
+                if !exists && !missing.contains(workflow_id) {
+                    missing.push(workflow_id.clone());
+                }
+            }
+            let version_exists =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions WHERE id = ?")
+                    .bind(&binding.workflow_version_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|error| AppError::database(error.to_string()))?
+                    > 0;
+            if !version_exists && !missing.contains(&binding.workflow_version_id) {
+                missing.push(binding.workflow_version_id.clone());
+            }
+            let recipe_exists = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM recipes WHERE id = ? AND workflow_version_id = ?",
+            )
+            .bind(&binding.recipe_id)
+            .bind(&binding.workflow_version_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| AppError::database(error.to_string()))?
+                > 0;
+            if !recipe_exists && !missing.contains(&binding.recipe_id) {
+                missing.push(binding.recipe_id.clone());
+            }
+        }
         Ok(missing)
     }
 
@@ -813,6 +849,8 @@ impl ProjectBackupService {
                 workflow_refs.push(reference);
             }
         }
+        let project_workflow_bindings =
+            query_project_workflow_bindings(&mut transaction, project_id).await?;
         transaction
             .commit()
             .await
@@ -942,6 +980,7 @@ impl ProjectBackupService {
             items,
             preparation_snapshots,
             workflow_refs,
+            project_workflow_bindings,
             asset_tags,
             asset_tag_links,
             asset_favorites,
@@ -1106,6 +1145,8 @@ struct BackupDocument {
     #[serde(default)]
     preparation_snapshots: Vec<BackupProductionPreparationSnapshot>,
     workflow_refs: Vec<WorkflowReference>,
+    #[serde(default)]
+    project_workflow_bindings: Vec<BackupProjectWorkflowBinding>,
     #[serde(default)]
     asset_tags: Vec<BackupAssetTag>,
     #[serde(default)]
@@ -2016,6 +2057,19 @@ struct WorkflowReference {
     recipe_id: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupProjectWorkflowBinding {
+    stage: String,
+    mode: String,
+    workflow_version_id: String,
+    recipe_id: String,
+    created_at: String,
+    updated_at: String,
+    #[serde(default, skip_serializing)]
+    workflow_id: Option<String>,
+}
+
 #[derive(FromRow)]
 struct DbProject {
     id: String,
@@ -2755,6 +2809,24 @@ async fn query_project(
         })
     })
     .transpose()
+}
+
+async fn query_project_workflow_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupProjectWorkflowBinding>, AppError> {
+    sqlx::query_as::<_, BackupProjectWorkflowBinding>(
+        "SELECT b.stage, b.mode, b.workflow_version_id, b.recipe_id,
+                b.created_at, b.updated_at, wv.workflow_id
+         FROM project_workflow_bindings b
+         LEFT JOIN workflow_versions wv ON wv.id = b.workflow_version_id
+         WHERE b.project_id = ?
+         ORDER BY b.stage ASC, b.mode ASC",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))
 }
 
 fn collect_workflow_refs(tasks: &[BackupTask]) -> Vec<WorkflowReference> {
@@ -4070,7 +4142,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -4115,6 +4187,7 @@ fn validate_document_entries(
         }
     }
     validate_asset_video_prompt_document(document)?;
+    validate_project_workflow_binding_document(document, version)?;
     validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
     validate_reference_anchor_document(document)?;
@@ -4126,6 +4199,47 @@ fn validate_document_entries(
     validate_production_orchestrator_document(document)?;
     validate_shot_document(document, version)?;
     validate_script_draft_document(document, version)?;
+    Ok(())
+}
+
+fn validate_project_workflow_binding_document(
+    document: &BackupDocument,
+    version: u32,
+) -> Result<(), AppError> {
+    if version < 16 {
+        if !document.project_workflow_bindings.is_empty() {
+            return Err(AppError::backup_invalid(
+                "旧版备份不应包含项目工作流绑定数据",
+            ));
+        }
+        return Ok(());
+    }
+
+    let mut keys = HashSet::new();
+    for binding in &document.project_workflow_bindings {
+        if binding.stage != "IMAGE" && binding.stage != "VIDEO" {
+            return Err(AppError::backup_invalid("项目工作流绑定 stage 无效"));
+        }
+        let valid_mode = matches!(
+            binding.mode.as_str(),
+            "DEFAULT"
+                | "FL2VA_TEXT_TO_VIDEO"
+                | "FL2VA_IMAGE_TO_VIDEO"
+                | "FL2VA_FIRST_LAST"
+                | "REF2VA_IMAGE"
+                | "REF2VA_AUDIO"
+                | "REF2VA_IMAGE_AUDIO"
+                | "REF2VA_VIDEO_IMAGE"
+        );
+        if !valid_mode
+            || (binding.stage == "IMAGE" && binding.mode != "DEFAULT")
+            || binding.workflow_version_id.trim().is_empty()
+            || binding.recipe_id.trim().is_empty()
+            || !keys.insert((binding.stage.as_str(), binding.mode.as_str()))
+        {
+            return Err(AppError::backup_invalid("项目工作流绑定数据无效"));
+        }
+    }
     Ok(())
 }
 
@@ -6169,6 +6283,24 @@ async fn restore_rows_in_transaction(
     .await
     .map_err(|error| AppError::database(error.to_string()))?;
 
+    for binding in &document.project_workflow_bindings {
+        sqlx::query(
+            "INSERT INTO project_workflow_bindings
+             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&project.id)
+        .bind(&binding.stage)
+        .bind(&binding.mode)
+        .bind(&binding.workflow_version_id)
+        .bind(&binding.recipe_id)
+        .bind(&binding.created_at)
+        .bind(&binding.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+
     for entry in &document.prompt_entries {
         let prompt_id = prompt_ids
             .get(&entry.id)
@@ -8065,6 +8197,7 @@ mod tests {
             items: Vec::new(),
             preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
+            project_workflow_bindings: Vec::new(),
             asset_tags: tags,
             asset_tag_links: links,
             asset_favorites: Vec::new(),
@@ -8478,6 +8611,18 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO project_workflow_bindings
+             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             VALUES
+             ('project-backup', 'IMAGE', 'DEFAULT', 'workflow-version-1', 'recipe-1',
+              '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+             ('project-backup', 'VIDEO', 'FL2VA_TEXT_TO_VIDEO', 'workflow-version-1', 'recipe-1',
+              '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO prompt_entries (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at) VALUES (?, ?, 'prompt', ?, ?, ?, ?, ?)")
             .bind("prm_backup")
             .bind("project-backup")
@@ -9055,7 +9200,13 @@ mod tests {
         assert!(exported.entries >= 6);
         let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 15);
+        assert_eq!(manifest.version, 16);
+        assert_eq!(document.project_workflow_bindings.len(), 2);
+        assert_eq!(document.project_workflow_bindings[0].stage, "IMAGE");
+        assert_eq!(
+            document.project_workflow_bindings[1].mode,
+            "FL2VA_TEXT_TO_VIDEO"
+        );
         assert_eq!(exported.entries, names.len());
         assert!(names.contains("production_preparation_snapshots.json"));
         assert_eq!(document.preparation_snapshots.len(), 1);
@@ -9071,6 +9222,18 @@ mod tests {
         assert_eq!(preview.shots, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, "project-backup");
+        let restored_bindings: Vec<(String, String, String, String, String)> = sqlx::query_as(
+            "SELECT project_id, stage, mode, workflow_version_id, recipe_id
+             FROM project_workflow_bindings WHERE project_id = ? ORDER BY stage, mode",
+        )
+        .bind(&restored.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_bindings.len(), 2);
+        assert!(restored_bindings.iter().all(|row| row.0 == restored.id));
+        assert_eq!(restored_bindings[0].1, "IMAGE");
+        assert_eq!(restored_bindings[1].2, "FL2VA_TEXT_TO_VIDEO");
         let restored_preparation_snapshot: (
             String,
             String,
@@ -9904,6 +10067,7 @@ mod tests {
             items: Vec::new(),
             preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
+            project_workflow_bindings: Vec::new(),
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
@@ -10076,6 +10240,7 @@ mod tests {
             items: Vec::new(),
             preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
+            project_workflow_bindings: Vec::new(),
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
@@ -10128,6 +10293,128 @@ mod tests {
         let mut archive = ZipArchive::new(File::open(&archive_path).unwrap()).unwrap();
         let entry = archive.by_name("assets/ast_large/content.bin").unwrap();
         assert_eq!(entry.size(), LARGE_ASSET_BYTES);
+    }
+
+    #[tokio::test]
+    async fn missing_project_workflow_dependencies_are_reported_but_restore_succeeds() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let project_root = data_dirs.projects.join("stale-binding");
+        std::fs::create_dir_all(&project_root).unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('stale-binding', '失效绑定项目', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(project_root.to_string_lossy().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO project_workflow_bindings
+             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             VALUES ('stale-binding', 'VIDEO', 'DEFAULT', 'missing-version', 'missing-recipe',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let archive_path = directory.path().join("stale-binding.zip");
+        service
+            .export("stale-binding", archive_path.clone())
+            .await
+            .unwrap();
+        let preview = service.inspect(archive_path).await.unwrap();
+        assert!(preview
+            .missing_workflows
+            .contains(&"missing-version".to_owned()));
+        assert!(preview
+            .missing_workflows
+            .contains(&"missing-recipe".to_owned()));
+
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let restored_binding: (String, String, String, String) = sqlx::query_as(
+            "SELECT stage, mode, workflow_version_id, recipe_id
+             FROM project_workflow_bindings WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            restored_binding,
+            (
+                "VIDEO".to_owned(),
+                "DEFAULT".to_owned(),
+                "missing-version".to_owned(),
+                "missing-recipe".to_owned()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn v15_backup_without_project_workflow_bindings_restores_with_empty_bindings() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let archive_path = directory.path().join("backup-v15.zip");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({
+            "format": "ai-studio-project-backup",
+            "version": 15,
+            "createdBy": "1.0.0",
+            "project": { "id": "legacy-v15", "name": "旧项目 V15" }
+        });
+        let document = json!({
+            "project": { "id": "legacy-v15", "name": "旧项目 V15" },
+            "description": null,
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+            "activeTasksExcluded": 0,
+            "incompleteTasksExcluded": 0,
+            "tasks": [],
+            "taskEvents": [],
+            "assets": [],
+            "mappings": [],
+            "snapshots": [],
+            "presets": [],
+            "batches": [],
+            "items": [],
+            "workflowRefs": []
+        });
+        writer.start_file("manifest.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
+            .unwrap();
+        writer.start_file("project.json", options).unwrap();
+        writer
+            .write_all(serde_json::to_string(&document).unwrap().as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+
+        let service = ProjectBackupService::new(
+            pool.clone(),
+            data_dirs.projects.clone(),
+            data_dirs.cache.clone(),
+        );
+        let preview = service.inspect(archive_path).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        let binding_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM project_workflow_bindings WHERE project_id = ?",
+        )
+        .bind(restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(binding_count, 0);
     }
 
     #[test]

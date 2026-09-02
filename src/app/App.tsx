@@ -825,6 +825,7 @@ function App() {
         <ProjectWorkspace
           projects={projects}
           activeProjectId={activeProjectId}
+          catalog={catalog}
           onOpen={openProject}
           onProjectUpdated={handleProjectUpdated}
           onProjectRestored={handleProjectRestored}

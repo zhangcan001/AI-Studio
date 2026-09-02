@@ -1,6 +1,10 @@
 use crate::{
     app_state::AppState,
     application::project_service::{ProjectServiceError, ProjectView},
+    application::project_workflow_binding_service::{
+        ProjectWorkflowBindingServiceError, ProjectWorkflowConfigUpdateRequest,
+        ProjectWorkflowConfigView,
+    },
     error::AppError,
 };
 use std::path::PathBuf;
@@ -42,6 +46,33 @@ pub async fn project_update(
         .update(&project_id, &name, description.as_deref())
         .await
         .map_err(map_project_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn project_workflow_config_get(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<ProjectWorkflowConfigView, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .project_workflow_binding_service
+        .get(&project_id)
+        .await
+        .map_err(map_project_workflow_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn project_workflow_config_replace(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: ProjectWorkflowConfigUpdateRequest,
+) -> Result<ProjectWorkflowConfigView, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .project_workflow_binding_service
+        .replace(&project_id, request)
+        .await
+        .map_err(map_project_workflow_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -146,5 +177,17 @@ pub(crate) fn map_project_error(error: ProjectServiceError) -> AppError {
         } => AppError::filesystem(format!(
             "project creation failed: {repository}; cleanup failed: {cleanup}"
         )),
+    }
+}
+
+fn map_project_workflow_error(error: ProjectWorkflowBindingServiceError) -> AppError {
+    match error {
+        ProjectWorkflowBindingServiceError::ProjectNotFound(project_id) => {
+            AppError::project_not_found(format!("project {project_id} was not found"))
+        }
+        ProjectWorkflowBindingServiceError::Invalid(message) => AppError::invalid_input(message),
+        ProjectWorkflowBindingServiceError::Repository(error) => {
+            super::map_repository_error(&error)
+        }
     }
 }

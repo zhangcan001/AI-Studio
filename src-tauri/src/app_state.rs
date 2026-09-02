@@ -29,6 +29,7 @@ use crate::application::project_command_center_service::ProjectCommandCenterServ
 use crate::application::project_manifest_service::ProjectManifestService;
 use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
+use crate::application::project_workflow_binding_service::ProjectWorkflowBindingService;
 use crate::application::prompt_library_service::PromptLibraryService;
 use crate::application::prompt_template_bulk_service::PromptTemplateBulkService;
 use crate::application::prompt_template_service::PromptTemplateService;
@@ -89,6 +90,7 @@ pub struct AppState {
     pub project_service: Arc<ProjectService>,
     pub project_backup_service: Arc<ProjectBackupService>,
     pub project_manifest_service: Arc<ProjectManifestService>,
+    pub project_workflow_binding_service: Arc<ProjectWorkflowBindingService>,
     pub preset_service: Arc<PresetService>,
     pub prompt_library_service: Arc<PromptLibraryService>,
     pub prompt_template_service: Arc<PromptTemplateService>,
@@ -148,6 +150,7 @@ impl AppState {
         project_service: Arc<ProjectService>,
         project_backup_service: Arc<ProjectBackupService>,
         project_manifest_service: Arc<ProjectManifestService>,
+        project_workflow_binding_service: Arc<ProjectWorkflowBindingService>,
         preset_service: Arc<PresetService>,
         prompt_library_service: Arc<PromptLibraryService>,
         prompt_template_service: Arc<PromptTemplateService>,
@@ -205,6 +208,7 @@ impl AppState {
             project_service,
             project_backup_service,
             project_manifest_service,
+            project_workflow_binding_service,
             preset_service,
             prompt_library_service,
             prompt_template_service,

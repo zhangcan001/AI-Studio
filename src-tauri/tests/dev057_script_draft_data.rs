@@ -1,4 +1,4 @@
-//! DEV-057 Agent-D: Backup 15, compatibility, isolation, and capacity gates.
+//! DEV-057 Agent-D: Backup 16, compatibility, isolation, and capacity gates.
 
 use ai_studio_lib::application::ports::ScriptDraftPageQuery;
 use ai_studio_lib::application::project_backup_service::ProjectBackupService;
@@ -45,7 +45,7 @@ async fn insert_project(pool: &SqlitePool, id: &str, root: &Path) {
     fs::create_dir_all(root).unwrap();
     sqlx::query(
         "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
-         VALUES (?, 'DEV-057 Project', 'Backup 15 fixture', ?, ?, ?)",
+         VALUES (?, 'DEV-057 Project', 'Backup 16 fixture', ?, ?, ?)",
     )
     .bind(id)
     .bind(root.to_string_lossy().to_string())
@@ -261,9 +261,9 @@ fn rewrite_legacy_archive(source: &Path, destination: &Path, version: u32) {
 }
 
 #[tokio::test]
-async fn backup15_roundtrip_remaps_sources_revisions_and_previous_links() {
+async fn backup16_roundtrip_remaps_sources_revisions_and_previous_links() {
     let (directory, dirs, pool) = database().await;
-    let project_id = "dev057-backup15";
+    let project_id = "dev057-backup16";
     insert_project(&pool, project_id, &directory.path().join("source-project")).await;
     let source_ids = [id("scr_"), id("scr_"), id("scr_")];
     let draft_id = id("drf_");
@@ -321,10 +321,10 @@ async fn backup15_roundtrip_remaps_sources_revisions_and_previous_links() {
 
     let service =
         ProjectBackupService::new(pool.clone(), dirs.projects.clone(), dirs.cache.clone());
-    let archive = directory.path().join("backup15.zip");
+    let archive = directory.path().join("backup16.zip");
     service.export(project_id, archive.clone()).await.unwrap();
     let document = read_zip_json(&archive, "project.json");
-    assert_eq!(read_zip_json(&archive, "manifest.json")["version"], 15);
+    assert_eq!(read_zip_json(&archive, "manifest.json")["version"], 16);
     assert_eq!(document["scriptSources"].as_array().unwrap().len(), 3);
     assert_eq!(
         document["scriptDraftRevisions"].as_array().unwrap().len(),
@@ -419,7 +419,7 @@ async fn backup14_13_12_and_manifest2_import_compatibility_hold() {
     insert_project(&pool, project_id, &directory.path().join("compat-project")).await;
     let service =
         ProjectBackupService::new(pool.clone(), dirs.projects.clone(), dirs.cache.clone());
-    let current = directory.path().join("backup15.zip");
+    let current = directory.path().join("backup16.zip");
     service.export(project_id, current.clone()).await.unwrap();
     for version in [14, 13, 12] {
         let legacy = directory.path().join(format!("backup{version}.zip"));

@@ -54,6 +54,7 @@ pub mod project_command_center_service;
 pub mod project_manifest_service;
 pub mod project_service;
 pub mod project_template_service;
+pub mod project_workflow_binding_service;
 pub mod prompt_context_builder;
 pub mod prompt_library_service;
 pub mod prompt_template_bulk_service;

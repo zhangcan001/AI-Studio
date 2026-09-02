@@ -297,6 +297,10 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 }
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS project_workflow_bindings")
+        .execute(pool)
+        .await
+        .expect("027 project workflow table should be removable in isolated upgrade fixture");
     sqlx::query("DROP TABLE IF EXISTS production_package_batch_bindings")
         .execute(pool)
         .await
@@ -527,7 +531,7 @@ async fn dev048_fresh_migration_001_to_025_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        26
+        27
     );
     let required_tables = [
         "profile_revisions",
@@ -544,6 +548,7 @@ async fn dev048_fresh_migration_001_to_025_creates_only_the_frozen_tables() {
         "script_sources",
         "script_import_drafts",
         "production_package_batch_bindings",
+        "project_workflow_bindings",
     ];
     for table in required_tables {
         assert_eq!(
@@ -585,7 +590,7 @@ async fn dev048_021_to_025_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        26
+        27
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -619,6 +624,7 @@ async fn dev048_021_to_025_preserves_all_legacy_sentinels_and_leaves_new_tables_
         "script_sources",
         "script_import_drafts",
         "production_package_batch_bindings",
+        "project_workflow_bindings",
     ] {
         assert_eq!(
             sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
@@ -645,7 +651,7 @@ async fn dev052_existing_023_to_025_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        26
+        27
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1451,7 +1457,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 26)
+            .is_some_and(|version| version <= 27)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"1.0.0\""));
@@ -1459,7 +1465,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(cargo.contains("version = \"1.0.0\""));
     let backup =
         fs::read_to_string(root.join("src/application/project_backup_service.rs")).unwrap();
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 15"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 16"));
     let manifest =
         fs::read_to_string(root.join("src/application/project_manifest_service.rs")).unwrap();
     assert!(manifest.contains("const MANIFEST_VERSION: u32 = 2"));

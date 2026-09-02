@@ -78,6 +78,10 @@ import type {
   ProjectBackupPreview,
   ProjectView,
 } from "../types/project";
+import type {
+  ProjectWorkflowConfigUpdateRequest,
+  ProjectWorkflowConfigView,
+} from "../types/projectWorkflow";
 import type { ProjectManifestExportView } from "../types/projectManifest";
 import type {
   PromptTemplateAnalysis,
@@ -1309,6 +1313,17 @@ export function updateProject(
   description?: string,
 ): Promise<ProjectView> {
   return invoke<ProjectView>("project_update", { projectId, name, description });
+}
+
+export function getProjectWorkflowConfig(projectId: string): Promise<ProjectWorkflowConfigView> {
+  return invoke<ProjectWorkflowConfigView>("project_workflow_config_get", { projectId });
+}
+
+export function replaceProjectWorkflowConfig(
+  projectId: string,
+  request: ProjectWorkflowConfigUpdateRequest,
+): Promise<ProjectWorkflowConfigView> {
+  return invoke<ProjectWorkflowConfigView>("project_workflow_config_replace", { projectId, request });
 }
 
 export function exportProjectBackup(projectId: string): Promise<ProjectBackupExportView | null> {

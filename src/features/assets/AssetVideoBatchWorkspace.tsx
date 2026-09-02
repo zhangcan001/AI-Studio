@@ -7,6 +7,7 @@ import {
   createProductionQueue,
   deletePreset,
   getPreferredPreset,
+  getProjectWorkflowConfig,
   listPresets,
   readAssetImage,
   readAssetThumbnail,
@@ -30,6 +31,7 @@ import type {
   H3ProjectFolderInspection,
 } from "../../types/h3LocalImport";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
+import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
 import {
   H3_QUALITY_PROFILE,
@@ -65,19 +67,17 @@ import { WorkflowSelector } from "../runtime/WorkflowSelector";
 import { WorkflowBenchmarkPanel } from "../experiments/WorkflowBenchmarkPanel";
 import { defaultGenerationValues } from "../../stores/studioStore";
 import {
-  clearSelectedRecipeRef,
   filterVideoRecipes,
-  readSelectedRecipeRef,
-  readProjectWorkflowOverrides,
-  resolveProjectFolderRecipes,
-  resolveVideoRecipe,
+  findRecipe,
   recipeRef,
   videoRecipeCapability,
-  writeSelectedRecipeRef,
-  writeProjectWorkflowOverrides,
   type H3CompatibleMode,
   type SelectedRecipeRef,
 } from "../runtime/workflowCapabilities";
+import {
+  resolveProjectFolderWorkflow,
+  resolveProjectVideoWorkflow,
+} from "../runtime/projectWorkflowResolution";
 
 interface Props {
   projectId: string;
@@ -624,11 +624,12 @@ export function AssetVideoBatchWorkspace({
   const [generationMode, setGenerationMode] = useState<H3GenerationMode>(() => h3InitialGenerationMode(initialAssets));
   const [qualityProfile, setQualityProfile] = useState<H3QualityProfile>(H3_QUALITY_PROFILE);
   const [manualVideoSelection, setManualVideoSelection] = useState<SelectedRecipeRef | undefined>(
-    () => readSelectedRecipeRef(projectId, "video"),
+    undefined,
   );
+  const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
   const [projectWorkflowStrategy, setProjectWorkflowStrategy] = useState<"AUTO" | "MANUAL">("AUTO");
   const [projectManualOverrides, setProjectManualOverrides] = useState<Partial<Record<H3CompatibleMode, SelectedRecipeRef>>>(
-    () => readProjectWorkflowOverrides(projectId),
+    {},
   );
   const [workflowSelectionNotice, setWorkflowSelectionNotice] = useState<string>();
   const [batchPrompt, setBatchPrompt] = useState("");
@@ -647,30 +648,81 @@ export function AssetVideoBatchWorkspace({
       ?? videoCatalog.find((candidate) => videoRecipeCapability(candidate).supportedModes.includes(generationMode)),
     [generationMode, qualityProfile, videoCatalog],
   );
-  const resolvedVideoRecipe = useMemo(
-    () => resolveVideoRecipe(videoCatalog, generationMode, manualVideoSelection, recommendedRecipe),
-    [generationMode, manualVideoSelection, recommendedRecipe, videoCatalog],
+  const projectVideoDefault = useMemo(
+    () => projectWorkflowConfig?.videoDefault?.available
+      ? recipeRef(projectWorkflowConfig.videoDefault)
+      : undefined,
+    [projectWorkflowConfig],
   );
+  const projectModeOverride = useMemo(
+    () => {
+      const binding = projectWorkflowConfig?.videoModeOverrides.find((candidate) => candidate.mode === generationMode);
+      return binding?.available ? recipeRef(binding) : undefined;
+    },
+    [generationMode, projectWorkflowConfig],
+  );
+  const resolvedVideoRecipe = useMemo(
+    () => resolveProjectVideoWorkflow(
+      videoCatalog,
+      generationMode,
+      manualVideoSelection,
+      projectModeOverride,
+      projectVideoDefault,
+      recommendedRecipe,
+    ),
+    [generationMode, manualVideoSelection, projectModeOverride, projectVideoDefault, recommendedRecipe, videoCatalog],
+  );
+  const staleManualVideoSelection = Boolean(
+    manualVideoSelection && !findRecipe(videoWorkflowCandidatesForMode(videoCatalog, generationMode), manualVideoSelection),
+  );
+  const staleProjectVideoBinding = Boolean(
+    (projectWorkflowConfig?.videoDefault
+      && (!projectWorkflowConfig.videoDefault.available
+        || !findRecipe(videoCatalog, projectWorkflowConfig.videoDefault)))
+      || (() => {
+        const binding = projectWorkflowConfig?.videoModeOverrides.find((candidate) => candidate.mode === generationMode);
+        return Boolean(binding
+          && (!binding.available
+            || !findRecipe(videoWorkflowCandidatesForMode(videoCatalog, generationMode), binding)));
+      })(),
+  );
+  const workflowSelectionSource = resolvedVideoRecipe.source === "explicit"
+    ? "manual"
+    : resolvedVideoRecipe.source;
   const recipe = resolvedVideoRecipe.recipe;
   const projectModes = useMemo(
     () => [...new Set((localInspection?.projectFolder?.segments ?? []).map((segment) => segment.generationMode))] as H3CompatibleMode[],
     [localInspection?.projectFolder?.segments],
   );
+  const resolvedProjectRecipes = useMemo(
+    () => projectModes.map((mode) => {
+      const configured = projectWorkflowConfig?.videoModeOverrides.find((binding) => binding.mode === mode);
+      const resolution = resolveProjectFolderWorkflow(
+        videoCatalog,
+        mode,
+        projectWorkflowStrategy === "MANUAL" ? projectManualOverrides[mode] : undefined,
+        configured?.available ? recipeRef(configured) : undefined,
+        projectVideoDefault,
+        h3RecipeForMode(videoCatalog, mode, qualityProfile),
+      );
+      const manual = projectWorkflowStrategy === "MANUAL" && Boolean(projectManualOverrides[mode]);
+      return {
+        mode,
+        recipe: resolution.recipe,
+        source: resolution.source === "explicit" || resolution.source === "project_mode" || resolution.source === "project_default"
+          ? "recommended" as const
+          : resolution.source ?? "compatible" as const,
+        staleManualSelection: manual && resolution.source !== "explicit",
+      };
+    }),
+    [projectManualOverrides, projectModes, projectVideoDefault, projectWorkflowConfig, projectWorkflowStrategy, qualityProfile, videoCatalog],
+  );
   const projectRecommendations = useMemo(
     () => Object.fromEntries(projectModes.map((mode) => {
-      const recommended = h3RecipeForMode(videoCatalog, mode, qualityProfile);
-      return [mode, recommended ? recipeRef(recommended) : undefined];
+      const resolved = resolvedProjectRecipes.find((item) => item.mode === mode);
+      return [mode, resolved?.recipe ? recipeRef(resolved.recipe) : undefined];
     })) as Partial<Record<H3CompatibleMode, SelectedRecipeRef>>,
-    [projectModes, qualityProfile, videoCatalog],
-  );
-  const resolvedProjectRecipes = useMemo(
-    () => resolveProjectFolderRecipes(
-      videoCatalog,
-      projectModes,
-      projectRecommendations,
-      projectWorkflowStrategy === "MANUAL" ? projectManualOverrides : {},
-    ),
-    [projectManualOverrides, projectModes, projectRecommendations, projectWorkflowStrategy, videoCatalog],
+    [projectModes, resolvedProjectRecipes],
   );
   const contract = useMemo(
     () => recipe
@@ -729,18 +781,26 @@ export function AssetVideoBatchWorkspace({
     setPrompts({});
     setSavedIds(new Set());
     loadedPromptIds.current = new Set();
-    setManualVideoSelection(readSelectedRecipeRef(projectId, "video"));
+    setManualVideoSelection(undefined);
+    setProjectWorkflowConfig(undefined);
+    void getProjectWorkflowConfig(projectId)
+      .then(setProjectWorkflowConfig)
+      .catch(() => setProjectWorkflowConfig({ projectId, videoModeOverrides: [] }));
     setProjectWorkflowStrategy("AUTO");
-    setProjectManualOverrides(readProjectWorkflowOverrides(projectId));
+    setProjectManualOverrides({});
     setWorkflowSelectionNotice(undefined);
   }, [projectId]);
 
   useEffect(() => {
-    if (!resolvedVideoRecipe.staleManualSelection || !manualVideoSelection) return;
-    clearSelectedRecipeRef(projectId, "video");
+    if (!staleManualVideoSelection || !manualVideoSelection) return;
     setManualVideoSelection(undefined);
     setWorkflowSelectionNotice("当前工作流不支持此生成模式，已切换到兼容工作流。");
-  }, [manualVideoSelection, projectId, resolvedVideoRecipe.staleManualSelection]);
+  }, [manualVideoSelection, staleManualVideoSelection]);
+
+  useEffect(() => {
+    if (!resolvedVideoRecipe.staleProjectBinding && !staleProjectVideoBinding) return;
+    setWorkflowSelectionNotice("项目工作流绑定已失效，当前仅临时使用兼容/推荐工作流；请在项目设置中重新选择或清除绑定。");
+  }, [resolvedVideoRecipe.staleProjectBinding, staleProjectVideoBinding]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setAssetLibraryKeyword(assetLibraryKeywordInput.trim()), 300);
@@ -1162,7 +1222,6 @@ export function AssetVideoBatchWorkspace({
       const next = { ...current };
       if (ref) next[mode] = ref;
       else delete next[mode];
-      writeProjectWorkflowOverrides(projectId, next);
       return next;
     });
   }
@@ -1250,14 +1309,12 @@ export function AssetVideoBatchWorkspace({
 
   function selectVideoWorkflow(nextRecipe: RecipeViewModel) {
     const nextRef = recipeRef(nextRecipe);
-    writeSelectedRecipeRef(projectId, "video", nextRef);
     setManualVideoSelection(nextRef);
     setWorkflowSelectionNotice(undefined);
   }
 
   function restoreRecommendedVideoWorkflow() {
     if (!recommendedRecipe) return;
-    clearSelectedRecipeRef(projectId, "video");
     setManualVideoSelection(undefined);
     setWorkflowSelectionNotice(undefined);
   }
@@ -1278,7 +1335,7 @@ export function AssetVideoBatchWorkspace({
           candidates={videoWorkflowCandidatesForMode(videoCatalog, generationMode)}
           selected={recipe}
           recommended={recommendedRecipe}
-          selectionSource={resolvedVideoRecipe.source}
+          selectionSource={workflowSelectionSource}
           onSelect={selectVideoWorkflow}
           onRestoreRecommendation={restoreRecommendedVideoWorkflow}
           onOpenWorkflows={onOpenWorkflows ? () => onOpenWorkflows() : undefined}
@@ -1329,7 +1386,7 @@ export function AssetVideoBatchWorkspace({
         candidates={videoWorkflowCandidatesForMode(videoCatalog, generationMode)}
         selected={recipe}
         recommended={recommendedRecipe}
-        selectionSource={resolvedVideoRecipe.source}
+        selectionSource={workflowSelectionSource}
         onSelect={selectVideoWorkflow}
         onRestoreRecommendation={restoreRecommendedVideoWorkflow}
         onOpenWorkflows={onOpenWorkflows ? () => onOpenWorkflows() : undefined}
