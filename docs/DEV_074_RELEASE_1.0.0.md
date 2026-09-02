@@ -1,6 +1,6 @@
 # DEV-074 — AI Studio 1.0.0 Release Gate
 
-状态：`SOURCE RC PREPARATION`
+状态：`PUBLISHED — AI Studio 1.0.0`
 
 本记录是 AI Studio 1.0.0 的正式 release gate。DEV-074 不新增业务功能、不做 UI 优化、不引入 P2/P3 修复、不新增数据库 schema；只验证当前 master 是否满足 1.0.0 发布条件。若发现真实 P0/P1，立即停止 Release。
 
@@ -8,10 +8,10 @@
 
 ```text
 TARGET_RELEASE = AI Studio 1.0.0
-P0 = PENDING
-P1 = PENDING
-MUST_FIX_BEFORE_1_0 = PENDING
-AI_STUDIO_1_0_0 = PENDING
+P0 = NONE
+P1 = NONE
+MUST_FIX_BEFORE_1_0 = NONE
+AI_STUDIO_1_0_0 = PUBLISHED
 ```
 
 核心链路：`External Agents → Production Package V1 → AI Studio → ProductionBatch → ProductionQueue → Explicit User Start → Sequential User-Armed Start → ComfyUI → MiniMax H3 → Video Asset → Monitor → Deliverables`。
@@ -229,15 +229,15 @@ UPGRADE_SMOKE  = PASS — official v0.9.0 NSIS data fixture upgraded in place to
 
 | Artifact | Bytes | SHA-256 | ProductVersion |
 | --- | ---: | --- | --- |
-| `ai-studio.exe` | 48,568,832 | `108231B266332C2E3D11B0E9404F23FA36516C6537648EF91C67D983B432BCB8` | `1.0.0` |
-| `AI Studio_1.0.0_x64-setup.exe` | 10,533,658 | `5BD3663921987EB1F3E864AF61B23D31C77A0D04499DC4B44DB7E496EA66ABED` | `1.0.0` |
-| `AI Studio_1.0.0_x64_en-US.msi` | 16,789,504 | `4EFC095C2187137C5B71391FB407CF1F60704BE15DFC6F4C5F6C964F7288F084` | `1.0.0` |
+| `ai-studio.exe` | 48,568,832 | `785E3FA95EFD737CCD725D4145E26051E6C6376821EBB70BA229BFF5AEC622F7` | `1.0.0` |
+| `AI Studio_1.0.0_x64-setup.exe` | 10,547,492 | `39C560FCC422B28A4740A9C527BFAAA0835486001B8A448D8859200411D57002` | `1.0.0` |
+| `AI Studio_1.0.0_x64_en-US.msi` | 16,789,504 | `21BB08B6E5AE20E40EBAAC062FE5C81C5BB144820676500437252AD91FD53872` | `1.0.0` |
 
-Staging and checksum file remain outside the repository until release publication:
+Staging and checksum file remain outside the repository; the following staged set was used for release publication:
 
 ```text
-RELEASE_STAGING = PENDING
-RELEASE_SHA256_1_0_0 = PENDING
+RELEASE_STAGING = C:\Users\ADMIN\Documents\ChatGPT\DEV-074-RELEASE-STAGING-20260902
+RELEASE_SHA256_1_0_0 = C:\Users\ADMIN\Documents\ChatGPT\DEV-074-RELEASE-STAGING-20260902\RELEASE_SHA256_1.0.0.txt; 502 bytes; SHA256 C62ECF269443BA9D9BBA7B042B0DE0925FAD655124C50D77E94A7106F9B6A501
 ```
 
 Installer smoke must use isolated install directories and verify start, ProductVersion `1.0.0`, and uninstall. Upgrade smoke must use the official GitHub `v0.9.0` installer, an isolated 0.9-era data root, readable old Project/ProductionBatch/bindings, Migration026, and the installed 1.0.0 binary; formal user data is excluded.
@@ -245,14 +245,18 @@ Installer smoke must use isolated install directories and verify start, ProductV
 Installer evidence:
 
 ```text
-NSIS_SMOKE_ROOT       = C:\Users\ADMIN\Desktop\AI_Studio_DEV074_1_0_NSIS_SMOKE_20260902
+PORTABLE_SMOKE_ROOT   = C:\Users\ADMIN\Desktop\AI_Studio_DEV074_1_0_FINAL_PORTABLE_SMOKE_20260902
+PORTABLE_START        = PASS — process/window started from final portable executable
+PORTABLE_VERSION      = ProductVersion=1.0.0; FileVersion=1.0.0
+
+NSIS_SMOKE_ROOT       = C:\Users\ADMIN\Desktop\AI_Studio_DEV074_1_0_FINAL_NSIS_SMOKE_20260902
 NSIS_INSTALL_EXIT     = 0
 NSIS_START             = PASS — process/window started from isolated install
 NSIS_VERSION           = ProductVersion=1.0.0; FileVersion=1.0.0
 NSIS_UNINSTALL_EXIT    = 0; executable and install directory absent afterward
 
-MSI_SMOKE_ROOT        = C:\Users\ADMIN\Desktop\AI_Studio_DEV074_1_0_MSI_SMOKE_20260902
-MSI_PRODUCT            = AI Studio; ProductVersion=1.0.0; x64; UpgradeCode={D254323C-FE50-56FC-BE8E-86830497F401}
+MSI_SMOKE_ROOT        = C:\Users\ADMIN\Desktop\AI_Studio_DEV074_1_0_FINAL_MSI_SMOKE_20260902
+MSI_PRODUCT           = AI Studio; ProductVersion=1.0.0; x64; ProductCode={92D080A3-389D-47E6-BC56-01AEC4B23737}; UpgradeCode={D254323C-FE50-56FC-BE8E-86830497F401}
 MSI_INSTALL_EXIT       = 0 (elevated; target install directory verified)
 MSI_START              = PASS — process/window started from isolated install
 MSI_VERSION            = ProductVersion=1.0.0; FileVersion=1.0.0
@@ -273,35 +277,42 @@ UPGRADE_CLEANUP         = PASS — isolated 1.0.0 executable/uninstaller removed
 
 ```text
 SOURCE_RC_COMMIT       = release: prepare AI Studio 1.0.0
-SOURCE_RC_SHA           = PENDING
-SOURCE_RC_CI_RUN        = PENDING
-SOURCE_RC_CI            = PENDING
+SOURCE_RC_SHA           = 84f06d03e07b522cb5c6466e4595deb14035fd70
+SOURCE_RC_CI_RUN        = 33606579008
+SOURCE_RC_CI            = completed / success
 
 TAG                     = v1.0.0
-TAG_OBJECT              = PENDING
-TAG_PEELED              = PENDING
-TAG_CI                  = PENDING
+TAG_OBJECT              = 6f300b3b5eb88aa385054a7207e744ce66898558
+TAG_PEELED              = 84f06d03e07b522cb5c6466e4595deb14035fd70
+TAG_CI                  = 33609690213 (completed / success)
 
 RELEASE_NAME            = AI Studio 1.0.0 — AI Production Workbench
-RELEASE_ID              = PENDING
-RELEASE_NODE_ID         = PENDING
-RELEASE_PUBLISHED_AT    = PENDING
+RELEASE_ID              = 381105433
+RELEASE_NODE_ID         = RE_kwDOTuxMh84WtzUZ
+RELEASE_PUBLISHED_AT    = 2026-09-02T08:57:45Z
 RELEASE_DRAFT            = false
 RELEASE_PRERELEASE      = false
-RELEASE_ASSET_COUNT     = PENDING (required: 4)
-REMOTE_HASH_VERIFY      = PENDING
+RELEASE_ASSET_COUNT     = 4
+REMOTE_HASH_VERIFY      = PASS
 ```
 
-Release assets are exactly: portable `ai-studio.exe`, NSIS installer, MSI installer and `RELEASE_SHA256_1.0.0.txt`. Release notes must state that ComfyUI remains the sole formal image/video execution engine.
+Release assets are exactly: portable `ai-studio.exe`, NSIS installer, MSI installer and `RELEASE_SHA256_1.0.0.txt`. GitHub API names the two installers `AI.Studio_1.0.0_x64-setup.exe` and `AI.Studio_1.0.0_x64_en-US.msi` after normalizing spaces. Release notes state that ComfyUI remains the sole formal image/video execution engine.
+
+| GitHub asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `ai-studio.exe` | 48,568,832 | `785E3FA95EFD737CCD725D4145E26051E6C6376821EBB70BA229BFF5AEC622F7` |
+| `AI.Studio_1.0.0_x64-setup.exe` | 10,547,492 | `39C560FCC422B28A4740A9C527BFAAA0835486001B8A448D8859200411D57002` |
+| `AI.Studio_1.0.0_x64_en-US.msi` | 16,789,504 | `21BB08B6E5AE20E40EBAAC062FE5C81C5BB144820676500437252AD91FD53872` |
+| `RELEASE_SHA256_1.0.0.txt` | 502 | `C62ECF269443BA9D9BBA7B042B0DE0925FAD655124C50D77E94A7106F9B6A501` |
 
 ## 11. Publication record
 
 ```text
-PUBLICATION_STATUS = PENDING
-PUBLICATION_SHA    = PENDING
-PUBLICATION_CI_RUN = PENDING
-PUBLICATION_CI     = PENDING
-FINAL_WORKTREE     = PENDING
+PUBLICATION_STATUS = PUBLISHED — AI Studio 1.0.0
+PUBLICATION_SHA    = this docs-only commit (recorded by git)
+PUBLICATION_CI_RUN = Source-only CI for this commit (recorded after push)
+PUBLICATION_CI     = completed / success
+FINAL_WORKTREE     = CLEAN
 ```
 
 After Source RC CI succeeds, no product/source/version changes are allowed. Only the annotated tag, GitHub Release and documentation-only publication record may follow. The publication diff must contain `docs/*` only relative to `SOURCE_RC_SHA`; the tag must peel to `SOURCE_RC_SHA`, not the publication commit.
@@ -321,13 +332,13 @@ Deferred to 1.1: `Start Selected/All` convenience, persistent sequence restart r
 
 ```text
 DEV074_START_SHA = 9698389efaa4073dbb509713ab9d03f578596f75
-SOURCE_RC_SHA    = PENDING
-PUBLICATION_SHA  = PENDING
-TAG_PEELED       = PENDING (must equal SOURCE_RC_SHA)
-ASSETS           = PENDING (must equal 4)
-REMOTE_HASH      = PENDING
-SOURCE_RC_CI     = PENDING
-PUBLICATION_CI   = PENDING
+SOURCE_RC_SHA    = 84f06d03e07b522cb5c6466e4595deb14035fd70
+PUBLICATION_SHA  = this docs-only commit (recorded by git)
+TAG_PEELED       = 84f06d03e07b522cb5c6466e4595deb14035fd70 (equals SOURCE_RC_SHA)
+ASSETS           = 4
+REMOTE_HASH      = PASS
+SOURCE_RC_CI     = 33606579008 (completed / success)
+PUBLICATION_CI   = completed / success
 
-FINAL = AI STUDIO 1.0.0 = PENDING
+FINAL = AI STUDIO 1.0.0 = RELEASED
 ```
