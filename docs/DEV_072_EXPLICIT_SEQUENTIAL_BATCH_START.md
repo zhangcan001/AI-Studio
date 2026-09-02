@@ -167,3 +167,55 @@ DEV-072 = PENDING HUMAN UAT
 ```
 
 提交 hash、Source-only CI run 和真人 UAT 结果在任务最终报告中记录。
+
+## 8. DEV-072A terminal lifecycle closure
+
+```text
+DEV072A_START_SHA = 34fe62bd62953be9c2d24cc0bd19ba8a158e4519a
+TERMINAL_STATE_LEAK = YES
+SAME_SESSION_REUSE_GAP = YES
+```
+
+DEV-072A 修复了 `maybeAdvanceSequentialBatchStart()` 的终态收口：只有 sequence `PAUSED` 保持 early return；无 current 且无 suffix 时归一化为 `IDLE`；有 current 时继续读取真实 Batch truth，再区分 `RUNNING`、当前 Batch `PAUSED`、clean `COMPLETED` 和 terminal failure。最终 clean completion 或无 suffix 的 terminal failure/cancel/skip 会清除 current 并回到 `IDLE`；带 suffix 的 terminal failure 仍保持 `PAUSED`，必须由用户明确【继续后续】。因此同一 App session 中 A→B→C 完成后点击 D 会立即启动 D，不会遗留 C 或“等待：0 个”。
+
+DEV-072A fix gates：
+
+```text
+FINAL_BATCH_STATE_CLEANUP        = PASS
+SAME_SESSION_SEQUENCE_REUSE      = PASS
+TERMINAL_FAILURE_NO_SUFFIX_CLEANUP = PASS
+FAILURE_WITH_SUFFIX_PAUSE        = PASS
+```
+
+新增回归：
+
+```text
+returns the sequential state to idle after the final armed batch completes       PASS
+starts a new batch immediately after the previous sequence has fully completed    PASS
+clears terminal failed state when there are no armed suffix batches               PASS
+```
+
+DEV-072A 严格串行验证结果：
+
+```text
+pnpm test -- ShotWorkspace.sequentialBatchStart    PASS (10 tests)
+pnpm test -- ProductionQueueDrawer                PASS (7 tests)
+pnpm test -- ShotWorkspace.production              PASS (17 tests)
+pnpm test -- ShotWorkspace.multiPackagePolling     PASS (6 tests)
+pnpm test                                         PASS (101 files, 447 tests)
+pnpm exec tsc --noEmit                            PASS
+pnpm build                                        PASS
+git diff --check                                  PASS
+
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check PASS
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets PASS
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1 PASS
+Rust library result: 700 passed; 0 failed; 1 ignored; all integration suites passed
+```
+
+Version、数据库和安全边界保持不变：`0.9.0`、Migration `026`、Migration027 不存在；没有修改 backend queue service、repository、command、migration、`ProductionBatchStatus`，没有新增 queue、executor、task model、retry 或 restart resume。最终状态仍为：
+
+```text
+DEV-072 CODE GATE = PASS
+DEV-072 = PENDING HUMAN UAT
+```

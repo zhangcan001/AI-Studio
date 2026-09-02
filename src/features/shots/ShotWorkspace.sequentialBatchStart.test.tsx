@@ -235,6 +235,74 @@ afterEach(() => {
 });
 
 describe("ShotWorkspace explicit sequential batch start", () => {
+  it("returns the sequential state to idle after the final armed batch completes", async () => {
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+    await flushAsyncWork();
+    screen.getByRole("region", { name: "生产队列" });
+    fireEvent.click(startButton("batch-a"));
+    await flushAsyncWork();
+    fireEvent.click(startButton("batch-b"));
+    fireEvent.click(startButton("batch-c"));
+    await flushAsyncWork();
+
+    await completeBatch("batch-a");
+    await completeBatch("batch-b");
+    expect(mocks.startProductionQueue).toHaveBeenNthCalledWith(3, "project-1", "batch-c");
+
+    await completeBatch("batch-c");
+    expect(mocks.startProductionQueue).toHaveBeenCalledTimes(3);
+    expect(document.querySelector('[data-sequential-status="ACTIVE"]')).toBeNull();
+    expect(document.querySelector('[data-sequential-status="PAUSED"]')).toBeNull();
+    expect(screen.queryByText(/等待：0 个/)).toBeNull();
+  });
+
+  it("starts a new batch immediately after the previous sequence has fully completed", async () => {
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+    await flushAsyncWork();
+    screen.getByRole("region", { name: "生产队列" });
+    fireEvent.click(startButton("batch-a"));
+    await flushAsyncWork();
+    fireEvent.click(startButton("batch-b"));
+    fireEvent.click(startButton("batch-c"));
+    await flushAsyncWork();
+
+    await completeBatch("batch-a");
+    await completeBatch("batch-b");
+    await completeBatch("batch-c");
+    expect(mocks.startProductionQueue).toHaveBeenCalledTimes(3);
+    expect(document.querySelector('[data-sequential-status="ACTIVE"]')).toBeNull();
+
+    fireEvent.click(startButton("batch-d"));
+    await flushAsyncWork();
+    expect(mocks.startProductionQueue).toHaveBeenNthCalledWith(4, "project-1", "batch-d");
+    expect(within(queueRow("batch-d")).getByText("运行中")).toBeTruthy();
+    expect(within(queueRow("batch-d")).queryByText(/等待自动开始 #1/)).toBeNull();
+  });
+
+  it("clears terminal failed state when there are no armed suffix batches", async () => {
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
+    await flushAsyncWork();
+    screen.getByRole("region", { name: "生产队列" });
+    fireEvent.click(startButton("batch-a"));
+    await flushAsyncWork();
+
+    batchStatuses["batch-a"] = "COMPLETED";
+    batchCounts["batch-a"] = { total: 1, succeeded: 0, failed: 1, cancelled: 0, skipped: 0 };
+    activeBatchId = undefined;
+    emitTerminalTask("batch-a");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+    await flushAsyncWork();
+    expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-sequential-status="ACTIVE"]')).toBeNull();
+    expect(document.querySelector('[data-sequential-status="PAUSED"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "继续后续" })).toBeNull();
+
+    fireEvent.click(startButton("batch-d"));
+    await flushAsyncWork();
+    expect(mocks.startProductionQueue).toHaveBeenNthCalledWith(2, "project-1", "batch-d");
+    expect(within(queueRow("batch-d")).getByText("运行中")).toBeTruthy();
+  });
+
   it("runs explicitly started batches in click order and never starts an unarmed batch", async () => {
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
     await flushAsyncWork();

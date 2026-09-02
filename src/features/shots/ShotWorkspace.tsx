@@ -997,7 +997,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     const sessionId = sequentialSessionRef.current;
     const isCurrentSession = () => sequentialMountedRef.current && sequentialSessionRef.current === sessionId;
     const initialState = sequentialBatchStartRef.current;
-    if (initialState.status === "PAUSED" || initialState.queuedBatchIds.length === 0) return;
+    if (initialState.status === "PAUSED") return;
+    if (!initialState.currentBatchId && initialState.queuedBatchIds.length === 0) {
+      if (initialState.status !== "IDLE") updateSequentialBatchStart({ ...emptySequentialBatchStartState });
+      return;
+    }
 
     sequentialAdvanceInFlightRef.current = true;
     try {
@@ -1037,13 +1041,21 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         }
         if (!isCleanSequentialCompletion(currentBatch)) {
           if (hasTerminalSequentialFailure(currentBatch)) {
-            updateSequentialBatchStart((current) => ({
-              ...current,
-              status: "PAUSED",
-              pauseReason: "上一批存在失败、取消或跳过项。",
-              canResume: true,
-            }));
+            if (sequentialBatchStartRef.current.queuedBatchIds.length === 0) {
+              updateSequentialBatchStart({ ...emptySequentialBatchStartState });
+            } else {
+              updateSequentialBatchStart((current) => ({
+                ...current,
+                status: "PAUSED",
+                pauseReason: "上一批存在失败、取消或跳过项。",
+                canResume: true,
+              }));
+            }
           }
+          return;
+        }
+        if (sequentialBatchStartRef.current.queuedBatchIds.length === 0) {
+          updateSequentialBatchStart({ ...emptySequentialBatchStartState });
           return;
         }
         updateSequentialBatchStart((current) => ({ ...current, currentBatchId: undefined }));
