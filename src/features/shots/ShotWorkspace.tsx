@@ -13,6 +13,7 @@ import {
   getShot,
   getProductionBatchRunbook,
   getProductionBatchReviewProductivity,
+  getProductionAdmissionStatus,
   getProductionQueue,
   getProductionQueueOverview,
   getSeriesProductionPlan,
@@ -47,8 +48,13 @@ import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
-import type { ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
-import type { ProductionBatchDetail } from "../../types/productionQueue";
+import type {
+  ProductionAdmissionStatus,
+  ProductionBatchDetail,
+  ProductionBatchSummary,
+  ProductionQueueOverview,
+  SequentialBatchStartState,
+} from "../../types/productionQueue";
 import type {
   ProductionPackageBatchBinding,
   ProductionPackageDiscoveryPackage,
@@ -269,6 +275,57 @@ interface ProductionQueueSnapshot {
   overview: ProductionQueueOverview;
 }
 
+const emptySequentialBatchStartState: SequentialBatchStartState = {
+  status: "IDLE",
+  queuedBatchIds: [],
+};
+
+function isCleanSequentialCompletion(batch: ProductionBatchDetail): boolean {
+  return batch.status === "COMPLETED"
+    && batch.running === 0
+    && batch.pending === 0
+    && batch.failed === 0
+    && batch.cancelled === 0
+    && batch.skipped === 0
+    && batch.succeeded === batch.total;
+}
+
+function hasTerminalSequentialFailure(batch: ProductionBatchDetail): boolean {
+  return isTerminalProductionBatch(batch) && !isCleanSequentialCompletion(batch);
+}
+
+function isStructuredProductionQueueBusy(error: unknown): boolean {
+  return Boolean(
+    error
+      && typeof error === "object"
+      && "code" in error
+      && (error as { code?: unknown }).code === "PRODUCTION_QUEUE_BUSY",
+  );
+}
+
+function addSequentialBatchToQueue(
+  state: SequentialBatchStartState,
+  batchId: string,
+  currentBatchId?: string,
+): SequentialBatchStartState {
+  if (state.currentBatchId === batchId || state.queuedBatchIds.includes(batchId)) return state;
+  const paused = state.status === "PAUSED";
+  return {
+    ...state,
+    status: paused ? "PAUSED" : "ACTIVE",
+    currentBatchId: state.currentBatchId ?? currentBatchId,
+    queuedBatchIds: [...state.queuedBatchIds, batchId],
+    pauseReason: paused ? state.pauseReason : undefined,
+    canResume: paused ? state.canResume : undefined,
+  };
+}
+
+function retainSequentialBatchFirst(state: SequentialBatchStartState, batchId: string): SequentialBatchStartState {
+  return state.queuedBatchIds.includes(batchId)
+    ? state
+    : { ...state, queuedBatchIds: [batchId, ...state.queuedBatchIds] };
+}
+
 const ProductionMonitor = ProductionMonitorComponent;
 
 function isTerminalProductionBatch(batch?: ProductionBatchDetail | null): boolean {
@@ -479,6 +536,9 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [productionQueues, setProductionQueues] = useState<ProductionBatchSummary[]>([]);
   const [productionQueueOverview, setProductionQueueOverview] = useState<ProductionQueueOverview>();
   const [productionQueueExpanded, setProductionQueueExpanded] = useState(false);
+  const [sequentialBatchStart, setSequentialBatchStart] = useState<SequentialBatchStartState>(() => ({
+    ...emptySequentialBatchStartState,
+  }));
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [productionMonitorBatch, setProductionMonitorBatch] = useState<ProductionBatchDetail>();
   const [productionMonitorReview, setProductionMonitorReview] = useState<ProductionBatchReviewProductivity>();
@@ -529,6 +589,20 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const productionMonitorPendingBatch = useRef<string | undefined>(undefined);
   const productionMonitorMounted = useRef(true);
   const productionMonitorBatchRef = useRef<string | undefined>(undefined);
+  const sequentialBatchStartRef = useRef<SequentialBatchStartState>({ ...emptySequentialBatchStartState });
+  const sequentialSessionRef = useRef(0);
+  const sequentialMountedRef = useRef(true);
+  const sequentialStartInFlightRef = useRef<string | undefined>(undefined);
+  const sequentialAdvanceInFlightRef = useRef(false);
+
+  const updateSequentialBatchStart = useCallback(
+    (next: SequentialBatchStartState | ((current: SequentialBatchStartState) => SequentialBatchStartState)) => {
+      const resolved = typeof next === "function" ? next(sequentialBatchStartRef.current) : next;
+      sequentialBatchStartRef.current = resolved;
+      setSequentialBatchStart(resolved);
+    },
+    [],
+  );
 
   useEffect(() => {
     multiPackageMounted.current = true;
@@ -538,6 +612,23 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       multiPackageRefreshPending.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    sequentialMountedRef.current = true;
+    return () => {
+      sequentialMountedRef.current = false;
+      sequentialSessionRef.current += 1;
+      sequentialStartInFlightRef.current = undefined;
+      sequentialAdvanceInFlightRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    sequentialSessionRef.current += 1;
+    sequentialStartInFlightRef.current = undefined;
+    sequentialAdvanceInFlightRef.current = false;
+    updateSequentialBatchStart({ ...emptySequentialBatchStartState });
+  }, [projectId, updateSequentialBatchStart]);
 
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const selectedProductionBatchId = useMemo(
@@ -900,6 +991,123 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       }
     }
   }, [projectId]);
+
+  const maybeAdvanceSequentialBatchStart = useCallback(async () => {
+    if (!sequentialMountedRef.current || sequentialAdvanceInFlightRef.current) return;
+    const sessionId = sequentialSessionRef.current;
+    const isCurrentSession = () => sequentialMountedRef.current && sequentialSessionRef.current === sessionId;
+    const initialState = sequentialBatchStartRef.current;
+    if (initialState.status === "PAUSED" || initialState.queuedBatchIds.length === 0) return;
+
+    sequentialAdvanceInFlightRef.current = true;
+    try {
+      let admission: ProductionAdmissionStatus;
+      try {
+        admission = await getProductionAdmissionStatus();
+      } catch (admissionError: unknown) {
+        if (!isCurrentSession()) return;
+        const message = toUserMessage(admissionError);
+        updateSequentialBatchStart((current) => ({ ...current, status: "PAUSED", pauseReason: message, canResume: true }));
+        setError(message);
+        return;
+      }
+      if (!isCurrentSession() || admission.busy) return;
+
+      const currentBatchId = sequentialBatchStartRef.current.currentBatchId;
+      if (currentBatchId) {
+        let currentBatch: ProductionBatchDetail;
+        try {
+          currentBatch = await getProductionQueue(projectId, currentBatchId);
+        } catch (batchError: unknown) {
+          if (!isCurrentSession()) return;
+          const message = toUserMessage(batchError);
+          updateSequentialBatchStart((current) => ({ ...current, status: "PAUSED", pauseReason: message, canResume: true }));
+          setError(message);
+          return;
+        }
+        if (!isCurrentSession()) return;
+        if (currentBatch.status === "PAUSED") {
+          updateSequentialBatchStart((current) => ({
+            ...current,
+            status: "PAUSED",
+            pauseReason: "当前批次已暂停，请先处理当前批次。",
+            canResume: false,
+          }));
+          return;
+        }
+        if (!isCleanSequentialCompletion(currentBatch)) {
+          if (hasTerminalSequentialFailure(currentBatch)) {
+            updateSequentialBatchStart((current) => ({
+              ...current,
+              status: "PAUSED",
+              pauseReason: "上一批存在失败、取消或跳过项。",
+              canResume: true,
+            }));
+          }
+          return;
+        }
+        updateSequentialBatchStart((current) => ({ ...current, currentBatchId: undefined }));
+      }
+
+      const nextBatchId = sequentialBatchStartRef.current.queuedBatchIds[0];
+      if (!nextBatchId) {
+        updateSequentialBatchStart((current) => ({ ...current, status: "IDLE", currentBatchId: undefined }));
+        return;
+      }
+
+      sequentialStartInFlightRef.current = nextBatchId;
+      try {
+        await startProductionQueue(projectId, nextBatchId);
+      } catch (startError: unknown) {
+        if (!isCurrentSession()) return;
+        if (isStructuredProductionQueueBusy(startError)) {
+          updateSequentialBatchStart((current) => ({ ...current, status: "ACTIVE" }));
+        } else {
+          const message = toUserMessage(startError);
+          updateSequentialBatchStart((current) => ({
+            ...current,
+            status: "PAUSED",
+            pauseReason: message,
+            canResume: true,
+          }));
+          setError(message);
+        }
+        return;
+      } finally {
+        if (sequentialStartInFlightRef.current === nextBatchId) sequentialStartInFlightRef.current = undefined;
+      }
+
+      if (!isCurrentSession()) return;
+      updateSequentialBatchStart((current) => ({
+        ...current,
+        status: "ACTIVE",
+        currentBatchId: nextBatchId,
+        queuedBatchIds: current.queuedBatchIds.filter((batchId) => batchId !== nextBatchId),
+        pauseReason: undefined,
+        canResume: undefined,
+      }));
+      productionMonitorBatchRef.current = nextBatchId;
+      setFocusedProductionBatchId(nextBatchId);
+      setProductionQueueExpanded(true);
+      await reloadProductionQueues();
+      if (!isCurrentSession()) return;
+      await reload();
+      if (!isCurrentSession()) return;
+      await refreshProductionMonitor(nextBatchId);
+    } finally {
+      sequentialAdvanceInFlightRef.current = false;
+    }
+  }, [projectId, refreshProductionMonitor, reload, reloadProductionQueues, updateSequentialBatchStart]);
+
+  useEffect(() => {
+    if (mode !== "production") return;
+    void maybeAdvanceSequentialBatchStart();
+  }, [maybeAdvanceSequentialBatchStart, mode, productionQueues]);
+
+  useEffect(() => {
+    if (mode !== "production") return;
+    void maybeAdvanceSequentialBatchStart();
+  }, [maybeAdvanceSequentialBatchStart, mode, productionMonitorBatch]);
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -1426,12 +1634,139 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }, [focusProductionQueueBatch, refreshProductionMonitor]);
 
   const startProductionBatch = useCallback(async (batchId: string) => {
-    focusProductionQueueBatch(batchId);
-    await startProductionQueue(projectId, batchId);
-    await reloadProductionQueues();
-    await reload();
-    await refreshProductionMonitor(batchId);
-  }, [focusProductionQueueBatch, projectId, refreshProductionMonitor, reload, reloadProductionQueues]);
+    if (!batchId || !sequentialMountedRef.current) return;
+    const sessionId = sequentialSessionRef.current;
+    const isCurrentSession = () => sequentialMountedRef.current && sequentialSessionRef.current === sessionId;
+    const currentState = sequentialBatchStartRef.current;
+    if (currentState.queuedBatchIds.includes(batchId)) return;
+    if (currentState.currentBatchId === batchId && currentState.status === "ACTIVE" && !sequentialStartInFlightRef.current) return;
+    if (currentState.currentBatchId && currentState.currentBatchId !== batchId) {
+      updateSequentialBatchStart((current) => addSequentialBatchToQueue(current, batchId, current.currentBatchId));
+      return;
+    }
+
+    if (sequentialStartInFlightRef.current || sequentialAdvanceInFlightRef.current) {
+      updateSequentialBatchStart((current) => addSequentialBatchToQueue(
+        current,
+        batchId,
+        sequentialStartInFlightRef.current ?? current.currentBatchId,
+      ));
+      return;
+    }
+
+    sequentialStartInFlightRef.current = batchId;
+    try {
+      let admission: ProductionAdmissionStatus;
+      try {
+        admission = await getProductionAdmissionStatus();
+      } catch (admissionError: unknown) {
+        if (!isCurrentSession()) return;
+        const message = toUserMessage(admissionError);
+        updateSequentialBatchStart((current) => ({
+          ...retainSequentialBatchFirst({ ...current, currentBatchId: undefined }, batchId),
+          status: "PAUSED",
+          pauseReason: message,
+          canResume: true,
+        }));
+        setError(message);
+        return;
+      }
+      if (!isCurrentSession()) return;
+
+      if (admission.busy) {
+        if (admission.batchId === batchId) {
+          updateSequentialBatchStart((current) => ({
+            ...current,
+            status: "ACTIVE",
+            currentBatchId: batchId,
+            pauseReason: undefined,
+            canResume: undefined,
+          }));
+        } else {
+          updateSequentialBatchStart((current) => addSequentialBatchToQueue(current, batchId, admission.batchId));
+        }
+        return;
+      }
+
+      updateSequentialBatchStart((current) => ({
+        ...current,
+        status: "ACTIVE",
+        currentBatchId: batchId,
+        pauseReason: undefined,
+        canResume: undefined,
+      }));
+      try {
+        await startProductionQueue(projectId, batchId);
+      } catch (startError: unknown) {
+        if (!isCurrentSession()) return;
+        const base = { ...sequentialBatchStartRef.current, currentBatchId: undefined };
+        if (isStructuredProductionQueueBusy(startError)) {
+          updateSequentialBatchStart({
+            ...retainSequentialBatchFirst(base, batchId),
+            status: "ACTIVE",
+            pauseReason: undefined,
+            canResume: undefined,
+          });
+        } else {
+          const message = toUserMessage(startError);
+          updateSequentialBatchStart({
+            ...retainSequentialBatchFirst(base, batchId),
+            status: "PAUSED",
+            pauseReason: message,
+            canResume: true,
+          });
+          setError(message);
+        }
+        return;
+      }
+
+      if (!isCurrentSession()) return;
+      updateSequentialBatchStart((current) => ({
+        ...current,
+        status: "ACTIVE",
+        currentBatchId: batchId,
+        queuedBatchIds: current.queuedBatchIds.filter((queuedBatchId) => queuedBatchId !== batchId),
+        pauseReason: undefined,
+        canResume: undefined,
+      }));
+      focusProductionQueueBatch(batchId);
+      await reloadProductionQueues();
+      if (!isCurrentSession()) return;
+      await reload();
+      if (!isCurrentSession()) return;
+      await refreshProductionMonitor(batchId);
+    } finally {
+      if (sequentialStartInFlightRef.current === batchId) sequentialStartInFlightRef.current = undefined;
+    }
+  }, [focusProductionQueueBatch, projectId, refreshProductionMonitor, reload, reloadProductionQueues, updateSequentialBatchStart]);
+
+  const cancelQueuedSequentialBatch = useCallback((batchId: string) => {
+    updateSequentialBatchStart((current) => ({
+      ...current,
+      queuedBatchIds: current.queuedBatchIds.filter((queuedBatchId) => queuedBatchId !== batchId),
+    }));
+  }, [updateSequentialBatchStart]);
+
+  const cancelSequentialBatchStart = useCallback(() => {
+    updateSequentialBatchStart((current) => ({
+      ...current,
+      status: current.currentBatchId ? current.status : "IDLE",
+      queuedBatchIds: [],
+    }));
+    setNotice("已取消后续连续运行；当前任务会继续完成。");
+  }, [updateSequentialBatchStart]);
+
+  const resumeSequentialBatchStart = useCallback(() => {
+    if (sequentialBatchStartRef.current.status !== "PAUSED") return;
+    updateSequentialBatchStart((current) => ({
+      ...current,
+      status: "ACTIVE",
+      currentBatchId: undefined,
+      pauseReason: undefined,
+      canResume: undefined,
+    }));
+    void maybeAdvanceSequentialBatchStart();
+  }, [maybeAdvanceSequentialBatchStart, updateSequentialBatchStart]);
 
   const requeueProductionMonitorItem = useCallback(async (itemId: string) => {
     const batchId = selectedProductionBatchId;
@@ -1960,7 +2295,15 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         onToggle={mode === "production" ? setProductionQueueExpanded : undefined}
         focusBatchId={mode === "production" ? focusedProductionBatchId : undefined}
         createdBatchIds={mode === "production" ? recentlyCreatedProductionBatchIds : undefined}
+        queuedStartBatchIds={sequentialBatchStart.queuedBatchIds}
+        currentSequentialBatchId={sequentialBatchStart.currentBatchId}
+        sequentialStartStatus={sequentialBatchStart.status}
+        sequentialPauseReason={sequentialBatchStart.pauseReason}
+        sequentialCanResume={sequentialBatchStart.canResume}
         onStart={startProductionBatch}
+        onCancelQueuedStart={cancelQueuedSequentialBatch}
+        onResumeSequentialStart={resumeSequentialBatchStart}
+        onCancelSequentialStart={cancelSequentialBatchStart}
         onPause={async (batchId) => { await pauseProductionQueue(projectId, batchId); await reloadProductionQueues(); await reload(); }}
         onOpen={mode === "production"
           ? (batchId) => openProductionMonitorBatch(batchId)

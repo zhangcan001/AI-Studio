@@ -4,6 +4,7 @@ import type {
   ProductionBatchItemView,
   ProductionBatchSummary,
   ProductionQueueOverview,
+  SequentialBatchStartStatus,
 } from "../../types/productionQueue";
 import type { ProductionBatchRunbookRow, ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
 import "./ProductionQueueDrawer.css";
@@ -38,11 +39,20 @@ export interface ProductionQueueDrawerProps {
   focusBatchId?: string;
   /** Batch IDs created by the latest quick-flow action; they stay visible and are marked. */
   createdBatchIds?: readonly string[];
+  /** Session-local explicit sequential-start intent owned by the host. */
+  queuedStartBatchIds?: readonly string[];
+  currentSequentialBatchId?: string;
+  sequentialStartStatus?: SequentialBatchStartStatus;
+  sequentialPauseReason?: string;
+  sequentialCanResume?: boolean;
   onToggle?: (expanded: boolean) => void;
   onStart?: (batchId: string) => void | Promise<void>;
   onPause?: (batchId: string) => void | Promise<void>;
   onRetry?: (itemId: string) => void | Promise<void>;
   onOpen?: (batchId: string) => void | Promise<void>;
+  onCancelQueuedStart?: (batchId: string) => void;
+  onResumeSequentialStart?: () => void;
+  onCancelSequentialStart?: () => void;
 }
 
 interface QueueDisplayData {
@@ -74,7 +84,7 @@ interface QueueStats {
   failed?: number;
 }
 
-type ActionKind = "start" | "pause" | "retry" | "open";
+type ActionKind = "start" | "pause" | "retry" | "open" | "cancel-waiting";
 
 export function ProductionQueueDrawer({
   overview,
@@ -86,11 +96,19 @@ export function ProductionQueueDrawer({
   defaultExpanded = false,
   focusBatchId,
   createdBatchIds,
+  queuedStartBatchIds = [],
+  currentSequentialBatchId,
+  sequentialStartStatus,
+  sequentialPauseReason,
+  sequentialCanResume = false,
   onToggle,
   onStart,
   onPause,
   onRetry,
   onOpen,
+  onCancelQueuedStart,
+  onResumeSequentialStart,
+  onCancelSequentialStart,
 }: ProductionQueueDrawerProps) {
   const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
   const [busyAction, setBusyAction] = useState<string>();
@@ -119,12 +137,16 @@ export function ProductionQueueDrawer({
   }
 
   async function runAction(kind: ActionKind, id: string, handler?: (value: string) => void | Promise<void>) {
-    if (!handler || busyAction) return;
-    setBusyAction(`${kind}:${id}`);
+    const action = `${kind}:${id}`;
+    const canQueueAnotherStart = kind === "start"
+      && busyAction?.startsWith("start:")
+      && busyAction !== action;
+    if (!handler || (busyAction && !canQueueAnotherStart)) return;
+    if (!canQueueAnotherStart) setBusyAction(action);
     try {
       await handler(id);
     } finally {
-      setBusyAction(undefined);
+      if (!canQueueAnotherStart) setBusyAction(undefined);
     }
   }
 
@@ -149,6 +171,19 @@ export function ProductionQueueDrawer({
         <span className="production-queue-drawer-chevron" aria-hidden="true">{isExpanded ? "⌄" : "⌃"}</span>
       </button>
 
+      {sequentialStartStatus && sequentialStartStatus !== "IDLE" && (
+        <SequentialStatusBar
+          status={sequentialStartStatus}
+          currentBatchId={currentSequentialBatchId}
+          currentBatchName={rows.find((row) => row.id === currentSequentialBatchId)?.name}
+          queuedBatchIds={queuedStartBatchIds}
+          pauseReason={sequentialPauseReason}
+          canResume={sequentialCanResume}
+          onResume={onResumeSequentialStart}
+          onCancel={onCancelSequentialStart}
+        />
+      )}
+
       {isExpanded && (
         <div id={contentId} className="production-queue-drawer-body">
           {visibleRows.length ? (
@@ -159,11 +194,14 @@ export function ProductionQueueDrawer({
                   row={row}
                   focused={row.id === focusBatchId}
                   recentlyCreated={createdBatchIds?.includes(row.id) ?? false}
+                  queued={queuedStartBatchIds.includes(row.id)}
+                  queuePosition={queuedStartBatchIds.indexOf(row.id) + 1}
                   busyAction={busyAction}
                   onStart={onStart ? (id) => void runAction("start", id, onStart) : undefined}
                   onPause={onPause ? (id) => void runAction("pause", id, onPause) : undefined}
                   onRetry={onRetry ? (id) => void runAction("retry", id, onRetry) : undefined}
                   onOpen={onOpen ? (id) => void runAction("open", id, onOpen) : undefined}
+                  onCancelWaiting={onCancelQueuedStart ? (id) => void runAction("cancel-waiting", id, onCancelQueuedStart) : undefined}
                 />
               ))}
             </ul>
@@ -205,20 +243,26 @@ function BatchRow({
   row,
   focused,
   recentlyCreated,
+  queued,
+  queuePosition,
   busyAction,
   onStart,
   onPause,
   onRetry,
   onOpen,
+  onCancelWaiting,
 }: {
   row: DrawerBatchRow;
   focused: boolean;
   recentlyCreated: boolean;
+  queued: boolean;
+  queuePosition: number;
   busyAction?: string;
   onStart?: (id: string) => void;
   onPause?: (id: string) => void;
   onRetry?: (id: string) => void;
   onOpen?: (id: string) => void;
+  onCancelWaiting?: (id: string) => void;
 }) {
   const progress = progressFor(row);
   const isBusy = Boolean(busyAction?.endsWith(`:${row.id}`));
@@ -237,6 +281,7 @@ function BatchRow({
         <div className="production-queue-drawer-row-heading">
           <strong title={row.shotName ?? row.name}>{row.shotName ?? row.name}</strong>
           {recentlyCreated && <span className="production-queue-drawer-recent-label">刚刚创建</span>}
+          {queued && <span className="production-queue-drawer-sequential-label">等待自动开始 #{queuePosition}</span>}
           <StatusChip status={row.status} />
         </div>
         <div className="production-queue-drawer-row-meta">
@@ -255,13 +300,25 @@ function BatchRow({
         )}
       </div>
       <div className="production-queue-drawer-actions">
-        {onStart && startable && (
+        {queued && onCancelWaiting && (
+          <button
+            type="button"
+            className="quiet"
+            data-action="cancel-waiting"
+            aria-label={`取消等待 ${row.id}`}
+            onClick={() => onCancelWaiting(row.id)}
+            disabled={Boolean(busyAction)}
+          >
+            取消等待
+          </button>
+        )}
+        {onStart && startable && !queued && (
           <button
             type="button"
             data-action="start"
             aria-label={`开始队列 ${row.id}`}
             onClick={() => onStart(row.id)}
-            disabled={Boolean(busyAction)}
+            disabled={Boolean(busyAction && !busyAction.startsWith("start:"))}
           >
             {row.status === "PAUSED" ? "继续" : "开始"}
           </button>
@@ -305,6 +362,54 @@ function BatchRow({
         {isBusy && <span className="production-queue-drawer-busy" role="status">处理中…</span>}
       </div>
     </li>
+  );
+}
+
+function SequentialStatusBar({
+  status,
+  currentBatchId,
+  currentBatchName,
+  queuedBatchIds,
+  pauseReason,
+  canResume,
+  onResume,
+  onCancel,
+}: {
+  status: SequentialBatchStartStatus;
+  currentBatchId?: string;
+  currentBatchName?: string;
+  queuedBatchIds: readonly string[];
+  pauseReason?: string;
+  canResume: boolean;
+  onResume?: () => void;
+  onCancel?: () => void;
+}) {
+  if (status === "ACTIVE") {
+    return (
+      <div className="production-queue-drawer-sequence" data-sequential-status="ACTIVE" role="status">
+        <strong>连续运行</strong>
+        <span>当前：{currentBatchName ?? currentBatchId ?? "准备中"}</span>
+        {queuedBatchIds.length > 0 && <span>等待：{queuedBatchIds.length} 个</span>}
+        {queuedBatchIds.length > 0 && onCancel && (
+          <button type="button" className="quiet" data-action="cancel-sequence" onClick={onCancel}>
+            取消后续连续运行
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="production-queue-drawer-sequence production-queue-drawer-sequence-paused" data-sequential-status="PAUSED" role="status">
+      <div className="production-queue-drawer-sequence-copy">
+        <strong>连续运行已暂停</strong>
+        <span>{pauseReason ?? "上一批存在失败项。"}</span>
+      </div>
+      <div className="production-queue-drawer-sequence-actions">
+        {canResume && onResume && <button type="button" data-action="resume-sequence" onClick={onResume}>继续后续</button>}
+        {onCancel && queuedBatchIds.length > 0 && <button type="button" className="quiet" data-action="cancel-sequence" onClick={onCancel}>取消后续连续运行</button>}
+      </div>
+    </div>
   );
 }
 

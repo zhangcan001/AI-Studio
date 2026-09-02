@@ -71,6 +71,17 @@ export interface ProductionAdmissionStatus {
   activeTaskId?: string;
 }
 
+/** Session-local UI intent; it is not persisted and is not a batch status. */
+export type SequentialBatchStartStatus = "IDLE" | "ACTIVE" | "PAUSED";
+
+export interface SequentialBatchStartState {
+  status: SequentialBatchStartStatus;
+  currentBatchId?: string;
+  queuedBatchIds: string[];
+  pauseReason?: string;
+  canResume?: boolean;
+}
+
 export interface ProductionBatchCreateItem {
   workflowVersionId: string;
   recipeId: string;

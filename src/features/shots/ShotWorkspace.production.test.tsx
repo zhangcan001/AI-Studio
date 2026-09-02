@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   createProductionPackageBatches: vi.fn(),
   listProductionPackageBindings: vi.fn(),
   listProductionQueues: vi.fn(),
+  getProductionAdmissionStatus: vi.fn(),
   getProductionQueue: vi.fn(),
   getProductionBatchReviewProductivity: vi.fn(),
   getProductionQueueOverview: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock("../../services/tauriClient", async () => {
     createProductionPackageBatches: mocks.createProductionPackageBatches,
     listProductionPackageBindings: mocks.listProductionPackageBindings,
     listProductionQueues: mocks.listProductionQueues,
+    getProductionAdmissionStatus: mocks.getProductionAdmissionStatus,
     getProductionQueue: mocks.getProductionQueue,
     getProductionBatchReviewProductivity: mocks.getProductionBatchReviewProductivity,
     getProductionQueueOverview: mocks.getProductionQueueOverview,
@@ -419,6 +421,7 @@ beforeEach(() => {
   });
   mocks.listProductionPackageBindings.mockResolvedValue([]);
   mocks.listProductionQueues.mockImplementation(async () => queues);
+  mocks.getProductionAdmissionStatus.mockResolvedValue({ busy: false });
   mocks.getProductionQueue.mockImplementation(async () => makeBatchDetail());
   mocks.getProductionBatchReviewProductivity.mockImplementation(async () => review);
   mocks.getProductionQueueOverview.mockImplementation(async () => ({ ...queueOverview, totalQueues: queues.length, totalItems: queues.length }));
