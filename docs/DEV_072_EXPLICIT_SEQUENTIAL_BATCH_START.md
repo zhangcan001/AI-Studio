@@ -1,6 +1,6 @@
 # DEV-072 — Explicit Sequential Batch Start V1
 
-状态：`DEV-072 CODE GATE = PASS — DEV-072 = PENDING HUMAN UAT`
+状态：`DEV-072 CODE GATE = PASS — DEV-072 = PASS`
 
 本 DEV 在 AI Studio 0.9.0 中增加“用户显式点选后按顺序连续启动 Batch”的前端编排。DEV-071 的 `AUTO_NEXT = NO` 历史结论保持有效；本次新增的是用户明确 armed 的 sequence，不是隐式自动接续。
 
@@ -149,7 +149,7 @@ BUILD = PASS
 
 ## 7. Human UAT boundary
 
-代码门禁和 Source-only CI 通过后，才进入真人 UAT；本 DEV 代码阶段不自动操作真实桌面生产。真人 UAT 使用 repo 外全新隔离 Project 和三个各含 1 个 H3 I2V、5 sec、960×544 item 的 Production Package：
+代码门禁和 Source-only CI 通过后，才进入真人 UAT；本 DEV 代码阶段不自动操作真实桌面生产。真人 UAT 使用 repo 外全新隔离 Project 和四个各含 1 个 H3 I2V、5 sec、960×544 item 的 Production Package：
 
 ```text
 A -> B -> C 为用户明确点击的 sequence
@@ -171,7 +171,7 @@ DEV-072 = PENDING HUMAN UAT
 ## 8. DEV-072A terminal lifecycle closure
 
 ```text
-DEV072A_START_SHA = 34fe62bd62953be9c2d24cc0bd19ba8a158e4519a
+DEV072A_START_SHA = 34fe62bd62953be9c2d24cc0bd19ba8a158e4519
 TERMINAL_STATE_LEAK = YES
 SAME_SESSION_REUSE_GAP = YES
 ```
@@ -217,5 +217,74 @@ Version、数据库和安全边界保持不变：`0.9.0`、Migration `026`、Mig
 
 ```text
 DEV-072 CODE GATE = PASS
-DEV-072 = PENDING HUMAN UAT
+DEV-072 = PASS
+```
+
+## 9. DEV-072 FINAL HUMAN UAT
+
+真人 UAT 使用最新本地构建 `src-tauri/target/release/ai-studio.exe`，repo 外 fixture：
+
+```text
+UAT_ROOT = C:\Users\ADMIN\Desktop\AI_Studio_DEV072_UAT
+PACKAGE_IDS = DEV072-UAT-A, DEV072-UAT-B, DEV072-UAT-C, DEV072-UAT-D
+ITEM = SH001
+MODE = I2V
+DURATION = 5 sec
+SIZE = 960×544
+```
+
+实现与基线：
+
+```text
+IMPLEMENTATION_SHA = 34fe62bd62953be9c2d24cc0bd19ba8a158e4519
+TERMINAL_FIX_SHA   = 3923e77923578da2c73b093ca35e9bb2f633782c
+FIX_CI             = 33580093365 success
+VERSION            = 0.9.0
+MIGRATION          = 026
+MIGRATION027       = ABSENT
+```
+
+批次与真实 Task 时间（Asia/Shanghai，`+08:00`）：
+
+| Package | Batch ID | Task started | Task finished | Final |
+| --- | --- | --- | --- | --- |
+| A | `pbt_b56fedd2f49a4edd831e20846981c5f5` | `2026-09-02T11:46:36.999272+08:00` | `2026-09-02T11:48:39.948982100+08:00` | `COMPLETED`, `1/1`, `100%` |
+| B | `pbt_84a35c209e064bb584889982685ce7c9` | `2026-09-02T11:48:43.139913100+08:00` | `2026-09-02T11:50:36.681667600+08:00` | `COMPLETED`, `1/1`, `100%` |
+| C | `pbt_2eb67a841ca449d3a8eb34d1aaf38ea5` | `2026-09-02T11:50:39.897547400+08:00` | `2026-09-02T11:52:18.317051400+08:00` | `COMPLETED`, `1/1`, `100%` |
+| D | `pbt_acb0dd066dcc4e908b46d15c61de6103` | `2026-09-02T11:54:46.805181200+08:00` | `2026-09-02T11:56:25.432223000+08:00` | `COMPLETED`, `1/1`, `100%` |
+
+最终真人验收结果：
+
+```text
+AUTO_START_ON_CREATE              = NO
+A_RUNNING                         = PASS
+B_AUTO_START                      = PASS
+C_AUTO_START                      = PASS
+BATCH_OVERLAP                     = NO
+FINAL_SEQUENCE_STATE              = IDLE
+UNARMED_D_AUTO_START              = NO
+D_IMMEDIATE_START_AFTER_SEQUENCE  = PASS
+A_FINAL                           = COMPLETED
+B_FINAL                           = COMPLETED
+C_FINAL                           = COMPLETED
+D_FINAL                           = COMPLETED
+MAX_CONCURRENT_BATCH              = 1
+COMFY_QUEUE_FINAL                 = running 0, pending 0
+```
+
+操作偏差记录：初始 A 运行期间用户误点 D，D 短暂显示为“等待自动开始 #3”，但没有创建 D Task 或提交 ComfyUI；随后 D 恢复为 `READY/PENDING`，并在同一 App session 中按要求显式启动后成功完成。该偏差不隐去，按真人 UAT owner 决定作为非产品 P2 操作偏差记录；产品行为验收判定为 `PASS`。
+
+```text
+P0 = NONE
+P1 = NONE
+P2 = OPERATOR_DEVIATION_ONLY
+P3 = NONE
+FAILURE_PAUSE       = AUTOMATED_PASS
+MANUAL_CONTINUE     = AUTOMATED_PASS
+CANCEL_WAITING      = AUTOMATED_PASS
+CANCEL_SEQUENCE     = AUTOMATED_PASS
+DUPLICATE_INTENT    = AUTOMATED_PASS
+VISIBILITY_RESUME   = AUTOMATED_PASS
+AUTO_RETRY          = NO
+```
 ```
