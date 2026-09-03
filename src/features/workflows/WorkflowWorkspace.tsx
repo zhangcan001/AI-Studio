@@ -61,6 +61,18 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
 }
 
+export function latestCatalogRecipeForWorkflowItem(item: WorkflowProductionWorkspaceView, catalog: RecipeViewModel[]): RecipeViewModel | undefined {
+  if (!item.workflowVersionId) return undefined;
+  for (let index = item.recipes.length - 1; index >= 0; index -= 1) {
+    const recipe = item.recipes[index];
+    const catalogRecipe = catalog.find((candidate) =>
+      candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === recipe.recipeId,
+    );
+    if (catalogRecipe) return catalogRecipe;
+  }
+  return undefined;
+}
+
 const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
   { value: "inspect", label: "检查工作流" },
   { value: "compatibility", label: "兼容性检查" },
@@ -1053,6 +1065,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>复制配方</button>}
               {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button workflow-parameter-button" onClick={() => void openParameterExposure(item)}>生产参数</button>}
               {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "快速测试"}</button>}
+              {item.workflowVersionId && !item.archived && (() => {
+                const projectRecipe = latestCatalogRecipeForWorkflowItem(item, catalog);
+                return <button type="button" className="quiet-button" onClick={() => { if (projectRecipe) void onUseInProject(projectRecipe.workflowId, projectRecipe.recipeId); }} disabled={!projectId || !projectRecipe} title={!projectId ? "请先选择或创建一个项目" : !projectRecipe ? "该工作流尚未进入生产目录" : "在当前项目中配置这个工作流"}>用于当前项目</button>;
+              })()}
               {item.workflowId && <button type="button" className="quiet-button" onClick={() => void smartImportWorkflow(item.workflowId)}>创建新版本</button>}
               {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)} disabled={item.builtin} title={item.builtin ? "内置运行包不可永久删除" : "删除此工作流版本"}>{item.builtin ? "删除（内置不可用）" : "删除"}</button>}
               {item.workflowVersionId && item.archived && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复到列表</button>}

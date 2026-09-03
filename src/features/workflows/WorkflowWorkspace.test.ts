@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowInputView } from "../../types/workflowOnboarding";
-import { createDefaultOutputDraft, isExposableWorkflowInput } from "./WorkflowWorkspace";
+import {
+  createDefaultOutputDraft,
+  isExposableWorkflowInput,
+  latestCatalogRecipeForWorkflowItem,
+} from "./WorkflowWorkspace";
 
 describe("工作流输出映射默认值", () => {
   it("使用中文显示名称，同时保留技术输出 ID", () => {
@@ -41,5 +45,45 @@ describe("Workflow Parameter Exposure 安全边界", () => {
     expect(isExposableWorkflowInput(workflowInput({ name: "model", suggestedSemanticKey: "model" }))).toBe(false);
     expect(isExposableWorkflowInput(workflowInput({ name: "output_directory", suggestedSemanticKey: "output_directory" }))).toBe(false);
     expect(isExposableWorkflowInput(workflowInput({ name: "device", suggestedSemanticKey: "device" }))).toBe(false);
+  });
+});
+
+const workflowRecipeItem = (recipeIds: string[]) =>
+  ({
+    workflowVersionId: "WV1",
+    recipes: recipeIds.map((recipeId) => ({ recipeId })),
+  }) as Parameters<typeof latestCatalogRecipeForWorkflowItem>[0];
+
+const catalogRecipes = (...entries: Array<[string, string]>) =>
+  entries.map(([workflowVersionId, recipeId]) => ({ workflowVersionId, recipeId })) as Parameters<
+    typeof latestCatalogRecipeForWorkflowItem
+  >[1];
+
+describe("工作流最新目录配方匹配", () => {
+  it("返回项目中最新且已进入目录的配方", () => {
+    expect(
+      latestCatalogRecipeForWorkflowItem(
+        workflowRecipeItem(["R1", "R2"]),
+        catalogRecipes(["WV1", "R1"], ["WV1", "R2"]),
+      )?.recipeId,
+    ).toBe("R2");
+  });
+
+  it("最新配方不在目录时回退到更早的匹配配方", () => {
+    expect(
+      latestCatalogRecipeForWorkflowItem(
+        workflowRecipeItem(["R1", "R2"]),
+        catalogRecipes(["WV1", "R1"]),
+      )?.recipeId,
+    ).toBe("R1");
+  });
+
+  it("相同配方 ID 但不同工作流版本时不匹配", () => {
+    expect(
+      latestCatalogRecipeForWorkflowItem(
+        workflowRecipeItem(["R2"]),
+        catalogRecipes(["WV2", "R2"]),
+      ),
+    ).toBeUndefined();
   });
 });
