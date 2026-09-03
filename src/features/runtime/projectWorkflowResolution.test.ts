@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
-import { resolveProjectWorkflow } from "./projectWorkflowResolution";
+import { resolveProjectVideoWorkflow, resolveProjectWorkflow } from "./projectWorkflowResolution";
 
 function recipe(id: string): RecipeViewModel {
   return {
@@ -52,5 +52,25 @@ describe("project workflow resolution", () => {
     expect(result.recipe?.recipeId).toBe("recipe-default");
     expect(result.source).toBe("project_default");
     expect(result.staleProjectBinding).toBe(true);
+  });
+
+  it("can keep a mode-specific preflight from falling back to generic video recipes", () => {
+    const genericVideo: RecipeViewModel = {
+      ...recipe("generic-video"),
+      outputTypes: ["video"],
+      fields: [],
+    };
+
+    expect(resolveProjectVideoWorkflow([genericVideo], "FL2VA_TEXT_TO_VIDEO").recipe?.recipeId)
+      .toBe("recipe-generic-video");
+    expect(resolveProjectVideoWorkflow(
+      [genericVideo],
+      "FL2VA_TEXT_TO_VIDEO",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { allowGenericFallback: false },
+    ).recipe).toBeUndefined();
   });
 });

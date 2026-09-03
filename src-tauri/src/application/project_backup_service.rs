@@ -10359,7 +10359,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v15_backup_without_project_workflow_bindings_restores_with_empty_bindings() {
+    async fn project_backup_v15_restores_without_project_workflow_bindings() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
@@ -10390,6 +10390,10 @@ mod tests {
             "items": [],
             "workflowRefs": []
         });
+        assert!(!document
+            .as_object()
+            .unwrap()
+            .contains_key("projectWorkflowBindings"));
         writer.start_file("manifest.json", options).unwrap();
         writer
             .write_all(serde_json::to_string(&manifest).unwrap().as_bytes())
@@ -10407,6 +10411,8 @@ mod tests {
         );
         let preview = service.inspect(archive_path).await.unwrap();
         let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_ne!(restored.id, "legacy-v15");
+        assert_eq!(restored.name, "旧项目 V15（恢复）");
         let binding_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM project_workflow_bindings WHERE project_id = ?",
         )

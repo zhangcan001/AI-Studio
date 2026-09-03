@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecipeViewModel } from "../../types/generation";
@@ -147,5 +147,29 @@ describe("ProjectWorkflowSettings", () => {
     await userEvent.click(screen.getByRole("button", { name: "保存工作流配置" }));
 
     expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-1", { bindings: [] });
+  });
+
+  it("publishes the loaded and saved config for the live preflight panel", async () => {
+    const nextConfig = {
+      ...emptyConfig,
+      imageDefault: {
+        stage: "IMAGE" as const,
+        mode: "DEFAULT" as const,
+        workflowVersionId: "image-version",
+        recipeId: "image-recipe",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        available: true,
+      },
+    };
+    const onConfigChanged = vi.fn();
+    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} onConfigChanged={onConfigChanged} />);
+
+    await screen.findByLabelText("图片默认工作流");
+    expect(onConfigChanged).toHaveBeenCalledWith(emptyConfig);
+    await userEvent.click(screen.getByRole("button", { name: "保存工作流配置" }));
+
+    await waitFor(() => expect(onConfigChanged).toHaveBeenLastCalledWith(nextConfig));
   });
 });

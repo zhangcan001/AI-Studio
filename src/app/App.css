@@ -722,6 +722,26 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .project-workflow-mode-row .settings-warning { margin: 0; }
 .project-workflow-migration { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid #4d658f; border-radius: 9px; color: #b9c8df; background: #182337; }
 .project-workflow-settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.project-workflow-preflight { display: grid; gap: 14px; padding: 16px; border: 1px solid #35435b; border-radius: 12px; background: #111720; }
+.project-workflow-preflight .section-heading { margin: 0; }
+.project-workflow-preflight-summary { display: grid; gap: 5px; padding: 13px 14px; border: 1px solid #3d79a8; border-radius: 10px; color: #d5deec; background: #182337; }
+.project-workflow-preflight-summary strong { color: #b9f5cd; font-size: 1rem; }
+.project-workflow-preflight-overall-partial { border-color: #80652d; background: #2a2417; }
+.project-workflow-preflight-overall-partial strong { color: #ffe3a3; }
+.project-workflow-preflight-overall-blocked { border-color: #744b50; background: #271d23; }
+.project-workflow-preflight-overall-blocked strong { color: #ffc1c1; }
+.project-workflow-preflight-group { display: grid; gap: 9px; }
+.project-workflow-preflight-group h4 { margin: 0; color: #d5deec; }
+.project-workflow-preflight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.project-workflow-preflight-item { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid #2c3547; border-radius: 9px; background: #171d28; }
+.project-workflow-preflight-item-warning { border-color: #80652d; background: #2a2417; }
+.project-workflow-preflight-item-blocked { border-color: #744b50; background: #271d23; }
+.project-workflow-preflight-item small { color: #8997ad; overflow-wrap: anywhere; }
+.project-workflow-preflight-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.project-workflow-preflight-status { color: #b9f5cd; font-size: 0.8rem; font-weight: 700; white-space: nowrap; }
+.project-workflow-preflight-warning { margin: 2px 0 0; color: #ffe3a3; font-size: 0.8rem; line-height: 1.45; }
+.project-workflow-preflight-blocked { margin: 0; color: #ffc1c1; font-size: 0.82rem; }
+.project-workflow-preflight-recipe { min-width: 0; overflow-wrap: anywhere; }
 .project-table { display: grid; gap: 8px; overflow-x: auto; }
 .project-table-row { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(150px, 1.5fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(74px, 0.55fr) minmax(145px, 0.75fr); align-items: center; gap: 12px; min-width: 860px; padding: 12px 14px; border: 1px solid #2c3547; border-radius: 9px; background: #111720; }
 .project-table-header { border-color: transparent; color: #8997ad; background: transparent; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }

@@ -4,9 +4,15 @@
 
 ```text
 DEV075_START_SHA=8e4ed13f5f809fc1725f20a35b95dac6e7001750
-DEV075_FINAL_SHA=see final Git section of the completion report
+DEV075_FINAL_SHA=82afb7c99057e95e32c9a00c4aecc2134475623e
 BRANCH=master
 WORKTREE_START=clean
+
+P0 = NONE
+P1 = NONE
+P2 = NONE
+P3 = NONE
+DEV075_PROJECT_WORKFLOW_BINDING = PASS
 
 MIGRATION_BEFORE=026
 MIGRATION_AFTER=027
@@ -59,7 +65,22 @@ pnpm exec tsc --noEmit
 PASS
 ```
 
-The final report records the complete serial gate results, including migration/schema checks, Rust and frontend regression suites, build, diff check, and Tauri release build.
+Current complete serial gate results:
+
+```text
+Rust full serial: 709 passed, 0 failed, 1 ignored
+Frontend: 103 test files, 454 tests passed
+TypeScript: PASS
+pnpm build: PASS (216 modules transformed; existing >500 KB chunk warning only)
+git diff --check: PASS
+pnpm tauri build: PASS
+Version: 1.0.0
+Migration: 027
+Backup format: V16
+Tables: 56
+```
+
+The explicit V15 compatibility test creates a V15 archive whose project document has no `projectWorkflowBindings` field, then verifies that the current `ProjectBackupService` can inspect and restore it into a new project with zero bindings and no compatibility error.
 
 ## UX acceptance scope
 

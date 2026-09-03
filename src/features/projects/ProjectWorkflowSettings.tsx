@@ -24,6 +24,7 @@ import { workflowDisplayName } from "../../i18n/statusLabels";
 interface Props {
   projectId: string;
   catalog: RecipeViewModel[];
+  onConfigChanged?: (config: ProjectWorkflowConfigView) => void;
 }
 
 type Draft = {
@@ -149,7 +150,7 @@ function ConfiguredSelect({
   );
 }
 
-export function ProjectWorkflowSettings({ projectId, catalog }: Props) {
+export function ProjectWorkflowSettings({ projectId, catalog, onConfigChanged }: Props) {
   const [config, setConfig] = useState<ProjectWorkflowConfigView>();
   const [draft, setDraft] = useState<Draft>({ videoModeOverrides: {} });
   const [legacyImage, setLegacyImage] = useState<SelectedRecipeRef>();
@@ -174,6 +175,7 @@ export function ProjectWorkflowSettings({ projectId, catalog }: Props) {
       .then((nextConfig) => {
         if (!active) return;
         setConfig(nextConfig);
+        onConfigChanged?.(nextConfig);
         setDraft(draftFromConfig(nextConfig));
         if (configIsEmpty(nextConfig)) {
           setLegacyImage(readSelectedRecipeRef(projectId, "image"));
@@ -192,7 +194,7 @@ export function ProjectWorkflowSettings({ projectId, catalog }: Props) {
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [projectId]);
+  }, [onConfigChanged, projectId]);
 
   function setDraftValue(patch: Partial<Draft>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -206,6 +208,7 @@ export function ProjectWorkflowSettings({ projectId, catalog }: Props) {
     try {
       const nextConfig = await replaceProjectWorkflowConfig(projectId, { bindings });
       setConfig(nextConfig);
+      onConfigChanged?.(nextConfig);
       setDraft(draftFromConfig(nextConfig));
       setLegacyImage(undefined);
       setLegacyVideo(undefined);

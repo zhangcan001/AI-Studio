@@ -30,6 +30,10 @@ interface ResolutionOptions<T extends RecipeViewModel> {
   recommended?: T;
 }
 
+export interface ProjectVideoWorkflowResolutionOptions {
+  allowGenericFallback?: boolean;
+}
+
 export function resolveProjectWorkflow<T extends RecipeViewModel>({
   candidates,
   explicit,
@@ -103,11 +107,14 @@ export function resolveProjectVideoWorkflow<T extends RecipeViewModel>(
   projectMode?: SelectedRecipeRef,
   projectDefault?: SelectedRecipeRef,
   recommended?: T,
+  options: ProjectVideoWorkflowResolutionOptions = {},
 ): ProjectWorkflowResolution<T> {
   const modeCandidates = recipesForVideoMode(catalog, mode) as T[];
   const candidates = modeCandidates.length || mode === "CUSTOM_VIDEO"
     ? modeCandidates
-    : recipesForVideoMode(catalog, "CUSTOM_VIDEO") as T[];
+    : options.allowGenericFallback === false
+      ? []
+      : recipesForVideoMode(catalog, "CUSTOM_VIDEO") as T[];
   return resolveProjectWorkflow({
     candidates,
     explicit,

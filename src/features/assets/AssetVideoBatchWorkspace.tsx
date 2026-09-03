@@ -123,10 +123,7 @@ export function h3InitialGenerationMode(initialAssets: AssetView[]): H3Generatio
 }
 
 function videoWorkflowCandidatesForMode(catalog: RecipeViewModel[], mode: H3GenerationMode): RecipeViewModel[] {
-  const compatible = catalog.filter((candidate) => videoRecipeCapability(candidate).supportedModes.includes(mode));
-  return compatible.length
-    ? compatible
-    : catalog.filter((candidate) => videoRecipeCapability(candidate).supportedModes.includes("CUSTOM_VIDEO"));
+  return catalog.filter((candidate) => videoRecipeCapability(candidate).supportedModes.includes(mode));
 }
 
 export function h3PickerAssets(assets: AssetView[], mode: H3GenerationMode): AssetView[] {
@@ -644,8 +641,7 @@ export function AssetVideoBatchWorkspace({
   const [assetLibraryError, setAssetLibraryError] = useState<string>();
   const videoCatalog = useMemo(() => filterVideoRecipes(catalog), [catalog]);
   const recommendedRecipe = useMemo(
-    () => h3RecipeForMode(videoCatalog, generationMode, qualityProfile)
-      ?? videoCatalog.find((candidate) => videoRecipeCapability(candidate).supportedModes.includes(generationMode)),
+    () => h3RecipeForMode(videoCatalog, generationMode, qualityProfile),
     [generationMode, qualityProfile, videoCatalog],
   );
   const projectVideoDefault = useMemo(
@@ -669,6 +665,7 @@ export function AssetVideoBatchWorkspace({
       projectModeOverride,
       projectVideoDefault,
       recommendedRecipe,
+      { allowGenericFallback: false },
     ),
     [generationMode, manualVideoSelection, projectModeOverride, projectVideoDefault, recommendedRecipe, videoCatalog],
   );
@@ -1353,18 +1350,18 @@ export function AssetVideoBatchWorkspace({
     );
   }
 
-  if (!recipe && !videoCatalog.length) {
+  if (!recipe && !videoWorkflowCandidatesForMode(videoCatalog, generationMode).length) {
     return (
       <section className="workspace-panel asset-video-batch-workspace" aria-label="视频工作流为空">
         <div className="section-heading workspace-heading">
           <div>
             <span className="section-label">视频工作流</span>
-            <h2>没有可用视频工作流</h2>
-            <p className="section-description">请先导入并发布一个声明视频输出的工作流。</p>
+            <h2>当前模式没有兼容工作流</h2>
+            <p className="section-description">请先导入并发布一个通过 H3 节点契约、支持当前模式的工作流。</p>
           </div>
           <button type="button" className="quiet-button" onClick={onBackToAssets}>返回资产库</button>
         </div>
-        <p className="disabled-note">没有可用视频工作流。</p>
+        <p className="disabled-note">当前模式没有可用的 H3 工作流；项目预检已将该路径标记为不可用。</p>
         {onOpenWorkflows && <button type="button" onClick={onOpenWorkflows}>导入工作流</button>}
       </section>
     );

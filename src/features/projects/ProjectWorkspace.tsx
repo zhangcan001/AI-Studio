@@ -12,10 +12,12 @@ import {
 } from "../../services/tauriClient";
 import type { ProjectBackupPreview, ProjectView } from "../../types/project";
 import type { RecipeViewModel } from "../../types/generation";
+import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
 import type { ProjectTemplate, TemplateProjectResult } from "../../types/organization";
 import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
+import { ProjectWorkflowPreflight } from "./ProjectWorkflowPreflight";
 
 interface Props {
   projects: ProjectView[];
@@ -43,12 +45,14 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
   const [templateForm, setTemplateForm] = useState<{ kind: "edit" | "createProject"; template: ProjectTemplate }>();
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
+  const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
 
   async function reloadTemplates() {
     setTemplates(await listProjectTemplates());
   }
 
   useEffect(() => { void reloadTemplates().catch((value) => setError(toUserMessage(value))); }, []);
+  useEffect(() => { setProjectWorkflowConfig(undefined); }, [activeProjectId]);
 
   function beginTemplateForm(kind: "edit" | "createProject", template: ProjectTemplate) {
     setTemplateForm({ kind, template });
@@ -237,7 +241,16 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         </form>
       )}
 
-      {activeProjectId && <ProjectWorkflowSettings projectId={activeProjectId} catalog={catalog} />}
+      {activeProjectId && (
+        <>
+          <ProjectWorkflowSettings
+            projectId={activeProjectId}
+            catalog={catalog}
+            onConfigChanged={setProjectWorkflowConfig}
+          />
+          {projectWorkflowConfig && <ProjectWorkflowPreflight config={projectWorkflowConfig} catalog={catalog} />}
+        </>
+      )}
 
       <section className="project-templates" aria-labelledby="project-templates-title">
         <div className="section-heading"><div><span className="section-label">可复用创作起点</span><h3 id="project-templates-title">项目模板</h3><p className="section-description">从已保存的工作流和无素材参数创建新项目。</p></div></div>
