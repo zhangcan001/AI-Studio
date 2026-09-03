@@ -22,7 +22,7 @@ async fn pick_api_workflow_file(
     let Some(file) = app_handle
         .dialog()
         .file()
-        .add_filter("ComfyUI API Workflow", &["json"])
+        .add_filter("ComfyUI Workflow JSON", &["json"])
         .blocking_pick_file()
     else {
         return Ok(None);
@@ -37,7 +37,7 @@ async fn pick_api_workflow_file(
         .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
     if !is_json {
         return Err(AppError::workflow_onboarding(
-            "WORKFLOW_NOT_API_FORMAT: select a .json ComfyUI API workflow",
+            "WORKFLOW_FILE_TYPE: select a .json ComfyUI workflow",
         ));
     }
     let original_filename = path

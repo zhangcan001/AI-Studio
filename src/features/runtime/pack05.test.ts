@@ -81,7 +81,7 @@ describe("M3 Pack 05 runtime contracts", () => {
   });
 
   it("rejects UI-format workflow files while accepting API-format graphs", () => {
-    const ui = inspectWorkflowImport(JSON.stringify({ nodes: [{ id: 1, type: "SaveImage" }] }));
+    const ui = inspectWorkflowImport(JSON.stringify({ nodes: [{ id: 1, type: "SaveImage" }], links: [] }));
     expect(ui.accepted).toBe(false);
     expect(ui.format).toBe("ui");
     const api = inspectWorkflowImport(JSON.stringify({ "1": { class_type: "SaveImage", inputs: {} } }));

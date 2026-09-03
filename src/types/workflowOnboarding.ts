@@ -15,6 +15,8 @@ export type WorkflowAutoOnboardingState =
   | "ALREADY_EXISTS_ARCHIVED"
   | "BLOCKED";
 
+export type WorkflowImportFormat = "API" | "UI" | "UNKNOWN" | "INVALID_JSON";
+
 export type InferenceConfidence = "CERTAIN" | "HIGH" | "AMBIGUOUS" | "UNKNOWN";
 
 export type WorkflowFieldType =
@@ -195,6 +197,9 @@ export interface WorkflowAutoIssueView {
 export interface WorkflowAutoOnboardingPlanView {
   draftId: string;
   state: WorkflowAutoOnboardingState;
+  /** Optional until the native onboarding response exposes format detection. */
+  format?: WorkflowImportFormat;
+  inputFormat?: WorkflowImportFormat;
   workflowKind: string;
   workflowSha256: string;
   originalFilename: string;

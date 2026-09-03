@@ -29,6 +29,29 @@ use uuid::Uuid;
 pub const MAX_WORKFLOW_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_ONBOARDING_DRAFTS: usize = 16;
 
+const INVALID_JSON_MESSAGE: &str = "无法读取这个文件，它不是有效的 JSON。";
+const UNKNOWN_WORKFLOW_MESSAGE: &str = "这个 JSON 不是可识别的 ComfyUI 工作流。";
+const UNSUPPORTED_UI_WORKFLOW_MESSAGE: &str = "检测到 ComfyUI 普通工作流 JSON。这个格式包含界面布局信息，暂时无法可靠转换成可执行 API 工作流。请在 ComfyUI 中将该工作流导出为 API Format JSON，然后重新选择该文件。";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComfyWorkflowInputFormat {
+    Api,
+    Ui,
+    Unknown,
+    InvalidJson,
+}
+
+impl ComfyWorkflowInputFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Api => "API",
+            Self::Ui => "UI",
+            Self::Unknown => "UNKNOWN",
+            Self::InvalidJson => "INVALID_JSON",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowOnboardingError {
     code: &'static str,
@@ -603,13 +626,7 @@ impl WorkflowOnboardingService {
                 ),
             ));
         }
-        let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
-            WorkflowOnboardingError::new(
-                "WORKFLOW_NOT_API_FORMAT",
-                format!("workflow is not valid JSON: {error}"),
-            )
-        })?;
-        let workflow = validate_api_workflow(value)?;
+        let workflow = parse_import_workflow(&bytes)?;
         let nodes = inspect_workflow(&workflow)?;
         let workflow_sha256 = sha256(&bytes);
         let is_new_version = existing_workflow_id.is_some();
@@ -3303,6 +3320,66 @@ fn input_max_items(definition: &InputDefinition) -> Option<usize> {
     }
 }
 
+pub fn detect_comfy_workflow_format(bytes: &[u8]) -> ComfyWorkflowInputFormat {
+    match serde_json::from_slice::<Value>(bytes) {
+        Ok(value) => detect_comfy_workflow_format_value(&value),
+        Err(_) => ComfyWorkflowInputFormat::InvalidJson,
+    }
+}
+
+fn detect_comfy_workflow_format_value(value: &Value) -> ComfyWorkflowInputFormat {
+    if is_ui_workflow_shape(value) {
+        return ComfyWorkflowInputFormat::Ui;
+    }
+    if is_api_workflow_shape(value) {
+        return ComfyWorkflowInputFormat::Api;
+    }
+    ComfyWorkflowInputFormat::Unknown
+}
+
+fn is_ui_workflow_shape(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.get("nodes").is_some_and(Value::is_array)
+        && object.get("links").is_some_and(Value::is_array)
+}
+
+fn is_api_workflow_shape(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    !object.is_empty()
+        && object.keys().all(|key| is_numeric_node_id(key))
+        && object.values().all(|node| {
+            let Some(node) = node.as_object() else {
+                return false;
+            };
+            node.get("class_type").is_some_and(Value::is_string)
+                && node.get("inputs").is_some_and(Value::is_object)
+        })
+}
+
+fn parse_import_workflow(bytes: &[u8]) -> Result<WorkflowDocument, WorkflowOnboardingError> {
+    let value: Value = serde_json::from_slice(bytes)
+        .map_err(|_| WorkflowOnboardingError::new("INVALID_JSON", INVALID_JSON_MESSAGE))?;
+    match detect_comfy_workflow_format_value(&value) {
+        ComfyWorkflowInputFormat::Api => validate_api_workflow(value),
+        ComfyWorkflowInputFormat::Ui => Err(WorkflowOnboardingError::new(
+            "UNSUPPORTED_UI_FORMAT",
+            UNSUPPORTED_UI_WORKFLOW_MESSAGE,
+        )),
+        ComfyWorkflowInputFormat::Unknown => Err(WorkflowOnboardingError::new(
+            "UNKNOWN",
+            UNKNOWN_WORKFLOW_MESSAGE,
+        )),
+        ComfyWorkflowInputFormat::InvalidJson => Err(WorkflowOnboardingError::new(
+            "INVALID_JSON",
+            INVALID_JSON_MESSAGE,
+        )),
+    }
+}
+
 fn validate_api_workflow(value: Value) -> Result<WorkflowDocument, WorkflowOnboardingError> {
     let object = value.as_object().cloned().ok_or_else(|| {
         WorkflowOnboardingError::new(
@@ -4351,6 +4428,109 @@ mod tests {
                 .code(),
             "WORKFLOW_NOT_API_FORMAT"
         );
+    }
+
+    #[test]
+    fn classifies_api_ui_unknown_and_invalid_workflow_files_before_onboarding() {
+        let api = br#"{
+            "1": {"class_type": "CLIPTextEncode", "inputs": {}},
+            "2": {"class_type": "SaveImage", "inputs": {}}
+        }"#;
+        assert_eq!(
+            detect_comfy_workflow_format(api),
+            ComfyWorkflowInputFormat::Api
+        );
+        assert!(parse_import_workflow(api).is_ok());
+
+        let ui = serde_json::to_vec(&json!({
+            "last_node_id": 2,
+            "last_link_id": 1,
+            "nodes": [
+                {
+                    "id": 1,
+                    "type": "LoadImage",
+                    "pos": [0, 0],
+                    "size": [315, 278],
+                    "flags": {},
+                    "order": 0,
+                    "mode": 0,
+                    "inputs": [],
+                    "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [1]}],
+                    "properties": {},
+                    "widgets_values": ["example.png"]
+                },
+                {
+                    "id": 2,
+                    "type": "SaveImage",
+                    "pos": [400, 0],
+                    "size": [315, 58],
+                    "flags": {},
+                    "order": 1,
+                    "mode": 0,
+                    "inputs": [{"name": "images", "type": "IMAGE", "link": 1}],
+                    "outputs": [],
+                    "properties": {},
+                    "widgets_values": ["ComfyUI"]
+                }
+            ],
+            "links": [[1, 1, 0, 2, 0, "IMAGE"]],
+            "groups": [],
+            "config": {},
+            "extra": {},
+            "version": 0.4
+        }))
+        .unwrap();
+        assert_eq!(
+            detect_comfy_workflow_format(&ui),
+            ComfyWorkflowInputFormat::Ui
+        );
+        let ui_error = parse_import_workflow(&ui).unwrap_err();
+        assert_eq!(ui_error.code(), "UNSUPPORTED_UI_FORMAT");
+        assert!(format!("{ui_error}").contains("请在 ComfyUI 中将该工作流导出为 API Format JSON"));
+
+        assert_eq!(
+            detect_comfy_workflow_format(br#"{}"#),
+            ComfyWorkflowInputFormat::Unknown
+        );
+        let unknown_error = parse_import_workflow(br#"{}"#).unwrap_err();
+        assert_eq!(unknown_error.code(), "UNKNOWN");
+        assert!(format!("{unknown_error}").contains("这个 JSON 不是可识别的 ComfyUI 工作流"));
+
+        assert_eq!(
+            detect_comfy_workflow_format(br#"{"#),
+            ComfyWorkflowInputFormat::InvalidJson
+        );
+        let invalid_error = parse_import_workflow(br#"{"#).unwrap_err();
+        assert_eq!(invalid_error.code(), "INVALID_JSON");
+        assert!(format!("{invalid_error}").contains("不是有效的 JSON"));
+    }
+
+    #[test]
+    fn auto_input_inference_keeps_prompt_numeric_and_media_semantics_distinct() {
+        let cases = [
+            ("prompt", json!("positive"), "prompt", "textarea"),
+            (
+                "negative_prompt",
+                json!("negative"),
+                "negative_prompt",
+                "textarea",
+            ),
+            ("seed", json!(7), "seed", "seed"),
+            ("steps", json!(20), "steps", "integer"),
+            ("cfg", json!(7.5), "cfg", "number"),
+            ("width", json!(512), "width", "integer"),
+            ("height", json!(512), "height", "integer"),
+            ("image", json!("input.png"), "reference_image", "image"),
+            ("video", json!("input.mp4"), "reference_video", "video"),
+            ("audio", json!("input.wav"), "reference_audio", "audio"),
+        ];
+
+        for (input_name, value, semantic_key, field_type) in cases {
+            let guess = auto_input_guess("CustomNode", input_name, &value)
+                .unwrap_or_else(|| panic!("expected inference for {input_name}"));
+            assert_eq!(guess.semantic_key, semantic_key, "{input_name}");
+            assert_eq!(guess.field_type.as_str(), field_type, "{input_name}");
+        }
     }
 
     #[test]

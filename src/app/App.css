@@ -783,6 +783,11 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 
 .workflow-workspace { display: grid; gap: 18px; }
 .workflow-workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.workflow-advanced-actions { position: relative; }
+.workflow-advanced-actions > summary { min-height: 36px; padding: 8px 12px; border: 1px solid var(--ux-border); border-radius: 8px; color: var(--ux-muted); background: var(--ux-surface-1); cursor: pointer; list-style: none; }
+.workflow-advanced-actions > summary::-webkit-details-marker { display: none; }
+.workflow-advanced-actions-content { position: absolute; z-index: 5; right: 0; top: calc(100% + 6px); display: grid; gap: 6px; min-width: 190px; padding: 8px; border: 1px solid var(--ux-border); border-radius: 9px; background: var(--ux-surface-0); box-shadow: 0 14px 30px rgb(0 0 0 / 32%); }
+.workflow-advanced-actions-content button { width: 100%; text-align: left; }
 
 .workflow-import-quality {
   display: grid;
@@ -809,8 +814,12 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .workflow-smart-result-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .workflow-smart-result-grid span { min-width: 0; padding: 9px 10px; border: 1px solid #2c496a; border-radius: 8px; color: #8997ad; background: #101a27; font-size: 0.74rem; }
 .workflow-smart-result-grid strong { display: block; overflow: hidden; margin-top: 4px; color: #e4ecfa; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-import-result-warning { padding: 9px 10px; border: 1px solid #80652d; border-radius: 8px; color: #ffe3a3 !important; background: #2a2417; }
 .workflow-smart-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .workflow-smart-issues { grid-template-columns: minmax(0, 1fr) auto; border-color: #725d37; background: linear-gradient(135deg, #2a251c, #111720 70%); }
+.workflow-import-format-issue { grid-template-columns: minmax(0, 1fr) auto; }
+.workflow-import-guidance { grid-column: 1 / -1; padding: 10px 12px; border: 1px solid #4d658f; border-radius: 8px; color: #c9d6e8; background: #111f31; }
+.workflow-import-guidance p { margin: 4px 0 0; }
 .workflow-smart-issues-heading { display: grid; gap: 6px; min-width: 0; }
 .workflow-smart-state { align-self: start; padding: 5px 8px; border: 1px solid #8b7144; border-radius: 999px; color: #f3d99b; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; }
 .workflow-smart-state-waiting_for_comfy_ui { color: #b9c8df; border-color: #4d658f; }

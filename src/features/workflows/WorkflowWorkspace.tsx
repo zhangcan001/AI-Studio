@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   checkOnboardingCapability,
   cleanWorkflowStaging,
@@ -45,9 +45,10 @@ import type {
   WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
-import { toUserMessage } from "../../i18n/errorMessages";
+import { formatUiError, toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, stagingStatusLabel, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
-import { WorkflowSmartImport } from "./WorkflowSmartImport";
+import { WorkflowSmartImport, workflowImportFormat } from "./WorkflowSmartImport";
+import type { WorkflowImportErrorView } from "./WorkflowImportIssues";
 import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
 
 interface Props {
@@ -128,6 +129,21 @@ interface MetadataDraft {
   mode: string;
 }
 
+function workflowImportErrorView(error: unknown): WorkflowImportErrorView | undefined {
+  const formatted = formatUiError(error);
+  const haystack = `${formatted.code ?? ""} ${formatted.technicalMessage}`.toUpperCase();
+  if (/INVALID[_\s-]*JSON|JSON[_\s-]*(PARSE|INVALID)|MALFORMED[_\s-]*JSON/.test(haystack)) {
+    return { kind: "INVALID_JSON", message: "无法读取这个文件，它不是有效的 JSON。" };
+  }
+  if (/UI[_\s-]*(FORMAT|WORKFLOW)|WORKFLOW[_\s-]*UI|UNSUPPORTED[_\s-]*UI/.test(haystack)) {
+    return { kind: "UI_FORMAT", message: "检测到 ComfyUI 普通工作流 JSON，但这个格式不能安全地直接添加。" };
+  }
+  if (/\bUNKNOWN\b|UNRECOGNIZED|WORKFLOW_NOT_API_FORMAT/.test(haystack)) {
+    return { kind: "UNKNOWN_FORMAT", message: "这个 JSON 不是可识别的 ComfyUI 工作流。" };
+  }
+  return undefined;
+}
+
 export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onOpenTask }: Props) {
   const cachedWorkspace = useWorkflowWorkspaceStore((state) => state.workspace);
   const setCachedWorkspace = useWorkflowWorkspaceStore((state) => state.setWorkspace);
@@ -146,6 +162,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
   const [autoPlan, setAutoPlan] = useState<WorkflowAutoOnboardingPlanView>();
+  const [autoImportError, setAutoImportError] = useState<WorkflowImportErrorView>();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [parameterDraft, setParameterDraft] = useState<WorkflowOnboardingDraftView>();
   const [parameterItem, setParameterItem] = useState<WorkflowProductionWorkspaceView>();
@@ -163,6 +180,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const setError = useWorkflowOnboardingStore((state) => state.setError);
   const setNotice = useWorkflowOnboardingStore((state) => state.setNotice);
   const reset = useWorkflowOnboardingStore((state) => state.reset);
+  const importBusyRef = useRef(false);
 
   const loadWorkspace = useCallback(async (mode: "fast" | "refresh" = "fast") => {
     const cached = useWorkflowWorkspaceStore.getState().workspace;
@@ -214,14 +232,56 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     setPublished(undefined);
   }, [draft?.draftId]);
 
-  async function importWorkflow(existingWorkflowId?: string) {
+  async function discardReplacedDraft(previousDraftId: string | undefined, nextDraftId?: string) {
+    if (!previousDraftId || previousDraftId === nextDraftId) return;
+    try {
+      await discardOnboarding(previousDraftId);
+    } catch {
+      // A published or already discarded draft is safe to replace locally.
+    }
+  }
+
+  function resetImportViewForNewWorkflow() {
+    reset();
     setLoading(true);
-    setError(undefined);
-    setNotice(undefined);
+    setAutoPlan(undefined);
+    setAutoImportError(undefined);
+    setShowAdvanced(false);
+    setPublished(undefined);
+  }
+
+  async function returnToWorkflowList() {
+    if (importBusyRef.current) return;
+    const draftId = draft?.draftId;
+    if (draftId) {
+      setLoading(true);
+      try {
+        await discardOnboarding(draftId);
+      } catch {
+        // Closing remains safe when the native service already consumed the draft.
+      } finally {
+        setLoading(false);
+      }
+    }
+    reset();
+    setAutoPlan(undefined);
+    setAutoImportError(undefined);
+    setShowAdvanced(false);
+    setPublished(undefined);
+  }
+
+  async function importWorkflow(existingWorkflowId?: string) {
+    if (loading || importBusyRef.current) return;
+    const previousDraftId = draft?.draftId;
+    importBusyRef.current = true;
+    setLoading(true);
     try {
       const imported = await pickApiWorkflow(existingWorkflowId);
       if (imported) {
+        await discardReplacedDraft(previousDraftId, imported.draftId);
+        resetImportViewForNewWorkflow();
         setAutoPlan(undefined);
+        setAutoImportError(undefined);
         setShowAdvanced(true);
         setDraft(imported);
         const validation = imported.validation;
@@ -236,36 +296,75 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           : `导入质量初检通过：${imported.nodeCount} 个节点、${imported.uniqueClassCount} 种节点类型；请继续完成能力检查与试运行。`,
         );
         await loadWorkspace("refresh");
+      } else {
+        await discardReplacedDraft(previousDraftId);
+        resetImportViewForNewWorkflow();
       }
     } catch (importError: unknown) {
+      await discardReplacedDraft(previousDraftId);
+      reset();
+      setPublished(undefined);
+      setAutoPlan(undefined);
+      setAutoImportError(undefined);
+      setShowAdvanced(false);
       setError(toUserMessage(importError));
     } finally {
       setLoading(false);
+      importBusyRef.current = false;
     }
   }
 
   async function smartImportWorkflow(existingWorkflowId?: string) {
+    if (loading || importBusyRef.current) return;
+    const previousDraftId = draft?.draftId;
+    importBusyRef.current = true;
     setLoading(true);
-    setError(undefined);
-    setNotice(undefined);
     try {
       const plan = await autoOnboardWorkflow(existingWorkflowId);
       if (plan) {
+        await discardReplacedDraft(previousDraftId, plan.draftId);
+        resetImportViewForNewWorkflow();
         setAutoPlan(plan);
         setShowAdvanced(false);
-        setDraft(await getOnboardingDraft(plan.draftId));
+        const detectedFormat = workflowImportFormat(plan);
+        if (plan.draftId && (!detectedFormat || detectedFormat === "API")) {
+          try {
+            const importedDraft = await getOnboardingDraft(plan.draftId);
+            setDraft(importedDraft);
+          } catch (draftError) {
+            if (!plan.published) throw draftError;
+          }
+        } else if (plan.draftId && detectedFormat && detectedFormat !== "API") {
+          await discardOnboarding(plan.draftId).catch(() => undefined);
+        }
         if (plan.published) {
-          setNotice(plan.message);
+          setNotice("工作流已添加到列表，可在项目设置中选择。");
           await loadWorkspace("refresh");
           await onCatalogChanged();
         } else {
-          setNotice(plan.message);
+          setNotice(undefined);
         }
+      } else {
+        await discardReplacedDraft(previousDraftId);
+        resetImportViewForNewWorkflow();
       }
     } catch (importError: unknown) {
-      setError(toUserMessage(importError));
+      await discardReplacedDraft(previousDraftId);
+      reset();
+      setPublished(undefined);
+      const formatError = workflowImportErrorView(importError);
+      setAutoPlan(undefined);
+      setShowAdvanced(false);
+      if (formatError) {
+        setError(undefined);
+        setAutoImportError(formatError);
+      } else {
+        setAutoImportError(undefined);
+        setError(toUserMessage(importError));
+      }
     } finally {
       setLoading(false);
+      importBusyRef.current = false;
     }
   }
 
@@ -873,17 +972,22 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         </div>
         <div className="workflow-workspace-actions">
           <button type="button" onClick={() => void loadWorkspace("refresh")} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
-          <button type="button" className="quiet-button" onClick={() => void recheckAllVersions()} disabled={checkingAll || workspaceLoading}>{checkingAll ? "检查中..." : "检查全部兼容性"}</button>
-          <button type="button" onClick={() => void smartImportWorkflow()} disabled={loading}>导入工作流</button>
-          <button type="button" className="quiet-button" onClick={() => void importWorkflow()} disabled={loading}>高级：手动配置工作流</button>
-          <button type="button" onClick={() => void importBackup()} disabled={loading}>导入工作流备份</button>
+          <button type="button" onClick={() => void smartImportWorkflow()} disabled={loading || importBusyRef.current}>+ 添加工作流</button>
+          <details className="workflow-advanced-actions">
+            <summary>更多</summary>
+            <div className="workflow-advanced-actions-content">
+              <button type="button" className="quiet-button" onClick={() => void recheckAllVersions()} disabled={checkingAll || workspaceLoading}>{checkingAll ? "检查中..." : "检查全部兼容性"}</button>
+              <button type="button" className="quiet-button" onClick={() => void importWorkflow()} disabled={loading || importBusyRef.current}>手动配置工作流</button>
+              <button type="button" className="quiet-button" onClick={() => void importBackup()} disabled={loading || importBusyRef.current}>导入工作流备份</button>
+            </div>
+          </details>
         </div>
       </div>
 
       <section className="workflow-import-quality" aria-label="工作流导入质量门">
         <div>
           <span className="section-label">导入质量门</span>
-          <strong>选择 JSON → 自动识别 → 能力检查 → 配方 → 自动确认</strong>
+          <strong>选择 JSON → 自动识别 → 检查环境 → 确认添加</strong>
           <p>正常工作流只需一次操作；只有歧义、缺失节点或不兼容字段才会进入问题聚焦。</p>
         </div>
         <ul>
@@ -899,6 +1003,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
 
       <WorkflowSmartImport
         plan={autoPlan}
+        importError={autoImportError}
+        projectId={projectId}
         loading={loading}
         onResolve={(issue, candidate) => void resolveAutoIssue(issue, candidate)}
         onResume={() => void resumeAutoImport()}
@@ -906,6 +1012,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onOpenExisting={() => void openExistingWorkflow()}
         onRestoreExisting={() => void restoreExistingArchivedWorkflow()}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
+        onUseInProject={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
+        onRetry={() => void smartImportWorkflow()}
+        onCancel={() => void returnToWorkflowList()}
+        onReturnToList={() => void returnToWorkflowList()}
       />
 
       <section className="workflow-health-dashboard" aria-label="运行环境健康概览">

@@ -166,7 +166,7 @@ export function applyRuntimeParameterProfile(
   return { values: nextValues, appliedFields, ignoredParameters };
 }
 
-export type WorkflowImportFormat = "api" | "ui" | "unknown";
+export type WorkflowImportFormat = "api" | "ui" | "unknown" | "invalid";
 
 export interface WorkflowImportQualityReport {
   accepted: boolean;
@@ -190,14 +190,14 @@ export function inspectWorkflowImport(text: string, fileName = "workflow.json"):
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { accepted: false, format: "unknown", nodeCount: 0, uniqueClassCount: 0, outputCandidateCount: 0, errors: [...errors, "文件不是有效的 JSON。"], warnings };
+    return { accepted: false, format: "invalid", nodeCount: 0, uniqueClassCount: 0, outputCandidateCount: 0, errors: [...errors, "文件不是有效的 JSON。"], warnings };
   }
 
   if (!isRecord(parsed)) {
     return { accepted: false, format: "unknown", nodeCount: 0, uniqueClassCount: 0, outputCandidateCount: 0, errors: [...errors, "工作流根节点必须是对象。"], warnings };
   }
 
-  if (Array.isArray(parsed.nodes)) {
+  if (Array.isArray(parsed.nodes) && Array.isArray(parsed.links)) {
     const nodes = parsed.nodes.filter(isRecord);
     const classes = new Set(nodes.map((node) => stringValue(node.type) ?? stringValue(node.class_type)).filter((value): value is string => Boolean(value)));
     errors.push("检测到 ComfyUI 编辑器格式。请在 ComfyUI 中导出 API 格式工作流后重新导入。");
@@ -209,7 +209,11 @@ export function inspectWorkflowImport(text: string, fileName = "workflow.json"):
   for (const [nodeId, value] of entries) {
     if (isRecord(value) && typeof value.class_type === "string") nodes.push([nodeId, value]);
   }
-  if (!nodes.length) {
+  const isApiShape = entries.length > 0
+    && nodes.length === entries.length
+    && entries.every(([nodeId]) => /^\d+$/.test(nodeId))
+    && nodes.every(([, value]) => isRecord(value.inputs));
+  if (!isApiShape) {
     return { accepted: false, format: "unknown", nodeCount: 0, uniqueClassCount: 0, outputCandidateCount: 0, errors: [...errors, "未识别为 ComfyUI API 工作流。"], warnings };
   }
 
