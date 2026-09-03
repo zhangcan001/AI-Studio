@@ -25,4 +25,18 @@ describe("StudioShell C workspace navigation", () => {
     expect(html.match(/studio-global-rail__item--active/g)).toHaveLength(1);
     expect(html).toContain(`aria-label="${section === "creation" ? "创作：镜头创作工作区" : section === "production" ? "生产：生产队列与批量运行" : "审核：镜头审核与任务"}"`);
   });
+
+  it("maps the workflows workspace to the workflow rail item", () => {
+    const html = renderToStaticMarkup(
+      <StudioShell
+        workspace="workflows"
+        onNavigate={vi.fn()}
+      >
+        <div>Workflow workspace</div>
+      </StudioShell>,
+    );
+
+    expect(html).toMatch(/<button[^>]*aria-current="page"[^>]*aria-label="工作流：/);
+    expect(html).not.toMatch(/<button[^>]*aria-current="page"[^>]*aria-label="创作：/);
+  });
 });

@@ -1,8 +1,8 @@
 import type { Workspace } from "../../types/workspaceResume";
 import "./StudioGlobalRail.css";
 
-export type StudioRailItemId = "project" | "creation" | "assets" | "production" | "review" | "analysis" | "settings";
-export type StudioRailIconName = "analysis" | "assets" | "creation" | "production" | "project" | "review" | "settings";
+export type StudioRailItemId = "project" | "creation" | "assets" | "production" | "review" | "workflows" | "analysis" | "settings";
+export type StudioRailIconName = "analysis" | "assets" | "creation" | "production" | "project" | "review" | "workflows" | "settings";
 
 export interface StudioRailItem {
   id: StudioRailItemId;
@@ -18,6 +18,7 @@ export const defaultStudioRailItems: readonly StudioRailItem[] = [
   { id: "assets", label: "资产", destination: "assets", icon: "assets", hint: "资产库" },
   { id: "production", label: "生产", destination: "shots", icon: "production", hint: "生产队列与批量运行" },
   { id: "review", label: "审核", destination: "shots", icon: "review", hint: "镜头审核与任务" },
+  { id: "workflows", label: "工作流", destination: "workflows", icon: "workflows", hint: "添加和管理 ComfyUI 工作流" },
   { id: "analysis", label: "分析", destination: "command-center", icon: "analysis", hint: "项目进度与生产概览" },
   { id: "settings", label: "设置", destination: "settings", icon: "settings", hint: "运行时与应用设置" },
 ];
@@ -71,6 +72,7 @@ function StudioGlobalRailIcon({ name }: { name: StudioRailIconName }) {
     production: "M5 5h14v14H5z M9 8.5v7l6-3.5z",
     project: "M4 5h16v14H4z M8 9h3 M13 9h3 M8 13h3 M13 13h3 M8 17h8",
     review: "M5 4h14v16H5z M8.5 9.5 11 12l4.5-5 M8 16h8",
+    workflows: "M3.5 4.5h5v5h-5z M15.5 4.5h5v5h-5z M3.5 14.5h5v5h-5z M15.5 14.5h5v5h-5z M8.5 7h7 M18 9.5v5 M15.5 17h-7 M6 14.5v-5",
     settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-2.6v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H6v-2.6h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V4.8h2.6V5a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v2.6h-.2a1.7 1.7 0 0 0-1.6 1z",
   };
 
