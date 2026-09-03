@@ -14,6 +14,7 @@ import {
   getProductionBatchRunbook,
   getProductionBatchReviewProductivity,
   getProductionAdmissionStatus,
+  getProjectWorkflowConfig,
   getProductionQueue,
   getProductionQueueOverview,
   getSeriesProductionPlan,
@@ -44,6 +45,7 @@ import {
 import type { ProductionPackageCreateBatchesResult } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
+import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
@@ -115,12 +117,16 @@ import {
 import { EMPTY_PRODUCTION_STRUCTURE, findProductionSceneParent, orderedEpisodes, orderedSeries, productionSceneOptions, shotSceneIndex } from "./productionStructureState";
 import { isPromptTemplateText } from "../prompts/promptTemplateState";
 import {
-  filterProductionRuntimeCatalog,
   h3FamilyForWorkflowId,
   h3QualityProfileForWorkflowId,
-  isProductionRuntimeForStage,
   MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
 } from "../runtime/productRuntimeScope";
+import {
+  resolveShotStageRecipe,
+  shotStageRecipeCompatibility,
+  validateShotReferenceImages,
+  type ShotVideoInputMode,
+} from "../runtime/shotWorkflowCompatibility";
 import "./ShotWorkspace.css";
 
 export type ShotWorkspaceMode = "creation" | "production" | "review";
@@ -531,6 +537,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [referenceAnchors, setReferenceAnchors] = useState<ReferenceAnchorView[]>([]);
+  const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
+  const [projectWorkflowConfigError, setProjectWorkflowConfigError] = useState<string>();
   const [productionStructure, setProductionStructure] = useState<ProductionStructureTree>(() => EMPTY_PRODUCTION_STRUCTURE(projectId));
   const [productionBatchRunbook, setProductionBatchRunbook] = useState<ProductionBatchRunbookView>(() => emptyRunbook(projectId));
   const [productionQueues, setProductionQueues] = useState<ProductionBatchSummary[]>([]);
@@ -630,6 +638,27 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     updateSequentialBatchStart({ ...emptySequentialBatchStartState });
   }, [projectId, updateSequentialBatchStart]);
 
+  useEffect(() => {
+    let active = true;
+    setProjectWorkflowConfig(undefined);
+    setProjectWorkflowConfigError(undefined);
+    void getProjectWorkflowConfig(projectId)
+      .then((config) => {
+        if (!active) return;
+        if (!config) {
+          setProjectWorkflowConfigError("项目工作流配置读取为空，已阻止正式 Shot 生产。");
+          return;
+        }
+        setProjectWorkflowConfig(config);
+      })
+      .catch((loadError: unknown) => {
+        if (active) setProjectWorkflowConfigError(`项目工作流配置加载失败：${toUserMessage(loadError)}`);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const selectedProductionBatchId = useMemo(
     () => selectDefaultProductionBatchId(productionQueues, focusedProductionBatchId),
@@ -657,25 +686,39 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   );
   const shotList = useMemo(() => buildShotListView(shots, shotListControls, shotSceneIds), [shots, shotListControls, shotSceneIds]);
   const currentDraft = stageDrafts[stage];
-  const productCatalog = useMemo(() => filterProductionRuntimeCatalog(catalog), [catalog]);
+  const productCatalog = catalog;
   const stageRecipes = useMemo(
-    () => productCatalog.filter((recipe) =>
-      isProductionRuntimeForStage(stage, recipe.workflowId) && (recipe.outputTypes?.includes(stage) ?? false),
-    ),
+    () => productCatalog.filter((recipe) => shotStageRecipeCompatibility(recipe, stage).compatible),
     [productCatalog, stage],
   );
   const currentRecipe = productCatalog.find(
     (recipe) =>
       recipe.workflowVersionId === currentDraft?.workflowVersionId &&
-      recipe.recipeId === currentDraft?.recipeId &&
-      isProductionRuntimeForStage(stage, recipe.workflowId),
+      recipe.recipeId === currentDraft?.recipeId,
+  );
+  const currentCompatibility = currentRecipe ? shotStageRecipeCompatibility(currentRecipe, stage) : undefined;
+  const currentStageConfig = selectedShot?.stageConfigs.find((config) => config.stage === stage);
+  const currentProjectDefault = projectDefaultForStage(projectWorkflowConfig, stage);
+  const stageResolution = useMemo(
+    () => resolveShotStageRecipe(
+      productCatalog,
+      stage,
+      currentStageConfig,
+      currentProjectDefault,
+      preferredStageRecipe(productCatalog, stage),
+    ),
+    [currentProjectDefault, currentStageConfig, productCatalog, stage],
   );
   const currentReferences = references[stage] ?? [];
   const selectedAnchor = referenceAnchors.find((anchor) => anchor.id === selectedAnchorId);
   const ref2vaMode = stage === "video" && isRef2vaRecipe(currentRecipe);
   const ref2vaImageField = ref2vaMode ? referenceImagesField(currentRecipe) : undefined;
-  const referenceValidation = ref2vaMode
-    ? validateRef2vaReferences(ref2vaImageField, currentReferences)
+  const videoInputMode: ShotVideoInputMode | undefined = stage === "video" ? currentCompatibility?.videoInputMode : undefined;
+  const videoReferenceField = currentRecipe?.fields.find((field): field is Extract<RecipeField, { type: "images" }> => field.type === "images");
+  const referenceValidation = videoInputMode === "REFERENCE_IMAGES"
+    ? ref2vaMode
+      ? validateRef2vaReferences(ref2vaImageField, currentReferences)
+      : validateShotReferenceImages(videoReferenceField, currentReferences)
     : undefined;
   const imageAssets = assets.filter(isImageAsset);
   const videoAssets = assets.filter(isVideoAsset);
@@ -1231,24 +1274,31 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     const nextDrafts: Partial<Record<ShotStage, StageDraft>> = {};
     for (const nextStage of ["image", "video"] as const) {
       const config = selectedShot.stageConfigs.find((item) => item.stage === nextStage);
-      const recipe = config
-        ? productCatalog.find((item) =>
-          item.workflowVersionId === config.workflowVersionId &&
-          item.recipeId === config.recipeId &&
-          isProductionRuntimeForStage(nextStage, item.workflowId),
-        )
-        : preferredStageRecipe(productCatalog, nextStage);
-      if (config && recipe) {
+      const projectDefault = projectDefaultForStage(projectWorkflowConfig, nextStage);
+      const resolution = resolveShotStageRecipe(
+        productCatalog,
+        nextStage,
+        config,
+        projectDefault,
+        preferredStageRecipe(productCatalog, nextStage),
+      );
+      if (config) {
         nextDrafts[nextStage] = {
           workflowVersionId: config.workflowVersionId,
           recipeId: config.recipeId,
           values: config.scalarValues as ShotInputValues,
         };
-      } else if (recipe) {
+      } else if (resolution.recipe) {
         nextDrafts[nextStage] = {
-          workflowVersionId: recipe.workflowVersionId,
-          recipeId: recipe.recipeId,
-          values: defaultScalarValues(recipe),
+          workflowVersionId: resolution.recipe.workflowVersionId,
+          recipeId: resolution.recipe.recipeId,
+          values: defaultScalarValues(resolution.recipe),
+        };
+      } else if (projectDefault && resolution.blocked) {
+        nextDrafts[nextStage] = {
+          workflowVersionId: projectDefault.workflowVersionId,
+          recipeId: projectDefault.recipeId,
+          values: {},
         };
       }
     }
@@ -1260,7 +1310,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       image: imageReferences,
       video: videoReferences,
     });
-  }, [productCatalog, selectedShot]);
+  }, [productCatalog, projectWorkflowConfig, selectedShot]);
 
   useEffect(() => {
     const linkedIds = selectedShot?.generationLinks.flatMap((link) => link.task?.outputAssetIds ?? []) ?? [];
@@ -1372,7 +1422,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
 
   async function replaceReferences() {
     if (!selectedShot) return;
-    if (ref2vaMode && referenceValidation) {
+    if (videoInputMode === "REFERENCE_IMAGES" && referenceValidation) {
       setError(referenceValidation);
       return;
     }
@@ -1398,8 +1448,10 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     const nextReferences = ref2vaMode
       ? ensurePrimaryReference(result.assetIds, selectedShot.selectedImageAssetId)
       : result.assetIds;
-    const nextValidation = ref2vaMode
-      ? validateRef2vaReferences(ref2vaImageField, nextReferences)
+    const nextValidation = videoInputMode === "REFERENCE_IMAGES"
+      ? ref2vaMode
+        ? validateRef2vaReferences(ref2vaImageField, nextReferences)
+        : validateShotReferenceImages(videoReferenceField, nextReferences)
       : undefined;
     if (nextValidation) {
       setError(nextValidation);
@@ -1429,20 +1481,43 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
 
   async function generate() {
     if (!selectedShot || !currentDraft) return;
+    if (!projectWorkflowConfig || projectWorkflowConfigError || stageResolution.blocked || !currentRecipe || !currentCompatibility?.compatible) {
+      setError(projectWorkflowConfigError ?? stageResolution.reason ?? "当前阶段工作流不可用于正式 Shot 生产。");
+      return;
+    }
     if (stage === "video") {
-      if (!ref2vaMode && !selectedShot.selectedImageAssetId) {
-        setError("请先选择关键帧图片");
-        return;
-      }
-      if (referenceValidation) {
-        setError(referenceValidation);
+      const inputError = videoInputMode === "SINGLE_IMAGE"
+        ? selectedShot.selectedImageAssetId ? undefined : "请先选择关键帧图片。"
+        : videoInputMode === "REFERENCE_IMAGES"
+          ? referenceValidation
+          : videoInputMode === "UNSUPPORTED"
+            ? currentCompatibility.reason ?? "当前视频 Recipe 的媒体输入无法由 Shot 提供。"
+            : undefined;
+      if (inputError) {
+        setError(inputError);
         return;
       }
     }
     setBusy(true); setError(undefined); setNotice(undefined);
     try {
-      if (ref2vaMode && !sameReferenceOrder(currentReferences, orderedShotReferences(selectedShot, "video"))) {
+      if (videoInputMode === "REFERENCE_IMAGES" && !sameReferenceOrder(currentReferences, orderedShotReferences(selectedShot, "video"))) {
         const next = await replaceShotReferences({ projectId, shotId: selectedShot.id, stage: "video", assetIds: currentReferences });
+        applyShot(next);
+      }
+      const persistedConfig = selectedShot.stageConfigs.find((config) => config.stage === stage);
+      const draftChanged = !persistedConfig
+        || dirtyStages.has(stage)
+        || persistedConfig.workflowVersionId !== currentDraft.workflowVersionId
+        || persistedConfig.recipeId !== currentDraft.recipeId;
+      if (draftChanged) {
+        const next = await setShotStageConfig({
+          projectId,
+          shotId: selectedShot.id,
+          stage,
+          workflowVersionId: currentDraft.workflowVersionId,
+          recipeId: currentDraft.recipeId,
+          values: currentDraft.values,
+        });
         applyShot(next);
       }
       const task = await generateShot({ projectId, shotId: selectedShot.id, stage, values: currentDraft.values });
@@ -1566,8 +1641,24 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     name: entry.name,
     versionCount: entry.versions.length,
   }));
-  const canGenerate = Boolean(currentDraft)
-    && !(stage === "video" && ((!ref2vaMode && !selectedShot?.selectedImageAssetId) || Boolean(referenceValidation)));
+  const videoInputReady = videoInputMode === "TEXT_ONLY"
+    ? true
+    : videoInputMode === "SINGLE_IMAGE"
+      ? Boolean(selectedShot?.selectedImageAssetId)
+      : videoInputMode === "REFERENCE_IMAGES"
+        ? !referenceValidation
+        : false;
+  const stageConfigurationError = projectWorkflowConfigError
+    ?? (projectWorkflowConfig && stageResolution.blocked ? stageResolution.reason : undefined);
+  const canGenerate = Boolean(
+    projectWorkflowConfig
+      && !projectWorkflowConfigError
+      && currentDraft
+      && currentRecipe
+      && currentCompatibility?.compatible
+      && !stageResolution.blocked
+      && (stage !== "video" || videoInputReady),
+  );
   const treeShotFilter = useCallback((shot: ShotView) => {
     const query = shotListControls.query.trim().toLocaleLowerCase();
     if (query && !`${shot.name}\n${shot.promptText}`.toLocaleLowerCase().includes(query)) return false;
@@ -1577,8 +1668,20 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }, [shotListControls, shotSceneIds]);
 
   async function configureBulkStage(nextStage: ShotStage, shotIds: string[]) {
-    const recipe = preferredStageRecipe(productCatalog, nextStage);
-    if (!recipe) throw new Error(`当前没有可用的${nextStage === "image" ? "Krea2 图片" : "H3 视频"}配方。`);
+    if (projectWorkflowConfigError) throw new Error(projectWorkflowConfigError);
+    if (!projectWorkflowConfig) throw new Error("项目工作流配置尚未加载，请稍后重试。");
+    const projectDefault = projectDefaultForStage(projectWorkflowConfig, nextStage);
+    const resolution = resolveShotStageRecipe(
+      productCatalog,
+      nextStage,
+      undefined,
+      projectDefault,
+      preferredStageRecipe(productCatalog, nextStage),
+    );
+    if (resolution.blocked || !resolution.recipe) {
+      throw new Error(resolution.reason ?? `当前没有可用的${nextStage === "image" ? "图片" : "视频"}配方。`);
+    }
+    const recipe = resolution.recipe;
     await bulkSetShotStageConfig({
       projectId,
       stage: nextStage,
@@ -2151,7 +2254,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               keyframeAsset={selectedShot?.selectedImageAssetId ? assets.find((asset) => asset.id === selectedShot.selectedImageAssetId) : undefined}
               onReferenceAdd={(assetId) => setReferences((current) => ({
                 ...current,
-                [stage]: addOrderedReference(current[stage], assetId, stage === "video" ? ref2vaImageField?.maxItems : undefined),
+                [stage]: addOrderedReference(current[stage], assetId, stage === "video" ? videoReferenceField?.maxItems : undefined),
               }))}
               onReferenceRemove={(assetId) => setReferences((current) => ({ ...current, [stage]: removeOrderedReference(current[stage], assetId) }))}
               onReferenceMove={(index, delta) => setReferences((current) => ({ ...current, [stage]: moveOrderedReference(current[stage], index, delta) }))}
@@ -2181,7 +2284,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onPreviewPrompt={() => setNotice("提示词预览使用当前编辑框内容；保存镜头后才会写入快照。")}
               onApplyPrompt={() => setNotice("当前提示词预览已应用到编辑框；点击保存镜头写入快照。")}
               notice={notice}
-              error={error}
+              error={error ?? stageConfigurationError}
             />
           ) : showConsistencyScope && consistencyScope && consistencyWorkspace ? (
             <ScopeConsistencyWorkspace
@@ -2496,10 +2599,15 @@ function defaultScalarValues(recipe: RecipeViewModel): ShotInputValues {
   }));
 }
 
+function projectDefaultForStage(
+  config: ProjectWorkflowConfigView | undefined,
+  stage: ShotStage,
+): ProjectWorkflowConfigView["imageDefault"] | ProjectWorkflowConfigView["videoDefault"] | undefined {
+  return stage === "image" ? config?.imageDefault : config?.videoDefault;
+}
+
 function preferredStageRecipe(catalog: RecipeViewModel[], stage: ShotStage): RecipeViewModel | undefined {
-  const compatible = catalog.filter((item) =>
-    isProductionRuntimeForStage(stage, item.workflowId) && (item.outputTypes?.includes(stage) ?? false),
-  );
+  const compatible = catalog.filter((item) => shotStageRecipeCompatibility(item, stage).compatible);
   if (stage === "video") {
     return compatible.find((item) => item.workflowId === MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID)
       ?? compatible.find((item) => h3QualityProfileForWorkflowId(item.workflowId) === "QUALITY")

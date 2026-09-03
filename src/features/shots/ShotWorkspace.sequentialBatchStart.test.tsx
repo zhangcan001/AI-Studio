@@ -12,6 +12,7 @@ type BatchId = (typeof ids)[number];
 
 const mocks = vi.hoisted(() => ({
   listShots: vi.fn(),
+  getProjectWorkflowConfig: vi.fn(),
   listRecentAssets: vi.fn(),
   listPromptLibrary: vi.fn(),
   listReferenceAnchors: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("../../services/tauriClient", async () => {
   return {
     ...actual,
     listShots: mocks.listShots,
+    getProjectWorkflowConfig: mocks.getProjectWorkflowConfig,
     listRecentAssets: mocks.listRecentAssets,
     listPromptLibrary: mocks.listPromptLibrary,
     listReferenceAnchors: mocks.listReferenceAnchors,
@@ -177,6 +179,7 @@ beforeEach(() => {
   taskUpdateListener = undefined;
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   mocks.listShots.mockResolvedValue([]);
+  mocks.getProjectWorkflowConfig.mockResolvedValue({ projectId: "project-1", videoModeOverrides: [] });
   mocks.listRecentAssets.mockResolvedValue([]);
   mocks.listPromptLibrary.mockResolvedValue({ items: [], total: 0 });
   mocks.listReferenceAnchors.mockResolvedValue([]);

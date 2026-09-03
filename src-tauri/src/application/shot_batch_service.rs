@@ -1,26 +1,23 @@
 use crate::application::generation_input_preparer::{
     GenerationInputPreparer, GenerationInputValue,
 };
-use crate::application::ordered_reference_binding::{
-    ref2va_image_bounds, validate_ordered_reference_ids,
-};
+use crate::application::ordered_reference_binding::validate_ordered_reference_ids;
 use crate::application::ports::{
     AssetRepository, AvailableGenerationDefinition, Clock, GenerationDefinitionRepository,
     ProjectRepository, RepositoryError, ShotBatchBinding, ShotBatchRepository, ShotBulkRepository,
     ShotData, ShotRepository, TaskRepository,
 };
-use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::production_queue_service::{
     freeze_random_seed_values, generation_values_to_json,
 };
 use crate::application::shot_service::scalar_values_from_json;
+use crate::application::shot_workflow_compatibility::{classify_shot_recipe, ShotVideoInputMode};
 use crate::compiler::{RecipeParser, WorkflowCompiler};
 use crate::domain::production_preparation::{PreparationSnapshotRecord, PreparedShotBatchRecord};
 use crate::domain::{
-    derive_stage_status, AssetId, AssetType, CompileRequest, InputDefinition, OutputType,
-    ProductionBatch, ProductionBatchDetail, ProductionBatchItem, ProductionBatchItemId,
-    ProductionBatchStatus, Recipe, ResolvedShotContext, ShotStage, TaskId, TaskStatus,
-    WorkflowDocument,
+    derive_stage_status, AssetId, AssetType, CompileRequest, InputDefinition, ProductionBatch,
+    ProductionBatchDetail, ProductionBatchItem, ProductionBatchItemId, ProductionBatchStatus,
+    Recipe, ResolvedShotContext, ShotStage, TaskId, TaskStatus, WorkflowDocument,
 };
 use serde::Serialize;
 use std::{
@@ -651,18 +648,9 @@ impl ShotBatchService {
                 recipe: None,
             });
         };
-        let available_definition = available_definitions
-            .get(&(config.workflow_version_id.clone(), config.recipe_id.clone()));
-        if let Some(available_definition) = available_definition {
-            if production_runtime_for_stage(stage, &available_definition.workflow_id).is_none() {
-                reasons.push(match stage {
-                    ShotStage::Image => "批量关键帧当前只支持 Kera2 运行时".to_owned(),
-                    ShotStage::Video => {
-                        "批量视频当前只支持 MiniMax H3 参考图生视频运行时".to_owned()
-                    }
-                });
-            }
-        } else {
+        if !available_definitions
+            .contains_key(&(config.workflow_version_id.clone(), config.recipe_id.clone()))
+        {
             reasons.push("当前工作流版本或 Recipe 未达到可用状态".to_owned());
         }
         let Some(definition) = self
@@ -695,60 +683,55 @@ impl ShotBatchService {
             }
         };
         row.recipe_name = Some(recipe.name.clone());
-        let expected_output = match stage {
-            ShotStage::Image => OutputType::Image,
-            ShotStage::Video => OutputType::Video,
+        let compatibility = match classify_shot_recipe(stage, &definition.workflow_id, &recipe) {
+            Ok(compatibility) => Some(compatibility),
+            Err(error) => {
+                reasons.push(error);
+                None
+            }
         };
-        if !recipe
-            .outputs
-            .iter()
-            .any(|output| output.output_type == expected_output)
-        {
-            reasons.push(format!("Recipe 没有 {} 输出", stage.as_str()));
-        }
-        let image_input = recipe.inputs.iter().find_map(|(key, input)| match input {
-            InputDefinition::Image { .. } => Some((key.clone(), false)),
-            InputDefinition::Images { .. } => Some((key.clone(), true)),
-            _ => None,
+        let input_mode = compatibility.as_ref().map(|value| &value.input_mode);
+        let image_input = input_mode.and_then(|mode| match mode {
+            ShotVideoInputMode::SingleImage { key } => Some((key.as_str(), false)),
+            ShotVideoInputMode::ReferenceImages { key, .. } => Some((key.as_str(), true)),
+            ShotVideoInputMode::TextOnly => None,
         });
-        let ref2va_bounds = if stage == ShotStage::Video {
-            match ref2va_image_bounds(&definition.workflow_id, &recipe) {
-                Ok(bounds) => bounds,
-                Err(error) => {
-                    reasons.push(error);
-                    None
-                }
-            }
-        } else {
-            None
-        };
         if stage == ShotStage::Video {
-            row.video_mode = Some(if ref2va_bounds.is_some() {
-                "REF2VA".to_owned()
-            } else {
-                "I2V".to_owned()
-            });
-            row.reference_count = if ref2va_bounds.is_some() {
-                data.reference_assets
-                    .iter()
-                    .filter(|reference| reference.stage == stage)
-                    .count()
-            } else {
-                usize::from(data.shot.selected_image_asset_id.is_some())
-            };
-            if let Some((min_items, max_items)) = ref2va_bounds {
-                row.reference_min = Some(min_items);
-                row.reference_max = Some(max_items);
-            }
-            match (image_input.as_ref(), ref2va_bounds) {
-                (Some((_, true)), Some(_)) | (Some((_, false)), None) => {}
-                (Some((_, true)), None) => reasons.push(
-                    "I2V Recipe 必须使用单个 image 输入；多图输入仅支持 H3 REF2VA".to_owned(),
-                ),
-                (Some((_, false)), Some(_)) => {
-                    reasons.push("REF2VA Recipe 必须使用 plural reference_images 输入".to_owned())
+            if let Some(mode) = input_mode {
+                row.video_mode = Some(match mode {
+                    ShotVideoInputMode::TextOnly => "TEXT_ONLY".to_owned(),
+                    ShotVideoInputMode::SingleImage { .. } => "I2V".to_owned(),
+                    ShotVideoInputMode::ReferenceImages { .. } => {
+                        if compatibility
+                            .as_ref()
+                            .is_some_and(|value| value.ref2va_bounds.is_some())
+                        {
+                            "REF2VA".to_owned()
+                        } else {
+                            "REFERENCE_IMAGES".to_owned()
+                        }
+                    }
+                });
+                match mode {
+                    ShotVideoInputMode::TextOnly => {}
+                    ShotVideoInputMode::SingleImage { .. } => {
+                        row.reference_count =
+                            usize::from(data.shot.selected_image_asset_id.is_some());
+                    }
+                    ShotVideoInputMode::ReferenceImages {
+                        min_items,
+                        max_items,
+                        ..
+                    } => {
+                        row.reference_count = data
+                            .reference_assets
+                            .iter()
+                            .filter(|reference| reference.stage == stage)
+                            .count();
+                        row.reference_min = Some(*min_items);
+                        row.reference_max = Some(*max_items);
+                    }
                 }
-                (None, _) => reasons.push("当前 Recipe 没有可用的图片输入".to_owned()),
             }
         }
 
@@ -773,30 +756,9 @@ impl ShotBatchService {
         }
 
         if stage == ShotStage::Video {
-            match (image_input.as_ref(), ref2va_bounds) {
-                (Some((key, true)), Some(bounds)) => {
-                    match ordered_reference_asset_ids(&data, stage) {
-                        Ok(references) => {
-                            if let Err(error) =
-                                validate_ordered_reference_ids(&references, Some(bounds))
-                            {
-                                reasons.push(error);
-                            }
-                            for asset_id in &references {
-                                if let Err(reason) = self
-                                    .validate_asset(project_id, asset_id, AssetType::Image)
-                                    .await
-                                {
-                                    reasons.push(reason);
-                                }
-                            }
-                            values
-                                .insert(key.clone(), GenerationInputValue::ImageAssets(references));
-                        }
-                        Err(error) => reasons.push(error),
-                    }
-                }
-                (Some((key, false)), None) => {
+            match input_mode {
+                Some(ShotVideoInputMode::TextOnly) | None => {}
+                Some(ShotVideoInputMode::SingleImage { key }) => {
                     if let Some(selected_id) = data.shot.selected_image_asset_id.as_deref() {
                         match AssetId::parse(selected_id.to_owned()) {
                             Ok(asset_id) => {
@@ -817,15 +779,33 @@ impl ShotBatchService {
                         reasons.push("I2V 请先选择当前项目的关键帧图片".to_owned());
                     }
                 }
-                _ => {}
+                Some(ShotVideoInputMode::ReferenceImages {
+                    key,
+                    min_items,
+                    max_items,
+                }) => match ordered_reference_asset_ids(&data, stage) {
+                    Ok(references) => {
+                        if let Err(error) = validate_ordered_reference_ids(
+                            &references,
+                            Some((*min_items, *max_items)),
+                        ) {
+                            reasons.push(error);
+                        }
+                        for asset_id in &references {
+                            if let Err(reason) = self
+                                .validate_asset(project_id, asset_id, AssetType::Image)
+                                .await
+                            {
+                                reasons.push(reason);
+                            }
+                        }
+                        values.insert(key.clone(), GenerationInputValue::ImageAssets(references));
+                    }
+                    Err(error) => reasons.push(error),
+                },
             }
         } else {
-            let references = data
-                .reference_assets
-                .iter()
-                .filter(|reference| reference.stage == stage)
-                .map(|reference| AssetId::parse(reference.asset_id.clone()))
-                .collect::<Result<Vec<_>, _>>();
+            let references = ordered_reference_asset_ids(&data, stage);
             match references {
                 Ok(references) => {
                     for asset_id in &references {
@@ -839,11 +819,27 @@ impl ShotBatchService {
                     if !references.is_empty() {
                         match image_input {
                             Some((key, true)) => {
-                                values.insert(key, GenerationInputValue::ImageAssets(references));
+                                if let Some(ShotVideoInputMode::ReferenceImages {
+                                    min_items,
+                                    max_items,
+                                    ..
+                                }) = input_mode
+                                {
+                                    if let Err(error) = validate_ordered_reference_ids(
+                                        &references,
+                                        Some((*min_items, *max_items)),
+                                    ) {
+                                        reasons.push(error);
+                                    }
+                                }
+                                values.insert(
+                                    key.to_owned(),
+                                    GenerationInputValue::ImageAssets(references),
+                                );
                             }
                             Some((key, false)) if references.len() == 1 => {
                                 values.insert(
-                                    key,
+                                    key.to_owned(),
                                     GenerationInputValue::ImageAsset(references[0].clone()),
                                 );
                             }
@@ -1009,10 +1005,8 @@ mod tests {
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::ports::{
-        AvailableGenerationDefinition, ShotData, ShotRecord, ShotReferenceAssetRecord,
-        ShotRepository, ShotStageConfigRecord,
+        ShotData, ShotRecord, ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord,
     };
-    use crate::application::product_runtime_scope::production_runtime_for_stage;
     use crate::compiler::RecipeParser;
     use crate::domain::{PromptContext, ResolvedShotContext, ResolvedWorkflowContext, ShotStage};
     use crate::infrastructure::database::{
@@ -1096,6 +1090,49 @@ bindings:
 outputs:
   - id: generated_video
     type: video
+    node: "9"
+    required: true
+"#;
+
+    const SIMPLE_T2I_TEST_RECIPE_YAML: &str = r#"
+schema_version: 1
+id: custom_t2i
+name: Custom Text to Image
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  steps:
+    type: integer
+    label: Steps
+    required: true
+    default: 20
+    min: 1
+    max: 100
+  seed:
+    type: seed
+    label: Seed
+    default: random
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+  - source: steps
+    target:
+      node: "3"
+      input: steps
+  - source: seed
+    target:
+      node: "3"
+      input: seed
+outputs:
+  - id: generated_image
+    type: image
     node: "9"
     required: true
 "#;
@@ -1299,6 +1336,138 @@ outputs:
         assert_eq!(row.blocking_reasons.len(), 1);
     }
 
+    #[tokio::test]
+    async fn custom_image_batch_accepts_recipe_and_freezes_stage_identity() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let pool = initialize(&directory.path().join("custom-image-batch.db"))
+            .await
+            .expect("database should initialize");
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE projects SET id = 'prj_default' WHERE id = 'project-1'")
+            .execute(&pool)
+            .await
+            .expect("test project id should update");
+
+        insert_video_definition(
+            &pool,
+            "wfl_dev080_custom_image_a",
+            "wfv-dev080-custom-image-a",
+            "rcp-dev080-custom-image-a",
+            SIMPLE_T2I_TEST_RECIPE_YAML,
+        )
+        .await;
+        insert_video_definition(
+            &pool,
+            "wfl_dev080_custom_image_b",
+            "wfv-dev080-custom-image-b",
+            "rcp-dev080-custom-image-b",
+            SIMPLE_T2I_TEST_RECIPE_YAML,
+        )
+        .await;
+
+        let now = Utc::now();
+        let shot_repository = Arc::new(SqliteShotRepository::new(pool.clone()));
+        shot_repository
+            .insert(&ShotRecord {
+                id: "sht_dev080_custom_image".to_owned(),
+                project_id: "prj_default".to_owned(),
+                ordinal: 0,
+                name: "Custom Image Shot".to_owned(),
+                prompt_text: "custom prompt".to_owned(),
+                prompt_entry_id: None,
+                prompt_version_id: None,
+                selected_image_asset_id: None,
+                selected_video_asset_id: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .expect("custom Shot should insert");
+        shot_repository
+            .upsert_stage_config(
+                "prj_default",
+                &ShotStageConfigRecord {
+                    shot_id: "sht_dev080_custom_image".to_owned(),
+                    stage: ShotStage::Image,
+                    workflow_version_id: "wfv-dev080-custom-image-a".to_owned(),
+                    recipe_id: "rcp-dev080-custom-image-a".to_owned(),
+                    scalar_values: json!({}),
+                    updated_at: now,
+                },
+            )
+            .await
+            .expect("custom image config should persist");
+
+        let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
+        let service = ShotBatchService::new(
+            shot_repository.clone(),
+            queue_repository,
+            Arc::new(SqliteTaskRepository::new(pool.clone())),
+            Arc::new(SqliteAssetRepository::new(pool.clone())),
+            Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone())),
+            Arc::new(SqliteProjectRepository::new(pool.clone())),
+            Arc::new(SystemClock),
+        );
+        let plan = service
+            .plan("prj_default", ShotStage::Image)
+            .await
+            .expect("custom image plan should build");
+        assert_eq!(plan.eligible_count, 1);
+        assert_eq!(
+            plan.rows[0].workflow_version_id.as_deref(),
+            Some("wfv-dev080-custom-image-a")
+        );
+
+        let old_batch = service
+            .create(CreateShotBatchRequest {
+                project_id: "prj_default".to_owned(),
+                stage: ShotStage::Image,
+                shot_ids: vec!["sht_dev080_custom_image".to_owned()],
+            })
+            .await
+            .expect("custom image batch should be created");
+        assert_eq!(
+            old_batch.items[0].workflow_version_id,
+            "wfv-dev080-custom-image-a"
+        );
+        assert_eq!(old_batch.items[0].recipe_id, "rcp-dev080-custom-image-a");
+
+        shot_repository
+            .upsert_stage_config(
+                "prj_default",
+                &ShotStageConfigRecord {
+                    shot_id: "sht_dev080_custom_image".to_owned(),
+                    stage: ShotStage::Image,
+                    workflow_version_id: "wfv-dev080-custom-image-b".to_owned(),
+                    recipe_id: "rcp-dev080-custom-image-b".to_owned(),
+                    scalar_values: json!({}),
+                    updated_at: Utc::now(),
+                },
+            )
+            .await
+            .expect("updated custom image config should persist");
+        let new_batch = service
+            .create(CreateShotBatchRequest {
+                project_id: "prj_default".to_owned(),
+                stage: ShotStage::Image,
+                shot_ids: vec!["sht_dev080_custom_image".to_owned()],
+            })
+            .await
+            .expect("new custom image batch should be created");
+
+        assert_eq!(
+            old_batch.items[0].workflow_version_id,
+            "wfv-dev080-custom-image-a"
+        );
+        assert_eq!(old_batch.items[0].recipe_id, "rcp-dev080-custom-image-a");
+        assert_eq!(
+            new_batch.items[0].workflow_version_id,
+            "wfv-dev080-custom-image-b"
+        );
+        assert_eq!(new_batch.items[0].recipe_id, "rcp-dev080-custom-image-b");
+        pool.close().await;
+    }
+
     #[test]
     fn preparation_maps_explicit_negative_prompt_and_rejects_ambiguous_textareas() {
         let context = resolved_prompt_context();
@@ -1322,60 +1491,6 @@ outputs:
             ShotBatchService::prepare_values_from_context(ShotStage::Image, &context, &ambiguous)
                 .expect_err("ambiguous textareas must be rejected");
         assert!(error.contains("多个 TextArea"));
-    }
-
-    #[test]
-    fn planner_scope_uses_exact_ids_and_ignores_display_names() {
-        let definition = |workflow_id: &str, name: &str, category: &str, mode: &str| {
-            AvailableGenerationDefinition {
-                workflow_id: workflow_id.to_owned(),
-                workflow_version_id: "wfv".to_owned(),
-                recipe_id: "recipe".to_owned(),
-                recipe_version: "1.0.0".to_owned(),
-                name: name.to_owned(),
-                category: category.to_owned(),
-                mode: mode.to_owned(),
-                recipe_yaml: String::new(),
-            }
-        };
-        assert!(production_runtime_for_stage(
-            ShotStage::Image,
-            &definition(
-                "wfl_kera2_t2i_local_v2",
-                "Kera2 Test Fake Name",
-                "unrelated",
-                "not-a-mode"
-            )
-            .workflow_id
-        )
-        .is_some());
-        assert!(production_runtime_for_stage(
-            ShotStage::Video,
-            &definition(
-                "wfl_minimax_h3_reference_video",
-                "MiniMax H3 Reference Video Clone",
-                "unrelated",
-                "not-a-mode"
-            )
-            .workflow_id
-        )
-        .is_some());
-        assert!(production_runtime_for_stage(
-            ShotStage::Image,
-            &definition("wfl_other", "Kera2 Test Fake", "image", "text_to_image").workflow_id
-        )
-        .is_none());
-        assert!(production_runtime_for_stage(
-            ShotStage::Video,
-            &definition(
-                "wfl_fake",
-                "MiniMax H3 Reference Video Clone",
-                "video",
-                "reference_to_video"
-            )
-            .workflow_id
-        )
-        .is_none());
     }
 
     #[test]

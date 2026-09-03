@@ -1770,30 +1770,37 @@ fn reference_manifest_for_values(
     recipe: &Recipe,
     values: &BTreeMap<String, GenerationInputValue>,
 ) -> Result<Option<ReferenceManifest>, ProductionQueueError> {
-    let Some(value) = values.get("reference_images") else {
+    let Some((key, input)) = recipe
+        .inputs
+        .iter()
+        .find(|(_, input)| matches!(input, InputDefinition::Images { .. }))
+    else {
         return Ok(None);
     };
-    let Some(InputDefinition::Images {
+    let InputDefinition::Images {
         min_items,
         max_items,
         ..
-    }) = recipe.inputs.get("reference_images")
+    } = input
     else {
-        return Err(ProductionQueueError::InvalidInput(
-            "REF2VA recipe input reference_images must be plural images".to_owned(),
-        ));
+        return Err(ProductionQueueError::InvalidInput(format!(
+            "Recipe input {key} must be plural images"
+        )));
+    };
+    let Some(value) = values.get(key) else {
+        return Ok(None);
     };
     let GenerationInputValue::ImageAssets(asset_ids) = value else {
-        return Err(ProductionQueueError::InvalidInput(
-            "REF2VA reference_images must be an ordered image asset array".to_owned(),
-        ));
+        return Err(ProductionQueueError::InvalidInput(format!(
+            "Recipe input {key} must be an ordered image asset array"
+        )));
     };
     let bounds = ref2va_image_bounds(workflow_id, recipe)
         .map_err(ProductionQueueError::InvalidInput)?
         .unwrap_or((*min_items, *max_items));
     validate_ordered_reference_ids(asset_ids, Some(bounds))
         .map_err(ProductionQueueError::InvalidInput)?;
-    Ok(Some(reference_manifest("reference_images", asset_ids)))
+    Ok(Some(reference_manifest(key, asset_ids)))
 }
 
 fn should_pause_after_terminal(
@@ -2127,7 +2134,7 @@ mod tests {
     }
 
     #[test]
-    fn reference_manifest_preserves_ordered_image_array() {
+    fn reference_manifest_preserves_ordered_image_array_and_uses_recipe_key() {
         let recipe = Recipe {
             schema_version: 1,
             id: "ref2va_recipe".to_owned(),
@@ -2136,7 +2143,7 @@ mod tests {
                 file: "workflow_api.json".to_owned(),
             },
             inputs: [(
-                "reference_images".to_owned(),
+                "images".to_owned(),
                 InputDefinition::Images {
                     label: "References".to_owned(),
                     required: false,
@@ -2150,7 +2157,7 @@ mod tests {
             outputs: Vec::new(),
         };
         let values = [(
-            "reference_images".to_owned(),
+            "images".to_owned(),
             GenerationInputValue::ImageAssets(vec![
                 AssetId::parse("ast_second".to_owned()).unwrap(),
                 AssetId::parse("ast_first".to_owned()).unwrap(),
@@ -2162,7 +2169,7 @@ mod tests {
         let manifest = reference_manifest_for_values("wfl_other", &recipe, &values)
             .expect("manifest should be valid")
             .expect("image array should produce a manifest");
-        assert_eq!(manifest.input_key, "reference_images");
+        assert_eq!(manifest.input_key, "images");
         assert_eq!(
             manifest
                 .asset_ids

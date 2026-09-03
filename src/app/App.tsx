@@ -16,6 +16,8 @@ import {
   reconcileActiveTasks,
   refreshComfyCapabilities,
   replaceConsistencyScopeBinding,
+  getProjectWorkflowConfig,
+  replaceProjectWorkflowConfig,
   replaceShotConsistencyBinding,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
@@ -42,6 +44,11 @@ import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import type { ShotStage } from "../types/shot";
+import type {
+  ProjectWorkflowBindingInput,
+  ProjectWorkflowBindingView,
+  ProjectWorkflowConfigView,
+} from "../types/projectWorkflow";
 import type {
   ConsistencyContextPreview,
   ConsistencyBindingReplaceInput,
@@ -88,6 +95,45 @@ export function workflowUseProjectDestination(
     : undefined;
 }
 
+export type WorkflowDefaultStage = "IMAGE" | "VIDEO";
+export type WorkflowDefaultSelection = WorkflowDefaultStage | "DUAL" | "NONE";
+
+export function workflowDefaultSelection(recipe: Pick<RecipeViewModel, "outputTypes">): WorkflowDefaultSelection {
+  const hasImage = recipe.outputTypes?.includes("image") ?? false;
+  const hasVideo = recipe.outputTypes?.includes("video") ?? false;
+  if (hasImage && hasVideo) return "DUAL";
+  if (hasImage) return "IMAGE";
+  if (hasVideo) return "VIDEO";
+  return "NONE";
+}
+
+function bindingInput(binding: ProjectWorkflowBindingView): ProjectWorkflowBindingInput {
+  return {
+    stage: binding.stage,
+    mode: binding.mode,
+    workflowVersionId: binding.workflowVersionId,
+    recipeId: binding.recipeId,
+  };
+}
+
+export function projectWorkflowBindingsForRecipe(
+  config: ProjectWorkflowConfigView,
+  stage: WorkflowDefaultStage,
+  recipe: Pick<RecipeViewModel, "workflowVersionId" | "recipeId">,
+): ProjectWorkflowBindingInput[] {
+  const replacement: ProjectWorkflowBindingInput = {
+    stage,
+    mode: "DEFAULT",
+    workflowVersionId: recipe.workflowVersionId,
+    recipeId: recipe.recipeId,
+  };
+  return [
+    stage === "IMAGE" ? replacement : config.imageDefault ? bindingInput(config.imageDefault) : undefined,
+    stage === "VIDEO" ? replacement : config.videoDefault ? bindingInput(config.videoDefault) : undefined,
+    ...config.videoModeOverrides.map(bindingInput),
+  ].filter((binding): binding is ProjectWorkflowBindingInput => Boolean(binding));
+}
+
 function keepsNativeContextMenu(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return target instanceof HTMLInputElement
@@ -116,6 +162,7 @@ function App() {
   const [capabilityLoading, setCapabilityLoading] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [workflowNotice, setWorkflowNotice] = useState<string | null>(null);
   const [projectContextLoading, setProjectContextLoading] = useState(false);
   const [consistencyProfiles, setConsistencyProfiles] = useState<ConsistencyProfileOption[]>([]);
   const [consistencyReferenceSets, setConsistencyReferenceSets] = useState<ConsistencyReferenceSetOption[]>([]);
@@ -493,20 +540,51 @@ function App() {
   }
 
   async function openWorkflowForProject(workflowId: string, recipeId: string) {
+    setError(null);
+    setWorkflowNotice(null);
     try {
       const nextCatalog = await listGenerationCatalog();
       setCatalog(nextCatalog);
-      const destination = workflowUseProjectDestination(nextCatalog, workflowId, recipeId);
-      if (!destination) {
+      const recipe = nextCatalog.find((candidate) => candidate.workflowId === workflowId && candidate.recipeId === recipeId);
+      if (!recipe) {
         setError("刚添加的工作流暂时还没有出现在项目工作流列表中，请刷新后重试。");
         return;
       }
       const currentProject = useProjectStore.getState().activeProject();
       if (!currentProject) {
-        setError("当前项目不可用，无法打开项目工作流设置。");
+        setError("当前项目不可用，无法绑定工作流。");
         return;
       }
-      openProject(currentProject.id, false, destination);
+
+      const selection = workflowDefaultSelection(recipe);
+      if (selection === "NONE") {
+        setError("该工作流没有图片或视频输出，无法绑定为项目默认工作流。");
+        return;
+      }
+      if (selection === "DUAL") {
+        openProject(currentProject.id, false, "projects");
+        setWorkflowNotice("该工作流同时输出图片和视频，未自动绑定。请在项目工作流设置中明确选择图片或视频默认工作流。");
+        return;
+      }
+
+      const currentConfig = await getProjectWorkflowConfig(currentProject.id);
+      const nextConfig = await replaceProjectWorkflowConfig(currentProject.id, {
+        bindings: projectWorkflowBindingsForRecipe(currentConfig, selection, recipe),
+      });
+      const confirmedBinding = selection === "IMAGE" ? nextConfig.imageDefault : nextConfig.videoDefault;
+      if (
+        !confirmedBinding
+        || confirmedBinding.workflowVersionId !== recipe.workflowVersionId
+        || confirmedBinding.recipeId !== recipe.recipeId
+      ) {
+        setError("项目工作流绑定写入后校验失败，未确认目标工作流，请重试。");
+        return;
+      }
+
+      openProject(currentProject.id, false, "projects");
+      setWorkflowNotice(
+        `已设为当前项目${selection === "IMAGE" ? "图片" : "视频"}默认工作流：${recipe.name}（${recipe.workflowVersionId} · ${recipe.recipeId}）`,
+      );
       setError(null);
     } catch (openError: unknown) {
       setError(toUserMessage(openError));
@@ -889,6 +967,7 @@ function App() {
       )}
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
+      {workflowNotice && <p className="workflow-notice" role="status">{workflowNotice}</p>}
       {error && <p className="error-message global-error">提示：{error}</p>}
         </div>
       </StudioShell>

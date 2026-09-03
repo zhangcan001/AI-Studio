@@ -3,7 +3,7 @@ use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
 };
 use crate::application::ordered_reference_binding::{
-    ref2va_image_bounds, reference_manifest, validate_ordered_reference_ids,
+    reference_manifest, validate_ordered_reference_ids,
 };
 use crate::application::ports::{
     AssetRepository, Clock, GenerationDefinitionRepository, GenerationSnapshotRepository,
@@ -11,13 +11,15 @@ use crate::application::ports::{
     ShotRecord, ShotReferenceAssetRecord, ShotRepository, ShotStageConfigRecord,
     ShotStagePromptRecord, TaskRepository, TaskUpdatePayload,
 };
-use crate::application::product_runtime_scope::production_runtime_for_stage;
 use crate::application::prompt_library_service::canonical_prompt_text;
+use crate::application::shot_workflow_compatibility::{
+    classify_shot_recipe, ShotVideoInputMode, ShotWorkflowCompatibility,
+};
 use crate::application::task_query_service::TaskQueryService;
 use crate::compiler::RecipeParser;
 use crate::domain::{
     canonical_shot_name, derive_stage_status, validate_project_id, AssetId, AssetType,
-    InputDefinition, OutputType, Recipe, SeedValue, ShotStage, ShotViewStatus, TaskId, TaskStatus,
+    InputDefinition, Recipe, SeedValue, ShotStage, ShotViewStatus, TaskId, TaskStatus,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -492,11 +494,13 @@ impl ShotService {
             .ok_or_else(|| ShotServiceError::InvalidInput("当前阶段工作流已不可用".to_owned()))?;
         let recipe = RecipeParser::parse(&definition.recipe_yaml)
             .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
-        let ref2va_bounds = if request.stage == ShotStage::Video {
+        let compatibility = if request.stage == ShotStage::Video {
             validate_video_recipe(&definition.workflow_id, &recipe)?
         } else {
-            None
+            classify_shot_recipe(request.stage, &definition.workflow_id, &recipe)
+                .map_err(ShotServiceError::InvalidInput)?
         };
+        let input_mode = compatibility.input_mode;
         let frozen_values = retry_task
             .as_ref()
             .map(|(_, snapshot)| input_values_from_snapshot(&snapshot.user_inputs_json, &recipe))
@@ -529,32 +533,33 @@ impl ShotService {
                 values.insert(prompt_key.clone(), GenerationInputValue::Text(prompt));
             }
         }
-        let image_input = recipe.inputs.iter().find_map(|(key, input)| match input {
-            InputDefinition::Image { .. } => Some((key, false)),
-            InputDefinition::Images { .. } => Some((key, true)),
-            _ => None,
-        });
         if request.stage == ShotStage::Video {
-            let (_, input) = video_image_input(&recipe)?;
             let (selected, references) = if is_frozen_retry {
-                let (key, _) = video_image_input(&recipe)?;
-                match (input, values.get(key).cloned()) {
-                    (InputDefinition::Image { .. }, Some(GenerationInputValue::ImageAsset(id))) => {
-                        (Some(id), Vec::new())
-                    }
-                    (
-                        InputDefinition::Images { .. },
-                        Some(GenerationInputValue::ImageAssets(ids)),
-                    ) => (None, ids),
-                    _ => {
-                        return Err(ShotServiceError::InvalidInput(
-                            "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
-                        ));
+                match &input_mode {
+                    ShotVideoInputMode::TextOnly => (None, Vec::new()),
+                    ShotVideoInputMode::SingleImage { key } => match values.get(key).cloned() {
+                        Some(GenerationInputValue::ImageAsset(id)) => (Some(id), Vec::new()),
+                        _ => {
+                            return Err(ShotServiceError::InvalidInput(
+                                "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
+                            ));
+                        }
+                    },
+                    ShotVideoInputMode::ReferenceImages { key, .. } => {
+                        match values.get(key).cloned() {
+                            Some(GenerationInputValue::ImageAssets(ids)) => (None, ids),
+                            _ => {
+                                return Err(ShotServiceError::InvalidInput(
+                                    "失败任务快照缺少有效的视频输入，无法安全重试".to_owned(),
+                                ));
+                            }
+                        }
                     }
                 }
             } else {
-                let selected = match input {
-                    InputDefinition::Image { .. } => {
+                match &input_mode {
+                    ShotVideoInputMode::TextOnly => (None, Vec::new()),
+                    ShotVideoInputMode::SingleImage { .. } => {
                         let selected =
                             data.shot.selected_image_asset_id.as_ref().ok_or_else(|| {
                                 ShotServiceError::InvalidInput("请先选择关键帧图片".to_owned())
@@ -564,30 +569,39 @@ impl ShotService {
                         })?;
                         self.validate_image_asset(&request.project_id, &selected, "关键帧")
                             .await?;
-                        Some(selected)
+                        (Some(selected), Vec::new())
                     }
-                    InputDefinition::Images { .. } => None,
-                    _ => unreachable!("video_image_input only returns image inputs"),
-                };
-                let references = if matches!(input, InputDefinition::Images { .. }) {
-                    let references =
-                        ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
-                    validate_ordered_reference_ids(&references, None)
-                        .map_err(ShotServiceError::InvalidInput)?;
-                    for asset_id in &references {
-                        self.validate_image_asset(&request.project_id, asset_id, "参考图")
-                            .await?;
+                    ShotVideoInputMode::ReferenceImages {
+                        min_items,
+                        max_items,
+                        ..
+                    } => {
+                        let references =
+                            ordered_reference_asset_ids(&data.reference_assets, request.stage)?;
+                        validate_ordered_reference_ids(&references, Some((*min_items, *max_items)))
+                            .map_err(ShotServiceError::InvalidInput)?;
+                        for asset_id in &references {
+                            self.validate_image_asset(&request.project_id, asset_id, "参考图")
+                                .await?;
+                        }
+                        (None, references)
                     }
-                    references
-                } else {
-                    Vec::new()
-                };
-                (selected, references)
+                }
             };
-            let (key, image_value, manifest) =
-                build_video_input(&recipe, selected, references, ref2va_bounds)?;
-            values.insert(key, image_value);
-            reference_manifest = manifest;
+            if !matches!(&input_mode, ShotVideoInputMode::TextOnly) {
+                let bounds = match &input_mode {
+                    ShotVideoInputMode::ReferenceImages {
+                        min_items,
+                        max_items,
+                        ..
+                    } => Some((*min_items, *max_items)),
+                    _ => None,
+                };
+                let (key, image_value, manifest) =
+                    build_video_input(&recipe, selected, references, bounds)?;
+                values.insert(key, image_value);
+                reference_manifest = manifest;
+            }
             self.ensure_no_active_video_tasks(&request.project_id)
                 .await?;
         } else if !is_frozen_retry {
@@ -601,9 +615,15 @@ impl ShotService {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if !references.is_empty() {
-                let (key, multiple) = image_input.ok_or_else(|| {
-                    ShotServiceError::InvalidInput("当前阶段 Recipe 没有可用的图片输入".to_owned())
-                })?;
+                let (key, multiple) = match &input_mode {
+                    ShotVideoInputMode::SingleImage { key } => (key, false),
+                    ShotVideoInputMode::ReferenceImages { key, .. } => (key, true),
+                    ShotVideoInputMode::TextOnly => {
+                        return Err(ShotServiceError::InvalidInput(
+                            "当前阶段 Recipe 没有可用的图片输入".to_owned(),
+                        ));
+                    }
+                };
                 if !multiple && references.len() != 1 {
                     return Err(ShotServiceError::InvalidInput(
                         "单图片输入只能绑定一个 Reference Asset".to_owned(),
@@ -941,32 +961,10 @@ pub(crate) fn validate_stage_config_values(
     definition: &crate::application::ports::GenerationDefinition,
     values: &BTreeMap<String, GenerationInputValue>,
 ) -> Result<Value, ShotServiceError> {
-    if production_runtime_for_stage(stage, &definition.workflow_id).is_none() {
-        return Err(ShotServiceError::InvalidInput(match stage {
-            ShotStage::Image => "图片阶段仅支持正式 Krea2 运行时".to_owned(),
-            ShotStage::Video => "视频阶段仅支持 MiniMax H3 运行时".to_owned(),
-        }));
-    }
     let recipe = RecipeParser::parse(&definition.recipe_yaml)
         .map_err(|error| ShotServiceError::InvalidInput(error.to_string()))?;
-    let expected_output = match stage {
-        ShotStage::Image => OutputType::Image,
-        ShotStage::Video => OutputType::Video,
-    };
-    if !recipe
-        .outputs
-        .iter()
-        .any(|output| output.output_type == expected_output)
-    {
-        return Err(ShotServiceError::InvalidInput(format!(
-            "{} 阶段需要兼容的 {} 输出",
-            stage.as_str(),
-            expected_output_label(expected_output)
-        )));
-    }
-    if stage == ShotStage::Video {
-        validate_video_recipe(&definition.workflow_id, &recipe)?;
-    }
+    classify_shot_recipe(stage, &definition.workflow_id, &recipe)
+        .map_err(ShotServiceError::InvalidInput)?;
     scalar_values_to_json(&recipe.inputs, values)
 }
 
@@ -1006,13 +1004,6 @@ fn overall_status(
                 ShotViewStatus::Draft
             }
         }
-    }
-}
-
-fn expected_output_label(output: OutputType) -> &'static str {
-    match output {
-        OutputType::Image => "image",
-        OutputType::Video => "video",
     }
 }
 
@@ -1181,26 +1172,9 @@ fn snapshot_asset_ids(
 fn validate_video_recipe(
     workflow_id: &str,
     recipe: &Recipe,
-) -> Result<Option<(usize, usize)>, ShotServiceError> {
-    if production_runtime_for_stage(ShotStage::Video, workflow_id).is_none() {
-        return Err(ShotServiceError::InvalidInput(
-            "视频阶段仅支持 MiniMax H3 运行时".to_owned(),
-        ));
-    }
-    let (_, input) = video_image_input(recipe)?;
-    let ref2va_bounds =
-        ref2va_image_bounds(workflow_id, recipe).map_err(ShotServiceError::InvalidInput)?;
-    if ref2va_bounds.is_some() && !matches!(input, InputDefinition::Images { .. }) {
-        return Err(ShotServiceError::InvalidInput(
-            "REF2VA Recipe 必须声明 plural reference_images 输入".to_owned(),
-        ));
-    }
-    if ref2va_bounds.is_none() && !matches!(input, InputDefinition::Image { .. }) {
-        return Err(ShotServiceError::InvalidInput(
-            "I2V Recipe 必须声明单个 image 输入".to_owned(),
-        ));
-    }
-    Ok(ref2va_bounds)
+) -> Result<ShotWorkflowCompatibility, ShotServiceError> {
+    classify_shot_recipe(ShotStage::Video, workflow_id, recipe)
+        .map_err(ShotServiceError::InvalidInput)
 }
 
 fn build_video_input(
@@ -1222,7 +1196,9 @@ fn build_video_input(
         }
         InputDefinition::Images { .. } => {
             let bounds = ref2va_bounds.ok_or_else(|| {
-                ShotServiceError::InvalidInput("视频多图输入仅支持 H3 REF2VA Recipe".to_owned())
+                ShotServiceError::InvalidInput(
+                    "视频多图输入缺少有效的 Recipe reference bounds".to_owned(),
+                )
             })?;
             validate_ordered_reference_ids(&references, Some(bounds))
                 .map_err(ShotServiceError::InvalidInput)?;

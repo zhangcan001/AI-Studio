@@ -77,6 +77,7 @@ pub mod shot_readiness_evaluator;
 pub mod shot_readiness_service;
 pub mod shot_reference_pack_builder;
 pub mod shot_service;
+pub(crate) mod shot_workflow_compatibility;
 pub mod source_asset_import_service;
 pub mod task_cancellation_service;
 pub mod task_execution_registry;

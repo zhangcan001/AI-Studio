@@ -9,10 +9,12 @@ import type { ProductionPackageCreateBatchesResult, ProductionPackageInspectionR
 import type { ProductionBatchReviewProductivity } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 import type { ProductionPackageBatchBinding } from "../../types/productionPackage";
+import type { ShotView } from "../../types/shot";
 import { buildLocalDeliveryManifest, ShotWorkspace } from "./ShotWorkspace";
 
 const mocks = vi.hoisted(() => ({
   listShots: vi.fn(),
+  getProjectWorkflowConfig: vi.fn(),
   listRecentAssets: vi.fn(),
   listPromptLibrary: vi.fn(),
   listReferenceAnchors: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock("../../services/tauriClient", async () => {
   return {
     ...actual,
     listShots: mocks.listShots,
+    getProjectWorkflowConfig: mocks.getProjectWorkflowConfig,
     listRecentAssets: mocks.listRecentAssets,
     listPromptLibrary: mocks.listPromptLibrary,
     listReferenceAnchors: mocks.listReferenceAnchors,
@@ -159,6 +162,22 @@ vi.mock("../production/ProductionMonitor", () => ({
 let queues: ProductionBatchSummary[];
 let batchStatus: ProductionBatchDetail["status"] = "READY";
 let review: ProductionBatchReviewProductivity;
+
+const configReadFailureShot: ShotView = {
+  id: "shot-config-read-failure",
+  projectId: "project-1",
+  ordinal: 0,
+  name: "配置读取失败测试镜头",
+  promptText: "test",
+  createdAt: "2026-08-29T00:00:00Z",
+  updatedAt: "2026-08-29T00:00:00Z",
+  status: "DRAFT",
+  imageStatus: "DRAFT",
+  videoStatus: "DRAFT",
+  stageConfigs: [],
+  referenceAssets: [],
+  generationLinks: [],
+};
 
 const successAsset: AssetView = {
   id: "asset-success",
@@ -406,6 +425,7 @@ beforeEach(() => {
   batchStatus = "READY";
   review = makeReview();
   mocks.listShots.mockResolvedValue([]);
+  mocks.getProjectWorkflowConfig.mockResolvedValue({ projectId: "project-1", videoModeOverrides: [] });
   mocks.listRecentAssets.mockResolvedValue([]);
   mocks.listPromptLibrary.mockResolvedValue({ items: [], total: 0 });
   mocks.listReferenceAnchors.mockResolvedValue([]);
@@ -445,6 +465,22 @@ afterEach(() => {
 });
 
 describe("ShotWorkspace production package queue integration", () => {
+  it("fails closed with an explicit project workflow loading error", async () => {
+    mocks.listShots.mockResolvedValue([configReadFailureShot]);
+    mocks.getProjectWorkflowConfig.mockRejectedValue(new Error("database unavailable"));
+
+    render(
+      <ShotWorkspace
+        projectId="project-1"
+        catalog={[]}
+        initialSelectedShotId={configReadFailureShot.id}
+      />,
+    );
+
+    expect((await screen.findByRole("alert")).textContent).toContain("项目工作流配置加载失败");
+    expect((screen.getByRole("button", { name: "生成" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("blocks programmatic WARNING and BLOCKED package creation at the Host", async () => {
     const user = userEvent.setup();
     setupMultiPackageInspectionMocks();
