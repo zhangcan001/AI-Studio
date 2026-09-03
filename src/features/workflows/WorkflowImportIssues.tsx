@@ -12,6 +12,10 @@ export interface WorkflowImportErrorView {
   message: string;
 }
 
+export function workflowIssueSelectionKey(issue: WorkflowAutoIssueView, issueIndex: number): string {
+  return [issue.code, issue.field ?? "NONE", String(issueIndex)].join(":");
+}
+
 interface Props {
   plan: WorkflowAutoOnboardingPlanView;
   loading: boolean;
@@ -90,7 +94,8 @@ function issueTitle(code: string): string {
 export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRestoreExisting, onCancel }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
   const waiting = plan.state === "WAITING_FOR_COMFY_UI";
-  useEffect(() => setSelected({}), [plan.draftId, plan.state]);
+  const issueFingerprint = plan.issues.map((issue, issueIndex) => workflowIssueSelectionKey(issue, issueIndex)).join("|");
+  useEffect(() => setSelected({}), [plan.draftId, plan.state, issueFingerprint]);
   return (
     <section className="workflow-smart-issues" aria-label="工作流导入问题">
       <div className="workflow-smart-issues-heading">
@@ -104,9 +109,10 @@ export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpe
       {!!plan.issues.length && (
         <div className="workflow-smart-issue-list">
           {plan.issues.map((issue, issueIndex) => {
-            const choice = selected[issue.code] ?? -1;
+            const issueKey = workflowIssueSelectionKey(issue, issueIndex);
+            const choice = selected[issueKey] ?? -1;
             return (
-              <article className="workflow-smart-issue" key={`${issue.code}-${issueIndex}`}>
+              <article className="workflow-smart-issue" key={issueKey}>
                 <div>
                   <strong>{issueTitle(issue.code)}</strong>
                   <p>{issue.message}</p>
@@ -118,9 +124,9 @@ export function WorkflowImportIssues({ plan, loading, onResolve, onResume, onOpe
                       <label key={`${candidate.label}-${candidateIndex}`}>
                         <input
                           type="radio"
-                          name={`${issue.code}-${issueIndex}`}
+                          name={issueKey}
                           checked={choice === candidateIndex}
-                          onChange={() => setSelected((current) => ({ ...current, [issue.code]: candidateIndex }))}
+                          onChange={() => setSelected((current) => ({ ...current, [issueKey]: candidateIndex }))}
                         />
                         <span>{candidate.label}</span>
                       </label>

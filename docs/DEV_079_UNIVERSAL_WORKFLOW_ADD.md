@@ -171,6 +171,68 @@ docs: record DEV-079 verification
 
 There is no new migration, table, workflow model, executor, runtime system, queue behavior, batch strategy, automatic node installation, cloud workflow sync, or LLM integration. The migration set remains 027 and the backup count remains 16.
 
+## DEV-079 P1 fix closeout
+
+The P1 fix keeps the existing project workspace and project workflow settings as the single configuration surface. The two result actions now have independent callbacks:
+
+```text
+打开生成页面 -> onOpenStudio -> openPublishedWorkflow
+用于当前项目 -> onUseInProject -> refresh Catalog -> exact workflowId + recipeId check -> projects workspace
+```
+
+`用于当前项目` never auto-binds a project configuration. It re-reads the Catalog, rejects a missing current project or missing exact recipe pair without navigation or database mutation, and opens the current project's existing `ProjectWorkflowSettings`. The user selects and explicitly saves the exact `workflowVersionId + recipeId` there. It does not fall back to another recipe with the same `workflowId`, and it does not fall back to the Studio page.
+
+Ambiguous import issue selection now uses a unique key composed of `code + field-or-NONE + issueIndex`. The key is used for selected state, radio groups, and rendered issue identity. Selection is cleared when the draft, state, or issue fingerprint changes. Two same-code issues therefore remain independently selectable and each resolve callback receives its own exact issue and candidate.
+
+The React closure UAT is intentionally two-stage: the real `WorkflowWorkspace` crosses a mocked Tauri boundary and refreshes the Catalog; the independent project callback then renders the real `ProjectWorkflowSettings`, verifies both image/video exact candidates, proves no write before Save, and verifies the exact binding payload after Save.
+
+```text
+DEV079_P1_START_SHA=2c21a1ff9767541227d9b260037514290e8900a1
+P1_MULTI_AGENT_EXECUTION=YES
+P1_MAIN=workspace wiring, integration, verification, docs, Git
+P1_AGENT_A=App project-destination callback and exact Catalog guard
+P1_AGENT_B=ambiguity selection key and issue isolation regression
+P1_AGENT_C=two-stage React closure UAT with real Workspace and ProjectWorkflowSettings
+P1_CONFLICTS=NONE
+P1_SUBAGENTS_COMMITTED_OR_PUSHED=NO
+
+DEV079_P1_01_USE_IN_PROJECT_NAVIGATION=FIXED
+DEV079_P1_02_AMBIGUITY_SELECTION_COLLISION=FIXED
+DEV079_P2_01_PROJECT_CLOSURE_REACT_UAT=FIXED
+USE_IN_PROJECT_OPENS_PROJECT_WORKFLOW_SETTINGS=YES
+USE_IN_PROJECT_AUTO_BINDS=NO
+USE_IN_PROJECT_OPEN_SETTINGS=YES
+USE_IN_PROJECT_AUTO_BIND=NO
+USE_IN_PROJECT_FALLBACK_TO_OPEN_STUDIO=NO
+EXACT_PROJECT_RECIPE_CHECK=YES
+AMBIGUITY_SELECTION_KEY=CODE_PLUS_FIELD_PLUS_INDEX
+MULTIPLE_SAME_CODE_ISSUES_ISOLATED=YES
+ADD_TO_PROJECT_SINGLE_REACT_CLOSURE_UAT=NO
+TWO_STAGE_REACT_CLOSURE_UAT=YES
+
+P1_DIRECT_FRONTEND_TARGET=4_FILES_11_TESTS_PASS
+P1_REQUESTED_FRONTEND_TARGET=5_FILES_18_TESTS_PASS
+P1_PROJECT_WORKFLOW_REGRESSION=7_FILES_56_TESTS_PASS
+P1_FULL_FRONTEND=112_FILES_519_TESTS_PASS
+P1_DEV079_RUST=6_TESTS_PASS
+P1_WORKFLOW_ONBOARDING=22_TESTS_PASS
+P1_DEV078_RUST=3_TESTS_PASS
+P1_FULL_RUST=729_PASS_0_FAIL_1_IGNORED
+P1_TYPESCRIPT=PASS
+P1_FRONTEND_BUILD=PASS
+P1_TAURI_BUILD=PASS
+P1_RUST_FMT=PASS
+P1_DIFF_CHECK=PASS
+
+MIGRATION_P1_BEFORE=027
+MIGRATION_P1_AFTER=027
+BACKUP_P1_BEFORE=16
+BACKUP_P1_AFTER=16
+ARCHITECTURE_UNCHANGED=YES
+UI_JSON_CONVERSION_REMAINS_P2=YES
+DEV079_P1_FIX_SHA=RECORDED_IN_GIT_HISTORY
+```
+
 ## Final gate
 
 ```text
@@ -179,6 +241,8 @@ P1=NONE
 P2=UI_FORMAT_CONVERSION_NOT_FULLY_SUPPORTED
 P3=NONE
 DEV079_UNIVERSAL_WORKFLOW_ADD=PASS
+DEV079_P1_PROJECT_WORKFLOW_ADD_CLOSURE=PASS
+DEV-080_NOT_STARTED=YES
 ```
 
 DEV-079 is complete. Do not automatically start DEV-080.

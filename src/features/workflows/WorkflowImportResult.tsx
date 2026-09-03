@@ -51,7 +51,6 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
   if (!published) return null;
   const inputLabels = plan.inputMappings.map((mapping) => mapping.label).join("、") || "无字面量输入";
   const outputLabels = plan.outputMappings.map((mapping) => mapping.type === "video" ? "视频" : "图片").join("、") || "—";
-  const useInProject = onUseInProject ?? onOpenStudio;
   const missingNodes = missingNodeLabels(plan);
 
   return (
@@ -72,7 +71,7 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
         </div>
         {!!missingNodes.length && <p className="workflow-import-result-warning">⚠ 当前 ComfyUI 缺少 {missingNodes.length} 个节点：{missingNodes.join("、")}。工作流已保存，修复节点前不能生产。</p>}
         <div className="workflow-smart-actions">
-          {projectId && useInProject && <button type="button" onClick={() => useInProject(published.workflowId, published.recipeId)}>用于当前项目</button>}
+          {projectId && onUseInProject && <button type="button" onClick={() => onUseInProject(published.workflowId, published.recipeId)}>用于当前项目</button>}
           {onOpenStudio && <button type="button" className="quiet-button" onClick={() => onOpenStudio(published.workflowId, published.recipeId)}>打开生成页面</button>}
           <button type="button" className="quiet-button" onClick={onOpenAdvanced}>查看高级详情</button>
           {onReturnToList && <button type="button" className="quiet-button" onClick={onReturnToList}>返回工作流列表</button>}

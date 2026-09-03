@@ -78,6 +78,16 @@ const workspaceLabels: Record<Workspace, string> = {
   settings: "设置",
 };
 
+export function workflowUseProjectDestination(
+  catalog: readonly Pick<RecipeViewModel, "workflowId" | "recipeId">[],
+  workflowId: string,
+  recipeId: string,
+): "projects" | undefined {
+  return catalog.some((recipe) => recipe.workflowId === workflowId && recipe.recipeId === recipeId)
+    ? "projects"
+    : undefined;
+}
+
 function keepsNativeContextMenu(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return target instanceof HTMLInputElement
@@ -482,6 +492,27 @@ function App() {
     }
   }
 
+  async function openWorkflowForProject(workflowId: string, recipeId: string) {
+    try {
+      const nextCatalog = await listGenerationCatalog();
+      setCatalog(nextCatalog);
+      const destination = workflowUseProjectDestination(nextCatalog, workflowId, recipeId);
+      if (!destination) {
+        setError("刚添加的工作流暂时还没有出现在项目工作流列表中，请刷新后重试。");
+        return;
+      }
+      const currentProject = useProjectStore.getState().activeProject();
+      if (!currentProject) {
+        setError("当前项目不可用，无法打开项目工作流设置。");
+        return;
+      }
+      openProject(currentProject.id, false, destination);
+      setError(null);
+    } catch (openError: unknown) {
+      setError(toUserMessage(openError));
+    }
+  }
+
   async function reconcileTasks() {
     if (!activeProjectId) return;
     setReconciling(true);
@@ -839,6 +870,7 @@ function App() {
           comfyConnected={isConnected}
           onCatalogChanged={reloadCatalog}
           onOpenStudio={openPublishedWorkflow}
+          onUseInProject={openWorkflowForProject}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
             navigateToWorkspace("tasks");

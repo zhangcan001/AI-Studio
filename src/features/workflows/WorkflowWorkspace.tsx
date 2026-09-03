@@ -57,6 +57,7 @@ interface Props {
   comfyConnected: boolean;
   onCatalogChanged: () => Promise<void>;
   onOpenStudio: (workflowId: string, recipeId: string) => Promise<void>;
+  onUseInProject: (workflowId: string, recipeId: string) => Promise<void>;
   onOpenTask?: (taskId: string) => void;
 }
 
@@ -144,7 +145,7 @@ function workflowImportErrorView(error: unknown): WorkflowImportErrorView | unde
   return undefined;
 }
 
-export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onOpenTask }: Props) {
+export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenTask }: Props) {
   const cachedWorkspace = useWorkflowWorkspaceStore((state) => state.workspace);
   const setCachedWorkspace = useWorkflowWorkspaceStore((state) => state.setWorkspace);
   const [items, setItems] = useState<WorkflowProductionWorkspaceView[]>(() => cachedWorkspace?.items ?? []);
@@ -1012,7 +1013,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onOpenExisting={() => void openExistingWorkflow()}
         onRestoreExisting={() => void restoreExistingArchivedWorkflow()}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
-        onUseInProject={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
+        onUseInProject={(workflowId, recipeId) => void onUseInProject(workflowId, recipeId)}
         onRetry={() => void smartImportWorkflow()}
         onCancel={() => void returnToWorkflowList()}
         onReturnToList={() => void returnToWorkflowList()}
