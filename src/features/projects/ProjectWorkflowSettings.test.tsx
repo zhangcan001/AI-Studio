@@ -172,4 +172,18 @@ describe("ProjectWorkflowSettings", () => {
 
     await waitFor(() => expect(onConfigChanged).toHaveBeenLastCalledWith(nextConfig));
   });
+
+  it("does not publish a config when saving fails", async () => {
+    const onConfigChanged = vi.fn();
+    mocks.replaceProjectWorkflowConfig.mockRejectedValue(new Error("offline"));
+    render(<ProjectWorkflowSettings projectId="project-1" catalog={catalog} onConfigChanged={onConfigChanged} />);
+
+    await screen.findByLabelText("图片默认工作流");
+    const loadedCallCount = onConfigChanged.mock.calls.length;
+    await userEvent.selectOptions(screen.getByLabelText("图片默认工作流"), "image-version:image-recipe");
+    await userEvent.click(screen.getByRole("button", { name: "保存工作流配置" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(onConfigChanged).toHaveBeenCalledTimes(loadedCallCount);
+  });
 });

@@ -155,6 +155,28 @@ describe("project workflow preflight", () => {
     });
   });
 
+  it("prefers the exact H3 recommendation over compatible when the video default targets another mode", () => {
+    const videoDefault = videoRecipe("default");
+    const compatible = videoRecipe("compatible", ["reference_audio"]);
+    const recommended = videoRecipe(
+      "recommended",
+      ["reference_audio"],
+      MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+    );
+    const report = preflightProjectWorkflow(config({
+      videoDefault: binding("VIDEO", "DEFAULT", "default"),
+    }), [imageRecipe(), videoDefault, compatible, recommended]);
+    const result = item(report, "REF2VA_AUDIO");
+
+    expect(result).toMatchObject({
+      status: "READY",
+      recipe: recommended,
+      source: "recommended",
+      staleConfiguredBinding: false,
+      usingFallback: true,
+    });
+  });
+
   it("warns on a stale video default and uses the mode recommendation", () => {
     const recommended = videoRecipe(
       "recommended",

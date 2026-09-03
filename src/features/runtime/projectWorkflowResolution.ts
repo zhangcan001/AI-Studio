@@ -110,18 +110,29 @@ export function resolveProjectVideoWorkflow<T extends RecipeViewModel>(
   options: ProjectVideoWorkflowResolutionOptions = {},
 ): ProjectWorkflowResolution<T> {
   const modeCandidates = recipesForVideoMode(catalog, mode) as T[];
+  const genericVideoCandidates = recipesForVideoMode(catalog, "CUSTOM_VIDEO") as T[];
   const candidates = modeCandidates.length || mode === "CUSTOM_VIDEO"
     ? modeCandidates
     : options.allowGenericFallback === false
       ? []
-      : recipesForVideoMode(catalog, "CUSTOM_VIDEO") as T[];
-  return resolveProjectWorkflow({
+      : genericVideoCandidates;
+  const resolution = resolveProjectWorkflow({
     candidates,
     explicit,
     projectMode,
     projectDefault,
     recommended,
   });
+  const staleProjectMode = Boolean(projectMode && !findRecipe(candidates, projectMode));
+  const staleProjectDefault = Boolean(
+    projectDefault
+      && !findRecipe(candidates, projectDefault)
+      && !findRecipe(genericVideoCandidates, projectDefault),
+  );
+  return {
+    ...resolution,
+    staleProjectBinding: staleProjectMode || staleProjectDefault,
+  };
 }
 
 export function resolveProjectFolderWorkflow<T extends RecipeViewModel>(

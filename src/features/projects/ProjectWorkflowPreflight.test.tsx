@@ -140,4 +140,20 @@ describe("ProjectWorkflowPreflight", () => {
     await waitFor(() => expect(screen.getAllByText(/version-override/).length).toBeGreaterThan(0));
     expect(mocks.getProjectWorkflowConfig).toHaveBeenCalledWith("project-1");
   });
+
+  it("keeps the previous result when recheck fails", async () => {
+    mocks.getProjectWorkflowConfig.mockRejectedValue(new Error("offline"));
+    render(
+      <ProjectWorkflowPreflight
+        config={config({ videoDefault: binding("VIDEO", "DEFAULT", "default") })}
+        catalog={readyCatalog}
+      />,
+    );
+
+    const previousResult = screen.getAllByTestId("project-workflow-preflight-item")[0].textContent;
+    await userEvent.click(screen.getByRole("button", { name: "重新检查" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("重新检查失败"));
+    expect(screen.getAllByTestId("project-workflow-preflight-item")[0].textContent).toBe(previousResult);
+  });
 });

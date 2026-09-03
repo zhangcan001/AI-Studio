@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { RecipeViewModel } from "../../types/generation";
-import { resolveProjectVideoWorkflow, resolveProjectWorkflow } from "./projectWorkflowResolution";
+import type { RecipeField, RecipeViewModel } from "../../types/generation";
+import {
+  MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+} from "./productRuntimeScope";
+import {
+  resolveProjectFolderWorkflow,
+  resolveProjectVideoWorkflow,
+  resolveProjectWorkflow,
+} from "./projectWorkflowResolution";
+import { recipeRef } from "./workflowCapabilities";
 
 function recipe(id: string): RecipeViewModel {
   return {
@@ -12,6 +20,25 @@ function recipe(id: string): RecipeViewModel {
     mode: "test",
     fields: [],
     outputTypes: ["image"],
+  };
+}
+
+function videoRecipe(
+  id: string,
+  mediaKey?: "reference_audio",
+  workflowId = `workflow-${id}`,
+): RecipeViewModel {
+  const fields: RecipeField[] = [
+    { key: "prompt", type: "textarea", label: "Prompt", required: true, default: "" },
+  ];
+  if (mediaKey) fields.push({ key: mediaKey, type: "audio", label: mediaKey, required: false });
+  return {
+    ...recipe(id),
+    workflowId,
+    category: "video",
+    mode: "video",
+    fields,
+    outputTypes: ["video"],
   };
 }
 
@@ -54,23 +81,75 @@ describe("project workflow resolution", () => {
     expect(result.staleProjectBinding).toBe(true);
   });
 
-  it("can keep a mode-specific preflight from falling back to generic video recipes", () => {
+  it("blocks a specific H3 mode when only a generic video recipe exists", () => {
     const genericVideo: RecipeViewModel = {
       ...recipe("generic-video"),
       outputTypes: ["video"],
       fields: [],
     };
 
-    expect(resolveProjectVideoWorkflow([genericVideo], "FL2VA_TEXT_TO_VIDEO").recipe?.recipeId)
-      .toBe("recipe-generic-video");
     expect(resolveProjectVideoWorkflow(
       [genericVideo],
-      "FL2VA_TEXT_TO_VIDEO",
+      "FL2VA_IMAGE_TO_VIDEO",
       undefined,
       undefined,
       undefined,
       undefined,
       { allowGenericFallback: false },
     ).recipe).toBeUndefined();
+  });
+
+  it("preserves generic CUSTOM_VIDEO fallback when explicitly allowed", () => {
+    const genericVideo: RecipeViewModel = {
+      ...recipe("generic-video"),
+      outputTypes: ["video"],
+      fields: [],
+    };
+
+    const resolved = resolveProjectVideoWorkflow(
+      [genericVideo],
+      "FL2VA_IMAGE_TO_VIDEO",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { allowGenericFallback: true },
+    );
+    expect(resolved).toMatchObject({
+      recipe: genericVideo,
+      source: "compatible",
+      staleProjectBinding: false,
+    });
+    expect(resolveProjectVideoWorkflow([genericVideo], "CUSTOM_VIDEO", undefined, undefined, undefined, undefined, {
+      allowGenericFallback: false,
+    }).recipe).toBe(genericVideo);
+  });
+
+  it("does not mark an available but mode-incompatible video default stale", () => {
+    const videoDefault = videoRecipe("default");
+    const compatible = videoRecipe("compatible", "reference_audio");
+    const recommended = videoRecipe(
+      "recommended",
+      "reference_audio",
+      MINIMAX_H3_REF2VA_QUALITY_WORKFLOW_ID,
+    );
+    expect(resolveProjectVideoWorkflow(
+      [videoDefault, compatible, recommended],
+      "REF2VA_AUDIO",
+      undefined,
+      undefined,
+      recipeRef(videoDefault),
+      recommended,
+      { allowGenericFallback: false },
+    )).toMatchObject({
+      recipe: recommended,
+      source: "recommended",
+      staleProjectBinding: false,
+    });
+  });
+
+  it("keeps project-folder resolution strict instead of using generic video recipes", () => {
+    const genericVideo = videoRecipe("generic-video");
+    expect(resolveProjectFolderWorkflow([genericVideo], "FL2VA_IMAGE_TO_VIDEO").recipe).toBeUndefined();
   });
 });
