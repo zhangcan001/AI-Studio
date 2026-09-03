@@ -29,8 +29,8 @@ use ai_studio_lib::application::{
     },
     production_start_admission_service::{
         ProductionStartAdmissionError, ProductionStartAdmissionService,
-        RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED, RUNTIME_ADMISSION_COMFY_UNAVAILABLE,
-        RUNTIME_ADMISSION_MISSING_NODES,
+        RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE, RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED,
+        RUNTIME_ADMISSION_COMFY_UNAVAILABLE, RUNTIME_ADMISSION_MISSING_NODES,
     },
     shot_batch_service::ShotBatchService,
     shot_context_resolver::ShotContextResolver,
@@ -151,9 +151,94 @@ outputs:
     required: true
 "#;
 
+const SHARED_WORKFLOW_ID: &str = "wfl_dev078_shared_recipe";
+const SHARED_RECIPE_A_VERSION: &str = "1.0.0";
+const SHARED_RECIPE_B_VERSION: &str = "2.0.0";
+const SHARED_RECIPE_A_YAML: &str = r#"schema_version: 1
+id: rcp_dev078_recipe_a
+name: DEV-078 Shared Recipe A
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  sampler:
+    type: textarea
+    label: Sampler
+    required: false
+    default: euler
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+  - source: sampler
+    target:
+      node: "3"
+      input: sampler_name
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true
+"#;
+const SHARED_RECIPE_B_YAML: &str = r#"schema_version: 1
+id: rcp_dev078_recipe_b
+name: DEV-078 Shared Recipe B
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+bindings:
+  - source: prompt
+    target:
+      node: "6"
+      input: text
+outputs:
+  - id: generated_image
+    type: image
+    node: "9"
+    required: true
+"#;
+
+fn fixture_package() -> WorkflowPackageFiles {
+    WorkflowPackageFiles {
+        package_name: "dev052_fixture".to_owned(),
+        package_source_path: None,
+        manifest_yaml: "schema_version: 1\nid: wfl_dev052_fixture\nname: DEV-052 Fixture\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: image\nmode: t2i\n".to_owned(),
+        recipe_yaml: RECIPE_YAML.to_owned(),
+        workflow_json: WORKFLOW_JSON.to_owned(),
+    }
+}
+
+fn shared_recipe_packages() -> Vec<WorkflowPackageFiles> {
+    [
+        ("dev078_shared_recipe_a", SHARED_RECIPE_A_VERSION, SHARED_RECIPE_A_YAML),
+        ("dev078_shared_recipe_b", SHARED_RECIPE_B_VERSION, SHARED_RECIPE_B_YAML),
+    ]
+    .into_iter()
+    .map(|(package_name, recipe_version, recipe_yaml)| WorkflowPackageFiles {
+        package_name: package_name.to_owned(),
+        package_source_path: None,
+        manifest_yaml: format!(
+            "schema_version: 1\nid: {SHARED_WORKFLOW_ID}\nname: DEV-078 Shared Recipe\nworkflow_version: 1.0.0\nrecipe_version: {recipe_version}\ncategory: image\nmode: t2i\n"
+        ),
+        recipe_yaml: recipe_yaml.to_owned(),
+        workflow_json: WORKFLOW_JSON.to_owned(),
+    })
+    .collect()
+}
+
 #[derive(Clone)]
 struct StaticWorkflowSource {
-    package: WorkflowPackageFiles,
+    packages: Vec<WorkflowPackageFiles>,
     load_calls: Arc<AtomicUsize>,
 }
 
@@ -161,7 +246,12 @@ struct StaticWorkflowSource {
 impl WorkflowLibrarySource for StaticWorkflowSource {
     async fn load_packages(&self) -> Result<Vec<WorkflowPackageLoad>, WorkflowLibrarySourceError> {
         self.load_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(vec![WorkflowPackageLoad::Loaded(self.package.clone())])
+        Ok(self
+            .packages
+            .iter()
+            .cloned()
+            .map(WorkflowPackageLoad::Loaded)
+            .collect())
     }
 }
 
@@ -181,6 +271,7 @@ struct CountingComfyAdapter {
     submit_calls: Arc<AtomicUsize>,
     offline: Arc<AtomicBool>,
     missing_nodes: Arc<AtomicBool>,
+    sampler_option_incompatible: Arc<AtomicBool>,
     capability_refresh_failure: Arc<AtomicBool>,
     hold_health_check: Arc<AtomicBool>,
     health_check_released: Arc<AtomicBool>,
@@ -202,6 +293,7 @@ impl CountingComfyAdapter {
             submit_calls: Arc::new(AtomicUsize::new(0)),
             offline: Arc::new(AtomicBool::new(false)),
             missing_nodes: Arc::new(AtomicBool::new(false)),
+            sampler_option_incompatible: Arc::new(AtomicBool::new(false)),
             capability_refresh_failure: Arc::new(AtomicBool::new(false)),
             hold_health_check: Arc::new(AtomicBool::new(false)),
             health_check_released: Arc::new(AtomicBool::new(true)),
@@ -222,6 +314,8 @@ impl CountingComfyAdapter {
         self.submit_calls.store(0, Ordering::SeqCst);
         self.offline.store(false, Ordering::SeqCst);
         self.missing_nodes.store(false, Ordering::SeqCst);
+        self.sampler_option_incompatible
+            .store(false, Ordering::SeqCst);
         self.capability_refresh_failure
             .store(false, Ordering::SeqCst);
         self.hold_health_check.store(false, Ordering::SeqCst);
@@ -241,6 +335,11 @@ impl CountingComfyAdapter {
 
     fn set_missing_nodes(&self, missing: bool) {
         self.missing_nodes.store(missing, Ordering::SeqCst);
+    }
+
+    fn set_recipe_specific_incompatibility(&self, incompatible: bool) {
+        self.sampler_option_incompatible
+            .store(incompatible, Ordering::SeqCst);
     }
 
     fn hold_health_check(&self) {
@@ -328,8 +427,17 @@ impl ComfyAdapter for CountingComfyAdapter {
                 "DEV-078 test capability refresh failed".to_owned(),
             ));
         }
+        let k_sampler = if self.sampler_option_incompatible.load(Ordering::SeqCst) {
+            json!({
+                "input": {"required": {
+                    "sampler_name": [["ddim"], {}]
+                }}
+            })
+        } else {
+            json!({})
+        };
         let mut object_info = json!({
-            "KSampler": {},
+            "KSampler": k_sampler,
             "CheckpointLoaderSimple": {},
             "EmptyLatentImage": {},
             "CLIPTextEncode": {},
@@ -395,13 +503,26 @@ struct Harness {
     readiness: Arc<ShotReadinessService>,
     source_calls: Arc<AtomicUsize>,
     comfy: Arc<CountingComfyAdapter>,
+    lifecycle: Arc<WorkflowLifecycleService>,
     admission: Arc<ProductionStartAdmissionService>,
     queue: Arc<ProductionQueueService>,
     workflow_version_id: String,
     recipe_id: String,
+    recipe_ids_by_version: BTreeMap<String, String>,
 }
 
 async fn harness() -> Harness {
+    harness_with_packages(vec![fixture_package()], false).await
+}
+
+async fn shared_recipe_harness() -> Harness {
+    harness_with_packages(shared_recipe_packages(), true).await
+}
+
+async fn harness_with_packages(
+    packages: Vec<WorkflowPackageFiles>,
+    recipe_specific_incompatibility: bool,
+) -> Harness {
     let directory = tempdir().expect("DEV-052 tempdir should exist");
     let pool = initialize(&directory.path().join("dev052-runtime.db"))
         .await
@@ -421,14 +542,9 @@ async fn harness() -> Harness {
         .expect("project fixture should be created");
 
     let source_calls = Arc::new(AtomicUsize::new(0));
+    let package_count = packages.len();
     let source: Arc<dyn WorkflowLibrarySource> = Arc::new(StaticWorkflowSource {
-        package: WorkflowPackageFiles {
-            package_name: "dev052_fixture".to_owned(),
-            package_source_path: None,
-            manifest_yaml: "schema_version: 1\nid: wfl_dev052_fixture\nname: DEV-052 Fixture\nworkflow_version: 1.0.0\nrecipe_version: 1.0.0\ncategory: image\nmode: t2i\n".to_owned(),
-            recipe_yaml: RECIPE_YAML.to_owned(),
-            workflow_json: WORKFLOW_JSON.to_owned(),
-        },
+        packages,
         load_calls: source_calls.clone(),
     });
     let workflow_library_repository = Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone()));
@@ -442,8 +558,8 @@ async fn harness() -> Harness {
         .await
         .expect("fixture workflow package should sync");
     assert_eq!(
-        sync.valid, 1,
-        "fixture package must pass runtime validation"
+        sync.valid as usize, package_count,
+        "fixture packages must pass runtime validation"
     );
 
     let definition_impl = Arc::new(SqliteGenerationDefinitionRepository::new(pool.clone()));
@@ -451,9 +567,19 @@ async fn harness() -> Harness {
         .list_available()
         .await
         .expect("fixture generation definition should be available");
-    assert_eq!(definitions.len(), 1);
+    assert_eq!(definitions.len(), package_count);
     let workflow_version_id = definitions[0].workflow_version_id.clone();
     let recipe_id = definitions[0].recipe_id.clone();
+    let recipe_ids_by_version = definitions
+        .iter()
+        .map(|definition| {
+            (
+                definition.recipe_version.clone(),
+                definition.recipe_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(recipe_ids_by_version.len(), package_count);
     seed_hierarchy(&pool, &workflow_version_id, &recipe_id).await;
 
     let asset_repository: Arc<dyn AssetRepository> =
@@ -607,6 +733,7 @@ async fn harness() -> Harness {
 
     source_calls.store(0, Ordering::SeqCst);
     comfy.reset();
+    comfy.set_recipe_specific_incompatibility(recipe_specific_incompatibility);
     Harness {
         _directory: directory,
         pool,
@@ -616,10 +743,12 @@ async fn harness() -> Harness {
         readiness,
         source_calls,
         comfy,
+        lifecycle: workflow_lifecycle_service,
         admission,
         queue: queue_service,
         workflow_version_id,
         recipe_id,
+        recipe_ids_by_version,
     }
 }
 
@@ -630,10 +759,19 @@ fn production_queue_repository_as_shot_batch(
 }
 
 async fn create_runtime_batch(harness: &Harness, item_count: usize) -> String {
+    let recipe_id = harness.recipe_id.clone();
+    create_runtime_batch_for_recipe(harness, &recipe_id, item_count).await
+}
+
+async fn create_runtime_batch_for_recipe(
+    harness: &Harness,
+    recipe_id: &str,
+    item_count: usize,
+) -> String {
     let items = (0..item_count)
         .map(|index| CreateProductionBatchItem {
             workflow_version_id: harness.workflow_version_id.clone(),
-            recipe_id: harness.recipe_id.clone(),
+            recipe_id: recipe_id.to_owned(),
             values: BTreeMap::from([(
                 "prompt".to_owned(),
                 GenerationInputValue::Text(format!("DEV-078 prompt {index}")),
@@ -654,6 +792,14 @@ async fn create_runtime_batch(harness: &Harness, item_count: usize) -> String {
         .id
         .as_str()
         .to_owned()
+}
+
+fn recipe_id_for_version(harness: &Harness, recipe_version: &str) -> String {
+    harness
+        .recipe_ids_by_version
+        .get(recipe_version)
+        .cloned()
+        .expect("fixture recipe version should be registered")
 }
 
 fn runtime_failure_code(error: ProductionStartAdmissionError) -> &'static str {
@@ -716,6 +862,119 @@ async fn dev078_b2_runtime_block_keeps_batch_pending_without_side_effects() {
     assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
     assert_eq!(count(&harness.pool, "tasks").await, 0);
     assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_p1_exact_recipe_inspection_is_isolated() {
+    let harness = shared_recipe_harness().await;
+    let recipe_a = recipe_id_for_version(&harness, SHARED_RECIPE_A_VERSION);
+    let recipe_b = recipe_id_for_version(&harness, SHARED_RECIPE_B_VERSION);
+
+    let inspection_a = harness
+        .lifecycle
+        .inspect_recipe_runtime(&harness.workflow_version_id, &recipe_a)
+        .await
+        .expect("Recipe A exact inspection should succeed");
+    assert_eq!(inspection_a.recipe_id, recipe_a);
+    assert_eq!(
+        inspection_a.capability, "READY",
+        "Recipe A capability issues: {:?}",
+        inspection_a.capability_issues
+    );
+
+    let inspection_b = harness
+        .lifecycle
+        .inspect_recipe_runtime(&harness.workflow_version_id, &recipe_b)
+        .await
+        .expect("Recipe B exact inspection should return its runtime facts");
+    assert_eq!(inspection_b.recipe_id, recipe_b);
+    assert_eq!(inspection_b.capability, "INCOMPATIBLE_INPUT_VALUES");
+
+    let inspection_a_again = harness
+        .lifecycle
+        .inspect_recipe_runtime(&harness.workflow_version_id, &recipe_a)
+        .await
+        .expect("Recipe A exact inspection should remain available");
+    assert_eq!(inspection_a_again.recipe_id, recipe_a);
+    assert_eq!(inspection_a_again.capability, "READY");
+
+    let workspace = harness
+        .lifecycle
+        .list_workspace()
+        .await
+        .expect("fast workspace list should remain readable");
+    let version_view = workspace
+        .items
+        .iter()
+        .find(|view| view.workflow_version_id.as_deref() == Some(&harness.workflow_version_id))
+        .expect("shared workflow version should remain in the workspace");
+    assert_eq!(
+        version_view.capability, "NOT_CHECKED",
+        "exact inspection must not write version-level capability cache"
+    );
+}
+
+#[tokio::test]
+async fn dev078_p1_shared_workflow_blocks_only_incompatible_recipe() {
+    let harness = shared_recipe_harness().await;
+    let recipe_b = recipe_id_for_version(&harness, SHARED_RECIPE_B_VERSION);
+    let batch_id = create_runtime_batch_for_recipe(&harness, &recipe_b, 1).await;
+
+    let error = harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect_err("Recipe B must be blocked by its own incompatible capability");
+    match error {
+        ProductionStartAdmissionError::Runtime(failure) => {
+            assert_eq!(failure.code, RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE);
+            assert_eq!(failure.workflow_version_id, harness.workflow_version_id);
+            assert_eq!(failure.recipe_id, recipe_b);
+        }
+        ProductionStartAdmissionError::Queue(error) => {
+            panic!("expected Recipe B runtime admission failure, got queue error: {error}");
+        }
+    }
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("blocked exact-recipe batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_p1_shared_workflow_allows_ready_recipe() {
+    let harness = shared_recipe_harness().await;
+    let recipe_a = recipe_id_for_version(&harness, SHARED_RECIPE_A_VERSION);
+    let batch_id = create_runtime_batch_for_recipe(&harness, &recipe_a, 1).await;
+    harness.comfy.hold_submission();
+
+    harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect("Recipe A must be admitted when Recipe B is incompatible");
+    harness.comfy.wait_for_submission().await;
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("admitted exact-recipe batch should be readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Running);
+    assert_eq!(
+        detail.items[0].status,
+        ProductionBatchItemStatus::Dispatched
+    );
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+
+    harness.comfy.release_submission();
 }
 
 #[tokio::test]

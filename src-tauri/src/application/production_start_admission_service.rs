@@ -1,8 +1,9 @@
 use crate::application::comfy_service::{ComfyConnectionStatus, ComfyService};
 use crate::application::production_queue_service::{ProductionQueueError, ProductionQueueService};
 use crate::application::workflow_lifecycle_service::{
-    WorkflowLifecycleService, WorkflowProductionWorkspaceResponse,
+    WorkflowLifecycleError, WorkflowLifecycleService, WorkflowRecipeRuntimeInspection,
 };
+use crate::application::workflow_onboarding_service::CapabilityIssueView;
 use crate::domain::{ProductionBatchItem, ProductionBatchItemStatus};
 use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 
@@ -12,6 +13,8 @@ pub const RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED: &str =
     "RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED";
 pub const RUNTIME_ADMISSION_WORKSPACE_DIAGNOSTICS_FAILED: &str =
     "RUNTIME_ADMISSION_WORKSPACE_DIAGNOSTICS_FAILED";
+pub const RUNTIME_ADMISSION_EXACT_RECIPE_CHECK_FAILED: &str =
+    "RUNTIME_ADMISSION_EXACT_RECIPE_CHECK_FAILED";
 pub const RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND: &str = "RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND";
 pub const RUNTIME_ADMISSION_RECIPE_NOT_FOUND: &str = "RUNTIME_ADMISSION_RECIPE_NOT_FOUND";
 pub const RUNTIME_ADMISSION_WORKFLOW_DISABLED: &str = "RUNTIME_ADMISSION_WORKFLOW_DISABLED";
@@ -154,19 +157,24 @@ impl ProductionStartAdmissionService {
                 ))
             })?;
 
-            let workspace = self
-                .lifecycle
-                .list_workspace_diagnostics()
-                .await
-                .map_err(|error| {
-                    ProductionStartAdmissionError::Runtime(runtime_failure(
-                        &pending_pairs,
-                        RUNTIME_ADMISSION_WORKSPACE_DIAGNOSTICS_FAILED,
-                        format!("{}: {}", error.code(), error),
-                        Vec::new(),
-                    ))
-                })?;
-            evaluate_runtime_admission(&detail.items, status.status, &workspace)?;
+            let mut inspections = Vec::with_capacity(pending_pairs.len());
+            for (workflow_version_id, recipe_id) in &pending_pairs {
+                let inspection = self
+                    .lifecycle
+                    .inspect_recipe_runtime(workflow_version_id, recipe_id)
+                    .await
+                    .map_err(|error| {
+                        ProductionStartAdmissionError::Runtime(
+                            runtime_failure_from_lifecycle_error(
+                                workflow_version_id,
+                                recipe_id,
+                                error,
+                            ),
+                        )
+                    })?;
+                inspections.push(inspection);
+            }
+            evaluate_runtime_admission(&detail.items, status.status, &inspections)?;
         }
 
         self.queue.commit_start_admitted(&detail).await?;
@@ -186,13 +194,13 @@ pub(crate) fn pending_runtime_pairs(items: &[ProductionBatchItem]) -> Vec<(Strin
         .collect()
 }
 
-/// Pure runtime admission decision over frozen Pending identities and a live
-/// workspace diagnostic response. It intentionally ignores all non-Pending
-/// item identities and all unrelated workspace entries.
+/// Pure runtime admission decision over frozen Pending identities and one exact
+/// runtime inspection per identity. It intentionally ignores all non-Pending
+/// item identities and all unrelated inspections.
 pub(crate) fn evaluate_runtime_admission(
     items: &[ProductionBatchItem],
     comfy_status: ComfyConnectionStatus,
-    workspace: &WorkflowProductionWorkspaceResponse,
+    inspections: &[WorkflowRecipeRuntimeInspection],
 ) -> Result<Vec<(String, String)>, ProductionStartAdmissionError> {
     let pairs = pending_runtime_pairs(items);
     if pairs.is_empty() {
@@ -213,163 +221,123 @@ pub(crate) fn evaluate_runtime_admission(
     }
 
     for (workflow_version_id, recipe_id) in &pairs {
-        let Some(view) = workspace
-            .items
-            .iter()
-            .find(|view| view.workflow_version_id.as_deref() == Some(workflow_version_id.as_str()))
-        else {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND,
-                    "workflow version is absent from workspace diagnostics",
-                    Vec::new(),
-                ),
-            ));
-        };
-
-        if !view
-            .recipes
-            .iter()
-            .any(|recipe| recipe.recipe_id == *recipe_id)
-        {
+        let Some(inspection) = inspections.iter().find(|inspection| {
+            inspection.workflow_version_id == *workflow_version_id
+                && inspection.recipe_id == *recipe_id
+        }) else {
             return Err(ProductionStartAdmissionError::Runtime(
                 runtime_failure_for_pair(
                     workflow_version_id,
                     recipe_id,
                     RUNTIME_ADMISSION_RECIPE_NOT_FOUND,
-                    "exact recipe is absent from the workflow version diagnostics",
+                    "exact recipe runtime inspection is absent",
                     Vec::new(),
                 ),
             ));
-        }
-        if view.archived {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_WORKFLOW_ARCHIVED,
-                    "workflow version is archived",
-                    Vec::new(),
-                ),
-            ));
-        }
-        if !view.enabled {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_WORKFLOW_DISABLED,
-                    "workflow version is disabled",
-                    Vec::new(),
-                ),
-            ));
-        }
-        if view.package_status != "VALID" {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_PACKAGE_INVALID,
-                    format!("package status is {}", view.package_status),
-                    Vec::new(),
-                ),
-            ));
-        }
-        if !view.diagnostics.is_empty() {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_DIAGNOSTICS,
-                    "workflow package diagnostics are not empty",
-                    Vec::new(),
-                ),
-            ));
-        }
-
-        let missing_nodes = missing_node_class_types(view);
-        if view.capability == "MISSING_NODES" || !missing_nodes.is_empty() {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_MISSING_NODES,
-                    "ComfyUI is missing workflow node classes",
-                    missing_nodes,
-                ),
-            ));
-        }
-        match view.capability.as_str() {
-            "READY" => {}
-            "INCOMPATIBLE_INPUT_VALUES" => {
-                return Err(ProductionStartAdmissionError::Runtime(
-                    runtime_failure_for_pair(
-                        workflow_version_id,
-                        recipe_id,
-                        RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE,
-                        "workflow inputs are incompatible with ComfyUI",
-                        Vec::new(),
-                    ),
-                ));
-            }
-            "NOT_CHECKED" => {
-                return Err(ProductionStartAdmissionError::Runtime(
-                    runtime_failure_for_pair(
-                        workflow_version_id,
-                        recipe_id,
-                        RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED,
-                        "runtime capability has not been checked",
-                        Vec::new(),
-                    ),
-                ));
-            }
-            "COMFY_OFFLINE" => {
-                return Err(ProductionStartAdmissionError::Runtime(
-                    runtime_failure_for_pair(
-                        workflow_version_id,
-                        recipe_id,
-                        RUNTIME_ADMISSION_CAPABILITY_OFFLINE,
-                        "workflow capability reports ComfyUI offline",
-                        Vec::new(),
-                    ),
-                ));
-            }
-            _ => {
-                return Err(ProductionStartAdmissionError::Runtime(
-                    runtime_failure_for_pair(
-                        workflow_version_id,
-                        recipe_id,
-                        RUNTIME_ADMISSION_CAPABILITY_UNKNOWN,
-                        format!("unknown capability state {}", view.capability),
-                        Vec::new(),
-                    ),
-                ));
-            }
-        }
-
-        if view.readiness != "READY" && !(view.readiness == "DEGRADED" && !view.has_successful_run)
-        {
-            return Err(ProductionStartAdmissionError::Runtime(
-                runtime_failure_for_pair(
-                    workflow_version_id,
-                    recipe_id,
-                    RUNTIME_ADMISSION_READINESS_BLOCKED,
-                    format!("workflow readiness is {}", view.readiness),
-                    Vec::new(),
-                ),
-            ));
-        }
+        };
+        evaluate_recipe_runtime_inspection(inspection)
+            .map_err(ProductionStartAdmissionError::Runtime)?;
     }
 
     Ok(pairs)
 }
 
-fn missing_node_class_types(
-    view: &crate::application::workflow_lifecycle_service::WorkflowProductionWorkspaceView,
-) -> Vec<String> {
-    view.capability_issues
+/// Pure admission decision for one exact recipe inspection. Readiness is a UI
+/// projection, so the start gate checks its underlying facts directly.
+pub(crate) fn evaluate_recipe_runtime_inspection(
+    inspection: &WorkflowRecipeRuntimeInspection,
+) -> Result<(), RuntimeAdmissionFailure> {
+    if inspection.workflow_version_id.trim().is_empty() || inspection.recipe_id.trim().is_empty() {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_EXACT_RECIPE_CHECK_FAILED,
+            "exact recipe runtime inspection has an empty identity",
+            Vec::new(),
+        ));
+    }
+    if inspection.archived {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_WORKFLOW_ARCHIVED,
+            "workflow version is archived",
+            Vec::new(),
+        ));
+    }
+    if !inspection.enabled {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_WORKFLOW_DISABLED,
+            "workflow version is disabled",
+            Vec::new(),
+        ));
+    }
+    if inspection.package_status != "VALID" {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_PACKAGE_INVALID,
+            format!("exact package status is {}", inspection.package_status),
+            Vec::new(),
+        ));
+    }
+    if !inspection.diagnostics.is_empty() {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_DIAGNOSTICS,
+            "exact recipe package diagnostics are not empty",
+            Vec::new(),
+        ));
+    }
+
+    let missing_nodes = missing_node_class_types(&inspection.capability_issues);
+    if inspection.capability == "MISSING_NODES" || !missing_nodes.is_empty() {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_MISSING_NODES,
+            "ComfyUI is missing workflow node classes",
+            missing_nodes,
+        ));
+    }
+    match inspection.capability.as_str() {
+        "READY" => Ok(()),
+        "INCOMPATIBLE_INPUT_VALUES" => Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE,
+            "exact recipe inputs are incompatible with ComfyUI",
+            Vec::new(),
+        )),
+        "NOT_CHECKED" => Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED,
+            "exact recipe runtime capability has not been checked",
+            Vec::new(),
+        )),
+        "COMFY_OFFLINE" => Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_CAPABILITY_OFFLINE,
+            "exact recipe capability reports ComfyUI offline",
+            Vec::new(),
+        )),
+        capability => Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_CAPABILITY_UNKNOWN,
+            format!("unknown exact recipe capability state {capability}"),
+            Vec::new(),
+        )),
+    }
+}
+
+fn missing_node_class_types(issues: &[CapabilityIssueView]) -> Vec<String> {
+    issues
         .iter()
         .filter(|issue| issue.code == "MISSING_NODE")
         .filter_map(|issue| issue.class_type.as_deref())
@@ -379,6 +347,41 @@ fn missing_node_class_types(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+fn runtime_failure_from_lifecycle_error(
+    workflow_version_id: &str,
+    recipe_id: &str,
+    error: WorkflowLifecycleError,
+) -> RuntimeAdmissionFailure {
+    let code = match error.code() {
+        "WORKFLOW_VERSION_NOT_FOUND" => RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND,
+        "RECIPE_NOT_FOUND" => RUNTIME_ADMISSION_RECIPE_NOT_FOUND,
+        "RUNTIME_PACKAGE_MISSING"
+        | "WORKFLOW_PACKAGE_INVALID"
+        | "PACKAGE_ARCHIVE_INVALID"
+        | "PACKAGE_ARCHIVE_MISSING_ENTRY"
+        | "MANIFEST_INVALID"
+        | "RECIPE_INVALID"
+        | "WORKFLOW_NOT_API_FORMAT"
+        | "WORKFLOW_INPUTS_MISSING" => RUNTIME_ADMISSION_PACKAGE_INVALID,
+        "MISSING_NODES" | "MISSING_NODE" => RUNTIME_ADMISSION_MISSING_NODES,
+        "INCOMPATIBLE_INPUT_VALUES" | "COMFY_PROTOCOL_ERROR" => {
+            RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE
+        }
+        "NOT_CHECKED" | "CAPABILITY_NOT_CHECKED" => RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED,
+        "COMFY_OFFLINE" | "COMFY_UNAVAILABLE" | "COMFY_TIMEOUT" => {
+            RUNTIME_ADMISSION_CAPABILITY_OFFLINE
+        }
+        _ => RUNTIME_ADMISSION_EXACT_RECIPE_CHECK_FAILED,
+    };
+    runtime_failure_for_pair(
+        workflow_version_id,
+        recipe_id,
+        code,
+        format!("{}: {}", error.code(), error),
+        Vec::new(),
+    )
 }
 
 fn runtime_failure(
@@ -412,8 +415,7 @@ mod tests {
     use super::*;
     use crate::application::comfy_service::ComfyConnectionStatus;
     use crate::application::workflow_lifecycle_service::{
-        WorkflowDiagnosticView, WorkflowProductionWorkspaceResponse,
-        WorkflowProductionWorkspaceView, WorkflowRecipeSummaryView,
+        WorkflowDiagnosticView, WorkflowRecipeRuntimeInspection,
     };
     use crate::application::workflow_onboarding_service::CapabilityIssueView;
     use crate::domain::{
@@ -445,59 +447,24 @@ mod tests {
         }
     }
 
-    fn view(
+    fn inspection(
         workflow_version_id: &str,
-        recipe_ids: &[&str],
+        recipe_id: &str,
         capability: &str,
-    ) -> WorkflowProductionWorkspaceView {
-        WorkflowProductionWorkspaceView {
-            package_name: "runtime-package".to_owned(),
-            builtin: false,
-            archived: false,
-            archived_at: None,
-            package_status: "VALID".to_owned(),
-            error_code: None,
-            error_message: None,
-            workflow_id: Some("workflow".to_owned()),
-            workflow_version_id: Some(workflow_version_id.to_owned()),
-            name: Some("Workflow".to_owned()),
-            category: Some("image".to_owned()),
-            mode: Some("text_to_image".to_owned()),
-            workflow_version: Some("1.0.0".to_owned()),
-            workflow_sha256: Some("workflow-sha".to_owned()),
-            recipe_sha256: Some("recipe-sha".to_owned()),
+    ) -> WorkflowRecipeRuntimeInspection {
+        WorkflowRecipeRuntimeInspection {
+            workflow_id: "workflow".to_owned(),
+            workflow_version_id: workflow_version_id.to_owned(),
+            recipe_id: recipe_id.to_owned(),
+            recipe_version: "1.0.0".to_owned(),
             enabled: true,
-            capability: capability.to_owned(),
-            readiness: "READY".to_owned(),
-            readiness_reasons: Vec::new(),
-            capability_issues: Vec::new(),
-            node_count: 1,
-            recipes: recipe_ids
-                .iter()
-                .map(|recipe_id| WorkflowRecipeSummaryView {
-                    recipe_id: (*recipe_id).to_owned(),
-                    version: "1.0.0".to_owned(),
-                    input_count: 1,
-                    output_count: 1,
-                    preset_count: None,
-                })
-                .collect(),
-            active_tasks: 0,
-            total_tasks: 0,
-            has_successful_run: true,
-            latest_success_at: Some("2026-01-01T00:00:00Z".to_owned()),
-            latest_failure_at: None,
-            live_verified_at: Some("2026-01-01T00:00:00Z".to_owned()),
+            archived: false,
+            package_name: "runtime-package".to_owned(),
+            package_status: "VALID".to_owned(),
             diagnostics: Vec::new(),
-        }
-    }
-
-    fn workspace(
-        views: Vec<WorkflowProductionWorkspaceView>,
-    ) -> WorkflowProductionWorkspaceResponse {
-        WorkflowProductionWorkspaceResponse {
-            items: views,
-            staging: Vec::new(),
+            capability: capability.to_owned(),
+            capability_issues: Vec::new(),
+            has_successful_run: true,
         }
     }
 
@@ -515,7 +482,7 @@ mod tests {
         let result = evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-a", &["recipe-a"], "READY")]),
+            &[inspection("wv-a", "recipe-a", "READY")],
         );
 
         assert_eq!(
@@ -533,7 +500,7 @@ mod tests {
                 ProductionBatchItemStatus::Pending,
             )],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-a", &["recipe-other"], "READY")]),
+            &[inspection("wv-a", "recipe-other", "READY")],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_RECIPE_NOT_FOUND);
@@ -543,12 +510,12 @@ mod tests {
 
     #[test]
     fn a3_disabled_workflow_is_rejected() {
-        let mut disabled = view("wv-a", &["recipe-a"], "READY");
+        let mut disabled = inspection("wv-a", "recipe-a", "READY");
         disabled.enabled = false;
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![disabled]),
+            &[disabled],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_WORKFLOW_DISABLED);
@@ -556,12 +523,12 @@ mod tests {
 
     #[test]
     fn a4_archived_workflow_is_rejected() {
-        let mut archived = view("wv-a", &["recipe-a"], "READY");
+        let mut archived = inspection("wv-a", "recipe-a", "READY");
         archived.archived = true;
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![archived]),
+            &[archived],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_WORKFLOW_ARCHIVED);
@@ -569,9 +536,8 @@ mod tests {
 
     #[test]
     fn a5_invalid_package_is_rejected() {
-        let mut invalid = view("wv-a", &["recipe-a"], "READY");
+        let mut invalid = inspection("wv-a", "recipe-a", "READY");
         invalid.package_status = "INVALID".to_owned();
-        invalid.error_code = Some("WORKFLOW_RUNTIME_HASH_MISMATCH".to_owned());
         invalid.diagnostics.push(WorkflowDiagnosticView {
             code: "WORKFLOW_RUNTIME_HASH_MISMATCH".to_owned(),
             message: "hash mismatch".to_owned(),
@@ -579,7 +545,7 @@ mod tests {
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![invalid]),
+            &[invalid],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_PACKAGE_INVALID);
@@ -587,7 +553,7 @@ mod tests {
 
     #[test]
     fn a6_missing_nodes_preserve_sorted_unique_class_types() {
-        let mut missing = view("wv-a", &["recipe-a"], "MISSING_NODES");
+        let mut missing = inspection("wv-a", "recipe-a", "MISSING_NODES");
         missing.capability_issues = vec![
             CapabilityIssueView {
                 code: "MISSING_NODE".to_owned(),
@@ -620,7 +586,7 @@ mod tests {
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![missing]),
+            &[missing],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_MISSING_NODES);
@@ -632,11 +598,7 @@ mod tests {
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view(
-                "wv-a",
-                &["recipe-a"],
-                "INCOMPATIBLE_INPUT_VALUES",
-            )]),
+            &[inspection("wv-a", "recipe-a", "INCOMPATIBLE_INPUT_VALUES")],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE);
@@ -647,7 +609,7 @@ mod tests {
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-a", &["recipe-a"], "NOT_CHECKED")]),
+            &[inspection("wv-a", "recipe-a", "NOT_CHECKED")],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED);
@@ -658,7 +620,7 @@ mod tests {
         let failure = failure(evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Incompatible,
-            &workspace(vec![view("wv-a", &["recipe-a"], "READY")]),
+            &[inspection("wv-a", "recipe-a", "READY")],
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_COMFY_INCOMPATIBLE);
@@ -666,15 +628,13 @@ mod tests {
 
     #[test]
     fn a9_degraded_without_successful_history_is_allowed() {
-        let mut degraded = view("wv-a", &["recipe-a"], "READY");
-        degraded.readiness = "DEGRADED".to_owned();
+        let mut degraded = inspection("wv-a", "recipe-a", "READY");
         degraded.has_successful_run = false;
-        degraded.latest_success_at = None;
 
         let result = evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![degraded]),
+            &[degraded],
         );
 
         assert!(result.is_ok());
@@ -682,7 +642,7 @@ mod tests {
 
     #[test]
     fn a10_unrelated_blocked_workflow_does_not_block_requested_workflow() {
-        let mut unrelated = view("wv-unrelated", &["recipe-unrelated"], "MISSING_NODES");
+        let mut unrelated = inspection("wv-unrelated", "recipe-unrelated", "MISSING_NODES");
         unrelated.package_status = "INVALID".to_owned();
         unrelated.diagnostics.push(WorkflowDiagnosticView {
             code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
@@ -692,7 +652,7 @@ mod tests {
         let result = evaluate_runtime_admission(
             &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-a", &["recipe-a"], "READY"), unrelated]),
+            &[inspection("wv-a", "recipe-a", "READY"), unrelated],
         );
 
         assert!(result.is_ok());
@@ -714,7 +674,7 @@ mod tests {
                 ),
             ],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-current", &["recipe-current"], "READY")]),
+            &[inspection("wv-current", "recipe-current", "READY")],
         );
 
         assert_eq!(
@@ -731,7 +691,10 @@ mod tests {
                 item("wv-a", "recipe-b", ProductionBatchItemStatus::Pending),
             ],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-a", &["recipe-a", "recipe-b"], "READY")]),
+            &[
+                inspection("wv-a", "recipe-a", "READY"),
+                inspection("wv-a", "recipe-b", "READY"),
+            ],
         );
 
         assert_eq!(
@@ -753,9 +716,52 @@ mod tests {
                 item("wv-a", "recipe-b", ProductionBatchItemStatus::Pending),
             ],
             ComfyConnectionStatus::Connected,
-            &workspace(vec![view("wv-a", &["recipe-a", "recipe-b"], "READY")]),
+            &[
+                inspection("wv-a", "recipe-a", "READY"),
+                inspection("wv-a", "recipe-b", "READY"),
+            ],
         );
 
         assert_eq!(result.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn p1_exact_recipe_ready_is_admitted_with_incompatible_sibling() {
+        let result = evaluate_runtime_admission(
+            &[item(
+                "wv-shared",
+                "recipe-a",
+                ProductionBatchItemStatus::Pending,
+            )],
+            ComfyConnectionStatus::Connected,
+            &[
+                inspection("wv-shared", "recipe-a", "READY"),
+                inspection("wv-shared", "recipe-b", "INCOMPATIBLE_INPUT_VALUES"),
+            ],
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            vec![("wv-shared".to_owned(), "recipe-a".to_owned())]
+        );
+    }
+
+    #[test]
+    fn p1_exact_recipe_incompatible_is_blocked_with_ready_sibling() {
+        let failure = failure(evaluate_runtime_admission(
+            &[item(
+                "wv-shared",
+                "recipe-b",
+                ProductionBatchItemStatus::Pending,
+            )],
+            ComfyConnectionStatus::Connected,
+            &[
+                inspection("wv-shared", "recipe-a", "READY"),
+                inspection("wv-shared", "recipe-b", "INCOMPATIBLE_INPUT_VALUES"),
+            ],
+        ));
+
+        assert_eq!(failure.code, RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE);
+        assert_eq!(failure.recipe_id, "recipe-b");
     }
 }

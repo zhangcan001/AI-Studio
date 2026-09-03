@@ -8,7 +8,7 @@ use crate::application::{
     workflow_library_service::WorkflowLibraryService,
     workflow_manifest::WorkflowManifest,
     workflow_onboarding_service::{
-        read_back_and_validate_package, CapabilityCheckView, CapabilityState,
+        read_back_and_validate_package, CapabilityCheckView, CapabilityIssueView, CapabilityState,
         RuntimeWorkflowCapabilityInput, WorkflowOnboardingDraftView, WorkflowOnboardingService,
     },
 };
@@ -69,6 +69,22 @@ pub struct WorkflowRecipeSummaryView {
     pub input_count: usize,
     pub output_count: usize,
     pub preset_count: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowRecipeRuntimeInspection {
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub recipe_version: String,
+    pub enabled: bool,
+    pub archived: bool,
+    pub package_name: String,
+    pub package_status: String,
+    pub diagnostics: Vec<WorkflowDiagnosticView>,
+    pub capability: String,
+    pub capability_issues: Vec<CapabilityIssueView>,
+    pub has_successful_run: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -995,6 +1011,169 @@ impl WorkflowLifecycleService {
             view.readiness = readiness;
             view.readiness_reasons = reasons;
         }
+    }
+
+    pub async fn inspect_recipe_runtime(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<WorkflowRecipeRuntimeInspection, WorkflowLifecycleError> {
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| {
+                WorkflowLifecycleError::new(
+                    "WORKFLOW_VERSION_NOT_FOUND",
+                    "workflow version was not found",
+                )
+            })?;
+        let recipe = version
+            .recipes
+            .iter()
+            .find(|recipe| recipe.recipe_id == recipe_id)
+            .ok_or_else(|| {
+                WorkflowLifecycleError::new(
+                    "RECIPE_NOT_FOUND",
+                    "recipe was not found for the workflow version",
+                )
+            })?;
+        let state = self
+            .state_repository
+            .find_state(workflow_version_id)
+            .await
+            .map_err(db_error)?;
+        let enabled = state.as_ref().map_or(true, |state| state.enabled);
+        let archived = state.as_ref().is_some_and(|state| state.archived);
+        let invalid = |package_name: String, diagnostics: Vec<WorkflowDiagnosticView>| {
+            WorkflowRecipeRuntimeInspection {
+                workflow_id: version.workflow_id.clone(),
+                workflow_version_id: version.workflow_version_id.clone(),
+                recipe_id: recipe.recipe_id.clone(),
+                recipe_version: recipe.version.clone(),
+                enabled,
+                archived,
+                package_name,
+                package_status: "INVALID".to_owned(),
+                diagnostics,
+                capability: "NOT_CHECKED".to_owned(),
+                capability_issues: Vec::new(),
+                has_successful_run: version.has_successful_run,
+            }
+        };
+
+        let package = match self
+            .find_package(
+                &version.workflow_id,
+                &version.workflow_version,
+                Some(&recipe.version),
+            )
+            .await
+        {
+            Ok(package) => package,
+            Err(error) if error.code() == "RUNTIME_PACKAGE_MISSING" => {
+                return Ok(invalid(
+                    version.package_name.clone().unwrap_or_default(),
+                    vec![WorkflowDiagnosticView {
+                        code: "RUNTIME_PACKAGE_MISSING".to_owned(),
+                        message: "the exact recipe runtime package was not found".to_owned(),
+                    }],
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        let manifest = match WorkflowManifest::parse(&package.manifest_yaml) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                return Ok(invalid(
+                    package.package_name,
+                    vec![WorkflowDiagnosticView {
+                        code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
+                        message: error,
+                    }],
+                ));
+            }
+        };
+        let mut diagnostics = Vec::new();
+        if let Err(error) = manifest.validate() {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
+                message: error,
+            });
+        }
+        if manifest.id != version.workflow_id {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
+                message: "runtime package workflow id does not match the registered workflow"
+                    .to_owned(),
+            });
+        }
+        if manifest.workflow_version != version.workflow_version {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
+                message: "runtime package workflow version does not match the registered version"
+                    .to_owned(),
+            });
+        }
+        if manifest.recipe_version != recipe.version {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
+                message: "runtime package recipe version does not match the exact recipe"
+                    .to_owned(),
+            });
+        }
+        if sha256(package.workflow_json.as_bytes()) != version.workflow_sha256 {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "WORKFLOW_RUNTIME_HASH_MISMATCH".to_owned(),
+                message: "runtime workflow bytes do not match the registered hash".to_owned(),
+            });
+        }
+        if sha256(package.recipe_yaml.as_bytes()) != recipe.recipe_sha256 {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "RECIPE_RUNTIME_HASH_MISMATCH".to_owned(),
+                message: "exact runtime recipe bytes do not match the registered hash".to_owned(),
+            });
+        }
+        let exact_recipe = match RecipeParser::parse(&package.recipe_yaml) {
+            Ok(recipe) => recipe,
+            Err(error) => {
+                diagnostics.push(WorkflowDiagnosticView {
+                    code: "RECIPE_INVALID".to_owned(),
+                    message: error.to_string(),
+                });
+                return Ok(invalid(package.package_name, diagnostics));
+            }
+        };
+        if let Err(error) = parse_workflow(&package.workflow_json) {
+            diagnostics.push(WorkflowDiagnosticView {
+                code: "WORKFLOW_PACKAGE_INVALID".to_owned(),
+                message: error.to_string(),
+            });
+            return Ok(invalid(package.package_name, diagnostics));
+        }
+        if !diagnostics.is_empty() {
+            return Ok(invalid(package.package_name, diagnostics));
+        }
+        let capability = self
+            .onboarding_service
+            .check_runtime_workflow_with_recipe(&package.workflow_json, &exact_recipe)
+            .await
+            .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
+        Ok(WorkflowRecipeRuntimeInspection {
+            workflow_id: version.workflow_id,
+            workflow_version_id: version.workflow_version_id,
+            recipe_id: recipe.recipe_id.clone(),
+            recipe_version: recipe.version.clone(),
+            enabled,
+            archived,
+            package_name: package.package_name,
+            package_status: "VALID".to_owned(),
+            diagnostics,
+            capability: capability_state(&capability),
+            capability_issues: capability.issues,
+            has_successful_run: version.has_successful_run,
+        })
     }
 
     async fn restore_removed_packages(&self, packages: &[(String, WorkflowPackageBytes)]) {
@@ -2155,16 +2334,474 @@ fn archive_error(message: impl Into<String>) -> WorkflowLifecycleError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_archive, diff_workflow, fast_view_for_version, parse_archive, readiness_for,
-        WorkflowDiagnosticView,
+        build_archive, diff_workflow, fast_view_for_version, parse_archive, readiness_for, sha256,
+        WorkflowDiagnosticView, WorkflowLifecycleService,
     };
-    use crate::application::ports::{
-        RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowPackageBytes,
+    use crate::application::{
+        ports::{
+            Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyHealth,
+            ComfyHistory, ComfyOutputData, ComfyOutputFile, PromptSubmission, RepositoryError,
+            RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, SystemStats,
+            WorkflowLibraryRepository, WorkflowLibrarySource, WorkflowLibrarySourceError,
+            WorkflowPackageBytes, WorkflowPackageFiles, WorkflowPackageLoad, WorkflowPackageRecord,
+            WorkflowPackageRegistration, WorkflowPackageStore, WorkflowPackageStoreError,
+            WorkflowRunRepository, WorkflowRuntimeRepository, WorkflowRuntimeState,
+            WorkflowRuntimeStateRepository,
+        },
+        workflow_library_service::WorkflowLibraryService,
+        workflow_onboarding_service::WorkflowOnboardingService,
     };
     use crate::domain::WorkflowDocument;
-    use serde_json::json;
-    use std::io::{Cursor, Write};
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use serde_json::{json, Value};
+    use std::{
+        io::{Cursor, Write},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
     use zip::{write::FileOptions, ZipWriter};
+
+    const EXACT_WORKFLOW_JSON: &str = r#"{
+  "1": {"class_type": "TestNode", "inputs": {"mode": "bad"}}
+}"#;
+    const EXACT_RECIPE_A_YAML: &str = r#"schema_version: 1
+id: rcp_exact_a
+name: Exact Recipe A
+workflow:
+  file: workflow_api.json
+inputs:
+  mode:
+    type: textarea
+    label: Mode
+    required: true
+    default: bad
+bindings:
+  - source: mode
+    target:
+      node: "1"
+      input: mode
+outputs: []
+"#;
+    const EXACT_RECIPE_B_YAML: &str = r#"schema_version: 1
+id: rcp_exact_b
+name: Exact Recipe B
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: false
+    default: ""
+bindings: []
+outputs: []
+"#;
+
+    #[derive(Clone)]
+    struct ExactRecipeSource {
+        packages: Vec<WorkflowPackageFiles>,
+        load_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl WorkflowLibrarySource for ExactRecipeSource {
+        async fn load_packages(
+            &self,
+        ) -> Result<Vec<WorkflowPackageLoad>, WorkflowLibrarySourceError> {
+            self.load_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self
+                .packages
+                .iter()
+                .cloned()
+                .map(WorkflowPackageLoad::Loaded)
+                .collect())
+        }
+    }
+
+    struct ExactLibraryRepository;
+
+    #[async_trait]
+    impl WorkflowLibraryRepository for ExactLibraryRepository {
+        async fn register_package(
+            &self,
+            _package: &WorkflowPackageRecord,
+        ) -> Result<WorkflowPackageRegistration, RepositoryError> {
+            Ok(WorkflowPackageRegistration::Inserted)
+        }
+    }
+
+    struct ExactRunRepository;
+
+    #[async_trait]
+    impl WorkflowRunRepository for ExactRunRepository {
+        async fn has_successful_run(
+            &self,
+            _workflow_id: &str,
+            _workflow_version: &str,
+        ) -> Result<bool, RepositoryError> {
+            Ok(false)
+        }
+    }
+
+    struct ExactPackageStore;
+
+    fn package_store_error() -> WorkflowPackageStoreError {
+        WorkflowPackageStoreError {
+            message: "test package store does not provide this operation".to_owned(),
+        }
+    }
+
+    #[async_trait]
+    impl WorkflowPackageStore for ExactPackageStore {
+        async fn stage(
+            &self,
+            _staging_id: &str,
+            _package: &WorkflowPackageBytes,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Ok(())
+        }
+
+        async fn read_staging(
+            &self,
+            _staging_id: &str,
+        ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn publish_atomic(
+            &self,
+            _staging_id: &str,
+            _package_name: &str,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Ok(())
+        }
+
+        async fn remove_staging(&self, _staging_id: &str) -> Result<(), WorkflowPackageStoreError> {
+            Ok(())
+        }
+
+        async fn remove_published(
+            &self,
+            _package_name: &str,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Ok(())
+        }
+
+        async fn read_runtime(
+            &self,
+            _package_name: &str,
+        ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn list_staging_ids(&self) -> Result<Vec<String>, WorkflowPackageStoreError> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct ExactRuntimeRepository {
+        version: RuntimeWorkflowVersionRecord,
+    }
+
+    #[async_trait]
+    impl WorkflowRuntimeRepository for ExactRuntimeRepository {
+        async fn list_versions(
+            &self,
+        ) -> Result<Vec<RuntimeWorkflowVersionRecord>, RepositoryError> {
+            Ok(vec![self.version.clone()])
+        }
+
+        async fn find_version(
+            &self,
+            workflow_version_id: &str,
+        ) -> Result<Option<RuntimeWorkflowVersionRecord>, RepositoryError> {
+            Ok((self.version.workflow_version_id == workflow_version_id)
+                .then(|| self.version.clone()))
+        }
+
+        async fn inspect_deletion(
+            &self,
+            _workflow_version_id: &str,
+        ) -> Result<Option<crate::application::ports::WorkflowDeletionCounts>, RepositoryError>
+        {
+            Ok(None)
+        }
+
+        async fn delete_version(
+            &self,
+            _workflow_version_id: &str,
+            _workflow_id: &str,
+            _updated_at: DateTime<Utc>,
+        ) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+    }
+
+    struct ExactStateRepository;
+
+    #[async_trait]
+    impl WorkflowRuntimeStateRepository for ExactStateRepository {
+        async fn is_enabled(&self, _workflow_version_id: &str) -> Result<bool, RepositoryError> {
+            Ok(true)
+        }
+
+        async fn set_enabled(
+            &self,
+            _workflow_version_id: &str,
+            _enabled: bool,
+            _updated_at: DateTime<Utc>,
+        ) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        async fn find_state(
+            &self,
+            _workflow_version_id: &str,
+        ) -> Result<Option<WorkflowRuntimeState>, RepositoryError> {
+            Ok(None)
+        }
+
+        async fn set_archived(
+            &self,
+            _workflow_version_id: &str,
+            _archived: bool,
+            _enabled: bool,
+            _archived_at: Option<DateTime<Utc>>,
+            _updated_at: DateTime<Utc>,
+        ) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        async fn list_states(&self) -> Result<Vec<WorkflowRuntimeState>, RepositoryError> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct ExactClock;
+
+    impl Clock for ExactClock {
+        fn now(&self) -> DateTime<Utc> {
+            Utc::now()
+        }
+    }
+
+    struct ExactComfyAdapter {
+        object_info: Value,
+    }
+
+    #[async_trait]
+    impl ComfyAdapter for ExactComfyAdapter {
+        async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "not used by exact inspection test".to_owned(),
+            ))
+        }
+
+        async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "not used by exact inspection test".to_owned(),
+            ))
+        }
+
+        async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
+            Ok(self.object_info.clone())
+        }
+
+        async fn get_history(&self, _prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "not used by exact inspection test".to_owned(),
+            ))
+        }
+
+        async fn download_output(
+            &self,
+            _file: &ComfyOutputFile,
+        ) -> Result<ComfyOutputData, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "not used by exact inspection test".to_owned(),
+            ))
+        }
+
+        async fn submit_workflow(
+            &self,
+            _client_id: &str,
+            _prompt_id: &str,
+            _workflow: Value,
+        ) -> Result<PromptSubmission, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "not used by exact inspection test".to_owned(),
+            ))
+        }
+
+        async fn subscribe_events(
+            &self,
+            _client_id: &str,
+        ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+            Err(ComfyAdapterError::Incompatible(
+                "not used by exact inspection test".to_owned(),
+            ))
+        }
+    }
+
+    fn exact_package(
+        package_name: &str,
+        recipe_version: &str,
+        recipe_yaml: &str,
+    ) -> WorkflowPackageFiles {
+        WorkflowPackageFiles {
+            package_name: package_name.to_owned(),
+            package_source_path: None,
+            manifest_yaml: format!(
+                "schema_version: 1\nid: wfl_exact_shared\nname: Exact Shared\nworkflow_version: 1.0.0\nrecipe_version: {recipe_version}\ncategory: image\nmode: text_to_image\n"
+            ),
+            recipe_yaml: recipe_yaml.to_owned(),
+            workflow_json: EXACT_WORKFLOW_JSON.to_owned(),
+        }
+    }
+
+    fn exact_service() -> (WorkflowLifecycleService, Arc<ExactRecipeSource>) {
+        exact_service_with_recipe_hash_mismatch(false)
+    }
+
+    fn exact_service_with_recipe_hash_mismatch(
+        recipe_hash_mismatch: bool,
+    ) -> (WorkflowLifecycleService, Arc<ExactRecipeSource>) {
+        let mut package_a = exact_package("pkg-exact-a", "1.0.0", EXACT_RECIPE_A_YAML);
+        if recipe_hash_mismatch {
+            package_a
+                .recipe_yaml
+                .push_str("\n# registered hash intentionally differs\n");
+        }
+        let package_b = exact_package("pkg-exact-b", "2.0.0", EXACT_RECIPE_B_YAML);
+        let source = Arc::new(ExactRecipeSource {
+            packages: vec![package_a, package_b],
+            load_calls: Arc::new(AtomicUsize::new(0)),
+        });
+        let version = RuntimeWorkflowVersionRecord {
+            workflow_version_id: "wv-exact-shared".to_owned(),
+            workflow_id: "wfl_exact_shared".to_owned(),
+            name: "Exact Shared".to_owned(),
+            category: "image".to_owned(),
+            mode: "text_to_image".to_owned(),
+            workflow_version: "1.0.0".to_owned(),
+            workflow_sha256: sha256(EXACT_WORKFLOW_JSON.as_bytes()),
+            package_name: Some("pkg-exact-a".to_owned()),
+            is_current: true,
+            recipes: vec![
+                RuntimeRecipeRecord {
+                    recipe_id: "recipe-a".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    schema_version: 1,
+                    recipe_yaml: EXACT_RECIPE_A_YAML.to_owned(),
+                    recipe_sha256: sha256(EXACT_RECIPE_A_YAML.as_bytes()),
+                },
+                RuntimeRecipeRecord {
+                    recipe_id: "recipe-b".to_owned(),
+                    version: "2.0.0".to_owned(),
+                    schema_version: 1,
+                    recipe_yaml: EXACT_RECIPE_B_YAML.to_owned(),
+                    recipe_sha256: sha256(EXACT_RECIPE_B_YAML.as_bytes()),
+                },
+            ],
+            active_tasks: 0,
+            total_tasks: 0,
+            has_successful_run: false,
+            latest_success_at: None,
+            latest_failure_at: None,
+        };
+        let runtime: Arc<dyn WorkflowRuntimeRepository> =
+            Arc::new(ExactRuntimeRepository { version });
+        let state: Arc<dyn WorkflowRuntimeStateRepository> = Arc::new(ExactStateRepository);
+        let clock: Arc<dyn Clock> = Arc::new(ExactClock);
+        let library = Arc::new(WorkflowLibraryService::new(
+            source.clone(),
+            Arc::new(ExactLibraryRepository),
+            clock.clone(),
+        ));
+        let package_store: Arc<dyn WorkflowPackageStore> = Arc::new(ExactPackageStore);
+        let onboarding = Arc::new(
+            WorkflowOnboardingService::new(
+                source.clone(),
+                Arc::new(ExactComfyAdapter {
+                    object_info: json!({
+                        "TestNode": {"input": {"required": {"mode": [["good"]]}}}
+                    }),
+                }),
+                library.clone(),
+                Arc::new(ExactRunRepository),
+                package_store.clone(),
+                clock.clone(),
+            )
+            .with_runtime_state(runtime.clone(), state.clone()),
+        );
+        (
+            WorkflowLifecycleService::new(
+                source.clone(),
+                library,
+                onboarding,
+                runtime,
+                state,
+                package_store,
+                clock,
+            ),
+            source,
+        )
+    }
+
+    #[tokio::test]
+    async fn exact_recipe_inspection_is_recipe_scoped_and_does_not_pollute_workspace_cache() {
+        let (service, source) = exact_service();
+
+        let recipe_a = service
+            .inspect_recipe_runtime("wv-exact-shared", "recipe-a")
+            .await
+            .unwrap();
+        assert_eq!(recipe_a.recipe_id, "recipe-a");
+        assert_eq!(recipe_a.recipe_version, "1.0.0");
+        assert_eq!(recipe_a.package_name, "pkg-exact-a");
+        assert_eq!(recipe_a.package_status, "VALID");
+        assert_eq!(recipe_a.capability, "READY");
+
+        let recipe_b = service
+            .inspect_recipe_runtime("wv-exact-shared", "recipe-b")
+            .await
+            .unwrap();
+        assert_eq!(recipe_b.recipe_id, "recipe-b");
+        assert_eq!(recipe_b.recipe_version, "2.0.0");
+        assert_eq!(recipe_b.package_name, "pkg-exact-b");
+        assert_eq!(recipe_b.capability, "INCOMPATIBLE_INPUT_VALUES");
+
+        let workspace = service.list_workspace().await.unwrap();
+        assert_eq!(workspace.items[0].capability, "NOT_CHECKED");
+        assert_eq!(source.load_calls.load(Ordering::SeqCst), 2);
+
+        let recipe_a_again = service
+            .inspect_recipe_runtime("wv-exact-shared", "recipe-a")
+            .await
+            .unwrap();
+        assert_eq!(recipe_a_again.capability, "READY");
+        assert_eq!(source.load_calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn exact_recipe_hash_diagnostics_return_invalid_before_capability() {
+        let (service, _source) = exact_service_with_recipe_hash_mismatch(true);
+
+        let inspection = service
+            .inspect_recipe_runtime("wv-exact-shared", "recipe-a")
+            .await
+            .unwrap();
+
+        assert_eq!(inspection.package_status, "INVALID");
+        assert_eq!(inspection.capability, "NOT_CHECKED");
+        assert!(inspection
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RECIPE_RUNTIME_HASH_MISMATCH"));
+    }
 
     #[test]
     fn archive_round_trip_has_only_safe_runtime_files() {

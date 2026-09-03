@@ -44,13 +44,28 @@ PREEXISTING_AUTO_START_ON_CREATE_MISMATCH=CONFIRMED_PREEXISTING
 DEV078_CODE_SHA=0648a052a22878a439ff7ba3c58fe78921beb442
 DEV078_FINAL_SHA=0648a052a22878a439ff7ba3c58fe78921beb442
 DEV078_CLOSEOUT_DOC_SHA=RECORDED_IN_GIT_HISTORY
+
+DEV078_P1_01_EXACT_RECIPE_RUNTIME_ADMISSION=FIXED
+EXACT_RUNTIME_MATCH=WORKFLOW_VERSION_ID_PLUS_RECIPE_ID
+EXACT_RECIPE_PACKAGE_SELECTION=YES
+EXACT_RECIPE_CAPABILITY_CHECK=YES
+EXACT_RECIPE_HASH_CHECK=YES
+VERSION_LEVEL_CAPABILITY_USED_FOR_START=NO
+EXACT_RECIPE_INSPECTION_CACHE_WRITE=NO
+WORKSPACE_DIAGNOSTICS_CONTRACT_CHANGED=NO
+WORKFLOW_READINESS_FIELD_USED_AS_HARD_START_GATE=NO
+FIRST_REAL_RUN_NOT_SELF_BLOCKED=YES
+BACKEND_START_GATE_AUTHORITATIVE=YES
+DEV078_P1_FIX_SHA=RECORDED_IN_GIT_HISTORY
 ```
 
 ## Implementation
 
 - Added `ProductionStartAdmissionService` with only `Arc<ProductionQueueService>`, `Arc<ComfyService>`, and `Arc<WorkflowLifecycleService>` dependencies.
 - Reused the existing Queue admission gate. Queue start was split into lock-free `inspect_start_admitted` and `commit_start_admitted`; commit verifies the batch update before spawning.
-- Runtime checks are fail-closed for Comfy unavailable/incompatible, capability refresh failure, diagnostics failure, missing/archived/disabled workflow versions, invalid or missing packages, missing exact recipes, non-ready capabilities, missing nodes, incompatible inputs, and blocking diagnostics.
+- `WorkflowLifecycleService::inspect_recipe_runtime(workflow_version_id, recipe_id)` now loads the registered version, selects the exact Recipe record by `recipe_id`, resolves its own Recipe version through the existing `find_package(..., Some(recipe_version))`, validates manifest identity and both workflow/Recipe hashes, parses that exact `recipe.yaml`, and runs the current Comfy capability check without writing either global cache.
+- Runtime checks are fail-closed for Comfy unavailable/incompatible, capability refresh failure, exact inspection failures, missing/archived/disabled workflow versions, invalid or missing packages, missing exact recipes, non-ready capabilities, missing nodes, incompatible inputs, and blocking diagnostics.
+- Admission evaluates one exact inspection for every Pending `(workflowVersionId, recipeId)` pair. Version-level workspace capability and UI `readiness` are not start-gate truth; a first run with valid package, enabled state, empty diagnostics, and `READY` capability remains admissible.
 - `DEGRADED` caused only by absent successful-run history remains admissible for the first real run. VRAM thresholds and unrelated workflow status are not used.
 - Runtime rejection returns top-level `PRODUCTION_START_ADMISSION_BLOCKED` with structured workflow version, recipe, reason, and missing-node details. Frontend error formatting keeps those identities visible in Chinese without trusting the DEV-077 snapshot.
 - H3 local import, review regeneration, production orchestrator, and workflow benchmark auto-start paths now use the same admission service in the formal application composition. Their `cfg(test)` fallback is an explicit legacy test harness only; no production build path uses the unchecked queue helper.
@@ -68,13 +83,22 @@ Backend formal start paths are covered by the source-contract test in `dev078_pr
 
 Frontend start calls remain the existing `startProductionQueue` client wrapper and therefore cross the same Tauri command. No second start command, queue, executor, task model, automatic retry, workflow switch, or batch mutation was added.
 
+DEV-077 project readiness remains a version-level best-effort runtime projection; the backend start gate remains authoritative:
+
+```text
+PROJECT_READINESS_UI_RECIPE_LEVEL_RUNTIME_DETAIL=VERSION_LEVEL_BEST_EFFORT
+BACKEND_START_GATE_REMAINS_AUTHORITATIVE=YES
+```
+
 `AssetVideoBatchWorkspace` still contains the pre-existing `createBatch() -> startProductionQueue()` flow. DEV-078 does not change that separate create/auto-start mismatch; the call is nevertheless protected by the new backend guard. It is recorded as `CONFIRMED_PREEXISTING`, not introduced by DEV-078.
 
 ## Verification
 
-Pure admission tests A1–A13 plus an incompatible-Comfy status case: **14 passed**.
+Exact Lifecycle inspection tests: **7 passed**, including same-version Recipe A/B selection, exact capability isolation, cache non-pollution, and hash mismatch fail-closed behavior.
 
-Deterministic SQLite/adapter integration tests B1–B6 plus the existing-gate concurrency test: **7 passed**. They cover valid dispatch, zero-side-effect blocking, pending-only resume, Busy precedence, offline fail-closed behavior, capability refresh failure, and configuration exclusion until commit.
+Pure admission tests A1–A13 plus exact sibling Recipe cases and an incompatible-Comfy status case: **16 passed**.
+
+Deterministic SQLite/adapter runtime integration tests: **16 passed**. They cover valid dispatch, zero-side-effect blocking, pending-only resume, Busy precedence, offline fail-closed behavior, capability refresh failure, configuration exclusion until commit, and same-version exact Recipe A/B admission.
 
 Additional queue lock/update regression tests: **2 passed**. Command and formal backend source boundary tests: **3 passed**.
 
@@ -82,7 +106,7 @@ Additional queue lock/update regression tests: **2 passed**. Command and formal 
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check   PASS
 cargo check --manifest-path src-tauri/Cargo.toml --all-targets   PASS
 cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
-  723 passed, 0 failed, 1 ignored                                PASS
+  all targets passed; lib 727 passed, 0 failed, 1 ignored       PASS
 pnpm test
   109 test files, 511 tests                                      PASS
 pnpm test -- ProductionMonitor AssetVideoBatchWorkspace MultiPackageProductionBoard
