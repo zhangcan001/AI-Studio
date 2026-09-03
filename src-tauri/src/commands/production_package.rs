@@ -179,6 +179,11 @@ fn map_package_error(error: ProductionPackageError) -> AppError {
         ProductionPackageError::Filesystem(message) => AppError::filesystem(message),
         ProductionPackageError::H3(message) => AppError::invalid_input(message),
         ProductionPackageError::Queue(message) => AppError::database(message),
+        ProductionPackageError::ProjectWorkflowUnavailable { message, mode } => {
+            AppError::invalid_input(format!(
+                "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE: mode {mode}: {message}"
+            ))
+        }
         ProductionPackageError::Inspection(error) => AppError::invalid_input(error.to_string()),
         ProductionPackageError::InvalidInput(message)
         | ProductionPackageError::MediaChanged(message)

@@ -604,6 +604,18 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 )
                 .with_start_admission_service(production_start_admission_service.clone()),
             );
+            let project_workflow_binding_repository: Arc<dyn application::ports::ProjectWorkflowBindingRepository> = Arc::new(
+                infrastructure::database::SqliteProjectWorkflowBindingRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let project_workflow_binding_service = Arc::new(ProjectWorkflowBindingService::new(
+                project_workflow_binding_repository,
+                project_repository.clone(),
+                runtime_repository.clone(),
+                runtime_state_repository.clone(),
+                clock.clone(),
+            ));
             let package_generation_definitions = tauri::async_runtime::block_on(
                 definition_repository.list_available(),
             )
@@ -641,7 +653,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_queue_service.clone(),
                 package_h3_config,
                 clock.clone(),
-            ));
+            )
+            .with_project_workflow_binding_service(project_workflow_binding_service.clone()));
             let diagnostics_service = Arc::new(DiagnosticsService::new(
                 database_pool.clone(),
                 task_repository.clone(),
@@ -700,18 +713,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 data_dirs.cache.clone(),
             ));
             let project_manifest_service = Arc::new(ProjectManifestService::new(database_pool.clone()));
-            let project_workflow_binding_repository: Arc<dyn application::ports::ProjectWorkflowBindingRepository> = Arc::new(
-                infrastructure::database::SqliteProjectWorkflowBindingRepository::new(
-                    database_pool.clone(),
-                ),
-            );
-            let project_workflow_binding_service = Arc::new(ProjectWorkflowBindingService::new(
-                project_workflow_binding_repository,
-                project_repository.clone(),
-                runtime_repository,
-                runtime_state_repository,
-                clock.clone(),
-            ));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository.clone(),
                 definition_repository.clone(),

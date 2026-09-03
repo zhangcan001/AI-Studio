@@ -524,6 +524,13 @@ pub struct H3QualityRecipeSelection {
     pub recipe_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct H3ModeRecipeSelection {
+    pub mode: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct H3LocalImportCommitRequest {
     pub batch_name: Option<String>,
@@ -541,6 +548,7 @@ pub struct H3LocalImportCommitRequest {
     pub ref2va_recipe_id: Option<String>,
     pub quality_profile: Option<String>,
     pub quality_recipes: Vec<H3QualityRecipeSelection>,
+    pub mode_recipes: Vec<H3ModeRecipeSelection>,
 }
 
 #[derive(Clone, Debug)]
@@ -1222,6 +1230,15 @@ impl H3LocalImportService {
                     project.errors.join("；")
                 }
             )));
+        }
+
+        for segment in project
+            .segments
+            .iter()
+            .filter(|item| item.status == "READY")
+        {
+            let mode = H3CommitGenerationMode::parse(Some(&segment.generation_mode))?;
+            project_recipe_ids(&request, mode)?;
         }
 
         let seed = request.seed.clone().unwrap_or(SeedValue::Random);
@@ -2794,6 +2811,23 @@ fn project_recipe_ids(
     request: &H3LocalImportCommitRequest,
     mode: H3CommitGenerationMode,
 ) -> Result<(String, String), H3LocalImportError> {
+    if let Some(selection) = request
+        .mode_recipes
+        .iter()
+        .find(|selection| selection.mode == mode.as_str())
+    {
+        if selection.workflow_version_id.trim().is_empty() || selection.recipe_id.trim().is_empty()
+        {
+            return Err(H3LocalImportError::Inspection(format!(
+                "工作流 Recipe 标识无效：{}",
+                mode.as_str()
+            )));
+        }
+        return Ok((
+            selection.workflow_version_id.clone(),
+            selection.recipe_id.clone(),
+        ));
+    }
     if request.quality_profile.as_deref() == Some("QUALITY") {
         let selection = request
             .quality_recipes
@@ -3891,7 +3925,9 @@ fn revalidate_file_path(root: &Path, path: &Path) -> Result<PathBuf, H3LocalImpo
 }
 
 fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H3LocalImportError> {
-    if request.workflow_version_id.trim().is_empty() || request.recipe_id.trim().is_empty() {
+    if request.mode_recipes.is_empty()
+        && (request.workflow_version_id.trim().is_empty() || request.recipe_id.trim().is_empty())
+    {
         return Err(H3LocalImportError::InvalidInput(
             "H3 Recipe 标识不能为空".to_owned(),
         ));
@@ -3931,6 +3967,24 @@ fn validate_commit_request(request: &H3LocalImportCommitRequest) -> Result<(), H
             ));
         }
         H3CommitGenerationMode::parse(Some(&selection.mode))?;
+    }
+    let mut mode_recipe_modes = HashSet::new();
+    for selection in &request.mode_recipes {
+        if selection.mode.trim().is_empty()
+            || selection.workflow_version_id.trim().is_empty()
+            || selection.recipe_id.trim().is_empty()
+        {
+            return Err(H3LocalImportError::InvalidInput(
+                "工作流 Recipe 选择不能包含空标识".to_owned(),
+            ));
+        }
+        H3CommitGenerationMode::parse(Some(&selection.mode))?;
+        if !mode_recipe_modes.insert(selection.mode.as_str()) {
+            return Err(H3LocalImportError::InvalidInput(format!(
+                "工作流 Recipe 选择不能重复：{}",
+                selection.mode
+            )));
+        }
     }
     Ok(())
 }
@@ -4245,6 +4299,7 @@ mod tests {
                     recipe_id: "quality-ref-recipe".to_owned(),
                 },
             ],
+            mode_recipes: Vec::new(),
         };
 
         assert_eq!(
@@ -4260,6 +4315,41 @@ mod tests {
                 "quality-ref-workflow".to_owned(),
                 "quality-ref-recipe".to_owned()
             )
+        );
+    }
+
+    #[test]
+    fn exact_mode_recipe_precedes_quality_family_and_base_routes() {
+        let request = H3LocalImportCommitRequest {
+            batch_name: None,
+            workflow_version_id: "base-workflow".to_owned(),
+            recipe_id: "base-recipe".to_owned(),
+            width: 960,
+            height: 544,
+            duration_seconds: 5,
+            seed: None,
+            auto_start: false,
+            generation_mode: Some("REF2VA_IMAGE".to_owned()),
+            fl2va_workflow_version_id: Some("family-fl2va-workflow".to_owned()),
+            fl2va_recipe_id: Some("family-fl2va-recipe".to_owned()),
+            ref2va_workflow_version_id: Some("family-ref-workflow".to_owned()),
+            ref2va_recipe_id: Some("family-ref-recipe".to_owned()),
+            quality_profile: Some("QUALITY".to_owned()),
+            quality_recipes: vec![H3QualityRecipeSelection {
+                mode: "REF2VA_IMAGE".to_owned(),
+                workflow_version_id: "quality-workflow".to_owned(),
+                recipe_id: "quality-recipe".to_owned(),
+            }],
+            mode_recipes: vec![H3ModeRecipeSelection {
+                mode: "REF2VA_IMAGE".to_owned(),
+                workflow_version_id: "project-workflow".to_owned(),
+                recipe_id: "project-recipe".to_owned(),
+            }],
+        };
+
+        assert_eq!(
+            project_recipe_ids(&request, H3CommitGenerationMode::Ref2vaImage).unwrap(),
+            ("project-workflow".to_owned(), "project-recipe".to_owned())
         );
     }
 
@@ -4956,6 +5046,7 @@ outputs:
                     ref2va_recipe_id: None,
                     quality_profile: None,
                     quality_recipes: Vec::new(),
+                    mode_recipes: Vec::new(),
                 },
             )
             .await
@@ -5160,6 +5251,7 @@ outputs:
                     ref2va_recipe_id: None,
                     quality_profile: None,
                     quality_recipes: Vec::new(),
+                    mode_recipes: Vec::new(),
                 },
             )
             .await
@@ -5674,6 +5766,7 @@ outputs:
                     ref2va_recipe_id: None,
                     quality_profile: None,
                     quality_recipes: Vec::new(),
+                    mode_recipes: Vec::new(),
                 },
             )
             .await

@@ -234,6 +234,7 @@ pub async fn h3_local_import_commit(
                         recipe_id: selection.recipe_id,
                     })
                     .collect(),
+                mode_recipes: Vec::new(),
             },
         )
         .await

@@ -12,10 +12,10 @@ use crate::application::ports::{
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
 use crate::domain::{
-    AssetId, InputDefinition, ProductionBatch, ProductionBatchDetail, ProductionBatchId,
-    ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus, ProductionBatchStatus,
-    ProductionPackageBatchBinding, ProductionPackageProvenance, Recipe, SeedValue, TaskId,
-    TaskStatus,
+    AssetId, InputDefinition, OutputType, ProductionBatch, ProductionBatchDetail,
+    ProductionBatchId, ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
+    ProductionBatchStatus, ProductionPackageBatchBinding, ProductionPackageProvenance, Recipe,
+    SeedValue, TaskId, TaskStatus,
 };
 use serde_json::{json, Map, Value};
 use std::{
@@ -269,6 +269,20 @@ impl ProductionQueueService {
         crate::domain::validate_project_id(project_id)
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         Ok(self.repository.list_package_bindings(project_id).await?)
+    }
+
+    /// Validate a project-selected package recipe before the H3 importer stages
+    /// any media. Runtime availability is checked by the project binding
+    /// service; this reuses the queue's authoritative definition parser and
+    /// validator for the recipe and its canonical package-mode inputs.
+    pub async fn validate_recipe_for_mode(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        mode: &str,
+    ) -> Result<(), ProductionQueueError> {
+        let recipe = self.load_recipe(workflow_version_id, recipe_id).await?;
+        validate_package_recipe_for_mode(mode, &recipe).map_err(ProductionQueueError::InvalidInput)
     }
 
     async fn load_recipe(
@@ -2041,6 +2055,82 @@ fn parse_batch_id(value: &str) -> Result<ProductionBatchId, ProductionQueueError
         .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))
 }
 
+fn validate_package_recipe_for_mode(mode: &str, recipe: &Recipe) -> Result<(), String> {
+    if !recipe
+        .outputs
+        .iter()
+        .any(|output| output.output_type == OutputType::Video)
+    {
+        return Err("selected Recipe must produce a video".to_owned());
+    }
+
+    let mut expected = vec![
+        ("prompt", "textarea"),
+        ("duration_seconds", "integer"),
+        ("width", "integer"),
+        ("height", "integer"),
+        ("seed", "seed"),
+    ];
+    match mode {
+        "FL2VA_TEXT_TO_VIDEO" => {}
+        "FL2VA_IMAGE_TO_VIDEO" => expected.push(("first_frame", "image")),
+        "FL2VA_FIRST_LAST" => {
+            expected.push(("first_frame", "image"));
+            expected.push(("last_frame", "image"));
+        }
+        "REF2VA_IMAGE" => expected.push(("reference_images", "images")),
+        "REF2VA_AUDIO" => expected.push(("reference_audios", "audios")),
+        "REF2VA_IMAGE_AUDIO" => {
+            expected.push(("reference_images", "images"));
+            expected.push(("reference_audios", "audios"));
+        }
+        "REF2VA_VIDEO_IMAGE" => {
+            expected.push(("reference_images", "images"));
+            expected.push(("reference_videos", "videos"));
+        }
+        _ => return Err(format!("unsupported package production mode: {mode}")),
+    }
+
+    for (key, expected_kind) in &expected {
+        let input = recipe
+            .inputs
+            .get(*key)
+            .ok_or_else(|| format!("Recipe is missing required package input {key}"))?;
+        if input.kind() != *expected_kind {
+            return Err(format!(
+                "Recipe input {key} has kind {}, expected {expected_kind}",
+                input.kind()
+            ));
+        }
+    }
+
+    let expected_keys = expected.iter().map(|(key, _)| *key).collect::<HashSet<_>>();
+    for (key, input) in &recipe.inputs {
+        if input_is_required(input) && !expected_keys.contains(key.as_str()) {
+            return Err(format!(
+                "Recipe requires unsupported package input {key} ({})",
+                input.kind()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn input_is_required(input: &InputDefinition) -> bool {
+    match input {
+        InputDefinition::TextArea { required, .. }
+        | InputDefinition::Integer { required, .. }
+        | InputDefinition::Number { required, .. }
+        | InputDefinition::Image { required, .. }
+        | InputDefinition::Images { required, .. }
+        | InputDefinition::Video { required, .. }
+        | InputDefinition::Audio { required, .. }
+        | InputDefinition::Videos { required, .. }
+        | InputDefinition::Audios { required, .. } => *required,
+        InputDefinition::Seed { .. } => true,
+    }
+}
+
 #[derive(Debug)]
 pub enum ProductionQueueError {
     InvalidInput(String),
@@ -2082,18 +2172,89 @@ mod tests {
         find_retry_item, freeze_random_seed_values, generation_start_error_code,
         generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
         reference_manifest_for_values, select_recovery, should_pause_after_terminal,
+        validate_package_recipe_for_mode,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::application::generation_service::GenerationServiceError;
     use crate::application::ports::{ActiveProductionItem, ComfyAdapterError};
     use crate::domain::{
-        AssetId, InputDefinition, ProductionBatch, ProductionBatchDetail, ProductionBatchId,
-        ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
-        ProductionBatchStatus, Recipe, SeedDefault, SeedValue, WorkflowRef,
+        AssetId, InputDefinition, OutputDefinition, OutputType, ProductionBatch,
+        ProductionBatchDetail, ProductionBatchId, ProductionBatchItem, ProductionBatchItemId,
+        ProductionBatchItemStatus, ProductionBatchStatus, Recipe, SeedDefault, SeedValue,
+        WorkflowRef,
     };
     use chrono::Utc;
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    fn package_recipe(include_reference_audios: bool) -> Recipe {
+        let mut inputs = BTreeMap::new();
+        inputs.insert(
+            "prompt".to_owned(),
+            InputDefinition::TextArea {
+                label: "Prompt".to_owned(),
+                required: true,
+                default: None,
+            },
+        );
+        for key in ["duration_seconds", "width", "height"] {
+            inputs.insert(
+                key.to_owned(),
+                InputDefinition::Integer {
+                    label: key.to_owned(),
+                    required: true,
+                    default: None,
+                    min: None,
+                    max: None,
+                    step: None,
+                },
+            );
+        }
+        inputs.insert(
+            "seed".to_owned(),
+            InputDefinition::Seed {
+                label: "Seed".to_owned(),
+                default: SeedDefault::Random,
+                min: None,
+                max: None,
+            },
+        );
+        if include_reference_audios {
+            inputs.insert(
+                "reference_audios".to_owned(),
+                InputDefinition::Audios {
+                    label: "Reference audio".to_owned(),
+                    required: true,
+                    min_items: 1,
+                    max_items: 3,
+                },
+            );
+        }
+        Recipe {
+            schema_version: 1,
+            id: "package-recipe".to_owned(),
+            name: "Package recipe".to_owned(),
+            workflow: WorkflowRef {
+                file: "workflow.json".to_owned(),
+            },
+            inputs,
+            bindings: Vec::new(),
+            outputs: vec![OutputDefinition {
+                id: "video".to_owned(),
+                output_type: OutputType::Video,
+                node: "video".to_owned(),
+                required: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn package_mode_recipe_validation_checks_mode_specific_input_capability() {
+        assert!(validate_package_recipe_for_mode("REF2VA_AUDIO", &package_recipe(true)).is_ok());
+        let error = validate_package_recipe_for_mode("REF2VA_AUDIO", &package_recipe(false))
+            .expect_err("audio mode must require the canonical audio input");
+        assert!(error.contains("reference_audios"));
+    }
 
     #[test]
     fn queue_values_round_trip_without_losing_seed_or_asset_identity() {

@@ -8,7 +8,7 @@
 
 use crate::application::h3_local_import_service::{
     H3LocalImportCommitRequest, H3LocalImportError, H3LocalImportMode, H3LocalImportService,
-    H3QualityRecipeSelection,
+    H3ModeRecipeSelection, H3QualityRecipeSelection,
 };
 use crate::application::ports::Clock;
 use crate::application::production_package_inspector::{
@@ -16,6 +16,10 @@ use crate::application::production_package_inspector::{
     ProductionPackageInspector, ProductionPackageItemInspection, ProductionPackageItemStatus,
 };
 use crate::application::production_queue_service::ProductionQueueService;
+use crate::application::project_workflow_binding_service::{
+    ProjectWorkflowBindingService, ProjectWorkflowConfigView, DEFAULT_MODE, VIDEO_MODES,
+    VIDEO_STAGE,
+};
 use crate::application::source_asset_import_service::SourceAssetImportService;
 use crate::domain::{
     normalize_package_root, production_package_source_key, ProductionPackageProvenance,
@@ -132,6 +136,7 @@ pub enum ProductionPackageError {
     Filesystem(String),
     H3(String),
     Queue(String),
+    ProjectWorkflowUnavailable { mode: String, message: String },
 }
 
 impl ProductionPackageError {
@@ -150,6 +155,9 @@ impl ProductionPackageError {
             Self::Filesystem(_) => "PACKAGE_FILESYSTEM_ERROR",
             Self::H3(_) => "PACKAGE_H3_IMPORT_ERROR",
             Self::Queue(_) => "PACKAGE_QUEUE_ERROR",
+            Self::ProjectWorkflowUnavailable { .. } => {
+                "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE"
+            }
         }
     }
 }
@@ -168,6 +176,9 @@ impl fmt::Display for ProductionPackageError {
             | Self::Filesystem(message)
             | Self::H3(message)
             | Self::Queue(message) => write!(formatter, "{}: {message}", self.code()),
+            Self::ProjectWorkflowUnavailable { mode, message } => {
+                write!(formatter, "{}: mode {mode}: {message}", self.code())
+            }
             Self::SessionNotFound => write!(
                 formatter,
                 "{}: inspection session was not found",
@@ -203,6 +214,7 @@ pub struct ProductionPackageService {
     // the application boundary.
     _source_asset_import_service: Arc<SourceAssetImportService>,
     production_queue_service: Arc<ProductionQueueService>,
+    project_workflow_binding_service: Option<Arc<ProjectWorkflowBindingService>>,
     h3_config: ProductionPackageH3Config,
     clock: Arc<dyn Clock>,
     sessions: Arc<Mutex<HashMap<String, PackageSession>>>,
@@ -222,10 +234,19 @@ impl ProductionPackageService {
             h3_local_import_service,
             _source_asset_import_service: source_asset_import_service,
             production_queue_service,
+            project_workflow_binding_service: None,
             h3_config,
             clock,
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn with_project_workflow_binding_service(
+        mut self,
+        service: Arc<ProjectWorkflowBindingService>,
+    ) -> Self {
+        self.project_workflow_binding_service = Some(service);
+        self
     }
 
     pub async fn inspect_session(
@@ -264,7 +285,6 @@ impl ProductionPackageService {
         selected_item_ids: &[String],
     ) -> Result<ProductionPackageCreateBatchesResult, ProductionPackageError> {
         self.cleanup_expired_sessions(Some(session_id)).await;
-        self.h3_config.validate()?;
         if selected_item_ids.is_empty() {
             return Err(ProductionPackageError::InvalidInput(
                 "at least one package item must be selected".to_owned(),
@@ -351,6 +371,19 @@ impl ProductionPackageService {
             ));
         }
 
+        let mode_recipes = self
+            .resolve_project_mode_recipes(&session.project_id, &remaining_selected)
+            .await?;
+        if self.project_workflow_binding_service.is_none()
+            || remaining_selected.iter().any(|item| {
+                !mode_recipes
+                    .iter()
+                    .any(|selection| selection.mode == item.mode)
+            })
+        {
+            self.h3_config.validate()?;
+        }
+
         // Consume the package session before side effects. A retry after a
         // partial downstream failure must be explicit, never an accidental
         // duplicate batch import. Checking removal also closes the race where
@@ -384,6 +417,7 @@ impl ProductionPackageService {
                             &current.package_name,
                             chunk_index as u32,
                             chunk_count as u32,
+                            &mode_recipes,
                         )
                         .await;
                     let _ = fs::remove_dir_all(&staging_root);
@@ -438,6 +472,7 @@ impl ProductionPackageService {
         package_name: &str,
         chunk_index: u32,
         chunk_count: u32,
+        mode_recipes: &[H3ModeRecipeSelection],
     ) -> Result<ProductionPackageBatchMapping, ProductionPackageError> {
         let (h3_session_id, inspection) = self
             .h3_local_import_service
@@ -474,6 +509,7 @@ impl ProductionPackageService {
                     ref2va_recipe_id: self.h3_config.ref2va_recipe_id.clone(),
                     quality_profile: self.h3_config.quality_profile.clone(),
                     quality_recipes: self.h3_config.quality_recipes.clone(),
+                    mode_recipes: mode_recipes.to_vec(),
                 },
                 Some(ProductionPackageProvenance::new(
                     package_root,
@@ -522,6 +558,51 @@ impl ProductionPackageService {
         })
     }
 
+    async fn resolve_project_mode_recipes(
+        &self,
+        project_id: &str,
+        items: &[ProductionPackageItemInspection],
+    ) -> Result<Vec<H3ModeRecipeSelection>, ProductionPackageError> {
+        let Some(service) = self.project_workflow_binding_service.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let fallback_mode = items
+            .first()
+            .map(|item| item.mode.as_str())
+            .unwrap_or("UNKNOWN");
+        let config = service
+            .get(project_id)
+            .await
+            .map_err(|error| project_workflow_unavailable(fallback_mode, error.to_string()))?;
+        if config.project_id != project_id {
+            return Err(project_workflow_unavailable(
+                fallback_mode,
+                format!(
+                    "project workflow configuration belongs to {}, not {project_id}",
+                    config.project_id
+                ),
+            ));
+        }
+        let modes = items
+            .iter()
+            .map(|item| item.mode.clone())
+            .collect::<Vec<_>>();
+        let selections = select_project_mode_recipes(&config, &modes)?;
+        for selection in &selections {
+            self.production_queue_service
+                .validate_recipe_for_mode(
+                    &selection.workflow_version_id,
+                    &selection.recipe_id,
+                    &selection.mode,
+                )
+                .await
+                .map_err(|error| {
+                    project_workflow_unavailable(&selection.mode, error.to_string())
+                })?;
+        }
+        Ok(selections)
+    }
+
     async fn cleanup_expired_sessions(&self, keep_session_id: Option<&str>) {
         let now = self.clock.now();
         self.sessions.lock().await.retain(|session_id, session| {
@@ -558,6 +639,63 @@ fn create_batches_result(
 fn validate_project_id(project_id: &str) -> Result<(), ProductionPackageError> {
     crate::domain::validate_project_id(project_id)
         .map_err(|error| ProductionPackageError::InvalidInput(error.to_string()))
+}
+
+fn select_project_mode_recipes(
+    config: &ProjectWorkflowConfigView,
+    modes: &[String],
+) -> Result<Vec<H3ModeRecipeSelection>, ProductionPackageError> {
+    let mut seen = HashSet::new();
+    let mut selections = Vec::new();
+    for mode in modes {
+        if !seen.insert(mode.clone()) {
+            continue;
+        }
+        if !VIDEO_MODES.contains(&mode.as_str()) {
+            return Err(project_workflow_unavailable(
+                mode,
+                "unsupported package production mode",
+            ));
+        }
+        let binding = config
+            .video_mode_overrides
+            .iter()
+            .find(|binding| binding.stage == VIDEO_STAGE && binding.mode == *mode)
+            .or_else(|| {
+                config
+                    .video_default
+                    .as_ref()
+                    .filter(|binding| binding.stage == VIDEO_STAGE && binding.mode == DEFAULT_MODE)
+            });
+        let Some(binding) = binding else {
+            continue;
+        };
+        if !binding.available {
+            return Err(project_workflow_unavailable(
+                mode,
+                "configured project workflow binding is unavailable",
+            ));
+        }
+        if binding.workflow_version_id.trim().is_empty() || binding.recipe_id.trim().is_empty() {
+            return Err(project_workflow_unavailable(
+                mode,
+                "configured project workflow binding has an empty identity",
+            ));
+        }
+        selections.push(H3ModeRecipeSelection {
+            mode: mode.clone(),
+            workflow_version_id: binding.workflow_version_id.clone(),
+            recipe_id: binding.recipe_id.clone(),
+        });
+    }
+    Ok(selections)
+}
+
+fn project_workflow_unavailable(mode: &str, message: impl Into<String>) -> ProductionPackageError {
+    ProductionPackageError::ProjectWorkflowUnavailable {
+        mode: mode.to_owned(),
+        message: message.into(),
+    }
 }
 
 fn select_items<'a>(
@@ -792,5 +930,164 @@ fn map_h3_error(error: H3LocalImportError) -> ProductionPackageError {
         H3LocalImportError::SessionExpired => {
             ProductionPackageError::H3("H3 session expired".to_owned())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{select_project_mode_recipes, ProductionPackageError};
+    use crate::application::project_workflow_binding_service::{
+        ProjectWorkflowBindingView, ProjectWorkflowConfigView, DEFAULT_MODE, VIDEO_STAGE,
+    };
+    use chrono::Utc;
+
+    fn binding(
+        mode: &str,
+        workflow_version_id: &str,
+        recipe_id: &str,
+        available: bool,
+    ) -> ProjectWorkflowBindingView {
+        let now = Utc::now();
+        ProjectWorkflowBindingView {
+            stage: VIDEO_STAGE.to_owned(),
+            mode: mode.to_owned(),
+            workflow_version_id: workflow_version_id.to_owned(),
+            recipe_id: recipe_id.to_owned(),
+            created_at: now,
+            updated_at: now,
+            available,
+        }
+    }
+
+    fn config(
+        video_default: Option<ProjectWorkflowBindingView>,
+        video_mode_overrides: Vec<ProjectWorkflowBindingView>,
+    ) -> ProjectWorkflowConfigView {
+        ProjectWorkflowConfigView {
+            project_id: "project-a".to_owned(),
+            image_default: None,
+            video_default,
+            video_mode_overrides,
+        }
+    }
+
+    #[test]
+    fn project_video_default_routes_all_supported_package_modes() {
+        let config = config(
+            Some(binding(DEFAULT_MODE, "custom-wv", "custom-recipe", true)),
+            vec![],
+        );
+        let modes = super::VIDEO_MODES
+            .iter()
+            .map(|mode| (*mode).to_owned())
+            .collect::<Vec<_>>();
+
+        let selections = select_project_mode_recipes(&config, &modes).unwrap();
+
+        assert_eq!(selections.len(), super::VIDEO_MODES.len());
+        assert!(selections.iter().all(|selection| {
+            selection.workflow_version_id == "custom-wv" && selection.recipe_id == "custom-recipe"
+        }));
+    }
+
+    #[test]
+    fn exact_mode_override_precedes_video_default() {
+        let config = config(
+            Some(binding(DEFAULT_MODE, "default-wv", "default-recipe", true)),
+            vec![binding(
+                "REF2VA_IMAGE",
+                "override-wv",
+                "override-recipe",
+                true,
+            )],
+        );
+
+        let selections = select_project_mode_recipes(
+            &config,
+            &["REF2VA_IMAGE".to_owned(), "FL2VA_TEXT_TO_VIDEO".to_owned()],
+        )
+        .unwrap();
+
+        assert_eq!(selections[0].workflow_version_id, "override-wv");
+        assert_eq!(selections[0].recipe_id, "override-recipe");
+        assert_eq!(selections[1].workflow_version_id, "default-wv");
+        assert_eq!(selections[1].recipe_id, "default-recipe");
+    }
+
+    #[test]
+    fn unavailable_configured_binding_blocks_without_legacy_fallback() {
+        let config = config(
+            Some(binding(DEFAULT_MODE, "builtin-wv", "builtin-recipe", true)),
+            vec![binding("REF2VA_AUDIO", "custom-wv", "custom-recipe", false)],
+        );
+
+        let error = select_project_mode_recipes(&config, &["REF2VA_AUDIO".to_owned()]).unwrap_err();
+
+        assert_eq!(
+            error.code(),
+            "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE"
+        );
+        assert!(matches!(
+            error,
+            ProductionPackageError::ProjectWorkflowUnavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn empty_project_video_config_is_the_only_legacy_fallback_shape() {
+        let selections = select_project_mode_recipes(
+            &config(None, vec![]),
+            &["FL2VA_TEXT_TO_VIDEO".to_owned(), "REF2VA_IMAGE".to_owned()],
+        )
+        .unwrap();
+
+        assert!(selections.is_empty());
+    }
+
+    #[test]
+    fn mixed_mode_package_keeps_each_exact_pair() {
+        let config = config(
+            None,
+            vec![
+                binding("FL2VA_TEXT_TO_VIDEO", "t2v-wv", "t2v-recipe", true),
+                binding("REF2VA_IMAGE", "ref-wv", "ref-recipe", true),
+            ],
+        );
+
+        let selections = select_project_mode_recipes(
+            &config,
+            &["FL2VA_TEXT_TO_VIDEO".to_owned(), "REF2VA_IMAGE".to_owned()],
+        )
+        .unwrap();
+
+        assert_eq!(selections[0].workflow_version_id, "t2v-wv");
+        assert_eq!(selections[0].recipe_id, "t2v-recipe");
+        assert_eq!(selections[1].workflow_version_id, "ref-wv");
+        assert_eq!(selections[1].recipe_id, "ref-recipe");
+    }
+
+    #[test]
+    fn resolving_a_new_project_config_does_not_mutate_an_old_pair() {
+        let old = select_project_mode_recipes(
+            &config(
+                Some(binding(DEFAULT_MODE, "workflow-a", "recipe-a", true)),
+                vec![],
+            ),
+            &["FL2VA_TEXT_TO_VIDEO".to_owned()],
+        )
+        .unwrap();
+        let new = select_project_mode_recipes(
+            &config(
+                Some(binding(DEFAULT_MODE, "workflow-b", "recipe-b", true)),
+                vec![],
+            ),
+            &["FL2VA_TEXT_TO_VIDEO".to_owned()],
+        )
+        .unwrap();
+
+        assert_eq!(old[0].workflow_version_id, "workflow-a");
+        assert_eq!(old[0].recipe_id, "recipe-a");
+        assert_eq!(new[0].workflow_version_id, "workflow-b");
+        assert_eq!(new[0].recipe_id, "recipe-b");
     }
 }
