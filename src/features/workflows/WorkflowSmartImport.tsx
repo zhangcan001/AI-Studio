@@ -3,6 +3,7 @@ import type {
   WorkflowAutoIssueView,
   WorkflowAutoOnboardingPlanView,
   WorkflowImportFormat,
+  WorkflowOnboardingDraftView,
 } from "../../types/workflowOnboarding";
 import { WorkflowImportFormatIssue, WorkflowImportIssues, type WorkflowImportErrorView } from "./WorkflowImportIssues";
 import { WorkflowImportResult } from "./WorkflowImportResult";
@@ -22,6 +23,7 @@ interface Props {
   onRetry?: () => void;
   importError?: WorkflowImportErrorView;
   projectId?: string;
+  draft?: WorkflowOnboardingDraftView;
 }
 
 type PlanWithOptionalFormat = WorkflowAutoOnboardingPlanView & {
@@ -66,7 +68,7 @@ function formatIssue(format: WorkflowImportFormat): WorkflowImportErrorView | un
   return undefined;
 }
 
-export function WorkflowSmartImport({ plan, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRestoreExisting, onOpenStudio, onUseInProject, onReturnToList, onCancel, onRetry, importError, projectId }: Props) {
+export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRestoreExisting, onOpenStudio, onUseInProject, onReturnToList, onCancel, onRetry, importError, projectId }: Props) {
   if (importError) {
     return <WorkflowImportFormatIssue issue={importError} loading={loading} onRetry={onRetry} onCancel={onReturnToList ?? onCancel} />;
   }
@@ -91,6 +93,7 @@ export function WorkflowSmartImport({ plan, loading, onResolve, onResume, onOpen
   return (
     <WorkflowImportIssues
       plan={plan}
+      draft={draft}
       loading={loading}
       onResolve={onResolve}
       onResume={onResume}

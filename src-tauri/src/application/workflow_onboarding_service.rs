@@ -4,6 +4,7 @@ use crate::application::{
         WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
+    workflow_graph_analysis::{WorkflowGraph, WorkflowSource},
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
 };
@@ -1058,12 +1059,7 @@ impl WorkflowOnboardingService {
                     format!("target input {} does not exist", request.target_input),
                 )
             })?;
-            if is_workflow_link(current, &draft.workflow)?.is_some() {
-                return Err(WorkflowOnboardingError::new(
-                    "LINKED_INPUT_NOT_BINDABLE",
-                    "Connected input — not directly bindable",
-                ));
-            }
+            let linked = is_workflow_link(current, &draft.workflow)?.is_some();
             if is_dangerous_input_name(&request.target_input) {
                 return Err(WorkflowOnboardingError::new(
                     "MAPPING_DANGEROUS_INPUT",
@@ -1073,7 +1069,18 @@ impl WorkflowOnboardingService {
                     ),
                 ));
             }
-            validate_mapping_value(field_type, current)?;
+            if linked
+                && linked_target_semantic(&request.target_input)
+                    != Some(request.semantic_key.as_str())
+            {
+                return Err(WorkflowOnboardingError::new(
+                    "LINKED_INPUT_NOT_BINDABLE",
+                    "Connected input can only be exposed for its recognized production semantic",
+                ));
+            }
+            if !linked {
+                validate_mapping_value(field_type, current)?;
+            }
             let input_view = draft
                 .nodes
                 .iter()
@@ -1874,7 +1881,41 @@ fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult
     };
     let mut candidates_by_key: BTreeMap<String, Vec<AutoInputCandidate>> = BTreeMap::new();
 
+    let (output_mappings, output_inferences, output_issues) = infer_auto_outputs(draft);
+    result.output_mappings = output_mappings;
+    result.inferences.extend(output_inferences);
+    result.issues.extend(output_issues);
+
+    let graph = WorkflowGraph::from_document(&draft.workflow).unwrap_or_default();
+    let mut output_roots = result
+        .output_mappings
+        .iter()
+        .map(|output| output.node_id.clone())
+        .collect::<BTreeSet<_>>();
+    if output_roots.is_empty() {
+        output_roots = draft
+            .output_mappings
+            .iter()
+            .map(|output| output.node_id.clone())
+            .collect();
+    }
+    if output_roots.is_empty() {
+        output_roots = draft
+            .nodes
+            .iter()
+            .filter(|node| output_candidate_score(draft, node) > 0)
+            .map(|node| node.node_id.clone())
+            .collect();
+    }
+    let inference_scope = output_roots
+        .iter()
+        .flat_map(|node_id| graph.upstream_closure(node_id))
+        .collect::<BTreeSet<_>>();
+
     for node in &draft.nodes {
+        if !inference_scope.is_empty() && !inference_scope.contains(&node.node_id) {
+            continue;
+        }
         for input in &node.inputs {
             if !input.bindable || input.is_linked {
                 continue;
@@ -1919,16 +1960,45 @@ fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult
                 output_type: None,
                 field_type: Some(guess.field_type.as_str().to_owned()),
             };
-            candidates_by_key
-                .entry(guess.semantic_key.to_owned())
-                .or_default()
-                .push(AutoInputCandidate {
+            append_auto_input_candidate(
+                &mut candidates_by_key,
+                AutoInputCandidate {
                     mapping,
                     inference,
                     issue_candidate,
                     confidence: guess.confidence,
-                });
+                },
+            );
         }
+    }
+
+    infer_graph_linked_inputs(draft, &graph, &inference_scope, &mut candidates_by_key);
+    match infer_video_duration_source(draft, &graph, &inference_scope, &result.output_mappings) {
+        DurationSourceInference::Found(candidate) => {
+            append_auto_input_candidate(&mut candidates_by_key, candidate);
+        }
+        DurationSourceInference::Ambiguous(candidates) => {
+            let alternatives = candidates
+                .iter()
+                .map(|candidate| candidate.label.clone())
+                .collect::<Vec<_>>();
+            result.inferences.push(WorkflowAutoInferenceView {
+                field: "duration_seconds".to_owned(),
+                value: Some("number".to_owned()),
+                confidence: InferenceConfidence::Ambiguous,
+                source: "GRAPH_DURATION_SOURCE".to_owned(),
+                alternatives,
+                node_id: None,
+                input_name: None,
+            });
+            result.issues.push(WorkflowAutoIssueView {
+                code: "AMBIGUOUS_DURATION_SOURCE".to_owned(),
+                message: "无法自动确认视频时长来源，请选择唯一的动态数值源。".to_owned(),
+                field: Some("duration_seconds".to_owned()),
+                candidates,
+            });
+        }
+        DurationSourceInference::None => {}
     }
 
     for (semantic_key, mut candidates) in candidates_by_key {
@@ -1988,10 +2058,6 @@ fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult
         }
     }
 
-    let (output_mappings, output_inferences, output_issues) = infer_auto_outputs(draft);
-    result.output_mappings = output_mappings;
-    result.inferences.extend(output_inferences);
-    result.issues.extend(output_issues);
     let has_first_frame = result
         .input_mappings
         .iter()
@@ -2031,6 +2097,482 @@ fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult
     result.category = category;
     result.mode = mode;
     result
+}
+
+enum DurationSourceInference {
+    None,
+    Found(AutoInputCandidate),
+    Ambiguous(Vec<WorkflowAutoIssueCandidateView>),
+}
+
+fn append_auto_input_candidate(
+    candidates_by_key: &mut BTreeMap<String, Vec<AutoInputCandidate>>,
+    candidate: AutoInputCandidate,
+) {
+    let key = candidate.mapping.semantic_key.clone();
+    let candidates = candidates_by_key.entry(key).or_default();
+    if let Some(existing) = candidates.iter_mut().find(|existing| {
+        existing.mapping.target_node == candidate.mapping.target_node
+            && existing.mapping.target_input == candidate.mapping.target_input
+            && existing.mapping.item_index == candidate.mapping.item_index
+    }) {
+        if inference_confidence_rank(candidate.confidence)
+            > inference_confidence_rank(existing.confidence)
+        {
+            *existing = candidate;
+        }
+    } else {
+        candidates.push(candidate);
+    }
+}
+
+fn inference_confidence_rank(confidence: InferenceConfidence) -> u8 {
+    match confidence {
+        InferenceConfidence::Certain => 3,
+        InferenceConfidence::High => 2,
+        InferenceConfidence::Ambiguous => 1,
+        InferenceConfidence::Unknown => 0,
+    }
+}
+
+fn inference_scope_for_node(scope: &BTreeSet<String>, node_id: &str) -> bool {
+    scope.is_empty() || scope.contains(node_id)
+}
+
+fn graph_numeric_leaves(graph: &WorkflowGraph, node_id: &str) -> Vec<WorkflowSource> {
+    let mut unique = BTreeMap::new();
+    for link in graph.upstream_of(node_id) {
+        for trace in graph.trace_scalar_sources(node_id, &link.target_input) {
+            unique
+                .entry((trace.source.node_id.clone(), trace.source.input.clone()))
+                .or_insert(trace.source);
+        }
+    }
+    unique.into_values().collect()
+}
+
+fn linked_target_semantic(input_name: &str) -> Option<&'static str> {
+    match input_name.to_ascii_lowercase().as_str() {
+        "prompt" | "text" | "positive" | "positive_prompt" => Some("prompt"),
+        "negative" | "negative_prompt" => Some("negative_prompt"),
+        "width" => Some("width"),
+        "height" => Some("height"),
+        "seed" | "noise_seed" | "random_seed" => Some("seed"),
+        "length" | "frames" | "num_frames" | "frame_count" => Some("duration_seconds"),
+        "image" | "input_image" => Some("reference_image"),
+        "images" | "reference_images" => Some("reference_images"),
+        "video" | "input_video" => Some("reference_video"),
+        "videos" | "reference_videos" => Some("reference_videos"),
+        "audio" | "input_audio" => Some("reference_audio"),
+        "audios" | "reference_audios" => Some("reference_audios"),
+        _ => None,
+    }
+}
+
+fn infer_graph_linked_inputs(
+    draft: &WorkflowOnboardingDraft,
+    graph: &WorkflowGraph,
+    inference_scope: &BTreeSet<String>,
+    candidates_by_key: &mut BTreeMap<String, Vec<AutoInputCandidate>>,
+) {
+    for node in &draft.nodes {
+        if !inference_scope_for_node(inference_scope, &node.node_id) {
+            continue;
+        }
+        for input in &node.inputs {
+            if graph.incoming_source(&node.node_id, &input.name).is_none() {
+                continue;
+            }
+            let Some(semantic_key) = linked_target_semantic(&input.name) else {
+                continue;
+            };
+            if matches!(semantic_key, "width" | "height") {
+                let guess = AutoInputGuess {
+                    semantic_key,
+                    field_type: SemanticFieldType::Integer,
+                    confidence: InferenceConfidence::Certain,
+                    source: "GRAPH_LINKED_DIRECT_SINK",
+                    required: true,
+                };
+                let Ok(mapping) = auto_linked_input_mapping(&node.node_id, input, guess) else {
+                    continue;
+                };
+                append_auto_input_candidate(
+                    candidates_by_key,
+                    AutoInputCandidate {
+                        mapping,
+                        inference: WorkflowAutoInferenceView {
+                            field: semantic_key.to_owned(),
+                            value: Some(guess.field_type.as_str().to_owned()),
+                            confidence: guess.confidence,
+                            source: guess.source.to_owned(),
+                            alternatives: Vec::new(),
+                            node_id: Some(node.node_id.clone()),
+                            input_name: Some(input.name.clone()),
+                        },
+                        issue_candidate: WorkflowAutoIssueCandidateView {
+                            label: format!("节点 {} · {}", node.node_id, input.name),
+                            node_id: Some(node.node_id.clone()),
+                            input_name: Some(input.name.clone()),
+                            output_id: None,
+                            output_type: None,
+                            field_type: Some(guess.field_type.as_str().to_owned()),
+                        },
+                        confidence: guess.confidence,
+                    },
+                );
+                continue;
+            }
+
+            for trace in graph.trace_sources(&node.node_id, &input.name) {
+                let leaf = trace.source;
+                let class_type = draft.workflow.class_type(&leaf.node_id).unwrap_or_default();
+                let Some(guess) = auto_input_guess(class_type, &leaf.input, &leaf.value) else {
+                    continue;
+                };
+                if guess.semantic_key != semantic_key {
+                    continue;
+                }
+                let Some(source_input) = draft
+                    .nodes
+                    .iter()
+                    .find(|candidate| candidate.node_id == leaf.node_id)
+                    .and_then(|candidate| {
+                        candidate
+                            .inputs
+                            .iter()
+                            .find(|candidate| candidate.name == leaf.input)
+                    })
+                else {
+                    continue;
+                };
+                let Ok(mapping) =
+                    auto_input_mapping(&leaf.node_id, source_input, &leaf.value, guess)
+                else {
+                    continue;
+                };
+                append_auto_input_candidate(
+                    candidates_by_key,
+                    AutoInputCandidate {
+                        mapping,
+                        inference: WorkflowAutoInferenceView {
+                            field: semantic_key.to_owned(),
+                            value: Some(guess.field_type.as_str().to_owned()),
+                            confidence: guess.confidence,
+                            source: "GRAPH_LINKED_SOURCE_LEAF".to_owned(),
+                            alternatives: Vec::new(),
+                            node_id: Some(leaf.node_id.clone()),
+                            input_name: Some(leaf.input.clone()),
+                        },
+                        issue_candidate: WorkflowAutoIssueCandidateView {
+                            label: format!("节点 {} · {}", leaf.node_id, leaf.input),
+                            node_id: Some(leaf.node_id.clone()),
+                            input_name: Some(leaf.input.clone()),
+                            output_id: None,
+                            output_type: None,
+                            field_type: Some(guess.field_type.as_str().to_owned()),
+                        },
+                        confidence: guess.confidence,
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn infer_video_duration_source(
+    draft: &WorkflowOnboardingDraft,
+    graph: &WorkflowGraph,
+    inference_scope: &BTreeSet<String>,
+    outputs: &[OutputMapping],
+) -> DurationSourceInference {
+    let has_video_output = outputs.iter().any(|output| {
+        output.output_type == OutputType::Video
+            && inference_scope_for_node(inference_scope, &output.node_id)
+    }) || (outputs.is_empty()
+        && draft.nodes.iter().any(|node| {
+            inference_scope_for_node(inference_scope, &node.node_id)
+                && output_candidate_score(draft, node) > 0
+                && output_type_for_node(draft, node) == OutputType::Video
+        }));
+    if !has_video_output {
+        return DurationSourceInference::None;
+    }
+
+    let mut found = Vec::new();
+    let mut issue_candidates = BTreeMap::new();
+    let mut saw_linked_length = false;
+    let mut saw_unproven_chain = false;
+    for node in &draft.nodes {
+        if !inference_scope_for_node(inference_scope, &node.node_id) {
+            continue;
+        }
+        for input in &node.inputs {
+            if !is_video_length_input(&input.name) {
+                continue;
+            }
+            let Some(expression_node) = graph.incoming_source(&node.node_id, &input.name) else {
+                continue;
+            };
+            saw_linked_length = true;
+            let numeric_leaves = graph_numeric_leaves(graph, expression_node);
+            let expression = draft
+                .workflow
+                .inputs(expression_node)
+                .and_then(|inputs| inputs.get("expression"))
+                .and_then(Value::as_str);
+            let expression_class = draft
+                .workflow
+                .class_type(expression_node)
+                .unwrap_or_default();
+            let proven = expression.is_some_and(expression_proves_duration)
+                && is_arithmetic_node(expression_class)
+                && arithmetic_chain_is_safe(
+                    &draft.workflow,
+                    graph,
+                    expression_node,
+                    &mut BTreeSet::new(),
+                );
+            if !proven || numeric_leaves.len() != 1 {
+                saw_unproven_chain = true;
+                if numeric_leaves.is_empty() {
+                    issue_candidates
+                        .entry((node.node_id.clone(), input.name.clone()))
+                        .or_insert(WorkflowAutoIssueCandidateView {
+                            label: format!("节点 {} · {}", node.node_id, input.name),
+                            node_id: Some(node.node_id.clone()),
+                            input_name: Some(input.name.clone()),
+                            output_id: None,
+                            output_type: Some("duration_seconds".to_owned()),
+                            field_type: Some("number".to_owned()),
+                        });
+                } else {
+                    for leaf in numeric_leaves {
+                        issue_candidates
+                            .entry((leaf.node_id.clone(), leaf.input.clone()))
+                            .or_insert(WorkflowAutoIssueCandidateView {
+                                label: format!("节点 {} · {}", leaf.node_id, leaf.input),
+                                node_id: Some(leaf.node_id),
+                                input_name: Some(leaf.input),
+                                output_id: None,
+                                output_type: Some("duration_seconds".to_owned()),
+                                field_type: Some(
+                                    if is_integer_number(&leaf.value) {
+                                        "integer"
+                                    } else {
+                                        "number"
+                                    }
+                                    .to_owned(),
+                                ),
+                            });
+                    }
+                }
+                continue;
+            }
+
+            let leaf = numeric_leaves
+                .into_iter()
+                .next()
+                .expect("length checked above");
+            let Some(leaf_input) = draft
+                .nodes
+                .iter()
+                .find(|candidate| candidate.node_id == leaf.node_id)
+                .and_then(|candidate| {
+                    candidate
+                        .inputs
+                        .iter()
+                        .find(|candidate| candidate.name == leaf.input)
+                })
+            else {
+                saw_unproven_chain = true;
+                continue;
+            };
+            let guess = AutoInputGuess {
+                semantic_key: "duration_seconds",
+                field_type: if is_integer_number(&leaf.value) {
+                    SemanticFieldType::Integer
+                } else {
+                    SemanticFieldType::Number
+                },
+                confidence: InferenceConfidence::Certain,
+                source: "GRAPH_DURATION_SOURCE",
+                required: true,
+            };
+            let Ok(mapping) = auto_input_mapping(&leaf.node_id, leaf_input, &leaf.value, guess)
+            else {
+                saw_unproven_chain = true;
+                continue;
+            };
+            let label = format!("节点 {} · {}", leaf.node_id, leaf.input);
+            issue_candidates
+                .entry((leaf.node_id.clone(), leaf.input.clone()))
+                .or_insert_with(|| WorkflowAutoIssueCandidateView {
+                    label: label.clone(),
+                    node_id: Some(leaf.node_id.clone()),
+                    input_name: Some(leaf.input.clone()),
+                    output_id: None,
+                    output_type: Some("duration_seconds".to_owned()),
+                    field_type: Some(guess.field_type.as_str().to_owned()),
+                });
+            found.push(AutoInputCandidate {
+                mapping,
+                inference: WorkflowAutoInferenceView {
+                    field: "duration_seconds".to_owned(),
+                    value: Some(guess.field_type.as_str().to_owned()),
+                    confidence: guess.confidence,
+                    source: guess.source.to_owned(),
+                    alternatives: Vec::new(),
+                    node_id: Some(leaf.node_id.clone()),
+                    input_name: Some(leaf.input.clone()),
+                },
+                issue_candidate: WorkflowAutoIssueCandidateView {
+                    label,
+                    node_id: Some(leaf.node_id),
+                    input_name: Some(leaf.input),
+                    output_id: None,
+                    output_type: Some("duration_seconds".to_owned()),
+                    field_type: Some(guess.field_type.as_str().to_owned()),
+                },
+                confidence: guess.confidence,
+            });
+        }
+    }
+
+    if !saw_linked_length {
+        return DurationSourceInference::None;
+    }
+    if found.len() == 1 && !saw_unproven_chain {
+        return DurationSourceInference::Found(found.remove(0));
+    }
+    for candidate in found {
+        issue_candidates
+            .entry((
+                candidate.mapping.target_node.clone(),
+                candidate.mapping.target_input.clone(),
+            ))
+            .or_insert(candidate.issue_candidate);
+    }
+    DurationSourceInference::Ambiguous(issue_candidates.into_values().collect())
+}
+
+fn is_video_length_input(input_name: &str) -> bool {
+    matches!(
+        input_name.to_ascii_lowercase().as_str(),
+        "length" | "frames" | "num_frames" | "frame_count"
+    )
+}
+
+fn is_arithmetic_node(class_type: &str) -> bool {
+    let lower = class_type.to_ascii_lowercase();
+    ["math", "expression", "arithmetic", "convert", "conversion"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+fn arithmetic_chain_is_safe(
+    workflow: &WorkflowDocument,
+    graph: &WorkflowGraph,
+    node_id: &str,
+    visited: &mut BTreeSet<String>,
+) -> bool {
+    if !visited.insert(node_id.to_owned()) {
+        return true;
+    }
+    if workflow.inputs(node_id).is_none() {
+        return false;
+    }
+    for link in graph.upstream_of(node_id) {
+        let source_node = &link.source_node_id;
+        if workflow.inputs(source_node).is_none() {
+            return false;
+        }
+        let has_linked_input = !graph.upstream_of(source_node).is_empty();
+        if has_linked_input {
+            if !is_arithmetic_node(workflow.class_type(source_node).unwrap_or_default())
+                || !arithmetic_chain_is_safe(workflow, graph, source_node, visited)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn expression_proves_duration(expression: &str) -> bool {
+    let compact = expression
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    if !compact.contains('*') && !compact.contains('×') {
+        return false;
+    }
+    if !compact
+        .chars()
+        .any(|character| character.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    let fps = duration_fps_literals(expression);
+    fps.len() == 1 && fps[0].is_finite() && (1.0..=240.0).contains(&fps[0])
+}
+
+fn duration_fps_literals(expression: &str) -> Vec<f64> {
+    let chars = expression.chars().collect::<Vec<_>>();
+    let mut literals = Vec::new();
+    for (index, character) in chars.iter().enumerate() {
+        if !matches!(character, '*' | '×') {
+            continue;
+        }
+        let mut left = index;
+        while left > 0 && chars[left - 1].is_whitespace() {
+            left -= 1;
+        }
+        let mut right = index + 1;
+        while right < chars.len() && chars[right].is_whitespace() {
+            right += 1;
+        }
+        let left_number = number_ending_at(&chars, left);
+        let right_number = number_starting_at(&chars, right);
+        let left_is_identifier = left > 0 && chars[left - 1].is_ascii_alphabetic();
+        let right_is_identifier = right < chars.len() && chars[right].is_ascii_alphabetic();
+        if left_number.is_some() && right_is_identifier {
+            if let Some(number) = left_number {
+                if !literals.contains(&number) {
+                    literals.push(number);
+                }
+            }
+        } else if right_number.is_some() && left_is_identifier {
+            if let Some(number) = right_number {
+                if !literals.contains(&number) {
+                    literals.push(number);
+                }
+            }
+        }
+    }
+    literals
+}
+
+fn number_ending_at(chars: &[char], end: usize) -> Option<f64> {
+    if end == 0 || !chars[end - 1].is_ascii_digit() && chars[end - 1] != '.' {
+        return None;
+    }
+    let mut start = end - 1;
+    while start > 0 && (chars[start - 1].is_ascii_digit() || chars[start - 1] == '.') {
+        start -= 1;
+    }
+    chars[start..end].iter().collect::<String>().parse().ok()
+}
+
+fn number_starting_at(chars: &[char], start: usize) -> Option<f64> {
+    if start >= chars.len() || !chars[start].is_ascii_digit() && chars[start] != '.' {
+        return None;
+    }
+    let mut end = start + 1;
+    while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
+        end += 1;
+    }
+    chars[start..end].iter().collect::<String>().parse().ok()
 }
 
 fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoInputGuess> {
@@ -2158,7 +2700,7 @@ fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoI
             required: true,
         });
     }
-    if is_media && name.contains("image") {
+    if is_media && name.contains("image") && !is_non_media_image_parameter(&name) {
         let plural = name.contains("images") || name.contains("reference_images");
         return Some(AutoInputGuess {
             semantic_key: if plural {
@@ -2223,6 +2765,12 @@ fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoI
     None
 }
 
+fn is_non_media_image_parameter(name: &str) -> bool {
+    ["image_size", "image_scale", "ref_image_size"]
+        .iter()
+        .any(|marker| name == *marker || name.ends_with(marker))
+}
+
 fn numeric_guess(
     key: &'static str,
     value: &Value,
@@ -2241,7 +2789,7 @@ fn numeric_guess(
         } else {
             "INPUT_NAME_NUMBER_PARAMETER"
         },
-        required: true,
+        required: matches!(key, "prompt" | "width" | "height" | "duration_seconds"),
     }
 }
 
@@ -2256,11 +2804,28 @@ fn auto_input_mapping(
     guess: AutoInputGuess,
 ) -> Result<InputMapping, WorkflowOnboardingError> {
     validate_mapping_value(guess.field_type, value)?;
+    auto_input_mapping_at_target(node_id, input, Some(value), guess)
+}
+
+fn auto_linked_input_mapping(
+    node_id: &str,
+    input: &WorkflowInputView,
+    guess: AutoInputGuess,
+) -> Result<InputMapping, WorkflowOnboardingError> {
+    auto_input_mapping_at_target(node_id, input, None, guess)
+}
+
+fn auto_input_mapping_at_target(
+    node_id: &str,
+    input: &WorkflowInputView,
+    value: Option<&Value>,
+    guess: AutoInputGuess,
+) -> Result<InputMapping, WorkflowOnboardingError> {
     let default_value = match guess.field_type {
-        SemanticFieldType::Textarea
-        | SemanticFieldType::Integer
-        | SemanticFieldType::Number
-        | SemanticFieldType::Seed => Some(current_value_summary(value)),
+        SemanticFieldType::Textarea | SemanticFieldType::Integer | SemanticFieldType::Number => {
+            value.map(current_value_summary)
+        }
+        SemanticFieldType::Seed => Some("random".to_owned()),
         _ => None,
     };
     let step = if matches!(
@@ -2324,20 +2889,17 @@ fn infer_auto_outputs(
     let mut candidates = draft
         .nodes
         .iter()
-        .filter(|node| is_probable_output_node(node))
-        .map(|node| {
-            let output_type = output_type_for_node(draft, node);
-            let label = if node.title.trim().is_empty() {
-                format!("节点 {}", node.node_id)
-            } else {
-                node.title.clone()
-            };
-            (
-                node.node_id.clone(),
-                label,
-                output_type,
-                node.class_type.to_ascii_lowercase().contains("save"),
-            )
+        .filter_map(|node| {
+            let score = output_candidate_score(draft, node);
+            (score > 0).then(|| {
+                let output_type = output_type_for_node(draft, node);
+                let label = if node.title.trim().is_empty() {
+                    format!("节点 {}", node.node_id)
+                } else {
+                    node.title.clone()
+                };
+                (node.node_id.clone(), label, output_type, score)
+            })
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.0.cmp(&right.0));
@@ -2362,18 +2924,17 @@ fn infer_auto_outputs(
             }],
         );
     }
-    let saved = candidates
+    let best_score = candidates
         .iter()
-        .filter(|candidate| candidate.3)
+        .map(|candidate| candidate.3)
+        .max()
+        .expect("output candidates are not empty");
+    let best = candidates
+        .iter()
+        .filter(|candidate| candidate.3 == best_score)
         .cloned()
         .collect::<Vec<_>>();
-    let selected = if saved.len() == 1 {
-        Some(saved[0].clone())
-    } else if candidates.len() == 1 {
-        Some(candidates[0].clone())
-    } else {
-        None
-    };
+    let selected = (best.len() == 1).then(|| best[0].clone());
     if let Some((node_id, label, output_type, _)) = selected {
         let output_name = match output_type {
             OutputType::Image => "图片",
@@ -2402,7 +2963,7 @@ fn infer_auto_outputs(
                 } else {
                     InferenceConfidence::High
                 },
-                source: "OUTPUT_NODE_AND_SAVE_NODE_PRIORITY".to_owned(),
+                source: "OUTPUT_CANDIDATE_SCORE".to_owned(),
                 alternatives: Vec::new(),
                 node_id: Some(node_id),
                 input_name: None,
@@ -2543,20 +3104,62 @@ fn workflow_kind_for_outputs(outputs: &[OutputMapping]) -> String {
     }
 }
 
-fn is_probable_output_node(node: &WorkflowNodeView) -> bool {
-    if node.is_output_node {
-        return true;
-    }
-    let text = format!("{} {}", node.class_type, node.title).to_ascii_lowercase();
-    [
-        "saveimage",
-        "savevideo",
-        "previewimage",
-        "previewvideo",
-        "output",
+fn output_candidate_score(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView) -> i32 {
+    let class_type = node.class_type.to_ascii_lowercase();
+    let title = node.title.to_ascii_lowercase();
+    let text = format!("{class_type} {title}");
+    if [
+        "clearcache",
+        "clear cache",
+        "cacheall",
+        "debug",
+        "log",
+        "show text",
+        "utility",
     ]
     .iter()
     .any(|marker| text.contains(marker))
+    {
+        return -1000;
+    }
+
+    if ["saveimage", "savevideo", "vhs_videocombine", "videocombine"]
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return 100;
+    }
+    if ["previewimage", "previewvideo"]
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return 80;
+    }
+    if node.is_output_node && node_has_media_semantics(draft, node) {
+        return 50;
+    }
+    if text.contains("output") && node_has_media_semantics(draft, node) {
+        return 40;
+    }
+    0
+}
+
+fn node_has_media_semantics(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView) -> bool {
+    let text = format!("{} {}", node.class_type, node.title).to_ascii_lowercase();
+    if ["image", "video", "animated", "webm", "frames", "media"]
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return true;
+    }
+    draft.workflow.inputs(&node.node_id).is_some_and(|inputs| {
+        inputs.keys().any(|name| {
+            let name = name.to_ascii_lowercase();
+            ["image", "images", "video", "videos", "frames"]
+                .iter()
+                .any(|marker| name.contains(marker))
+        })
+    })
 }
 
 fn output_type_for_node(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView) -> OutputType {
@@ -3494,7 +4097,7 @@ fn inspect_workflow(
                     kind: value_kind(value, linked).to_owned(),
                     current_value_summary: current_value_summary(value),
                     is_linked: linked,
-                    bindable: !linked,
+                    bindable: !linked || linked_target_semantic(name).is_some(),
                     suggested_type: suggestion_for_input(name, value, linked),
                     suggested_semantic_key: suggestion_for_semantic_key(name, value, linked),
                     numeric_min: None,
@@ -3930,7 +4533,7 @@ fn validate_mapping_value(
     }
 }
 
-fn possible_link(value: &Value) -> Option<(&str, u64)> {
+pub(crate) fn possible_link(value: &Value) -> Option<(&str, u64)> {
     let array = value.as_array()?;
     if array.len() != 2 {
         return None;
@@ -3991,10 +4594,23 @@ fn current_value_summary(value: &Value) -> String {
 }
 
 fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<String> {
-    if linked {
-        return None;
-    }
     let name = name.to_ascii_lowercase();
+    if linked {
+        return match name.as_str() {
+            "prompt" | "text" | "positive" | "positive_prompt" | "negative" | "negative_prompt" => {
+                Some("textarea".to_owned())
+            }
+            "width" | "height" | "length" | "frames" | "num_frames" | "frame_count" => {
+                Some("integer".to_owned())
+            }
+            "seed" | "noise_seed" | "random_seed" => Some("seed".to_owned()),
+            "image" | "input_image" | "first_frame" | "start_frame" | "last_frame"
+            | "end_frame" => Some("image".to_owned()),
+            "video" | "input_video" => Some("video".to_owned()),
+            "audio" | "input_audio" => Some("audio".to_owned()),
+            _ => None,
+        };
+    }
     if value.is_string()
         && (["prompt", "text", "positive", "negative"]
             .iter()
@@ -4056,10 +4672,13 @@ fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<Strin
 }
 
 fn suggestion_for_semantic_key(name: &str, value: &Value, linked: bool) -> Option<String> {
-    if linked || value.is_object() || value.is_boolean() || value.is_null() {
+    if value.is_object() || value.is_boolean() || value.is_null() {
         return None;
     }
     let lower = name.to_ascii_lowercase();
+    if linked {
+        return linked_target_semantic(&lower).map(str::to_owned);
+    }
     let semantic = [
         "prompt",
         "seed",
@@ -4505,6 +5124,59 @@ mod tests {
         assert!(format!("{invalid_error}").contains("不是有效的 JSON"));
     }
 
+    fn test_draft(value: Value) -> WorkflowOnboardingDraft {
+        let raw_bytes = serde_json::to_vec(&value).unwrap();
+        let workflow = validate_api_workflow(value).unwrap();
+        WorkflowOnboardingDraft {
+            draft_id: "onb_test_graph".to_owned(),
+            workflow_sha256: sha256(&raw_bytes),
+            original_filename: "test_graph.json".to_owned(),
+            nodes: inspect_workflow(&workflow).unwrap(),
+            workflow,
+            raw_bytes,
+            manifest: WorkflowManifest {
+                schema_version: 1,
+                id: "wfl_test_graph".to_owned(),
+                name: "Test Graph".to_owned(),
+                workflow_version: "1.0.0".to_owned(),
+                recipe_version: "1.0.0".to_owned(),
+                category: "image".to_owned(),
+                mode: "text_to_image".to_owned(),
+            },
+            recipe_id: "rcp_test_graph".to_owned(),
+            allow_existing_workflow_sha: false,
+            capability: CapabilityCheckView {
+                state: CapabilityState::Ready,
+                checked_at: None,
+                issues: Vec::new(),
+            },
+            input_mappings: Vec::new(),
+            output_mappings: Vec::new(),
+        }
+    }
+
+    fn graph_video_draft() -> WorkflowOnboardingDraft {
+        test_draft(json!({
+            "1": {"inputs": {"conditioning": ["63", 0]}, "class_type": "BasicGuider"},
+            "2": {"inputs": {"noise_seed": 123}, "class_type": "RandomNoise"},
+            "3": {"inputs": {"clip_name": "test-clip.safetensors"}, "class_type": "CLIPLoader"},
+            "6": {"inputs": {"vae_name": "test-vae.safetensors"}, "class_type": "VAELoader"},
+            "14": {"inputs": {"guider": ["1", 0], "noise": ["2", 0], "sampler": ["54", 0], "sigmas": ["50", 0], "latent_image": ["63", 1]}, "class_type": "SamplerCustomAdvanced"},
+            "18": {"inputs": {"samples": ["14", 0], "vae": ["6", 0]}, "class_type": "VAEDecodeAudio"},
+            "35": {"inputs": {"expression": "a * 24", "values.a": ["49", 0]}, "class_type": "ComfyMathExpression"},
+            "39": {"inputs": {"samples": ["14", 0], "vae": ["60", 0]}, "class_type": "VAEDecode"},
+            "40": {"inputs": {"anything": ["39", 0]}, "class_type": "easy clearCacheAll"},
+            "49": {"inputs": {"value": 5}, "class_type": "FloatConstant"},
+            "50": {"inputs": {"scheduler": "normal", "steps": 8, "denoise": 1}, "class_type": "BasicScheduler"},
+            "54": {"inputs": {}, "class_type": "KSamplerSelect"},
+            "59": {"inputs": {"text": "A cinematic test prompt"}, "class_type": "Text Multiline"},
+            "60": {"inputs": {"vae_name": "test-vae.safetensors"}, "class_type": "VAELoader"},
+            "61": {"inputs": {"aspect_ratio": "16:9", "megapixels": 0.4, "multiple": 32}, "class_type": "ResolutionSelector"},
+            "62": {"inputs": {"audio": ["18", 0], "crf": 19, "filename_prefix": "ComfyUI", "format": "video/h264-mp4", "frame_rate": 24, "images": ["39", 0], "pix_fmt": "yuv420p", "save_metadata": true}, "class_type": "VHS_VideoCombine"},
+            "63": {"inputs": {"audio_vae": ["6", 0], "clip": ["3", 0], "height": ["61", 1], "length": ["35", 1], "prompt": ["59", 0], "ref_image_size": "medium", "vae": ["60", 0], "width": ["61", 0]}, "class_type": "MiniMaxH3ReferenceToVideo"}
+        }))
+    }
+
     #[test]
     fn auto_input_inference_keeps_prompt_numeric_and_media_semantics_distinct() {
         let cases = [
@@ -4923,7 +5595,7 @@ outputs: []
             .set_input_mapping(
                 &draft.draft_id,
                 WorkflowOnboardingInputMappingRequest {
-                    semantic_key: "reference_image".to_owned(),
+                    semantic_key: "unrelated_media".to_owned(),
                     field_type: "image".to_owned(),
                     label: "Reference image".to_owned(),
                     required: false,
@@ -4938,7 +5610,7 @@ outputs: []
                     item_index: None,
                 },
             )
-            .expect_err("linked inputs must remain internal");
+            .expect_err("linked inputs must reject unrelated production semantics");
         assert_eq!(linked_error.code(), "LINKED_INPUT_NOT_BINDABLE");
         let dangerous_error = service
             .set_input_mapping(
@@ -5276,6 +5948,211 @@ outputs: []
 
         assert_eq!(checked.len(), 10);
         assert_eq!(adapter.object_info_calls(), 1);
+    }
+
+    #[test]
+    fn output_candidates_prefer_media_sinks_and_preserve_ties() {
+        let cases = [
+            (
+                json!({
+                    "1": {"inputs": {}, "class_type": "VHS_VideoCombine"},
+                    "2": {"inputs": {}, "class_type": "easy clearCacheAll"}
+                }),
+                Some("1"),
+                None,
+            ),
+            (
+                json!({
+                    "1": {"inputs": {}, "class_type": "SaveVideo"},
+                    "2": {"inputs": {}, "class_type": "PreviewVideo"}
+                }),
+                Some("1"),
+                None,
+            ),
+            (
+                json!({
+                    "1": {"inputs": {}, "class_type": "SaveVideo"},
+                    "2": {"inputs": {}, "class_type": "SaveVideo"}
+                }),
+                None,
+                Some("AMBIGUOUS_OUTPUT"),
+            ),
+            (
+                json!({"1": {"inputs": {}, "class_type": "easy clearCacheAll"}}),
+                None,
+                Some("UNKNOWN_OUTPUT"),
+            ),
+        ];
+
+        for (workflow, output_node, issue_code) in cases {
+            let result = infer_auto_onboarding(&test_draft(workflow));
+            assert_eq!(
+                result
+                    .output_mappings
+                    .first()
+                    .map(|output| output.node_id.as_str()),
+                output_node,
+            );
+            assert_eq!(
+                result.issues.first().map(|issue| issue.code.as_str()),
+                issue_code,
+            );
+        }
+    }
+
+    #[test]
+    fn graph_inference_binds_complex_video_recipe_without_exposing_loader_controls() {
+        let draft = graph_video_draft();
+        let result = infer_auto_onboarding(&draft);
+
+        assert_eq!(result.category, "video");
+        assert_eq!(result.mode, "text_to_video");
+        assert_eq!(
+            result
+                .output_mappings
+                .first()
+                .map(|output| output.node_id.as_str()),
+            Some("62")
+        );
+        assert!(
+            result.issues.is_empty(),
+            "unexpected issues: {:?}",
+            result.issues
+        );
+
+        let mapping = |key: &str| {
+            result
+                .input_mappings
+                .iter()
+                .find(|mapping| mapping.semantic_key == key)
+                .unwrap_or_else(|| panic!("missing mapping {key}"))
+        };
+        assert_eq!(
+            (
+                mapping("prompt").target_node.as_str(),
+                mapping("prompt").target_input.as_str()
+            ),
+            ("59", "text")
+        );
+        assert_eq!(
+            (
+                mapping("width").target_node.as_str(),
+                mapping("width").target_input.as_str()
+            ),
+            ("63", "width")
+        );
+        assert_eq!(
+            (
+                mapping("height").target_node.as_str(),
+                mapping("height").target_input.as_str()
+            ),
+            ("63", "height")
+        );
+        assert_eq!(
+            (
+                mapping("duration_seconds").target_node.as_str(),
+                mapping("duration_seconds").target_input.as_str()
+            ),
+            ("49", "value")
+        );
+        assert_eq!(
+            mapping("duration_seconds").default_value.as_deref(),
+            Some("5")
+        );
+        assert!(!mapping("steps").required);
+        assert_eq!(mapping("steps").default_value.as_deref(), Some("8"));
+        assert!(!mapping("denoise").required);
+        assert_eq!(mapping("denoise").default_value.as_deref(), Some("1"));
+        assert!(!mapping("fps").required);
+        assert_eq!(mapping("fps").default_value.as_deref(), Some("24"));
+        assert!(result.input_mappings.iter().all(|mapping| {
+            ![
+                "clip_name",
+                "vae_name",
+                "unet_name",
+                "lora_name",
+                "scheduler",
+                "format",
+                "crf",
+                "pix_fmt",
+                "filename_prefix",
+                "save_metadata",
+                "ref_image_size",
+            ]
+            .contains(&mapping.target_input.as_str())
+        }));
+
+        let recipe = build_recipe(&WorkflowOnboardingDraft {
+            input_mappings: result.input_mappings.clone(),
+            output_mappings: result.output_mappings.clone(),
+            ..draft.clone()
+        })
+        .unwrap();
+        let mut values = BTreeMap::new();
+        values.insert(
+            "prompt".to_owned(),
+            crate::domain::InputValue::String("DEV081 test".to_owned()),
+        );
+        values.insert("width".to_owned(), crate::domain::InputValue::Integer(768));
+        values.insert("height".to_owned(), crate::domain::InputValue::Integer(432));
+        values.insert(
+            "duration_seconds".to_owned(),
+            crate::domain::InputValue::Integer(5),
+        );
+        values.insert(
+            "seed".to_owned(),
+            crate::domain::InputValue::Seed(crate::domain::SeedValue::Fixed(123)),
+        );
+        let compiled = WorkflowCompiler
+            .compile(
+                &draft.workflow,
+                &recipe,
+                &crate::domain::CompileRequest::new(values),
+            )
+            .unwrap();
+        assert_eq!(
+            compiled.workflow["59"]["inputs"]["text"],
+            json!("DEV081 test")
+        );
+        assert_eq!(compiled.workflow["63"]["inputs"]["width"], json!(768));
+        assert_eq!(compiled.workflow["63"]["inputs"]["height"], json!(432));
+        assert_eq!(compiled.workflow["49"]["inputs"]["value"], json!(5));
+        assert_eq!(compiled.workflow["2"]["inputs"]["noise_seed"], json!(123));
+        assert_eq!(compiled.workflow["50"]["inputs"]["steps"], json!(8));
+        assert_eq!(compiled.workflow["50"]["inputs"]["denoise"], json!(1));
+        assert_eq!(compiled.workflow["62"]["inputs"]["frame_rate"], json!(24));
+        assert_eq!(
+            possible_link(&draft.workflow.inputs("63").unwrap()["width"]),
+            Some(("61", 0))
+        );
+        assert_eq!(
+            possible_link(&draft.workflow.inputs("63").unwrap()["height"]),
+            Some(("61", 1))
+        );
+        assert_eq!(
+            possible_link(&draft.workflow.inputs("63").unwrap()["length"]),
+            Some(("35", 1))
+        );
+    }
+
+    #[test]
+    fn duration_inference_requires_one_proven_numeric_source() {
+        let draft = test_draft(json!({
+            "1": {"inputs": {"video": ["2", 0]}, "class_type": "SaveVideo"},
+            "2": {"inputs": {"length": ["3", 0]}, "class_type": "VideoGenerator"},
+            "3": {"inputs": {"expression": "a * 24", "values.a": ["4", 0], "values.b": ["5", 0]}, "class_type": "ComfyMathExpression"},
+            "4": {"inputs": {"value": 5}, "class_type": "FloatConstant"},
+            "5": {"inputs": {"value": 6}, "class_type": "FloatConstant"}
+        }));
+        let result = infer_auto_onboarding(&draft);
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| issue.code == "AMBIGUOUS_DURATION_SOURCE"));
+        assert!(!result
+            .input_mappings
+            .iter()
+            .any(|mapping| mapping.semantic_key == "duration_seconds"));
     }
 
     #[test]

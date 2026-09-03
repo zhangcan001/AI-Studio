@@ -26,5 +26,9 @@ dist-ssr
 # Local runtime workflow inputs
 runtime-import/
 
+# Real workflow fixtures can contain prompts and local model paths.
+local-fixtures/*
+!local-fixtures/.gitkeep
+
 # Local ChatGPT/CodexPro coordination state
 .ai-bridge/

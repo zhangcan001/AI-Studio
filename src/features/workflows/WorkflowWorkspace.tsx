@@ -142,7 +142,7 @@ interface MetadataDraft {
   mode: string;
 }
 
-function workflowImportErrorView(error: unknown): WorkflowImportErrorView | undefined {
+function workflowImportErrorView(error: unknown): WorkflowImportErrorView {
   const formatted = formatUiError(error);
   const haystack = `${formatted.code ?? ""} ${formatted.technicalMessage}`.toUpperCase();
   if (/INVALID[_\s-]*JSON|JSON[_\s-]*(PARSE|INVALID)|MALFORMED[_\s-]*JSON/.test(haystack)) {
@@ -154,7 +154,14 @@ function workflowImportErrorView(error: unknown): WorkflowImportErrorView | unde
   if (/\bUNKNOWN\b|UNRECOGNIZED|WORKFLOW_NOT_API_FORMAT/.test(haystack)) {
     return { kind: "UNKNOWN_FORMAT", message: "这个 JSON 不是可识别的 ComfyUI 工作流。" };
   }
-  return undefined;
+  return {
+    kind: "IMPORT_FAILED",
+    message: formatted.message === "操作失败，请查看技术详情。"
+      ? "工作流导入未完成，请查看详细原因后重试。"
+      : formatted.message,
+    code: formatted.code,
+    technicalMessage: formatted.technicalMessage,
+  };
 }
 
 export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenTask }: Props) {
@@ -365,16 +372,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       await discardReplacedDraft(previousDraftId);
       reset();
       setPublished(undefined);
-      const formatError = workflowImportErrorView(importError);
       setAutoPlan(undefined);
       setShowAdvanced(false);
-      if (formatError) {
-        setError(undefined);
-        setAutoImportError(formatError);
-      } else {
-        setAutoImportError(undefined);
-        setError(toUserMessage(importError));
-      }
+      setError(undefined);
+      setAutoImportError(workflowImportErrorView(importError));
     } finally {
       setLoading(false);
       importBusyRef.current = false;
@@ -840,7 +841,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   }
 
   async function bindInput(nodeId: string, input: WorkflowInputView) {
-    if (!draft || input.isLinked || !input.bindable) return;
+    if (!draft || (!input.bindable && (!input.isLinked || !isExposableWorkflowInput(input)))) return;
     const mapping = mappingDrafts[mappingKey(nodeId, input.name)] ?? defaultMapping(nodeId, input);
     const request: WorkflowOnboardingInputMappingRequest = {
       semanticKey: mapping.semanticKey,
@@ -1017,6 +1018,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       <WorkflowSmartImport
         plan={autoPlan}
         importError={autoImportError}
+        draft={draft}
         projectId={projectId}
         loading={loading}
         onResolve={(issue, candidate) => void resolveAutoIssue(issue, candidate)}
@@ -1418,7 +1420,7 @@ function InputsPane({
 }) {
   return (
     <div className="workflow-onboarding-pane">
-      <p className="section-description">选择语义字段并确认每项映射。已连接的输入受到保护，不能直接绑定。</p>
+      <p className="section-description">选择语义字段并确认每项映射。已连接的输入默认保持原图连接，也可以手动映射并在执行时覆盖。</p>
       <div className="workflow-input-list">
         {draft.nodes.flatMap((node) => node.inputs.map((input) => {
           const key = mappingKey(node.nodeId, input.name);
@@ -1427,7 +1429,8 @@ function InputsPane({
           return (
             <div className="workflow-input-card" key={key}>
               <div className="workflow-input-heading"><strong>{node.nodeId}.{input.name}</strong><span>{input.currentValueSummary}</span></div>
-              {input.isLinked ? <p className="disabled-note">已连接输入，不能直接绑定。</p> : (
+              {input.isLinked && <p className="field-hint">此参数在执行时会覆盖当前节点连接输入，原始工作流不会修改。</p>}
+              {(input.bindable || (input.isLinked && isExposableWorkflowInput(input))) ? (
                 <div className="workflow-mapping-form">
                   <label>语义键<input value={mapping.semanticKey} onChange={(event) => onPatch(key, { semanticKey: event.target.value })} /></label>
                   <label>字段类型<select value={mapping.fieldType} onChange={(event) => onPatch(key, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
@@ -1440,9 +1443,9 @@ function InputsPane({
                   </> : null}
                   {mapping.fieldType === "integer" || mapping.fieldType === "number" ? <label>步长<input value={mapping.step} onChange={(event) => onPatch(key, { step: event.target.value })} inputMode={mapping.fieldType === "number" ? "decimal" : "numeric"} /></label> : null}
                   {mapping.fieldType.endsWith("s") ? <label>最大数量<input value={mapping.maxItems} onChange={(event) => onPatch(key, { maxItems: event.target.value })} inputMode="numeric" /></label> : null}
-                  <button type="button" onClick={() => onBind(node.nodeId, input)} disabled={!input.bindable}>确认映射</button>
+                  <button type="button" onClick={() => onBind(node.nodeId, input)} disabled={!input.bindable && !input.isLinked}>确认映射</button>
                 </div>
-              )}
+              ) : <p className="disabled-note">当前输入不能作为生产参数。</p>}
               {input.allowedOptions.length > 0 && <small className="field-hint">可用选项：{input.allowedOptions.join(", ")}</small>}
               {existing && <div className="workflow-existing-mapping"><span>已映射为 <strong>{existing.label}</strong></span><button type="button" className="quiet-button" onClick={() => onRemove(existing)}>移除</button></div>}
             </div>
@@ -1558,7 +1561,7 @@ function defaultMapping(nodeId: string, input: WorkflowInputView): MappingDraft 
     fieldType,
     label: fieldLabel(input.name),
     required: true,
-    defaultValue: fieldType === "textarea" || fieldType === "integer" || fieldType === "number" || fieldType === "seed"
+    defaultValue: !input.isLinked && (fieldType === "textarea" || fieldType === "integer" || fieldType === "number" || fieldType === "seed")
       ? input.currentValueSummary === "random" ? "" : input.currentValueSummary
       : "",
     minValue: input.numericMin ?? "",
@@ -1590,8 +1593,12 @@ function supportedParameterFieldType(input: WorkflowInputView): WorkflowFieldTyp
 }
 
 export function isExposableWorkflowInput(input: WorkflowInputView): boolean {
-  return input.bindable
-    && !input.isLinked
+  const linkedSemantic = input.suggestedSemanticKey?.toLowerCase();
+  const graphSemantic = [
+    "prompt", "negative_prompt", "width", "height", "duration_seconds", "seed",
+    "reference_image", "reference_video", "reference_audio",
+  ].includes(linkedSemantic ?? "");
+  return (input.bindable || (input.isLinked && graphSemantic))
     && Boolean(supportedParameterFieldType(input))
     && !isDangerousParameterName(input.name);
 }

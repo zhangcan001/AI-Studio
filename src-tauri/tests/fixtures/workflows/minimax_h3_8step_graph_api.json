@@ -1,0 +1,186 @@
+{
+  "1": {
+    "inputs": {
+      "model": ["57", 0],
+      "conditioning": ["63", 0]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {"title": "Basic Guider"}
+  },
+  "2": {
+    "inputs": {
+      "noise_seed": 123456789
+    },
+    "class_type": "RandomNoise",
+    "_meta": {"title": "Random Noise"}
+  },
+  "3": {
+    "inputs": {
+      "clip_name": "CLIP_MODEL_PLACEHOLDER",
+      "type": "default",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {"title": "CLIP Loader"}
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "AUDIO_VAE_MODEL_PLACEHOLDER"
+    },
+    "class_type": "VAELoader",
+    "_meta": {"title": "Audio VAE Loader"}
+  },
+  "14": {
+    "inputs": {
+      "noise": ["2", 0],
+      "guider": ["1", 0],
+      "sampler": ["54", 0],
+      "sigmas": ["50", 0],
+      "latent_image": ["63", 1]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {"title": "Advanced Sampler"}
+  },
+  "18": {
+    "inputs": {
+      "samples": ["14", 0],
+      "vae": ["6", 0]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {"title": "Audio Decode"}
+  },
+  "35": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": ["49", 0]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {"title": "Frame Length Expression"}
+  },
+  "39": {
+    "inputs": {
+      "samples": ["14", 0],
+      "vae": ["60", 0]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {"title": "Video Decode"}
+  },
+  "40": {
+    "inputs": {
+      "anything": ["39", 0]
+    },
+    "class_type": "easy clearCacheAll",
+    "_meta": {"title": "Cache Utility"}
+  },
+  "41": {
+    "inputs": {
+      "model": ["56", 0]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {"title": "Memory Efficient Attention"}
+  },
+  "49": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "FloatConstant",
+    "_meta": {"title": "Duration Seconds"}
+  },
+  "50": {
+    "inputs": {
+      "scheduler": "beta",
+      "steps": 8,
+      "denoise": 1,
+      "model": ["57", 0]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {"title": "8 Step Scheduler"}
+  },
+  "54": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {"title": "Sampler Select"}
+  },
+  "56": {
+    "inputs": {
+      "unet_name": "UNET_MODEL_PLACEHOLDER",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {"title": "UNET Loader"}
+  },
+  "57": {
+    "inputs": {
+      "lora_name": "LORA_MODEL_PLACEHOLDER",
+      "strength_model": 1,
+      "model": ["118", 0]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {"title": "Model LoRA"}
+  },
+  "59": {
+    "inputs": {
+      "text": "A cinematic test prompt"
+    },
+    "class_type": "Text Multiline",
+    "_meta": {"title": "Prompt Text"}
+  },
+  "60": {
+    "inputs": {
+      "vae_name": "VIDEO_VAE_MODEL_PLACEHOLDER"
+    },
+    "class_type": "VAELoader",
+    "_meta": {"title": "Video VAE Loader"}
+  },
+  "61": {
+    "inputs": {
+      "aspect_ratio": "16:9",
+      "megapixels": 0.4,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {"title": "Resolution Selector"}
+  },
+  "62": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "dev081_test",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": ["39", 0],
+      "audio": ["18", 0]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {"title": "Final Video Output"}
+  },
+  "63": {
+    "inputs": {
+      "prompt": ["59", 0],
+      "width": ["61", 0],
+      "height": ["61", 1],
+      "length": ["35", 1],
+      "ref_image_size": "small",
+      "clip": ["3", 0],
+      "vae": ["60", 0],
+      "audio_vae": ["6", 0]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {"title": "MiniMax H3 Video Generator"}
+  },
+  "118": {
+    "inputs": {
+      "attention": "sage_attention",
+      "model": ["41", 0]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {"title": "Attention Backend"}
+  }
+}

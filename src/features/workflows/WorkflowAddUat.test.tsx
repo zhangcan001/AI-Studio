@@ -21,6 +21,7 @@ import { WorkflowWorkspace } from "./WorkflowWorkspace";
 const serviceMocks = vi.hoisted(() => ({
   autoOnboardWorkflow: vi.fn(),
   getOnboardingDraft: vi.fn(),
+  setOnboardingInputMapping: vi.fn(),
   listWorkflowProductionWorkspace: vi.fn(),
   refreshWorkflowProductionWorkspace: vi.fn(),
   listGenerationCatalog: vi.fn(),
@@ -330,6 +331,32 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     expect(screen.queryByText("✓ 工作流已添加")).toBeNull();
   });
 
+  it("非格式导入异常显示可展开的详细原因，而不是裸 IMPORT_FAILED", async () => {
+    const user = userEvent.setup();
+    serviceMocks.autoOnboardWorkflow.mockRejectedValue({
+      code: "IMPORT_FAILED",
+      message: "graph inference could not resolve duration source",
+    });
+    serviceMocks.listWorkflowProductionWorkspace.mockResolvedValue(EMPTY_WORKSPACE);
+
+    render(
+      <WorkflowWorkspace
+        projectId="project-1"
+        catalog={[]}
+        comfyConnected={false}
+        onCatalogChanged={vi.fn().mockResolvedValue(undefined)}
+        onOpenStudio={vi.fn().mockResolvedValue(undefined)}
+        onUseInProject={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
+    expect(await screen.findByRole("heading", { name: "工作流未能导入" })).toBeTruthy();
+    expect(screen.getByText("工作流导入未完成，请查看详细原因后重试。")).toBeTruthy();
+    expect(screen.getByText("查看详细原因")).toBeTruthy();
+    expect(screen.getByText("graph inference could not resolve duration source")).toBeTruthy();
+  });
+
   it("真实 WorkflowWorkspace 添加后刷新 Catalog，打开生成页面不触发用于当前项目", async () => {
     const user = userEvent.setup();
     const recipe = addedRecipe("image");
@@ -402,5 +429,72 @@ describe("DEV-079 添加工作流前端 UAT", () => {
         recipeId: recipe.recipeId,
       }],
     }));
+  });
+
+  it("高级输入映射允许 linked target，并明确执行时覆盖连接输入", async () => {
+    const user = userEvent.setup();
+    const recipe = addedRecipe("video");
+    const reviewPlan = plan({
+      state: "NEEDS_REVIEW",
+      published: undefined,
+      autoPublishable: false,
+      message: "工作流需要确认",
+      issues: [{
+        code: "AMBIGUOUS_DURATION_SOURCE",
+        field: "duration_seconds",
+        message: "无法自动确认视频时长来源",
+        candidates: [{ label: "节点 49 · value", nodeId: "49", inputName: "value", fieldType: "number" }],
+      }],
+    });
+    const linkedDraft = {
+      ...onboardingDraft(recipe),
+      nodes: [{
+        nodeId: "63",
+        classType: "MiniMaxH3ReferenceToVideo",
+        title: "视频生成",
+        isOutputNode: true,
+        inputs: [{
+          name: "width",
+          kind: "link",
+          currentValueSummary: "节点 61 · 1",
+          isLinked: true,
+          bindable: false,
+          suggestedType: "integer",
+          suggestedSemanticKey: "width",
+          numericMin: "16",
+          numericMax: "2048",
+          numericStep: "1",
+          allowedOptions: [],
+        }],
+      }],
+    };
+    serviceMocks.autoOnboardWorkflow.mockResolvedValue(reviewPlan);
+    serviceMocks.getOnboardingDraft.mockResolvedValue(linkedDraft);
+    serviceMocks.setOnboardingInputMapping.mockResolvedValue(linkedDraft);
+    serviceMocks.listWorkflowProductionWorkspace.mockResolvedValue(EMPTY_WORKSPACE);
+
+    render(
+      <WorkflowWorkspace
+        projectId="project-1"
+        catalog={[]}
+        comfyConnected={false}
+        onCatalogChanged={vi.fn().mockResolvedValue(undefined)}
+        onOpenStudio={vi.fn().mockResolvedValue(undefined)}
+        onUseInProject={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
+    await screen.findByRole("heading", { name: "需要确认后添加" });
+    await user.click(screen.getByRole("button", { name: "高级编辑" }));
+    await user.click(screen.getByRole("tab", { name: "输入映射" }));
+
+    expect(screen.getByRole("button", { name: "确认映射" })).toBeTruthy();
+    expect(screen.getByText(/此参数在执行时会覆盖当前节点连接输入/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "确认映射" }));
+    await waitFor(() => expect(serviceMocks.setOnboardingInputMapping).toHaveBeenCalledWith(
+      "dev079-p1-draft",
+      expect.objectContaining({ targetNode: "63", targetInput: "width", defaultValue: undefined }),
+    ));
   });
 });

@@ -34,9 +34,15 @@ function workflowInput(overrides: Partial<WorkflowInputView> = {}): WorkflowInpu
 }
 
 describe("Workflow Parameter Exposure 安全边界", () => {
-  it("只允许已有 Recipe 字段类型支持的未连接字面量输入", () => {
+  it("只允许已有 Recipe 字段类型支持的字面量和安全图语义输入", () => {
     expect(isExposableWorkflowInput(workflowInput())).toBe(true);
-    expect(isExposableWorkflowInput(workflowInput({ isLinked: true }))).toBe(false);
+    expect(isExposableWorkflowInput(workflowInput({ isLinked: true, bindable: false }))).toBe(false);
+    expect(isExposableWorkflowInput(workflowInput({
+      name: "width",
+      isLinked: true,
+      bindable: false,
+      suggestedSemanticKey: "width",
+    }))).toBe(true);
     expect(isExposableWorkflowInput(workflowInput({ bindable: false }))).toBe(false);
     expect(isExposableWorkflowInput(workflowInput({ suggestedType: "float" }))).toBe(false);
   });

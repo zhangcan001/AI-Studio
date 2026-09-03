@@ -85,6 +85,7 @@ pub mod task_history_service;
 pub mod task_query_service;
 pub mod task_recovery_service;
 pub mod workflow_benchmark_service;
+pub mod workflow_graph_analysis;
 pub mod workflow_library_service;
 pub mod workflow_lifecycle_service;
 pub mod workflow_manifest;
