@@ -929,7 +929,7 @@ outputs:
         assert_eq!(image_batch.items.len(), 1);
         let image_batch_id = image_batch.batch.id.clone();
         queue_service
-            .start(&project_id, image_batch_id.as_str())
+            .start_for_test(&project_id, image_batch_id.as_str())
             .await
             .expect("DEV027 live image batch should start through ProductionQueueService");
         let image_task = wait_for_live_batch(
@@ -977,7 +977,7 @@ outputs:
         );
         let video_batch_id = video_batch.batch.id.clone();
         queue_service
-            .start(&project_id, video_batch_id.as_str())
+            .start_for_test(&project_id, video_batch_id.as_str())
             .await
             .expect("DEV027 live I2V batch should start through ProductionQueueService");
         let video_task = wait_for_live_batch(

@@ -23,6 +23,7 @@ use crate::application::production_orchestrator_service::ProductionOrchestratorS
 use crate::application::production_package_service::ProductionPackageService;
 use crate::application::production_preparation_service::ProductionPreparationService;
 use crate::application::production_queue_service::ProductionQueueService;
+use crate::application::production_start_admission_service::ProductionStartAdmissionService;
 use crate::application::production_structure_service::ProductionStructureService;
 use crate::application::project_backup_service::ProjectBackupService;
 use crate::application::project_command_center_service::ProjectCommandCenterService;
@@ -101,6 +102,7 @@ pub struct AppState {
     pub organization_service: Arc<OrganizationService>,
     pub project_template_service: Arc<ProjectTemplateService>,
     pub production_queue_service: Arc<ProductionQueueService>,
+    pub production_start_admission_service: Arc<ProductionStartAdmissionService>,
     pub production_item_review_service: Arc<ProductionItemReviewService>,
     pub production_audit_service: Arc<ProductionAuditService>,
     pub diagnostics_service: Arc<DiagnosticsService>,
@@ -161,6 +163,7 @@ impl AppState {
         organization_service: Arc<OrganizationService>,
         project_template_service: Arc<ProjectTemplateService>,
         production_queue_service: Arc<ProductionQueueService>,
+        production_start_admission_service: Arc<ProductionStartAdmissionService>,
         production_item_review_service: Arc<ProductionItemReviewService>,
         production_audit_service: Arc<ProductionAuditService>,
         diagnostics_service: Arc<DiagnosticsService>,
@@ -219,6 +222,7 @@ impl AppState {
             organization_service,
             project_template_service,
             production_queue_service,
+            production_start_admission_service,
             production_item_review_service,
             production_audit_service,
             diagnostics_service,

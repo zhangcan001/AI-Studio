@@ -47,6 +47,7 @@ pub mod production_package_inspector;
 pub mod production_package_service;
 pub mod production_preparation_service;
 pub mod production_queue_service;
+pub mod production_start_admission_service;
 pub mod production_structure_service;
 pub mod project_backup_service;
 pub mod project_bootstrap;

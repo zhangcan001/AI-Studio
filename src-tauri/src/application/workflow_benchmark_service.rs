@@ -6,6 +6,7 @@ use crate::application::production_queue_service::{
     generation_values_from_json, generation_values_to_json, CreateProductionBatchItem,
     CreateProductionBatchRequest, ProductionQueueError, ProductionQueueService,
 };
+use crate::application::production_start_admission_service::ProductionStartAdmissionService;
 use crate::application::scheduler::scheduler_decision;
 use crate::compiler::{RecipeParser, RecipeValidator};
 use crate::domain::{InputDefinition, OutputType, PresetId, Recipe, SeedValue};
@@ -313,6 +314,7 @@ pub struct WorkflowBenchmarkService {
     definition_repository: Arc<dyn GenerationDefinitionRepository>,
     preset_repository: Arc<dyn PresetRepository>,
     production_queue_service: Arc<ProductionQueueService>,
+    production_start_admission_service: Option<Arc<ProductionStartAdmissionService>>,
     clock: Arc<dyn Clock>,
 }
 
@@ -329,8 +331,36 @@ impl WorkflowBenchmarkService {
             definition_repository,
             preset_repository,
             production_queue_service,
+            production_start_admission_service: None,
             clock,
         }
+    }
+
+    pub fn with_start_admission_service(
+        mut self,
+        service: Arc<ProductionStartAdmissionService>,
+    ) -> Self {
+        self.production_start_admission_service = Some(service);
+        self
+    }
+
+    async fn start_production(&self, project_id: &str, batch_id: &str) -> Result<(), String> {
+        #[cfg(test)]
+        if self.production_start_admission_service.is_none() {
+            return self
+                .production_queue_service
+                .start_for_test(project_id, batch_id)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        let service = self
+            .production_start_admission_service
+            .as_ref()
+            .ok_or_else(|| "PRODUCTION_START_ADMISSION_UNAVAILABLE".to_owned())?;
+        service
+            .start(project_id, batch_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn preview(
@@ -434,8 +464,7 @@ impl WorkflowBenchmarkService {
 
         if request.auto_start {
             if let Err(error) = self
-                .production_queue_service
-                .start(&request.project_id, queue.batch.id.as_str())
+                .start_production(&request.project_id, queue.batch.id.as_str())
                 .await
             {
                 // Admission failures leave a durable QUEUED experiment that can
@@ -868,8 +897,7 @@ impl WorkflowBenchmarkService {
 
         if auto_start {
             if let Err(error) = self
-                .production_queue_service
-                .start(project_id, queue.batch.id.as_str())
+                .start_production(project_id, queue.batch.id.as_str())
                 .await
             {
                 tracing::info!(

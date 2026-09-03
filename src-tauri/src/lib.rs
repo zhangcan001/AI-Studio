@@ -15,6 +15,7 @@ pub use application::ports::{
     WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
+pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
     initialize, SqliteAssetDeletionRepository, SqliteAssetRepository,
     SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
@@ -54,6 +55,7 @@ use application::{
     production_package_service::{ProductionPackageH3Config, ProductionPackageService},
     production_preparation_service::ProductionPreparationService,
     production_queue_service::ProductionQueueService,
+    production_start_admission_service::ProductionStartAdmissionService,
     production_structure_service::ProductionStructureService,
     project_backup_service::ProjectBackupService,
     project_bootstrap::DefaultProjectBootstrap,
@@ -87,7 +89,6 @@ use application::{
     workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::WorkflowOnboardingService,
 };
-use error::AppError;
 use infrastructure::logging::LoggingStatus;
 use infrastructure::{
     comfy::ComfyHttpAdapterFactory,
@@ -556,36 +557,53 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_recovery_service.clone(),
                 clock.clone(),
             ));
-            let production_item_review_service = Arc::new(ProductionItemReviewService::new_with_shot_batch_repository(
-                production_item_review_repository,
-                production_queue_repository,
+            let production_start_admission_service = Arc::new(ProductionStartAdmissionService::new(
                 production_queue_service.clone(),
-                task_repository.clone(),
-                asset_repository.clone(),
-                shot_batch_repository.clone(),
-                clock.clone(),
+                comfy_service.clone(),
+                workflow_lifecycle_service.clone(),
             ));
+            let production_item_review_service = Arc::new(
+                ProductionItemReviewService::new_with_shot_batch_repository(
+                    production_item_review_repository,
+                    production_queue_repository,
+                    production_queue_service.clone(),
+                    task_repository.clone(),
+                    asset_repository.clone(),
+                    shot_batch_repository.clone(),
+                    clock.clone(),
+                )
+                .with_start_admission_service(production_start_admission_service.clone()),
+            );
             let production_audit_service = Arc::new(ProductionAuditService::new(database_pool.clone()));
-            let workflow_benchmark_service = Arc::new(WorkflowBenchmarkService::new(
-                database_pool.clone(),
-                definition_repository.clone(),
-                preset_repository.clone(),
-                production_queue_service.clone(),
-                clock.clone(),
-            ));
-            let production_orchestrator_service = Arc::new(ProductionOrchestratorService::new(
-                database_pool.clone(),
-                definition_repository.clone(),
-                production_queue_service.clone(),
-                task_cancellation_service.clone(),
-                clock.clone(),
-            ));
-            let h3_local_import_service = Arc::new(H3LocalImportService::new(
-                source_asset_import_service.clone(),
-                asset_video_prompt_service.clone(),
-                production_queue_service.clone(),
-                clock.clone(),
-            ));
+            let workflow_benchmark_service = Arc::new(
+                WorkflowBenchmarkService::new(
+                    database_pool.clone(),
+                    definition_repository.clone(),
+                    preset_repository.clone(),
+                    production_queue_service.clone(),
+                    clock.clone(),
+                )
+                .with_start_admission_service(production_start_admission_service.clone()),
+            );
+            let production_orchestrator_service = Arc::new(
+                ProductionOrchestratorService::new(
+                    database_pool.clone(),
+                    definition_repository.clone(),
+                    production_queue_service.clone(),
+                    task_cancellation_service.clone(),
+                    clock.clone(),
+                )
+                .with_start_admission_service(production_start_admission_service.clone()),
+            );
+            let h3_local_import_service = Arc::new(
+                H3LocalImportService::new(
+                    source_asset_import_service.clone(),
+                    asset_video_prompt_service.clone(),
+                    production_queue_service.clone(),
+                    clock.clone(),
+                )
+                .with_start_admission_service(production_start_admission_service.clone()),
+            );
             let package_generation_definitions = tauri::async_runtime::block_on(
                 definition_repository.list_available(),
             )
@@ -826,6 +844,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 organization_service,
                 project_template_service,
                 production_queue_service,
+                production_start_admission_service,
                 production_item_review_service,
                 production_audit_service,
                 diagnostics_service,

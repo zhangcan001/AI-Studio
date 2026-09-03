@@ -448,7 +448,7 @@ async fn dev055_real_comfyui_release_gate() {
         .await
         .expect("DEV-055 Krea2 image batch should be created through ShotBatchService");
     queue_service
-        .start(PROJECT_ID, image_batch.batch.id.as_str())
+        .start_for_test(PROJECT_ID, image_batch.batch.id.as_str())
         .await
         .expect("DEV-055 Krea2 image batch should start through ProductionQueueService");
     let timeout_seconds = live_timeout_seconds();
@@ -529,7 +529,7 @@ async fn dev055_real_comfyui_release_gate() {
         .unwrap_or_else(|| panic!("ENV_NOT_READY: I2V batch is missing first_frame.assetId"));
     assert_eq!(stage_input, selected_image.id.as_str());
     queue_service
-        .start(PROJECT_ID, i2v_batch.batch.id.as_str())
+        .start_for_test(PROJECT_ID, i2v_batch.batch.id.as_str())
         .await
         .expect("DEV-055 H3 I2V batch should start through ProductionQueueService");
     let i2v_tasks = wait_for_batch(
@@ -631,7 +631,7 @@ async fn dev055_real_comfyui_release_gate() {
             serde_json::json!(reference_ids)
         );
         queue_service
-            .start(PROJECT_ID, ref_batch.batch.id.as_str())
+            .start_for_test(PROJECT_ID, ref_batch.batch.id.as_str())
             .await
             .expect("DEV-055 REF2VA batch should start through ProductionQueueService");
         let ref_tasks = wait_for_batch(

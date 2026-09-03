@@ -25,6 +25,7 @@ pub enum AppErrorCode {
     ReusableDraftUnavailable,
     WorkflowOnboardingError,
     ProductionQueueBusy,
+    ProductionStartAdmissionBlocked,
     ComfyEndpointInvalid,
     ComfyEndpointTestFailed,
     ComfyEndpointChangeBusy,
@@ -130,6 +131,12 @@ impl AppError {
         error
     }
 
+    pub fn production_start_admission_blocked(message: impl Into<String>, details: Value) -> Self {
+        let mut error = Self::new(AppErrorCode::ProductionStartAdmissionBlocked, message);
+        error.details = Some(details);
+        error
+    }
+
     pub fn comfy_endpoint_invalid(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::ComfyEndpointInvalid, message)
     }
@@ -204,6 +211,7 @@ impl AppError {
             AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
             AppErrorCode::WorkflowOnboardingError => "WORKFLOW_ONBOARDING_ERROR",
             AppErrorCode::ProductionQueueBusy => "PRODUCTION_QUEUE_BUSY",
+            AppErrorCode::ProductionStartAdmissionBlocked => "PRODUCTION_START_ADMISSION_BLOCKED",
             AppErrorCode::ComfyEndpointInvalid => "COMFY_ENDPOINT_INVALID",
             AppErrorCode::ComfyEndpointTestFailed => "COMFY_ENDPOINT_TEST_FAILED",
             AppErrorCode::ComfyEndpointChangeBusy => "COMFY_ENDPOINT_CHANGE_BUSY",

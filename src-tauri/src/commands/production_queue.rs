@@ -5,6 +5,7 @@ use crate::{
         ProductionPartialResumeEntry, ProductionPartialResumePlan, ProductionPartialResumeResult,
         ProductionQueueError, ProductionQueueOverview,
     },
+    application::production_start_admission_service::ProductionStartAdmissionError,
     domain::{ProductionBatch, ProductionBatchDetail, ProductionBatchItem},
     error::AppError,
 };
@@ -242,10 +243,10 @@ pub async fn production_queue_start(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production_start_admission_service
         .start(&project_id, &batch_id)
         .await
-        .map_err(map_queue_error)?;
+        .map_err(map_start_admission_error)?;
     production_queue_get(state, project_id, batch_id).await
 }
 
@@ -574,5 +575,25 @@ pub(crate) fn map_queue_error(error: ProductionQueueError) -> AppError {
         ),
         ProductionQueueError::NotFound(message) => AppError::invalid_input(message),
         ProductionQueueError::Repository(error) => super::map_repository_error(&error),
+    }
+}
+
+pub(crate) fn map_start_admission_error(error: ProductionStartAdmissionError) -> AppError {
+    match error {
+        ProductionStartAdmissionError::Queue(error) => map_queue_error(error),
+        ProductionStartAdmissionError::Runtime(failure) => {
+            let message = failure.to_string();
+            AppError::production_start_admission_blocked(
+                "Production batch runtime admission failed",
+                serde_json::json!({
+                    "code": failure.code,
+                    "workflowVersionId": failure.workflow_version_id,
+                    "recipeId": failure.recipe_id,
+                    "reason": failure.reason,
+                    "missingNodes": failure.missing_nodes,
+                    "message": message,
+                }),
+            )
+        }
     }
 }

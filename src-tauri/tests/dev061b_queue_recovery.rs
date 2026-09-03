@@ -20,7 +20,9 @@ use ai_studio_lib::application::{
     },
     production_package_inspector::{ProductionPackageInspector, PRODUCTION_PACKAGE_TYPE},
     production_package_service::{ProductionPackageH3Config, ProductionPackageService},
-    production_queue_service::{ProductionPartialResumePlan, ProductionQueueService},
+    production_queue_service::{
+        ProductionPartialResumePlan, ProductionQueueError, ProductionQueueService,
+    },
     source_asset_import_service::SourceAssetImportService,
     task_recovery_service::TaskRecoveryService,
 };
@@ -839,6 +841,93 @@ fn assert_plan_is_resolved(plan: &ProductionPartialResumePlan) {
 }
 
 #[tokio::test]
+async fn admitted_start_seams_do_not_reacquire_the_existing_admission_gate() {
+    let directory = tempdir().expect("temporary workspace should exist");
+    let pool = initialize(&directory.path().join("dev078-admitted-start.db"))
+        .await
+        .expect("SQLite should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("project storage should exist");
+    seed_database(&pool, &project_root).await;
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("package root should exist");
+    write_package(&package_root, &png_bytes([10, 20, 30, 255])).await;
+
+    let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Offline));
+    let services = build_services(&pool, Arc::clone(&comfy), &package_root);
+    let (batch_id, _, _) = create_package_batch(&services, &package_root).await;
+
+    let gate = services
+        .queue
+        .acquire_runtime_configuration_admission()
+        .await;
+    let detail = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        services.queue.inspect_start_admitted(PROJECT_ID, &batch_id),
+    )
+    .await
+    .expect("inspect_start_admitted must not wait for the already-held gate")
+    .expect("the ready batch should be admitted");
+    assert_eq!(detail.batch.id.as_str(), batch_id);
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        services.queue.commit_start_admitted(&detail),
+    )
+    .await
+    .expect("commit_start_admitted must not wait for the already-held gate")
+    .expect("an admitted ready batch should commit");
+
+    drop(gate);
+}
+
+#[tokio::test]
+async fn admitted_start_commit_does_not_spawn_after_a_zero_row_batch_update() {
+    let directory = tempdir().expect("temporary workspace should exist");
+    let pool = initialize(&directory.path().join("dev078-stale-commit.db"))
+        .await
+        .expect("SQLite should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("project storage should exist");
+    seed_database(&pool, &project_root).await;
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("package root should exist");
+    write_package(&package_root, &png_bytes([40, 50, 60, 255])).await;
+
+    let comfy = Arc::new(ControlledComfy::new(ComfyBehavior::Offline));
+    let services = build_services(&pool, Arc::clone(&comfy), &package_root);
+    let (batch_id, _, _) = create_package_batch(&services, &package_root).await;
+    let detail = services
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("the ready batch should be readable");
+
+    let mut stale_detail = detail.clone();
+    stale_detail.batch.project_id = "prj_missing".to_owned();
+    let error = services
+        .queue
+        .commit_start_admitted(&stale_detail)
+        .await
+        .expect_err("a zero-row batch update must fail closed");
+    assert!(matches!(
+        error,
+        ProductionQueueError::InvalidState(message)
+            if message == "production batch start commit did not update a batch"
+    ));
+
+    let unchanged = services
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("the original batch should remain readable");
+    assert_eq!(unchanged.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(count(&pool, "tasks").await, 0);
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn restart_keeps_package_batch_idle_then_explicit_start_recovers_offline_and_retries_frozen_asset(
 ) {
     let directory = tempdir().expect("temporary workspace should exist");
@@ -890,7 +979,7 @@ async fn restart_keeps_package_batch_idle_then_explicit_start_recovers_offline_a
 
     services
         .queue
-        .start(PROJECT_ID, &batch_id)
+        .start_for_test(PROJECT_ID, &batch_id)
         .await
         .expect("explicit queue start should succeed");
     wait_for_item_status(&pool, &source_item_id, ProductionBatchItemStatus::Failed).await;
@@ -976,7 +1065,7 @@ async fn restart_keeps_package_batch_idle_then_explicit_start_recovers_offline_a
     comfy.set_behavior(ComfyBehavior::Success);
     services
         .queue
-        .start(PROJECT_ID, &batch_id)
+        .start_for_test(PROJECT_ID, &batch_id)
         .await
         .expect("retry requires an explicit start");
     wait_for_item_status(&pool, &retry_item_id, ProductionBatchItemStatus::Succeeded).await;
@@ -1038,7 +1127,7 @@ async fn stream_disconnect_recovery_uses_existing_prompt_without_second_task_or_
     let (batch_id, item_id, _) = create_package_batch(&services, &package_root).await;
     services
         .queue
-        .start(PROJECT_ID, &batch_id)
+        .start_for_test(PROJECT_ID, &batch_id)
         .await
         .expect("explicit queue start should succeed");
     wait_for_event(&pool, "TASK_STREAM_DISCONNECTED").await;

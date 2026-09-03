@@ -7,6 +7,7 @@ use crate::application::production_queue_service::{
     generation_values_from_json, generation_values_to_json, CreateProductionBatchItem,
     CreateProductionBatchRequest, ProductionQueueError, ProductionQueueService,
 };
+use crate::application::production_start_admission_service::ProductionStartAdmissionService;
 use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::compiler::RecipeParser;
 use crate::domain::InputDefinition;
@@ -175,6 +176,7 @@ pub struct ProductionOrchestratorService {
     pool: SqlitePool,
     definition_repository: Arc<dyn GenerationDefinitionRepository>,
     production_queue_service: Arc<ProductionQueueService>,
+    production_start_admission_service: Option<Arc<ProductionStartAdmissionService>>,
     task_cancellation_service: Arc<TaskCancellationService>,
     clock: Arc<dyn Clock>,
     stage_trigger_gate: Arc<AsyncMutex<()>>,
@@ -192,10 +194,46 @@ impl ProductionOrchestratorService {
             pool,
             definition_repository,
             production_queue_service,
+            production_start_admission_service: None,
             task_cancellation_service,
             clock,
             stage_trigger_gate: Arc::new(AsyncMutex::new(())),
         }
+    }
+
+    pub fn with_start_admission_service(
+        mut self,
+        service: Arc<ProductionStartAdmissionService>,
+    ) -> Self {
+        self.production_start_admission_service = Some(service);
+        self
+    }
+
+    async fn start_production(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionOrchestratorError> {
+        #[cfg(test)]
+        if self.production_start_admission_service.is_none() {
+            return self
+                .production_queue_service
+                .start_for_test(project_id, batch_id)
+                .await
+                .map_err(|error| ProductionOrchestratorError::Queue(error.to_string()));
+        }
+        let service = self
+            .production_start_admission_service
+            .as_ref()
+            .ok_or_else(|| {
+                ProductionOrchestratorError::Queue(
+                    "PRODUCTION_START_ADMISSION_UNAVAILABLE".to_owned(),
+                )
+            })?;
+        service
+            .start(project_id, batch_id)
+            .await
+            .map_err(|error| ProductionOrchestratorError::Queue(error.to_string()))
     }
 
     pub async fn create(
@@ -444,9 +482,7 @@ impl ProductionOrchestratorService {
             if run.status == ProductionRunStatus::Ready.as_str()
                 && stage.status == ProductionStageStatus::Ready.as_str()
             {
-                self.production_queue_service
-                    .start(project_id, batch_id)
-                    .await?;
+                self.start_production(project_id, batch_id).await?;
                 self.mark_stage_running(run_id, 0).await?;
                 return self.get(project_id, run_id).await;
             }
@@ -537,8 +573,7 @@ impl ProductionOrchestratorService {
             .await?;
         }
         transaction.commit().await.map_err(db_error)?;
-        self.production_queue_service
-            .start(project_id, queue.batch.id.as_str())
+        self.start_production(project_id, queue.batch.id.as_str())
             .await?;
         self.mark_stage_running(run_id, 0).await?;
         self.get(project_id, run_id).await
@@ -741,9 +776,7 @@ impl ProductionOrchestratorService {
         let stage = self.load_stage(run_id, 2).await?;
         if let Some(batch_id) = stage.production_batch_id.as_deref() {
             if !retry && stage.status == ProductionStageStatus::Ready.as_str() {
-                self.production_queue_service
-                    .start(project_id, batch_id)
-                    .await?;
+                self.start_production(project_id, batch_id).await?;
                 self.mark_stage_running(run_id, 2).await?;
                 return self.get(project_id, run_id).await;
             }
@@ -878,8 +911,7 @@ impl ProductionOrchestratorService {
         .map_err(db_error)?;
         transaction.commit().await.map_err(db_error)?;
         if let Err(error) = self
-            .production_queue_service
-            .start(project_id, queue.batch.id.as_str())
+            .start_production(project_id, queue.batch.id.as_str())
             .await
         {
             sqlx::query(
@@ -890,7 +922,7 @@ impl ProductionOrchestratorService {
             .execute(&self.pool)
             .await
             .map_err(db_error)?;
-            return Err(error.into());
+            return Err(error);
         }
         self.mark_stage_running(run_id, 2).await?;
         self.get(project_id, run_id).await
@@ -1061,9 +1093,7 @@ impl ProductionOrchestratorService {
             .await
             .map_err(db_error)?;
         transaction.commit().await.map_err(db_error)?;
-        self.production_queue_service
-            .start(project_id, batch_id)
-            .await?;
+        self.start_production(project_id, batch_id).await?;
         self.mark_stage_running(run_id, 2).await?;
         self.get(project_id, run_id).await
     }

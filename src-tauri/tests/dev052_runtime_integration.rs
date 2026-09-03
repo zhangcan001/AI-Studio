@@ -23,7 +23,15 @@ use ai_studio_lib::application::{
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     production_preparation_service::ProductionPreparationService,
-    production_queue_service::ProductionQueueService,
+    production_queue_service::{
+        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueError,
+        ProductionQueueService,
+    },
+    production_start_admission_service::{
+        ProductionStartAdmissionError, ProductionStartAdmissionService,
+        RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED, RUNTIME_ADMISSION_COMFY_UNAVAILABLE,
+        RUNTIME_ADMISSION_MISSING_NODES,
+    },
     shot_batch_service::ShotBatchService,
     shot_context_resolver::ShotContextResolver,
     shot_readiness_service::ShotReadinessService,
@@ -58,13 +66,15 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::{
+    collections::BTreeMap,
     fs,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
 use tempfile::{tempdir, TempDir};
+use tokio::sync::Notify;
 
 const PROJECT_ID: &str = "prj_default";
 const READY_SHOT_ID: &str = "shot_dev052_ready";
@@ -169,6 +179,19 @@ struct CountingComfyAdapter {
     health_calls: Arc<AtomicUsize>,
     object_info_calls: Arc<AtomicUsize>,
     submit_calls: Arc<AtomicUsize>,
+    offline: Arc<AtomicBool>,
+    missing_nodes: Arc<AtomicBool>,
+    capability_refresh_failure: Arc<AtomicBool>,
+    hold_health_check: Arc<AtomicBool>,
+    health_check_released: Arc<AtomicBool>,
+    health_check_started: Arc<AtomicBool>,
+    health_check_notify: Arc<Notify>,
+    health_check_release: Arc<Notify>,
+    hold_submission: Arc<AtomicBool>,
+    submission_released: Arc<AtomicBool>,
+    submission_started: Arc<AtomicBool>,
+    submission_notify: Arc<Notify>,
+    submission_release: Arc<Notify>,
 }
 
 impl CountingComfyAdapter {
@@ -177,6 +200,19 @@ impl CountingComfyAdapter {
             health_calls: Arc::new(AtomicUsize::new(0)),
             object_info_calls: Arc::new(AtomicUsize::new(0)),
             submit_calls: Arc::new(AtomicUsize::new(0)),
+            offline: Arc::new(AtomicBool::new(false)),
+            missing_nodes: Arc::new(AtomicBool::new(false)),
+            capability_refresh_failure: Arc::new(AtomicBool::new(false)),
+            hold_health_check: Arc::new(AtomicBool::new(false)),
+            health_check_released: Arc::new(AtomicBool::new(true)),
+            health_check_started: Arc::new(AtomicBool::new(false)),
+            health_check_notify: Arc::new(Notify::new()),
+            health_check_release: Arc::new(Notify::new()),
+            hold_submission: Arc::new(AtomicBool::new(false)),
+            submission_started: Arc::new(AtomicBool::new(false)),
+            submission_notify: Arc::new(Notify::new()),
+            submission_release: Arc::new(Notify::new()),
+            submission_released: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -184,6 +220,63 @@ impl CountingComfyAdapter {
         self.health_calls.store(0, Ordering::SeqCst);
         self.object_info_calls.store(0, Ordering::SeqCst);
         self.submit_calls.store(0, Ordering::SeqCst);
+        self.offline.store(false, Ordering::SeqCst);
+        self.missing_nodes.store(false, Ordering::SeqCst);
+        self.capability_refresh_failure
+            .store(false, Ordering::SeqCst);
+        self.hold_health_check.store(false, Ordering::SeqCst);
+        self.health_check_released.store(true, Ordering::SeqCst);
+        self.hold_submission.store(false, Ordering::SeqCst);
+        self.submission_released.store(true, Ordering::SeqCst);
+    }
+
+    fn set_offline(&self, offline: bool) {
+        self.offline.store(offline, Ordering::SeqCst);
+    }
+
+    fn set_capability_refresh_failure(&self, failed: bool) {
+        self.capability_refresh_failure
+            .store(failed, Ordering::SeqCst);
+    }
+
+    fn set_missing_nodes(&self, missing: bool) {
+        self.missing_nodes.store(missing, Ordering::SeqCst);
+    }
+
+    fn hold_health_check(&self) {
+        self.health_check_started.store(false, Ordering::SeqCst);
+        self.health_check_released.store(false, Ordering::SeqCst);
+        self.hold_health_check.store(true, Ordering::SeqCst);
+    }
+
+    fn release_health_check(&self) {
+        self.health_check_released.store(true, Ordering::SeqCst);
+        self.hold_health_check.store(false, Ordering::SeqCst);
+        self.health_check_release.notify_waiters();
+    }
+
+    async fn wait_for_health_check(&self) {
+        if !self.health_check_started.load(Ordering::SeqCst) {
+            self.health_check_notify.notified().await;
+        }
+    }
+
+    fn hold_submission(&self) {
+        self.submission_started.store(false, Ordering::SeqCst);
+        self.submission_released.store(false, Ordering::SeqCst);
+        self.hold_submission.store(true, Ordering::SeqCst);
+    }
+
+    fn release_submission(&self) {
+        self.submission_released.store(true, Ordering::SeqCst);
+        self.hold_submission.store(false, Ordering::SeqCst);
+        self.submission_release.notify_waiters();
+    }
+
+    async fn wait_for_submission(&self) {
+        if !self.submission_started.load(Ordering::SeqCst) {
+            self.submission_notify.notified().await;
+        }
     }
 }
 
@@ -191,6 +284,20 @@ impl CountingComfyAdapter {
 impl ComfyAdapter for CountingComfyAdapter {
     async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
         self.health_calls.fetch_add(1, Ordering::SeqCst);
+        if self.offline.load(Ordering::SeqCst) {
+            return Err(ComfyAdapterError::Offline(
+                "DEV-078 test ComfyUI is offline".to_owned(),
+            ));
+        }
+        if self.hold_health_check.load(Ordering::SeqCst) {
+            self.health_check_started.store(true, Ordering::SeqCst);
+            self.health_check_notify.notify_waiters();
+            while self.hold_health_check.load(Ordering::SeqCst)
+                && !self.health_check_released.load(Ordering::SeqCst)
+            {
+                self.health_check_release.notified().await;
+            }
+        }
         Ok(ComfyHealth {
             system: SystemStats {
                 comfyui_version: Some("dev052-test".to_owned()),
@@ -216,7 +323,12 @@ impl ComfyAdapter for CountingComfyAdapter {
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
         self.object_info_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(json!({
+        if self.capability_refresh_failure.load(Ordering::SeqCst) {
+            return Err(ComfyAdapterError::Protocol(
+                "DEV-078 test capability refresh failed".to_owned(),
+            ));
+        }
+        let mut object_info = json!({
             "KSampler": {},
             "CheckpointLoaderSimple": {},
             "EmptyLatentImage": {},
@@ -224,7 +336,14 @@ impl ComfyAdapter for CountingComfyAdapter {
             "VAEDecode": {},
             "SaveImage": {},
             "LoadImage": {}
-        }))
+        });
+        if self.missing_nodes.load(Ordering::SeqCst) {
+            object_info
+                .as_object_mut()
+                .expect("test object_info should be an object")
+                .remove("KSampler");
+        }
+        Ok(object_info)
     }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
@@ -245,6 +364,15 @@ impl ComfyAdapter for CountingComfyAdapter {
         _workflow: Value,
     ) -> Result<PromptSubmission, ComfyAdapterError> {
         self.submit_calls.fetch_add(1, Ordering::SeqCst);
+        if self.hold_submission.load(Ordering::SeqCst) {
+            self.submission_started.store(true, Ordering::SeqCst);
+            self.submission_notify.notify_waiters();
+            while self.hold_submission.load(Ordering::SeqCst)
+                && !self.submission_released.load(Ordering::SeqCst)
+            {
+                self.submission_release.notified().await;
+            }
+        }
         Err(ComfyAdapterError::Incompatible(
             "DEV-052 preparation must not submit workflows".to_owned(),
         ))
@@ -267,6 +395,8 @@ struct Harness {
     readiness: Arc<ShotReadinessService>,
     source_calls: Arc<AtomicUsize>,
     comfy: Arc<CountingComfyAdapter>,
+    admission: Arc<ProductionStartAdmissionService>,
+    queue: Arc<ProductionQueueService>,
     workflow_version_id: String,
     recipe_id: String,
 }
@@ -429,6 +559,11 @@ async fn harness() -> Harness {
         recovery_service,
         clock.clone(),
     ));
+    let admission = Arc::new(ProductionStartAdmissionService::new(
+        queue_service.clone(),
+        comfy_service.clone(),
+        workflow_lifecycle_service.clone(),
+    ));
     let diagnostics_service = Arc::new(DiagnosticsService::new(
         pool.clone(),
         task_repository,
@@ -442,14 +577,14 @@ async fn harness() -> Harness {
         },
     ));
     let comfy_preflight_service = Arc::new(ComfyPreflightService::new(
-        comfy_service,
+        comfy_service.clone(),
         diagnostics_service,
         workflow_lifecycle_service.clone(),
     ));
     let readiness = Arc::new(ShotReadinessService::new(
         resolver.clone(),
         comfy_preflight_service,
-        workflow_lifecycle_service,
+        workflow_lifecycle_service.clone(),
         structure_repository,
     ));
     let shot_batch_service = Arc::new(ShotBatchService::new(
@@ -481,6 +616,8 @@ async fn harness() -> Harness {
         readiness,
         source_calls,
         comfy,
+        admission,
+        queue: queue_service,
         workflow_version_id,
         recipe_id,
     }
@@ -490,6 +627,279 @@ fn production_queue_repository_as_shot_batch(
     repository: &Arc<SqliteProductionQueueRepository>,
 ) -> Arc<dyn ShotBatchRepository> {
     repository.clone()
+}
+
+async fn create_runtime_batch(harness: &Harness, item_count: usize) -> String {
+    let items = (0..item_count)
+        .map(|index| CreateProductionBatchItem {
+            workflow_version_id: harness.workflow_version_id.clone(),
+            recipe_id: harness.recipe_id.clone(),
+            values: BTreeMap::from([(
+                "prompt".to_owned(),
+                GenerationInputValue::Text(format!("DEV-078 prompt {index}")),
+            )]),
+        })
+        .collect();
+    harness
+        .queue
+        .create(CreateProductionBatchRequest {
+            project_id: PROJECT_ID.to_owned(),
+            name: format!("DEV-078 runtime batch {item_count}"),
+            continue_on_failure: false,
+            items,
+        })
+        .await
+        .expect("DEV-078 runtime batch should be created without starting")
+        .batch
+        .id
+        .as_str()
+        .to_owned()
+}
+
+fn runtime_failure_code(error: ProductionStartAdmissionError) -> &'static str {
+    match error {
+        ProductionStartAdmissionError::Runtime(failure) => failure.code,
+        ProductionStartAdmissionError::Queue(error) => {
+            panic!("expected runtime admission failure, got queue error: {error}")
+        }
+    }
+}
+
+#[tokio::test]
+async fn dev078_b1_valid_runtime_starts_and_enters_existing_dispatch() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 1).await;
+    harness.comfy.hold_submission();
+
+    harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect("a valid runtime should be admitted");
+    harness.comfy.wait_for_submission().await;
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("started batch should be readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Running);
+    assert_eq!(
+        detail.items[0].status,
+        ProductionBatchItemStatus::Dispatched
+    );
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+
+    harness.comfy.release_submission();
+}
+
+#[tokio::test]
+async fn dev078_b2_runtime_block_keeps_batch_pending_without_side_effects() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 1).await;
+    harness.comfy.set_missing_nodes(true);
+
+    let error = harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect_err("a missing runtime node must block start");
+    assert_eq!(runtime_failure_code(error), RUNTIME_ADMISSION_MISSING_NODES);
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("blocked batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev078_b3_resume_checks_only_the_current_pending_workflow() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 2).await;
+    let workflow_id =
+        sqlx::query_scalar::<_, String>("SELECT workflow_id FROM workflow_versions WHERE id = ?")
+            .bind(&harness.workflow_version_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("fixture workflow should be readable");
+    sqlx::query(
+        "INSERT INTO workflow_versions
+         (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+         VALUES (?, ?, '0.9.0', ?, 'dev078-old-workflow-sha', ?)",
+    )
+    .bind("missing-old-workflow")
+    .bind(workflow_id)
+    .bind(WORKFLOW_JSON)
+    .bind(CREATED_AT)
+    .execute(&harness.pool)
+    .await
+    .expect("old workflow version should be a valid terminal fixture");
+    sqlx::query(
+        "UPDATE production_batch_items
+         SET status = 'SUCCEEDED', workflow_version_id = 'missing-old-workflow'
+         WHERE batch_id = ? AND ordinal = 0",
+    )
+    .bind(&batch_id)
+    .execute(&harness.pool)
+    .await
+    .expect("old terminal item should be editable for the fixture");
+    harness.comfy.hold_submission();
+
+    harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect("a valid pending workflow should resume despite an old unavailable item");
+    harness.comfy.wait_for_submission().await;
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("resumed batch should be readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Running);
+    assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Succeeded);
+    assert_eq!(
+        detail.items[1].status,
+        ProductionBatchItemStatus::Dispatched
+    );
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+
+    harness.comfy.release_submission();
+}
+
+#[tokio::test]
+async fn dev078_b4_existing_busy_admission_wins_before_runtime_checks() {
+    let harness = harness().await;
+    let running_batch_id = create_runtime_batch(&harness, 1).await;
+    let blocked_batch_id = create_runtime_batch(&harness, 1).await;
+    harness.comfy.hold_submission();
+
+    harness
+        .admission
+        .start(PROJECT_ID, &running_batch_id)
+        .await
+        .expect("the first batch should start");
+    harness.comfy.wait_for_submission().await;
+    let health_calls_before = harness.comfy.health_calls.load(Ordering::SeqCst);
+
+    let error = harness
+        .admission
+        .start(PROJECT_ID, &blocked_batch_id)
+        .await
+        .expect_err("a second active batch must be rejected as busy");
+    assert!(matches!(
+        error,
+        ProductionStartAdmissionError::Queue(ProductionQueueError::Busy(_))
+    ));
+    assert_eq!(
+        harness.comfy.health_calls.load(Ordering::SeqCst),
+        health_calls_before,
+        "busy admission should short-circuit before the runtime health check"
+    );
+
+    harness.comfy.release_submission();
+}
+
+#[tokio::test]
+async fn dev078_b5_offline_runtime_keeps_batch_unchanged() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 1).await;
+    harness.comfy.set_offline(true);
+
+    let error = harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect_err("an offline ComfyUI must block start");
+    assert_eq!(
+        runtime_failure_code(error),
+        RUNTIME_ADMISSION_COMFY_UNAVAILABLE
+    );
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("offline batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+}
+
+#[tokio::test]
+async fn dev078_b6_capability_refresh_failure_fails_closed() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 1).await;
+    harness.comfy.set_capability_refresh_failure(true);
+
+    let error = harness
+        .admission
+        .start(PROJECT_ID, &batch_id)
+        .await
+        .expect_err("capability refresh failure must block start");
+    assert_eq!(
+        runtime_failure_code(error),
+        RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED
+    );
+
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, &batch_id)
+        .await
+        .expect("refresh-failed batch should remain readable");
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Ready);
+    assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Pending);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+}
+
+#[tokio::test]
+async fn dev078_existing_gate_excludes_configuration_changes_until_start_commits() {
+    let harness = harness().await;
+    let batch_id = create_runtime_batch(&harness, 1).await;
+    harness.comfy.hold_health_check();
+
+    let admission = harness.admission.clone();
+    let start_task = tokio::spawn(async move { admission.start(PROJECT_ID, &batch_id).await });
+    harness.comfy.wait_for_health_check().await;
+
+    let (acquired_tx, mut acquired_rx) = tokio::sync::oneshot::channel();
+    let queue = harness.queue.clone();
+    let configuration_task = tokio::spawn(async move {
+        let guard = queue.acquire_runtime_configuration_admission().await;
+        acquired_tx
+            .send(())
+            .expect("configuration waiter should still be observed");
+        guard
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        !configuration_task.is_finished(),
+        "configuration changes must wait while runtime admission holds the existing gate"
+    );
+    assert!(
+        matches!(
+            acquired_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ),
+        "configuration changes must not acquire the gate before start commits"
+    );
+
+    harness.comfy.release_health_check();
+    start_task
+        .await
+        .expect("start task should join")
+        .expect("valid runtime should eventually commit");
+    let _configuration_guard = configuration_task
+        .await
+        .expect("configuration waiter should join");
+    assert!(acquired_rx.await.is_ok());
 }
 
 async fn seed_hierarchy(pool: &SqlitePool, workflow_version_id: &str, recipe_id: &str) {

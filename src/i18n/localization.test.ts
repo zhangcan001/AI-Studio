@@ -50,6 +50,29 @@ describe("用户可见错误信息", () => {
     expect(errorMessageForCode("TASK_NOT_CANCELLABLE")).toBe("当前任务状态不支持取消。");
   });
 
+  it("keeps runtime admission identity in the user-visible start error", () => {
+    const formatted = formatUiError({
+      code: "PRODUCTION_START_ADMISSION_BLOCKED",
+      message: "Production batch runtime admission failed",
+      details: {
+        code: "RUNTIME_ADMISSION_MISSING_NODES",
+        workflowVersionId: "wfv_h3",
+        recipeId: "rcp_h3",
+        reason: "ComfyUI is missing workflow node classes",
+        missingNodes: ["KSampler", "VAEEncode"],
+      },
+    });
+
+    expect(formatted.code).toBe("PRODUCTION_START_ADMISSION_BLOCKED");
+    expect(formatted.message).toContain("wfv_h3");
+    expect(formatted.message).toContain("rcp_h3");
+    expect(formatted.message).toContain("KSampler");
+    expect(toUserMessage({
+      code: "PRODUCTION_START_ADMISSION_BLOCKED",
+      message: "RUNTIME_ADMISSION_MISSING_NODES: workflow_version_id=wfv_h3, recipe_id=rcp_h3, reason=ComfyUI is missing workflow node classes, missing_nodes=KSampler",
+    })).toContain("缺少节点");
+  });
+
   it("does not expose unknown raw errors in the primary message", () => {
     const formatted = formatUiError(new Error("SECRET_RAW_ERROR from backend"));
     expect(formatted.message).toBe("操作失败，请查看技术详情。");

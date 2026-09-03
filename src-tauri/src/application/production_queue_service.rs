@@ -412,13 +412,17 @@ impl ProductionQueueService {
         .unwrap_or_default())
     }
 
-    pub async fn start(
-        self: &Arc<Self>,
+    /// Inspect a start request while the caller holds `admission_gate`.
+    ///
+    /// This method deliberately does not acquire the gate. The runtime
+    /// admission service keeps the same gate across this inspection, its
+    /// runtime checks, and `commit_start_admitted`.
+    pub async fn inspect_start_admitted(
+        &self,
         project_id: &str,
         batch_id: &str,
-    ) -> Result<(), ProductionQueueError> {
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
         let batch_id = parse_batch_id(batch_id)?;
-        let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
         let detail = self
             .repository
             .find_detail(project_id, &batch_id)
@@ -438,16 +442,46 @@ impl ProductionQueueService {
         if blocker.busy {
             return Err(ProductionQueueError::Busy(blocker));
         }
-        self.repository
+        Ok(detail)
+    }
+
+    /// Commit a previously admitted start while the caller holds
+    /// `admission_gate`. This is intentionally lock-free: acquiring the gate
+    /// here would deadlock the runtime admission service.
+    pub async fn commit_start_admitted(
+        self: &Arc<Self>,
+        detail: &ProductionBatchDetail,
+    ) -> Result<(), ProductionQueueError> {
+        let updated = self
+            .repository
             .set_batch_status(
-                project_id,
-                &batch_id,
+                &detail.batch.project_id,
+                &detail.batch.id,
                 ProductionBatchStatus::Running,
                 self.clock.now(),
             )
             .await?;
-        self.spawn_if_needed(project_id.to_owned(), batch_id);
+        if !updated {
+            return Err(ProductionQueueError::InvalidState(
+                "production batch start commit did not update a batch".to_owned(),
+            ));
+        }
+        self.spawn_if_needed(detail.batch.project_id.clone(), detail.batch.id.clone());
         Ok(())
+    }
+
+    /// Legacy unchecked start kept for old harnesses while the formal command
+    /// migrates to `ProductionStartAdmissionService`. It must not be used as
+    /// the production start entry point because it performs no runtime guard.
+    #[doc(hidden)]
+    pub async fn start_for_test(
+        self: &Arc<Self>,
+        project_id: &str,
+        batch_id: &str,
+    ) -> Result<(), ProductionQueueError> {
+        let _admission = self.acquire_runtime_configuration_admission().await;
+        let detail = self.inspect_start_admitted(project_id, batch_id).await?;
+        self.commit_start_admitted(&detail).await
     }
 
     pub async fn pause(

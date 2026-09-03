@@ -5,6 +5,7 @@ use crate::application::ports::Clock;
 use crate::application::production_queue_service::{
     CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueService,
 };
+use crate::application::production_start_admission_service::ProductionStartAdmissionService;
 use crate::application::source_asset_import_service::{
     SourceAssetImportService, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_IMAGE_BYTES,
     MAX_SOURCE_VIDEO_BYTES,
@@ -690,6 +691,7 @@ pub struct H3LocalImportService {
     source_asset_import_service: Arc<SourceAssetImportService>,
     asset_video_prompt_service: Arc<AssetVideoPromptService>,
     production_queue_service: Arc<ProductionQueueService>,
+    production_start_admission_service: Option<Arc<ProductionStartAdmissionService>>,
     clock: Arc<dyn Clock>,
     sessions: Arc<Mutex<HashMap<String, LocalImportSession>>>,
 }
@@ -705,9 +707,37 @@ impl H3LocalImportService {
             source_asset_import_service,
             asset_video_prompt_service,
             production_queue_service,
+            production_start_admission_service: None,
             clock,
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn with_start_admission_service(
+        mut self,
+        service: Arc<ProductionStartAdmissionService>,
+    ) -> Self {
+        self.production_start_admission_service = Some(service);
+        self
+    }
+
+    async fn start_production(&self, project_id: &str, batch_id: &str) -> Result<(), String> {
+        #[cfg(test)]
+        if self.production_start_admission_service.is_none() {
+            return self
+                .production_queue_service
+                .start_for_test(project_id, batch_id)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        let service = self
+            .production_start_admission_service
+            .as_ref()
+            .ok_or_else(|| "PRODUCTION_START_ADMISSION_UNAVAILABLE".to_owned())?;
+        service
+            .start(project_id, batch_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn cleanup_expired_sessions(&self, keep_session_id: Option<&str>) {
@@ -1150,8 +1180,7 @@ impl H3LocalImportService {
         let mut auto_started = false;
         if request.auto_start {
             match self
-                .production_queue_service
-                .start(&session.project_id, detail.batch.id.as_str())
+                .start_production(&session.project_id, detail.batch.id.as_str())
                 .await
             {
                 Ok(()) => auto_started = true,
@@ -1439,8 +1468,7 @@ impl H3LocalImportService {
         let mut auto_started = false;
         if request.auto_start {
             match self
-                .production_queue_service
-                .start(&session.project_id, detail.batch.id.as_str())
+                .start_production(&session.project_id, detail.batch.id.as_str())
                 .await
             {
                 Ok(()) => auto_started = true,

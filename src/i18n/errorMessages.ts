@@ -29,6 +29,28 @@ const ERROR_MESSAGES: Record<string, string> = {
   FILESYSTEM_BOUNDARY_ERROR: "素材文件路径不在当前项目目录内，删除已阻止。",
   COMFY_MEMORY_BUSY: "当前仍有任务或 ComfyUI 队列活动，完成或取消后再释放模型内存。",
   COMFY_MEMORY_RELEASE_FAILED: "ComfyUI 释放显存/内存失败，请检查连接后重试。",
+  PRODUCTION_RUNTIME_NOT_READY: "无法启动生产队列：运行时准入检查未通过。",
+  PRODUCTION_START_ADMISSION_BLOCKED: "无法启动生产队列：运行时准入检查未通过。",
+  RUNTIME_ADMISSION_RECIPE_NOT_FOUND: "无法启动生产队列：请求的工作流配方不存在。",
+  RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND: "无法启动生产队列：请求的工作流版本不存在。",
+  RUNTIME_ADMISSION_WORKFLOW_DISABLED: "无法启动生产队列：请求的工作流版本已停用。",
+  RUNTIME_ADMISSION_WORKFLOW_ARCHIVED: "无法启动生产队列：请求的工作流版本已归档。",
+  RUNTIME_ADMISSION_PACKAGE_INVALID: "无法启动生产队列：工作流运行包校验未通过。",
+  RUNTIME_ADMISSION_MISSING_NODES: "无法启动生产队列：ComfyUI 缺少工作流节点。",
+  RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE: "无法启动生产队列：工作流输入与当前 ComfyUI 能力不兼容。",
+  RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED: "无法启动生产队列：尚未完成当前工作流的运行环境检查。",
+  RUNTIME_ADMISSION_COMFY_UNAVAILABLE: "无法启动生产队列：ComfyUI 当前不可用。",
+  RUNTIME_ADMISSION_COMFY_INCOMPATIBLE: "无法启动生产队列：ComfyUI 返回了不兼容的运行时响应。",
+  RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED: "无法启动生产队列：ComfyUI 能力刷新失败。",
+  RUNTIME_ADMISSION_WORKSPACE_DIAGNOSTICS_FAILED: "无法启动生产队列：工作流运行包诊断失败。",
+  RUNTIME_ADMISSION_CAPABILITY_OFFLINE: "无法启动生产队列：工作流能力检查发现 ComfyUI 离线。",
+  RUNTIME_ADMISSION_CAPABILITY_UNKNOWN: "无法启动生产队列：工作流能力状态未知。",
+  RUNTIME_ADMISSION_DIAGNOSTICS: "无法启动生产队列：工作流运行包存在诊断问题。",
+  RUNTIME_ADMISSION_READINESS_BLOCKED: "无法启动生产队列：工作流尚未达到生产就绪状态。",
+  QUEUE_RUNTIME_NOT_READY: "无法启动生产队列：引用的运行时尚未就绪。",
+  QUEUE_RUNTIME_CAPABILITY_INVALID: "无法启动生产队列：ComfyUI 能力检查未通过。",
+  QUEUE_RUNTIME_UNAVAILABLE: "无法启动生产队列：引用的运行时不可用。",
+  QUEUE_RUNTIME_DISABLED: "无法启动生产队列：引用的运行时已停用。",
   EXECUTION_ERROR: "生成执行失败，请查看任务详情中的技术信息。",
   EXECUTION_INTERRUPTED: "生成任务已被中断。",
   TASK_DOMAIN_ERROR: "任务状态操作失败，请查看技术详情。",
@@ -107,15 +129,115 @@ function rawErrorMessage(error: unknown): string {
 function errorCode(error: unknown, raw: string): string | undefined {
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code && code !== "INVALID_INPUT") return code;
+  }
+  const embeddedRuntimeCode = raw.match(/\bRUNTIME_ADMISSION_[A-Z0-9_]+\b/)?.[0];
+  if (embeddedRuntimeCode && RUNTIME_ADMISSION_CODES.has(embeddedRuntimeCode)) return embeddedRuntimeCode;
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
     if (typeof code === "string" && code) return code;
   }
   return raw.match(/^[A-Z][A-Z0-9_]{2,}/)?.[0];
 }
 
+const RUNTIME_ADMISSION_CODES = new Set([
+  "PRODUCTION_RUNTIME_NOT_READY",
+  "PRODUCTION_START_ADMISSION_BLOCKED",
+  "RUNTIME_ADMISSION_RECIPE_NOT_FOUND",
+  "RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND",
+  "RUNTIME_ADMISSION_WORKFLOW_DISABLED",
+  "RUNTIME_ADMISSION_WORKFLOW_ARCHIVED",
+  "RUNTIME_ADMISSION_PACKAGE_INVALID",
+  "RUNTIME_ADMISSION_MISSING_NODES",
+  "RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE",
+  "RUNTIME_ADMISSION_CAPABILITY_NOT_CHECKED",
+  "RUNTIME_ADMISSION_COMFY_UNAVAILABLE",
+  "RUNTIME_ADMISSION_COMFY_INCOMPATIBLE",
+  "RUNTIME_ADMISSION_CAPABILITY_REFRESH_FAILED",
+  "RUNTIME_ADMISSION_WORKSPACE_DIAGNOSTICS_FAILED",
+  "RUNTIME_ADMISSION_CAPABILITY_OFFLINE",
+  "RUNTIME_ADMISSION_CAPABILITY_UNKNOWN",
+  "RUNTIME_ADMISSION_DIAGNOSTICS",
+  "RUNTIME_ADMISSION_READINESS_BLOCKED",
+  "QUEUE_RUNTIME_NOT_READY",
+  "QUEUE_RUNTIME_CAPABILITY_INVALID",
+  "QUEUE_RUNTIME_UNAVAILABLE",
+  "QUEUE_RUNTIME_DISABLED",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(nonEmptyString).filter((item): item is string => Boolean(item));
+  const single = nonEmptyString(value);
+  return single ? [single] : [];
+}
+
+function runtimeAdmissionRecords(error: unknown): Record<string, unknown>[] {
+  if (!isRecord(error) || !("details" in error)) return [];
+  const details = error.details;
+  if (Array.isArray(details)) return details.filter(isRecord);
+  if (!isRecord(details)) return [];
+  for (const key of ["failures", "issues", "blockers"]) {
+    const records = details[key];
+    if (Array.isArray(records)) return records.filter(isRecord);
+  }
+  return [details];
+}
+
+function runtimeAdmissionDetails(error: unknown): string | undefined {
+  const descriptions = runtimeAdmissionRecords(error).map((record) => {
+    const workflowVersionId = nonEmptyString(record.workflowVersionId ?? record.workflow_version_id);
+    const recipeId = nonEmptyString(record.recipeId ?? record.recipe_id);
+    const missingNodes = stringList(record.missingNodes ?? record.missingNodeIds ?? record.missing_node_ids);
+    const message = nonEmptyString(record.message ?? record.reason);
+    return [
+      workflowVersionId ? `工作流版本 ${workflowVersionId}` : undefined,
+      recipeId ? `配方 ${recipeId}` : undefined,
+      missingNodes.length ? `缺少节点：${missingNodes.join("、")}` : undefined,
+      message,
+    ].filter(Boolean).join("；");
+  }).filter(Boolean);
+  return descriptions.length ? descriptions.join("；") : undefined;
+}
+
+function runtimeAdmissionTextDetails(technicalMessage: string): string | undefined {
+  const workflowVersionId = technicalMessage.match(/workflow_version_id=([^,\s]+)/)?.[1];
+  const recipeId = technicalMessage.match(/recipe_id=([^,\s]+)/)?.[1];
+  const missingNodes = technicalMessage.match(/missing_nodes=([^,\s]+)/)?.[1]?.split(",").filter(Boolean) ?? [];
+  const reason = technicalMessage.match(/reason=(.*?)(?:,\s+missing_nodes=|$)/)?.[1];
+  const details = [
+    workflowVersionId ? `工作流版本 ${workflowVersionId}` : undefined,
+    recipeId ? `配方 ${recipeId}` : undefined,
+    missingNodes.length ? `缺少节点：${missingNodes.join("、")}` : undefined,
+    reason,
+  ].filter(Boolean);
+  return details.length ? details.join("；") : undefined;
+}
+
+function runtimeAdmissionMessage(error: unknown, code: string | undefined, technicalMessage: string): string | undefined {
+  if (!code || !RUNTIME_ADMISSION_CODES.has(code)) return undefined;
+  const base = ERROR_MESSAGES[code] ?? ERROR_MESSAGES.PRODUCTION_RUNTIME_NOT_READY;
+  const details = runtimeAdmissionDetails(error) ?? runtimeAdmissionTextDetails(technicalMessage);
+  if (details) return `${base}（${details}）`;
+  const suffix = technicalMessage.replace(/^[A-Z][A-Z0-9_]{2,}\s*[:：]\s*/, "").trim();
+  if (suffix && !/^runtime admission blocked$/i.test(suffix) && suffix !== base) {
+    return `${base}（${suffix}）`;
+  }
+  return base;
+}
+
 export function formatUiError(error: unknown): UiError {
   const technicalMessage = rawErrorMessage(error);
   const code = errorCode(error, technicalMessage);
-  const message = (code && ERROR_MESSAGES[code]) ?? "操作失败，请查看技术详情。";
+  const message = runtimeAdmissionMessage(error, code, technicalMessage)
+    ?? ((code && ERROR_MESSAGES[code]) ?? "操作失败，请查看技术详情。");
   return { message, code, technicalMessage };
 }
 

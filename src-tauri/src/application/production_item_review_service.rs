@@ -8,6 +8,7 @@ use crate::application::production_queue_service::{
     generation_values_from_json, CreateProductionBatchItem, CreateProductionBatchRequest,
     ProductionQueueError, ProductionQueueService,
 };
+use crate::application::production_start_admission_service::ProductionStartAdmissionService;
 use crate::domain::{
     Asset, AssetId, AssetType, PreparationSnapshotRecord, ProductionBatchDetail,
     ProductionBatchItem, ProductionBatchItemStatus, ProductionReviewStatus, SeedValue, ShotStage,
@@ -146,6 +147,7 @@ pub struct ProductionItemReviewService {
     review_repository: Arc<dyn ProductionItemReviewRepository>,
     production_queue_repository: Arc<dyn ProductionQueueRepository>,
     production_queue_service: Arc<ProductionQueueService>,
+    production_start_admission_service: Option<Arc<ProductionStartAdmissionService>>,
     task_repository: Arc<dyn TaskRepository>,
     asset_repository: Arc<dyn AssetRepository>,
     shot_batch_repository: Option<Arc<dyn ShotBatchRepository>>,
@@ -165,6 +167,7 @@ impl ProductionItemReviewService {
             review_repository,
             production_queue_repository,
             production_queue_service,
+            production_start_admission_service: None,
             task_repository,
             asset_repository,
             shot_batch_repository: None,
@@ -185,11 +188,39 @@ impl ProductionItemReviewService {
             review_repository,
             production_queue_repository,
             production_queue_service,
+            production_start_admission_service: None,
             task_repository,
             asset_repository,
             shot_batch_repository: Some(shot_batch_repository),
             clock,
         }
+    }
+
+    pub fn with_start_admission_service(
+        mut self,
+        service: Arc<ProductionStartAdmissionService>,
+    ) -> Self {
+        self.production_start_admission_service = Some(service);
+        self
+    }
+
+    async fn start_production(&self, project_id: &str, batch_id: &str) -> Result<(), String> {
+        #[cfg(test)]
+        if self.production_start_admission_service.is_none() {
+            return self
+                .production_queue_service
+                .start_for_test(project_id, batch_id)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        let service = self
+            .production_start_admission_service
+            .as_ref()
+            .ok_or_else(|| "PRODUCTION_START_ADMISSION_UNAVAILABLE".to_owned())?;
+        service
+            .start(project_id, batch_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn get(
@@ -472,8 +503,7 @@ impl ProductionItemReviewService {
         let mut start_warning = None;
         if auto_start {
             match self
-                .production_queue_service
-                .start(project_id, detail.batch.id.as_str())
+                .start_production(project_id, detail.batch.id.as_str())
                 .await
             {
                 Ok(()) => auto_started = true,
