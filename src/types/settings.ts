@@ -23,15 +23,17 @@ export interface ComfyPreflightIssue {
   detail: string;
   workflowId?: string | null;
   workflowVersionId?: string | null;
-  missingNodes?: string[];
+  missingNodes?: string[] | null;
   suggestedAction?: string | null;
 }
 
 export interface ComfyPreflightWorkflowItem {
-  name: string;
+  workflowId?: string | null;
+  workflowVersionId?: string | null;
+  name?: string | null;
   version?: string | null;
   status: "READY" | "BLOCKED" | "DISABLED" | string;
-  missingNodes?: string[];
+  missingNodes?: string[] | null;
   reason?: string | null;
 }
 

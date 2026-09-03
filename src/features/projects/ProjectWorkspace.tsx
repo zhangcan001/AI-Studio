@@ -18,6 +18,7 @@ import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
 import type { ProjectTemplate, TemplateProjectResult } from "../../types/organization";
 import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
 import { ProjectWorkflowPreflight } from "./ProjectWorkflowPreflight";
+import { ProjectProductionReadiness } from "./ProjectProductionReadiness";
 
 interface Props {
   projects: ProjectView[];
@@ -248,7 +249,12 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
             catalog={catalog}
             onConfigChanged={setProjectWorkflowConfig}
           />
-          {projectWorkflowConfig && <ProjectWorkflowPreflight config={projectWorkflowConfig} catalog={catalog} />}
+          {projectWorkflowConfig && (
+            <>
+              <ProjectProductionReadiness config={projectWorkflowConfig} catalog={catalog} />
+              <ProjectWorkflowPreflight config={projectWorkflowConfig} catalog={catalog} />
+            </>
+          )}
         </>
       )}
 
