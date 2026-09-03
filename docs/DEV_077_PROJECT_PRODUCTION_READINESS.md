@@ -9,6 +9,8 @@ DEV077_START_SHA=37455f556ab712aed49f3ce434a59b168da56122
 DEV077_CODE_SHA=b1551b8e774784c3393d0bd543e8bd2d0c8f17a7
 DEV077_FINAL_SHA=b1551b8e774784c3393d0bd543e8bd2d0c8f17a7
 DEV077_CLOSEOUT_DOC_SHA=RECORDED_IN_GIT_HISTORY
+DEV077_P1_01_BASE_SHA=dd89b3f9b01c35853bda4662e0c5c3087c794fe3
+DEV077_P1_01_RECIPE_AWARE_SNAPSHOT_INVALIDATION=FIXED
 BRANCH=master
 WORKTREE_START=clean
 ORIGIN_MASTER_START=37455f556ab712aed49f3ce434a59b168da56122
@@ -46,6 +48,11 @@ PROJECT_READINESS_BLOCKED=SUPPORTED
 PROJECT_RELEVANT_ISSUE_FILTER=SUPPORTED
 PROJECT_WORKFLOW_CHANGE_INVALIDATES_RUNTIME_SNAPSHOT=YES
 PROJECT_RUNTIME_CHECK_READ_ONLY=YES
+SNAPSHOT_FINGERPRINT_INCLUDES_RECIPE_ID=YES
+SNAPSHOT_FINGERPRINT_INCLUDES_PREFLIGHT_SEMANTICS=YES
+RECIPE_ONLY_CHANGE_INVALIDATES_SNAPSHOT=YES
+SAME_RECIPE_STATUS_CHANGE_INVALIDATES_SNAPSHOT=YES
+AUTO_RECHECK_ON_CHANGE=NO
 ```
 
 ## 1. Multi-Agent
@@ -154,13 +161,27 @@ START_ALL=NO
 SEQUENCE_RESTART_RESUME=NO
 ```
 
-## 8. Tests
+## 8. P1-01 Closure
+
+`fingerprint()` 现在按每条生产路径生成稳定字符串 projection，包含 path、resolved WorkflowVersion、resolved Recipe、Project Workflow Preflight status/source、configuredRef 的两项身份，以及 stale/fallback 语义。不会序列化整个 Recipe 对象，也不会因无关 catalog 元数据或对象字段顺序变化而失效。
+
+```text
+Recipe-only change=invalidates old report
+Same Recipe READY→WARNING change=invalidates old report
+ProjectWorkflowSettings save A→B with same WorkflowVersion=invalidates old report
+Automatic recheck=NO
+Old report cleared=YES
+getComfyPreflight after configuration change=still one call
+```
+
+## 9. Tests
 
 ```text
 projectProductionReadiness=11 passed
-ProjectProductionReadiness=10 passed
-ProjectProductionReadinessUat=6 passed
-DEV-076 regression=9 files / 70 tests passed
+ProjectProductionReadiness=12 passed
+ProjectProductionReadinessUat=7 passed
+P1 targeted readiness=3 files / 30 tests passed
+DEV-076 regression=7 files / 56 tests passed
 Settings/runtime regression=PASS; settingsUx, ProjectCommandCenter and Comfy preflight coverage included
 Comfy preflight Rust tests=4 passed
 
@@ -168,16 +189,18 @@ cargo fmt=PASS
 cargo check=PASS
 cargo test=709 passed / 0 failed / 1 ignored; all integration targets passed
 
-pnpm test=109 files / 507 tests passed
+pnpm test=109 files / 510 tests passed
 Frontend files=109
-Frontend tests=507
+Frontend tests=510
 tsc=PASS
 build=PASS; 220 modules transformed
 diff check=PASS
 tauri build=PASS; ai-studio.exe, MSI and NSIS bundles produced
 ```
 
-## 9. Git
+首次全量 Rust 尝试有两个既有 `cancellation_e2e` 时序测试失败；两者隔离复跑均通过，随后未修改 Rust 代码并重跑全量，最终结果为 `709 passed / 0 failed / 1 ignored`。这不是本次 P1 修复引入的失败。
+
+## 10. Git
 
 代码提交：
 
@@ -189,7 +212,7 @@ push=origin/master PASS
 
 本文件由第二个提交 `docs: record DEV-077 verification` 记录。文档按要求不写入自身 SHA；真实 closeout 文档 SHA 以最终 Git 历史为准。
 
-## 10. Issues
+## 11. Issues
 
 ```text
 P0=NONE
@@ -198,7 +221,7 @@ P2=NONE
 P3=NONE
 ```
 
-## 11. Final
+## 12. Final
 
 ```text
 DEV077_PROJECT_PRODUCTION_READINESS=PASS

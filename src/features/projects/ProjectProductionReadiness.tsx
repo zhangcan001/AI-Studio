@@ -71,7 +71,18 @@ function runtimeWorkflowLabel(workflow: ComfyPreflightWorkflowItem): string {
 }
 
 function fingerprint(report: ReturnType<typeof preflightProjectWorkflow>): string {
-  return report.items.map((item) => `${item.path}:${item.recipe?.workflowVersionId ?? "NONE"}`).join("|");
+  return report.items.map((item) => [
+    item.path,
+    item.status,
+    item.source ?? "NONE",
+    item.recipe?.workflowVersionId ?? "NONE",
+    item.recipe?.recipeId ?? "NONE",
+    item.configuredRef?.workflowVersionId ?? "NONE",
+    item.configuredRef?.recipeId ?? "NONE",
+    item.staleConfiguredBinding ? "STALE" : "FRESH",
+    item.usingFallback ? "FALLBACK" : "DIRECT",
+  ].join(":"))
+    .join("|");
 }
 
 function formatVram(free?: number | null, total?: number | null): string {

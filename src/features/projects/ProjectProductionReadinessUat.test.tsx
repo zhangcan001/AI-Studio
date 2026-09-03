@@ -144,6 +144,10 @@ const IMAGE_B = imageRecipe("b");
 const VIDEO_A = videoRecipe("a");
 const CATALOG = [IMAGE_A, IMAGE_B, VIDEO_A];
 const READY_RUNTIME = runtimeReport([runtimeItem(IMAGE_A), runtimeItem(VIDEO_A)]);
+const IMAGE_SHARED_A = { ...IMAGE_A, workflowVersionId: "image-shared", recipeId: "image-recipe-a" };
+const IMAGE_SHARED_B = { ...IMAGE_B, workflowVersionId: "image-shared", recipeId: "image-recipe-b" };
+const SHARED_RECIPE_CATALOG = [IMAGE_SHARED_A, IMAGE_SHARED_B, VIDEO_A];
+const READY_SHARED_RUNTIME = runtimeReport([runtimeItem(IMAGE_SHARED_A), runtimeItem(VIDEO_A)]);
 
 function Harness({ initialConfig, catalog = CATALOG }: { initialConfig: ProjectWorkflowConfigView; catalog?: RecipeViewModel[] }) {
   const [currentConfig, setCurrentConfig] = useState(initialConfig);
@@ -232,6 +236,34 @@ describe("ProjectProductionReadiness deterministic UAT", () => {
 
     await waitFor(() => expect(screen.getByText("项目工作流已变化，请重新检查开工条件。")).toBeTruthy());
     expect(screen.getByText("尚未检查当前运行环境")).toBeTruthy();
+    expect(mocks.getComfyPreflight).toHaveBeenCalledTimes(1);
+  });
+
+  it("Case 7: invalidates after ProjectWorkflowSettings saves recipe B with the same workflow version", async () => {
+    const initialConfig = config({ imageDefault: binding(IMAGE_SHARED_A, "IMAGE") });
+    const nextConfig = config({ imageDefault: binding(IMAGE_SHARED_B, "IMAGE") });
+    mocks.getProjectWorkflowConfig.mockResolvedValue(initialConfig);
+    mocks.replaceProjectWorkflowConfig.mockResolvedValue(nextConfig);
+    mocks.getComfyPreflight.mockResolvedValue(READY_SHARED_RUNTIME);
+    render(<Harness initialConfig={initialConfig} catalog={SHARED_RECIPE_CATALOG} />);
+
+    const user = userEvent.setup();
+    await screen.findByLabelText("图片默认工作流");
+    await user.click(screen.getByRole("button", { name: "检查开工条件" }));
+    await waitFor(() => expect(screen.getByText(/WorkflowVersion：image-shared/)).toBeTruthy());
+    await user.selectOptions(screen.getByLabelText("图片默认工作流"), "image-shared:image-recipe-b");
+    await user.click(screen.getByRole("button", { name: "保存工作流配置" }));
+
+    await waitFor(() => expect(screen.getByText("项目工作流已变化，请重新检查开工条件。")).toBeTruthy());
+    expect(screen.getByText("尚未检查当前运行环境")).toBeTruthy();
+    expect(mocks.replaceProjectWorkflowConfig).toHaveBeenCalledWith("project-uat", {
+      bindings: [{
+        stage: "IMAGE",
+        mode: "DEFAULT",
+        workflowVersionId: "image-shared",
+        recipeId: "image-recipe-b",
+      }],
+    });
     expect(mocks.getComfyPreflight).toHaveBeenCalledTimes(1);
   });
 

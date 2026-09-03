@@ -142,6 +142,10 @@ const IMAGE_B = imageRecipe("b");
 const VIDEO_A = videoRecipe("a");
 const CATALOG = [IMAGE_A, IMAGE_B, VIDEO_A];
 const READY_RUNTIME = runtimeReport([runtimeItem(IMAGE_A), runtimeItem(VIDEO_A)]);
+const IMAGE_SHARED_A = { ...IMAGE_A, workflowVersionId: "image-shared", recipeId: "image-recipe-a" };
+const IMAGE_SHARED_B = { ...IMAGE_B, workflowVersionId: "image-shared", recipeId: "image-recipe-b" };
+const SHARED_RECIPE_CATALOG = [IMAGE_SHARED_A, IMAGE_SHARED_B, VIDEO_A];
+const READY_SHARED_RUNTIME = runtimeReport([runtimeItem(IMAGE_SHARED_A), runtimeItem(VIDEO_A)]);
 
 async function check() {
   await userEvent.click(screen.getByRole("button", { name: /检查开工条件/ }));
@@ -282,6 +286,39 @@ describe("ProjectProductionReadiness", () => {
     await check();
     await waitFor(() => expect(screen.getByText(/WorkflowVersion：image-a/)).toBeTruthy());
     rerender(<ProjectProductionReadiness config={config({ imageDefault: binding(IMAGE_B, "IMAGE") })} catalog={CATALOG} />);
+
+    await waitFor(() => expect(screen.getByText("项目工作流已变化，请重新检查开工条件。")).toBeTruthy());
+    expect(screen.getByText("尚未检查当前运行环境")).toBeTruthy();
+    expect(mocks.getComfyPreflight).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates the old runtime snapshot when only the configured recipe changes", async () => {
+    mocks.getComfyPreflight.mockResolvedValue(READY_SHARED_RUNTIME);
+    const { rerender } = render(
+      <ProjectProductionReadiness
+        config={config({ imageDefault: binding(IMAGE_SHARED_A, "IMAGE") })}
+        catalog={SHARED_RECIPE_CATALOG}
+      />,
+    );
+
+    await check();
+    await waitFor(() => expect(screen.getByText(/WorkflowVersion：image-shared/)).toBeTruthy());
+    rerender(<ProjectProductionReadiness config={config({ imageDefault: binding(IMAGE_SHARED_B, "IMAGE") })} catalog={SHARED_RECIPE_CATALOG} />);
+
+    await waitFor(() => expect(screen.getByText("项目工作流已变化，请重新检查开工条件。")).toBeTruthy());
+    expect(screen.getByText("尚未检查当前运行环境")).toBeTruthy();
+    expect(mocks.getComfyPreflight).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates the old runtime snapshot when the same recipe changes preflight semantics", async () => {
+    mocks.getComfyPreflight.mockResolvedValue(READY_RUNTIME);
+    const freshConfig = config({ imageDefault: binding(IMAGE_A, "IMAGE") });
+    const staleConfig = config({ imageDefault: { ...binding(IMAGE_A, "IMAGE"), available: false } });
+    const { rerender } = render(<ProjectProductionReadiness config={freshConfig} catalog={CATALOG} />);
+
+    await check();
+    await waitFor(() => expect(screen.getAllByTestId("project-production-readiness-path")[0].className).toContain("-ready"));
+    rerender(<ProjectProductionReadiness config={staleConfig} catalog={CATALOG} />);
 
     await waitFor(() => expect(screen.getByText("项目工作流已变化，请重新检查开工条件。")).toBeTruthy());
     expect(screen.getByText("尚未检查当前运行环境")).toBeTruthy();
