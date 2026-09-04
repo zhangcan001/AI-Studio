@@ -27,15 +27,15 @@ function workflowPurposeLabel(category: string, kind: string): string {
 function capabilityLabel(state: string): string {
   switch (state) {
     case "READY":
-      return "当前环境可用";
+      return "当前可运行";
     case "MISSING_NODES":
-      return "已添加，当前环境缺少节点";
+      return "已保存，当前不可运行（缺少节点）";
     case "COMFY_OFFLINE":
-      return "已添加，等待 ComfyUI 检查";
+      return "已保存，当前不可运行（ComfyUI 离线）";
     case "INCOMPATIBLE_INPUT_VALUES":
-      return "已添加，需要检查输入";
+      return "已保存，当前不可运行（输入待检查）";
     default:
-      return "已添加，待检查";
+      return "已保存，待检查";
   }
 }
 
@@ -67,9 +67,11 @@ export function WorkflowImportResult({ plan, projectId, onOpenAdvanced, onOpenSt
           <span>工作流版本<strong>{plan.metadata.workflowVersion}</strong></span>
           <span>输入<strong>{inputLabels}</strong></span>
           <span>输出<strong>{outputLabels}</strong></span>
-          <span>可用状态<strong>{capabilityLabel(plan.capability.state)}</strong></span>
+          <span>导入状态<strong>可加入工作流库</strong></span>
+          <span>运行状态<strong>{capabilityLabel(plan.capability.state)}</strong></span>
         </div>
-        {!!missingNodes.length && <p className="workflow-import-result-warning">⚠ 当前 ComfyUI 缺少 {missingNodes.length} 个节点：{missingNodes.join("、")}。工作流已保存，修复节点前不能生产。</p>}
+        {plan.capability.state === "COMFY_OFFLINE" && <p className="workflow-import-result-warning">⚠ ComfyUI 当前离线，但工作流已经保存。连接 ComfyUI 后可重新检查并运行。</p>}
+        {!!missingNodes.length && <p className="workflow-import-result-warning">⚠ 当前 ComfyUI 缺少 {missingNodes.length} 个节点：{missingNodes.join("、")}。工作流已经保存，安装节点后即可运行。</p>}
         <div className="workflow-smart-actions">
           {projectId && onUseInProject && <button type="button" onClick={() => onUseInProject(published.workflowId, published.recipeId)}>用于当前项目</button>}
           {onOpenStudio && <button type="button" className="quiet-button" onClick={() => onOpenStudio(published.workflowId, published.recipeId)}>打开生成页面</button>}

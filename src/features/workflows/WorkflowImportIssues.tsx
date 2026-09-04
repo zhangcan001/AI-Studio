@@ -35,18 +35,39 @@ function existingWorkflowSource(plan: WorkflowAutoOnboardingPlanView): string {
   const source = plan.existingWorkflowSource?.trim();
   if (source) {
     const normalized = source.toUpperCase();
-    if (normalized.includes("BUILTIN") || source.includes("内置")) return "内置运行包";
-    if (normalized.includes("USER") || normalized.includes("IMPORT") || source.includes("用户")) return "用户工作流";
+    if (normalized.includes("BUILTIN") || normalized.includes("PRODUCT") || source.includes("内置")) return "系统自带";
+    if (normalized.includes("USER") || normalized.includes("IMPORT") || source.includes("用户")) return "用户导入";
     return source;
   }
-  return plan.existingPackageName ? `运行包：${plan.existingPackageName}` : "现有工作流";
+  return "现有工作流";
 }
 
 function matchTypeLabel(matchType?: string): string | undefined {
   const normalized = matchType?.trim().toUpperCase();
   if (normalized === "SEMANTIC_SHA") return "语义匹配";
   if (normalized === "RAW_SHA") return "原始 SHA 匹配";
+  if (normalized === "STRUCTURAL_SHA") return "结构相似";
   return matchType?.trim() || undefined;
+}
+
+function recognitionIdentity(plan: WorkflowAutoOnboardingPlanView): string | undefined {
+  return plan.identity?.trim().toUpperCase() || plan.recognition?.identity;
+}
+
+function isExactDuplicate(plan: WorkflowAutoOnboardingPlanView): boolean {
+  const identity = recognitionIdentity(plan);
+  return identity === "EXACT_RAW"
+    || identity === "EXACT_SEMANTIC"
+    || plan.state === "ALREADY_EXISTS"
+    || plan.state === "ALREADY_EXISTS_ARCHIVED";
+}
+
+function isStructuralVariant(plan: WorkflowAutoOnboardingPlanView): boolean {
+  return recognitionIdentity(plan) === "STRUCTURAL_VARIANT";
+}
+
+function isArchivedDuplicate(plan: WorkflowAutoOnboardingPlanView): boolean {
+  return plan.state === "ALREADY_EXISTS_ARCHIVED";
 }
 
 function suggestedRecipeVersion(plan: WorkflowAutoOnboardingPlanView): string {
@@ -74,6 +95,8 @@ interface Props {
   onResume: () => void;
   onOpenAdvanced: () => void;
   onOpenExisting: () => void;
+  onOpenExistingVersion?: () => void;
+  onUseInProject?: (workflowId: string, recipeId: string) => void;
   onRegenerateRecipe?: () => void;
   onRestoreExisting?: () => void;
   onCancel?: () => void;
@@ -138,6 +161,9 @@ function planMessage(plan: WorkflowAutoOnboardingPlanView): string {
     if (plan.capability.state === "MISSING_NODES" || plan.capability.state === "INCOMPATIBLE_INPUT_VALUES") return "已识别为现有工作流，但当前 ComfyUI 依赖尚未满足；修复节点或输入后可重新生成 Recipe。";
     return "已识别为现有工作流，当前 Recipe 需要升级。重新生成只会新增 Recipe，不会修改原工作流或旧 Recipe。";
   }
+  if (isStructuralVariant(plan)) return "检测到一个结构相似的工作流。它可能只是参数不同，不会自动合并，请选择如何保存。";
+  if (isArchivedDuplicate(plan)) return "该工作流之前已删除，可以恢复现有工作流，不会创建重复数据。";
+  if (isExactDuplicate(plan)) return "该工作流已经存在，不会创建重复数据。";
   if (plan.message.trim()) return plan.message;
   if (plan.state === "WAITING_FOR_COMFY_UI") return "正在检查当前 ComfyUI 环境，请稍候。";
   if (plan.state === "ALREADY_EXISTS" || plan.state === "ALREADY_EXISTS_ARCHIVED") return "这个工作流已经存在，请打开现有版本或返回列表。";
@@ -221,10 +247,14 @@ function issueCapabilityDetails(plan: WorkflowAutoOnboardingPlanView, issue: Wor
   };
 }
 
-export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRegenerateRecipe, onRestoreExisting, onCancel }: Props) {
+export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onUseInProject, onRegenerateRecipe, onRestoreExisting, onCancel }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
   const waiting = plan.state === "WAITING_FOR_COMFY_UI";
   const outdated = isExistingRecipeOutdated(plan);
+  const exactDuplicate = isExactDuplicate(plan);
+  const archivedDuplicate = isArchivedDuplicate(plan);
+  const structuralVariant = isStructuralVariant(plan);
+  const hasExistingWorkflow = Boolean(plan.existingWorkflowId || plan.existingPackageName || exactDuplicate);
   const matchType = matchTypeLabel(plan.existingMatchType);
   const issueFingerprint = plan.issues.map((issue, issueIndex) => workflowIssueSelectionKey(issue, issueIndex)).join("|");
   useEffect(() => setSelected({}), [plan.draftId, plan.state, issueFingerprint]);
@@ -233,22 +263,29 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
       <div className="workflow-smart-issues-heading">
         <div>
           <span className="section-label">添加工作流</span>
-          <h3>{outdated ? "检测到现有工作流，需要升级 Recipe" : waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流暂时无法添加" : "需要确认后添加"}</h3>
+          <h3>{outdated ? "检测到现有工作流，需要更新配置" : structuralVariant ? "检测到结构相似的工作流" : archivedDuplicate ? "该工作流之前已删除" : exactDuplicate ? "该工作流已经存在" : waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流可以保存，但当前不能运行" : "需要确认后添加"}</h3>
           <p>{planMessage(plan)}</p>
         </div>
         <span className={`workflow-smart-state workflow-smart-state-${plan.state.toLowerCase()}`}>{outdated ? (waiting || plan.capability.state === "COMFY_OFFLINE" ? "等待连接" : "需要升级") : waiting ? "等待中" : plan.state === "BLOCKED" ? "暂不可用" : "需要确认"}</span>
       </div>
-      {outdated && (
-        <div className="workflow-import-guidance" aria-label="现有工作流 Recipe 升级信息">
-          <strong>现有工作流信息</strong>
+      {hasExistingWorkflow && (
+        <div className="workflow-import-guidance" aria-label="现有工作流信息">
+          <strong>{structuralVariant ? "结构相似工作流" : "现有工作流信息"}</strong>
           <div className="workflow-detail-grid">
             <span>工作流名称<strong>{existingWorkflowName(plan)}</strong></span>
             <span>来源<strong>{existingWorkflowSource(plan)}</strong></span>
             <span>工作流版本<strong>{plan.existingWorkflowVersion ?? "—"}</strong></span>
             <span>旧 Recipe<strong>{existingRecipeLabel(plan)}</strong></span>
-            <span>建议新版本<strong>{suggestedRecipeVersion(plan)}</strong></span>
+            {outdated && <span>建议新版本<strong>{suggestedRecipeVersion(plan)}</strong></span>}
           </div>
-          <p>重新生成只会新增 Recipe，不会修改内置工作流或旧 Recipe。</p>
+          {structuralVariant
+            ? <p>结构相似只用于提示，不会自动合并或覆盖现有工作流。</p>
+            : <p>更新配置只会新增版本，不会修改系统自带工作流或旧配置。</p>}
+          {!!(plan.structuralChanges ?? plan.recognition?.structuralChanges)?.length && (
+            <ul className="workflow-issue-list">
+              {(plan.structuralChanges ?? plan.recognition?.structuralChanges ?? []).map((change, index) => <li key={`${change.message}-${index}`}>{change.message}</li>)}
+            </ul>
+          )}
           {matchType && (
             <details className="technical-error-details" open>
               <summary>技术详情</summary>
@@ -318,9 +355,13 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
       )}
       <div className="workflow-smart-actions">
         {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续自动确认"}</button>}
-        {(plan.state === "ALREADY_EXISTS" || plan.state === "ALREADY_EXISTS_ARCHIVED") && <button type="button" onClick={onOpenExisting}>打开现有工作流</button>}
-        {outdated && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>重新生成 Recipe</button>}
-        {plan.state === "ALREADY_EXISTS_ARCHIVED" && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复归档工作流</button>}
+        {exactDuplicate && !archivedDuplicate && <button type="button" onClick={onOpenExisting}>打开工作流</button>}
+        {exactDuplicate && !archivedDuplicate && plan.existingWorkflowId && onUseInProject && <button type="button" onClick={() => onUseInProject(plan.existingWorkflowId!, plan.existingRecipes?.[0]?.recipeId ?? plan.metadata.recipeId)}>用于当前项目</button>}
+        {exactDuplicate && !archivedDuplicate && <button type="button" className="quiet-button" onClick={onResume} disabled={loading}>重新识别</button>}
+        {structuralVariant && <button type="button" onClick={onOpenAdvanced}>添加为新工作流</button>}
+        {structuralVariant && onOpenExistingVersion && <button type="button" className="quiet-button" onClick={onOpenExistingVersion}>添加为现有工作流的新版本</button>}
+        {outdated && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>更新工作流配置</button>}
+        {archivedDuplicate && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复工作流</button>}
         <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>
         {onCancel && <button type="button" className="quiet-button" onClick={onCancel} disabled={loading}>取消添加</button>}
       </div>

@@ -15,6 +15,7 @@ interface Props {
   onResume: () => void;
   onOpenAdvanced: () => void;
   onOpenExisting: () => void;
+  onOpenExistingVersion?: () => void;
   onRegenerateRecipe?: () => void;
   onRestoreExisting?: () => void;
   onOpenStudio?: (workflowId: string, recipeId: string) => void;
@@ -69,7 +70,7 @@ function formatIssue(format: WorkflowImportFormat): WorkflowImportErrorView | un
   return undefined;
 }
 
-export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRegenerateRecipe, onRestoreExisting, onOpenStudio, onUseInProject, onReturnToList, onCancel, onRetry, importError, projectId }: Props) {
+export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onRegenerateRecipe, onRestoreExisting, onOpenStudio, onUseInProject, onReturnToList, onCancel, onRetry, importError, projectId }: Props) {
   if (importError) {
     return <WorkflowImportFormatIssue issue={importError} loading={loading} onRetry={onRetry} onCancel={onReturnToList ?? onCancel} />;
   }
@@ -79,7 +80,7 @@ export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume,
   if (detectedIssue) {
     return <WorkflowImportFormatIssue issue={detectedIssue} loading={loading} onRetry={onRetry} onCancel={onReturnToList ?? onCancel} />;
   }
-  if (plan.state === "AUTO_PUBLISHED") {
+  if (plan.state === "AUTO_PUBLISHED" || plan.published) {
     return (
       <WorkflowImportResult
         plan={plan}
@@ -100,6 +101,8 @@ export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume,
       onResume={onResume}
       onOpenAdvanced={onOpenAdvanced}
       onOpenExisting={onOpenExisting}
+      onOpenExistingVersion={onOpenExistingVersion}
+      onUseInProject={projectId ? onUseInProject : undefined}
       onRegenerateRecipe={onRegenerateRecipe}
       onRestoreExisting={onRestoreExisting}
       onCancel={onCancel}

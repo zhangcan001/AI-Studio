@@ -714,7 +714,7 @@ impl ProductionPackageService {
         mode: &str,
     ) -> Result<ResolvedPackageRecipe, ProductionPackageError> {
         let Some(service) = self.project_workflow_binding_service.as_ref() else {
-            return Ok(legacy_package_recipe(&self.h3_config, mode)?);
+            return legacy_package_recipe(&self.h3_config, mode);
         };
         let config = service
             .get(project_id)
@@ -730,7 +730,21 @@ impl ProductionPackageService {
             ));
         }
         if config.video_default.is_none() && config.video_mode_overrides.is_empty() {
-            return Ok(legacy_package_recipe(&self.h3_config, mode)?);
+            let resolved = legacy_package_recipe(&self.h3_config, mode)?;
+            let available = service
+                .is_workflow_available_for_recipe(
+                    &resolved.workflow_version_id,
+                    &resolved.recipe_id,
+                )
+                .await
+                .map_err(|error| project_workflow_unavailable(mode, error.to_string()))?;
+            if !available {
+                return Err(project_workflow_unavailable(
+                    mode,
+                    "legacy H3 workflow configuration points to an unavailable workflow",
+                ));
+            }
+            return Ok(resolved);
         }
         let selection = select_project_mode_binding(&config, mode);
         let Some((binding, source)) = selection else {

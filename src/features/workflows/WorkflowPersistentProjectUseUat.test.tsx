@@ -14,6 +14,9 @@ import { WorkflowWorkspace } from "./WorkflowWorkspace";
 
 const tauriMocks = vi.hoisted(() => ({
   listWorkflowProductionWorkspace: vi.fn(),
+  refreshWorkflowProductionWorkspace: vi.fn(),
+  restoreWorkflowVersion: vi.fn(),
+  recheckWorkflowCapability: vi.fn(),
 }));
 
 vi.mock("../../services/tauriClient", async () => {
@@ -82,6 +85,9 @@ function renderWorkspace({
   items?: WorkflowProductionWorkspaceView[];
 } = {}) {
   tauriMocks.listWorkflowProductionWorkspace.mockResolvedValue(workspaceResponse(items));
+  tauriMocks.refreshWorkflowProductionWorkspace.mockResolvedValue(workspaceResponse(items));
+  tauriMocks.restoreWorkflowVersion.mockResolvedValue(undefined);
+  tauriMocks.recheckWorkflowCapability.mockResolvedValue({ state: "READY", issues: [] });
   const onUseInProject = vi.fn().mockResolvedValue(undefined);
 
   render(
@@ -153,5 +159,8 @@ describe("DEV-079 工作流列表用于当前项目 UAT", () => {
     const archivedName = await screen.findByText("Archived Workflow");
     const archivedView = within(archivedName.closest("article")!);
     expect(archivedView.queryByRole("button", { name: "用于当前项目" })).toBeNull();
+    expect(archivedView.getAllByText(/已删除/).length).toBeGreaterThan(0);
+    await user.click(archivedView.getByRole("button", { name: "恢复工作流" }));
+    await waitFor(() => expect(tauriMocks.restoreWorkflowVersion).toHaveBeenCalledWith("ARCHIVED_WV"));
   });
 });

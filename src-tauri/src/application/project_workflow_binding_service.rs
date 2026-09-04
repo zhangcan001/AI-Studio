@@ -187,6 +187,60 @@ impl ProjectWorkflowBindingService {
         self.get(project_id).await
     }
 
+    pub async fn workflow_version_binding_summary(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<(u64, Vec<String>), ProjectWorkflowBindingServiceError> {
+        let bindings = self
+            .binding_repository
+            .list_for_workflow_version(workflow_version_id)
+            .await?;
+        let mut scopes = bindings
+            .iter()
+            .map(|binding| format!("{} {}", binding.stage, binding.mode))
+            .collect::<Vec<_>>();
+        scopes.sort();
+        scopes.dedup();
+        Ok((bindings.len() as u64, scopes))
+    }
+
+    pub async fn clear_by_workflow_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<u64, ProjectWorkflowBindingServiceError> {
+        Ok(self
+            .binding_repository
+            .clear_by_workflow_version(workflow_version_id)
+            .await?)
+    }
+
+    pub async fn is_workflow_available_for_recipe(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<bool, ProjectWorkflowBindingServiceError> {
+        let Some(version) = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+        else {
+            return Ok(false);
+        };
+        if !version.is_current
+            || !version
+                .recipes
+                .iter()
+                .any(|recipe| recipe.recipe_id == recipe_id)
+        {
+            return Ok(false);
+        }
+        Ok(self
+            .runtime_state_repository
+            .find_state(workflow_version_id)
+            .await?
+            .is_none_or(|state| state.enabled && !state.archived))
+    }
+
     async fn ensure_project(
         &self,
         project_id: &str,
@@ -208,26 +262,8 @@ impl ProjectWorkflowBindingService {
         &self,
         binding: &ProjectWorkflowBindingRecord,
     ) -> Result<bool, ProjectWorkflowBindingServiceError> {
-        let Some(version) = self
-            .runtime_repository
-            .find_version(&binding.workflow_version_id)
-            .await?
-        else {
-            return Ok(false);
-        };
-        if !version.is_current
-            || !version
-                .recipes
-                .iter()
-                .any(|recipe| recipe.recipe_id == binding.recipe_id)
-        {
-            return Ok(false);
-        }
-        Ok(self
-            .runtime_state_repository
-            .find_state(&binding.workflow_version_id)
-            .await?
-            .is_none_or(|state| state.enabled && !state.archived))
+        self.is_workflow_available_for_recipe(&binding.workflow_version_id, &binding.recipe_id)
+            .await
     }
 }
 

@@ -25,4 +25,14 @@ pub trait ProjectWorkflowBindingRepository: Send + Sync {
         project_id: &str,
         bindings: &[ProjectWorkflowBindingRecord],
     ) -> Result<(), RepositoryError>;
+
+    async fn list_for_workflow_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Vec<ProjectWorkflowBindingRecord>, RepositoryError>;
+
+    async fn clear_by_workflow_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<u64, RepositoryError>;
 }

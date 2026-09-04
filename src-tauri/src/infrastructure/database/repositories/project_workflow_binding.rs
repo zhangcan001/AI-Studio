@@ -55,6 +55,38 @@ impl ProjectWorkflowBindingRepository for SqliteProjectWorkflowBindingRepository
 
         transaction.commit().await.map_err(map_sqlx_error)
     }
+
+    async fn list_for_workflow_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Vec<ProjectWorkflowBindingRecord>, RepositoryError> {
+        let rows = sqlx::query_as::<_, ProjectWorkflowBindingRow>(
+            "SELECT project_id, stage, mode, workflow_version_id, recipe_id,
+                    created_at, updated_at
+             FROM project_workflow_bindings
+             WHERE workflow_version_id = ?
+             ORDER BY project_id ASC, stage ASC, mode ASC",
+        )
+        .bind(workflow_version_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    async fn clear_by_workflow_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<u64, RepositoryError> {
+        let result =
+            sqlx::query("DELETE FROM project_workflow_bindings WHERE workflow_version_id = ?")
+                .bind(workflow_version_id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
+    }
 }
 
 async fn insert_binding(
@@ -226,6 +258,43 @@ mod tests {
         assert_eq!(
             repository.list_for_project("project-1").await.unwrap(),
             Vec::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn clears_only_the_requested_workflow_version() {
+        let (_directory, _pool, repository) = setup().await;
+        let removed = binding("VIDEO", "DEFAULT", "deleted-version", "recipe-1");
+        let kept = binding("IMAGE", "DEFAULT", "kept-version", "recipe-2");
+        repository
+            .replace_for_project("project-1", &[removed.clone(), kept.clone()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .list_for_workflow_version("deleted-version")
+                .await
+                .unwrap(),
+            vec![removed]
+        );
+        assert_eq!(
+            repository
+                .clear_by_workflow_version("deleted-version")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            repository.list_for_project("project-1").await.unwrap(),
+            vec![kept]
+        );
+        assert_eq!(
+            repository
+                .clear_by_workflow_version("deleted-version")
+                .await
+                .unwrap(),
+            0
         );
     }
 }

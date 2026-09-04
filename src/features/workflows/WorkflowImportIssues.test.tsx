@@ -256,16 +256,16 @@ describe("WorkflowImportIssues", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "检测到现有工作流，需要升级 Recipe" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "检测到现有工作流，需要更新配置" })).toBeTruthy();
     expect(screen.getByText("AITUDOU MiniMax H3 LightX2V 8步高动态加速")).toBeTruthy();
-    expect(screen.getByText("内置运行包")).toBeTruthy();
+    expect(screen.getByText("系统自带")).toBeTruthy();
     expect(screen.getByText("1.0.0 · rcp-old")).toBeTruthy();
     expect(screen.getByText("1.0.1")).toBeTruthy();
     expect(screen.getByText("matchType=语义匹配")).toBeTruthy();
     expect(screen.getByText(/连接 ComfyUI 后可重新生成 Recipe/)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "工作流暂时无法添加" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "重新生成 Recipe" }));
+    await user.click(screen.getByRole("button", { name: "更新工作流配置" }));
     expect(onRegenerateRecipe).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -285,5 +285,33 @@ describe("WorkflowImportIssues", () => {
     );
     expect(screen.getByText(/修复节点或输入后可重新生成 Recipe/)).toBeTruthy();
     expect(screen.getByText("matchType=语义匹配")).toBeTruthy();
+  });
+
+  it("结构相似工作流要求用户明确选择新工作流或新版本", async () => {
+    const user = userEvent.setup();
+    const onOpenExistingVersion = vi.fn();
+    render(
+      <WorkflowImportIssues
+        plan={planWithIssues([], {
+          state: "NEEDS_REVIEW",
+          recognition: { format: "API", identity: "STRUCTURAL_VARIANT" },
+          identity: "STRUCTURAL_VARIANT",
+          existingWorkflowId: "workflow-existing",
+          existingWorkflowVersion: "1.0.0",
+          existingWorkflowName: "现有工作流",
+          existingMatchType: "STRUCTURAL_SHA",
+        })}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={vi.fn()}
+        onOpenAdvanced={vi.fn()}
+        onOpenExisting={vi.fn()}
+        onOpenExistingVersion={onOpenExistingVersion}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "检测到结构相似的工作流" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "添加为现有工作流的新版本" }));
+    expect(onOpenExistingVersion).toHaveBeenCalledTimes(1);
   });
 });

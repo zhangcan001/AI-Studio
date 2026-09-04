@@ -166,6 +166,7 @@ const MISSING_NODE_WORKFLOW: &str = r#"{
 #[derive(Clone)]
 struct FixtureComfyAdapter {
     object_info: Value,
+    offline: bool,
     submit_calls: Arc<AtomicUsize>,
 }
 
@@ -173,6 +174,15 @@ impl FixtureComfyAdapter {
     fn new(object_info: Value) -> Self {
         Self {
             object_info,
+            offline: false,
+            submit_calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn offline() -> Self {
+        Self {
+            object_info: Value::Null,
+            offline: true,
             submit_calls: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -193,6 +203,11 @@ impl ComfyAdapter for FixtureComfyAdapter {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
+        if self.offline {
+            return Err(ComfyAdapterError::Offline(
+                "DEV-082 fixture ComfyUI is offline".to_owned(),
+            ));
+        }
         Ok(self.object_info.clone())
     }
 
@@ -266,6 +281,14 @@ struct Harness {
 }
 
 async fn harness(object_info: Value) -> Harness {
+    harness_with_comfy(Arc::new(FixtureComfyAdapter::new(object_info))).await
+}
+
+async fn offline_harness() -> Harness {
+    harness_with_comfy(Arc::new(FixtureComfyAdapter::offline())).await
+}
+
+async fn harness_with_comfy(comfy: Arc<FixtureComfyAdapter>) -> Harness {
     let directory = tempdir().expect("fixture directory should exist");
     let data_root = directory.path().join("AIStudioData");
     let library_root = data_root.join("workflow_library");
@@ -286,7 +309,6 @@ async fn harness(object_info: Value) -> Harness {
     let runtime_repository = Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
     let runtime_state_repository =
         Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
-    let comfy = Arc::new(FixtureComfyAdapter::new(object_info));
     let service = WorkflowOnboardingService::new(
         source,
         comfy.clone(),
@@ -408,6 +430,48 @@ fn detects_real_api_ui_unknown_array_and_invalid_inputs_before_onboarding() {
 }
 
 #[tokio::test]
+async fn dev082_importability_is_independent_from_comfy_capability() {
+    let offline = offline_harness().await;
+    let offline_draft = offline
+        .service
+        .import_bytes(
+            api_image_bytes(),
+            "dev082_offline_api.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("valid API JSON remains importable while ComfyUI is offline");
+    assert!(offline_draft.validation.api_format);
+    assert_eq!(offline_draft.capability.state, CapabilityState::NotChecked);
+    let offline_capability = offline
+        .service
+        .check_capability(&offline_draft.draft_id)
+        .await
+        .expect("offline capability should be reported, not make import fail");
+    assert_eq!(offline_capability.state, CapabilityState::ComfyOffline);
+    assert!(offline.service.get(&offline_draft.draft_id).is_ok());
+
+    let missing = harness(object_info()).await;
+    let missing_draft = missing
+        .service
+        .import_bytes(
+            MISSING_NODE_WORKFLOW.as_bytes().to_vec(),
+            "dev082_missing_node_api.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("valid API JSON remains importable with missing custom nodes");
+    assert!(missing_draft.validation.api_format);
+    let missing_capability = missing
+        .service
+        .check_capability(&missing_draft.draft_id)
+        .await
+        .expect("missing node capability should be reported after import");
+    assert_eq!(missing_capability.state, CapabilityState::MissingNodes);
+    assert!(missing.service.get(&missing_draft.draft_id).is_ok());
+}
+
+#[tokio::test]
 async fn auto_adds_image_and_refreshes_the_real_generation_catalog() {
     let harness = harness(object_info()).await;
     let plan = harness
@@ -520,7 +584,7 @@ async fn auto_adds_video_without_claiming_an_exact_h3_mode() {
 }
 
 #[tokio::test]
-async fn ambiguous_and_missing_node_imports_never_silently_publish() {
+async fn ambiguous_imports_wait_for_review_and_missing_nodes_publish_disabled() {
     let ambiguous_harness = harness(object_info()).await;
     let ambiguous = ambiguous_harness
         .service
@@ -556,15 +620,38 @@ async fn ambiguous_and_missing_node_imports_never_silently_publish() {
         )
         .await
         .expect("missing-node workflow must remain available for explicit handling");
-    assert_ne!(missing.state, WorkflowAutoOnboardingState::AutoPublished);
-    assert!(missing.published.is_none());
+    assert_eq!(missing.state, WorkflowAutoOnboardingState::AutoPublished);
+    let published = missing
+        .published
+        .as_ref()
+        .expect("importable missing-node workflow should be saved");
     assert_eq!(missing.capability.state, CapabilityState::MissingNodes);
+    assert!(missing.recognition.importable);
+    assert!(!missing.recognition.executable);
     assert!(missing
         .issues
         .iter()
         .any(|issue| issue.code == "MISSING_NODES"));
     assert!(missing_harness.service.get(&missing.draft_id).is_ok());
-    assert_no_package_or_staging(&missing_harness);
+    let runtime_version = missing_harness
+        .runtime_repository
+        .list_versions()
+        .await
+        .expect("missing-node package should register a runtime version")
+        .into_iter()
+        .find(|version| {
+            version.workflow_id == published.workflow_id
+                && version.workflow_version == published.workflow_version
+        })
+        .expect("missing-node runtime version should exist");
+    let state = missing_harness
+        .runtime_state_repository
+        .find_state(&runtime_version.workflow_version_id)
+        .await
+        .expect("runtime state should be readable")
+        .expect("missing-node package should have explicit runtime state");
+    assert!(!state.enabled);
+    assert!(!state.archived);
 }
 
 #[tokio::test]

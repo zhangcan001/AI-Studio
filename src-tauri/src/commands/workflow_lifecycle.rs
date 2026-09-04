@@ -14,6 +14,10 @@ fn map_error(error: WorkflowLifecycleError) -> AppError {
     AppError::workflow_onboarding(format!("{}: {}", error.code(), error))
 }
 
+fn map_binding_cleanup_error(error: impl std::fmt::Display) -> AppError {
+    AppError::workflow_onboarding(format!("PROJECT_WORKFLOW_BINDING_CLEANUP_FAILED: {error}"))
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_runtime_workspace_list(
     state: State<'_, AppState>,
@@ -227,11 +231,19 @@ pub async fn workflow_inspect_deletion(
     state: State<'_, AppState>,
     workflow_version_id: String,
 ) -> Result<WorkflowDeletionInspection, AppError> {
-    state
+    let mut inspection = state
         .workflow_lifecycle_service
         .inspect_deletion(&workflow_version_id)
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    let (count, scopes) = state
+        .project_workflow_binding_service
+        .workflow_version_binding_summary(&workflow_version_id)
+        .await
+        .map_err(map_binding_cleanup_error)?;
+    inspection.project_binding_count = count;
+    inspection.project_binding_scopes = scopes;
+    Ok(inspection)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -239,11 +251,17 @@ pub async fn workflow_delete_version(
     state: State<'_, AppState>,
     workflow_version_id: String,
 ) -> Result<WorkflowDeletionResult, AppError> {
-    state
+    let mut result = state
         .workflow_lifecycle_service
         .delete_version(&workflow_version_id)
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    result.project_binding_count = state
+        .project_workflow_binding_service
+        .clear_by_workflow_version(&workflow_version_id)
+        .await
+        .map_err(map_binding_cleanup_error)?;
+    Ok(result)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -251,11 +269,19 @@ pub async fn workflow_delete_workflow(
     state: State<'_, AppState>,
     workflow_id: String,
 ) -> Result<Vec<WorkflowDeletionResult>, AppError> {
-    state
+    let mut results = state
         .workflow_lifecycle_service
         .delete_workflow(&workflow_id)
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    for result in &mut results {
+        result.project_binding_count = state
+            .project_workflow_binding_service
+            .clear_by_workflow_version(&result.workflow_version_id)
+            .await
+            .map_err(map_binding_cleanup_error)?;
+    }
+    Ok(results)
 }
 
 #[tauri::command(rename_all = "camelCase")]

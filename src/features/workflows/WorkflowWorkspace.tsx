@@ -50,6 +50,7 @@ import { formatUiError, toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, stagingStatusLabel, workflowDisplayName, workflowModeLabel } from "../../i18n/statusLabels";
 import { WorkflowSmartImport, workflowImportFormat } from "./WorkflowSmartImport";
 import type { WorkflowImportErrorView } from "./WorkflowImportIssues";
+import { WorkflowDeleteDialog } from "./WorkflowDeleteDialog";
 import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
 
 interface Props {
@@ -93,6 +94,12 @@ function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
     return leftPart < rightPart ? -1 : 1;
   }
   return left.prerelease.length - right.prerelease.length;
+}
+
+function nextWorkflowVersion(value: string): string {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+  if (!match) return "1.0.1";
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
 }
 
 export function latestCatalogRecipeForWorkflowItem(item: WorkflowProductionWorkspaceView, catalog: RecipeViewModel[]): RecipeViewModel | undefined {
@@ -178,6 +185,12 @@ interface MetadataDraft {
   mode: string;
 }
 
+interface WorkflowDeletionTarget {
+  item: WorkflowProductionWorkspaceView;
+  inspection: WorkflowDeletionInspection;
+  scope: "VERSION" | "WORKFLOW";
+}
+
 function workflowImportErrorView(error: unknown): WorkflowImportErrorView {
   const formatted = formatUiError(error);
   const haystack = `${formatted.code ?? ""} ${formatted.technicalMessage}`.toUpperCase();
@@ -206,7 +219,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [items, setItems] = useState<WorkflowProductionWorkspaceView[]>(() => cachedWorkspace?.items ?? []);
   const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>(() => cachedWorkspace?.staging ?? []);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "enabled" | "disabled" | "issues" | "archived">("all");
+  const [filter, setFilter] = useState<"all" | "available" | "issues" | "archived">("all");
   const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
   const [diff, setDiff] = useState<WorkflowVersionDiffView>();
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -224,6 +237,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [parameterItem, setParameterItem] = useState<WorkflowProductionWorkspaceView>();
   const [parameterOriginalKeys, setParameterOriginalKeys] = useState<string[]>([]);
   const [parameterLoading, setParameterLoading] = useState(false);
+  const [deletionTarget, setDeletionTarget] = useState<WorkflowDeletionTarget>();
+  const [deleting, setDeleting] = useState(false);
   const draft = useWorkflowOnboardingStore((state) => state.draft);
   const step = useWorkflowOnboardingStore((state) => state.step);
   const loading = useWorkflowOnboardingStore((state) => state.loading);
@@ -444,57 +459,39 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
   }
 
-  async function removeWorkflowVersion(item: WorkflowProductionWorkspaceView) {
+  async function inspectForDeletion(item: WorkflowProductionWorkspaceView, scope: WorkflowDeletionTarget["scope"] = "VERSION") {
     if (!item.workflowVersionId) return;
     setWorkspaceError(undefined);
     try {
       const inspection = await inspectWorkflowDeletion(item.workflowVersionId);
-      if (inspection.builtin) {
-        setWorkspaceError("这是内置运行包，不能永久删除；如需停用请使用“停用”。");
-        return;
-      }
-      if (inspection.activeTaskCount > 0 || inspection.activeQueueItemCount > 0) {
-        setWorkspaceError(inspection.blockingReasons.join(" "));
-        return;
-      }
-      const confirmed = window.confirm(deletionConfirmation(inspection, inspection.requiresArchive));
-      if (!confirmed) return;
-      const result = await deleteWorkflowVersion(item.workflowVersionId);
-      await loadWorkspace("fast");
-      await onCatalogChanged();
-      setNotice(result.action === "ARCHIVE"
-        ? `${inspection.name} 已归档，历史任务和生成资产仍可查看与重生成。`
-        : `${inspection.name} 已永久删除；历史任务引用检查通过。`);
+      setDeletionTarget({ item, inspection, scope });
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     }
   }
 
-  async function removeEntireWorkflow(item: WorkflowProductionWorkspaceView) {
-    if (!item.workflowId) return;
+  async function confirmWorkflowDeletion() {
+    if (!deletionTarget || deleting) return;
+    setDeleting(true);
     setWorkspaceError(undefined);
     try {
-      const inspection = item.workflowVersionId
-        ? await inspectWorkflowDeletion(item.workflowVersionId)
-        : undefined;
-      if (inspection?.builtin) {
-        setWorkspaceError("该工作流包含内置运行包，不能永久删除。");
-        return;
-      }
-      if (inspection && (inspection.activeTaskCount > 0 || inspection.activeQueueItemCount > 0)) {
-        setWorkspaceError(inspection.blockingReasons.join(" "));
-        return;
-      }
-      if (!window.confirm(`确定删除整个工作流“${item.name ?? item.workflowId}”吗？\n\n系统会逐版本检查：有历史任务的版本会归档，未被引用的自定义版本才会永久删除。\n\n此操作不可撤销。`)) return;
-      const results = await deleteWorkflow(item.workflowId);
-      await loadWorkspace("fast");
+      const { item, scope, inspection } = deletionTarget;
+      const result = scope === "WORKFLOW" && item.workflowId
+        ? await deleteWorkflow(item.workflowId)
+        : item.workflowVersionId
+          ? [await deleteWorkflowVersion(item.workflowVersionId)]
+          : [];
+      setDeletionTarget(undefined);
+      await loadWorkspace("refresh");
       await onCatalogChanged();
-      const archivedCount = results.filter((result) => result.action === "ARCHIVE").length;
-      setNotice(archivedCount
-        ? `工作流已处理：${archivedCount} 个版本已归档，历史记录保持不变。`
-        : "整个工作流及其未被引用的版本已删除。");
+      const hardDeleted = result.filter((entry) => entry.action === "HARD_DELETE").length;
+      setNotice(hardDeleted
+        ? `${inspection.name} 已删除；历史生产记录仍然保留。`
+        : `${inspection.name} 已从工作流库移除，可在“已删除”中恢复。`);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -502,9 +499,18 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     if (!item.workflowVersionId || !item.archived) return;
     try {
       await restoreWorkflowVersion(item.workflowVersionId);
-      await loadWorkspace("fast");
+      let message = `${item.name ?? item.packageName} 已恢复工作流，当前保持停用状态。`;
+      try {
+        const capability = await recheckWorkflowCapability(item.workflowVersionId);
+        message = capability.state === "READY"
+          ? `${item.name ?? item.packageName} 已恢复并完成检查，现在可用。`
+          : `${item.name ?? item.packageName} 已恢复，检查结果为待处理；修复环境后即可运行。`;
+      } catch {
+        message = `${item.name ?? item.packageName} 已恢复，暂未完成兼容性检查。`;
+      }
+      await loadWorkspace("refresh");
       await onCatalogChanged();
-      setNotice(`${item.name ?? item.packageName} 已恢复到工作流列表（保持停用状态）。`);
+      setNotice(message);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     }
@@ -533,6 +539,33 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     }
+  }
+
+  async function reidentifyWorkflow(item: WorkflowProductionWorkspaceView) {
+    if (!item.workflowId || !item.workflowVersion || item.archived) return;
+    await runDraftAction(async () => {
+      const sourceRecipeVersion = item.recipes[item.recipes.length - 1]?.version;
+      const nextPlan = await regenerateWorkflowRecipe(
+        item.workflowId!,
+        item.workflowVersion!,
+        sourceRecipeVersion,
+      );
+      setAutoPlan(nextPlan);
+      setAutoImportError(undefined);
+      setShowAdvanced(false);
+      try {
+        setDraft(await getOnboardingDraft(nextPlan.draftId));
+      } catch (draftError) {
+        if (!nextPlan.published) throw draftError;
+      }
+      if (nextPlan.published) {
+        await loadWorkspace("refresh");
+        await onCatalogChanged();
+        setNotice(`已重新识别并保存新的 Recipe ${nextPlan.metadata.recipeVersion}；原工作流版本和旧 Recipe 保持不变。`);
+      } else {
+        setNotice(nextPlan.message);
+      }
+    });
   }
 
   async function repairBuiltinPackage(item: WorkflowProductionWorkspaceView) {
@@ -805,12 +838,20 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
 
   const visibleItems = items.filter((item) => {
     const matchesSearch = !search.trim() || (item.name ?? item.packageName).toLowerCase().includes(search.trim().toLowerCase());
+    const needsAction = !item.archived && (
+      !item.enabled
+      || item.packageStatus !== "VALID"
+      || item.capability !== "READY"
+      || item.readiness !== "READY"
+      || item.diagnostics.length > 0
+    );
     const matchesFilter = filter === "archived"
       ? item.archived
-      : !item.archived && (filter === "all"
-        || (filter === "enabled" && item.enabled)
-        || (filter === "disabled" && !item.enabled)
-        || (filter === "issues" && (item.packageStatus !== "VALID" || item.diagnostics.length > 0 || item.capability !== "READY")));
+      : filter === "available"
+        ? !item.archived && !needsAction
+        : filter === "issues"
+          ? !item.archived && needsAction
+          : !item.archived;
     return matchesSearch && matchesFilter;
   });
 
@@ -1014,6 +1055,24 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     setShowAdvanced(true);
   }
 
+  async function openStructuralVariantAsVersion() {
+    if (!autoPlan?.existingWorkflowId || !autoPlan.existingWorkflowVersion) return;
+    await runDraftAction(async () => {
+      const currentDraft = draft ?? await getOnboardingDraft(autoPlan.draftId);
+      const nextDraft = await setOnboardingMetadata(autoPlan.draftId, {
+        workflowId: autoPlan.existingWorkflowId,
+        name: currentDraft.manifest.name,
+        workflowVersion: nextWorkflowVersion(autoPlan.existingWorkflowVersion!),
+        recipeVersion: "1.0.0",
+        category: currentDraft.manifest.category,
+        mode: currentDraft.manifest.mode,
+      });
+      setDraft(nextDraft);
+      setShowAdvanced(true);
+      setNotice("已选择添加为现有工作流的新版本。请在高级编辑中确认映射后发布；旧版本不会被覆盖。");
+    });
+  }
+
   async function openExistingWorkflow() {
     if (!autoPlan?.existingWorkflowId) return;
     const existing = items.find((item) =>
@@ -1082,72 +1141,74 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onResume={() => void resumeAutoImport()}
         onOpenAdvanced={() => void openAdvancedImport()}
         onOpenExisting={() => void openExistingWorkflow()}
+        onOpenExistingVersion={() => void openStructuralVariantAsVersion()}
+        onUseInProject={(workflowId, recipeId) => void onUseInProject(workflowId, recipeId)}
         onRegenerateRecipe={() => void regenerateExistingRecipe()}
         onRestoreExisting={() => void restoreExistingArchivedWorkflow()}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
-        onUseInProject={(workflowId, recipeId) => void onUseInProject(workflowId, recipeId)}
         onRetry={() => void smartImportWorkflow()}
         onCancel={() => void returnToWorkflowList()}
         onReturnToList={() => void returnToWorkflowList()}
       />
 
       <section className="workflow-health-dashboard" aria-label="运行环境健康概览">
-        <div><span>运行包总数</span><strong>{items.length}</strong></div>
-        <div><span>生产就绪</span><strong>{items.filter((item) => item.readiness === "READY").length}</strong></div>
-        <div><span>待验证</span><strong>{items.filter((item) => item.readiness === "DEGRADED").length}</strong></div>
-        <div><span>阻塞诊断</span><strong>{items.filter((item) => item.readiness === "BLOCKED").length}</strong></div>
+        <div><span>运行包总数</span><strong>{items.filter((item) => !item.archived).length}</strong></div>
+        <div><span>生产就绪</span><strong>{items.filter((item) => !item.archived && item.readiness === "READY").length}</strong></div>
+        <div><span>待验证</span><strong>{items.filter((item) => !item.archived && item.readiness === "DEGRADED").length}</strong></div>
+        <div><span>阻塞诊断</span><strong>{items.filter((item) => !item.archived && item.readiness === "BLOCKED").length}</strong></div>
       </section>
 
       <div className="workflow-production-toolbar">
         <input aria-label="搜索工作流" placeholder="按名称搜索" value={search} onChange={(event) => setSearch(event.target.value)} />
         <select aria-label="工作流筛选" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
-          <option value="all">全部（未归档）</option><option value="enabled">已启用</option><option value="disabled">已停用</option><option value="issues">有问题</option><option value="archived">已归档</option>
+          <option value="all">全部</option><option value="available">可用</option><option value="issues">需处理</option><option value="archived">已删除</option>
         </select>
         <button type="button" onClick={() => void compareSelected()} disabled={selectedVersions.length !== 2}>比较选中的版本</button>
       </div>
       <div className="workflow-catalog" aria-label="工作流运行包">
         <div className="workflow-catalog-header">
-          <span>比较</span><span>工作流名称</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>就绪状态</span><span>运行记录</span><span>操作 / 删除</span>
+          <span>比较</span><span>工作流名称 / 来源</span><span>版本</span><span>模式</span><span>运行包</span><span>兼容状态</span><span>就绪状态</span><span>运行记录</span><span>操作</span>
         </div>
         {workspaceLoading && !visibleItems.length && <p className="loading-state">正在读取已注册工作流…</p>}
         {visibleItems.map((item) => (
           <article className="workflow-catalog-row" key={`${item.packageName}:${item.workflowVersionId ?? "invalid"}`}>
             <input type="checkbox" aria-label={`比较 ${workflowDisplayName(item.workflowId, item.name ?? item.packageName)}`} checked={item.workflowVersionId ? selectedVersions.includes(item.workflowVersionId) : false} onChange={() => toggleSelected(item)} disabled={!item.workflowVersionId} />
-            <strong>{workflowDisplayName(item.workflowId, item.name ?? item.packageName)}</strong>
-            <span>{item.workflowVersion ?? "—"}{item.archived ? " · 已归档" : item.builtin ? " · 内置" : ""}</span>
+            <div className="workflow-row-identity">
+              <strong>{workflowDisplayName(item.workflowId, item.name ?? item.packageName)}</strong>
+              <small>{workflowSourceLabel(item)}</small>
+            </div>
+            <span>{item.workflowVersion ?? "—"}{item.archived ? " · 已删除" : ""}</span>
             <span>{item.mode ? workflowModeLabel(item.mode) : "—"}</span>
             <span>{packageStatusLabel(item.packageStatus)}</span>
             <span className={`workflow-capability workflow-capability-${item.capability.toLowerCase()}`}>{formatCapability(item.capability)}</span>
             <span className={`workflow-readiness workflow-readiness-${item.readiness.toLowerCase()}`}>{formatReadiness(item.readiness)}</span>
             <span>{item.hasSuccessfulRun ? "已有成功运行" : `共 ${item.totalTasks} 个任务`}</span>
             <div className="workflow-row-actions">
-              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>重新检查</button>}
-              {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>复制配方</button>}
-              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button workflow-parameter-button" onClick={() => void openParameterExposure(item)}>生产参数</button>}
-              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "快速测试"}</button>}
-              {item.workflowVersionId && !item.archived && (() => {
+              {!item.archived && item.workflowVersionId && (() => {
                 const projectRecipe = latestCatalogRecipeForWorkflowItem(item, catalog);
                 return <button type="button" className="quiet-button" onClick={() => { if (projectRecipe) void onUseInProject(projectRecipe.workflowId, projectRecipe.recipeId); }} disabled={!projectId || !projectRecipe} title={!projectId ? "请先选择或创建一个项目" : !projectRecipe ? "该工作流尚未进入生产目录" : "在当前项目中配置这个工作流"}>用于当前项目</button>;
               })()}
-              {item.workflowId && <button type="button" className="quiet-button" onClick={() => void smartImportWorkflow(item.workflowId)}>创建新版本</button>}
-              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)} disabled={item.builtin} title={item.builtin ? "内置运行包不可永久删除" : "删除此工作流版本"}>{item.builtin ? "删除（内置不可用）" : "删除"}</button>}
-              {item.workflowVersionId && item.archived && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复到列表</button>}
-              <details className="workflow-row-menu">
+              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === item.workflowVersionId}>{quickTestingId === item.workflowVersionId ? "测试中..." : "测试"}</button>}
+              {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button danger-button" onClick={() => void inspectForDeletion(item)} title="从工作流库移除这个工作流">删除</button>}
+              {item.workflowVersionId && item.archived && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复工作流</button>}
+              {!item.archived && <details className="workflow-row-menu">
                 <summary aria-label="更多工作流操作">⋯</summary>
                 <div className="workflow-row-menu-content">
-                  {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "停用" : "启用"}</button>}
-                  {item.workflowVersionId && !item.archived && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
-                  {item.workflowVersionId && !item.archived && !item.builtin && <button type="button" className="quiet-button danger-button" onClick={() => void removeWorkflowVersion(item)}>删除此版本</button>}
-                  {item.workflowVersionId && !item.archived && item.workflowId && <button type="button" className="quiet-button danger-button" onClick={() => void removeEntireWorkflow(item)}>删除整个工作流</button>}
-                  {item.builtin && <span className="workflow-row-menu-note">内置运行包不可永久删除</span>}
+                  {item.workflowVersionId && item.workflowId && item.workflowVersion && <button type="button" className="quiet-button" onClick={() => void reidentifyWorkflow(item)}>重新识别</button>}
+                  {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>重新检查</button>}
+                  {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>创建新 Recipe 版本</button>}
+                  {item.workflowVersionId && <button type="button" className="quiet-button workflow-parameter-button" onClick={() => void openParameterExposure(item)}>生产参数</button>}
+                  {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(item.workflowVersionId!)}>导出工作流</button>}
+                  {item.workflowVersionId && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "停用" : "启用"}</button>}
+                  {item.workflowVersionId && item.workflowId && <button type="button" className="quiet-button danger-button" onClick={() => void inspectForDeletion(item, "WORKFLOW")}>删除整个工作流</button>}
                 </div>
-              </details>
+              </details>}
             </div>
             <details className="workflow-catalog-detail">
               <summary>查看详情</summary>
               <div className="workflow-detail-grid">
-                <span>启用状态 <strong>{item.archived ? "已归档" : item.enabled ? "已启用" : "已停用"}</strong></span>
-                <span>包来源 <strong>{item.builtin ? "内置运行包" : "用户导入"}</strong></span>
+                <span>启用状态 <strong>{item.archived ? "已删除" : item.enabled ? "已启用" : "已停用"}</strong></span>
+                <span>包来源 <strong>{workflowSourceLabel(item)}</strong></span>
                 <span>工作流 SHA-256 <strong>{item.workflowSha256 ?? "—"}</strong></span>
                 <span>配方 SHA-256 <strong>{item.recipeSha256 ?? "—"}</strong></span>
                 <span>节点数量 <strong>{item.nodeCount}</strong></span>
@@ -1254,6 +1315,16 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
             />
           )}
         </div>
+      )}
+
+      {deletionTarget && (
+        <WorkflowDeleteDialog
+          item={deletionTarget.item}
+          inspection={deletionTarget.inspection}
+          deleting={deleting}
+          onClose={() => setDeletionTarget(undefined)}
+          onConfirm={() => void confirmWorkflowDeletion()}
+        />
       )}
     </section>
   );
@@ -1736,19 +1807,8 @@ function formatReadiness(value: string): string {
   }[value] ?? "未知状态";
 }
 
-function deletionConfirmation(inspection: WorkflowDeletionInspection, requiresArchive: boolean): string {
-  const lines = [
-    `工作流：${inspection.name}`,
-    `历史任务：${inspection.historicalTaskCount} 条`,
-    `生产批次引用：${inspection.productionBatchItemCount} 条`,
-    "",
-    requiresArchive
-      ? "该版本已有历史引用，将从生产选择器归档，但保留任务、批次、资产和重生成能力。"
-      : "该版本没有历史任务或生产批次引用，将永久删除运行包、配方注册和运行状态。",
-    "",
-    requiresArchive ? "确定归档此工作流版本吗？" : "确定永久删除此工作流版本吗？此操作不可撤销。",
-  ];
-  return lines.join("\n");
+function workflowSourceLabel(item: WorkflowProductionWorkspaceView): string {
+  return item.builtin || item.source?.trim().toUpperCase() === "PRODUCT" ? "系统自带" : "用户导入";
 }
 
 function packageStatusLabel(value: string): string {

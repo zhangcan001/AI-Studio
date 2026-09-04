@@ -1,9 +1,9 @@
 use crate::application::{
     builtin_runtime_packages::{audit_installed, is_builtin_package_name},
     ports::{
-        Clock, RuntimeWorkflowVersionRecord, WorkflowLibrarySource, WorkflowPackageBytes,
-        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeRepository,
-        WorkflowRuntimeStateRepository,
+        Clock, ProjectWorkflowBindingRepository, RuntimeWorkflowVersionRecord,
+        WorkflowLibrarySource, WorkflowPackageBytes, WorkflowPackageLoad, WorkflowPackageStore,
+        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     workflow_library_service::WorkflowLibraryService,
     workflow_manifest::WorkflowManifest,
@@ -159,6 +159,10 @@ pub struct WorkflowDeletionInspection {
     pub historical_task_count: u64,
     pub production_batch_item_count: u64,
     pub benchmark_reference_count: u64,
+    #[serde(rename = "deleteAction")]
+    pub delete_action: String,
+    pub project_binding_count: u64,
+    pub project_binding_scopes: Vec<String>,
     pub can_hard_delete: bool,
     pub requires_archive: bool,
     pub blocking_reasons: Vec<String>,
@@ -168,6 +172,9 @@ pub struct WorkflowDeletionInspection {
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDeletionResult {
     pub action: String,
+    #[serde(rename = "deleteAction")]
+    pub delete_action: String,
+    pub project_binding_count: u64,
     pub workflow_id: String,
     pub workflow_version_id: String,
     pub archived: bool,
@@ -251,6 +258,7 @@ pub struct WorkflowLifecycleService {
     runtime_repository: Arc<dyn WorkflowRuntimeRepository>,
     state_repository: Arc<dyn WorkflowRuntimeStateRepository>,
     package_store: Arc<dyn WorkflowPackageStore>,
+    project_workflow_binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
     clock: Arc<dyn Clock>,
     capability_cache: Arc<RwLock<HashMap<String, CapabilityCheckView>>>,
     workspace_cache: Arc<RwLock<HashMap<String, WorkflowProductionWorkspaceView>>>,
@@ -274,10 +282,19 @@ impl WorkflowLifecycleService {
             runtime_repository,
             state_repository,
             package_store,
+            project_workflow_binding_repository: None,
             clock,
             capability_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_cache: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    pub fn with_project_workflow_binding_repository(
+        mut self,
+        repository: Arc<dyn ProjectWorkflowBindingRepository>,
+    ) -> Self {
+        self.project_workflow_binding_repository = Some(repository);
+        self
     }
 
     /// Fast navigation path. This deliberately reads only registered runtime
@@ -717,9 +734,6 @@ impl WorkflowLifecycleService {
         if archived {
             blocking_reasons.push("该工作流版本已从生产库移除，请先恢复后再管理。".to_owned());
         }
-        if builtin {
-            blocking_reasons.push("内置 Runtime Package 不允许永久删除。".to_owned());
-        }
         if counts.active_task_count > 0 {
             blocking_reasons.push(format!(
                 "仍有 {} 个活动任务或队列项，完成或取消后才能处理。",
@@ -756,11 +770,28 @@ impl WorkflowLifecycleService {
                 counts.benchmark_reference_count
             ));
         }
+        let project_bindings = if let Some(repository) = &self.project_workflow_binding_repository {
+            repository
+                .list_for_workflow_version(workflow_version_id)
+                .await
+                .map_err(db_error)?
+        } else {
+            Vec::new()
+        };
+        let mut project_binding_scopes = project_bindings
+            .iter()
+            .map(|binding| format!("{} {}", binding.stage, binding.mode))
+            .collect::<Vec<_>>();
+        project_binding_scopes.sort();
+        project_binding_scopes.dedup();
+        let project_binding_count = project_bindings.len() as u64;
         let has_active_work = counts.active_task_count > 0 || counts.active_queue_item_count > 0;
         let has_history = counts.historical_task_count > 0
             || counts.production_batch_item_count > 0
             || counts.other_reference_count > 0
-            || counts.benchmark_reference_count > 0;
+            || counts.benchmark_reference_count > 0
+            || project_binding_count > 0;
+        let delete_action = deletion_action(builtin, archived, has_active_work, has_history);
         Ok(WorkflowDeletionInspection {
             workflow_id: version.workflow_id,
             workflow_version_id: version.workflow_version_id,
@@ -774,8 +805,11 @@ impl WorkflowLifecycleService {
             historical_task_count: counts.historical_task_count,
             production_batch_item_count: counts.production_batch_item_count,
             benchmark_reference_count: counts.benchmark_reference_count,
-            can_hard_delete: !archived && !builtin && !has_active_work && !has_history,
-            requires_archive: !archived && !builtin && !has_active_work && has_history,
+            delete_action: delete_action.to_owned(),
+            project_binding_count,
+            project_binding_scopes,
+            can_hard_delete: delete_action == "HARD_DELETE",
+            requires_archive: delete_action == "REMOVE",
             blocking_reasons,
         })
     }
@@ -785,12 +819,6 @@ impl WorkflowLifecycleService {
         workflow_version_id: &str,
     ) -> Result<WorkflowDeletionResult, WorkflowLifecycleError> {
         let inspection = self.inspect_deletion(workflow_version_id).await?;
-        if inspection.builtin {
-            return Err(WorkflowLifecycleError::new(
-                "WORKFLOW_BUILTIN_DELETE_BLOCKED",
-                "built-in Runtime Packages cannot be permanently deleted",
-            ));
-        }
         if inspection.archived {
             return Err(WorkflowLifecycleError::new(
                 "WORKFLOW_ARCHIVED_DELETE_BLOCKED",
@@ -803,7 +831,7 @@ impl WorkflowLifecycleService {
                 inspection.blocking_reasons.join(" "),
             ));
         }
-        if inspection.requires_archive {
+        if inspection.delete_action == "REMOVE" {
             self.state_repository
                 .set_archived(
                     workflow_version_id,
@@ -821,7 +849,9 @@ impl WorkflowLifecycleService {
                 .await
                 .remove(workflow_version_id);
             return Ok(WorkflowDeletionResult {
-                action: "ARCHIVE".to_owned(),
+                action: "REMOVE".to_owned(),
+                delete_action: "REMOVE".to_owned(),
+                project_binding_count: 0,
                 workflow_id: inspection.workflow_id,
                 workflow_version_id: inspection.workflow_version_id,
                 archived: true,
@@ -888,6 +918,8 @@ impl WorkflowLifecycleService {
             .remove(workflow_version_id);
         Ok(WorkflowDeletionResult {
             action: "HARD_DELETE".to_owned(),
+            delete_action: "HARD_DELETE".to_owned(),
+            project_binding_count: 0,
             workflow_id: version.workflow_id,
             workflow_version_id: version.workflow_version_id,
             archived: false,
@@ -917,13 +949,11 @@ impl WorkflowLifecycleService {
             let inspection = self.inspect_deletion(version_id).await?;
             if inspection.active_task_count > 0
                 || inspection.active_queue_item_count > 0
-                || inspection.builtin
+                || inspection.archived
             {
                 return Err(WorkflowLifecycleError::new(
                     if inspection.active_task_count > 0 || inspection.active_queue_item_count > 0 {
                         "WORKFLOW_DELETE_BLOCKED_ACTIVE_TASKS"
-                    } else if inspection.builtin {
-                        "WORKFLOW_BUILTIN_DELETE_BLOCKED"
                     } else {
                         "WORKFLOW_ARCHIVED_DELETE_BLOCKED"
                     },
@@ -932,21 +962,7 @@ impl WorkflowLifecycleService {
             }
         }
         let mut result = Vec::new();
-        let mut deletable_versions = Vec::new();
         for version_id in versions {
-            let inspection = self.inspect_deletion(&version_id).await?;
-            if inspection.archived {
-                result.push(WorkflowDeletionResult {
-                    action: "ARCHIVE".to_owned(),
-                    workflow_id: inspection.workflow_id,
-                    workflow_version_id: inspection.workflow_version_id,
-                    archived: true,
-                });
-            } else {
-                deletable_versions.push(version_id);
-            }
-        }
-        for version_id in deletable_versions {
             result.push(self.delete_version(&version_id).await?);
         }
         Ok(result)
@@ -978,6 +994,13 @@ impl WorkflowLifecycleService {
             .write()
             .await
             .remove(workflow_version_id);
+        if let Err(error) = self.recheck_capability(workflow_version_id).await {
+            tracing::warn!(
+                workflow_version_id,
+                error = %error,
+                "workflow restored without a successful capability recheck"
+            );
+        }
         Ok(())
     }
 
@@ -2315,6 +2338,21 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn deletion_action(
+    builtin: bool,
+    archived: bool,
+    has_active_work: bool,
+    has_history: bool,
+) -> &'static str {
+    if archived || has_active_work {
+        "BLOCKED"
+    } else if builtin || has_history {
+        "REMOVE"
+    } else {
+        "HARD_DELETE"
+    }
+}
+
 fn db_error(error: crate::application::ports::RepositoryError) -> WorkflowLifecycleError {
     WorkflowLifecycleError::new("DATABASE_ERROR", error.to_string())
 }
@@ -2334,8 +2372,8 @@ fn archive_error(message: impl Into<String>) -> WorkflowLifecycleError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_archive, diff_workflow, fast_view_for_version, parse_archive, readiness_for, sha256,
-        WorkflowDiagnosticView, WorkflowLifecycleService,
+        build_archive, deletion_action, diff_workflow, fast_view_for_version, parse_archive,
+        readiness_for, sha256, WorkflowDiagnosticView, WorkflowLifecycleService,
     };
     use crate::application::{
         ports::{
@@ -2803,12 +2841,34 @@ outputs: []
             .any(|diagnostic| diagnostic.code == "RECIPE_RUNTIME_HASH_MISMATCH"));
     }
 
+    #[tokio::test]
+    async fn restoring_a_workflow_rechecks_capability_and_caches_the_result() {
+        let (service, _source) = exact_service();
+
+        service.restore_version("wv-exact-shared").await.unwrap();
+
+        assert!(service
+            .capability_cache
+            .read()
+            .await
+            .contains_key("wv-exact-shared"));
+    }
+
     #[test]
     fn archive_round_trip_has_only_safe_runtime_files() {
         let package =
             WorkflowPackageBytes::new(b"manifest".to_vec(), b"recipe".to_vec(), b"{}".to_vec());
         let archive = build_archive(&package).unwrap();
         assert_eq!(parse_archive(&archive).unwrap(), package);
+    }
+
+    #[test]
+    fn deletion_policy_removes_products_and_historical_user_workflows_without_hard_delete() {
+        assert_eq!(deletion_action(true, false, false, false), "REMOVE");
+        assert_eq!(deletion_action(false, false, false, true), "REMOVE");
+        assert_eq!(deletion_action(false, false, false, false), "HARD_DELETE");
+        assert_eq!(deletion_action(true, false, true, false), "BLOCKED");
+        assert_eq!(deletion_action(false, true, false, false), "BLOCKED");
     }
 
     #[test]

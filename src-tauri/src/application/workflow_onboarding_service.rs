@@ -7,6 +7,10 @@ use crate::application::{
     workflow_graph_analysis::{WorkflowGraph, WorkflowSource},
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
+    workflow_recognition_service::{
+        structural_workflow_sha256, RuntimeCapabilityState, RuntimeCapabilitySummary,
+        WorkflowRecognitionReport, WorkflowRecognitionService,
+    },
     workflow_semantic_identity::semantic_workflow_sha256,
 };
 use crate::compiler::{
@@ -242,6 +246,7 @@ pub struct WorkflowOnboardingDraftView {
     pub manifest: WorkflowManifestView,
     pub recipe: RecipeDraftView,
     pub validation: WorkflowOnboardingValidationView,
+    pub recognition: WorkflowRecognitionReport,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -466,6 +471,7 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub existing_match_type: Option<String>,
     pub existing_recipes: Vec<WorkflowAutoExistingRecipeView>,
     pub expected_inference: Vec<WorkflowAutoInferenceView>,
+    pub recognition: WorkflowRecognitionReport,
     pub message: String,
 }
 
@@ -528,6 +534,7 @@ struct WorkflowOnboardingDraft {
     capability: CapabilityCheckView,
     input_mappings: Vec<InputMapping>,
     output_mappings: Vec<OutputMapping>,
+    recognition: WorkflowRecognitionReport,
 }
 
 #[derive(Default)]
@@ -599,6 +606,7 @@ struct ParsedExistingWorkflowPackage {
 enum ExistingWorkflowMatchType {
     RawSha,
     SemanticSha,
+    StructuralSha,
 }
 
 impl ExistingWorkflowMatchType {
@@ -606,6 +614,7 @@ impl ExistingWorkflowMatchType {
         match self {
             Self::RawSha => "RAW_SHA",
             Self::SemanticSha => "SEMANTIC_SHA",
+            Self::StructuralSha => "STRUCTURAL_SHA",
         }
     }
 }
@@ -692,6 +701,33 @@ impl WorkflowOnboardingService {
         self
     }
 
+    /// Recognize a selected file without contacting ComfyUI or creating a
+    /// draft. The import path remains API-only, while UI/invalid/unknown
+    /// feedback is still available to a recognition surface.
+    pub fn recognize_bytes(&self, bytes: &[u8]) -> WorkflowRecognitionReport {
+        WorkflowRecognitionService::recognize_bytes(bytes, &[])
+    }
+
+    async fn recognize_draft(
+        &self,
+        draft: &WorkflowOnboardingDraft,
+    ) -> Result<WorkflowRecognitionReport, WorkflowOnboardingError> {
+        let packages = self.source.load_packages().await.map_err(|error| {
+            WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
+        })?;
+        let existing = packages
+            .into_iter()
+            .filter_map(|package| match package {
+                WorkflowPackageLoad::Loaded(files) => Some(files),
+                WorkflowPackageLoad::Invalid { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        Ok(
+            WorkflowRecognitionService::recognize_bytes(&draft.raw_bytes, &existing)
+                .with_runtime_capability(runtime_capability_summary(&draft.capability)),
+        )
+    }
+
     pub async fn import_bytes(
         &self,
         bytes: Vec<u8>,
@@ -711,6 +747,8 @@ impl WorkflowOnboardingService {
         let workflow = parse_import_workflow(&bytes)?;
         let nodes = inspect_workflow(&workflow)?;
         let workflow_sha256 = sha256(&bytes);
+        let recognition =
+            WorkflowRecognitionService::recognize_api_workflow(&workflow, &bytes, &[]);
         let is_new_version = existing_workflow_id.is_some();
         let workflow_id = match existing_workflow_id {
             Some(value) => validate_workflow_id(&value)?,
@@ -745,7 +783,10 @@ impl WorkflowOnboardingService {
                 mode: "text_to_image".to_owned(),
             },
             recipe_id,
-            allow_existing_workflow_sha: false,
+            // Supplying an existing workflow id is the explicit "new version"
+            // path. It must be allowed to reuse the workflow identity while
+            // still keeping ordinary duplicate imports read-only.
+            allow_existing_workflow_sha: is_new_version,
             capability: CapabilityCheckView {
                 state: CapabilityState::NotChecked,
                 checked_at: None,
@@ -753,6 +794,7 @@ impl WorkflowOnboardingService {
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            recognition,
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
@@ -798,8 +840,17 @@ impl WorkflowOnboardingService {
         });
         let auto_publishable =
             validation.ready_to_publish && !has_ambiguous_required && issues.is_empty();
+        let auto_importable = importable_validation(&validation)
+            && !has_ambiguous_required
+            && inference.issues.is_empty();
 
-        if !existing.is_empty() {
+        let explicit_structural_new_version = current.allow_existing_workflow_sha
+            && existing
+                .iter()
+                .any(|package| package.match_type == ExistingWorkflowMatchType::StructuralSha)
+            && auto_importable;
+
+        if !existing.is_empty() && !explicit_structural_new_version {
             let expected = build_recipe(&current)?;
             let expected_signature = normalized_recipe_signature(
                 &expected,
@@ -814,14 +865,25 @@ impl WorkflowOnboardingService {
                     package_name: package.files.package_name.clone(),
                 })
                 .collect::<Vec<_>>();
+            let structural_variant = existing
+                .iter()
+                .any(|package| package.match_type == ExistingWorkflowMatchType::StructuralSha);
             let matching = existing.iter().any(|package| {
-                normalized_recipe_signature(
-                    &package.recipe,
-                    &package.manifest.category,
-                    &package.manifest.mode,
-                ) == expected_signature
+                !structural_variant
+                    && normalized_recipe_signature(
+                        &package.recipe,
+                        &package.manifest.category,
+                        &package.manifest.mode,
+                    ) == expected_signature
             });
-            let existing_issues = if matching {
+            let existing_issues = if structural_variant {
+                vec![WorkflowAutoIssueView {
+                    code: "STRUCTURAL_VARIANT".to_owned(),
+                    message: "检测到结构相似但参数不同的工作流。请选择创建新工作流或新版本；系统不会自动合并。".to_owned(),
+                    field: None,
+                    candidates: Vec::new(),
+                }]
+            } else if matching {
                 vec![WorkflowAutoIssueView {
                     code: "EXISTING_RECIPE_CURRENT".to_owned(),
                     message: "检测到相同工作流，已有 Recipe 与当前自动识别结果一致。".to_owned(),
@@ -853,7 +915,9 @@ impl WorkflowOnboardingService {
                 .await?;
             let mut plan = auto_plan_for_draft(
                 &current,
-                if matching && archived {
+                if structural_variant {
+                    WorkflowAutoOnboardingState::NeedsReview
+                } else if matching && archived {
                     WorkflowAutoOnboardingState::AlreadyExistsArchived
                 } else if matching {
                     WorkflowAutoOnboardingState::AlreadyExists
@@ -867,7 +931,10 @@ impl WorkflowOnboardingService {
                 Some(representative.manifest.id.clone()),
                 Some(representative.manifest.workflow_version.clone()),
                 Some(representative.files.package_name.clone()),
-                if matching && archived {
+                if structural_variant {
+                    "检测到结构相似的现有工作流；请选择创建新工作流或新版本。系统不会自动合并。"
+                        .to_owned()
+                } else if matching && archived {
                     "该工作流已归档，可在工作流管理中恢复。".to_owned()
                 } else if matching {
                     "该工作流已经导入，现有 Recipe 与当前自动识别结果一致。".to_owned()
@@ -897,20 +964,34 @@ impl WorkflowOnboardingService {
             return Ok(plan);
         }
 
-        if auto_publishable {
-            let published = self.publish(draft_id).await?;
+        if auto_importable {
+            let published = if auto_publishable {
+                self.publish(draft_id).await?
+            } else {
+                self.publish_importable(draft_id).await?
+            };
             let draft = self.with_registry(|registry| registry.get(draft_id))??;
+            let message = if auto_publishable {
+                "工作流导入成功，已自动生成 Recipe 并启用。"
+            } else {
+                "工作流已加入工作流库，但当前运行环境未就绪；修复 ComfyUI 后可重新检查。"
+            };
+            let published_issues = if auto_publishable {
+                Vec::new()
+            } else {
+                auto_issues_from_capability(&draft.capability)
+            };
             return Ok(auto_plan_for_draft(
                 &draft,
                 WorkflowAutoOnboardingState::AutoPublished,
                 &inference.inferences,
-                &[],
-                true,
+                &published_issues,
+                auto_importable,
                 Some(published),
                 None,
                 None,
                 None,
-                "工作流导入成功，已自动生成 Recipe 并启用。".to_owned(),
+                message.to_owned(),
             ));
         }
 
@@ -955,6 +1036,10 @@ impl WorkflowOnboardingService {
         self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
             draft.capability = capability.clone();
+            draft.recognition = draft
+                .recognition
+                .clone()
+                .with_runtime_capability(runtime_capability_summary(&capability));
             if let Some(nodes) = enriched_nodes {
                 draft.nodes = nodes;
             }
@@ -994,6 +1079,12 @@ impl WorkflowOnboardingService {
             Ok(())
         })??;
         let current = self.with_registry(|registry| registry.get(draft_id))??;
+        let recognition = self.recognize_draft(&current).await?;
+        self.with_registry(|registry| {
+            registry.get_mut(draft_id)?.recognition = recognition.clone();
+            Ok(())
+        })??;
+        let current = self.with_registry(|registry| registry.get(draft_id))??;
         Ok((inference, current))
     }
 
@@ -1013,14 +1104,17 @@ impl WorkflowOnboardingService {
             })
             .collect::<Vec<_>>();
 
-        let raw_matches = loaded
+        let parsed = loaded
+            .into_iter()
+            .filter_map(parse_existing_workflow_package)
+            .collect::<Vec<_>>();
+        let raw_matches = parsed
             .iter()
-            .filter(|files| sha256(files.workflow_json.as_bytes()) == workflow_sha256)
-            .filter_map(|files| parse_existing_workflow_package(files.clone()))
+            .filter(|package| sha256(package.files.workflow_json.as_bytes()) == workflow_sha256)
             .map(|package| ExistingWorkflowPackage {
-                manifest: package.manifest,
-                files: package.files,
-                recipe: package.recipe,
+                manifest: package.manifest.clone(),
+                files: package.files.clone(),
+                recipe: package.recipe.clone(),
                 match_type: ExistingWorkflowMatchType::RawSha,
             })
             .collect::<Vec<_>>();
@@ -1029,20 +1123,41 @@ impl WorkflowOnboardingService {
         }
 
         let semantic_sha = semantic_workflow_sha256(workflow);
-        Ok(loaded
-            .into_iter()
-            .filter_map(|files| {
-                let package = parse_existing_workflow_package(files)?;
+        let semantic_matches = parsed
+            .iter()
+            .filter_map(|package| {
                 let existing_workflow =
                     parse_api_workflow_string(&package.files.workflow_json).ok()?;
                 if semantic_workflow_sha256(&existing_workflow) != semantic_sha {
                     return None;
                 }
                 Some(ExistingWorkflowPackage {
+                    manifest: package.manifest.clone(),
+                    files: package.files.clone(),
+                    recipe: package.recipe.clone(),
+                    match_type: ExistingWorkflowMatchType::SemanticSha,
+                })
+            })
+            .collect::<Vec<_>>();
+        if !semantic_matches.is_empty() {
+            return Ok(semantic_matches);
+        }
+
+        Ok(parsed
+            .into_iter()
+            .filter_map(|package| {
+                let existing_workflow =
+                    parse_api_workflow_string(&package.files.workflow_json).ok()?;
+                if structural_workflow_sha256(&existing_workflow)
+                    != structural_workflow_sha256(workflow)
+                {
+                    return None;
+                }
+                Some(ExistingWorkflowPackage {
                     manifest: package.manifest,
                     files: package.files,
                     recipe: package.recipe,
-                    match_type: ExistingWorkflowMatchType::SemanticSha,
+                    match_type: ExistingWorkflowMatchType::StructuralSha,
                 })
             })
             .collect())
@@ -1139,6 +1254,8 @@ impl WorkflowOnboardingService {
             &next_manifest.mode,
         )?;
         let raw_bytes = files.workflow_json.into_bytes();
+        let recognition =
+            WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
         let draft = WorkflowOnboardingDraft {
             draft_id: format!("onb_{}", Uuid::new_v4()),
             workflow_sha256: sha256(&raw_bytes),
@@ -1160,6 +1277,7 @@ impl WorkflowOnboardingService {
                 .iter()
                 .map(output_mapping_from_recipe)
                 .collect(),
+            recognition,
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
@@ -1208,6 +1326,9 @@ impl WorkflowOnboardingService {
         let (files, mut manifest, _) = candidates.pop().expect("candidate is not empty");
         let workflow_json = files.workflow_json.clone();
         let workflow = parse_api_workflow_string(&workflow_json)?;
+        let raw_bytes = workflow_json.into_bytes();
+        let recognition =
+            WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
         manifest.recipe_version = increment_semver(
             &self
                 .latest_recipe_version(workflow_id, workflow_version)
@@ -1215,11 +1336,11 @@ impl WorkflowOnboardingService {
         );
         let draft = WorkflowOnboardingDraft {
             draft_id: format!("onb_{}", Uuid::new_v4()),
-            workflow_sha256: sha256(workflow_json.as_bytes()),
+            workflow_sha256: sha256(&raw_bytes),
             original_filename: safe_filename(&format!("{}.json", manifest.name)),
             nodes: inspect_workflow(&workflow)?,
             workflow,
-            raw_bytes: workflow_json.into_bytes(),
+            raw_bytes,
             manifest,
             recipe_id: format!("rcp_{}", Uuid::new_v4()),
             allow_existing_workflow_sha: true,
@@ -1230,6 +1351,7 @@ impl WorkflowOnboardingService {
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            recognition,
         };
         let draft_id = draft.draft_id.clone();
         self.with_registry(|registry| {
@@ -1569,6 +1691,10 @@ impl WorkflowOnboardingService {
         self.with_registry(|registry| {
             let draft = registry.get_mut(draft_id)?;
             draft.capability = capability.clone();
+            draft.recognition = draft
+                .recognition
+                .clone()
+                .with_runtime_capability(runtime_capability_summary(&capability));
             if let Some(nodes) = enriched_nodes {
                 draft.nodes = nodes;
             }
@@ -1720,12 +1846,32 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
+        self.publish_internal(draft_id, false).await
+    }
+
+    async fn publish_importable(
+        &self,
+        draft_id: &str,
+    ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
+        self.publish_internal(draft_id, true).await
+    }
+
+    async fn publish_internal(
+        &self,
+        draft_id: &str,
+        allow_unready_capability: bool,
+    ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
         // Always recheck the live capability before publishing. A previous
         // READY result is only a snapshot and cannot authorize a stale draft.
         self.check_capability(draft_id).await?;
         let draft = self.with_registry(|registry| registry.get(draft_id))??;
         let validation = validation_for_draft(&draft);
-        if !validation.ready_to_publish {
+        let valid = if allow_unready_capability {
+            importable_validation(&validation)
+        } else {
+            validation.ready_to_publish
+        };
+        if !valid {
             return Err(WorkflowOnboardingError::new(
                 "WORKFLOW_ONBOARDING_NOT_READY",
                 validation.issues.join("; "),
@@ -1863,6 +2009,27 @@ impl WorkflowOnboardingService {
         } else {
             draft.recipe_id.clone()
         };
+
+        if allow_unready_capability && draft.capability.state != CapabilityState::Ready {
+            if let (Some(runtime_repository), Some(state_repository)) =
+                (&self.runtime_repository, &self.state_repository)
+            {
+                let versions = runtime_repository.list_versions().await.map_err(|error| {
+                    WorkflowOnboardingError::new("DATABASE_ERROR", error.to_string())
+                })?;
+                if let Some(version) = versions.into_iter().find(|version| {
+                    version.workflow_id == draft.manifest.id
+                        && version.workflow_version == draft.manifest.workflow_version
+                }) {
+                    state_repository
+                        .set_enabled(&version.workflow_version_id, false, self.clock.now())
+                        .await
+                        .map_err(|error| {
+                            WorkflowOnboardingError::new("DATABASE_ERROR", error.to_string())
+                        })?;
+                }
+            }
+        }
 
         Ok(WorkflowOnboardingPublishView {
             workflow_id: draft.manifest.id,
@@ -2316,6 +2483,7 @@ fn auto_plan_for_draft(
         existing_match_type: None,
         existing_recipes: Vec::new(),
         expected_inference: Vec::new(),
+        recognition: draft.recognition.clone(),
         message,
     }
 }
@@ -3479,6 +3647,24 @@ fn auto_issues_from_capability(capability: &CapabilityCheckView) -> Vec<Workflow
         .collect()
 }
 
+fn runtime_capability_summary(capability: &CapabilityCheckView) -> RuntimeCapabilitySummary {
+    let state = match capability.state {
+        CapabilityState::Ready => RuntimeCapabilityState::Ready,
+        CapabilityState::MissingNodes => RuntimeCapabilityState::MissingNodes,
+        CapabilityState::ComfyOffline => RuntimeCapabilityState::Offline,
+        CapabilityState::IncompatibleInputValues => RuntimeCapabilityState::Incompatible,
+        CapabilityState::NotChecked => RuntimeCapabilityState::NotChecked,
+    };
+    RuntimeCapabilitySummary {
+        state,
+        issues: capability
+            .issues
+            .iter()
+            .map(|issue| format!("{}: {}", issue.code, issue.message))
+            .collect(),
+    }
+}
+
 fn infer_manifest_media(
     outputs: &[OutputMapping],
     input_mappings: &[InputMapping],
@@ -3768,6 +3954,7 @@ fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftVie
         },
         recipe,
         validation,
+        recognition: draft.recognition.clone(),
     }
 }
 
@@ -3869,6 +4056,19 @@ fn validation_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingVa
         ready_to_publish,
         issues,
     }
+}
+
+fn importable_validation(validation: &WorkflowOnboardingValidationView) -> bool {
+    validation.api_format
+        && validation.recipe
+        && validation.bindings
+        && validation.outputs
+        && validation.manifest
+        && validation.dry_run
+        && validation
+            .issues
+            .iter()
+            .all(|issue| issue.starts_with("CAPABILITY_NOT_READY:"))
 }
 
 fn build_recipe(draft: &WorkflowOnboardingDraft) -> Result<Recipe, WorkflowOnboardingError> {
@@ -4597,6 +4797,8 @@ fn runtime_check_draft(
         validate_api_workflow(serde_json::from_str(workflow_json).map_err(|error| {
             WorkflowOnboardingError::new("WORKFLOW_NOT_API_FORMAT", error.to_string())
         })?)?;
+    let recognition =
+        WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
     Ok(WorkflowOnboardingDraft {
         draft_id: "onb_runtime_check".to_owned(),
         workflow_sha256: sha256(&raw_bytes),
@@ -4622,6 +4824,7 @@ fn runtime_check_draft(
         },
         input_mappings: Vec::new(),
         output_mappings: Vec::new(),
+        recognition,
     })
 }
 
@@ -5658,6 +5861,8 @@ mod tests {
     fn test_draft(value: Value) -> WorkflowOnboardingDraft {
         let raw_bytes = serde_json::to_vec(&value).unwrap();
         let workflow = validate_api_workflow(value).unwrap();
+        let recognition =
+            WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
         WorkflowOnboardingDraft {
             draft_id: "onb_test_graph".to_owned(),
             workflow_sha256: sha256(&raw_bytes),
@@ -5683,6 +5888,7 @@ mod tests {
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            recognition,
         }
     }
 
@@ -6693,6 +6899,7 @@ outputs: []
             "2":{"inputs":{"video":["1",0]},"class_type":"SaveVideo"}
         }"#;
         let workflow = validate_api_workflow(serde_json::from_slice(video).unwrap()).unwrap();
+        let recognition = WorkflowRecognitionService::recognize_api_workflow(&workflow, video, &[]);
         let draft = WorkflowOnboardingDraft {
             draft_id: "onb_video".to_owned(),
             raw_bytes: video.to_vec(),
@@ -6718,6 +6925,7 @@ outputs: []
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            recognition,
         };
         let result = infer_auto_onboarding(&draft);
         assert_eq!(result.category, "video");
@@ -6810,7 +7018,7 @@ outputs: []
     }
 
     #[tokio::test]
-    async fn auto_onboarding_waits_when_comfy_is_offline_and_deduplicates_exact_sha() {
+    async fn auto_onboarding_imports_when_comfy_is_offline_and_deduplicates_exact_sha() {
         let directory = tempdir().unwrap();
         let library_root = directory.path().join("library");
         let staging_root = directory.path().join("staging");
@@ -6838,20 +7046,17 @@ outputs: []
             "2":{"inputs":{"images":["1",0]},"class_type":"SaveImage"}
         }"#
         .to_vec();
-        let waiting = service
+        let imported = service
             .auto_onboard_bytes(raw.clone(), "offline_auto.json".to_owned(), None)
             .await
             .unwrap();
-        assert_eq!(
-            waiting.state,
-            WorkflowAutoOnboardingState::WaitingForComfyUi
-        );
-        assert!(waiting
+        assert_eq!(imported.state, WorkflowAutoOnboardingState::AutoPublished);
+        assert!(imported
             .input_mappings
             .iter()
             .any(|mapping| mapping.semantic_key == "prompt"));
-        assert!(waiting.published.is_none());
-        assert!(waiting.message.contains("连接 ComfyUI"));
+        assert!(imported.published.is_some());
+        assert!(imported.message.contains("已加入工作流库"));
     }
 
     #[test]
@@ -6863,9 +7068,12 @@ outputs: []
                 "1": {"inputs": {}, "class_type": "Test"}
             }))
             .unwrap();
+            let raw_bytes = br#"{"1":{"inputs":{},"class_type":"Test"}}"#.to_vec();
+            let recognition =
+                WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
             registry.insert(WorkflowOnboardingDraft {
                 draft_id: id,
-                raw_bytes: br#"{"1":{"inputs":{},"class_type":"Test"}}"#.to_vec(),
+                raw_bytes,
                 workflow,
                 workflow_sha256: "sha".to_owned(),
                 original_filename: "test.json".to_owned(),
@@ -6888,6 +7096,7 @@ outputs: []
                 },
                 input_mappings: Vec::new(),
                 output_mappings: Vec::new(),
+                recognition,
             });
         }
         assert_eq!(registry.order.len(), MAX_ONBOARDING_DRAFTS);
@@ -6910,6 +7119,8 @@ outputs: []
         let raw_bytes = br#"{"1":{"inputs":{"prompt":"hello","seed":7},"class_type":"Sampler"},"2":{"inputs":{"image":["1",0]},"class_type":"SaveImage","output_node":true}}"#.to_vec();
         let workflow = validate_api_workflow(serde_json::from_slice(&raw_bytes).unwrap()).unwrap();
         let nodes = inspect_workflow(&workflow).unwrap();
+        let recognition =
+            WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
         WorkflowOnboardingDraft {
             draft_id: "onb_test".to_owned(),
             raw_bytes,
@@ -6972,6 +7183,7 @@ outputs: []
                 node_id: "2".to_owned(),
                 required: true,
             }],
+            recognition,
         }
     }
 

@@ -17,6 +17,67 @@ export type WorkflowAutoOnboardingState =
 
 export type WorkflowImportFormat = "API" | "UI" | "UNKNOWN" | "INVALID_JSON";
 
+export type WorkflowRecognitionIdentity = "NEW" | "EXACT_RAW" | "EXACT_SEMANTIC" | "STRUCTURAL_VARIANT";
+export type WorkflowRecipeStatus = "CURRENT" | "OUTDATED" | "MISSING";
+export type WorkflowRuntimeCapability = "READY" | "MISSING_NODES" | "OFFLINE" | "INCOMPATIBLE" | "NOT_CHECKED";
+
+export interface WorkflowStructuralChangeView {
+  field?: string;
+  from?: string;
+  to?: string;
+  message: string;
+}
+
+export interface WorkflowRecognitionInputView {
+  semanticKey: string;
+  fieldType: string;
+  label: string;
+  required: boolean;
+  nodeId: string;
+  inputName: string;
+  confidence: "HIGH" | "MEDIUM" | "LOW" | string;
+}
+
+export interface WorkflowRecognitionOutputView {
+  outputId: string;
+  type: "image" | "video" | string;
+  nodeId: string;
+  required: boolean;
+  confidence: "HIGH" | "MEDIUM" | "LOW" | string;
+}
+
+export interface WorkflowRecognitionIssueView {
+  code: string;
+  message: string;
+}
+
+export interface WorkflowRecognitionReportView {
+  format: WorkflowImportFormat;
+  recognized?: boolean;
+  importable?: boolean;
+  executable?: boolean;
+  identity: WorkflowRecognitionIdentity;
+  rawSha256?: string;
+  semanticSha256?: string;
+  structuralSha256?: string;
+  existingWorkflowId?: string;
+  existingWorkflowVersion?: string;
+  existingName?: string;
+  category?: string;
+  mode?: string;
+  confidence?: "HIGH" | "MEDIUM" | "LOW" | string;
+  inputs?: WorkflowRecognitionInputView[];
+  outputs?: WorkflowRecognitionOutputView[];
+  recipeStatus?: WorkflowRecipeStatus;
+  runtimeCapability?: WorkflowRuntimeCapability;
+  capabilityIssues?: string[];
+  issues?: WorkflowRecognitionIssueView[];
+  suggestedAction?: string;
+  nodeCount?: number;
+  uniqueClassCount?: number;
+  structuralChanges?: WorkflowStructuralChangeView[];
+}
+
 export type InferenceConfidence = "CERTAIN" | "HIGH" | "AMBIGUOUS" | "UNKNOWN";
 
 export type WorkflowFieldType =
@@ -206,6 +267,13 @@ export interface WorkflowAutoOnboardingPlanView {
   /** Optional until the native onboarding response exposes format detection. */
   format?: WorkflowImportFormat;
   inputFormat?: WorkflowImportFormat;
+  recognition?: WorkflowRecognitionReportView;
+  identity?: WorkflowRecognitionIdentity | string;
+  recipeStatus?: WorkflowRecipeStatus | string;
+  runtimeCapability?: WorkflowRuntimeCapability | string;
+  importability?: "RECOGNIZED" | "IMPORTABLE" | "NOT_IMPORTABLE" | string;
+  executable?: boolean;
+  structuralChanges?: WorkflowStructuralChangeView[];
   workflowKind: string;
   workflowSha256: string;
   originalFilename: string;
@@ -224,7 +292,7 @@ export interface WorkflowAutoOnboardingPlanView {
   existingWorkflowVersion?: string;
   existingWorkflowName?: string;
   existingWorkflowSource?: string;
-  existingMatchType?: "RAW_SHA" | "SEMANTIC_SHA" | string;
+  existingMatchType?: "RAW_SHA" | "SEMANTIC_SHA" | "STRUCTURAL_SHA" | string;
   existingPackageName?: string;
   existingRecipes?: WorkflowAutoExistingRecipeView[];
   expectedInference?: WorkflowAutoInferenceView[];
@@ -271,6 +339,7 @@ export interface WorkflowStagingView {
 export interface WorkflowProductionWorkspaceView {
   packageName: string;
   builtin: boolean;
+  source?: "PRODUCT" | "USER" | string;
   archived: boolean;
   archivedAt?: string;
   packageStatus: string;
@@ -318,13 +387,18 @@ export interface WorkflowDeletionInspection {
   historicalTaskCount: number;
   productionBatchItemCount: number;
   benchmarkReferenceCount: number;
+  projectBindingCount?: number;
+  projectBindingScopes?: string[];
+  deleteAction?: "REMOVE" | "HARD_DELETE" | "BLOCKED" | string;
   canHardDelete: boolean;
   requiresArchive: boolean;
   blockingReasons: string[];
 }
 
 export interface WorkflowDeletionResult {
-  action: "HARD_DELETE" | "ARCHIVE";
+  action: "HARD_DELETE" | "REMOVE" | "ARCHIVE";
+  deleteAction?: "REMOVE" | "HARD_DELETE" | "BLOCKED" | string;
+  projectBindingCount?: number;
   workflowId: string;
   workflowVersionId: string;
   archived: boolean;
