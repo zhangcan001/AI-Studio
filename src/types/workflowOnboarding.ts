@@ -404,6 +404,14 @@ export interface WorkflowDeletionResult {
   archived: boolean;
 }
 
+export interface WorkflowRestoreResult {
+  workflowVersionId: string;
+  archived: boolean;
+  enabled: boolean;
+  capability: string;
+  readiness: string;
+}
+
 export interface WorkflowCapabilityBatchView {
   workflowVersionId: string;
   capability: CapabilityCheckView;

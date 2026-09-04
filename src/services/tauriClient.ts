@@ -227,6 +227,7 @@ import type {
   WorkflowOnboardingRemoveInputMappingRequest,
   WorkflowOnboardingValidationView,
   WorkflowProductionWorkspaceResponse,
+  WorkflowRestoreResult,
   WorkflowRestoreView,
   WorkflowVersionDiffView,
   WorkflowWorkspaceView,
@@ -597,8 +598,8 @@ export function deleteWorkflow(workflowId: string): Promise<WorkflowDeletionResu
   return invoke<WorkflowDeletionResult[]>("workflow_delete_workflow", { workflowId });
 }
 
-export function restoreWorkflowVersion(workflowVersionId: string): Promise<void> {
-  return invoke<void>("workflow_restore_version", { workflowVersionId });
+export function restoreWorkflowVersion(workflowVersionId: string): Promise<WorkflowRestoreResult> {
+  return invoke<WorkflowRestoreResult>("workflow_restore_version", { workflowVersionId });
 }
 
 export function listGenerationCatalog(): Promise<RecipeViewModel[]> {

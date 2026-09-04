@@ -59,7 +59,7 @@ describe("WorkflowDeleteDialog", () => {
     expect(screen.getByRole("heading", { name: "删除工作流" })).toBeTruthy();
     expect(screen.getByText("系统自带")).toBeTruthy();
     expect(screen.getByText("该工作流当前被 1 个项目配置使用。删除后将解除这些项目工作流配置。")).toBeTruthy();
-    expect(screen.getByText(/已有生产记录仍然保留/)).toBeTruthy();
+    expect(screen.getByText(/历史任务、生产批次和其他历史引用会保留/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "删除工作流" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
@@ -76,5 +76,27 @@ describe("WorkflowDeleteDialog", () => {
 
     expect(screen.getByText(/当前有活动任务或队列项目，暂时不能删除/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "删除工作流" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("没有历史引用的 PRODUCT REMOVE 只提示可恢复，不声称历史保留", () => {
+    render(
+      <WorkflowDeleteDialog
+        item={item}
+        inspection={{
+          ...inspection,
+          historicalTaskCount: 0,
+          productionBatchItemCount: 0,
+          benchmarkReferenceCount: 0,
+          projectBindingCount: 2,
+          deleteAction: "REMOVE",
+        }}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/你可以稍后恢复该工作流/)).toBeTruthy();
+    expect(screen.queryByText(/历史生产记录仍然保留/)).toBeNull();
+    expect(screen.queryByText(/历史任务、生产批次和其他历史引用会保留/)).toBeNull();
   });
 });

@@ -485,9 +485,18 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       await loadWorkspace("refresh");
       await onCatalogChanged();
       const hardDeleted = result.filter((entry) => entry.action === "HARD_DELETE").length;
-      setNotice(hardDeleted
-        ? `${inspection.name} 已删除；历史生产记录仍然保留。`
-        : `${inspection.name} 已从工作流库移除，可在“已删除”中恢复。`);
+      const projectBindingCount = result.reduce((total, entry) => total + (entry.projectBindingCount ?? 0), 0);
+      const hasHistory = inspection.historicalTaskCount > 0
+        || inspection.productionBatchItemCount > 0
+        || inspection.benchmarkReferenceCount > 0;
+      const permanentlyDeleted = result.length > 0 && hardDeleted === result.length;
+      const message = [
+        `${inspection.name} 已删除。`,
+        projectBindingCount > 0 && `已解除 ${projectBindingCount} 项项目工作流配置。`,
+        hasHistory && "历史生产记录仍然保留。",
+        permanentlyDeleted ? "工作流已永久删除。" : "已从工作流库移除，可在“已删除”中恢复。",
+      ].filter((part): part is string => Boolean(part)).join(" ");
+      setNotice(message);
     } catch (actionError: unknown) {
       setWorkspaceError(toUserMessage(actionError));
     } finally {
@@ -498,16 +507,18 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   async function restoreArchivedWorkflow(item: WorkflowProductionWorkspaceView) {
     if (!item.workflowVersionId || !item.archived) return;
     try {
-      await restoreWorkflowVersion(item.workflowVersionId);
-      let message = `${item.name ?? item.packageName} 已恢复工作流，当前保持停用状态。`;
-      try {
-        const capability = await recheckWorkflowCapability(item.workflowVersionId);
-        message = capability.state === "READY"
-          ? `${item.name ?? item.packageName} 已恢复并完成检查，现在可用。`
-          : `${item.name ?? item.packageName} 已恢复，检查结果为待处理；修复环境后即可运行。`;
-      } catch {
-        message = `${item.name ?? item.packageName} 已恢复，暂未完成兼容性检查。`;
-      }
+      const result = await restoreWorkflowVersion(item.workflowVersionId);
+      const name = item.name ?? item.packageName;
+      const capability = result.capability.toUpperCase();
+      const message = result.enabled && capability === "READY"
+        ? `${name} 已恢复并重新启用，现在可以正常使用。`
+        : capability === "MISSING_NODES"
+          ? `${name} 已恢复，但当前缺少 ComfyUI 节点，暂时保持停用。`
+          : capability === "COMFY_OFFLINE"
+            ? `${name} 已恢复，但当前 ComfyUI 离线，暂时保持停用。`
+            : capability.includes("INCOMPATIBLE")
+              ? `${name} 已恢复，但存在兼容性问题，暂时保持停用。`
+              : `${name} 已恢复，完成检查后即可启用。`;
       await loadWorkspace("refresh");
       await onCatalogChanged();
       setNotice(message);

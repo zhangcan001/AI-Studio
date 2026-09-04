@@ -80,7 +80,7 @@ export function WorkflowDeleteDialog({ item, inspection, deleting = false, onClo
         <p className="asset-delete-confirm-copy">
           {hardDelete
             ? "该用户工作流没有历史引用，确认后将永久删除运行包和工作流记录。"
-            : "删除后将从工作流库和生成页面移除。已有生产记录仍然保留。你可以稍后恢复该工作流。"}
+            : "删除后将从工作流库和生成页面移除。你可以稍后恢复该工作流。"}
         </p>
         {(inspection.historicalTaskCount > 0 || inspection.productionBatchItemCount > 0 || inspection.benchmarkReferenceCount > 0) && (
           <p className="asset-delete-confirm-copy">

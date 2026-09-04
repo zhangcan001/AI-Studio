@@ -1,9 +1,10 @@
 use crate::application::{
     builtin_runtime_packages::{audit_installed, is_builtin_package_name},
     ports::{
-        Clock, ProjectWorkflowBindingRepository, RuntimeWorkflowVersionRecord,
-        WorkflowLibrarySource, WorkflowPackageBytes, WorkflowPackageLoad, WorkflowPackageStore,
-        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+        Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository,
+        RuntimeWorkflowVersionRecord, WorkflowLibrarySource, WorkflowPackageBytes,
+        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeRepository, WorkflowRuntimeState,
+        WorkflowRuntimeStateRepository,
     },
     workflow_library_service::WorkflowLibraryService,
     workflow_manifest::WorkflowManifest,
@@ -197,6 +198,16 @@ pub struct WorkflowRestoreView {
     pub recipe_id: Option<String>,
     pub enabled: bool,
     pub capability: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRestoreResult {
+    pub workflow_version_id: String,
+    pub archived: bool,
+    pub enabled: bool,
+    pub capability: String,
+    pub readiness: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -770,14 +781,7 @@ impl WorkflowLifecycleService {
                 counts.benchmark_reference_count
             ));
         }
-        let project_bindings = if let Some(repository) = &self.project_workflow_binding_repository {
-            repository
-                .list_for_workflow_version(workflow_version_id)
-                .await
-                .map_err(db_error)?
-        } else {
-            Vec::new()
-        };
+        let project_bindings = self.list_project_bindings(workflow_version_id).await?;
         let mut project_binding_scopes = project_bindings
             .iter()
             .map(|binding| format!("{} {}", binding.stage, binding.mode))
@@ -831,31 +835,14 @@ impl WorkflowLifecycleService {
                 inspection.blocking_reasons.join(" "),
             ));
         }
+
+        let project_bindings = if inspection.delete_action == "REMOVE" {
+            self.list_project_bindings(workflow_version_id).await?
+        } else {
+            Vec::new()
+        };
         if inspection.delete_action == "REMOVE" {
-            self.state_repository
-                .set_archived(
-                    workflow_version_id,
-                    true,
-                    false,
-                    Some(self.clock.now()),
-                    self.clock.now(),
-                )
-                .await
-                .map_err(db_error)?;
-            self.update_cached_archive_state(workflow_version_id, true, false)
-                .await;
-            self.capability_cache
-                .write()
-                .await
-                .remove(workflow_version_id);
-            return Ok(WorkflowDeletionResult {
-                action: "REMOVE".to_owned(),
-                delete_action: "REMOVE".to_owned(),
-                project_binding_count: 0,
-                workflow_id: inspection.workflow_id,
-                workflow_version_id: inspection.workflow_version_id,
-                archived: true,
-            });
+            return self.remove_version(&inspection, &project_bindings).await;
         }
 
         let version = self
@@ -872,6 +859,15 @@ impl WorkflowLifecycleService {
         let packages = self
             .find_packages(&version.workflow_id, &version.workflow_version)
             .await?;
+        // Recheck immediately before any package/runtime deletion. A binding
+        // can arrive after inspect_deletion selected HARD_DELETE; in that case
+        // the safe outcome is the normal reversible REMOVE path.
+        let late_project_bindings = self.list_project_bindings(workflow_version_id).await?;
+        if !late_project_bindings.is_empty() {
+            return self
+                .remove_version(&inspection, &late_project_bindings)
+                .await;
+        }
         let mut package_names = packages
             .iter()
             .map(|package| package.package_name.clone())
@@ -926,6 +922,122 @@ impl WorkflowLifecycleService {
         })
     }
 
+    async fn list_project_bindings(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Vec<ProjectWorkflowBindingRecord>, WorkflowLifecycleError> {
+        match &self.project_workflow_binding_repository {
+            Some(repository) => repository
+                .list_for_workflow_version(workflow_version_id)
+                .await
+                .map_err(db_error),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    async fn remove_version(
+        &self,
+        inspection: &WorkflowDeletionInspection,
+        project_bindings: &[ProjectWorkflowBindingRecord],
+    ) -> Result<WorkflowDeletionResult, WorkflowLifecycleError> {
+        let previous_state = self
+            .state_repository
+            .find_state(&inspection.workflow_version_id)
+            .await
+            .map_err(db_error)?;
+        let now = self.clock.now();
+        self.state_repository
+            .set_archived(&inspection.workflow_version_id, true, false, Some(now), now)
+            .await
+            .map_err(db_error)?;
+
+        let cleared_count = if let Some(repository) = &self.project_workflow_binding_repository {
+            match repository
+                .clear_by_workflow_version(&inspection.workflow_version_id)
+                .await
+            {
+                Ok(count) => count,
+                Err(error) => {
+                    let cleanup_message = error.to_string();
+                    let compensation = self
+                        .restore_runtime_state(
+                            &inspection.workflow_version_id,
+                            previous_state.as_ref(),
+                        )
+                        .await;
+                    match compensation {
+                        Ok(()) => {
+                            let (previous_archived, previous_enabled) = previous_state
+                                .as_ref()
+                                .map(|state| (state.archived, state.enabled))
+                                .unwrap_or((false, true));
+                            self.update_cached_archive_state(
+                                &inspection.workflow_version_id,
+                                previous_archived,
+                                previous_enabled,
+                            )
+                            .await;
+                            return Err(WorkflowLifecycleError::new(
+                                "WORKFLOW_DELETE_BINDING_CLEANUP_FAILED",
+                                format!(
+                                    "clearing {} exact project binding(s) failed: {cleanup_message}",
+                                    project_bindings.len()
+                                ),
+                            ));
+                        }
+                        Err(compensation_error) => {
+                            return Err(WorkflowLifecycleError::new(
+                                "WORKFLOW_DELETE_COMPENSATION_FAILED",
+                                format!(
+                                    "clearing {} exact project binding(s) failed: {cleanup_message}; \
+                                     restoring runtime state also failed: {compensation_error}",
+                                    project_bindings.len()
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        } else {
+            0
+        };
+
+        self.update_cached_archive_state(&inspection.workflow_version_id, true, false)
+            .await;
+        self.capability_cache
+            .write()
+            .await
+            .remove(&inspection.workflow_version_id);
+        Ok(WorkflowDeletionResult {
+            action: "REMOVE".to_owned(),
+            delete_action: "REMOVE".to_owned(),
+            project_binding_count: cleared_count,
+            workflow_id: inspection.workflow_id.clone(),
+            workflow_version_id: inspection.workflow_version_id.clone(),
+            archived: true,
+        })
+    }
+
+    async fn restore_runtime_state(
+        &self,
+        workflow_version_id: &str,
+        previous_state: Option<&WorkflowRuntimeState>,
+    ) -> Result<(), WorkflowLifecycleError> {
+        let (archived, enabled, archived_at) = previous_state
+            .map(|state| (state.archived, state.enabled, state.archived_at))
+            .unwrap_or((false, true, None));
+        self.state_repository
+            .set_archived(
+                workflow_version_id,
+                archived,
+                enabled,
+                archived_at,
+                self.clock.now(),
+            )
+            .await
+            .map_err(db_error)
+    }
+
     pub async fn delete_workflow(
         &self,
         workflow_id: &str,
@@ -963,7 +1075,19 @@ impl WorkflowLifecycleService {
         }
         let mut result = Vec::new();
         for version_id in versions {
-            result.push(self.delete_version(&version_id).await?);
+            match self.delete_version(&version_id).await {
+                Ok(deletion) => result.push(deletion),
+                Err(error) if result.is_empty() => return Err(error),
+                Err(error) => {
+                    return Err(WorkflowLifecycleError::new(
+                        "WORKFLOW_DELETE_WORKFLOW_PARTIAL_FAILURE",
+                        format!(
+                            "workflow version {version_id} failed after {} version(s) were processed: {error}",
+                            result.len()
+                        ),
+                    ));
+                }
+            }
         }
         Ok(result)
     }
@@ -971,7 +1095,7 @@ impl WorkflowLifecycleService {
     pub async fn restore_version(
         &self,
         workflow_version_id: &str,
-    ) -> Result<(), WorkflowLifecycleError> {
+    ) -> Result<WorkflowRestoreResult, WorkflowLifecycleError> {
         self.runtime_repository
             .find_version(workflow_version_id)
             .await
@@ -982,8 +1106,20 @@ impl WorkflowLifecycleService {
                     "workflow version was not found",
                 )
             })?;
+        let state = self
+            .state_repository
+            .find_state(workflow_version_id)
+            .await
+            .map_err(db_error)?;
+        if !state.as_ref().is_some_and(|state| state.archived) {
+            return Err(WorkflowLifecycleError::new(
+                "WORKFLOW_NOT_ARCHIVED",
+                "workflow version is not archived",
+            ));
+        }
+        let now = self.clock.now();
         self.state_repository
-            .set_archived(workflow_version_id, false, false, None, self.clock.now())
+            .set_archived(workflow_version_id, false, false, None, now)
             .await
             .map_err(db_error)?;
         self.workspace_cache
@@ -994,14 +1130,36 @@ impl WorkflowLifecycleService {
             .write()
             .await
             .remove(workflow_version_id);
-        if let Err(error) = self.recheck_capability(workflow_version_id).await {
-            tracing::warn!(
-                workflow_version_id,
-                error = %error,
-                "workflow restored without a successful capability recheck"
-            );
-        }
-        Ok(())
+        let capability = match self.recheck_capability(workflow_version_id).await {
+            Ok(capability) => capability,
+            Err(error) => {
+                let capability = capability_for_restore_error(&error, self.clock.now());
+                self.capability_cache
+                    .write()
+                    .await
+                    .insert(workflow_version_id.to_owned(), capability.clone());
+                tracing::warn!(
+                    workflow_version_id,
+                    error = %error,
+                    "workflow restored without a successful capability recheck"
+                );
+                capability
+            }
+        };
+        let capability_name = capability_state(&capability);
+        let enabled = if capability.state == CapabilityState::Ready {
+            self.set_enabled(workflow_version_id, true).await?;
+            true
+        } else {
+            false
+        };
+        Ok(WorkflowRestoreResult {
+            workflow_version_id: workflow_version_id.to_owned(),
+            archived: false,
+            enabled,
+            readiness: restore_readiness(&capability_name, enabled),
+            capability: capability_name,
+        })
     }
 
     async fn update_cached_archive_state(
@@ -2289,6 +2447,41 @@ fn capability_state(capability: &CapabilityCheckView) -> String {
         .unwrap_or_else(|| "NOT_CHECKED".to_owned())
 }
 
+fn capability_for_restore_error(
+    error: &WorkflowLifecycleError,
+    checked_at: chrono::DateTime<chrono::Utc>,
+) -> CapabilityCheckView {
+    let state = match error.code() {
+        "COMFY_OFFLINE" => CapabilityState::ComfyOffline,
+        "MISSING_NODES" | "MISSING_NODE" => CapabilityState::MissingNodes,
+        "INCOMPATIBLE_INPUT_VALUES" | "COMFY_PROTOCOL_ERROR" => {
+            CapabilityState::IncompatibleInputValues
+        }
+        _ => CapabilityState::NotChecked,
+    };
+    CapabilityCheckView {
+        state,
+        checked_at: Some(checked_at.to_rfc3339()),
+        issues: vec![CapabilityIssueView {
+            code: error.code().to_owned(),
+            class_type: None,
+            node_id: None,
+            affected_node_ids: Vec::new(),
+            input_name: None,
+            current_value: None,
+            message: error.to_string(),
+        }],
+    }
+}
+
+fn restore_readiness(capability: &str, enabled: bool) -> String {
+    if enabled && capability == "READY" {
+        "ACTIVE".to_owned()
+    } else {
+        "RESTORED_NEEDS_ATTENTION".to_owned()
+    }
+}
+
 fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
     let parse = |value: &str| {
         value
@@ -2378,7 +2571,8 @@ mod tests {
     use crate::application::{
         ports::{
             Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyHealth,
-            ComfyHistory, ComfyOutputData, ComfyOutputFile, PromptSubmission, RepositoryError,
+            ComfyHistory, ComfyOutputData, ComfyOutputFile, ProjectWorkflowBindingRecord,
+            ProjectWorkflowBindingRepository, PromptSubmission, RepositoryError,
             RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, SystemStats,
             WorkflowLibraryRepository, WorkflowLibrarySource, WorkflowLibrarySourceError,
             WorkflowPackageBytes, WorkflowPackageFiles, WorkflowPackageLoad, WorkflowPackageRecord,
@@ -2397,7 +2591,7 @@ mod tests {
         io::{Cursor, Write},
         sync::{
             atomic::{AtomicUsize, Ordering},
-            Arc,
+            Arc, Mutex,
         },
     };
     use zip::{write::FileOptions, ZipWriter};
@@ -2442,6 +2636,7 @@ outputs: []
     struct ExactRecipeSource {
         packages: Vec<WorkflowPackageFiles>,
         load_calls: Arc<AtomicUsize>,
+        empty: Arc<std::sync::atomic::AtomicBool>,
     }
 
     #[async_trait]
@@ -2450,6 +2645,9 @@ outputs: []
             &self,
         ) -> Result<Vec<WorkflowPackageLoad>, WorkflowLibrarySourceError> {
             self.load_calls.fetch_add(1, Ordering::SeqCst);
+            if self.empty.load(Ordering::SeqCst) {
+                return Ok(Vec::new());
+            }
             Ok(self
                 .packages
                 .iter()
@@ -2578,43 +2776,194 @@ outputs: []
         }
     }
 
-    struct ExactStateRepository;
+    #[derive(Clone, Default)]
+    struct ExactStateRepository {
+        state: Arc<Mutex<Option<WorkflowRuntimeState>>>,
+    }
+
+    impl ExactStateRepository {
+        fn with_state(state: WorkflowRuntimeState) -> Self {
+            Self {
+                state: Arc::new(Mutex::new(Some(state))),
+            }
+        }
+
+        fn snapshot(&self) -> Option<WorkflowRuntimeState> {
+            self.state.lock().unwrap().clone()
+        }
+    }
 
     #[async_trait]
     impl WorkflowRuntimeStateRepository for ExactStateRepository {
-        async fn is_enabled(&self, _workflow_version_id: &str) -> Result<bool, RepositoryError> {
-            Ok(true)
+        async fn is_enabled(&self, workflow_version_id: &str) -> Result<bool, RepositoryError> {
+            Ok(self
+                .state
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|state| state.workflow_version_id == workflow_version_id)
+                .map_or(true, |state| state.enabled))
         }
 
         async fn set_enabled(
             &self,
-            _workflow_version_id: &str,
-            _enabled: bool,
-            _updated_at: DateTime<Utc>,
+            workflow_version_id: &str,
+            enabled: bool,
+            updated_at: DateTime<Utc>,
         ) -> Result<(), RepositoryError> {
+            let mut state = self.state.lock().unwrap();
+            let current = state.clone().unwrap_or(WorkflowRuntimeState {
+                workflow_version_id: workflow_version_id.to_owned(),
+                enabled: true,
+                archived: false,
+                archived_at: None,
+                updated_at,
+            });
+            *state = Some(WorkflowRuntimeState {
+                enabled,
+                updated_at,
+                ..current
+            });
             Ok(())
         }
 
         async fn find_state(
             &self,
-            _workflow_version_id: &str,
+            workflow_version_id: &str,
         ) -> Result<Option<WorkflowRuntimeState>, RepositoryError> {
-            Ok(None)
+            Ok(self
+                .state
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|state| state.workflow_version_id == workflow_version_id))
         }
 
         async fn set_archived(
             &self,
-            _workflow_version_id: &str,
-            _archived: bool,
-            _enabled: bool,
-            _archived_at: Option<DateTime<Utc>>,
-            _updated_at: DateTime<Utc>,
+            workflow_version_id: &str,
+            archived: bool,
+            enabled: bool,
+            archived_at: Option<DateTime<Utc>>,
+            updated_at: DateTime<Utc>,
         ) -> Result<(), RepositoryError> {
+            *self.state.lock().unwrap() = Some(WorkflowRuntimeState {
+                workflow_version_id: workflow_version_id.to_owned(),
+                enabled,
+                archived,
+                archived_at,
+                updated_at,
+            });
             Ok(())
         }
 
         async fn list_states(&self) -> Result<Vec<WorkflowRuntimeState>, RepositoryError> {
-            Ok(Vec::new())
+            Ok(self.state.lock().unwrap().clone().into_iter().collect())
+        }
+    }
+
+    #[derive(Clone)]
+    struct ExactBindingRepository {
+        bindings: Arc<Mutex<Vec<ProjectWorkflowBindingRecord>>>,
+        fail_clear: bool,
+        late_binding: Option<ProjectWorkflowBindingRecord>,
+        list_calls: Arc<AtomicUsize>,
+    }
+
+    impl ExactBindingRepository {
+        fn one(workflow_version_id: &str, fail_clear: bool) -> Self {
+            Self {
+                bindings: Arc::new(Mutex::new(vec![binding_record(workflow_version_id)])),
+                fail_clear,
+                late_binding: None,
+                list_calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn late(workflow_version_id: &str) -> Self {
+            Self {
+                bindings: Arc::new(Mutex::new(Vec::new())),
+                fail_clear: false,
+                late_binding: Some(binding_record(workflow_version_id)),
+                list_calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn len(&self) -> usize {
+            self.bindings.lock().unwrap().len()
+        }
+    }
+
+    fn binding_record(workflow_version_id: &str) -> ProjectWorkflowBindingRecord {
+        let now = Utc::now();
+        ProjectWorkflowBindingRecord {
+            project_id: "project-exact".to_owned(),
+            stage: "VIDEO".to_owned(),
+            mode: "DEFAULT".to_owned(),
+            workflow_version_id: workflow_version_id.to_owned(),
+            recipe_id: "recipe-a".to_owned(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[async_trait]
+    impl ProjectWorkflowBindingRepository for ExactBindingRepository {
+        async fn list_for_project(
+            &self,
+            project_id: &str,
+        ) -> Result<Vec<ProjectWorkflowBindingRecord>, RepositoryError> {
+            Ok(self
+                .bindings
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|binding| binding.project_id == project_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn replace_for_project(
+            &self,
+            _project_id: &str,
+            _bindings: &[ProjectWorkflowBindingRecord],
+        ) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        async fn list_for_workflow_version(
+            &self,
+            workflow_version_id: &str,
+        ) -> Result<Vec<ProjectWorkflowBindingRecord>, RepositoryError> {
+            if let Some(binding) = &self.late_binding {
+                if self.list_calls.fetch_add(1, Ordering::SeqCst) >= 1 {
+                    let mut bindings = self.bindings.lock().unwrap();
+                    if bindings.is_empty() {
+                        bindings.push(binding.clone());
+                    }
+                }
+            }
+            Ok(self
+                .bindings
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|binding| binding.workflow_version_id == workflow_version_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn clear_by_workflow_version(
+            &self,
+            workflow_version_id: &str,
+        ) -> Result<u64, RepositoryError> {
+            if self.fail_clear {
+                return Err(RepositoryError::database("forced binding cleanup failure"));
+            }
+            let mut bindings = self.bindings.lock().unwrap();
+            let before = bindings.len();
+            bindings.retain(|binding| binding.workflow_version_id != workflow_version_id);
+            Ok((before - bindings.len()) as u64)
         }
     }
 
@@ -2707,6 +3056,27 @@ outputs: []
     fn exact_service_with_recipe_hash_mismatch(
         recipe_hash_mismatch: bool,
     ) -> (WorkflowLifecycleService, Arc<ExactRecipeSource>) {
+        let (service, source, _) = exact_service_with_options(
+            recipe_hash_mismatch,
+            None,
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["good"]]}}}
+            }),
+            None,
+        );
+        (service, source)
+    }
+
+    fn exact_service_with_options(
+        recipe_hash_mismatch: bool,
+        initial_state: Option<WorkflowRuntimeState>,
+        object_info: Value,
+        binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
+    ) -> (
+        WorkflowLifecycleService,
+        Arc<ExactRecipeSource>,
+        Arc<ExactStateRepository>,
+    ) {
         let mut package_a = exact_package("pkg-exact-a", "1.0.0", EXACT_RECIPE_A_YAML);
         if recipe_hash_mismatch {
             package_a
@@ -2717,6 +3087,7 @@ outputs: []
         let source = Arc::new(ExactRecipeSource {
             packages: vec![package_a, package_b],
             load_calls: Arc::new(AtomicUsize::new(0)),
+            empty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
         let version = RuntimeWorkflowVersionRecord {
             workflow_version_id: "wv-exact-shared".to_owned(),
@@ -2752,7 +3123,12 @@ outputs: []
         };
         let runtime: Arc<dyn WorkflowRuntimeRepository> =
             Arc::new(ExactRuntimeRepository { version });
-        let state: Arc<dyn WorkflowRuntimeStateRepository> = Arc::new(ExactStateRepository);
+        let state_repository = Arc::new(
+            initial_state
+                .map(ExactStateRepository::with_state)
+                .unwrap_or_default(),
+        );
+        let state: Arc<dyn WorkflowRuntimeStateRepository> = state_repository.clone();
         let clock: Arc<dyn Clock> = Arc::new(ExactClock);
         let library = Arc::new(WorkflowLibraryService::new(
             source.clone(),
@@ -2763,11 +3139,7 @@ outputs: []
         let onboarding = Arc::new(
             WorkflowOnboardingService::new(
                 source.clone(),
-                Arc::new(ExactComfyAdapter {
-                    object_info: json!({
-                        "TestNode": {"input": {"required": {"mode": [["good"]]}}}
-                    }),
-                }),
+                Arc::new(ExactComfyAdapter { object_info }),
                 library.clone(),
                 Arc::new(ExactRunRepository),
                 package_store.clone(),
@@ -2775,18 +3147,20 @@ outputs: []
             )
             .with_runtime_state(runtime.clone(), state.clone()),
         );
-        (
-            WorkflowLifecycleService::new(
-                source.clone(),
-                library,
-                onboarding,
-                runtime,
-                state,
-                package_store,
-                clock,
-            ),
-            source,
-        )
+        let service = WorkflowLifecycleService::new(
+            source.clone(),
+            library,
+            onboarding,
+            runtime,
+            state,
+            package_store,
+            clock,
+        );
+        let service = match binding_repository {
+            Some(repository) => service.with_project_workflow_binding_repository(repository),
+            None => service,
+        };
+        (service, source, state_repository)
     }
 
     #[tokio::test]
@@ -2842,16 +3216,185 @@ outputs: []
     }
 
     #[tokio::test]
-    async fn restoring_a_workflow_rechecks_capability_and_caches_the_result() {
-        let (service, _source) = exact_service();
+    async fn restoring_a_ready_workflow_reenables_it_and_returns_the_result() {
+        let now = Utc::now();
+        let (service, _source, state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: false,
+                archived: true,
+                archived_at: Some(now),
+                updated_at: now,
+            }),
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["bad"]]}}}
+            }),
+            None,
+        );
 
-        service.restore_version("wv-exact-shared").await.unwrap();
+        let result = service.restore_version("wv-exact-shared").await.unwrap();
 
+        assert_eq!(result.workflow_version_id, "wv-exact-shared");
+        assert!(!result.archived);
+        assert!(result.enabled);
+        assert_eq!(result.capability, "READY");
+        assert_eq!(result.readiness, "ACTIVE");
+        let state = state.snapshot().unwrap();
+        assert!(!state.archived);
+        assert!(state.enabled);
         assert!(service
             .capability_cache
             .read()
             .await
             .contains_key("wv-exact-shared"));
+    }
+
+    #[tokio::test]
+    async fn restoring_a_blocked_workflow_keeps_it_disabled_with_explicit_readiness() {
+        let now = Utc::now();
+        let (service, _source, state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: false,
+                archived: true,
+                archived_at: Some(now),
+                updated_at: now,
+            }),
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["good"]]}}}
+            }),
+            None,
+        );
+
+        let result = service.restore_version("wv-exact-shared").await.unwrap();
+
+        assert!(!result.archived);
+        assert!(!result.enabled);
+        assert_eq!(result.capability, "INCOMPATIBLE_INPUT_VALUES");
+        assert_eq!(result.readiness, "RESTORED_NEEDS_ATTENTION");
+        let state = state.snapshot().unwrap();
+        assert!(!state.archived);
+        assert!(!state.enabled);
+    }
+
+    #[tokio::test]
+    async fn restore_succeeds_when_capability_recheck_fails() {
+        let now = Utc::now();
+        let (service, source, state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: false,
+                archived: true,
+                archived_at: Some(now),
+                updated_at: now,
+            }),
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["bad"]]}}}
+            }),
+            None,
+        );
+        source.empty.store(true, Ordering::SeqCst);
+
+        let result = service.restore_version("wv-exact-shared").await.unwrap();
+
+        assert!(!result.archived);
+        assert!(!result.enabled);
+        assert_eq!(result.capability, "NOT_CHECKED");
+        assert_eq!(result.readiness, "RESTORED_NEEDS_ATTENTION");
+        let state = state.snapshot().unwrap();
+        assert!(!state.archived);
+        assert!(!state.enabled);
+    }
+
+    #[tokio::test]
+    async fn removing_a_workflow_clears_exact_bindings_and_returns_the_cleared_count() {
+        let now = Utc::now();
+        let binding = Arc::new(ExactBindingRepository::one("wv-exact-shared", false));
+        let (service, _source, state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: true,
+                archived: false,
+                archived_at: None,
+                updated_at: now,
+            }),
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["good"]]}}}
+            }),
+            Some(binding.clone()),
+        );
+
+        let result = service.delete_version("wv-exact-shared").await.unwrap();
+
+        assert_eq!(result.action, "REMOVE");
+        assert_eq!(result.project_binding_count, 1);
+        assert!(result.archived);
+        let state = state.snapshot().unwrap();
+        assert!(state.archived);
+        assert!(!state.enabled);
+        assert_eq!(binding.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn binding_cleanup_failure_compensates_the_previous_runtime_state() {
+        let now = Utc::now();
+        let binding = Arc::new(ExactBindingRepository::one("wv-exact-shared", true));
+        let (service, _source, state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: true,
+                archived: false,
+                archived_at: None,
+                updated_at: now,
+            }),
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["good"]]}}}
+            }),
+            Some(binding.clone()),
+        );
+
+        let error = service
+            .delete_version("wv-exact-shared")
+            .await
+            .expect_err("binding cleanup failure must fail closed");
+
+        assert_eq!(error.code(), "WORKFLOW_DELETE_BINDING_CLEANUP_FAILED");
+        let state = state.snapshot().unwrap();
+        assert!(!state.archived);
+        assert!(state.enabled);
+        assert_eq!(binding.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn late_binding_downgrades_hard_delete_to_remove() {
+        let now = Utc::now();
+        let binding = Arc::new(ExactBindingRepository::late("wv-exact-shared"));
+        let (service, _source, state) = exact_service_with_options(
+            false,
+            Some(WorkflowRuntimeState {
+                workflow_version_id: "wv-exact-shared".to_owned(),
+                enabled: true,
+                archived: false,
+                archived_at: None,
+                updated_at: now,
+            }),
+            json!({
+                "TestNode": {"input": {"required": {"mode": [["good"]]}}}
+            }),
+            Some(binding.clone()),
+        );
+
+        let result = service.delete_version("wv-exact-shared").await.unwrap();
+
+        assert_eq!(result.action, "REMOVE");
+        assert_eq!(result.project_binding_count, 1);
+        assert!(state.snapshot().unwrap().archived);
+        assert_eq!(binding.len(), 0);
     }
 
     #[test]
