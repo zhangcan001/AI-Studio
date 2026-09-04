@@ -62,7 +62,7 @@ defaults, mode, and capability separately without printing the real prompt.
 
 ## Final closeout truth markers
 
-These values describe the final closeout against the `ef718f3e` baseline.
+These values describe the final closeout against the `8b87b1f4` baseline.
 
 ```text
 FINAL_CLOSEOUT=YES
@@ -85,3 +85,87 @@ REAL_COMFY_CAPABILITY_UAT=NOT_AUTOMATED
 `REAL_FIXTURE_GRAPH_UAT=YES` covers local graph inference only. Its capability
 result comes from fixture-generated `object_info`; it does not prove capability
 against the user's real ComfyUI installation.
+
+## DEV-081 P1 REAL-UAT DIAGNOSTIC CLOSEOUT — final MAIN result
+
+This section records the sanitized test input and the final audit evidence for the
+Production Package preflight, structured-error propagation, and existing-SHA
+Recipe regeneration work. Agent-D did not modify production implementation
+code and did not run Git commit or push.
+
+### Sanitized Production Package fixture
+
+The repository fixture is:
+
+`src-tauri/tests/fixtures/production_packages/dev081_t2v_3_items/production-package.json`
+
+It is schemaVersion 1, contains three T2V items, and uses only these prompts:
+
+```text
+DEV081 test prompt 01
+DEV081 test prompt 02
+DEV081 test prompt 03
+```
+
+Its defaults are `durationSeconds=5`, `width=960`, and `height=544`. It has no
+media paths, workflow IDs, recipe IDs, user prompts, or local absolute paths.
+The user's real desktop workflow remains local-only and was not copied into
+the repository.
+
+### MAIN validation checklist
+
+MAIN validated the following items against the implementation and the full
+test run:
+
+```text
+REAL_UAT_DIAGNOSTIC_CLOSEOUT=YES
+PACKAGE_PROJECT_AWARE_INSPECTION=YES
+PACKAGE_RECIPE_PREFLIGHT_BEFORE_CREATE=YES
+INSPECT_CREATE_RECIPE_PARITY=YES
+PACKAGE_ITEM_ALREADY_CREATED_VISIBLE_AT_INSPECT=YES
+PACKAGE_PROJECT_WORKFLOW_CHANGED_REQUIRES_REINSPECT=YES
+STRUCTURED_PACKAGE_ERROR=YES
+PACKAGE_ERROR_CODE_PRESERVED=YES
+GENERIC_INVALID_INPUT_FOR_PACKAGE_FAILURE=NO
+EXISTING_SHA_CURRENT_RECIPE_CHECKED=YES
+EXISTING_SHA_OUTDATED_RECIPE_DETECTED=YES
+REGENERATE_RECIPE_VERSION=YES
+OLD_RECIPE_IMMUTABLE=YES
+WORKFLOW_VERSION_UNCHANGED_DURING_RECIPE_REGEN=YES
+EXPLICIT_PROJECT_REBIND_REQUIRED=YES
+DEV081_T2V_3ITEM_INSPECT=PASS
+DEV081_T2V_3ITEM_CREATE=PASS
+DEV081_8STEP_REACHED_FAKE_COMFY=YES
+```
+
+### MAIN validation result
+
+The MAIN validation is complete. The final single-test evidence run reported:
+
+```text
+PACKAGE_MODE=FL2VA_TEXT_TO_VIDEO
+PACKAGE_RESOLVED_WORKFLOW_VERSION=wfv_7830a675-26cb-40eb-b413-05ab7f3a653e
+PACKAGE_RESOLVED_RECIPE=rcp_1ee51e43-3da1-4bec-892f-39c6ef04bab4
+PACKAGE_RESOLUTION_SOURCE=VIDEO_DEFAULT
+INSPECT_READY_COUNT=3
+INSPECT_BLOCKED_COUNT=0
+CREATED_COUNT=3
+AUTO_START_ON_CREATE=NO
+DEV078_EXACT_ADMISSION=PASS
+FAKE_COMFY_SUBMIT_COUNT=3
+EXEC_WIDTH=960
+EXEC_HEIGHT=544
+EXEC_DURATION=5
+EXEC_STEPS=8
+EXEC_DENOISE=1
+EXEC_FPS=24
+DEV081_8STEP_REACHED_FAKE_COMFY=YES
+```
+
+The dedicated DEV-081 run also proves same-SHA old-Recipe detection,
+regeneration to `1.0.1`, unchanged WorkflowVersion identity, preserved old
+Recipe, and explicit project rebinding. The repository-wide Rust and frontend
+gates passed after the compatibility assertion was updated to the structured
+`PACKAGE_ITEMS_ALREADY_CREATED` contract. Real ComfyUI capability polling
+remains `NOT_AUTOMATED`; the final closure uses sanitized fixtures and the
+deterministic fake Comfy adapter.

@@ -485,6 +485,14 @@ pub struct ProductionPackageInspectionItem {
     pub duration_seconds: Option<i64>,
     pub width: Option<i64>,
     pub height: Option<i64>,
+    #[serde(default)]
+    pub resolved_workflow_version_id: Option<String>,
+    #[serde(default)]
+    pub resolved_recipe_id: Option<String>,
+    #[serde(default)]
+    pub workflow_resolution_source: Option<String>,
+    #[serde(default)]
+    pub recipe_compatibility: Option<String>,
     pub status: ProductionPackageItemStatus,
     pub warnings: Vec<ProductionPackageDiagnostic>,
     pub errors: Vec<ProductionPackageDiagnostic>,

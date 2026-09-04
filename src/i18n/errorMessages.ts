@@ -17,6 +17,23 @@ const ERROR_MESSAGES: Record<string, string> = {
   COMFY_IMAGE_UPLOAD_FAILED: "图片上传到 ComfyUI 失败。",
   COMFY_INPUT_UPLOAD_TOO_LARGE: "素材文件过大，无法上传到 ComfyUI。",
   PRODUCTION_QUEUE_BUSY: "当前有生产队列正在运行，请等待完成或暂停后再提交任务。",
+  PRODUCTION_PACKAGE_ERROR: "生产包操作失败，请查看下方错误详情。",
+  PACKAGE_INVALID_INPUT: "生产包输入无效，请检查后重试。",
+  PACKAGE_RECIPE_INCOMPATIBLE: "工作流不兼容当前生产模式。",
+  PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE: "当前项目没有可用于该生产模式的工作流。",
+  PACKAGE_H3_IMPORT_ERROR: "H3 导入阶段失败。",
+  PACKAGE_QUEUE_ERROR: "生产队列创建失败。",
+  PACKAGE_FILESYSTEM_ERROR: "生产包文件访问失败，请检查文件权限。",
+  PACKAGE_SESSION_NOT_FOUND: "生产包检查结果不存在，请重新检查文件夹。",
+  PACKAGE_SESSION_EXPIRED: "生产包检查结果已过期，请重新检查文件夹。",
+  PACKAGE_MEDIA_CHANGED: "检查后的媒体文件已变化，请重新检查生产包。",
+  PACKAGE_PROMPT_CHANGED: "生产包提示词在检查后发生变化，请重新检查。",
+  PACKAGE_MODE_CHANGED: "生产包模式在检查后发生变化，请重新检查。",
+  PACKAGE_ITEM_NOT_FOUND: "生产包项目在检查后不存在，请重新检查。",
+  PACKAGE_ITEM_BLOCKED: "所选生产包项目当前已被阻止。",
+  PACKAGE_DUPLICATE_ITEM_ID: "生产包包含重复项目，请修复后重新检查。",
+  PACKAGE_ITEMS_ALREADY_CREATED: "所选生产包项目已经创建过生产批次。",
+  PACKAGE_PROJECT_WORKFLOW_CHANGED: "项目工作流配置在检查后发生变化，请重新检查生产包。",
   COMFY_ENDPOINT_INVALID: "ComfyUI 地址无效，请使用不含账号、参数和片段的 http 或 https 地址。",
   COMFY_ENDPOINT_TEST_FAILED: "无法连接到该 ComfyUI 地址。",
   COMFY_ENDPOINT_CHANGE_BUSY: "当前仍有生成任务或生产队列正在运行，完成后才能切换 ComfyUI。",
@@ -133,6 +150,13 @@ function rawErrorMessage(error: unknown): string {
 }
 
 function errorCode(error: unknown, raw: string): string | undefined {
+  if (error && typeof error === "object" && "details" in error) {
+    const details = (error as { details?: unknown }).details;
+    if (details && typeof details === "object" && !Array.isArray(details) && "packageErrorCode" in details) {
+      const packageErrorCode = (details as { packageErrorCode?: unknown }).packageErrorCode;
+      if (typeof packageErrorCode === "string" && packageErrorCode) return packageErrorCode;
+    }
+  }
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code?: unknown }).code;
     if (typeof code === "string" && code && code !== "INVALID_INPUT") return code;

@@ -469,6 +469,18 @@ export function autoConfirmOnboarding(draftId: string): Promise<WorkflowAutoOnbo
   return invoke<WorkflowAutoOnboardingPlanView>("workflow_onboarding_auto_confirm", { draftId });
 }
 
+export function regenerateWorkflowRecipe(
+  workflowId: string,
+  workflowVersion: string,
+  sourceRecipeVersion?: string,
+): Promise<WorkflowAutoOnboardingPlanView> {
+  return invoke<WorkflowAutoOnboardingPlanView>("workflow_onboarding_regenerate_recipe", {
+    workflowId,
+    workflowVersion,
+    sourceRecipeVersion,
+  });
+}
+
 export function getOnboardingDraft(draftId: string): Promise<WorkflowOnboardingDraftView> {
   return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_get", { draftId });
 }

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "packageType": "AI_STUDIO_VIDEO_PRODUCTION",
+  "packageId": "dev081-sanitized-package",
+  "name": "DEV-081 sanitized T2V package",
+  "description": "Sanitized three-item Production Package fixture for DEV-081 UAT.",
+  "defaults": {
+    "durationSeconds": 5,
+    "width": 960,
+    "height": 544,
+    "mode": "T2V"
+  },
+  "items": [
+    {
+      "id": "DEV081-ITEM-01",
+      "name": "DEV081 item 01",
+      "videoPrompt": "DEV081 test prompt 01",
+      "mode": "T2V"
+    },
+    {
+      "id": "DEV081-ITEM-02",
+      "name": "DEV081 item 02",
+      "videoPrompt": "DEV081 test prompt 02",
+      "mode": "T2V"
+    },
+    {
+      "id": "DEV081-ITEM-03",
+      "name": "DEV081 item 03",
+      "videoPrompt": "DEV081 test prompt 03",
+      "mode": "T2V"
+    }
+  ]
+}

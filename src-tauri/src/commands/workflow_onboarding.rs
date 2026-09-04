@@ -108,6 +108,24 @@ pub async fn workflow_onboarding_auto_confirm(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_onboarding_regenerate_recipe(
+    state: State<'_, AppState>,
+    workflow_id: String,
+    workflow_version: String,
+    source_recipe_version: Option<String>,
+) -> Result<WorkflowAutoOnboardingPlanView, AppError> {
+    state
+        .workflow_onboarding_service
+        .regenerate_recipe_draft(
+            &workflow_id,
+            &workflow_version,
+            source_recipe_version.as_deref(),
+        )
+        .await
+        .map_err(map_onboarding_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn workflow_onboarding_get(
     state: State<'_, AppState>,
     draft_id: String,

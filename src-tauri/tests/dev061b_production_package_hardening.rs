@@ -707,8 +707,8 @@ async fn all_bound_package_does_not_create_a_duplicate_batch() {
         .await;
     assert!(matches!(
         duplicate,
-        Err(ai_studio_lib::application::production_package_service::ProductionPackageError::InvalidInput(message))
-            if message == "all selected production package items are already bound to production batches"
+        Err(ai_studio_lib::application::production_package_service::ProductionPackageError::ItemsAlreadyCreated { item_ids })
+            if item_ids == duplicate_ids
     ));
     let batch_count_after = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM production_batches")
         .fetch_one(&pool)

@@ -26,6 +26,7 @@ interface Props {
   onResume: () => void;
   onOpenAdvanced: () => void;
   onOpenExisting: () => void;
+  onRegenerateRecipe?: () => void;
   onRestoreExisting?: () => void;
   onCancel?: () => void;
   draft?: WorkflowOnboardingDraftView;
@@ -165,7 +166,7 @@ function issueCapabilityDetails(plan: WorkflowAutoOnboardingPlanView, issue: Wor
   };
 }
 
-export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRestoreExisting, onCancel }: Props) {
+export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRegenerateRecipe, onRestoreExisting, onCancel }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
   const waiting = plan.state === "WAITING_FOR_COMFY_UI";
   const issueFingerprint = plan.issues.map((issue, issueIndex) => workflowIssueSelectionKey(issue, issueIndex)).join("|");
@@ -241,6 +242,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
       <div className="workflow-smart-actions">
         {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续自动确认"}</button>}
         {(plan.state === "ALREADY_EXISTS" || plan.state === "ALREADY_EXISTS_ARCHIVED") && <button type="button" onClick={onOpenExisting}>打开现有工作流</button>}
+        {plan.issues.some((issue) => issue.code === "EXISTING_RECIPE_OUTDATED") && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>重新生成 Recipe</button>}
         {plan.state === "ALREADY_EXISTS_ARCHIVED" && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复归档工作流</button>}
         <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>
         {onCancel && <button type="button" className="quiet-button" onClick={onCancel} disabled={loading}>取消添加</button>}

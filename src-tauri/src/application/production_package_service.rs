@@ -59,6 +59,24 @@ pub struct ProductionPackageH3Config {
     pub quality_recipes: Vec<H3QualityRecipeSelection>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedPackageRecipe {
+    mode: String,
+    workflow_version_id: String,
+    recipe_id: String,
+    source: &'static str,
+}
+
+impl ResolvedPackageRecipe {
+    fn as_h3_selection(&self) -> H3ModeRecipeSelection {
+        H3ModeRecipeSelection {
+            mode: self.mode.clone(),
+            workflow_version_id: self.workflow_version_id.clone(),
+            recipe_id: self.recipe_id.clone(),
+        }
+    }
+}
+
 impl ProductionPackageH3Config {
     fn validate(&self) -> Result<(), ProductionPackageError> {
         if self.workflow_version_id.trim().is_empty() || self.recipe_id.trim().is_empty() {
@@ -121,7 +139,7 @@ pub struct ProductionPackageCreateBatchesResult {
     pub warnings: Vec<ProductionPackageDiagnostic>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ProductionPackageError {
     InvalidInput(String),
     Inspection(ProductionPackageInspectionError),
@@ -136,7 +154,22 @@ pub enum ProductionPackageError {
     Filesystem(String),
     H3(String),
     Queue(String),
-    ProjectWorkflowUnavailable { mode: String, message: String },
+    ProjectWorkflowUnavailable {
+        mode: String,
+        message: String,
+    },
+    RecipeIncompatible {
+        mode: String,
+        workflow_version_id: String,
+        recipe_id: String,
+        message: String,
+    },
+    ItemsAlreadyCreated {
+        item_ids: Vec<String>,
+    },
+    ProjectWorkflowChanged {
+        mode: String,
+    },
 }
 
 impl ProductionPackageError {
@@ -158,6 +191,9 @@ impl ProductionPackageError {
             Self::ProjectWorkflowUnavailable { .. } => {
                 "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE"
             }
+            Self::RecipeIncompatible { .. } => "PACKAGE_RECIPE_INCOMPATIBLE",
+            Self::ItemsAlreadyCreated { .. } => "PACKAGE_ITEMS_ALREADY_CREATED",
+            Self::ProjectWorkflowChanged { .. } => "PACKAGE_PROJECT_WORKFLOW_CHANGED",
         }
     }
 }
@@ -179,6 +215,27 @@ impl fmt::Display for ProductionPackageError {
             Self::ProjectWorkflowUnavailable { mode, message } => {
                 write!(formatter, "{}: mode {mode}: {message}", self.code())
             }
+            Self::RecipeIncompatible {
+                mode,
+                workflow_version_id,
+                recipe_id,
+                message,
+            } => write!(
+                formatter,
+                "{}: mode {mode}, workflowVersionId {workflow_version_id}, recipeId {recipe_id}: {message}",
+                self.code()
+            ),
+            Self::ItemsAlreadyCreated { item_ids } => write!(
+                formatter,
+                "{}: package items are already bound to production batches: {}",
+                self.code(),
+                item_ids.join(", ")
+            ),
+            Self::ProjectWorkflowChanged { mode } => write!(
+                formatter,
+                "{}: project workflow configuration changed for mode {mode}; re-inspect the package",
+                self.code()
+            ),
             Self::SessionNotFound => write!(
                 formatter,
                 "{}: inspection session was not found",
@@ -256,7 +313,9 @@ impl ProductionPackageService {
     ) -> Result<(String, ProductionPackageInspection), ProductionPackageError> {
         validate_project_id(project_id)?;
         self.cleanup_expired_sessions(None).await;
-        let inspection = self.inspector.inspect(&package_root).await?;
+        let mut inspection = self.inspector.inspect(&package_root).await?;
+        self.enrich_project_production_readiness(project_id, &mut inspection)
+            .await?;
         let root_path = inspection.package_root.clone();
         let session_id = format!("production_package_{}", Uuid::new_v4());
         self.sessions.lock().await.insert(
@@ -330,9 +389,6 @@ impl ProductionPackageService {
                 .copied()
                 .ok_or_else(|| ProductionPackageError::ItemNotFound(item.id.clone()))?;
             ensure_item_unchanged(item, current_item)?;
-            if current_item.status == ProductionPackageItemStatus::Blocked {
-                return Err(ProductionPackageError::ItemBlocked(item.id.clone()));
-            }
             for media in item_media(item) {
                 self.inspector
                     .revalidate_media(&session.root_path, media)
@@ -365,15 +421,44 @@ impl ProductionPackageService {
             .cloned()
             .collect::<Vec<_>>();
         if remaining_selected.is_empty() {
-            return Err(ProductionPackageError::InvalidInput(
-                "all selected production package items are already bound to production batches"
-                    .to_owned(),
-            ));
+            return Err(ProductionPackageError::ItemsAlreadyCreated {
+                item_ids: current_selected
+                    .iter()
+                    .map(|item| item.id.clone())
+                    .collect(),
+            });
         }
 
         let mode_recipes = self
             .resolve_project_mode_recipes(&session.project_id, &remaining_selected)
             .await?;
+        for item in &remaining_selected {
+            let snapshot = session
+                .inspection
+                .items
+                .iter()
+                .find(|inspected| inspected.id == item.id)
+                .ok_or_else(|| ProductionPackageError::ItemNotFound(item.id.clone()))?;
+            let current_resolution = mode_recipes
+                .iter()
+                .find(|selection| selection.mode == item.mode)
+                .expect("resolved mode recipe should cover every selected item");
+            if snapshot.resolved_workflow_version_id.as_deref()
+                != Some(current_resolution.workflow_version_id.as_str())
+                || snapshot.resolved_recipe_id.as_deref()
+                    != Some(current_resolution.recipe_id.as_str())
+                || snapshot.workflow_resolution_source.as_deref() != Some(current_resolution.source)
+            {
+                return Err(ProductionPackageError::ProjectWorkflowChanged {
+                    mode: item.mode.clone(),
+                });
+            }
+        }
+        for item in &remaining_selected {
+            if item.status == ProductionPackageItemStatus::Blocked {
+                return Err(ProductionPackageError::ItemBlocked(item.id.clone()));
+            }
+        }
         if self.project_workflow_binding_service.is_none()
             || remaining_selected.iter().any(|item| {
                 !mode_recipes
@@ -472,7 +557,7 @@ impl ProductionPackageService {
         package_name: &str,
         chunk_index: u32,
         chunk_count: u32,
-        mode_recipes: &[H3ModeRecipeSelection],
+        mode_recipes: &[ResolvedPackageRecipe],
     ) -> Result<ProductionPackageBatchMapping, ProductionPackageError> {
         let (h3_session_id, inspection) = self
             .h3_local_import_service
@@ -509,7 +594,10 @@ impl ProductionPackageService {
                     ref2va_recipe_id: self.h3_config.ref2va_recipe_id.clone(),
                     quality_profile: self.h3_config.quality_profile.clone(),
                     quality_recipes: self.h3_config.quality_recipes.clone(),
-                    mode_recipes: mode_recipes.to_vec(),
+                    mode_recipes: mode_recipes
+                        .iter()
+                        .map(ResolvedPackageRecipe::as_h3_selection)
+                        .collect(),
                 },
                 Some(ProductionPackageProvenance::new(
                     package_root,
@@ -558,47 +646,156 @@ impl ProductionPackageService {
         })
     }
 
-    async fn resolve_project_mode_recipes(
+    async fn enrich_project_production_readiness(
         &self,
         project_id: &str,
-        items: &[ProductionPackageItemInspection],
-    ) -> Result<Vec<H3ModeRecipeSelection>, ProductionPackageError> {
+        inspection: &mut ProductionPackageInspection,
+    ) -> Result<(), ProductionPackageError> {
+        let package_root = normalize_package_root(&inspection.package_root);
+        let package_key = production_package_source_key(&package_root, &inspection.manifest_sha256);
+        let persisted_bindings = self
+            .production_queue_service
+            .list_package_bindings(project_id)
+            .await
+            .map_err(|error| ProductionPackageError::Queue(error.to_string()))?;
+        let already_created = persisted_bindings
+            .iter()
+            .filter(|binding| binding.package_key == package_key)
+            .flat_map(|binding| binding.package_item_ids.iter().cloned())
+            .collect::<HashSet<_>>();
+        let mut resolutions =
+            HashMap::<String, Result<ResolvedPackageRecipe, ProductionPackageError>>::new();
+        for mode in inspection
+            .items
+            .iter()
+            .map(|item| item.mode.clone())
+            .collect::<HashSet<_>>()
+        {
+            resolutions.insert(
+                mode.clone(),
+                self.resolve_project_mode_recipe(project_id, &mode).await,
+            );
+        }
+        for item in &mut inspection.items {
+            let resolution = resolutions
+                .get(&item.mode)
+                .expect("every package mode should have a resolution")
+                .clone();
+            match resolution {
+                Ok(resolved) => {
+                    item.resolved_workflow_version_id = Some(resolved.workflow_version_id);
+                    item.resolved_recipe_id = Some(resolved.recipe_id);
+                    item.workflow_resolution_source = Some(resolved.source.to_owned());
+                    item.recipe_compatibility = Some("READY".to_owned());
+                }
+                Err(error) => {
+                    item.recipe_compatibility = Some("BLOCKED".to_owned());
+                    item.errors.push(package_error_diagnostic(&error));
+                }
+            }
+            if already_created.contains(&item.id) {
+                item.errors.push(ProductionPackageDiagnostic::error(
+                    "PACKAGE_ITEM_ALREADY_CREATED",
+                    "该 Production Package 项目已经创建过生产批次。",
+                    Some("id".to_owned()),
+                ));
+            }
+            if !item.errors.is_empty() {
+                item.status = ProductionPackageItemStatus::Blocked;
+            }
+        }
+        inspection.recompute_summary();
+        Ok(())
+    }
+
+    async fn resolve_project_mode_recipe(
+        &self,
+        project_id: &str,
+        mode: &str,
+    ) -> Result<ResolvedPackageRecipe, ProductionPackageError> {
         let Some(service) = self.project_workflow_binding_service.as_ref() else {
-            return Ok(Vec::new());
+            return Ok(legacy_package_recipe(&self.h3_config, mode)?);
         };
-        let fallback_mode = items
-            .first()
-            .map(|item| item.mode.as_str())
-            .unwrap_or("UNKNOWN");
         let config = service
             .get(project_id)
             .await
-            .map_err(|error| project_workflow_unavailable(fallback_mode, error.to_string()))?;
+            .map_err(|error| project_workflow_unavailable(mode, error.to_string()))?;
         if config.project_id != project_id {
             return Err(project_workflow_unavailable(
-                fallback_mode,
+                mode,
                 format!(
                     "project workflow configuration belongs to {}, not {project_id}",
                     config.project_id
                 ),
             ));
         }
-        let modes = items
-            .iter()
-            .map(|item| item.mode.clone())
-            .collect::<Vec<_>>();
-        let selections = select_project_mode_recipes(&config, &modes)?;
-        for selection in &selections {
-            self.production_queue_service
-                .validate_recipe_for_mode(
-                    &selection.workflow_version_id,
-                    &selection.recipe_id,
-                    &selection.mode,
-                )
-                .await
-                .map_err(|error| {
-                    project_workflow_unavailable(&selection.mode, error.to_string())
-                })?;
+        if config.video_default.is_none() && config.video_mode_overrides.is_empty() {
+            return Ok(legacy_package_recipe(&self.h3_config, mode)?);
+        }
+        let selection = select_project_mode_binding(&config, mode);
+        let Some((binding, source)) = selection else {
+            return Err(project_workflow_unavailable(
+                mode,
+                "configured project workflow has no binding for this production mode",
+            ));
+        };
+        if !binding.available {
+            return Err(project_workflow_unavailable(
+                mode,
+                "configured project workflow binding is unavailable",
+            ));
+        }
+        if binding.workflow_version_id.trim().is_empty() || binding.recipe_id.trim().is_empty() {
+            return Err(project_workflow_unavailable(
+                mode,
+                "configured project workflow binding has an empty identity",
+            ));
+        }
+        let workflow_version_id = binding.workflow_version_id.clone();
+        let recipe_id = binding.recipe_id.clone();
+        let resolved = ResolvedPackageRecipe {
+            mode: mode.to_owned(),
+            workflow_version_id,
+            recipe_id,
+            source,
+        };
+        self.validate_resolved_recipe(&resolved).await?;
+        Ok(resolved)
+    }
+
+    async fn validate_resolved_recipe(
+        &self,
+        resolved: &ResolvedPackageRecipe,
+    ) -> Result<(), ProductionPackageError> {
+        self.production_queue_service
+            .validate_recipe_for_mode(
+                &resolved.workflow_version_id,
+                &resolved.recipe_id,
+                &resolved.mode,
+            )
+            .await
+            .map_err(|error| ProductionPackageError::RecipeIncompatible {
+                mode: resolved.mode.clone(),
+                workflow_version_id: resolved.workflow_version_id.clone(),
+                recipe_id: resolved.recipe_id.clone(),
+                message: error.to_string(),
+            })
+    }
+
+    async fn resolve_project_mode_recipes(
+        &self,
+        project_id: &str,
+        items: &[ProductionPackageItemInspection],
+    ) -> Result<Vec<ResolvedPackageRecipe>, ProductionPackageError> {
+        let mut modes = HashSet::new();
+        let mut selections = Vec::new();
+        for item in items {
+            if modes.insert(item.mode.clone()) {
+                selections.push(
+                    self.resolve_project_mode_recipe(project_id, &item.mode)
+                        .await?,
+                );
+            }
         }
         Ok(selections)
     }
@@ -657,17 +854,8 @@ fn select_project_mode_recipes(
                 "unsupported package production mode",
             ));
         }
-        let binding = config
-            .video_mode_overrides
-            .iter()
-            .find(|binding| binding.stage == VIDEO_STAGE && binding.mode == *mode)
-            .or_else(|| {
-                config
-                    .video_default
-                    .as_ref()
-                    .filter(|binding| binding.stage == VIDEO_STAGE && binding.mode == DEFAULT_MODE)
-            });
-        let Some(binding) = binding else {
+        let binding = select_project_mode_binding(config, mode);
+        let Some((binding, _source)) = binding else {
             continue;
         };
         if !binding.available {
@@ -689,6 +877,96 @@ fn select_project_mode_recipes(
         });
     }
     Ok(selections)
+}
+
+fn select_project_mode_binding<'a>(
+    config: &'a ProjectWorkflowConfigView,
+    mode: &str,
+) -> Option<(
+    &'a crate::application::project_workflow_binding_service::ProjectWorkflowBindingView,
+    &'static str,
+)> {
+    config
+        .video_mode_overrides
+        .iter()
+        .find(|binding| binding.stage == VIDEO_STAGE && binding.mode == mode)
+        .map(|binding| (binding, "MODE_OVERRIDE"))
+        .or_else(|| {
+            config
+                .video_default
+                .as_ref()
+                .filter(|binding| binding.stage == VIDEO_STAGE && binding.mode == DEFAULT_MODE)
+                .map(|binding| (binding, "VIDEO_DEFAULT"))
+        })
+}
+
+fn legacy_package_recipe(
+    config: &ProductionPackageH3Config,
+    mode: &str,
+) -> Result<ResolvedPackageRecipe, ProductionPackageError> {
+    if !VIDEO_MODES.contains(&mode) {
+        return Err(project_workflow_unavailable(
+            mode,
+            "unsupported package production mode",
+        ));
+    }
+    let (workflow_version_id, recipe_id) = if mode.starts_with("FL2VA_") {
+        (
+            config
+                .fl2va_workflow_version_id
+                .clone()
+                .unwrap_or_else(|| config.workflow_version_id.clone()),
+            config
+                .fl2va_recipe_id
+                .clone()
+                .unwrap_or_else(|| config.recipe_id.clone()),
+        )
+    } else {
+        (
+            config
+                .ref2va_workflow_version_id
+                .clone()
+                .unwrap_or_else(|| config.workflow_version_id.clone()),
+            config
+                .ref2va_recipe_id
+                .clone()
+                .unwrap_or_else(|| config.recipe_id.clone()),
+        )
+    };
+    if workflow_version_id.trim().is_empty() || recipe_id.trim().is_empty() {
+        return Err(project_workflow_unavailable(
+            mode,
+            "legacy H3 workflow configuration has an empty identity",
+        ));
+    }
+    Ok(ResolvedPackageRecipe {
+        mode: mode.to_owned(),
+        workflow_version_id,
+        recipe_id,
+        source: "LEGACY_FALLBACK",
+    })
+}
+
+fn package_error_diagnostic(error: &ProductionPackageError) -> ProductionPackageDiagnostic {
+    match error {
+        ProductionPackageError::RecipeIncompatible {
+            mode,
+            workflow_version_id,
+            recipe_id,
+            message,
+        } => ProductionPackageDiagnostic::error(
+            "PACKAGE_RECIPE_INCOMPATIBLE",
+            format!(
+                "当前项目工作流不能用于 {mode}：workflowVersionId={workflow_version_id}; recipeId={recipe_id}; {message}"
+            ),
+            Some("mode".to_owned()),
+        ),
+        _ => ProductionPackageDiagnostic::error(
+            error.code(),
+            error.to_string(),
+            Some("mode".to_owned()),
+        ),
+    }
 }
 
 fn project_workflow_unavailable(mode: &str, message: impl Into<String>) -> ProductionPackageError {

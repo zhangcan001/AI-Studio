@@ -8,6 +8,7 @@ import {
   deleteWorkflow,
   deleteWorkflowVersion,
   duplicateWorkflowRecipe,
+  regenerateWorkflowRecipe,
   exportWorkflowPackage,
   getOnboardingDraft,
   importWorkflowPackageBackup,
@@ -900,6 +901,25 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     });
   }
 
+  async function regenerateExistingRecipe() {
+    if (!autoPlan?.existingWorkflowId || !autoPlan.existingWorkflowVersion) return;
+    await runDraftAction(async () => {
+      const sourceRecipeVersion = autoPlan.existingRecipes?.[0]?.recipeVersion;
+      const nextPlan = await regenerateWorkflowRecipe(
+        autoPlan.existingWorkflowId!,
+        autoPlan.existingWorkflowVersion!,
+        sourceRecipeVersion,
+      );
+      setAutoPlan(nextPlan);
+      setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setNotice(nextPlan.message);
+      if (nextPlan.published) {
+        await loadWorkspace("refresh");
+        await onCatalogChanged();
+      }
+    });
+  }
+
   async function resolveAutoIssue(issue: WorkflowAutoIssueView, candidate: WorkflowAutoIssueCandidateView) {
     if (!autoPlan || !draft) return;
     await runDraftAction(async () => {
@@ -1025,6 +1045,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onResume={() => void resumeAutoImport()}
         onOpenAdvanced={() => void openAdvancedImport()}
         onOpenExisting={() => void openExistingWorkflow()}
+        onRegenerateRecipe={() => void regenerateExistingRecipe()}
         onRestoreExisting={() => void restoreExistingArchivedWorkflow()}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
         onUseInProject={(workflowId, recipeId) => void onUseInProject(workflowId, recipeId)}

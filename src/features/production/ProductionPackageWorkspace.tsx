@@ -70,7 +70,19 @@ type WorkspaceInspection = ProductionPackageInspectionResult & {
 interface WorkspaceError {
   message: string;
   code?: string;
+  technicalMessage?: string;
+  details?: ProductionPackageErrorDetails;
   requiresReinspect: boolean;
+}
+
+interface ProductionPackageErrorDetails {
+  packageErrorCode?: string;
+  technicalMessage?: string;
+  mode?: string;
+  workflowVersionId?: string;
+  recipeId?: string;
+  itemId?: string;
+  requiresReinspect?: boolean;
 }
 
 const STALE_PACKAGE_ERROR_CODES = new Set([
@@ -81,6 +93,7 @@ const STALE_PACKAGE_ERROR_CODES = new Set([
   "PACKAGE_MODE_CHANGED",
   "PACKAGE_ITEM_NOT_FOUND",
   "PACKAGE_ITEM_BLOCKED",
+  "PACKAGE_PROJECT_WORKFLOW_CHANGED",
 ]);
 
 export function ProductionPackageWorkspace({
@@ -502,6 +515,21 @@ export function ProductionPackageWorkspace({
         <div className="production-package-workspace-error" role="alert" aria-live="assertive">
           <strong>{error.code ? `操作失败 · ${error.code}` : "操作失败"}</strong>
           <p>{error.message}</p>
+          {error.details && (
+            <dl aria-label="生产包错误详情">
+              {error.details.packageErrorCode && <div><dt>错误类型</dt><dd>{error.details.packageErrorCode}</dd></div>}
+              {error.details.mode && <div><dt>模式</dt><dd>{error.details.mode}</dd></div>}
+              {error.details.workflowVersionId && <div><dt>WorkflowVersion</dt><dd>{error.details.workflowVersionId}</dd></div>}
+              {error.details.recipeId && <div><dt>Recipe</dt><dd>{error.details.recipeId}</dd></div>}
+              {error.details.itemId && <div><dt>项目</dt><dd>{error.details.itemId}</dd></div>}
+            </dl>
+          )}
+          {error.technicalMessage && (
+            <details open>
+              <summary>技术详情</summary>
+              <p>原因：<code>{error.technicalMessage}</code></p>
+            </details>
+          )}
           {queueOpenFailed
             ? <small>批次已经创建，可重新打开生产队列；不会重复创建批次。</small>
             : currentFolderPath && <small>请点击“重新检查”获取最新检查结果后再继续。</small>}
@@ -529,6 +557,24 @@ export function ProductionPackageWorkspace({
               </ul>
             </div>
           ) : null}
+
+          <details className="production-package-workspace-resolution-details">
+            <summary>查看每个项目的生产工作流配对（{items.length}）</summary>
+            <ul aria-label="生产包项目工作流配对">
+              {items.map((item) => {
+                return (
+                  <li key={`resolution-${item.id}`}>
+                    <strong>{item.name || item.id}</strong>
+                    <span>模式：{item.mode || "—"}</span>
+                    <span>WorkflowVersion：{item.resolvedWorkflowVersionId || "未解析"}</span>
+                    <span>Recipe：{item.resolvedRecipeId || "未解析"}</span>
+                    <span>来源：{item.workflowResolutionSource || "—"}</span>
+                    <span>兼容性：{item.recipeCompatibility || item.status}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
 
           <p className="production-package-workspace-selection-summary" role="status" aria-live="polite">
             已选择 {selectedItems.length} 项（READY {selectedReadyCount}，WARNING {selectedWarningCount}）；WARNING 需手动选择，BLOCKED 不可选。
@@ -734,12 +780,36 @@ function folderStatusLabel(input: {
 }
 
 function statusErrorCode(error: unknown): string | undefined {
+  const details = packageErrorDetails(error);
+  if (details?.packageErrorCode) return details.packageErrorCode;
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code?: unknown }).code;
     if (typeof code === "string" && code) return code;
   }
   const raw = rawErrorText(error);
   return raw.match(/[A-Z][A-Z0-9_]{2,}/)?.[0];
+}
+
+function packageErrorDetails(error: unknown): ProductionPackageErrorDetails | undefined {
+  if (!error || typeof error !== "object" || !("details" in error)) return undefined;
+  const details = (error as { details?: unknown }).details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
+  const record = details as Record<string, unknown>;
+  const stringValue = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim() ? value : undefined;
+  return {
+    packageErrorCode: stringValue(record.packageErrorCode),
+    technicalMessage: stringValue(record.technicalMessage),
+    mode: stringValue(record.mode),
+    workflowVersionId: stringValue(record.workflowVersionId),
+    recipeId: stringValue(record.recipeId),
+    itemId: stringValue(record.itemId),
+    requiresReinspect: record.requiresReinspect === true,
+  };
+}
+
+function technicalErrorMessage(error: unknown): string | undefined {
+  return packageErrorDetails(error)?.technicalMessage || rawErrorText(error) || undefined;
 }
 
 function rawErrorText(error: unknown): string {
@@ -758,8 +828,31 @@ function rawErrorText(error: unknown): string {
 
 function toWorkspaceError(error: unknown, operation: "inspect" | "create" | "open"): WorkspaceError {
   const code = statusErrorCode(error);
+  const details = packageErrorDetails(error);
+  const technicalMessage = technicalErrorMessage(error);
   let message: string;
   switch (code) {
+    case "PACKAGE_RECIPE_INCOMPATIBLE":
+      message = "工作流不兼容当前生产模式，请调整项目工作流后重新检查。";
+      break;
+    case "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE":
+      message = "当前项目没有可用于该生产模式的工作流，请先配置项目工作流。";
+      break;
+    case "PACKAGE_H3_IMPORT_ERROR":
+      message = "H3 导入阶段失败，请检查工作流运行包。";
+      break;
+    case "PACKAGE_QUEUE_ERROR":
+      message = "生产队列创建失败，请查看技术详情后重试。";
+      break;
+    case "PACKAGE_ITEMS_ALREADY_CREATED":
+      message = "所选生产包项目已经创建过生产批次，请重新检查并选择未创建项目。";
+      break;
+    case "PACKAGE_PROJECT_WORKFLOW_CHANGED":
+      message = "项目工作流配置在检查后发生变化，请重新检查生产包。";
+      break;
+    case "PACKAGE_FILESYSTEM_ERROR":
+      message = "生产包文件访问失败，请检查文件权限后重试。";
+      break;
     case "PACKAGE_SESSION_EXPIRED":
     case "PACKAGE_SESSION_NOT_FOUND":
       message = "生产包检查结果已过期，请重新检查文件夹后再试。";
@@ -781,6 +874,8 @@ function toWorkspaceError(error: unknown, operation: "inspect" | "create" | "ope
   return {
     message,
     code,
-    requiresReinspect: Boolean(code && STALE_PACKAGE_ERROR_CODES.has(code)),
+    technicalMessage,
+    details,
+    requiresReinspect: Boolean(details?.requiresReinspect || (code && STALE_PACKAGE_ERROR_CODES.has(code))),
   };
 }

@@ -24,6 +24,7 @@ pub enum AppErrorCode {
     AssetReadFailed,
     ReusableDraftUnavailable,
     WorkflowOnboardingError,
+    ProductionPackageError,
     ProductionQueueBusy,
     ProductionStartAdmissionBlocked,
     ComfyEndpointInvalid,
@@ -125,6 +126,23 @@ impl AppError {
         Self::new(AppErrorCode::WorkflowOnboardingError, message)
     }
 
+    pub fn production_package(
+        package_error_code: &str,
+        message: impl Into<String>,
+        details: Value,
+    ) -> Self {
+        let mut error = Self::new(AppErrorCode::ProductionPackageError, message);
+        let mut details = details;
+        if let Value::Object(ref mut object) = details {
+            object.insert(
+                "packageErrorCode".to_owned(),
+                Value::String(package_error_code.to_owned()),
+            );
+        }
+        error.details = Some(details);
+        error
+    }
+
     pub fn production_queue_busy(message: impl Into<String>, details: Value) -> Self {
         let mut error = Self::new(AppErrorCode::ProductionQueueBusy, message);
         error.details = Some(details);
@@ -210,6 +228,7 @@ impl AppError {
             AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
             AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
             AppErrorCode::WorkflowOnboardingError => "WORKFLOW_ONBOARDING_ERROR",
+            AppErrorCode::ProductionPackageError => "PRODUCTION_PACKAGE_ERROR",
             AppErrorCode::ProductionQueueBusy => "PRODUCTION_QUEUE_BUSY",
             AppErrorCode::ProductionStartAdmissionBlocked => "PRODUCTION_START_ADMISSION_BLOCKED",
             AppErrorCode::ComfyEndpointInvalid => "COMFY_ENDPOINT_INVALID",

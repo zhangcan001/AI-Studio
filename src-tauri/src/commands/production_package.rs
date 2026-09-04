@@ -17,6 +17,7 @@ use crate::{
     error::AppError,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -175,30 +176,122 @@ fn item_mapping_view(mapping: ProductionPackageItemMapping) -> ProductionPackage
 }
 
 fn map_package_error(error: ProductionPackageError) -> AppError {
-    match error {
-        ProductionPackageError::Filesystem(message) => AppError::filesystem(message),
-        ProductionPackageError::H3(message) => AppError::invalid_input(message),
-        ProductionPackageError::Queue(message) => AppError::database(message),
-        ProductionPackageError::ProjectWorkflowUnavailable { message, mode } => {
-            AppError::invalid_input(format!(
-                "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE: mode {mode}: {message}"
-            ))
+    let package_error_code = error.code().to_owned();
+    let technical_message = error.to_string();
+    let requires_reinspect = matches!(
+        &error,
+        ProductionPackageError::ProjectWorkflowChanged { .. }
+    );
+    let (message, mode, workflow_version_id, recipe_id, item_id) = match &error {
+        ProductionPackageError::ProjectWorkflowUnavailable { mode, .. } => (
+            "当前项目没有可用于该生产模式的工作流。",
+            Some(mode.as_str()),
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::RecipeIncompatible {
+            mode,
+            workflow_version_id,
+            recipe_id,
+            ..
+        } => (
+            "工作流不兼容当前生产模式。",
+            Some(mode.as_str()),
+            Some(workflow_version_id.as_str()),
+            Some(recipe_id.as_str()),
+            None,
+        ),
+        ProductionPackageError::ProjectWorkflowChanged { mode } => (
+            "项目工作流配置在检查后发生变化，请重新检查生产包。",
+            Some(mode.as_str()),
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::ItemsAlreadyCreated { item_ids } => (
+            "所选生产包项目已经创建过生产批次。",
+            None,
+            None,
+            None,
+            item_ids.first().map(String::as_str),
+        ),
+        ProductionPackageError::H3(_) => ("H3 导入阶段失败。", None, None, None, None),
+        ProductionPackageError::Queue(_) => ("生产队列创建失败。", None, None, None, None),
+        ProductionPackageError::MediaChanged(_) => (
+            "检查后的媒体文件已变化，请重新检查生产包。",
+            None,
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::PromptChanged(_)
+        | ProductionPackageError::ModeChanged(_)
+        | ProductionPackageError::ItemNotFound(_)
+        | ProductionPackageError::ItemBlocked(_) => (
+            "生产包内容在检查后发生变化，请重新检查。",
+            None,
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::DuplicateItemId(_) => (
+            "生产包包含重复项目，请修复后重新检查。",
+            None,
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::SessionNotFound => (
+            "生产包检查结果不存在，请重新检查文件夹。",
+            None,
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::SessionExpired => (
+            "生产包检查结果已过期，请重新检查文件夹。",
+            None,
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::Filesystem(_) => (
+            "生产包文件访问失败，请检查文件权限。",
+            None,
+            None,
+            None,
+            None,
+        ),
+        ProductionPackageError::Inspection(_) => {
+            ("生产包检查失败，请查看错误详情。", None, None, None, None)
         }
-        ProductionPackageError::Inspection(error) => AppError::invalid_input(error.to_string()),
-        ProductionPackageError::InvalidInput(message)
-        | ProductionPackageError::MediaChanged(message)
-        | ProductionPackageError::PromptChanged(message)
-        | ProductionPackageError::ModeChanged(message)
-        | ProductionPackageError::ItemNotFound(message)
-        | ProductionPackageError::ItemBlocked(message)
-        | ProductionPackageError::DuplicateItemId(message) => AppError::invalid_input(message),
-        ProductionPackageError::SessionNotFound => {
-            AppError::invalid_input("production package inspection session was not found")
+        ProductionPackageError::InvalidInput(_) => {
+            ("生产包输入无效，请检查后重试。", None, None, None, None)
         }
-        ProductionPackageError::SessionExpired => {
-            AppError::invalid_input("production package inspection session expired")
-        }
-    }
+    };
+
+    let item_id = match &error {
+        ProductionPackageError::PromptChanged(item_id)
+        | ProductionPackageError::ModeChanged(item_id)
+        | ProductionPackageError::ItemNotFound(item_id)
+        | ProductionPackageError::ItemBlocked(item_id)
+        | ProductionPackageError::DuplicateItemId(item_id) => Some(item_id.as_str()),
+        _ => item_id,
+    };
+
+    AppError::production_package(
+        &package_error_code,
+        message,
+        json!({
+            "technicalMessage": technical_message,
+            "mode": mode,
+            "workflowVersionId": workflow_version_id,
+            "recipeId": recipe_id,
+            "itemId": item_id,
+            "requiresReinspect": requires_reinspect,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -243,5 +336,75 @@ mod tests {
             rejected.is_err(),
             "create must not accept package or execution inputs"
         );
+    }
+
+    #[test]
+    fn package_errors_keep_domain_code_and_safe_context() {
+        let error = map_package_error(ProductionPackageError::ProjectWorkflowUnavailable {
+            mode: "FL2VA_TEXT_TO_VIDEO".to_owned(),
+            message: "Recipe is unavailable".to_owned(),
+        });
+        let value = serde_json::to_value(error).expect("app error should serialize");
+
+        assert_eq!(value["code"], "PRODUCTION_PACKAGE_ERROR");
+        assert_eq!(
+            value["details"]["packageErrorCode"],
+            "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE"
+        );
+        assert_eq!(value["details"]["mode"], "FL2VA_TEXT_TO_VIDEO");
+        assert_eq!(value["details"]["technicalMessage"], "PROJECT_WORKFLOW_UNAVAILABLE_FOR_PACKAGE_MODE: mode FL2VA_TEXT_TO_VIDEO: Recipe is unavailable");
+        assert!(value["details"].get("prompt").is_none());
+        assert!(value["details"].get("databasePath").is_none());
+    }
+
+    #[test]
+    fn package_error_mapping_does_not_collapse_h3_or_queue_to_invalid_input() {
+        for error in [
+            ProductionPackageError::H3("missing node".to_owned()),
+            ProductionPackageError::Queue("queue unavailable".to_owned()),
+        ] {
+            let value =
+                serde_json::to_value(map_package_error(error)).expect("error should serialize");
+            assert_eq!(value["code"], "PRODUCTION_PACKAGE_ERROR");
+            assert_ne!(value["code"], "INVALID_INPUT");
+        }
+    }
+
+    #[test]
+    fn package_recipe_and_project_change_errors_keep_structured_context() {
+        let recipe = serde_json::to_value(map_package_error(
+            ProductionPackageError::RecipeIncompatible {
+                mode: "FL2VA_TEXT_TO_VIDEO".to_owned(),
+                workflow_version_id: "wfv-123".to_owned(),
+                recipe_id: "rcp-456".to_owned(),
+                message: "Recipe is missing required package input width".to_owned(),
+            },
+        ))
+        .expect("recipe error should serialize");
+        assert_eq!(recipe["code"], "PRODUCTION_PACKAGE_ERROR");
+        assert_eq!(
+            recipe["details"]["packageErrorCode"],
+            "PACKAGE_RECIPE_INCOMPATIBLE"
+        );
+        assert_eq!(recipe["details"]["mode"], "FL2VA_TEXT_TO_VIDEO");
+        assert_eq!(recipe["details"]["workflowVersionId"], "wfv-123");
+        assert_eq!(recipe["details"]["recipeId"], "rcp-456");
+        assert_eq!(
+            recipe["details"]["technicalMessage"],
+            "PACKAGE_RECIPE_INCOMPATIBLE: mode FL2VA_TEXT_TO_VIDEO, workflowVersionId wfv-123, recipeId rcp-456: Recipe is missing required package input width"
+        );
+
+        let changed = serde_json::to_value(map_package_error(
+            ProductionPackageError::ProjectWorkflowChanged {
+                mode: "FL2VA_TEXT_TO_VIDEO".to_owned(),
+            },
+        ))
+        .expect("project change error should serialize");
+        assert_eq!(
+            changed["details"]["packageErrorCode"],
+            "PACKAGE_PROJECT_WORKFLOW_CHANGED"
+        );
+        assert_eq!(changed["details"]["mode"], "FL2VA_TEXT_TO_VIDEO");
+        assert_eq!(changed["details"]["requiresReinspect"], true);
     }
 }

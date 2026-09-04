@@ -616,6 +616,125 @@ async fn duplicate_and_archived_imports_reuse_existing_identity_without_new_vers
 }
 
 #[tokio::test]
+async fn existing_sha_outdated_recipe_is_regenerated_without_workflow_version_or_spam() {
+    let harness = harness(object_info()).await;
+    let first = harness
+        .service
+        .auto_onboard_bytes(api_image_bytes(), "dev081_regenerate.json".to_owned(), None)
+        .await
+        .expect("first import should publish");
+    let published = first.published.expect("first import should publish");
+    let old_recipe = format!(
+        "schema_version: 1\nid: {}\nname: Old Recipe\nworkflow:\n  file: workflow_api.json\ninputs:\n  prompt:\n    type: textarea\n    label: Prompt\n    required: true\n    default: old\n  seed:\n    type: seed\n    label: Seed\n    default: random\nbindings:\n  - source: prompt\n    target:\n      node: \"1\"\n      input: prompt\n  - source: seed\n    target:\n      node: \"1\"\n      input: seed\noutputs:\n  - id: output_1\n    type: image\n    node: \"2\"\n    required: true\n",
+        published.recipe_id
+    );
+    fs::write(
+        harness
+            .library_root
+            .join(&published.package_name)
+            .join("recipe.yaml"),
+        old_recipe,
+    )
+    .expect("old recipe should be replaced only in the isolated fixture");
+
+    let outdated = harness
+        .service
+        .auto_onboard_bytes(api_image_bytes(), "renamed_again.json".to_owned(), None)
+        .await
+        .expect("same SHA should return a diagnostic plan");
+    assert_eq!(outdated.state, WorkflowAutoOnboardingState::NeedsReview);
+    let issue = outdated
+        .issues
+        .iter()
+        .find(|issue| issue.code == "EXISTING_RECIPE_OUTDATED")
+        .expect("outdated recipe issue should be exposed");
+    assert!(issue.message.contains(&published.recipe_id));
+    assert!(issue.message.contains("width"));
+    assert_eq!(outdated.existing_recipes.len(), 1);
+    assert_eq!(outdated.existing_recipes[0].recipe_id, published.recipe_id);
+
+    let workflow_versions_before =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap();
+    let recipes_before = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
+    let regenerated = harness
+        .service
+        .regenerate_recipe_draft(
+            &published.workflow_id,
+            &published.workflow_version,
+            Some("1.0.0"),
+        )
+        .await
+        .expect("regeneration should publish the current inference");
+    assert_eq!(
+        regenerated.state,
+        WorkflowAutoOnboardingState::AutoPublished
+    );
+    let new_publish = regenerated
+        .published
+        .as_ref()
+        .expect("regeneration should publish a new recipe");
+    assert_ne!(new_publish.recipe_id, published.recipe_id);
+    assert_eq!(new_publish.workflow_id, published.workflow_id);
+    assert_eq!(new_publish.workflow_version, published.workflow_version);
+    assert_eq!(new_publish.workflow_sha256, published.workflow_sha256);
+    assert_eq!(regenerated.metadata.recipe_version, "1.0.1");
+    assert!(regenerated
+        .input_mappings
+        .iter()
+        .any(|mapping| mapping.semantic_key == "width"));
+    assert!(regenerated
+        .input_mappings
+        .iter()
+        .any(|mapping| mapping.semantic_key == "height"));
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap(),
+        workflow_versions_before
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap(),
+        recipes_before + 1
+    );
+    let old_db_recipe: String = sqlx::query_scalar("SELECT recipe_yaml FROM recipes WHERE id = ?")
+        .bind(&published.recipe_id)
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
+    assert!(old_db_recipe.contains("negative_prompt"));
+    assert!(old_db_recipe.contains("width"));
+
+    let current = harness
+        .service
+        .auto_onboard_bytes(api_image_bytes(), "same_again.json".to_owned(), None)
+        .await
+        .expect("current regenerated recipe should deduplicate");
+    assert_eq!(current.state, WorkflowAutoOnboardingState::AlreadyExists);
+    assert!(current
+        .issues
+        .iter()
+        .any(|issue| issue.code == "EXISTING_RECIPE_CURRENT"));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap(),
+        recipes_before + 1
+    );
+}
+
+#[tokio::test]
 async fn invalid_unknown_and_ui_inputs_are_explicitly_rejected_without_publishing() {
     let invalid_harness = harness(object_info()).await;
     assert_format_diagnostic(

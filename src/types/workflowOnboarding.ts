@@ -194,6 +194,12 @@ export interface WorkflowAutoIssueView {
   candidates: WorkflowAutoIssueCandidateView[];
 }
 
+export interface WorkflowAutoExistingRecipeView {
+  recipeId: string;
+  recipeVersion: string;
+  packageName: string;
+}
+
 export interface WorkflowAutoOnboardingPlanView {
   draftId: string;
   state: WorkflowAutoOnboardingState;
@@ -217,6 +223,8 @@ export interface WorkflowAutoOnboardingPlanView {
   existingWorkflowId?: string;
   existingWorkflowVersion?: string;
   existingPackageName?: string;
+  existingRecipes?: WorkflowAutoExistingRecipeView[];
+  expectedInference?: WorkflowAutoInferenceView[];
   message: string;
 }
 

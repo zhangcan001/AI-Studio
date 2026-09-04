@@ -13,13 +13,13 @@ use ai_studio_lib::application::{
     ports::{
         AssetRepository, AssetStore, AssetVideoPromptRepository, Clock, ComfyAdapter,
         ComfyAdapterError, ComfyConnectionConfig, ComfyEventSubscription, ComfyExecutionEvent,
-        ComfyHealth, ComfyHistory, ComfyOutputData, ComfyOutputFile,
-        GenerationDefinitionRepository, GenerationSnapshotRepository, NoopTaskUpdateSink,
-        ProductionQueueRepository, ProjectRepository, ProjectWorkflowBindingRepository,
-        PromptSubmission, ShotBatchRepository, SystemStats, TaskRepository, WorkflowLibrarySource,
-        WorkflowLibrarySourceError, WorkflowPackageFiles, WorkflowPackageLoad,
-        WorkflowPackageStore, WorkflowRunRepository, WorkflowRuntimeRepository,
-        WorkflowRuntimeStateRepository,
+        ComfyHealth, ComfyHistory, ComfyHistoryStatus, ComfyNodeOutput, ComfyOutputData,
+        ComfyOutputFile, ComfyOutputStream, ComfySavedResult, GenerationDefinitionRepository,
+        GenerationSnapshotRepository, NoopTaskUpdateSink, ProductionQueueRepository,
+        ProjectRepository, ProjectWorkflowBindingRepository, PromptSubmission, ShotBatchRepository,
+        SystemStats, TaskRepository, WorkflowLibrarySource, WorkflowLibrarySourceError,
+        WorkflowPackageFiles, WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
+        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     production_package_inspector::{
         ProductionPackageInspector, ProductionPackageItemStatus, PRODUCTION_PACKAGE_TYPE,
@@ -159,6 +159,10 @@ const DEV081_WORKFLOW_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/workflows/minimax_h3_8step_graph_api.json"
 ));
+const DEV081_PACKAGE_FIXTURE_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/production_packages/dev081_t2v_3_items/production-package.json"
+));
 
 #[derive(Clone)]
 struct StaticWorkflowSource {
@@ -247,11 +251,61 @@ impl ComfyEventSubscription for EmptyComfyEvents {
     }
 }
 
+struct CompletingComfyEvents {
+    submitted_prompt_id: Arc<Mutex<Option<String>>>,
+    started: bool,
+}
+
+#[async_trait]
+impl ComfyEventSubscription for CompletingComfyEvents {
+    async fn next_event(&mut self) -> Result<Option<ComfyExecutionEvent>, ComfyAdapterError> {
+        let prompt_id = loop {
+            if let Some(prompt_id) = self
+                .submitted_prompt_id
+                .lock()
+                .expect("fake Comfy prompt id lock should not be poisoned")
+                .clone()
+            {
+                break prompt_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        if self.started {
+            Ok(Some(ComfyExecutionEvent::ExecutionSucceeded { prompt_id }))
+        } else {
+            self.started = true;
+            Ok(Some(ComfyExecutionEvent::ExecutionStarted { prompt_id }))
+        }
+    }
+}
+
+struct FixtureVideoStream {
+    bytes: Option<Vec<u8>>,
+}
+
+#[async_trait]
+impl ComfyOutputStream for FixtureVideoStream {
+    fn content_type(&self) -> Option<&str> {
+        Some("video/mp4")
+    }
+
+    fn content_length(&self) -> Option<u64> {
+        self.bytes.as_ref().map(|bytes| bytes.len() as u64)
+    }
+
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, ComfyAdapterError> {
+        Ok(self.bytes.take())
+    }
+}
+
 #[derive(Clone)]
 struct NoSubmitComfyAdapter {
     submit_calls: Arc<AtomicUsize>,
     accept_submission: Arc<AtomicBool>,
+    complete_execution: Arc<AtomicBool>,
+    submitted_prompt_id: Arc<Mutex<Option<String>>>,
     submitted_workflow: Arc<Mutex<Option<Value>>>,
+    submitted_workflows: Arc<Mutex<Vec<Value>>>,
     object_info: Arc<Mutex<Value>>,
 }
 
@@ -260,7 +314,10 @@ impl NoSubmitComfyAdapter {
         Self {
             submit_calls: Arc::new(AtomicUsize::new(0)),
             accept_submission: Arc::new(AtomicBool::new(false)),
+            complete_execution: Arc::new(AtomicBool::new(false)),
+            submitted_prompt_id: Arc::new(Mutex::new(None)),
             submitted_workflow: Arc::new(Mutex::new(None)),
+            submitted_workflows: Arc::new(Mutex::new(Vec::new())),
             object_info: Arc::new(Mutex::new(json!({}))),
         }
     }
@@ -278,12 +335,25 @@ impl NoSubmitComfyAdapter {
         adapter
     }
 
+    fn runtime_with_object_info_and_completion(object_info: Value) -> Self {
+        let adapter = Self::runtime_with_object_info(object_info);
+        adapter.complete_execution.store(true, Ordering::SeqCst);
+        adapter
+    }
+
     fn submitted_workflow(&self) -> Value {
         self.submitted_workflow
             .lock()
             .expect("submitted workflow lock should not be poisoned")
             .clone()
             .expect("fake Comfy executor should receive one workflow")
+    }
+
+    fn submitted_workflows(&self) -> Vec<Value> {
+        self.submitted_workflows
+            .lock()
+            .expect("fake Comfy workflow history lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -322,7 +392,32 @@ impl ComfyAdapter for NoSubmitComfyAdapter {
     }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
-        Err(ComfyAdapterError::HistoryNotFound(prompt_id.to_owned()))
+        if !self.complete_execution.load(Ordering::SeqCst) {
+            return Err(ComfyAdapterError::HistoryNotFound(prompt_id.to_owned()));
+        }
+        let file = ComfyOutputFile {
+            filename: "DEV081-fake-output.mp4".to_owned(),
+            subfolder: String::new(),
+            folder_type: "output".to_owned(),
+        };
+        Ok(ComfyHistory {
+            prompt_id: prompt_id.to_owned(),
+            status: ComfyHistoryStatus {
+                status_str: Some("success".to_owned()),
+                completed: Some(true),
+                messages: None,
+            },
+            outputs: std::collections::BTreeMap::from([(
+                "62".to_owned(),
+                ComfyNodeOutput {
+                    images: Vec::new(),
+                    saved_results: vec![ComfySavedResult {
+                        file,
+                        animated: Some(true),
+                    }],
+                },
+            )]),
+        })
     }
 
     async fn download_output(
@@ -330,6 +425,20 @@ impl ComfyAdapter for NoSubmitComfyAdapter {
         file: &ComfyOutputFile,
     ) -> Result<ComfyOutputData, ComfyAdapterError> {
         Err(ComfyAdapterError::OutputDownload(file.filename.clone()))
+    }
+
+    async fn open_output_stream(
+        &self,
+        _file: &ComfyOutputFile,
+    ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+        if self.complete_execution.load(Ordering::SeqCst) {
+            return Ok(Box::new(FixtureVideoStream {
+                bytes: Some(b"DEV081 fake mp4 output".to_vec()),
+            }));
+        }
+        Err(ComfyAdapterError::Incompatible(
+            "fake Comfy output streaming is disabled".to_owned(),
+        ))
     }
 
     async fn submit_workflow(
@@ -340,6 +449,15 @@ impl ComfyAdapter for NoSubmitComfyAdapter {
     ) -> Result<PromptSubmission, ComfyAdapterError> {
         self.submit_calls.fetch_add(1, Ordering::SeqCst);
         if self.accept_submission.load(Ordering::SeqCst) {
+            *self
+                .submitted_prompt_id
+                .lock()
+                .expect("fake Comfy prompt id lock should not be poisoned") =
+                Some(prompt_id.to_owned());
+            self.submitted_workflows
+                .lock()
+                .expect("fake Comfy workflow history lock should not be poisoned")
+                .push(workflow.clone());
             *self
                 .submitted_workflow
                 .lock()
@@ -359,6 +477,12 @@ impl ComfyAdapter for NoSubmitComfyAdapter {
         &self,
         _client_id: &str,
     ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+        if self.complete_execution.load(Ordering::SeqCst) {
+            return Ok(Box::new(CompletingComfyEvents {
+                submitted_prompt_id: Arc::clone(&self.submitted_prompt_id),
+                started: false,
+            }));
+        }
         Ok(Box::new(EmptyComfyEvents))
     }
 }
@@ -580,6 +704,21 @@ async fn write_dev081_text_package(root: &Path) {
     )
     .await
     .expect("DEV-081 manifest should write");
+}
+
+async fn write_dev081_sanitized_package(root: &Path) {
+    tokio::fs::write(
+        root.join("production-package.json"),
+        DEV081_PACKAGE_FIXTURE_JSON.as_bytes(),
+    )
+    .await
+    .expect("DEV-081 sanitized package fixture should write");
+}
+
+fn dev081_incomplete_recipe_yaml(recipe_id: &str) -> String {
+    format!(
+        "schema_version: 1\nid: {recipe_id}\nname: DEV-081 old incomplete Recipe\nworkflow:\n  file: workflow_api.json\ninputs:\n  prompt:\n    type: textarea\n    label: Prompt\n    required: true\n    default: \"\"\n  seed:\n    type: seed\n    label: Seed\n    default: random\n    min: 0\n    max: 4294967295\nbindings:\n  - source: prompt\n    target:\n      node: \"59\"\n      input: text\n  - source: seed\n    target:\n      node: \"2\"\n      input: noise_seed\noutputs:\n  - id: video\n    type: video\n    node: \"62\"\n    required: true\n"
+    )
 }
 
 async fn write_dev059_mode_package(root: &Path) {
@@ -1058,6 +1197,22 @@ async fn dev080_package_uses_the_current_project_video_default_and_freezes_it_in
         .await
         .expect("DEV-080 package should inspect");
     assert_eq!(inspection.items[0].mode, "FL2VA_TEXT_TO_VIDEO");
+    assert_eq!(
+        inspection.items[0].resolved_workflow_version_id.as_deref(),
+        Some(DEV080_WORKFLOW_VERSION_ID)
+    );
+    assert_eq!(
+        inspection.items[0].resolved_recipe_id.as_deref(),
+        Some(DEV080_RECIPE_ID)
+    );
+    assert_eq!(
+        inspection.items[0].workflow_resolution_source.as_deref(),
+        Some("VIDEO_DEFAULT")
+    );
+    assert_eq!(
+        inspection.items[0].recipe_compatibility.as_deref(),
+        Some("READY")
+    );
 
     let result = package_service
         .create_batches(&session_id, &[inspection.items[0].id.clone()])
@@ -1083,6 +1238,157 @@ async fn dev080_package_uses_the_current_project_video_default_and_freezes_it_in
     assert_ne!(pair.0, DEV059_WORKFLOW_VERSION_ID);
     assert_ne!(pair.1, DEV059_RECIPE_ID);
     assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn dev081_incompatible_project_recipe_is_blocked_during_inspection() {
+    let directory = tempdir().expect("DEV-081 incompatible temp workspace should exist");
+    let pool = initialize(&directory.path().join("dev081-incompatible.db"))
+        .await
+        .expect("DEV-081 incompatible SQLite database should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("DEV-081 incompatible project storage should exist");
+    seed_dev059_database(&pool, &project_root).await;
+    seed_dev080_custom_package_binding(&pool).await;
+
+    let bad_recipe_id = "rcp_dev081_missing_duration";
+    let bad_yaml = DEV080_RECIPE_YAML
+        .replace(DEV080_RECIPE_ID, bad_recipe_id)
+        .replace(
+            "  duration_seconds:\n    type: integer\n    label: Duration\n    required: true\n    default: 5\n    min: 1\n    max: 15\n    step: 1\n",
+            "",
+        );
+    sqlx::query(
+        "INSERT INTO recipes
+         (id, workflow_version_id, version, schema_version, recipe_yaml,
+          recipe_sha256, created_at)
+         VALUES (?, ?, '2', 1, ?, ?, ?)",
+    )
+    .bind(bad_recipe_id)
+    .bind(DEV080_WORKFLOW_VERSION_ID)
+    .bind(&bad_yaml)
+    .bind(sha256_hex(&bad_yaml))
+    .bind(DEV059_CREATED_AT)
+    .execute(&pool)
+    .await
+    .expect("DEV-081 incompatible recipe should be inserted");
+    sqlx::query(
+        "UPDATE project_workflow_bindings SET recipe_id = ?
+         WHERE project_id = ? AND stage = 'VIDEO' AND mode = 'DEFAULT'",
+    )
+    .bind(bad_recipe_id)
+    .bind(DEV059_PROJECT_ID)
+    .execute(&pool)
+    .await
+    .expect("DEV-081 incompatible project binding should be updated");
+
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("DEV-081 incompatible package root should exist");
+    write_dev059_text_package(&package_root, 3).await;
+    let package_service =
+        build_dev059_package_service(&pool, Arc::new(NoSubmitComfyAdapter::new()));
+    let (_, inspection) = package_service
+        .inspect_session(DEV059_PROJECT_ID, package_root)
+        .await
+        .expect("incompatible Recipe should be visible in inspection");
+
+    assert_eq!(inspection.ready_count, 0);
+    assert_eq!(inspection.blocked_count, 3);
+    assert!(inspection.items.iter().all(|item| {
+        item.errors.iter().any(|error| {
+            error.code == "PACKAGE_RECIPE_INCOMPATIBLE"
+                && error.message.contains("duration_seconds")
+        }) && item.recipe_compatibility.as_deref() == Some("BLOCKED")
+    }));
+}
+
+#[tokio::test]
+async fn dev081_already_created_package_item_is_visible_during_inspection() {
+    let directory = tempdir().expect("DEV-081 duplicate temp workspace should exist");
+    let pool = initialize(&directory.path().join("dev081-already-created.db"))
+        .await
+        .expect("DEV-081 duplicate SQLite database should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("DEV-081 duplicate project storage should exist");
+    seed_dev059_database(&pool, &project_root).await;
+    seed_dev080_custom_package_binding(&pool).await;
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("DEV-081 duplicate package root should exist");
+    write_dev059_text_package(&package_root, 1).await;
+    let package_service =
+        build_dev059_package_service(&pool, Arc::new(NoSubmitComfyAdapter::new()));
+    let (session_id, first) = package_service
+        .inspect_session(DEV059_PROJECT_ID, package_root.clone())
+        .await
+        .expect("first package inspection should pass");
+    package_service
+        .create_batches(&session_id, &[first.items[0].id.clone()])
+        .await
+        .expect("first package creation should pass");
+
+    let (_, second) = package_service
+        .inspect_session(DEV059_PROJECT_ID, package_root)
+        .await
+        .expect("second package inspection should pass");
+    assert_eq!(second.ready_count, 0);
+    assert_eq!(second.blocked_count, 1);
+    assert!(second.items[0]
+        .errors
+        .iter()
+        .any(|error| error.code == "PACKAGE_ITEM_ALREADY_CREATED"));
+}
+
+#[tokio::test]
+async fn dev081_project_workflow_change_requires_reinspection_before_create() {
+    let directory = tempdir().expect("DEV-081 changed-config temp workspace should exist");
+    let pool = initialize(&directory.path().join("dev081-changed-config.db"))
+        .await
+        .expect("DEV-081 changed-config SQLite database should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("DEV-081 changed-config project storage should exist");
+    seed_dev059_database(&pool, &project_root).await;
+    seed_dev080_custom_package_binding(&pool).await;
+    let alternate_recipe_id = "rcp_dev081_alternate";
+    let alternate_yaml = DEV080_RECIPE_YAML.replace(DEV080_RECIPE_ID, alternate_recipe_id);
+    sqlx::query(
+        "INSERT INTO recipes
+         (id, workflow_version_id, version, schema_version, recipe_yaml,
+          recipe_sha256, created_at)
+         VALUES (?, ?, '2', 1, ?, ?, ?)",
+    )
+    .bind(alternate_recipe_id)
+    .bind(DEV080_WORKFLOW_VERSION_ID)
+    .bind(&alternate_yaml)
+    .bind(sha256_hex(&alternate_yaml))
+    .bind(DEV059_CREATED_AT)
+    .execute(&pool)
+    .await
+    .expect("DEV-081 alternate recipe should be inserted");
+
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("DEV-081 changed-config package root should exist");
+    write_dev059_text_package(&package_root, 1).await;
+    let package_service =
+        build_dev059_package_service(&pool, Arc::new(NoSubmitComfyAdapter::new()));
+    let (session_id, inspection) = package_service
+        .inspect_session(DEV059_PROJECT_ID, package_root)
+        .await
+        .expect("initial changed-config inspection should pass");
+    sqlx::query(
+        "UPDATE project_workflow_bindings SET recipe_id = ?
+         WHERE project_id = ? AND stage = 'VIDEO' AND mode = 'DEFAULT'",
+    )
+    .bind(alternate_recipe_id)
+    .bind(DEV059_PROJECT_ID)
+    .execute(&pool)
+    .await
+    .expect("DEV-081 project workflow should change");
+
+    let error = package_service
+        .create_batches(&session_id, &[inspection.items[0].id.clone()])
+        .await
+        .expect_err("changed project workflow must require reinspection");
+    assert_eq!(error.code(), "PACKAGE_PROJECT_WORKFLOW_CHANGED");
 }
 
 #[tokio::test]
@@ -1443,6 +1749,323 @@ async fn dev081_8step_graph_workflow_reaches_fake_comfy_executor() {
     println!("EXEC_DENOISE=1");
     println!("EXEC_FPS=24");
     println!("DEV081_8STEP_WORKFLOW_REACHED_EXECUTOR=YES");
+}
+
+#[tokio::test]
+async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches_fake_comfy() {
+    let directory = tempdir().expect("DEV-081 P1 UAT temp workspace should exist");
+    let data_root = directory.path().join("data");
+    let library_root = data_root.join("workflow-library");
+    let staging_root = data_root.join("workflow-staging");
+    fs::create_dir_all(&library_root).expect("DEV-081 P1 workflow library should exist");
+    fs::create_dir_all(&staging_root).expect("DEV-081 P1 workflow staging should exist");
+    let pool = initialize(&data_root.join("dev081-p1.db"))
+        .await
+        .expect("DEV-081 P1 SQLite database should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("DEV-081 P1 project storage should exist");
+    seed_dev059_database(&pool, &project_root).await;
+
+    let fixture: Value =
+        serde_json::from_str(DEV081_WORKFLOW_JSON).expect("DEV-081 P1 workflow should parse");
+    let fixture_sha = sha256_hex(DEV081_WORKFLOW_JSON);
+    let comfy = Arc::new(
+        NoSubmitComfyAdapter::runtime_with_object_info_and_completion(dev081_object_info(&fixture)),
+    );
+    let source: Arc<dyn WorkflowLibrarySource> =
+        Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+    let package_store: Arc<dyn WorkflowPackageStore> = Arc::new(
+        FileSystemWorkflowPackageStore::new(library_root.clone(), staging_root.clone()),
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let runtime_repository: Arc<dyn WorkflowRuntimeRepository> =
+        Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
+    let runtime_state_repository: Arc<dyn WorkflowRuntimeStateRepository> =
+        Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
+    let workflow_library_service = Arc::new(WorkflowLibraryService::new(
+        source.clone(),
+        Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+        clock.clone(),
+    ));
+    let onboarding = WorkflowOnboardingService::new(
+        source.clone(),
+        comfy.clone(),
+        workflow_library_service,
+        Arc::new(SqliteWorkflowRunRepository::new(pool.clone())),
+        package_store.clone(),
+        clock.clone(),
+    )
+    .with_runtime_state(runtime_repository, runtime_state_repository);
+
+    let first = onboarding
+        .auto_onboard_bytes(
+            DEV081_WORKFLOW_JSON.as_bytes().to_vec(),
+            "dev081-p1-original.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("DEV-081 P1 original workflow should publish");
+    assert_eq!(first.state, WorkflowAutoOnboardingState::AutoPublished);
+    let published = first
+        .published
+        .expect("DEV-081 P1 original workflow should have a package");
+    assert_eq!(published.workflow_sha256, fixture_sha);
+
+    let old_recipe_yaml = dev081_incomplete_recipe_yaml(&published.recipe_id);
+    fs::write(
+        library_root
+            .join(&published.package_name)
+            .join("recipe.yaml"),
+        &old_recipe_yaml,
+    )
+    .expect("DEV-081 P1 old Recipe fixture should be written");
+    sqlx::query("UPDATE recipes SET recipe_yaml = ?, recipe_sha256 = ? WHERE id = ?")
+        .bind(&old_recipe_yaml)
+        .bind(sha256_hex(&old_recipe_yaml))
+        .bind(&published.recipe_id)
+        .execute(&pool)
+        .await
+        .expect("DEV-081 P1 old Recipe should be persisted in the isolated fixture");
+
+    let outdated = onboarding
+        .auto_onboard_bytes(
+            DEV081_WORKFLOW_JSON.as_bytes().to_vec(),
+            "dev081-p1-reimport.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("DEV-081 P1 same-SHA reimport should return a diagnostic plan");
+    assert_eq!(outdated.state, WorkflowAutoOnboardingState::NeedsReview);
+    assert_eq!(outdated.existing_recipes.len(), 1);
+    assert_eq!(outdated.existing_recipes[0].recipe_id, published.recipe_id);
+    assert_eq!(outdated.existing_recipes[0].recipe_version, "1.0.0");
+    let outdated_issue = outdated
+        .issues
+        .iter()
+        .find(|issue| issue.code == "EXISTING_RECIPE_OUTDATED")
+        .expect("DEV-081 P1 outdated Recipe issue should be visible");
+    assert!(outdated_issue.message.contains("width"));
+    assert!(outdated_issue.message.contains("duration_seconds"));
+
+    let workflow_versions_before =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+            .fetch_one(&pool)
+            .await
+            .expect("DEV-081 P1 workflow version count should be readable");
+    let recipes_before = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
+        .fetch_one(&pool)
+        .await
+        .expect("DEV-081 P1 Recipe count should be readable");
+    let regenerated = onboarding
+        .regenerate_recipe_draft(
+            &published.workflow_id,
+            &published.workflow_version,
+            Some("1.0.0"),
+        )
+        .await
+        .expect("DEV-081 P1 Recipe regeneration should publish");
+    assert_eq!(
+        regenerated.state,
+        WorkflowAutoOnboardingState::AutoPublished
+    );
+    let regenerated_publish = regenerated
+        .published
+        .as_ref()
+        .expect("DEV-081 P1 regeneration should publish a new Recipe");
+    let regenerated_workflow_version_id: String =
+        sqlx::query_scalar("SELECT workflow_version_id FROM recipes WHERE id = ?")
+            .bind(&regenerated_publish.recipe_id)
+            .fetch_one(&pool)
+            .await
+            .expect("DEV-081 P1 regenerated workflow version should be readable");
+    assert_ne!(regenerated_publish.recipe_id, published.recipe_id);
+    assert_eq!(regenerated_publish.workflow_id, published.workflow_id);
+    assert_eq!(
+        regenerated_publish.workflow_version,
+        published.workflow_version
+    );
+    assert_eq!(regenerated_publish.workflow_sha256, fixture_sha);
+    assert_eq!(regenerated.metadata.recipe_version, "1.0.1");
+    assert!(regenerated.input_mappings.iter().any(|mapping| {
+        mapping.semantic_key == "prompt"
+            && mapping.target_node == "59"
+            && mapping.target_input == "text"
+    }));
+    assert!(regenerated.input_mappings.iter().any(|mapping| {
+        mapping.semantic_key == "width"
+            && mapping.target_node == "63"
+            && mapping.target_input == "width"
+    }));
+    assert!(regenerated.input_mappings.iter().any(|mapping| {
+        mapping.semantic_key == "height"
+            && mapping.target_node == "63"
+            && mapping.target_input == "height"
+    }));
+    assert!(regenerated.input_mappings.iter().any(|mapping| {
+        mapping.semantic_key == "duration_seconds"
+            && mapping.target_node == "49"
+            && mapping.target_input == "value"
+    }));
+    assert!(regenerated.input_mappings.iter().any(|mapping| {
+        mapping.semantic_key == "seed"
+            && mapping.target_node == "2"
+            && mapping.target_input == "noise_seed"
+    }));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        workflow_versions_before
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        recipes_before + 1
+    );
+    let old_recipe_after: String =
+        sqlx::query_scalar("SELECT recipe_yaml FROM recipes WHERE id = ?")
+            .bind(&published.recipe_id)
+            .fetch_one(&pool)
+            .await
+            .expect("DEV-081 P1 old Recipe should remain readable");
+    assert_eq!(old_recipe_after, old_recipe_yaml);
+
+    let binding_service = ProjectWorkflowBindingService::new(
+        Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone())),
+        Arc::new(SqliteProjectRepository::new(pool.clone())),
+        Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone())),
+        Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone())),
+        Arc::new(SystemClock),
+    );
+    binding_service
+        .replace(
+            DEV059_PROJECT_ID,
+            ProjectWorkflowConfigUpdateRequest {
+                bindings: vec![ProjectWorkflowBindingInput {
+                    stage: "VIDEO".to_owned(),
+                    mode: "DEFAULT".to_owned(),
+                    workflow_version_id: regenerated_workflow_version_id.clone(),
+                    recipe_id: regenerated_publish.recipe_id.clone(),
+                }],
+            },
+        )
+        .await
+        .expect("DEV-081 P1 new Recipe should require an explicit project rebind");
+
+    let package_root = directory.path().join("dev081-sanitized-package");
+    fs::create_dir_all(&package_root).expect("DEV-081 P1 package root should exist");
+    write_dev081_sanitized_package(&package_root).await;
+    let package_service = build_dev059_package_service(&pool, comfy.clone());
+    let (session_id, inspection) = package_service
+        .inspect_session(DEV059_PROJECT_ID, package_root)
+        .await
+        .expect("DEV-081 P1 sanitized package should inspect");
+    assert_eq!(inspection.item_count, 3);
+    assert_eq!(inspection.ready_count, 3);
+    assert_eq!(inspection.blocked_count, 0);
+    assert!(inspection.items.iter().all(|item| {
+        item.status == ProductionPackageItemStatus::Ready
+            && item.mode == "FL2VA_TEXT_TO_VIDEO"
+            && item.duration_seconds == 5
+            && item.width == 960
+            && item.height == 544
+            && item.resolved_workflow_version_id.as_deref()
+                == Some(regenerated_workflow_version_id.as_str())
+            && item.resolved_recipe_id.as_deref() == Some(regenerated_publish.recipe_id.as_str())
+            && item.workflow_resolution_source.as_deref() == Some("VIDEO_DEFAULT")
+            && item.recipe_compatibility.as_deref() == Some("READY")
+    }));
+    let selected_item_ids = inspection
+        .items
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    let result = package_service
+        .create_batches(&session_id, &selected_item_ids)
+        .await
+        .expect("DEV-081 P1 sanitized package should create all batches");
+    assert_eq!(result.created_count, 3);
+    assert_eq!(result.remaining_count, 0);
+    assert_eq!(result.item_count, 3);
+    assert_eq!(result.batch_count, 1);
+    assert!(!result.auto_started);
+    assert_eq!(
+        result
+            .item_mappings
+            .iter()
+            .map(|mapping| mapping.package_item_id.as_str())
+            .collect::<Vec<_>>(),
+        ["DEV081-ITEM-01", "DEV081-ITEM-02", "DEV081-ITEM-03"]
+    );
+    let batch_id = result.batches[0].batch_id.clone();
+    let batch_rows = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT workflow_version_id, recipe_id, values_json
+         FROM production_batch_items WHERE batch_id = ? ORDER BY ordinal",
+    )
+    .bind(&batch_id)
+    .fetch_all(&pool)
+    .await
+    .expect("DEV-081 P1 frozen batch items should be readable");
+    assert_eq!(batch_rows.len(), 3);
+    assert!(batch_rows
+        .iter()
+        .all(|(workflow_version_id, recipe_id, _)| {
+            workflow_version_id == &regenerated_workflow_version_id
+                && recipe_id == &regenerated_publish.recipe_id
+        }));
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    let admission = build_admission_service(&pool, comfy.clone(), source, package_store);
+    admission
+        .start(DEV059_PROJECT_ID, &batch_id)
+        .await
+        .expect("DEV-081 P1 frozen batch should pass DEV-078 admission");
+    for _ in 0..500 {
+        if comfy.submit_calls.load(Ordering::SeqCst) >= 3 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 3);
+    let submitted = comfy.submitted_workflows();
+    assert_eq!(submitted.len(), 3);
+    for (workflow, prompt) in submitted.iter().zip([
+        "DEV081 test prompt 01",
+        "DEV081 test prompt 02",
+        "DEV081 test prompt 03",
+    ]) {
+        assert_eq!(workflow["59"]["inputs"]["text"], prompt);
+        assert_eq!(workflow["63"]["inputs"]["width"], 960);
+        assert_eq!(workflow["63"]["inputs"]["height"], 544);
+        assert_eq!(workflow["49"]["inputs"]["value"], 5);
+        assert_eq!(workflow["50"]["inputs"]["steps"], 8);
+        assert_eq!(workflow["50"]["inputs"]["denoise"], 1);
+        assert_eq!(workflow["62"]["inputs"]["frame_rate"], 24);
+    }
+
+    println!("PACKAGE_MODE=FL2VA_TEXT_TO_VIDEO");
+    println!(
+        "PACKAGE_RESOLVED_WORKFLOW_VERSION={}",
+        regenerated_workflow_version_id
+    );
+    println!("PACKAGE_RESOLVED_RECIPE={}", regenerated_publish.recipe_id);
+    println!("PACKAGE_RESOLUTION_SOURCE=VIDEO_DEFAULT");
+    println!("INSPECT_READY_COUNT=3");
+    println!("INSPECT_BLOCKED_COUNT=0");
+    println!("CREATED_COUNT=3");
+    println!("AUTO_START_ON_CREATE=NO");
+    println!("DEV078_EXACT_ADMISSION=PASS");
+    println!("FAKE_COMFY_SUBMIT_COUNT=3");
+    println!("EXEC_WIDTH=960");
+    println!("EXEC_HEIGHT=544");
+    println!("EXEC_DURATION=5");
+    println!("EXEC_STEPS=8");
+    println!("EXEC_DENOISE=1");
+    println!("EXEC_FPS=24");
+    println!("DEV081_8STEP_REACHED_FAKE_COMFY=YES");
 }
 
 #[tokio::test]

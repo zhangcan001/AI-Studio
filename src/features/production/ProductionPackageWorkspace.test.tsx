@@ -210,6 +210,53 @@ describe("ProductionPackageWorkspace", () => {
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
   });
 
+  it("shows structured package compatibility details instead of generic invalid input", async () => {
+    const user = userEvent.setup();
+    inspectMock.mockResolvedValue(makeInspection(1, ["READY"]));
+    createMock.mockRejectedValueOnce({
+      code: "PRODUCTION_PACKAGE_ERROR",
+      message: "生产包操作失败",
+      details: {
+        packageErrorCode: "PACKAGE_RECIPE_INCOMPATIBLE",
+        technicalMessage: "Recipe is missing required package input width",
+        mode: "FL2VA_TEXT_TO_VIDEO",
+        workflowVersionId: "wfv-123",
+        recipeId: "rcp-456",
+      },
+    });
+    render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
+
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: /创建并打开生产队列/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("工作流不兼容当前生产模式");
+    expect(alert.textContent).toContain("FL2VA_TEXT_TO_VIDEO");
+    expect(alert.textContent).toContain("wfv-123");
+    expect(alert.textContent).toContain("rcp-456");
+    expect(alert.textContent).toContain("Recipe is missing required package input width");
+    expect(alert.textContent).not.toContain("输入内容无效，请检查后重试");
+  });
+
+  it("shows the resolved workflow pair and compatibility for each inspected item", async () => {
+    const user = userEvent.setup();
+    const inspection = makeInspection(1, ["READY"]);
+    Object.assign(inspection.items[0], {
+      resolvedWorkflowVersionId: "wfv-video-default",
+      resolvedRecipeId: "rcp-video-default",
+      workflowResolutionSource: "VIDEO_DEFAULT",
+      recipeCompatibility: "READY",
+    });
+    inspectMock.mockResolvedValue(inspection);
+    render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
+
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByText("查看每个项目的生产工作流配对（1）"));
+    expect(screen.getByText("WorkflowVersion：wfv-video-default")).toBeTruthy();
+    expect(screen.getByText("Recipe：rcp-video-default")).toBeTruthy();
+    expect(screen.getByText("来源：VIDEO_DEFAULT")).toBeTruthy();
+    expect(screen.getByText("兼容性：READY")).toBeTruthy();
+  });
+
   it("shows partial truth and reinspects only the remaining external IDs", async () => {
     const user = userEvent.setup();
     const openQueue = vi.fn();

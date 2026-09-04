@@ -86,7 +86,11 @@ impl ProductionPackageDiagnostic {
         }
     }
 
-    fn error(code: impl Into<String>, message: impl Into<String>, field: Option<String>) -> Self {
+    pub(crate) fn error(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        field: Option<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
@@ -164,6 +168,12 @@ pub struct ProductionPackageItemInspection {
     pub reference_images: Vec<ProductionPackageMediaInspection>,
     pub reference_audios: Vec<ProductionPackageMediaInspection>,
     pub reference_videos: Vec<ProductionPackageMediaInspection>,
+    /// Non-persistent project-aware production preflight fields. The pure
+    /// inspector leaves these unset; ProductionPackageService enriches them.
+    pub resolved_workflow_version_id: Option<String>,
+    pub resolved_recipe_id: Option<String>,
+    pub workflow_resolution_source: Option<String>,
+    pub recipe_compatibility: Option<String>,
     pub status: ProductionPackageItemStatus,
     pub warnings: Vec<ProductionPackageDiagnostic>,
     pub errors: Vec<ProductionPackageDiagnostic>,
@@ -200,6 +210,33 @@ impl ProductionPackageInspection {
         self.items.iter().filter(|item| item.is_ready())
     }
 
+    pub(crate) fn recompute_summary(&mut self) {
+        self.item_count = self.items.len();
+        self.ready_count = self
+            .items
+            .iter()
+            .filter(|item| item.status == ProductionPackageItemStatus::Ready)
+            .count();
+        self.warning_count = self.warnings.len()
+            + self
+                .items
+                .iter()
+                .filter(|item| item.status == ProductionPackageItemStatus::Warning)
+                .count();
+        self.blocked_count = self
+            .items
+            .iter()
+            .filter(|item| item.status == ProductionPackageItemStatus::Blocked)
+            .count();
+        self.status = if self.blocked_count > 0 {
+            ProductionPackageItemStatus::Blocked
+        } else if self.warning_count > 0 {
+            ProductionPackageItemStatus::Warning
+        } else {
+            ProductionPackageItemStatus::Ready
+        };
+    }
+
     /// Adapt the richer application snapshot to the stable domain DTO used
     /// by commands and other application services.  The filesystem path is
     /// intentionally not copied into the domain response.
@@ -228,6 +265,10 @@ impl ProductionPackageInspection {
                 duration_seconds: Some(item.duration_seconds),
                 width: Some(item.width),
                 height: Some(item.height),
+                resolved_workflow_version_id: item.resolved_workflow_version_id.clone(),
+                resolved_recipe_id: item.resolved_recipe_id.clone(),
+                workflow_resolution_source: item.workflow_resolution_source.clone(),
+                recipe_compatibility: item.recipe_compatibility.clone(),
                 status: match item.status {
                     ProductionPackageItemStatus::Ready => {
                         domain::ProductionPackageItemStatus::Ready
@@ -841,6 +882,10 @@ impl ProductionPackageInspector {
             reference_images,
             reference_audios,
             reference_videos,
+            resolved_workflow_version_id: None,
+            resolved_recipe_id: None,
+            workflow_resolution_source: None,
+            recipe_compatibility: None,
             status,
             warnings,
             errors,

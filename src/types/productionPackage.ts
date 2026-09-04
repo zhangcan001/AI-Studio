@@ -79,6 +79,10 @@ export interface ProductionPackageInspectionItem {
   resolution?: ProductionPackageResolution | string | null;
   width?: number | null;
   height?: number | null;
+  resolvedWorkflowVersionId?: string | null;
+  resolvedRecipeId?: string | null;
+  workflowResolutionSource?: string | null;
+  recipeCompatibility?: "READY" | "BLOCKED" | string | null;
   status: ProductionPackageItemStatus;
   warnings?: ProductionPackageIssue[];
   errors?: ProductionPackageIssue[];
