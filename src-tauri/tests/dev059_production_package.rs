@@ -1838,6 +1838,54 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
         .await
         .expect("DEV-081 P1 old Recipe should be persisted in the isolated fixture");
 
+    let old_workflow_version_id: String =
+        sqlx::query_scalar("SELECT workflow_version_id FROM recipes WHERE id = ?")
+            .bind(&published.recipe_id)
+            .fetch_one(&pool)
+            .await
+            .expect("DEV-081 P1 old workflow version should be readable");
+    let old_binding_service = ProjectWorkflowBindingService::new(
+        Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone())),
+        Arc::new(SqliteProjectRepository::new(pool.clone())),
+        Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone())),
+        Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone())),
+        Arc::new(SystemClock),
+    );
+    old_binding_service
+        .replace(
+            DEV059_PROJECT_ID,
+            ProjectWorkflowConfigUpdateRequest {
+                bindings: vec![ProjectWorkflowBindingInput {
+                    stage: "VIDEO".to_owned(),
+                    mode: "DEFAULT".to_owned(),
+                    workflow_version_id: old_workflow_version_id,
+                    recipe_id: published.recipe_id.clone(),
+                }],
+            },
+        )
+        .await
+        .expect("DEV-081 P1 old Recipe should be bound before the upgrade");
+
+    let package_before_root = directory.path().join("dev081-before-upgrade-package");
+    fs::create_dir_all(&package_before_root)
+        .expect("DEV-081 P1 pre-upgrade package root should exist");
+    write_dev081_sanitized_package(&package_before_root).await;
+    let package_before_service = build_dev059_package_service(&pool, comfy.clone());
+    let (_, before_inspection) = package_before_service
+        .inspect_session(DEV059_PROJECT_ID, package_before_root)
+        .await
+        .expect("DEV-081 P1 old Recipe package should inspect");
+    assert_eq!(before_inspection.item_count, 3);
+    assert_eq!(before_inspection.ready_count, 0);
+    assert_eq!(before_inspection.blocked_count, 3);
+    assert!(before_inspection.items.iter().all(|item| {
+        item.recipe_compatibility.as_deref() == Some("BLOCKED")
+            && item.errors.iter().any(|error| {
+                error.code == "PACKAGE_RECIPE_INCOMPATIBLE"
+                    && error.message.contains("duration_seconds")
+            })
+    }));
+
     let outdated = onboarding
         .auto_onboard_bytes(
             semantic_reimport.clone(),
@@ -2081,6 +2129,27 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
     println!("EXEC_DENOISE=1");
     println!("EXEC_FPS=24");
     println!("DEV081_8STEP_REACHED_FAKE_COMFY=YES");
+    println!("RAW_SHA_MATCH=NO");
+    println!("SEMANTIC_SHA_MATCH=YES");
+    println!("EXISTING_MATCH_TYPE=SEMANTIC_SHA");
+    println!("EXISTING_WORKFLOW_ID={}", published.workflow_id);
+    println!("EXISTING_WORKFLOW_VERSION={}", published.workflow_version);
+    println!("EXISTING_RECIPE_OUTDATED=YES");
+    println!("OLD_RECIPE_ID={}", published.recipe_id);
+    println!("OLD_RECIPE_VERSION=1.0.0");
+    println!("OLD_RECIPE_IMMUTABLE=YES");
+    println!("REGENERATE_RECIPE=YES");
+    println!("NEW_RECIPE_ID={}", regenerated_publish.recipe_id);
+    println!("NEW_RECIPE_VERSION=1.0.1");
+    println!("WORKFLOW_VERSION_COUNT_BEFORE={workflow_versions_before}");
+    println!("WORKFLOW_VERSION_COUNT_AFTER={workflow_versions_before}");
+    println!("RECIPE_COUNT_BEFORE={recipes_before}");
+    println!("RECIPE_COUNT_AFTER={}", recipes_before + 1);
+    println!("PROJECT_EXPLICIT_REBIND=YES");
+    println!("PROJECT_VIDEO_DEFAULT_NEW_RECIPE=YES");
+    println!("PACKAGE_BEFORE_UPGRADE_READY=0");
+    println!("PACKAGE_BEFORE_UPGRADE_BLOCKED=3");
+    println!("PACKAGE_BEFORE_UPGRADE_REASON=duration_seconds missing");
 }
 
 #[tokio::test]
