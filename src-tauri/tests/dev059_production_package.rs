@@ -27,13 +27,18 @@ use ai_studio_lib::application::{
     production_package_service::{ProductionPackageH3Config, ProductionPackageService},
     production_queue_service::ProductionQueueService,
     production_start_admission_service::ProductionStartAdmissionService,
-    project_workflow_binding_service::ProjectWorkflowBindingService,
+    project_workflow_binding_service::{
+        ProjectWorkflowBindingInput, ProjectWorkflowBindingService,
+        ProjectWorkflowConfigUpdateRequest,
+    },
     source_asset_import_service::SourceAssetImportService,
     task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
     workflow_lifecycle_service::WorkflowLifecycleService,
-    workflow_onboarding_service::WorkflowOnboardingService,
+    workflow_onboarding_service::{WorkflowAutoOnboardingState, WorkflowOnboardingService},
 };
+use ai_studio_lib::compiler::RecipeParser;
+use ai_studio_lib::domain::{InputDefinition, OutputType};
 use ai_studio_lib::infrastructure::{
     database::{
         initialize, SqliteAssetRepository, SqliteAssetVideoPromptRepository,
@@ -43,7 +48,9 @@ use ai_studio_lib::infrastructure::{
         SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
         SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
     },
-    filesystem::{FileSystemAssetStore, FileSystemWorkflowPackageStore},
+    filesystem::{
+        FileSystemAssetStore, FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore,
+    },
     time::SystemClock,
 };
 use async_trait::async_trait;
@@ -148,6 +155,11 @@ outputs:
     required: true
 "#;
 
+const DEV081_WORKFLOW_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/workflows/minimax_h3_8step_graph_api.json"
+));
+
 #[derive(Clone)]
 struct StaticWorkflowSource {
     package: WorkflowPackageFiles,
@@ -174,6 +186,25 @@ fn dev080_runtime_package() -> WorkflowPackageFiles {
 
 fn sha256_hex(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+fn dev081_object_info(workflow: &Value) -> Value {
+    let mut object_info = serde_json::Map::new();
+    for node in workflow
+        .as_object()
+        .expect("DEV-081 API workflow root should be an object")
+        .values()
+    {
+        let class_type = node["class_type"]
+            .as_str()
+            .expect("DEV-081 fixture node should have class_type");
+        let mut capability = json!({"input": {"required": {}, "optional": {}}});
+        if class_type == "VHS_VideoCombine" {
+            capability["output"] = json!(["VIDEO"]);
+        }
+        object_info.insert(class_type.to_owned(), capability);
+    }
+    Value::Object(object_info)
 }
 
 fn repo_root() -> PathBuf {
@@ -221,6 +252,7 @@ struct NoSubmitComfyAdapter {
     submit_calls: Arc<AtomicUsize>,
     accept_submission: Arc<AtomicBool>,
     submitted_workflow: Arc<Mutex<Option<Value>>>,
+    object_info: Arc<Mutex<Value>>,
 }
 
 impl NoSubmitComfyAdapter {
@@ -229,11 +261,19 @@ impl NoSubmitComfyAdapter {
             submit_calls: Arc::new(AtomicUsize::new(0)),
             accept_submission: Arc::new(AtomicBool::new(false)),
             submitted_workflow: Arc::new(Mutex::new(None)),
+            object_info: Arc::new(Mutex::new(json!({}))),
         }
     }
 
     fn runtime() -> Self {
-        let adapter = Self::new();
+        Self::runtime_with_object_info(json!({"SaveVideo": {}}))
+    }
+
+    fn runtime_with_object_info(object_info: Value) -> Self {
+        let adapter = Self {
+            object_info: Arc::new(Mutex::new(object_info)),
+            ..Self::new()
+        };
         adapter.accept_submission.store(true, Ordering::SeqCst);
         adapter
     }
@@ -274,11 +314,11 @@ impl ComfyAdapter for NoSubmitComfyAdapter {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
-        if self.accept_submission.load(Ordering::SeqCst) {
-            Ok(json!({"SaveVideo": {}}))
-        } else {
-            Ok(json!({}))
-        }
+        Ok(self
+            .object_info
+            .lock()
+            .expect("object info lock should not be poisoned")
+            .clone())
     }
 
     async fn get_history(&self, prompt_id: &str) -> Result<ComfyHistory, ComfyAdapterError> {
@@ -517,6 +557,31 @@ async fn write_dev059_text_package(root: &Path, item_count: usize) {
     .expect("DEV-059 text manifest should write");
 }
 
+async fn write_dev081_text_package(root: &Path) {
+    let manifest = json!({
+        "schemaVersion": 1,
+        "packageType": PRODUCTION_PACKAGE_TYPE,
+        "name": "DEV-081 graph workflow package",
+        "defaults": {
+            "durationSeconds": 7,
+            "width": 1056,
+            "height": 608
+        },
+        "items": [{
+            "id": "DEV081-TXT-001",
+            "name": "DEV-081 text shot",
+            "videoPrompt": "DEV081 PACKAGE PROMPT",
+            "mode": "TEXT_ONLY"
+        }]
+    });
+    tokio::fs::write(
+        root.join("production-package.json"),
+        serde_json::to_vec_pretty(&manifest).expect("DEV-081 manifest should serialize"),
+    )
+    .await
+    .expect("DEV-081 manifest should write");
+}
+
 async fn write_dev059_mode_package(root: &Path) {
     let frames = root.join("frames");
     fs::create_dir_all(&frames).expect("DEV-059 mode frames directory should be created");
@@ -675,9 +740,11 @@ fn build_dev059_package_service(
     .with_project_workflow_binding_service(project_workflow_binding_service)
 }
 
-fn build_dev080_admission_service(
+fn build_admission_service(
     pool: &SqlitePool,
     comfy: Arc<NoSubmitComfyAdapter>,
+    source: Arc<dyn WorkflowLibrarySource>,
+    package_store: Arc<dyn WorkflowPackageStore>,
 ) -> Arc<ProductionStartAdmissionService> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let project_repository: Arc<dyn ProjectRepository> =
@@ -697,9 +764,6 @@ fn build_dev080_admission_service(
         ComfyConnectionConfig::default(),
     ))));
 
-    let source: Arc<dyn WorkflowLibrarySource> = Arc::new(StaticWorkflowSource {
-        package: dev080_runtime_package(),
-    });
     let workflow_library_service = Arc::new(WorkflowLibraryService::new(
         source.clone(),
         Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
@@ -711,11 +775,6 @@ fn build_dev080_admission_service(
         Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
     let workflow_run_repository: Arc<dyn WorkflowRunRepository> =
         Arc::new(SqliteWorkflowRunRepository::new(pool.clone()));
-    let package_store: Arc<dyn WorkflowPackageStore> =
-        Arc::new(FileSystemWorkflowPackageStore::new(
-            "dev080-runtime-library".into(),
-            "dev080-staging".into(),
-        ));
     let onboarding_service = Arc::new(
         WorkflowOnboardingService::new(
             source.clone(),
@@ -775,6 +834,23 @@ fn build_dev080_admission_service(
         comfy_service,
         lifecycle_service,
     ))
+}
+
+fn build_dev080_admission_service(
+    pool: &SqlitePool,
+    comfy: Arc<NoSubmitComfyAdapter>,
+) -> Arc<ProductionStartAdmissionService> {
+    build_admission_service(
+        pool,
+        comfy,
+        Arc::new(StaticWorkflowSource {
+            package: dev080_runtime_package(),
+        }),
+        Arc::new(FileSystemWorkflowPackageStore::new(
+            "dev080-runtime-library".into(),
+            "dev080-staging".into(),
+        )),
+    )
 }
 
 #[test]
@@ -1125,6 +1201,248 @@ async fn dev080_custom_package_reaches_fake_comfy_after_start_admission() {
     );
     assert_ne!(pair.0, DEV059_WORKFLOW_VERSION_ID);
     assert_ne!(pair.1, DEV059_RECIPE_ID);
+}
+
+#[tokio::test]
+async fn dev081_8step_graph_workflow_reaches_fake_comfy_executor() {
+    let directory = tempdir().expect("DEV-081 runtime temp workspace should exist");
+    let data_root = directory.path().join("data");
+    let library_root = data_root.join("workflow-library");
+    let staging_root = data_root.join("workflow-staging");
+    fs::create_dir_all(&library_root).expect("DEV-081 workflow library should exist");
+    fs::create_dir_all(&staging_root).expect("DEV-081 workflow staging should exist");
+    let pool = initialize(&data_root.join("dev081.db"))
+        .await
+        .expect("DEV-081 SQLite database should initialize");
+    let project_root = directory.path().join("project-storage");
+    fs::create_dir_all(&project_root).expect("DEV-081 project storage should exist");
+    seed_dev059_database(&pool, &project_root).await;
+
+    let fixture: Value =
+        serde_json::from_str(DEV081_WORKFLOW_JSON).expect("DEV-081 fixture should parse");
+    let fixture_sha = sha256_hex(DEV081_WORKFLOW_JSON);
+    let comfy = Arc::new(NoSubmitComfyAdapter::runtime_with_object_info(
+        dev081_object_info(&fixture),
+    ));
+    let source: Arc<dyn WorkflowLibrarySource> =
+        Arc::new(FileSystemWorkflowLibrarySource::new(library_root.clone()));
+    let package_store: Arc<dyn WorkflowPackageStore> = Arc::new(
+        FileSystemWorkflowPackageStore::new(library_root.clone(), staging_root),
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let runtime_repository: Arc<dyn WorkflowRuntimeRepository> =
+        Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
+    let runtime_state_repository: Arc<dyn WorkflowRuntimeStateRepository> =
+        Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
+    let workflow_library_service = Arc::new(WorkflowLibraryService::new(
+        source.clone(),
+        Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
+        clock.clone(),
+    ));
+    let onboarding = WorkflowOnboardingService::new(
+        source.clone(),
+        comfy.clone(),
+        workflow_library_service,
+        Arc::new(SqliteWorkflowRunRepository::new(pool.clone())),
+        package_store.clone(),
+        clock.clone(),
+    )
+    .with_runtime_state(runtime_repository.clone(), runtime_state_repository.clone());
+
+    let plan = onboarding
+        .auto_onboard_bytes(
+            DEV081_WORKFLOW_JSON.as_bytes().to_vec(),
+            "minmax-8步加速.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("DEV-081 fixture should auto-onboard");
+    assert_eq!(plan.state, WorkflowAutoOnboardingState::AutoPublished);
+    assert!(plan.auto_publishable);
+    let published = plan
+        .published
+        .expect("DEV-081 auto-onboarding should publish");
+
+    let (workflow_version_id, recipe_yaml, published_workflow_json) =
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT wv.id, r.recipe_yaml, wv.api_workflow_json
+             FROM workflow_versions wv
+             INNER JOIN recipes r ON r.workflow_version_id = wv.id
+             WHERE wv.workflow_id = ? AND r.id = ?",
+        )
+        .bind(&published.workflow_id)
+        .bind(&published.recipe_id)
+        .fetch_one(&pool)
+        .await
+        .expect("DEV-081 published runtime identity should be readable");
+    assert_eq!(
+        serde_json::from_str::<Value>(&published_workflow_json)
+            .expect("DEV-081 persisted workflow should parse"),
+        fixture
+    );
+
+    let recipe = RecipeParser::parse(&recipe_yaml).expect("DEV-081 published Recipe should parse");
+    let binding = |source_key: &str| {
+        recipe
+            .bindings
+            .iter()
+            .find(|candidate| candidate.source == source_key)
+            .unwrap_or_else(|| panic!("DEV-081 Recipe should bind {source_key}"))
+    };
+    for (source_key, node, input) in [
+        ("prompt", "59", "text"),
+        ("width", "63", "width"),
+        ("height", "63", "height"),
+        ("duration_seconds", "49", "value"),
+        ("seed", "2", "noise_seed"),
+    ] {
+        assert_eq!(binding(source_key).target.node, node);
+        assert_eq!(binding(source_key).target.input, input);
+    }
+    for (key, expected) in [("steps", 8), ("denoise", 1), ("fps", 24)] {
+        match &recipe.inputs[key] {
+            InputDefinition::Integer {
+                required, default, ..
+            } => {
+                assert!(!required, "DEV-081 {key} should remain optional");
+                assert_eq!(*default, Some(expected));
+            }
+            other => panic!("DEV-081 {key} should be integer, got {other:?}"),
+        }
+    }
+    assert_eq!(recipe.outputs.len(), 1);
+    assert_eq!(recipe.outputs[0].node, "62");
+    assert_eq!(recipe.outputs[0].output_type, OutputType::Video);
+    assert_eq!(plan.metadata.mode, "text_to_video");
+
+    let binding_service = ProjectWorkflowBindingService::new(
+        Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone())),
+        Arc::new(SqliteProjectRepository::new(pool.clone())),
+        runtime_repository,
+        runtime_state_repository,
+        clock,
+    );
+    let config = binding_service
+        .replace(
+            DEV059_PROJECT_ID,
+            ProjectWorkflowConfigUpdateRequest {
+                bindings: vec![ProjectWorkflowBindingInput {
+                    stage: "VIDEO".to_owned(),
+                    mode: "DEFAULT".to_owned(),
+                    workflow_version_id: workflow_version_id.clone(),
+                    recipe_id: published.recipe_id.clone(),
+                }],
+            },
+        )
+        .await
+        .expect("DEV-081 published pair should bind to project VIDEO/DEFAULT");
+    let video_default = config
+        .video_default
+        .expect("DEV-081 project should have VIDEO/DEFAULT");
+    assert_eq!(video_default.workflow_version_id, workflow_version_id);
+    assert_eq!(video_default.recipe_id, published.recipe_id);
+
+    let package_root = directory.path().join("package");
+    fs::create_dir_all(&package_root).expect("DEV-081 package root should exist");
+    write_dev081_text_package(&package_root).await;
+    let package_service = build_dev059_package_service(&pool, comfy.clone());
+    let (session_id, inspection) = package_service
+        .inspect_session(DEV059_PROJECT_ID, package_root)
+        .await
+        .expect("DEV-081 package should inspect");
+    assert_eq!(inspection.items.len(), 1);
+    assert_eq!(inspection.items[0].mode, "FL2VA_TEXT_TO_VIDEO");
+    assert_eq!(
+        inspection.items[0].status,
+        ProductionPackageItemStatus::Ready,
+        "DEV-081 package item should be ready: {:?}",
+        inspection.items[0]
+    );
+    let result = package_service
+        .create_batches(&session_id, &[inspection.items[0].id.clone()])
+        .await
+        .expect("DEV-081 package should accept the auto-generated Recipe");
+    assert_eq!(result.item_count, 1);
+    let batch_id = result.batches[0].batch_id.clone();
+    let pair = sqlx::query_as::<_, (String, String)>(
+        "SELECT workflow_version_id, recipe_id
+         FROM production_batch_items WHERE batch_id = ?",
+    )
+    .bind(&batch_id)
+    .fetch_one(&pool)
+    .await
+    .expect("DEV-081 frozen batch pair should be readable");
+    assert_eq!(pair.0, workflow_version_id);
+    assert_eq!(pair.1, published.recipe_id);
+    assert_ne!(pair.0, DEV059_WORKFLOW_VERSION_ID);
+    assert_ne!(pair.1, DEV059_RECIPE_ID);
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    let admission = build_admission_service(&pool, comfy.clone(), source.clone(), package_store);
+    admission
+        .start(DEV059_PROJECT_ID, &batch_id)
+        .await
+        .expect("DEV-081 exact published pair should pass DEV-078 admission");
+    for _ in 0..200 {
+        if comfy.submit_calls.load(Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(comfy.submit_calls.load(Ordering::SeqCst), 1);
+    let submitted = comfy.submitted_workflow();
+    assert_eq!(submitted["59"]["inputs"]["text"], "DEV081 PACKAGE PROMPT");
+    assert_eq!(submitted["63"]["inputs"]["width"], 1056);
+    assert_eq!(submitted["63"]["inputs"]["height"], 608);
+    assert_eq!(submitted["49"]["inputs"]["value"], 7);
+    let seed = submitted["2"]["inputs"]["noise_seed"]
+        .as_u64()
+        .expect("DEV-081 runtime seed should be a valid u64");
+    assert_eq!(submitted["50"]["inputs"]["steps"], 8);
+    assert_eq!(submitted["50"]["inputs"]["denoise"], 1);
+    assert_eq!(submitted["62"]["inputs"]["frame_rate"], 24);
+    assert_eq!(submitted["63"]["inputs"]["prompt"], json!(["59", 0]));
+    assert_eq!(submitted["63"]["inputs"]["length"], json!(["35", 1]));
+    assert_eq!(submitted["35"]["inputs"]["values.a"], json!(["49", 0]));
+
+    let runtime_pair = sqlx::query_as::<_, (String, String)>(
+        "SELECT workflow_version_id, recipe_id FROM tasks WHERE project_id = ?",
+    )
+    .bind(DEV059_PROJECT_ID)
+    .fetch_one(&pool)
+    .await
+    .expect("DEV-081 executing task identity should be readable");
+    assert_eq!(runtime_pair, pair);
+    let published_package = source
+        .load_packages()
+        .await
+        .expect("DEV-081 published package should load")
+        .into_iter()
+        .find_map(|candidate| match candidate {
+            WorkflowPackageLoad::Loaded(package)
+                if package.package_name == published.package_name =>
+            {
+                Some(package)
+            }
+            _ => None,
+        })
+        .expect("DEV-081 exact published package should exist");
+    assert_eq!(sha256_hex(&published_package.workflow_json), fixture_sha);
+    assert_eq!(sha256_hex(DEV081_WORKFLOW_JSON), fixture_sha);
+
+    println!("PUBLISHED_WORKFLOW_ID={}", published.workflow_id);
+    println!("PUBLISHED_WORKFLOW_VERSION_ID={workflow_version_id}");
+    println!("PUBLISHED_RECIPE_ID={}", published.recipe_id);
+    println!("PRODUCTION_BATCH_ID={batch_id}");
+    println!("EXEC_PROMPT=DEV081 PACKAGE PROMPT");
+    println!("EXEC_WIDTH=1056");
+    println!("EXEC_HEIGHT=608");
+    println!("EXEC_DURATION=7");
+    println!("EXEC_SEED={seed}");
+    println!("EXEC_STEPS=8");
+    println!("EXEC_DENOISE=1");
+    println!("EXEC_FPS=24");
+    println!("DEV081_8STEP_WORKFLOW_REACHED_EXECUTOR=YES");
 }
 
 #[tokio::test]

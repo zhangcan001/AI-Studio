@@ -3184,6 +3184,11 @@ fn output_type_for_node(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView
 }
 
 fn infer_workflow_name(workflow: &WorkflowDocument, filename: &str) -> String {
+    let filename_name = filename_stem(filename);
+    if !is_generic_workflow_name(&filename_name) {
+        return filename_name.trim().to_owned();
+    }
+
     let mut nodes = workflow
         .value()
         .as_object()
@@ -3203,21 +3208,31 @@ fn infer_workflow_name(workflow: &WorkflowDocument, filename: &str) -> String {
         else {
             continue;
         };
-        let lower = title.to_ascii_lowercase();
-        if !title.trim().is_empty()
-            && !["save image", "save video", "preview image", "preview video"]
-                .iter()
-                .any(|generic| lower == *generic)
-        {
+        if !is_generic_workflow_name(title) {
             return title.trim().to_owned();
         }
     }
-    let name = filename_stem(filename);
-    if name.trim().is_empty() {
-        "Imported Workflow".to_owned()
-    } else {
-        name
-    }
+    "Imported Workflow".to_owned()
+}
+
+fn is_generic_workflow_name(value: &str) -> bool {
+    matches!(
+        value
+            .trim()
+            .to_ascii_lowercase()
+            .replace([' ', '-'], "_")
+            .as_str(),
+        "" | "workflow"
+            | "workflow_api"
+            | "api"
+            | "export"
+            | "comfyui_workflow"
+            | "imported_workflow"
+            | "save_image"
+            | "save_video"
+            | "preview_image"
+            | "preview_video"
+    )
 }
 
 fn humanize_field_key(value: &str) -> String {
@@ -5019,6 +5034,76 @@ mod tests {
     use serde_json::json;
     use std::{collections::BTreeMap, sync::Arc};
     use tempfile::tempdir;
+
+    fn workflow_with_titles(titles: &[&str]) -> WorkflowDocument {
+        WorkflowDocument::parse(Value::Object(
+            titles
+                .iter()
+                .enumerate()
+                .map(|(index, title)| {
+                    (
+                        (index + 1).to_string(),
+                        json!({
+                            "inputs": {},
+                            "class_type": "TestNode",
+                            "_meta": {"title": title}
+                        }),
+                    )
+                })
+                .collect(),
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn n1_workflow_name_prefers_non_generic_filename_over_node_title() {
+        let workflow = workflow_with_titles(&["基本引导器"]);
+
+        assert_eq!(
+            infer_workflow_name(&workflow, "minmax-8步加速.json"),
+            "minmax-8步加速"
+        );
+    }
+
+    #[test]
+    fn n2_workflow_name_uses_production_filename_stem() {
+        let workflow = workflow_with_titles(&[]);
+
+        assert_eq!(
+            infer_workflow_name(&workflow, "my-production-h3.json"),
+            "my-production-h3"
+        );
+    }
+
+    #[test]
+    fn n3_generic_filename_falls_back_to_meaningful_node_title() {
+        let workflow = workflow_with_titles(&["MiniMax H3 Production"]);
+
+        assert_eq!(
+            infer_workflow_name(&workflow, "workflow_api.json"),
+            "MiniMax H3 Production"
+        );
+    }
+
+    #[test]
+    fn n4_generic_filename_and_output_titles_use_imported_workflow() {
+        let workflow = workflow_with_titles(&["Save Video", "Preview Video"]);
+
+        assert_eq!(
+            infer_workflow_name(&workflow, "workflow.json"),
+            "Imported Workflow"
+        );
+    }
+
+    #[test]
+    fn n5_workflow_name_strips_windows_user_path() {
+        let workflow = workflow_with_titles(&["基本引导器"]);
+
+        assert_eq!(
+            infer_workflow_name(&workflow, r"C:\Users\ADMIN\Desktop\minmax-8步加速.json"),
+            "minmax-8步加速"
+        );
+    }
 
     #[test]
     fn validates_api_shape_and_broken_links_without_confusing_literal_arrays() {

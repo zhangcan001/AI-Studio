@@ -59,3 +59,29 @@ cargo test dev081_real_workflow -- --ignored --nocapture
 
 The test reports format, graph/output selection, each core binding, optional
 defaults, mode, and capability separately without printing the real prompt.
+
+## Final closeout truth markers
+
+These values describe the final closeout against the `ef718f3e` baseline.
+
+```text
+FINAL_CLOSEOUT=YES
+
+WORKFLOW_NAME_PREFERS_FILENAME=YES
+GENERIC_FILENAME_FALLBACK_TO_NODE_TITLE=YES
+
+SANITIZED_AUTO_ONBOARD=PASS
+SANITIZED_PUBLISHED_RECIPE_USED_BY_PRODUCTION_PACKAGE=PASS
+PROJECT_VIDEO_DEFAULT_EXACT_PAIR=PASS
+PRODUCTION_BATCH_EXACT_PAIR=PASS
+DEV078_EXACT_ADMISSION=PASS
+FAKE_COMFY_SUBMIT=PASS
+DEV081_8STEP_WORKFLOW_REACHED_EXECUTOR=YES
+
+REAL_FIXTURE_GRAPH_UAT=YES
+REAL_COMFY_CAPABILITY_UAT=NOT_AUTOMATED
+```
+
+`REAL_FIXTURE_GRAPH_UAT=YES` covers local graph inference only. Its capability
+result comes from fixture-generated `object_info`; it does not prove capability
+against the user's real ComfyUI installation.
