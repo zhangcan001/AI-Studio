@@ -192,6 +192,10 @@ fn sha256_hex(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }
 
+fn sha256_bytes(value: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(value))
+}
+
 fn dev081_object_info(workflow: &Value) -> Value {
     let mut object_info = serde_json::Map::new();
     for node in workflow
@@ -1769,6 +1773,13 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
     let fixture: Value =
         serde_json::from_str(DEV081_WORKFLOW_JSON).expect("DEV-081 P1 workflow should parse");
     let fixture_sha = sha256_hex(DEV081_WORKFLOW_JSON);
+    let semantic_reimport =
+        serde_json::to_vec_pretty(&fixture).expect("DEV-081 P1 semantic reimport should serialize");
+    assert_ne!(
+        fixture_sha,
+        sha256_bytes(&semantic_reimport),
+        "DEV-081 P1 reimport must exercise the semantic identity fallback"
+    );
     let comfy = Arc::new(
         NoSubmitComfyAdapter::runtime_with_object_info_and_completion(dev081_object_info(&fixture)),
     );
@@ -1829,13 +1840,17 @@ async fn dev081_real_uat_regenerates_recipe_then_creates_three_items_and_reaches
 
     let outdated = onboarding
         .auto_onboard_bytes(
-            DEV081_WORKFLOW_JSON.as_bytes().to_vec(),
+            semantic_reimport.clone(),
             "dev081-p1-reimport.json".to_owned(),
             None,
         )
         .await
-        .expect("DEV-081 P1 same-SHA reimport should return a diagnostic plan");
+        .expect("DEV-081 P1 semantic reimport should return a diagnostic plan");
     assert_eq!(outdated.state, WorkflowAutoOnboardingState::NeedsReview);
+    assert_eq!(
+        outdated.existing_match_type.as_deref(),
+        Some("SEMANTIC_SHA")
+    );
     assert_eq!(outdated.existing_recipes.len(), 1);
     assert_eq!(outdated.existing_recipes[0].recipe_id, published.recipe_id);
     assert_eq!(outdated.existing_recipes[0].recipe_version, "1.0.0");

@@ -90,3 +90,4 @@ pub mod workflow_library_service;
 pub mod workflow_lifecycle_service;
 pub mod workflow_manifest;
 pub mod workflow_onboarding_service;
+pub mod workflow_semantic_identity;

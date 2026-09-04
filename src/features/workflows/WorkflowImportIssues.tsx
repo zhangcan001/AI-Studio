@@ -19,6 +19,54 @@ export function workflowIssueSelectionKey(issue: WorkflowAutoIssueView, issueInd
   return [issue.code, issue.field ?? "NONE", String(issueIndex)].join(":");
 }
 
+function isExistingRecipeOutdated(plan: WorkflowAutoOnboardingPlanView): boolean {
+  return plan.issues.some((issue) => issue.code.trim().toUpperCase() === "EXISTING_RECIPE_OUTDATED");
+}
+
+function existingWorkflowName(plan: WorkflowAutoOnboardingPlanView): string {
+  return plan.existingWorkflowName?.trim()
+    || plan.metadata.name?.trim()
+    || plan.existingPackageName?.trim()
+    || plan.existingWorkflowId
+    || "现有工作流";
+}
+
+function existingWorkflowSource(plan: WorkflowAutoOnboardingPlanView): string {
+  const source = plan.existingWorkflowSource?.trim();
+  if (source) {
+    const normalized = source.toUpperCase();
+    if (normalized.includes("BUILTIN") || source.includes("内置")) return "内置运行包";
+    if (normalized.includes("USER") || normalized.includes("IMPORT") || source.includes("用户")) return "用户工作流";
+    return source;
+  }
+  return plan.existingPackageName ? `运行包：${plan.existingPackageName}` : "现有工作流";
+}
+
+function matchTypeLabel(matchType?: string): string | undefined {
+  const normalized = matchType?.trim().toUpperCase();
+  if (normalized === "SEMANTIC_SHA") return "语义匹配";
+  if (normalized === "RAW_SHA") return "原始 SHA 匹配";
+  return matchType?.trim() || undefined;
+}
+
+function suggestedRecipeVersion(plan: WorkflowAutoOnboardingPlanView): string {
+  if (plan.suggestedRecipeVersion?.trim()) return plan.suggestedRecipeVersion.trim();
+  const versions = (plan.existingRecipes ?? [])
+    .map((recipe) => recipe.recipeVersion.trim())
+    .filter((version) => /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version));
+  const current = versions.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))[versions.length - 1]
+    ?? plan.metadata.recipeVersion;
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(current.trim());
+  return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : "下一版本";
+}
+
+function existingRecipeLabel(plan: WorkflowAutoOnboardingPlanView): string {
+  const recipes = (plan.existingRecipes ?? [])
+    .map((recipe) => `${recipe.recipeVersion} · ${recipe.recipeId}`);
+  if (recipes.length) return recipes.join("、");
+  return `${plan.metadata.recipeVersion} · ${plan.metadata.recipeId}`;
+}
+
 interface Props {
   plan: WorkflowAutoOnboardingPlanView;
   loading: boolean;
@@ -85,6 +133,11 @@ export function WorkflowImportFormatIssue({ issue, loading, onRetry, onCancel }:
 }
 
 function planMessage(plan: WorkflowAutoOnboardingPlanView): string {
+  if (isExistingRecipeOutdated(plan)) {
+    if (plan.capability.state === "COMFY_OFFLINE") return "已识别为现有工作流，但当前 ComfyUI 离线；连接 ComfyUI 后可重新生成 Recipe。";
+    if (plan.capability.state === "MISSING_NODES" || plan.capability.state === "INCOMPATIBLE_INPUT_VALUES") return "已识别为现有工作流，但当前 ComfyUI 依赖尚未满足；修复节点或输入后可重新生成 Recipe。";
+    return "已识别为现有工作流，当前 Recipe 需要升级。重新生成只会新增 Recipe，不会修改原工作流或旧 Recipe。";
+  }
   if (plan.message.trim()) return plan.message;
   if (plan.state === "WAITING_FOR_COMFY_UI") return "正在检查当前 ComfyUI 环境，请稍候。";
   if (plan.state === "ALREADY_EXISTS" || plan.state === "ALREADY_EXISTS_ARCHIVED") return "这个工作流已经存在，请打开现有版本或返回列表。";
@@ -107,6 +160,8 @@ function issueTitle(code: string): string {
       return "无法自动确认视频时长来源";
     case "FLOAT_INPUT_NEEDS_REVIEW":
       return "数值参数需要确认";
+    case "EXISTING_RECIPE_OUTDATED":
+      return "现有 Recipe 需要升级";
   }
   const normalized = code.trim().toUpperCase();
   if (normalized.includes("MULTIPLE_OUTPUT") || normalized.includes("OUTPUT_AMBIGUOUS")) return "检测到多个输出节点";
@@ -169,6 +224,8 @@ function issueCapabilityDetails(plan: WorkflowAutoOnboardingPlanView, issue: Wor
 export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onRegenerateRecipe, onRestoreExisting, onCancel }: Props) {
   const [selected, setSelected] = useState<Record<string, number>>({});
   const waiting = plan.state === "WAITING_FOR_COMFY_UI";
+  const outdated = isExistingRecipeOutdated(plan);
+  const matchType = matchTypeLabel(plan.existingMatchType);
   const issueFingerprint = plan.issues.map((issue, issueIndex) => workflowIssueSelectionKey(issue, issueIndex)).join("|");
   useEffect(() => setSelected({}), [plan.draftId, plan.state, issueFingerprint]);
   return (
@@ -176,11 +233,30 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
       <div className="workflow-smart-issues-heading">
         <div>
           <span className="section-label">添加工作流</span>
-          <h3>{waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流暂时无法添加" : "需要确认后添加"}</h3>
+          <h3>{outdated ? "检测到现有工作流，需要升级 Recipe" : waiting ? "等待 ComfyUI 连接" : plan.state === "BLOCKED" ? "工作流暂时无法添加" : "需要确认后添加"}</h3>
           <p>{planMessage(plan)}</p>
         </div>
-        <span className={`workflow-smart-state workflow-smart-state-${plan.state.toLowerCase()}`}>{waiting ? "等待中" : plan.state === "BLOCKED" ? "暂不可用" : "需要确认"}</span>
+        <span className={`workflow-smart-state workflow-smart-state-${plan.state.toLowerCase()}`}>{outdated ? (waiting || plan.capability.state === "COMFY_OFFLINE" ? "等待连接" : "需要升级") : waiting ? "等待中" : plan.state === "BLOCKED" ? "暂不可用" : "需要确认"}</span>
       </div>
+      {outdated && (
+        <div className="workflow-import-guidance" aria-label="现有工作流 Recipe 升级信息">
+          <strong>现有工作流信息</strong>
+          <div className="workflow-detail-grid">
+            <span>工作流名称<strong>{existingWorkflowName(plan)}</strong></span>
+            <span>来源<strong>{existingWorkflowSource(plan)}</strong></span>
+            <span>工作流版本<strong>{plan.existingWorkflowVersion ?? "—"}</strong></span>
+            <span>旧 Recipe<strong>{existingRecipeLabel(plan)}</strong></span>
+            <span>建议新版本<strong>{suggestedRecipeVersion(plan)}</strong></span>
+          </div>
+          <p>重新生成只会新增 Recipe，不会修改内置工作流或旧 Recipe。</p>
+          {matchType && (
+            <details className="technical-error-details" open>
+              <summary>技术详情</summary>
+              <code>{`matchType=${matchType}`}</code>
+            </details>
+          )}
+        </div>
+      )}
       {!!plan.issues.length && (
         <div className="workflow-smart-issue-list">
           {plan.issues.map((issue, issueIndex) => {
@@ -190,6 +266,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
             const normalizedCode = issue.code.trim().toUpperCase();
             const showCandidateFallback = normalizedCode !== "MISSING_NODES"
               && normalizedCode !== "MISSING_NODE"
+              && normalizedCode !== "EXISTING_RECIPE_OUTDATED"
               && !issue.candidates.length
               && !details.allowedOptions.length
               && !details.inferredCandidates.length;
@@ -242,7 +319,7 @@ export function WorkflowImportIssues({ plan, draft, loading, onResolve, onResume
       <div className="workflow-smart-actions">
         {waiting && <button type="button" onClick={onResume} disabled={loading}>{loading ? "正在检查..." : "继续自动确认"}</button>}
         {(plan.state === "ALREADY_EXISTS" || plan.state === "ALREADY_EXISTS_ARCHIVED") && <button type="button" onClick={onOpenExisting}>打开现有工作流</button>}
-        {plan.issues.some((issue) => issue.code === "EXISTING_RECIPE_OUTDATED") && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>重新生成 Recipe</button>}
+        {outdated && onRegenerateRecipe && <button type="button" onClick={onRegenerateRecipe} disabled={loading}>重新生成 Recipe</button>}
         {plan.state === "ALREADY_EXISTS_ARCHIVED" && onRestoreExisting && <button type="button" onClick={onRestoreExisting} disabled={loading}>恢复归档工作流</button>}
         <button type="button" className="quiet-button" onClick={onOpenAdvanced}>高级编辑</button>
         {onCancel && <button type="button" className="quiet-button" onClick={onCancel} disabled={loading}>取消添加</button>}

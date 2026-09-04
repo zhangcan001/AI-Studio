@@ -7,6 +7,7 @@ use crate::application::{
     workflow_graph_analysis::{WorkflowGraph, WorkflowSource},
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
+    workflow_semantic_identity::semantic_workflow_sha256,
 };
 use crate::compiler::{
     BindingValidator, RecipeParser, RecipeValidator, WorkflowCompiler, WorkflowValidator,
@@ -458,7 +459,11 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub published: Option<WorkflowOnboardingPublishView>,
     pub existing_workflow_id: Option<String>,
     pub existing_workflow_version: Option<String>,
+    pub existing_workflow_name: Option<String>,
+    pub existing_workflow_source: Option<String>,
+    pub suggested_recipe_version: Option<String>,
     pub existing_package_name: Option<String>,
+    pub existing_match_type: Option<String>,
     pub existing_recipes: Vec<WorkflowAutoExistingRecipeView>,
     pub expected_inference: Vec<WorkflowAutoInferenceView>,
     pub message: String,
@@ -581,6 +586,40 @@ struct ExistingWorkflowPackage {
     manifest: WorkflowManifest,
     files: WorkflowPackageFiles,
     recipe: Recipe,
+    match_type: ExistingWorkflowMatchType,
+}
+
+struct ParsedExistingWorkflowPackage {
+    manifest: WorkflowManifest,
+    files: WorkflowPackageFiles,
+    recipe: Recipe,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExistingWorkflowMatchType {
+    RawSha,
+    SemanticSha,
+}
+
+impl ExistingWorkflowMatchType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::RawSha => "RAW_SHA",
+            Self::SemanticSha => "SEMANTIC_SHA",
+        }
+    }
+}
+
+fn parse_existing_workflow_package(
+    files: WorkflowPackageFiles,
+) -> Option<ParsedExistingWorkflowPackage> {
+    let manifest = WorkflowManifest::parse(&files.manifest_yaml).ok()?;
+    let recipe = RecipeParser::parse(&files.recipe_yaml).ok()?;
+    Some(ParsedExistingWorkflowPackage {
+        manifest,
+        files,
+        recipe,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -739,6 +778,10 @@ impl WorkflowOnboardingService {
         &self,
         draft_id: &str,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
+        let initial = self.with_registry(|registry| registry.get(draft_id))??;
+        let existing = self
+            .existing_packages_for_identity(&initial.workflow_sha256, &initial.workflow)
+            .await?;
         let (inference, current) = self.run_current_inference(draft_id).await?;
         let validation = validation_for_draft(&current);
         let mut issues = inference.issues.clone();
@@ -756,91 +799,102 @@ impl WorkflowOnboardingService {
         let auto_publishable =
             validation.ready_to_publish && !has_ambiguous_required && issues.is_empty();
 
-        if current.capability.state == CapabilityState::Ready {
-            let existing = self
-                .existing_packages_for_sha(&current.workflow_sha256)
+        if !existing.is_empty() {
+            let expected = build_recipe(&current)?;
+            let expected_signature = normalized_recipe_signature(
+                &expected,
+                &current.manifest.category,
+                &current.manifest.mode,
+            );
+            let existing_recipes = existing
+                .iter()
+                .map(|package| WorkflowAutoExistingRecipeView {
+                    recipe_id: package.recipe.id.clone(),
+                    recipe_version: package.manifest.recipe_version.clone(),
+                    package_name: package.files.package_name.clone(),
+                })
+                .collect::<Vec<_>>();
+            let matching = existing.iter().any(|package| {
+                normalized_recipe_signature(
+                    &package.recipe,
+                    &package.manifest.category,
+                    &package.manifest.mode,
+                ) == expected_signature
+            });
+            let existing_issues = if matching {
+                vec![WorkflowAutoIssueView {
+                    code: "EXISTING_RECIPE_CURRENT".to_owned(),
+                    message: "检测到相同工作流，已有 Recipe 与当前自动识别结果一致。".to_owned(),
+                    field: None,
+                    candidates: Vec::new(),
+                }]
+            } else {
+                vec![WorkflowAutoIssueView {
+                    code: "EXISTING_RECIPE_OUTDATED".to_owned(),
+                    message: format!(
+                        "检测到相同工作流，但现有 Recipe 与当前自动识别规则不一致。旧 Recipe：{}；预期当前 inference：{}。建议重新生成 Recipe，原 Recipe 将保留。",
+                        existing_recipes
+                            .iter()
+                            .map(|recipe| format!("{} v{}", recipe.recipe_id, recipe.recipe_version))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        recipe_signature_summary(&expected_signature),
+                    ),
+                    field: None,
+                    candidates: Vec::new(),
+                }]
+            };
+            let representative = &existing[0];
+            let archived = self
+                .is_archived_package(
+                    &representative.manifest.id,
+                    &representative.manifest.workflow_version,
+                )
                 .await?;
-            if !existing.is_empty() {
-                let expected = build_recipe(&current)?;
-                let expected_signature = normalized_recipe_signature(
-                    &expected,
-                    &current.manifest.category,
-                    &current.manifest.mode,
-                );
-                let existing_recipes = existing
-                    .iter()
-                    .map(|package| WorkflowAutoExistingRecipeView {
-                        recipe_id: package.recipe.id.clone(),
-                        recipe_version: package.manifest.recipe_version.clone(),
-                        package_name: package.files.package_name.clone(),
-                    })
-                    .collect::<Vec<_>>();
-                let matching = existing.iter().any(|package| {
-                    normalized_recipe_signature(
-                        &package.recipe,
-                        &package.manifest.category,
-                        &package.manifest.mode,
-                    ) == expected_signature
-                });
-                let existing_issues = if matching {
-                    vec![WorkflowAutoIssueView {
-                        code: "EXISTING_RECIPE_CURRENT".to_owned(),
-                        message: "检测到相同工作流，已有 Recipe 与当前自动识别结果一致。"
-                            .to_owned(),
-                        field: None,
-                        candidates: Vec::new(),
-                    }]
+            let mut plan = auto_plan_for_draft(
+                &current,
+                if matching && archived {
+                    WorkflowAutoOnboardingState::AlreadyExistsArchived
+                } else if matching {
+                    WorkflowAutoOnboardingState::AlreadyExists
                 } else {
-                    vec![WorkflowAutoIssueView {
-                        code: "EXISTING_RECIPE_OUTDATED".to_owned(),
-                        message: format!(
-                            "检测到相同工作流，但现有 Recipe 与当前自动识别规则不一致。旧 Recipe：{}；预期当前 inference：{}。建议重新生成 Recipe，原 Recipe 将保留。",
-                            existing_recipes
-                                .iter()
-                                .map(|recipe| format!("{} v{}", recipe.recipe_id, recipe.recipe_version))
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            recipe_signature_summary(&expected_signature),
-                        ),
-                        field: None,
-                        candidates: Vec::new(),
-                    }]
-                };
-                let representative = &existing[0];
-                let archived = self
-                    .is_archived_package(
-                        &representative.manifest.id,
-                        &representative.manifest.workflow_version,
-                    )
-                    .await?;
-                let mut plan = auto_plan_for_draft(
-                    &current,
-                    if matching && archived {
-                        WorkflowAutoOnboardingState::AlreadyExistsArchived
-                    } else if matching {
-                        WorkflowAutoOnboardingState::AlreadyExists
-                    } else {
-                        WorkflowAutoOnboardingState::NeedsReview
-                    },
-                    &inference.inferences,
-                    &existing_issues,
-                    false,
-                    None,
-                    Some(representative.manifest.id.clone()),
-                    Some(representative.manifest.workflow_version.clone()),
-                    Some(representative.files.package_name.clone()),
-                    if matching && archived {
-                        "该工作流已归档，可在工作流管理中恢复。".to_owned()
-                    } else if matching {
-                        "该工作流已经导入，现有 Recipe 与当前自动识别结果一致。".to_owned()
-                    } else {
-                        "该工作流已存在，但现有 Recipe 已过期，请重新生成 Recipe。".to_owned()
-                    },
-                );
-                plan.existing_recipes = existing_recipes;
-                plan.expected_inference = inference.inferences.clone();
-                return Ok(plan);
-            }
+                    WorkflowAutoOnboardingState::NeedsReview
+                },
+                &inference.inferences,
+                &existing_issues,
+                false,
+                None,
+                Some(representative.manifest.id.clone()),
+                Some(representative.manifest.workflow_version.clone()),
+                Some(representative.files.package_name.clone()),
+                if matching && archived {
+                    "该工作流已归档，可在工作流管理中恢复。".to_owned()
+                } else if matching {
+                    "该工作流已经导入，现有 Recipe 与当前自动识别结果一致。".to_owned()
+                } else {
+                    "该工作流已存在，但现有 Recipe 已过期，请重新生成 Recipe。".to_owned()
+                },
+            );
+            plan.existing_match_type = Some(representative.match_type.as_str().to_owned());
+            plan.existing_workflow_name = Some(representative.manifest.name.clone());
+            plan.existing_workflow_source = Some(
+                if crate::application::builtin_runtime_packages::is_builtin_package_name(
+                    &representative.files.package_name,
+                ) {
+                    "BUILTIN"
+                } else {
+                    "USER"
+                }
+                .to_owned(),
+            );
+            plan.suggested_recipe_version = existing
+                .iter()
+                .map(|package| package.manifest.recipe_version.as_str())
+                .max_by(|left, right| compare_semver(left, right))
+                .map(increment_semver);
+            plan.existing_recipes = existing_recipes;
+            plan.expected_inference = inference.inferences.clone();
+            return Ok(plan);
         }
 
         if auto_publishable {
@@ -943,34 +997,55 @@ impl WorkflowOnboardingService {
         Ok((inference, current))
     }
 
-    async fn existing_packages_for_sha(
+    async fn existing_packages_for_identity(
         &self,
         workflow_sha256: &str,
+        workflow: &WorkflowDocument,
     ) -> Result<Vec<ExistingWorkflowPackage>, WorkflowOnboardingError> {
         let packages = self.source.load_packages().await.map_err(|error| {
             WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
         })?;
-        let mut result = Vec::new();
-        for package in packages {
-            let WorkflowPackageLoad::Loaded(files) = package else {
-                continue;
-            };
-            if sha256(files.workflow_json.as_bytes()) != workflow_sha256 {
-                continue;
-            }
-            let Ok(manifest) = WorkflowManifest::parse(&files.manifest_yaml) else {
-                continue;
-            };
-            let Ok(recipe) = RecipeParser::parse(&files.recipe_yaml) else {
-                continue;
-            };
-            result.push(ExistingWorkflowPackage {
-                manifest,
-                files,
-                recipe,
-            });
+        let loaded = packages
+            .into_iter()
+            .filter_map(|package| match package {
+                WorkflowPackageLoad::Loaded(files) => Some(files),
+                WorkflowPackageLoad::Invalid { .. } => None,
+            })
+            .collect::<Vec<_>>();
+
+        let raw_matches = loaded
+            .iter()
+            .filter(|files| sha256(files.workflow_json.as_bytes()) == workflow_sha256)
+            .filter_map(|files| parse_existing_workflow_package(files.clone()))
+            .map(|package| ExistingWorkflowPackage {
+                manifest: package.manifest,
+                files: package.files,
+                recipe: package.recipe,
+                match_type: ExistingWorkflowMatchType::RawSha,
+            })
+            .collect::<Vec<_>>();
+        if !raw_matches.is_empty() {
+            return Ok(raw_matches);
         }
-        Ok(result)
+
+        let semantic_sha = semantic_workflow_sha256(workflow);
+        Ok(loaded
+            .into_iter()
+            .filter_map(|files| {
+                let package = parse_existing_workflow_package(files)?;
+                let existing_workflow =
+                    parse_api_workflow_string(&package.files.workflow_json).ok()?;
+                if semantic_workflow_sha256(&existing_workflow) != semantic_sha {
+                    return None;
+                }
+                Some(ExistingWorkflowPackage {
+                    manifest: package.manifest,
+                    files: package.files,
+                    recipe: package.recipe,
+                    match_type: ExistingWorkflowMatchType::SemanticSha,
+                })
+            })
+            .collect())
     }
 
     async fn is_archived_package(
@@ -2234,7 +2309,11 @@ fn auto_plan_for_draft(
         published,
         existing_workflow_id,
         existing_workflow_version,
+        existing_workflow_name: None,
+        existing_workflow_source: None,
+        suggested_recipe_version: None,
         existing_package_name,
+        existing_match_type: None,
         existing_recipes: Vec::new(),
         expected_inference: Vec::new(),
         message,

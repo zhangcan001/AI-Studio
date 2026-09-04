@@ -62,16 +62,51 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
 }
 
+interface ParsedSemver {
+  core: [number, number, number];
+  prerelease: string[];
+}
+
+function parseSemver(value?: string): ParsedSemver | undefined {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value?.trim() ?? "");
+  if (!match) return undefined;
+  const core = match.slice(1, 4).map(Number) as [number, number, number];
+  if (core.some((part) => !Number.isSafeInteger(part))) return undefined;
+  const prerelease = match[4]?.split(".") ?? [];
+  if (prerelease.some((part) => /^\d+$/.test(part) && ((part.length > 1 && part.startsWith("0")) || !Number.isSafeInteger(Number(part))))) return undefined;
+  return { core, prerelease };
+}
+
+function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
+  for (let index = 0; index < left.core.length; index += 1) {
+    if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index];
+  }
+  if (!left.prerelease.length || !right.prerelease.length) return left.prerelease.length === right.prerelease.length ? 0 : left.prerelease.length ? -1 : 1;
+  for (let index = 0; index < Math.min(left.prerelease.length, right.prerelease.length); index += 1) {
+    const leftPart = left.prerelease[index];
+    const rightPart = right.prerelease[index];
+    if (leftPart === rightPart) continue;
+    const leftNumeric = /^\d+$/.test(leftPart);
+    const rightNumeric = /^\d+$/.test(rightPart);
+    if (leftNumeric && rightNumeric) return Number(leftPart) - Number(rightPart);
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart < rightPart ? -1 : 1;
+  }
+  return left.prerelease.length - right.prerelease.length;
+}
+
 export function latestCatalogRecipeForWorkflowItem(item: WorkflowProductionWorkspaceView, catalog: RecipeViewModel[]): RecipeViewModel | undefined {
   if (!item.workflowVersionId) return undefined;
-  for (let index = item.recipes.length - 1; index >= 0; index -= 1) {
-    const recipe = item.recipes[index];
-    const catalogRecipe = catalog.find((candidate) =>
-      candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === recipe.recipeId,
-    );
-    if (catalogRecipe) return catalogRecipe;
-  }
-  return undefined;
+  const itemRecipes = new Map(item.recipes.map((recipe) => [recipe.recipeId, recipe.version]));
+  return catalog
+    .filter((candidate) => candidate.workflowVersionId === item.workflowVersionId && itemRecipes.has(candidate.recipeId))
+    .map((candidate) => ({
+      candidate,
+      version: parseSemver(candidate.recipeVersion) ?? parseSemver(itemRecipes.get(candidate.recipeId)),
+    }))
+    .filter((entry): entry is { candidate: RecipeViewModel; version: ParsedSemver } => Boolean(entry.version))
+    .sort((left, right) => compareSemver(right.version, left.version) || left.candidate.recipeId.localeCompare(right.candidate.recipeId))
+    .map((entry) => entry.candidate)[0];
 }
 
 const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
@@ -912,10 +947,12 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       );
       setAutoPlan(nextPlan);
       setDraft(await getOnboardingDraft(nextPlan.draftId));
-      setNotice(nextPlan.message);
       if (nextPlan.published) {
+        setNotice(`已为现有工作流生成新的 Recipe ${nextPlan.metadata.recipeVersion}。只新增 Recipe，不会修改原工作流或旧 Recipe。项目仍使用旧 Recipe，请点击“用于当前项目”切换。`);
         await loadWorkspace("refresh");
         await onCatalogChanged();
+      } else {
+        setNotice(nextPlan.message);
       }
     });
   }

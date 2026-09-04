@@ -28,6 +28,7 @@ use ai_studio_lib::infrastructure::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::{
     fs,
@@ -316,6 +317,16 @@ fn object_info() -> Value {
 
 fn api_image_bytes() -> Vec<u8> {
     API_IMAGE_WORKFLOW.as_bytes().to_vec()
+}
+
+fn api_image_pretty_bytes() -> Vec<u8> {
+    let workflow: Value = serde_json::from_str(API_IMAGE_WORKFLOW)
+        .expect("DEV-079 image workflow should remain valid JSON");
+    serde_json::to_vec_pretty(&workflow).expect("DEV-079 pretty workflow should serialize")
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn assert_no_package_or_staging(harness: &Harness) {
@@ -618,9 +629,16 @@ async fn duplicate_and_archived_imports_reuse_existing_identity_without_new_vers
 #[tokio::test]
 async fn existing_sha_outdated_recipe_is_regenerated_without_workflow_version_or_spam() {
     let harness = harness(object_info()).await;
+    let original_bytes = api_image_bytes();
+    let semantic_reimport_bytes = api_image_pretty_bytes();
+    assert_ne!(
+        sha256_bytes(&original_bytes),
+        sha256_bytes(&semantic_reimport_bytes),
+        "the semantic reimport must prove raw SHA is not the identity"
+    );
     let first = harness
         .service
-        .auto_onboard_bytes(api_image_bytes(), "dev081_regenerate.json".to_owned(), None)
+        .auto_onboard_bytes(original_bytes, "dev081_regenerate.json".to_owned(), None)
         .await
         .expect("first import should publish");
     let published = first.published.expect("first import should publish");
@@ -639,15 +657,23 @@ async fn existing_sha_outdated_recipe_is_regenerated_without_workflow_version_or
 
     let outdated = harness
         .service
-        .auto_onboard_bytes(api_image_bytes(), "renamed_again.json".to_owned(), None)
+        .auto_onboard_bytes(
+            semantic_reimport_bytes.clone(),
+            "renamed_again.json".to_owned(),
+            None,
+        )
         .await
-        .expect("same SHA should return a diagnostic plan");
+        .expect("semantic-equivalent reimport should return a diagnostic plan");
     assert_eq!(outdated.state, WorkflowAutoOnboardingState::NeedsReview);
     let issue = outdated
         .issues
         .iter()
         .find(|issue| issue.code == "EXISTING_RECIPE_OUTDATED")
         .expect("outdated recipe issue should be exposed");
+    assert_eq!(
+        outdated.existing_match_type.as_deref(),
+        Some("SEMANTIC_SHA")
+    );
     assert!(issue.message.contains(&published.recipe_id));
     assert!(issue.message.contains("width"));
     assert_eq!(outdated.existing_recipes.len(), 1);
@@ -717,9 +743,9 @@ async fn existing_sha_outdated_recipe_is_regenerated_without_workflow_version_or
 
     let current = harness
         .service
-        .auto_onboard_bytes(api_image_bytes(), "same_again.json".to_owned(), None)
+        .auto_onboard_bytes(semantic_reimport_bytes, "same_again.json".to_owned(), None)
         .await
-        .expect("current regenerated recipe should deduplicate");
+        .expect("current regenerated recipe should deduplicate semantically");
     assert_eq!(current.state, WorkflowAutoOnboardingState::AlreadyExists);
     assert!(current
         .issues

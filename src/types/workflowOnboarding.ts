@@ -222,9 +222,13 @@ export interface WorkflowAutoOnboardingPlanView {
   published?: WorkflowOnboardingPublishView;
   existingWorkflowId?: string;
   existingWorkflowVersion?: string;
+  existingWorkflowName?: string;
+  existingWorkflowSource?: string;
+  existingMatchType?: "RAW_SHA" | "SEMANTIC_SHA" | string;
   existingPackageName?: string;
   existingRecipes?: WorkflowAutoExistingRecipeView[];
   expectedInference?: WorkflowAutoInferenceView[];
+  suggestedRecipeVersion?: string;
   message: string;
 }
 

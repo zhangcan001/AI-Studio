@@ -11,7 +11,7 @@ use ai_studio_lib::application::{
     ports::{
         Clock, ComfyAdapter, ComfyAdapterError, ComfyEventSubscription, ComfyHealth, ComfyHistory,
         ComfyOutputData, ComfyOutputFile, PromptSubmission, RepositoryError, SystemStats,
-        WorkflowRunRepository,
+        WorkflowRunRepository, WorkflowRuntimeRepository,
     },
     production_package_inspector::{
         ProductionPackageInspector, ProductionPackageItemStatus as InspectorItemStatus,
@@ -21,19 +21,30 @@ use ai_studio_lib::application::{
         detect_comfy_workflow_format, CapabilityState, WorkflowAutoOnboardingPlanView,
         WorkflowAutoOnboardingState, WorkflowOnboardingService,
     },
+    workflow_semantic_identity::semantic_workflow_sha256,
 };
 use ai_studio_lib::compiler::{RecipeParser, RecipeValidator, WorkflowCompiler, WorkflowValidator};
 use ai_studio_lib::domain::{
     CompileRequest, InputValue, ProductionPackage, SeedValue, WorkflowDocument,
 };
 use ai_studio_lib::infrastructure::{
-    database::{initialize, SqliteWorkflowLibraryRepository},
+    database::{
+        initialize, SqliteWorkflowLibraryRepository, SqliteWorkflowRuntimeRepository,
+        SqliteWorkflowRuntimeStateRepository,
+    },
     filesystem::{FileSystemWorkflowLibrarySource, FileSystemWorkflowPackageStore},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
-use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc};
+use sha2::{Digest, Sha256};
+use sqlx::SqlitePool;
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tempfile::{tempdir, TempDir};
 
 const WORKFLOW_JSON: &str = include_str!(concat!(
@@ -145,8 +156,61 @@ outputs:
     required: true
 "#;
 
+const BUILTIN_PACKAGE_NAME: &str = "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0";
+
+const SANITIZED_PACKAGE_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/production_packages/dev081_t2v_3_items/production-package.json"
+));
+
 fn fixture_value() -> Value {
     serde_json::from_str(WORKFLOW_JSON).expect("sanitized workflow fixture should be valid JSON")
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn semantic_sha(value: &Value) -> String {
+    let document = WorkflowDocument::parse(value.clone()).expect("semantic fixture should parse");
+    semantic_workflow_sha256(&document)
+}
+
+fn pretty_fixture_bytes() -> Vec<u8> {
+    serde_json::to_vec_pretty(&fixture_value()).expect("sanitized fixture should serialize")
+}
+
+fn incomplete_builtin_recipe(recipe_id: &str) -> String {
+    format!(
+        "schema_version: 1\nid: {recipe_id}\nname: DEV-081 builtin old Recipe\nworkflow:\n  file: workflow_api.json\ninputs:\n  prompt:\n    type: textarea\n    label: Prompt\n    required: true\n    default: A cinematic test prompt\n  seed:\n    type: seed\n    label: Seed\n    default: random\nbindings:\n  - source: prompt\n    target:\n      node: \"59\"\n      input: text\n  - source: seed\n    target:\n      node: \"2\"\n      input: noise_seed\noutputs:\n  - id: generated_video\n    type: video\n    node: \"62\"\n    required: true\n"
+    )
+}
+
+fn move_to_builtin_package(harness: &Harness, package_name: &str) -> PathBuf {
+    let source = harness.library_root.join(package_name);
+    let builtin = harness.library_root.join(BUILTIN_PACKAGE_NAME);
+    fs::rename(source, &builtin).expect("isolated package should be moveable to builtin name");
+    builtin
+}
+
+fn package_file_bytes(package_root: &Path) -> [Vec<u8>; 3] {
+    [
+        fs::read(package_root.join("manifest.yaml")).expect("manifest should be readable"),
+        fs::read(package_root.join("recipe.yaml")).expect("recipe should be readable"),
+        fs::read(package_root.join("workflow_api.json")).expect("workflow should be readable"),
+    ]
+}
+
+async fn runtime_counts(harness: &Harness) -> (usize, usize) {
+    let versions = harness
+        .runtime_repository
+        .list_versions()
+        .await
+        .expect("runtime versions should be readable");
+    (
+        versions.len(),
+        versions.iter().map(|version| version.recipes.len()).sum(),
+    )
 }
 
 fn object_info_for(workflow: &Value) -> Value {
@@ -259,6 +323,9 @@ impl Clock for FixtureClock {
 
 struct Harness {
     _directory: TempDir,
+    library_root: PathBuf,
+    pool: SqlitePool,
+    runtime_repository: Arc<SqliteWorkflowRuntimeRepository>,
     service: WorkflowOnboardingService,
 }
 
@@ -277,9 +344,12 @@ async fn harness(workflow: &Value) -> Harness {
     let clock = Arc::new(FixtureClock);
     let library_service = Arc::new(WorkflowLibraryService::new(
         source.clone(),
-        Arc::new(SqliteWorkflowLibraryRepository::new(pool)),
+        Arc::new(SqliteWorkflowLibraryRepository::new(pool.clone())),
         clock.clone(),
     ));
+    let runtime_repository = Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
+    let runtime_state_repository =
+        Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
     let service = WorkflowOnboardingService::new(
         source,
         Arc::new(FixtureComfyAdapter {
@@ -288,14 +358,18 @@ async fn harness(workflow: &Value) -> Harness {
         library_service,
         Arc::new(FixtureRunRepository),
         Arc::new(FileSystemWorkflowPackageStore::new(
-            library_root,
+            library_root.clone(),
             staging_root,
         )),
         clock,
-    );
+    )
+    .with_runtime_state(runtime_repository.clone(), runtime_state_repository);
 
     Harness {
         _directory: directory,
+        library_root,
+        pool,
+        runtime_repository,
         service,
     }
 }
@@ -503,6 +577,104 @@ fn dev081_fixture_is_api_sanitized_and_topology_complete() {
                 .filter_map(Value::as_str)
                 .all(|value| value.contains("PLACEHOLDER") || value == "default"),
             "node {node_id} should contain only placeholder model values"
+        );
+    }
+}
+
+#[test]
+fn dev081_semantic_identity_v1_separates_raw_sha_from_canonical_json() {
+    let pretty = br#"{
+      "1": {
+        "class_type": "A",
+        "inputs": {
+          "x": 1,
+          "y": 2
+        }
+      }
+    }"#;
+    let compact_reordered = br#"{"1":{"inputs":{"y":2,"x":1},"class_type":"A"}}"#;
+    let pretty_value: Value =
+        serde_json::from_slice(pretty).expect("pretty semantic fixture should parse");
+    let compact_value: Value =
+        serde_json::from_slice(compact_reordered).expect("compact semantic fixture should parse");
+
+    assert_ne!(
+        sha256_bytes(pretty),
+        sha256_bytes(compact_reordered),
+        "serialization-only changes must retain a distinct raw SHA"
+    );
+    assert_eq!(pretty_value, compact_value);
+    assert_eq!(semantic_sha(&pretty_value), semantic_sha(&compact_value));
+
+    let fixture = fixture_value();
+    let compact_fixture = serde_json::to_vec(&fixture).expect("fixture should compact-serialize");
+    let pretty_fixture = pretty_fixture_bytes();
+    assert_ne!(
+        sha256_bytes(&compact_fixture),
+        sha256_bytes(&pretty_fixture)
+    );
+    assert_eq!(
+        semantic_sha(&serde_json::from_slice::<Value>(&compact_fixture).unwrap()),
+        semantic_sha(&serde_json::from_slice::<Value>(&pretty_fixture).unwrap())
+    );
+
+    let base = json!({
+        "59": {"class_type": "Prompt", "inputs": {"text": "A"}},
+        "60": {"class_type": "Model", "inputs": {"name": "model-a.safetensors"}},
+        "1": {"class_type": "Sampler", "inputs": {
+            "steps": 8,
+            "model": ["60", 0],
+            "prompt": ["59", 0]
+        }}
+    });
+
+    let mut steps_changed = base.clone();
+    steps_changed["1"]["inputs"]["steps"] = json!(12);
+    assert_ne!(semantic_sha(&base), semantic_sha(&steps_changed));
+
+    let mut link_changed = base.clone();
+    link_changed["1"]["inputs"]["prompt"] = json!(["60", 0]);
+    assert_ne!(semantic_sha(&base), semantic_sha(&link_changed));
+
+    let mut model_changed = base.clone();
+    model_changed["60"]["inputs"]["name"] = json!("model-b.safetensors");
+    assert_ne!(semantic_sha(&base), semantic_sha(&model_changed));
+
+    let node_id_changed = json!({
+        "59": {"class_type": "Prompt", "inputs": {"text": "A"}},
+        "61": {"class_type": "Model", "inputs": {"name": "model-a.safetensors"}},
+        "1": {"class_type": "Sampler", "inputs": {
+            "steps": 8,
+            "model": ["61", 0],
+            "prompt": ["59", 0]
+        }}
+    });
+    assert_ne!(semantic_sha(&base), semantic_sha(&node_id_changed));
+}
+
+#[test]
+fn dev081_sanitized_production_package_keeps_three_t2v_items() {
+    let package: Value =
+        serde_json::from_str(SANITIZED_PACKAGE_JSON).expect("sanitized package should parse");
+    assert_eq!(package["schemaVersion"], 1);
+    assert_eq!(package["defaults"]["durationSeconds"], 5);
+    assert_eq!(package["defaults"]["width"], 960);
+    assert_eq!(package["defaults"]["height"], 544);
+    let items = package["items"]
+        .as_array()
+        .expect("sanitized package items should be an array");
+    assert_eq!(items.len(), 3);
+    assert!(items.iter().all(|item| {
+        item["mode"] == "T2V"
+            && item["videoPrompt"]
+                .as_str()
+                .is_some_and(|prompt| prompt.starts_with("DEV081 test prompt "))
+    }));
+    let serialized = serde_json::to_string(&package).expect("package should serialize");
+    for forbidden in ["C:\\", "C:/", "Users\\", "Users/", "Desktop"] {
+        assert!(
+            !serialized.contains(forbidden),
+            "sanitized package leaked a local path marker: {forbidden}"
         );
     }
 }
@@ -731,4 +903,233 @@ async fn dev081_text_to_video_production_package_contract_remains_compatible() {
     assert_eq!(inspection.item_count, 1);
     assert_eq!(inspection.ready_count, 1);
     assert_eq!(inspection.items[0].mode, "FL2VA_TEXT_TO_VIDEO");
+}
+
+#[tokio::test]
+async fn dev081_semantic_reimport_reuses_builtin_identity_and_does_not_spam_current_recipe() {
+    let workflow = fixture_value();
+    let harness = harness(&workflow).await;
+    let original_bytes = WORKFLOW_JSON.as_bytes().to_vec();
+    let semantic_reimport_bytes = pretty_fixture_bytes();
+    assert_ne!(
+        sha256_bytes(&original_bytes),
+        sha256_bytes(&semantic_reimport_bytes),
+        "the reimport fixture must prove raw SHA differs"
+    );
+    assert_eq!(
+        semantic_sha(&serde_json::from_slice::<Value>(&original_bytes).unwrap()),
+        semantic_sha(&serde_json::from_slice::<Value>(&semantic_reimport_bytes).unwrap())
+    );
+
+    let first = harness
+        .service
+        .auto_onboard_bytes(
+            original_bytes,
+            "dev081_builtin_identity.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("sanitized workflow should publish the initial package");
+    let published = first
+        .published
+        .expect("initial sanitized workflow should publish");
+    let builtin_root = move_to_builtin_package(&harness, &published.package_name);
+    let package_count_before = fs::read_dir(&harness.library_root)
+        .expect("builtin package root should be readable")
+        .count();
+
+    let reimport = harness
+        .service
+        .auto_onboard_bytes(
+            semantic_reimport_bytes,
+            "dev081_builtin_identity_reimport.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("semantic-equivalent builtin reimport should produce a plan");
+
+    assert_eq!(reimport.state, WorkflowAutoOnboardingState::AlreadyExists);
+    assert_eq!(
+        reimport.existing_match_type.as_deref(),
+        Some("SEMANTIC_SHA")
+    );
+    assert_eq!(
+        reimport.existing_workflow_id.as_deref(),
+        Some(published.workflow_id.as_str())
+    );
+    assert_eq!(
+        reimport.existing_workflow_version.as_deref(),
+        Some(published.workflow_version.as_str())
+    );
+    assert_eq!(
+        reimport.existing_package_name.as_deref(),
+        Some(BUILTIN_PACKAGE_NAME)
+    );
+    assert_eq!(reimport.existing_recipes.len(), 1);
+    assert_eq!(reimport.existing_recipes[0].recipe_version, "1.0.0");
+    assert!(reimport
+        .issues
+        .iter()
+        .any(|issue| issue.code == "EXISTING_RECIPE_CURRENT"));
+    assert!(reimport.published.is_none());
+    assert_eq!(
+        fs::read_dir(&harness.library_root)
+            .expect("builtin package root should remain readable")
+            .count(),
+        package_count_before,
+        "current semantic reimport must not publish another package"
+    );
+    assert!(builtin_root.is_dir());
+}
+
+#[tokio::test]
+async fn dev081_builtin_old_recipe_is_reported_outdated_after_semantic_reimport() {
+    let workflow = fixture_value();
+    let harness = harness(&workflow).await;
+    let first = harness
+        .service
+        .auto_onboard_bytes(
+            WORKFLOW_JSON.as_bytes().to_vec(),
+            "dev081_builtin_outdated.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("sanitized workflow should publish the initial package");
+    let published = first
+        .published
+        .expect("initial sanitized workflow should publish");
+    let builtin_root = move_to_builtin_package(&harness, &published.package_name);
+    let old_recipe = incomplete_builtin_recipe(&published.recipe_id);
+    fs::write(builtin_root.join("recipe.yaml"), &old_recipe)
+        .expect("isolated builtin Recipe should be replaceable for the fixture");
+    sqlx::query("UPDATE recipes SET recipe_yaml = ?, recipe_sha256 = ? WHERE id = ?")
+        .bind(&old_recipe)
+        .bind(sha256_bytes(old_recipe.as_bytes()))
+        .bind(&published.recipe_id)
+        .execute(&harness.pool)
+        .await
+        .expect("old Recipe fixture should be synchronized in the isolated database");
+
+    let reimport = harness
+        .service
+        .auto_onboard_bytes(
+            pretty_fixture_bytes(),
+            "dev081_builtin_outdated_reimport.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("outdated semantic reimport should produce a plan");
+
+    assert_eq!(reimport.state, WorkflowAutoOnboardingState::NeedsReview);
+    assert_eq!(
+        reimport.existing_match_type.as_deref(),
+        Some("SEMANTIC_SHA")
+    );
+    assert_eq!(
+        reimport.existing_workflow_id.as_deref(),
+        Some(published.workflow_id.as_str())
+    );
+    assert_eq!(
+        reimport.existing_package_name.as_deref(),
+        Some(BUILTIN_PACKAGE_NAME)
+    );
+    assert_eq!(reimport.existing_recipes.len(), 1);
+    assert_eq!(reimport.existing_recipes[0].recipe_id, published.recipe_id);
+    assert_eq!(reimport.existing_recipes[0].recipe_version, "1.0.0");
+    assert!(reimport
+        .issues
+        .iter()
+        .any(|issue| issue.code == "EXISTING_RECIPE_OUTDATED"));
+    assert!(reimport.published.is_none());
+}
+
+#[tokio::test]
+async fn dev081_regenerate_builtin_recipe_keeps_workflow_and_original_files_immutable() {
+    let workflow = fixture_value();
+    let harness = harness(&workflow).await;
+    let first = harness
+        .service
+        .auto_onboard_bytes(
+            WORKFLOW_JSON.as_bytes().to_vec(),
+            "dev081_builtin_regeneration.json".to_owned(),
+            None,
+        )
+        .await
+        .expect("sanitized workflow should publish the initial package");
+    let published = first
+        .published
+        .expect("initial sanitized workflow should publish");
+    let builtin_root = move_to_builtin_package(&harness, &published.package_name);
+    let old_recipe = incomplete_builtin_recipe(&published.recipe_id);
+    fs::write(builtin_root.join("recipe.yaml"), &old_recipe)
+        .expect("isolated builtin Recipe should be replaceable for the fixture");
+    sqlx::query("UPDATE recipes SET recipe_yaml = ?, recipe_sha256 = ? WHERE id = ?")
+        .bind(&old_recipe)
+        .bind(sha256_bytes(old_recipe.as_bytes()))
+        .bind(&published.recipe_id)
+        .execute(&harness.pool)
+        .await
+        .expect("old Recipe fixture should be synchronized in the isolated database");
+
+    let builtin_files_before = package_file_bytes(&builtin_root);
+    let (workflow_versions_before, recipes_before) = runtime_counts(&harness).await;
+    let regenerated = harness
+        .service
+        .regenerate_recipe_draft(
+            &published.workflow_id,
+            &published.workflow_version,
+            Some("1.0.0"),
+        )
+        .await
+        .expect("builtin Recipe regeneration should publish an extension Recipe");
+    let new_publish = regenerated
+        .published
+        .as_ref()
+        .expect("builtin Recipe regeneration should publish");
+
+    assert_eq!(
+        regenerated.state,
+        WorkflowAutoOnboardingState::AutoPublished
+    );
+    assert_eq!(regenerated.metadata.recipe_version, "1.0.1");
+    assert_ne!(new_publish.recipe_id, published.recipe_id);
+    assert_eq!(new_publish.workflow_id, published.workflow_id);
+    assert_eq!(new_publish.workflow_version, published.workflow_version);
+    assert_ne!(new_publish.package_name, BUILTIN_PACKAGE_NAME);
+    assert!(
+        !ai_studio_lib::application::builtin_runtime_packages::is_builtin_package_name(
+            &new_publish.package_name
+        )
+    );
+    assert!(
+        ai_studio_lib::application::builtin_runtime_packages::is_builtin_package_name(
+            BUILTIN_PACKAGE_NAME
+        )
+    );
+
+    let (workflow_versions_after, recipes_after) = runtime_counts(&harness).await;
+    assert_eq!(workflow_versions_after, workflow_versions_before);
+    assert_eq!(recipes_after, recipes_before + 1);
+    assert_eq!(package_file_bytes(&builtin_root), builtin_files_before);
+    let old_recipe_after = fs::read_to_string(builtin_root.join("recipe.yaml"))
+        .expect("old builtin Recipe should remain readable");
+    assert_eq!(old_recipe_after, old_recipe);
+
+    let runtime_version = harness
+        .runtime_repository
+        .list_versions()
+        .await
+        .expect("runtime versions should remain readable")
+        .into_iter()
+        .find(|version| {
+            version.workflow_id == published.workflow_id
+                && version.workflow_version == published.workflow_version
+        })
+        .expect("builtin workflow version should remain registered");
+    let new_recipe = runtime_version
+        .recipes
+        .iter()
+        .find(|recipe| recipe.recipe_id == new_publish.recipe_id)
+        .expect("new Recipe should remain attached to the original WorkflowVersion");
+    assert_eq!(new_recipe.version, "1.0.1");
 }

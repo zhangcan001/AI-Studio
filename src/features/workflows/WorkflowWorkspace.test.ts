@@ -54,14 +54,14 @@ describe("Workflow Parameter Exposure 安全边界", () => {
   });
 });
 
-const workflowRecipeItem = (recipeIds: string[]) =>
+const workflowRecipeItem = (recipes: Array<[string, string]>) =>
   ({
     workflowVersionId: "WV1",
-    recipes: recipeIds.map((recipeId) => ({ recipeId })),
+    recipes: recipes.map(([recipeId, version]) => ({ recipeId, version })),
   }) as Parameters<typeof latestCatalogRecipeForWorkflowItem>[0];
 
-const catalogRecipes = (...entries: Array<[string, string]>) =>
-  entries.map(([workflowVersionId, recipeId]) => ({ workflowVersionId, recipeId })) as Parameters<
+const catalogRecipes = (...entries: Array<[string, string, string]>) =>
+  entries.map(([workflowVersionId, recipeId, recipeVersion]) => ({ workflowVersionId, recipeId, recipeVersion })) as Parameters<
     typeof latestCatalogRecipeForWorkflowItem
   >[1];
 
@@ -69,8 +69,8 @@ describe("工作流最新目录配方匹配", () => {
   it("返回项目中最新且已进入目录的配方", () => {
     expect(
       latestCatalogRecipeForWorkflowItem(
-        workflowRecipeItem(["R1", "R2"]),
-        catalogRecipes(["WV1", "R1"], ["WV1", "R2"]),
+        workflowRecipeItem([["R1", "1.0.0"], ["R2", "1.0.1"]]),
+        catalogRecipes(["WV1", "R1", "1.0.0"], ["WV1", "R2", "1.0.1"]),
       )?.recipeId,
     ).toBe("R2");
   });
@@ -78,8 +78,8 @@ describe("工作流最新目录配方匹配", () => {
   it("最新配方不在目录时回退到更早的匹配配方", () => {
     expect(
       latestCatalogRecipeForWorkflowItem(
-        workflowRecipeItem(["R1", "R2"]),
-        catalogRecipes(["WV1", "R1"]),
+        workflowRecipeItem([["R1", "1.0.0"], ["R2", "1.0.1"]]),
+        catalogRecipes(["WV1", "R1", "1.0.0"]),
       )?.recipeId,
     ).toBe("R1");
   });
@@ -87,9 +87,18 @@ describe("工作流最新目录配方匹配", () => {
   it("相同配方 ID 但不同工作流版本时不匹配", () => {
     expect(
       latestCatalogRecipeForWorkflowItem(
-        workflowRecipeItem(["R2"]),
-        catalogRecipes(["WV2", "R2"]),
+        workflowRecipeItem([["R2", "1.0.1"]]),
+        catalogRecipes(["WV2", "R2", "1.0.1"]),
       ),
     ).toBeUndefined();
+  });
+
+  it("不依赖工作区或目录插入顺序，按有效 semver 选择最新配方", () => {
+    expect(
+      latestCatalogRecipeForWorkflowItem(
+        workflowRecipeItem([["R10", "1.0.10"], ["R2", "1.0.2"]]),
+        catalogRecipes(["WV1", "R2", "1.0.2"], ["WV1", "R10", "1.0.10"]),
+      )?.recipeId,
+    ).toBe("R10");
   });
 });

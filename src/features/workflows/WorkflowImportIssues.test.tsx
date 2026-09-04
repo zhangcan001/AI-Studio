@@ -216,4 +216,74 @@ describe("WorkflowImportIssues", () => {
     expect(screen.getByText(/输入.*ckpt_name/)).toBeTruthy();
     expect(screen.getByText(/候选.*available\.safetensors/)).toBeTruthy();
   });
+
+  it("Recipe 过期时保留现有身份、语义匹配诊断和重新生成入口", async () => {
+    const user = userEvent.setup();
+    const onRegenerateRecipe = vi.fn();
+    const outdatedIssue: WorkflowAutoIssueView = {
+      code: "EXISTING_RECIPE_OUTDATED",
+      message: "existing recipe is outdated",
+      candidates: [],
+    };
+    const outdatedPlan = planWithIssues([outdatedIssue], {
+      state: "WAITING_FOR_COMFY_UI",
+      workflowKind: "VIDEO",
+      metadata: {
+        ...planWithIssues([]).metadata,
+        name: "导入文件名",
+        mode: "T2V",
+      },
+      capability: { state: "COMFY_OFFLINE", issues: [] },
+      existingWorkflowId: "builtin-workflow",
+      existingWorkflowVersion: "1.0.0",
+      existingWorkflowName: "AITUDOU MiniMax H3 LightX2V 8步高动态加速",
+      existingWorkflowSource: "BUILTIN",
+      existingPackageName: "builtin-package",
+      existingMatchType: "SEMANTIC_SHA",
+      existingRecipes: [{ recipeId: "rcp-old", recipeVersion: "1.0.0", packageName: "builtin-package" }],
+      suggestedRecipeVersion: "1.0.1",
+    });
+
+    const { rerender } = render(
+      <WorkflowImportIssues
+        plan={outdatedPlan}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={vi.fn()}
+        onOpenAdvanced={vi.fn()}
+        onOpenExisting={vi.fn()}
+        onRegenerateRecipe={onRegenerateRecipe}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "检测到现有工作流，需要升级 Recipe" })).toBeTruthy();
+    expect(screen.getByText("AITUDOU MiniMax H3 LightX2V 8步高动态加速")).toBeTruthy();
+    expect(screen.getByText("内置运行包")).toBeTruthy();
+    expect(screen.getByText("1.0.0 · rcp-old")).toBeTruthy();
+    expect(screen.getByText("1.0.1")).toBeTruthy();
+    expect(screen.getByText("matchType=语义匹配")).toBeTruthy();
+    expect(screen.getByText(/连接 ComfyUI 后可重新生成 Recipe/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "工作流暂时无法添加" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "重新生成 Recipe" }));
+    expect(onRegenerateRecipe).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <WorkflowImportIssues
+        plan={planWithIssues([outdatedIssue], {
+          ...outdatedPlan,
+          state: "BLOCKED",
+          capability: { state: "MISSING_NODES", issues: [] },
+        })}
+        loading={false}
+        onResolve={vi.fn()}
+        onResume={vi.fn()}
+        onOpenAdvanced={vi.fn()}
+        onOpenExisting={vi.fn()}
+        onRegenerateRecipe={onRegenerateRecipe}
+      />,
+    );
+    expect(screen.getByText(/修复节点或输入后可重新生成 Recipe/)).toBeTruthy();
+    expect(screen.getByText("matchType=语义匹配")).toBeTruthy();
+  });
 });
