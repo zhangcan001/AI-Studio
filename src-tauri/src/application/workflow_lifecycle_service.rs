@@ -580,52 +580,53 @@ impl WorkflowLifecycleService {
     pub async fn recheck_all_capabilities(
         &self,
     ) -> Result<Vec<WorkflowCapabilityBatchView>, WorkflowLifecycleError> {
-        let package_loads = self.load_package_loads().await?;
         let runtime_versions = self
             .runtime_repository
             .list_versions()
             .await
             .map_err(db_error)?;
-        let mut packages = HashMap::new();
-        for package in package_loads {
-            let WorkflowPackageLoad::Loaded(files) = package else {
+        let mut workflows = Vec::new();
+        for version in &runtime_versions {
+            let Some(recipe) = version
+                .recipes
+                .iter()
+                .max_by(|left, right| compare_versions(&left.version, &right.version))
+            else {
                 continue;
             };
-            let Ok(manifest) = WorkflowManifest::parse(&files.manifest_yaml) else {
-                continue;
+            let package = match self.find_exact_package(version, recipe).await {
+                Ok(package) => package,
+                Err(error)
+                    if matches!(
+                        error.code(),
+                        "RUNTIME_PACKAGE_MISSING"
+                            | "RUNTIME_ARTIFACT_HASH_MISMATCH"
+                            | "WORKFLOW_PACKAGE_INVALID"
+                            | "WORKFLOW_RUNTIME_HASH_MISMATCH"
+                            | "RECIPE_RUNTIME_HASH_MISMATCH"
+                    ) =>
+                {
+                    // The unified Workspace query owns the user-visible
+                    // missing/invalid diagnostics. Do not scan a legacy
+                    // package directory or substitute another recipe here.
+                    tracing::warn!(
+                        workflow_version_id = %version.workflow_version_id,
+                        recipe_id = %recipe.recipe_id,
+                        error = %error,
+                        "skipping capability recheck for an invalid exact runtime artifact"
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error),
             };
-            let Ok(recipe) = RecipeParser::parse(&files.recipe_yaml) else {
-                continue;
-            };
-            packages.insert(
-                (
-                    manifest.id,
-                    manifest.workflow_version,
-                    manifest.recipe_version,
-                ),
-                (files.workflow_json, recipe),
-            );
+            let recipe = RecipeParser::parse(&package.recipe_yaml)
+                .map_err(|error| invalid_error(error.to_string()))?;
+            workflows.push(RuntimeWorkflowCapabilityInput {
+                workflow_version_id: version.workflow_version_id.clone(),
+                workflow_json: package.workflow_json,
+                recipe,
+            });
         }
-        let workflows = runtime_versions
-            .iter()
-            .filter_map(|version| {
-                let recipe_version = version
-                    .recipes
-                    .iter()
-                    .max_by(|left, right| compare_versions(&left.version, &right.version))?;
-                packages
-                    .get(&(
-                        version.workflow_id.clone(),
-                        version.workflow_version.clone(),
-                        recipe_version.version.clone(),
-                    ))
-                    .map(|(workflow_json, recipe)| RuntimeWorkflowCapabilityInput {
-                        workflow_version_id: version.workflow_version_id.clone(),
-                        workflow_json: workflow_json.clone(),
-                        recipe: recipe.clone(),
-                    })
-            })
-            .collect::<Vec<_>>();
         let checked = self
             .onboarding_service
             .check_runtime_workflows(&workflows)
@@ -2848,6 +2849,33 @@ outputs: []
             _package_name: &str,
         ) -> Result<(), WorkflowPackageStoreError> {
             Ok(())
+        }
+
+        async fn quarantine_published(
+            &self,
+            _operation_id: &str,
+            _package_name: &str,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn restore_quarantined(
+            &self,
+            _operation_id: &str,
+            _package_name: &str,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn remove_quarantine(
+            &self,
+            _operation_id: &str,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn list_published(&self) -> Result<Vec<String>, WorkflowPackageStoreError> {
+            Ok(Vec::new())
         }
 
         async fn read_runtime(

@@ -55,6 +55,30 @@ pub trait WorkflowPackageStore: Send + Sync {
     /// Only used to compensate a publication that failed registration in the same request.
     async fn remove_published(&self, package_name: &str) -> Result<(), WorkflowPackageStoreError>;
 
+    /// Move an installed runtime package into an operation-scoped quarantine.
+    /// Implementations must use an atomic same-filesystem rename so a failed
+    /// purge can restore the package without reconstructing its bytes.
+    async fn quarantine_published(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<(), WorkflowPackageStoreError>;
+
+    /// Restore one package from an operation-scoped quarantine.
+    async fn restore_quarantined(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<(), WorkflowPackageStoreError>;
+
+    /// Remove an operation-scoped quarantine after the database transaction
+    /// has committed successfully.
+    async fn remove_quarantine(&self, operation_id: &str) -> Result<(), WorkflowPackageStoreError>;
+
+    /// List published package directory names. Internal quarantine directories
+    /// are not part of the published package namespace.
+    async fn list_published(&self) -> Result<Vec<String>, WorkflowPackageStoreError>;
+
     async fn read_runtime(
         &self,
         package_name: &str,

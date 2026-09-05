@@ -21,6 +21,33 @@ pub struct WorkflowRegistryRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkflowPurgeReferenceCounts {
+    pub task_count: u64,
+    pub batch_item_count: u64,
+    pub preset_count: u64,
+    pub template_count: u64,
+    pub shot_config_count: u64,
+    pub benchmark_count: u64,
+    pub binding_count: u64,
+    pub stage_count: u64,
+    pub run_template_count: u64,
+}
+
+impl WorkflowPurgeReferenceCounts {
+    pub fn total(&self) -> u64 {
+        self.task_count
+            + self.batch_item_count
+            + self.preset_count
+            + self.template_count
+            + self.shot_config_count
+            + self.benchmark_count
+            + self.binding_count
+            + self.stage_count
+            + self.run_template_count
+    }
+}
+
 /// Persistence boundary for the logical Workflow entity.
 ///
 /// Versions, recipes, and runtime artifacts retain their own immutable IDs;
@@ -59,6 +86,11 @@ pub trait WorkflowRegistryRepository: Send + Sync {
         workflow_id: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<Option<WorkflowRegistryRecord>, RepositoryError>;
+
+    async fn inspect_purge(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Option<WorkflowPurgeReferenceCounts>, RepositoryError>;
 
     async fn purge(&self, workflow_id: &str) -> Result<bool, RepositoryError>;
 }

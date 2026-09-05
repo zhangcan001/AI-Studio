@@ -231,7 +231,6 @@ import type {
   WorkflowRestoreResult,
   WorkflowRestoreView,
   WorkflowRegistryMutationResult,
-  WorkflowRegistryResponse,
   WorkflowRegistryView,
   WorkflowVersionDiffView,
   WorkflowWorkspaceView,
@@ -464,6 +463,7 @@ export function pickApiWorkflow(existingWorkflowId?: string): Promise<WorkflowOn
   });
 }
 
+/** @deprecated Formal import uses analyzeWorkflowImport followed by commitWorkflowImport. */
 export function autoOnboardWorkflow(existingWorkflowId?: string): Promise<WorkflowAutoOnboardingPlanView | null> {
   return invoke<WorkflowAutoOnboardingPlanView | null>("workflow_onboarding_auto_import_api_workflow", {
     existingWorkflowId,
@@ -481,6 +481,7 @@ export function commitWorkflowImport(request: WorkflowImportCommitRequest): Prom
   return invoke<WorkflowOnboardingPublishView>("workflow_commit_import", { request });
 }
 
+/** @deprecated Retained only for internal/legacy callers; formal UI never auto-publishes. */
 export function autoConfirmOnboarding(draftId: string): Promise<WorkflowAutoOnboardingPlanView> {
   return invoke<WorkflowAutoOnboardingPlanView>("workflow_onboarding_auto_confirm", { draftId });
 }
@@ -541,6 +542,7 @@ export function validateOnboarding(draftId: string): Promise<WorkflowOnboardingV
   return invoke<WorkflowOnboardingValidationView>("workflow_onboarding_validate", { draftId });
 }
 
+/** @deprecated INTERNAL_ADVANCED_EDITING_ONLY. Formal import uses analyze then commit. */
 export function publishOnboarding(draftId: string): Promise<WorkflowOnboardingPublishView> {
   return invoke<WorkflowOnboardingPublishView>("workflow_onboarding_publish", { draftId });
 }
@@ -557,8 +559,9 @@ export function listWorkflowProductionWorkspace(): Promise<WorkflowProductionWor
   return invoke<WorkflowProductionWorkspaceResponse>("workflow_runtime_workspace_list");
 }
 
-export function listWorkflowRegistry(): Promise<WorkflowRegistryView[] | WorkflowRegistryResponse> {
-  return invoke<WorkflowRegistryView[] | WorkflowRegistryResponse>("workflow_list_registry");
+/** Registry transport returns the V2 logical Workflow rows only. */
+export function listWorkflowRegistry(): Promise<WorkflowRegistryView[]> {
+  return invoke<WorkflowRegistryView[]>("workflow_list_registry");
 }
 
 export function getWorkflowRegistry(workflowId: string): Promise<WorkflowRegistryView> {

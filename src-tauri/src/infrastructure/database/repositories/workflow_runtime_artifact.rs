@@ -1,7 +1,7 @@
 use super::{format_datetime, map_sqlx_error, parse_datetime};
 use crate::application::ports::{
     RepositoryError, WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
-    RUNTIME_ARTIFACT_SOURCE_PRODUCT, RUNTIME_ARTIFACT_SOURCE_USER,
+    RUNTIME_ARTIFACT_CONFLICT, RUNTIME_ARTIFACT_SOURCE_PRODUCT, RUNTIME_ARTIFACT_SOURCE_USER,
 };
 use async_trait::async_trait;
 use sqlx::SqlitePool;
@@ -98,23 +98,49 @@ impl WorkflowRuntimeArtifactRepository for SqliteWorkflowRuntimeArtifactReposito
             ));
         }
 
-        let existing = sqlx::query_as::<_, ArtifactRow>(&format!(
+        let existing_for_pair = sqlx::query_as::<_, ArtifactRow>(&format!(
             "{ARTIFACT_SELECT}
-             WHERE workflow_version_id = ? AND recipe_id = ? AND package_name = ?"
+             WHERE workflow_version_id = ? AND recipe_id = ?"
         ))
         .bind(&artifact.workflow_version_id)
         .bind(&artifact.recipe_id)
-        .bind(&artifact.package_name)
-        .fetch_optional(&mut *transaction)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
-        if let Some(existing) = existing {
-            if existing.matches_immutable(artifact) {
+
+        if existing_for_pair.len() > 1 {
+            return Err(runtime_artifact_conflict(
+                &artifact.workflow_version_id,
+                &artifact.recipe_id,
+                "database already contains more than one exact runtime artifact",
+            ));
+        }
+
+        if let Some(existing) = existing_for_pair.first() {
+            if existing.package_name == artifact.package_name {
+                if existing.matches_immutable(artifact) {
+                    transaction.commit().await.map_err(map_sqlx_error)?;
+                    return Ok(());
+                }
+                return Err(RepositoryError::integrity(
+                    "runtime artifact identity already exists with different immutable metadata",
+                ));
+            }
+
+            if existing.workflow_sha256 == artifact.workflow_sha256
+                && existing.recipe_sha256 == artifact.recipe_sha256
+            {
+                // An exact pair is the cardinality boundary. The row already
+                // registered for that pair is the canonical selection; do not
+                // replace it or choose a row by query order.
                 transaction.commit().await.map_err(map_sqlx_error)?;
                 return Ok(());
             }
-            return Err(RepositoryError::integrity(
-                "runtime artifact identity already exists with different immutable metadata",
+
+            return Err(runtime_artifact_conflict(
+                &artifact.workflow_version_id,
+                &artifact.recipe_id,
+                "a different package has different workflow or recipe bytes",
             ));
         }
 
@@ -148,10 +174,30 @@ impl WorkflowRuntimeArtifactRepository for SqliteWorkflowRuntimeArtifactReposito
         .bind(format_datetime(artifact.created_at))
         .execute(&mut *transaction)
         .await
-        .map_err(map_sqlx_error)?;
+        .map_err(|error| map_runtime_artifact_sqlx_error(error, artifact))?;
 
         transaction.commit().await.map_err(map_sqlx_error)
     }
+}
+
+fn map_runtime_artifact_sqlx_error(
+    error: sqlx::Error,
+    artifact: &WorkflowRuntimeArtifactRecord,
+) -> RepositoryError {
+    if let sqlx::Error::Database(database_error) = &error {
+        let message = database_error.message().to_ascii_lowercase();
+        if message.contains("workflow_runtime_artifacts.workflow_version_id")
+            || message.contains("workflow_version_id, recipe_id")
+            || message.contains("idx_workflow_runtime_artifacts_version_recipe")
+        {
+            return runtime_artifact_conflict(
+                &artifact.workflow_version_id,
+                &artifact.recipe_id,
+                "exact recipe mapping is already registered",
+            );
+        }
+    }
+    map_sqlx_error(error)
 }
 
 impl SqliteWorkflowRuntimeArtifactRepository {
@@ -174,8 +220,40 @@ impl SqliteWorkflowRuntimeArtifactRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        rows.into_iter().map(ArtifactRow::try_into_record).collect()
+        let records = rows
+            .into_iter()
+            .map(ArtifactRow::try_into_record)
+            .collect::<Result<Vec<_>, _>>()?;
+        ensure_exact_pair_cardinality(&records)?;
+        Ok(records)
     }
+}
+
+fn ensure_exact_pair_cardinality(
+    artifacts: &[WorkflowRuntimeArtifactRecord],
+) -> Result<(), RepositoryError> {
+    for window in artifacts.windows(2) {
+        if window[0].workflow_version_id == window[1].workflow_version_id
+            && window[0].recipe_id == window[1].recipe_id
+        {
+            return Err(runtime_artifact_conflict(
+                &window[0].workflow_version_id,
+                &window[0].recipe_id,
+                "multiple runtime packages claim the same exact recipe",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn runtime_artifact_conflict(
+    workflow_version_id: &str,
+    recipe_id: &str,
+    detail: &str,
+) -> RepositoryError {
+    RepositoryError::integrity(format!(
+        "{RUNTIME_ARTIFACT_CONFLICT}: workflow version {workflow_version_id}, recipe {recipe_id}: {detail}"
+    ))
 }
 
 fn validate_artifact(artifact: &WorkflowRuntimeArtifactRecord) -> Result<(), RepositoryError> {

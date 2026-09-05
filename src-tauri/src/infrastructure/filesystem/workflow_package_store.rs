@@ -32,6 +32,25 @@ impl FileSystemWorkflowPackageStore {
         Ok(self.library_root.join(package_name))
     }
 
+    fn quarantine_path(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<PathBuf, WorkflowPackageStoreError> {
+        validate_operation_id(operation_id)?;
+        validate_package_name(package_name)?;
+        Ok(self
+            .library_root
+            .join(".purge")
+            .join(operation_id)
+            .join(package_name))
+    }
+
+    fn quarantine_root(&self, operation_id: &str) -> Result<PathBuf, WorkflowPackageStoreError> {
+        validate_operation_id(operation_id)?;
+        Ok(self.library_root.join(".purge").join(operation_id))
+    }
+
     fn write_package(
         path: &Path,
         package: &WorkflowPackageBytes,
@@ -111,6 +130,73 @@ impl WorkflowPackageStore for FileSystemWorkflowPackageStore {
         Ok(())
     }
 
+    async fn quarantine_published(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        let source = self.runtime_path(package_name)?;
+        let target = self.quarantine_path(operation_id, package_name)?;
+        if !source.is_dir() {
+            return Err(store_error("workflow package is unavailable"));
+        }
+        if target.exists() {
+            return Err(store_error(
+                "workflow package quarantine target already exists",
+            ));
+        }
+        fs::create_dir_all(self.quarantine_root(operation_id)?).map_err(io_error)?;
+        fs::rename(source, target).map_err(io_error)
+    }
+
+    async fn restore_quarantined(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        let source = self.quarantine_path(operation_id, package_name)?;
+        let target = self.runtime_path(package_name)?;
+        if !source.is_dir() {
+            return Err(store_error("workflow package quarantine is unavailable"));
+        }
+        if target.exists() {
+            return Err(store_error(
+                "workflow package restore target already exists",
+            ));
+        }
+        fs::create_dir_all(&self.library_root).map_err(io_error)?;
+        fs::rename(source, target).map_err(io_error)
+    }
+
+    async fn remove_quarantine(&self, operation_id: &str) -> Result<(), WorkflowPackageStoreError> {
+        let path = self.quarantine_root(operation_id)?;
+        if path.exists() {
+            fs::remove_dir_all(path).map_err(io_error)?;
+        }
+        Ok(())
+    }
+
+    async fn list_published(&self) -> Result<Vec<String>, WorkflowPackageStoreError> {
+        let entries = match fs::read_dir(&self.library_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error(error)),
+        };
+        let mut result = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(io_error)?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if entry.path().is_dir()
+                && !name.starts_with('.')
+                && validate_package_name(&name).is_ok()
+            {
+                result.push(name);
+            }
+        }
+        result.sort();
+        Ok(result)
+    }
+
     async fn read_runtime(
         &self,
         package_name: &str,
@@ -151,6 +237,18 @@ fn validate_package_name(value: &str) -> Result<(), WorkflowPackageStoreError> {
         })
     {
         return Err(store_error("invalid workflow package identifier"));
+    }
+    Ok(())
+}
+
+fn validate_operation_id(value: &str) -> Result<(), WorkflowPackageStoreError> {
+    if value.is_empty()
+        || value.len() > 160
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return Err(store_error("invalid workflow package operation identifier"));
     }
     Ok(())
 }

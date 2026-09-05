@@ -1,6 +1,7 @@
 use super::{format_datetime, map_sqlx_error};
 use crate::application::ports::{
     RepositoryError, WorkflowLibraryRepository, WorkflowPackageRecord, WorkflowPackageRegistration,
+    RUNTIME_ARTIFACT_CONFLICT,
 };
 use async_trait::async_trait;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -174,6 +175,30 @@ async fn register_runtime_artifact(
     workflow_version_id: &str,
     recipe_id: &str,
 ) -> Result<(), RepositoryError> {
+    let existing_for_pair = sqlx::query_as::<_, RuntimeArtifactRow>(
+        "SELECT workflow_version_id, recipe_id, workflow_sha256, recipe_sha256
+         FROM workflow_runtime_artifacts
+         WHERE workflow_version_id = ? AND recipe_id = ?",
+    )
+    .bind(workflow_version_id)
+    .bind(recipe_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    if let Some(existing) = existing_for_pair {
+        if existing.workflow_sha256 == package.workflow_sha256
+            && existing.recipe_sha256 == package.recipe_sha256
+        {
+            // The first Registry registration is the canonical package for
+            // this exact pair. A duplicate package with identical bytes is
+            // harmless and must not replace it by insertion order.
+            return Ok(());
+        }
+        return Err(RepositoryError::integrity(format!(
+            "{RUNTIME_ARTIFACT_CONFLICT}: exact workflow version/recipe is registered with different bytes"
+        )));
+    }
+
     let existing = sqlx::query_as::<_, RuntimeArtifactRow>(
         "SELECT workflow_version_id, recipe_id, workflow_sha256, recipe_sha256
          FROM workflow_runtime_artifacts WHERE package_name = ?",

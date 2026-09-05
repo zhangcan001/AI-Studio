@@ -1,7 +1,8 @@
 use super::{format_datetime, map_sqlx_error, parse_datetime, parse_optional_datetime};
 use crate::application::ports::{
-    RepositoryError, WorkflowRegistryRecord, WorkflowRegistryRepository, WORKFLOW_SOURCE_USER,
-    WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
+    RepositoryError, WorkflowPurgeReferenceCounts, WorkflowRegistryRecord,
+    WorkflowRegistryRepository, WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE,
+    WORKFLOW_STATE_REMOVED,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -154,6 +155,28 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
         }
 
         sqlx::query(
+            "INSERT INTO workflow_runtime_states (
+                 workflow_version_id, enabled, updated_at, archived, archived_at
+             )
+             SELECT wv.id, 0, ?, 1, ?
+             FROM workflow_versions wv
+             LEFT JOIN workflow_runtime_states wrs
+                ON wrs.workflow_version_id = wv.id
+             WHERE wv.workflow_id = ? AND wrs.workflow_version_id IS NULL
+             ON CONFLICT(workflow_version_id) DO UPDATE SET
+                 enabled = 0,
+                 updated_at = excluded.updated_at,
+                 archived = 1,
+                 archived_at = excluded.archived_at",
+        )
+        .bind(format_datetime(removed_at))
+        .bind(format_datetime(removed_at))
+        .bind(workflow_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
             "UPDATE workflows
              SET library_state = ?, removed_at = ?, updated_at = ?
              WHERE id = ?",
@@ -212,6 +235,63 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
         Ok(workflow)
     }
 
+    async fn inspect_purge(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Option<WorkflowPurgeReferenceCounts>, RepositoryError> {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(workflow_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        if exists == 0 {
+            return Ok(None);
+        }
+
+        let references = sqlx::query_as::<_, WorkflowReferenceCounts>(
+            "WITH versions AS (
+                 SELECT id FROM workflow_versions WHERE workflow_id = ?
+             )
+             SELECT
+                 (SELECT COUNT(*) FROM tasks
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS task_count,
+                 (SELECT COUNT(*) FROM production_batch_items
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS batch_item_count,
+                 (SELECT COUNT(*) FROM presets
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS preset_count,
+                 (SELECT COUNT(*) FROM project_templates
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS template_count,
+                 (SELECT COUNT(*) FROM shot_stage_configs
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS shot_config_count,
+                 (SELECT COUNT(*) FROM benchmark_candidates
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS benchmark_count,
+                 (SELECT COUNT(*) FROM project_workflow_bindings
+                    WHERE workflow_version_id IN (SELECT id FROM versions)) AS binding_count,
+                 (SELECT COUNT(*) FROM production_stages
+                    WHERE workflow_version_id IN (SELECT id FROM versions)
+                       OR recipe_id IN (
+                           SELECT id FROM recipes
+                           WHERE workflow_version_id IN (SELECT id FROM versions)
+                       )) AS stage_count,
+                 (SELECT COUNT(*) FROM production_run_templates
+                    WHERE krea2_workflow_version_id IN (SELECT id FROM versions)
+                       OR h3_workflow_version_id IN (SELECT id FROM versions)
+                       OR krea2_recipe_id IN (
+                           SELECT id FROM recipes
+                           WHERE workflow_version_id IN (SELECT id FROM versions)
+                       )
+                       OR h3_recipe_id IN (
+                           SELECT id FROM recipes
+                           WHERE workflow_version_id IN (SELECT id FROM versions)
+                       )) AS run_template_count",
+        )
+        .bind(workflow_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(Some(references.into_record()))
+    }
+
     async fn purge(&self, workflow_id: &str) -> Result<bool, RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
         let Some(workflow) = read_workflow_in_transaction(&mut transaction, workflow_id).await?
@@ -258,7 +338,15 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
                        )) AS stage_count,
                  (SELECT COUNT(*) FROM production_run_templates
                     WHERE krea2_workflow_version_id IN (SELECT id FROM versions)
-                       OR h3_workflow_version_id IN (SELECT id FROM versions)) AS run_template_count",
+                       OR h3_workflow_version_id IN (SELECT id FROM versions)
+                       OR krea2_recipe_id IN (
+                           SELECT id FROM recipes
+                           WHERE workflow_version_id IN (SELECT id FROM versions)
+                       )
+                       OR h3_recipe_id IN (
+                           SELECT id FROM recipes
+                           WHERE workflow_version_id IN (SELECT id FROM versions)
+                       )) AS run_template_count",
         )
         .bind(workflow_id)
         .fetch_one(&mut *transaction)
@@ -465,6 +553,20 @@ struct WorkflowReferenceCounts {
 }
 
 impl WorkflowReferenceCounts {
+    fn into_record(self) -> WorkflowPurgeReferenceCounts {
+        WorkflowPurgeReferenceCounts {
+            task_count: self.task_count.max(0) as u64,
+            batch_item_count: self.batch_item_count.max(0) as u64,
+            preset_count: self.preset_count.max(0) as u64,
+            template_count: self.template_count.max(0) as u64,
+            shot_config_count: self.shot_config_count.max(0) as u64,
+            benchmark_count: self.benchmark_count.max(0) as u64,
+            binding_count: self.binding_count.max(0) as u64,
+            stage_count: self.stage_count.max(0) as u64,
+            run_template_count: self.run_template_count.max(0) as u64,
+        }
+    }
+
     fn total(&self) -> i64 {
         self.task_count
             + self.batch_item_count

@@ -55,6 +55,7 @@ use crate::application::workflow_library_service::WorkflowLibraryService;
 use crate::application::workflow_lifecycle_service::WorkflowLifecycleService;
 use crate::application::workflow_onboarding_service::WorkflowOnboardingService;
 use crate::application::workflow_registry_service::WorkflowRegistryService;
+use crate::application::workflow_workspace_query_service::WorkflowWorkspaceQueryService;
 use crate::infrastructure::filesystem::AppDataDirs;
 use std::sync::Arc;
 
@@ -65,6 +66,7 @@ pub struct AppState {
     pub generation_service: Arc<GenerationService>,
     pub workflow_library_service: Arc<WorkflowLibraryService>,
     pub workflow_registry_service: Arc<WorkflowRegistryService>,
+    pub workflow_workspace_query_service: Arc<WorkflowWorkspaceQueryService>,
     pub workflow_onboarding_service: Arc<WorkflowOnboardingService>,
     pub workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
     pub workflow_benchmark_service: Arc<WorkflowBenchmarkService>,
@@ -127,6 +129,7 @@ impl AppState {
         generation_service: Arc<GenerationService>,
         workflow_library_service: Arc<WorkflowLibraryService>,
         workflow_registry_service: Arc<WorkflowRegistryService>,
+        workflow_workspace_query_service: Arc<WorkflowWorkspaceQueryService>,
         workflow_onboarding_service: Arc<WorkflowOnboardingService>,
         workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
         workflow_benchmark_service: Arc<WorkflowBenchmarkService>,
@@ -187,6 +190,7 @@ impl AppState {
             generation_service,
             workflow_library_service,
             workflow_registry_service,
+            workflow_workspace_query_service,
             workflow_onboarding_service,
             workflow_lifecycle_service,
             workflow_benchmark_service,

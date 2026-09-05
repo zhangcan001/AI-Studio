@@ -2,6 +2,7 @@ use crate::application::builtin_runtime_packages::is_builtin_package_name;
 use crate::application::ports::{
     Clock, RepositoryError, WorkflowLibraryRepository, WorkflowLibrarySource, WorkflowPackageFiles,
     WorkflowPackageLoad, WorkflowPackageRecord, WorkflowPackageRegistration,
+    RUNTIME_ARTIFACT_CONFLICT,
 };
 use crate::application::workflow_manifest::WorkflowManifest;
 use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
@@ -186,6 +187,9 @@ impl WorkflowPackageServiceError {
     fn code(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "WORKFLOW_PACKAGE_INVALID",
+            Self::Repository(error) if error.to_string().contains(RUNTIME_ARTIFACT_CONFLICT) => {
+                RUNTIME_ARTIFACT_CONFLICT
+            }
             Self::Repository(RepositoryError::WorkflowVersionConflict { .. }) => {
                 "WORKFLOW_VERSION_CONFLICT"
             }

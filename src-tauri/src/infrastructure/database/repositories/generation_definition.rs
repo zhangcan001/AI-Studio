@@ -37,22 +37,14 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                 r.recipe_sha256,
                 wv.api_workflow_json,
                 r.recipe_yaml,
-                COALESCE(
-                    (SELECT wra.package_name
-                     FROM workflow_runtime_artifacts wra
-                     WHERE wra.workflow_version_id = wv.id
-                       AND wra.recipe_id = r.id
-                     ORDER BY wra.id ASC LIMIT 1),
-                    wv.package_name
-                ) AS package_name,
-                COALESCE(
-                    (SELECT wra.package_source_path
-                     FROM workflow_runtime_artifacts wra
-                     WHERE wra.workflow_version_id = wv.id
-                       AND wra.recipe_id = r.id
-                     ORDER BY wra.id ASC LIMIT 1),
-                    wv.package_source_path
-                ) AS package_source_path
+                (SELECT wra.package_name
+                 FROM workflow_runtime_artifacts wra
+                 WHERE wra.workflow_version_id = wv.id
+                   AND wra.recipe_id = r.id) AS package_name,
+                (SELECT wra.package_source_path
+                 FROM workflow_runtime_artifacts wra
+                 WHERE wra.workflow_version_id = wv.id
+                   AND wra.recipe_id = r.id) AS package_source_path
              FROM workflows w
              INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
              INNER JOIN recipes r ON r.workflow_version_id = wv.id
@@ -91,22 +83,14 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                     r.recipe_sha256,
                     wv.api_workflow_json,
                     r.recipe_yaml,
-                    COALESCE(
-                        (SELECT wra.package_name
-                         FROM workflow_runtime_artifacts wra
-                         WHERE wra.workflow_version_id = wv.id
-                           AND wra.recipe_id = r.id
-                         ORDER BY wra.id ASC LIMIT 1),
-                        wv.package_name
-                    ) AS package_name,
-                    COALESCE(
-                        (SELECT wra.package_source_path
-                         FROM workflow_runtime_artifacts wra
-                         WHERE wra.workflow_version_id = wv.id
-                           AND wra.recipe_id = r.id
-                         ORDER BY wra.id ASC LIMIT 1),
-                        wv.package_source_path
-                    ) AS package_source_path
+                    (SELECT wra.package_name
+                     FROM workflow_runtime_artifacts wra
+                     WHERE wra.workflow_version_id = wv.id
+                       AND wra.recipe_id = r.id) AS package_name,
+                    (SELECT wra.package_source_path
+                     FROM workflow_runtime_artifacts wra
+                     WHERE wra.workflow_version_id = wv.id
+                       AND wra.recipe_id = r.id) AS package_source_path
                  FROM workflows w
                  INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
                  INNER JOIN recipes r ON r.workflow_version_id = wv.id

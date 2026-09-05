@@ -25,7 +25,12 @@ fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
         WorkflowRegistryServiceError::Blocked(message)
         | WorkflowRegistryServiceError::NotRemoved(message)
         | WorkflowRegistryServiceError::PurgeBlocked(message)
+        | WorkflowRegistryServiceError::PurgePackage(message)
+        | WorkflowRegistryServiceError::PurgeCleanupFailed(message)
         | WorkflowRegistryServiceError::CompensationFailed {
+            operation: message, ..
+        } => AppError::invalid_input(format!("{code}: {message}")),
+        WorkflowRegistryServiceError::PurgeCompensationFailed {
             operation: message, ..
         } => AppError::invalid_input(format!("{code}: {message}")),
         WorkflowRegistryServiceError::Repository(error) => super::map_repository_error(&error),

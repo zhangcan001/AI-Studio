@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 pub const RUNTIME_ARTIFACT_SOURCE_PRODUCT: &str = "PRODUCT";
 pub const RUNTIME_ARTIFACT_SOURCE_USER: &str = "USER";
-
+pub const RUNTIME_ARTIFACT_CONFLICT: &str = "RUNTIME_ARTIFACT_CONFLICT";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowRuntimeArtifactRecord {
     pub id: String,
@@ -18,8 +18,9 @@ pub struct WorkflowRuntimeArtifactRecord {
     pub created_at: DateTime<Utc>,
 }
 
-/// Exact runtime package provenance. The workflow-version/recipe/package
-/// tuple is the authoritative identity; legacy package columns are not used.
+/// Exact runtime package provenance. A workflow-version/recipe pair has one
+/// canonical runtime package; legacy package columns are not used to resolve
+/// that pair.
 #[async_trait]
 pub trait WorkflowRuntimeArtifactRepository: Send + Sync {
     async fn find_exact(

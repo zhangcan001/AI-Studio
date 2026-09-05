@@ -17,6 +17,7 @@ use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::application::workflow_onboarding_service::{
     dynamic_binding_target_labels, CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
 };
+use crate::application::workflow_registry_service::WorkflowRegistryService;
 use crate::compiler::{
     CompileError, CompiledMediaMapping, FinalCompiledWorkflowValidator, RecipeParser,
     WorkflowCompiler,
@@ -57,6 +58,40 @@ pub struct CreateGenerationRequest {
 pub struct ReferenceManifest {
     pub input_key: String,
     pub asset_ids: Vec<AssetId>,
+}
+
+/// Stable error code for a request that targets a Workflow Version/Recipe
+/// pair which is no longer admitted for a new generation.
+pub const WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION: &str = "WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION";
+
+/// Admission boundary for new generation creation.
+///
+/// This is deliberately separate from `GenerationDefinitionRepository`:
+/// historical definitions must remain readable for task history, while new
+/// tasks may only use an active Registry pair with an exact runtime artifact.
+/// The production composition root supplies `WorkflowRegistryService`; the
+/// optional seam keeps the existing isolated generation fixtures and history
+/// readers source-compatible until they opt into Registry admission.
+#[async_trait::async_trait]
+pub trait NewGenerationAdmission: Send + Sync {
+    async fn is_available_for_new_generation(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<bool, RepositoryError>;
+}
+
+#[async_trait::async_trait]
+impl NewGenerationAdmission for WorkflowRegistryService {
+    async fn is_available_for_new_generation(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<bool, RepositoryError> {
+        self.is_available(workflow_version_id, recipe_id)
+            .await
+            .map_err(|error| RepositoryError::database(error.to_string()))
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -150,6 +185,7 @@ pub struct GenerationService {
     submission_gate: Arc<Semaphore>,
     compiler: WorkflowCompiler,
     workflow_compatibility_service: Option<Arc<WorkflowOnboardingService>>,
+    new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
 }
 
 enum CancelResolution {
@@ -196,6 +232,7 @@ impl GenerationService {
             submission_gate: Arc::new(Semaphore::new(1)),
             compiler: WorkflowCompiler,
             workflow_compatibility_service: None,
+            new_generation_admission: None,
         }
     }
 
@@ -214,6 +251,18 @@ impl GenerationService {
         service: Arc<WorkflowOnboardingService>,
     ) -> Self {
         self.workflow_compatibility_service = Some(service);
+        self
+    }
+
+    /// Enable the explicit Registry admission check used by production
+    /// generation entry points. The check runs before definition lookup and
+    /// Task creation, so a rejected pair cannot create task/asset/execution
+    /// side effects. Historical definition lookup remains unchanged.
+    pub fn with_new_generation_admission(
+        mut self,
+        admission: Arc<dyn NewGenerationAdmission>,
+    ) -> Self {
+        self.new_generation_admission = Some(admission);
         self
     }
 
@@ -352,6 +401,21 @@ impl GenerationService {
         ),
         GenerationServiceError,
     > {
+        if let Some(admission) = &self.new_generation_admission {
+            let available = admission
+                .is_available_for_new_generation(&request.workflow_version_id, &request.recipe_id)
+                .await?;
+            if !available {
+                return Err(GenerationServiceError::ExecutionFailed {
+                    code: WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION.to_owned(),
+                    message: format!(
+                        "workflow version {} and recipe {} are unavailable for a new generation",
+                        request.workflow_version_id, request.recipe_id
+                    ),
+                });
+            }
+        }
+
         let definition = self
             .definition_repository
             .find(&request.workflow_version_id, &request.recipe_id)

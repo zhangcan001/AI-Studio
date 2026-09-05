@@ -67,7 +67,11 @@ impl WorkflowLibrarySource for FileSystemWorkflowLibrarySource {
                 message: format!("read workflow package entry: {error}"),
             })?;
             let path = entry.path();
-            if path.is_dir() {
+            let is_internal_directory = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with('.'));
+            if path.is_dir() && !is_internal_directory {
                 packages.push(Self::read_package(path));
             }
         }

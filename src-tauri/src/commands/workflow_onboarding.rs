@@ -78,6 +78,7 @@ pub async fn workflow_onboarding_pick_api_workflow(
         .map_err(map_onboarding_error)
 }
 
+/// INTERNAL_ADVANCED_EDITING_ONLY. Formal import uses analyze followed by explicit commit.
 #[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_onboarding_auto_import_api_workflow(
     app_handle: AppHandle,
@@ -95,6 +96,7 @@ pub async fn workflow_onboarding_auto_import_api_workflow(
         .map_err(map_onboarding_error)
 }
 
+/// INTERNAL_ADVANCED_EDITING_ONLY. Formal import uses analyze followed by explicit commit.
 #[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_onboarding_auto_confirm(
     state: State<'_, AppState>,
@@ -207,6 +209,7 @@ pub fn workflow_onboarding_validate(
         .map_err(map_onboarding_error)
 }
 
+/// INTERNAL_ADVANCED_EDITING_ONLY. Formal import uses analyze followed by explicit commit.
 #[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_onboarding_publish(
     state: State<'_, AppState>,

@@ -89,6 +89,7 @@ use application::{
     workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::WorkflowOnboardingService,
     workflow_registry_service::WorkflowRegistryService,
+    workflow_workspace_query_service::WorkflowWorkspaceQueryService,
 };
 use infrastructure::logging::LoggingStatus;
 use infrastructure::{
@@ -458,7 +459,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     clock.clone(),
                 )
                 .with_registry_repository(workflow_registry_repository)
-                .with_runtime_artifact_repository(runtime_artifact_repository.clone()),
+                .with_runtime_artifact_repository(runtime_artifact_repository.clone())
+                .with_package_store(package_store.clone()),
             );
             let project_workflow_binding_service = Arc::new(
                 ProjectWorkflowBindingService::new(
@@ -486,13 +488,22 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_onboarding_service.clone(),
                 runtime_repository.clone(),
                 runtime_state_repository.clone(),
-                package_store,
+                package_store.clone(),
                 clock.clone(),
             )
             .with_project_workflow_binding_repository(
                 project_workflow_binding_repository.clone(),
             )
             .with_runtime_artifact_repository(runtime_artifact_repository.clone()));
+            let workflow_workspace_query_service = Arc::new(WorkflowWorkspaceQueryService::new(
+                workflow_registry_service.clone(),
+                runtime_repository.clone(),
+                runtime_state_repository.clone(),
+                runtime_artifact_repository.clone(),
+                package_store.clone(),
+                workflow_onboarding_service.clone(),
+                clock.clone(),
+            ));
             let task_update_sink: Arc<dyn application::ports::TaskUpdateSink> =
                 Arc::new(TauriTaskUpdateSink::new(app.handle().clone()));
             let execution_registry = TaskExecutionRegistry::default();
@@ -508,6 +519,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     clock.clone(),
                 )
                 .with_workflow_compatibility_service(workflow_onboarding_service.clone())
+                .with_new_generation_admission(workflow_registry_service.clone())
                 .with_task_update_sink(task_update_sink.clone())
                 .with_execution_registry(execution_registry.clone()),
             );
@@ -840,6 +852,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 generation_service,
                 workflow_library_service,
                 workflow_registry_service,
+                workflow_workspace_query_service,
                 workflow_onboarding_service,
                 workflow_lifecycle_service,
                 workflow_benchmark_service,
@@ -1064,6 +1077,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_restore,
             commands::workflow_registry::workflow_purge,
             commands::workflow_registry::workflow_rerecognize,
+            commands::workflow_workspace::workflow_workspace_query,
             commands::workflow_lifecycle::workflow_runtime_workspace_list,
             commands::workflow_lifecycle::workflow_runtime_workspace_refresh,
             commands::workflow_lifecycle::workflow_runtime_diagnostics,

@@ -71,11 +71,19 @@ pub async fn workflow_recheck_all_capabilities(
     Vec<crate::application::workflow_lifecycle_service::WorkflowCapabilityBatchView>,
     AppError,
 > {
-    state
+    let checked = state
         .workflow_lifecycle_service
         .recheck_all_capabilities()
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    for item in &checked {
+        state
+            .workflow_workspace_query_service
+            .cache_capability_for_version(&item.workflow_version_id, item.capability.clone())
+            .await
+            .map_err(|error| AppError::workflow_onboarding(error.to_string()))?;
+    }
+    Ok(checked)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -96,11 +104,17 @@ pub async fn workflow_recheck_capability(
     state: State<'_, AppState>,
     workflow_version_id: String,
 ) -> Result<crate::application::workflow_onboarding_service::CapabilityCheckView, AppError> {
-    state
+    let capability = state
         .workflow_lifecycle_service
         .recheck_capability(&workflow_version_id)
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    state
+        .workflow_workspace_query_service
+        .cache_capability_for_version(&workflow_version_id, capability.clone())
+        .await
+        .map_err(|error| AppError::workflow_onboarding(error.to_string()))?;
+    Ok(capability)
 }
 
 #[tauri::command(rename_all = "camelCase")]

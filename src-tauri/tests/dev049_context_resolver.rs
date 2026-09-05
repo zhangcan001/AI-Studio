@@ -194,7 +194,7 @@ async fn dev049_fresh_001_to_025_creates_only_the_scope_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        28
+        29
     );
     for table in [
         "consistency_scope_profile_bindings",
@@ -230,7 +230,7 @@ async fn dev049_022_to_025_preserves_022_rows_and_leaves_scope_tables_empty() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        28
+        29
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = 'dev049-project'",)

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createGeneration } from "../../services/tauriClient";
 import {
-  checkOnboardingCapability,
   analyzeWorkflowImport,
+  checkOnboardingCapability,
   cleanWorkflowStaging,
   commitWorkflowImport,
   compareWorkflowVersions,
-  createGeneration,
   discardOnboarding,
   deleteWorkflow,
   deleteWorkflowVersion,
@@ -14,13 +14,8 @@ import {
   getOnboardingDraft,
   importWorkflowPackageBackup,
   inspectWorkflowDeletion,
-  listWorkflowRegistry,
-  listWorkflowProductionWorkspace,
-  refreshWorkflowProductionWorkspace,
   repairBuiltinWorkflowPackage,
   pickApiWorkflow,
-  autoConfirmOnboarding,
-  publishOnboarding,
   recheckWorkflowCapability,
   recheckAllWorkflowCapabilities,
   removeWorkflow,
@@ -36,7 +31,8 @@ import {
   setOnboardingMetadata,
   setOnboardingOutputMapping,
   validateOnboarding,
-} from "../../services/tauriClient";
+  queryWorkflowWorkspace,
+} from "../../services/workflowClient";
 import { useWorkflowOnboardingStore, type WorkflowOnboardingStep } from "../../stores/workflowOnboardingStore";
 import type {
   WorkflowFieldType,
@@ -51,20 +47,25 @@ import type {
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingOutputMappingRequest,
   WorkflowProductionWorkspaceView,
-  WorkflowRegistryRecipeView,
   WorkflowRegistryVersionView,
-  WorkflowRegistryView,
-  WorkflowRegistryResponse,
   WorkflowDeletionResult,
   WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import { formatUiError, toUserMessage } from "../../i18n/errorMessages";
-import { formatDateTime, stagingStatusLabel, workflowDisplayName } from "../../i18n/statusLabels";
-import { WorkflowSmartImport, workflowImportFormat } from "./WorkflowSmartImport";
+import { formatDateTime } from "../../i18n/statusLabels";
+import { WorkflowImportController } from "./WorkflowImportController";
+import { workflowImportFormat } from "./WorkflowSmartImport";
 import type { WorkflowImportErrorView } from "./WorkflowImportIssues";
 import { WorkflowDeleteDialog } from "./WorkflowDeleteDialog";
-import { useWorkflowWorkspaceStore } from "../../stores/workflowWorkspaceStore";
+import {
+  normalizeWorkspaceItems,
+  type WorkflowWorkspaceItem,
+} from "./workflowWorkspaceAdapters";
+import { WorkflowRegistryActions } from "./WorkflowRegistryActions";
+import { WorkflowWorkspaceList } from "./WorkflowWorkspaceList";
+
+export { latestCatalogRecipeForWorkflowItem } from "./workflowWorkspaceAdapters";
 
 interface Props {
   projectId?: string;
@@ -76,57 +77,10 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
 }
 
-interface ParsedSemver {
-  core: [number, number, number];
-  prerelease: string[];
-}
-
-function parseSemver(value?: string): ParsedSemver | undefined {
-  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value?.trim() ?? "");
-  if (!match) return undefined;
-  const core = match.slice(1, 4).map(Number) as [number, number, number];
-  if (core.some((part) => !Number.isSafeInteger(part))) return undefined;
-  const prerelease = match[4]?.split(".") ?? [];
-  if (prerelease.some((part) => /^\d+$/.test(part) && ((part.length > 1 && part.startsWith("0")) || !Number.isSafeInteger(Number(part))))) return undefined;
-  return { core, prerelease };
-}
-
-function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
-  for (let index = 0; index < left.core.length; index += 1) {
-    if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index];
-  }
-  if (!left.prerelease.length || !right.prerelease.length) return left.prerelease.length === right.prerelease.length ? 0 : left.prerelease.length ? -1 : 1;
-  for (let index = 0; index < Math.min(left.prerelease.length, right.prerelease.length); index += 1) {
-    const leftPart = left.prerelease[index];
-    const rightPart = right.prerelease[index];
-    if (leftPart === rightPart) continue;
-    const leftNumeric = /^\d+$/.test(leftPart);
-    const rightNumeric = /^\d+$/.test(rightPart);
-    if (leftNumeric && rightNumeric) return Number(leftPart) - Number(rightPart);
-    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
-    return leftPart < rightPart ? -1 : 1;
-  }
-  return left.prerelease.length - right.prerelease.length;
-}
-
 function nextWorkflowVersion(value: string): string {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
   if (!match) return "1.0.1";
   return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
-}
-
-export function latestCatalogRecipeForWorkflowItem(item: WorkflowProductionWorkspaceView, catalog: RecipeViewModel[]): RecipeViewModel | undefined {
-  if (!item.workflowVersionId) return undefined;
-  const itemRecipes = new Map(item.recipes.map((recipe) => [recipe.recipeId, recipe.version]));
-  return catalog
-    .filter((candidate) => candidate.workflowVersionId === item.workflowVersionId && itemRecipes.has(candidate.recipeId))
-    .map((candidate) => ({
-      candidate,
-      version: parseSemver(candidate.recipeVersion) ?? parseSemver(itemRecipes.get(candidate.recipeId)),
-    }))
-    .filter((entry): entry is { candidate: RecipeViewModel; version: ParsedSemver } => Boolean(entry.version))
-    .sort((left, right) => compareSemver(right.version, left.version) || left.candidate.recipeId.localeCompare(right.candidate.recipeId))
-    .map((entry) => entry.candidate)[0];
 }
 
 const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
@@ -204,18 +158,6 @@ interface WorkflowDeletionTarget {
   mode: "REMOVE" | "PURGE";
 }
 
-interface WorkflowWorkspaceItem extends WorkflowProductionWorkspaceView {
-  registryBacked: boolean;
-  sourceKind: string;
-  libraryState: string;
-  currentVersionId?: string;
-  currentRecipe?: WorkflowRegistryRecipeView;
-  versions: WorkflowRegistryVersionView[];
-  registryRecipes: WorkflowRegistryRecipeView[];
-  projectUsageCount: number;
-  historyCount: number;
-  removedAt?: string;
-}
 
 function workflowImportErrorView(error: unknown): WorkflowImportErrorView {
   const formatted = formatUiError(error);
@@ -239,152 +181,10 @@ function workflowImportErrorView(error: unknown): WorkflowImportErrorView {
   };
 }
 
-function normalizedState(value: string | undefined, fallback: "ACTIVE" | "REMOVED"): string {
-  const state = value?.trim().toUpperCase();
-  return state === "REMOVED" ? "REMOVED" : state === "ACTIVE" ? "ACTIVE" : fallback;
-}
-
-function registryRecipeSummary(recipe: WorkflowRegistryRecipeView, workflowVersionId?: string): WorkflowWorkspaceItem["recipes"][number] {
-  return {
-    recipeId: recipe.recipeId,
-    version: recipe.version ?? recipe.recipeVersion ?? "—",
-    inputCount: recipe.inputCount ?? 0,
-    outputCount: recipe.outputCount ?? 0,
-    presetCount: recipe.presetCount,
-    ...(workflowVersionId ? { workflowVersionId } : {}),
-  };
-}
-
-function registryVersion(item: WorkflowRegistryView, version: WorkflowRegistryVersionView | undefined): WorkflowRegistryVersionView | undefined {
-  if (version) return version;
-  if (item.currentVersionId) return item.versions?.find((candidate) => candidate.workflowVersionId === item.currentVersionId);
-  return item.versions?.[0];
-}
-
-function normalizeRegistryItem(item: WorkflowRegistryView): WorkflowWorkspaceItem {
-  const versions = item.versions ?? [];
-  const current = registryVersion(item, item.currentVersion ?? undefined);
-  const allRecipes = item.recipes?.length
-    ? item.recipes
-    : versions.flatMap((version) => (version.recipes ?? []).map((recipe) => ({ ...recipe, workflowVersionId: recipe.workflowVersionId ?? version.workflowVersionId })));
-  const currentVersionId = current?.workflowVersionId ?? item.currentVersionId ?? undefined;
-  const currentRecipes = current?.recipes?.length
-    ? current.recipes.map((recipe) => ({ ...recipe, workflowVersionId: recipe.workflowVersionId ?? currentVersionId }))
-    : allRecipes.filter((recipe) => !recipe.workflowVersionId || recipe.workflowVersionId === currentVersionId);
-  const currentRecipe = item.currentRecipe
-    ?? currentRecipes[0]
-    ?? allRecipes.find((recipe) => !recipe.workflowVersionId || recipe.workflowVersionId === currentVersionId);
-  const sourceKind = item.sourceKind?.trim().toUpperCase() || "USER";
-  const libraryState = normalizedState(item.libraryState, "ACTIVE");
-  const packageName = currentRecipe?.packageName ?? current?.packageName ?? `${item.workflowId}-runtime`;
-  const activeTasks = item.activeTaskCount ?? current?.activeTasks ?? 0;
-  const totalTasks = item.totalTaskCount ?? current?.totalTasks ?? item.historyCount ?? 0;
-  const capability = current?.capability ?? item.capability ?? "NOT_CHECKED";
-  const readiness = current?.readiness ?? (capability === "READY" ? "READY" : "BLOCKED");
-  const archived = libraryState === "REMOVED";
-  return {
-    packageName,
-    builtin: sourceKind === "PRODUCT",
-    source: sourceKind,
-    archived,
-    archivedAt: item.removedAt ?? undefined,
-    packageStatus: currentRecipe?.packageStatus ?? current?.packageStatus ?? "VALID",
-    workflowId: item.workflowId,
-    workflowVersionId: currentVersionId,
-    name: item.name,
-    category: undefined,
-    mode: undefined,
-    workflowVersion: current?.version ?? current?.workflowVersion,
-    workflowSha256: current?.rawSha256 ?? current?.workflowSha256 ?? "",
-    recipeSha256: currentRecipe?.recipeSha256,
-    enabled: currentRecipe?.enabled ?? current?.enabled ?? !archived,
-    capability,
-    readiness,
-    readinessReasons: current?.readinessReasons ?? [],
-    capabilityIssues: current?.capabilityIssues ?? item.capabilityIssues ?? [],
-    nodeCount: current?.nodeCount ?? 0,
-    recipes: currentRecipes.map((recipe) => registryRecipeSummary(recipe, currentVersionId)),
-    activeTasks,
-    totalTasks,
-    hasSuccessfulRun: item.hasSuccessfulRun ?? current?.hasSuccessfulRun ?? false,
-    latestSuccessAt: item.latestSuccessAt ?? current?.latestSuccessAt,
-    latestFailureAt: item.latestFailureAt ?? current?.latestFailureAt,
-    liveVerifiedAt: item.liveVerifiedAt ?? current?.liveVerifiedAt,
-    diagnostics: current?.diagnostics ?? [],
-    registryBacked: true,
-    sourceKind,
-    libraryState,
-    currentVersionId,
-    currentRecipe,
-    versions,
-    registryRecipes: allRecipes,
-    projectUsageCount: item.projectUsageCount ?? 0,
-    historyCount: item.historyCount ?? totalTasks,
-    removedAt: item.removedAt ?? undefined,
-  };
-}
-
-function normalizeLegacyItem(item: WorkflowProductionWorkspaceView): WorkflowWorkspaceItem {
-  const workflowId = item.workflowId ?? item.packageName;
-  const sourceKind = item.builtin || item.source?.trim().toUpperCase() === "PRODUCT" ? "PRODUCT" : "USER";
-  const recipeList = item.recipes.map((recipe) => ({
-    recipeId: recipe.recipeId,
-    workflowVersionId: item.workflowVersionId,
-    version: recipe.version,
-    inputCount: recipe.inputCount,
-    outputCount: recipe.outputCount,
-    presetCount: recipe.presetCount,
-  }));
-  const version: WorkflowRegistryVersionView = {
-    workflowVersionId: item.workflowVersionId ?? `${workflowId}:version`,
-    workflowId,
-    version: item.workflowVersion,
-    workflowVersion: item.workflowVersion,
-    rawSha256: item.workflowSha256,
-    workflowSha256: item.workflowSha256,
-    packageName: item.packageName,
-    packageStatus: item.packageStatus,
-    enabled: item.enabled,
-    archived: item.archived,
-    archivedAt: item.archivedAt,
-    capability: item.capability,
-    capabilityIssues: item.capabilityIssues,
-    readiness: item.readiness,
-    readinessReasons: item.readinessReasons,
-    nodeCount: item.nodeCount,
-    activeTasks: item.activeTasks,
-    totalTasks: item.totalTasks,
-    hasSuccessfulRun: item.hasSuccessfulRun,
-    latestSuccessAt: item.latestSuccessAt,
-    latestFailureAt: item.latestFailureAt,
-    liveVerifiedAt: item.liveVerifiedAt,
-    diagnostics: item.diagnostics,
-    recipes: recipeList,
-  };
-  return {
-    ...item,
-    workflowId,
-    registryBacked: false,
-    sourceKind,
-    libraryState: item.archived ? "REMOVED" : "ACTIVE",
-    currentVersionId: item.workflowVersionId,
-    currentRecipe: recipeList[recipeList.length - 1],
-    versions: [version],
-    registryRecipes: recipeList,
-    projectUsageCount: 0,
-    historyCount: item.totalTasks,
-  };
-}
-
-function registryItems(response: WorkflowRegistryView[] | WorkflowRegistryResponse): WorkflowRegistryView[] {
-  return Array.isArray(response) ? response : response.items;
-}
 
 export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenTask }: Props) {
-  const cachedWorkspace = useWorkflowWorkspaceStore((state) => state.workspace);
-  const setCachedWorkspace = useWorkflowWorkspaceStore((state) => state.setWorkspace);
-  const [items, setItems] = useState<WorkflowWorkspaceItem[]>(() => (cachedWorkspace?.items ?? []).map(normalizeLegacyItem));
-  const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>(() => cachedWorkspace?.staging ?? []);
+  const [items, setItems] = useState<WorkflowWorkspaceItem[]>([]);
+  const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "available" | "issues" | "archived">("all");
   const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
@@ -398,7 +198,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
   const [autoPlan, setAutoPlan] = useState<WorkflowAutoOnboardingPlanView>();
-  const [analysisMode, setAnalysisMode] = useState<"V2" | "LEGACY">("V2");
   const [autoImportError, setAutoImportError] = useState<WorkflowImportErrorView>();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [parameterDraft, setParameterDraft] = useState<WorkflowOnboardingDraftView>();
@@ -424,41 +223,19 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const importBusyRef = useRef(false);
 
   const loadWorkspace = useCallback(async (mode: "fast" | "refresh" = "fast") => {
-    const cached = useWorkflowWorkspaceStore.getState().workspace;
-    const hasCachedWorkspace = Boolean(cached);
-    if (cached) {
-      setItems(cached.items.map(normalizeLegacyItem));
-      setStaging(cached.staging);
-    }
-    setWorkspaceLoading(mode === "refresh" || !hasCachedWorkspace);
+    setWorkspaceLoading(true);
     setWorkspaceError(undefined);
     try {
-      try {
-        const registry = await listWorkflowRegistry();
-        const nextItems = registryItems(registry).map(normalizeRegistryItem);
-        const nextStaging = Array.isArray(registry) ? [] : (registry.staging ?? []).map((entry) => ({ ...entry }));
-        setItems(nextItems);
-        setStaging(nextStaging);
-        setCachedWorkspace({ items: nextItems, staging: nextStaging });
-        return;
-      } catch {
-        // DEV-083 keeps the package workspace as a compatibility fallback until the V2 command is installed.
-      }
-      const workspace = mode === "refresh"
-        ? await refreshWorkflowProductionWorkspace()
-        : await listWorkflowProductionWorkspace();
-      const nextItems = workspace.items.map(normalizeLegacyItem);
+      const workspace = await queryWorkflowWorkspace(mode === "refresh" ? "REFRESH" : "FAST");
+      const nextItems = normalizeWorkspaceItems(workspace.items);
       setItems(nextItems);
       setStaging(workspace.staging);
-      setCachedWorkspace({ items: nextItems, staging: workspace.staging });
     } catch (loadError: unknown) {
-      if (!hasCachedWorkspace) {
-        setWorkspaceError(toUserMessage(loadError));
-      }
+      setWorkspaceError(toUserMessage(loadError));
     } finally {
       setWorkspaceLoading(false);
     }
-  }, [setCachedWorkspace]);
+  }, []);
 
   useEffect(() => {
     void loadWorkspace("fast");
@@ -498,7 +275,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     reset();
     setLoading(true);
     setAutoPlan(undefined);
-    setAnalysisMode("V2");
     setAutoImportError(undefined);
     setShowAdvanced(false);
     setPublished(undefined);
@@ -519,7 +295,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
     reset();
     setAutoPlan(undefined);
-    setAnalysisMode("V2");
     setAutoImportError(undefined);
     setShowAdvanced(false);
     setPublished(undefined);
@@ -534,9 +309,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       const imported = await pickApiWorkflow(existingWorkflowId);
       if (imported) {
         await discardReplacedDraft(previousDraftId, imported.draftId);
-      resetImportViewForNewWorkflow();
-      setAutoPlan(undefined);
-      setAnalysisMode("V2");
+        resetImportViewForNewWorkflow();
+        setAutoPlan(undefined);
         setAutoImportError(undefined);
         setShowAdvanced(true);
         setDraft(imported);
@@ -561,7 +335,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       reset();
       setPublished(undefined);
       setAutoPlan(undefined);
-      setAnalysisMode("V2");
       setAutoImportError(undefined);
       setShowAdvanced(false);
       setError(toUserMessage(importError));
@@ -581,27 +354,31 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       if (plan) {
         await discardReplacedDraft(previousDraftId, plan.draftId);
         resetImportViewForNewWorkflow();
-        setAutoPlan(plan);
-        setAnalysisMode("V2");
+        // Analysis is read-only. A publish result is never accepted from the
+        // formal analyze endpoint; only commitAnalyzedImport may publish.
+        const analyzedPlan = plan.published || plan.state === "AUTO_PUBLISHED"
+          ? {
+              ...plan,
+              state: "NEEDS_REVIEW" as const,
+              commitRequired: true,
+              published: undefined,
+              message: "识别已完成，请明确点击添加工作流后写入。",
+            }
+          : plan;
+        setAutoPlan(analyzedPlan);
         setShowAdvanced(false);
-        const detectedFormat = workflowImportFormat(plan);
-        if (plan.draftId && (!detectedFormat || detectedFormat === "API")) {
+        const detectedFormat = workflowImportFormat(analyzedPlan);
+        if (analyzedPlan.draftId && (!detectedFormat || detectedFormat === "API")) {
           try {
-            const importedDraft = await getOnboardingDraft(plan.draftId);
+            const importedDraft = await getOnboardingDraft(analyzedPlan.draftId);
             setDraft(importedDraft);
           } catch (draftError) {
-            if (!plan.published) throw draftError;
+            throw draftError;
           }
-        } else if (plan.draftId && detectedFormat && detectedFormat !== "API") {
-          await discardOnboarding(plan.draftId).catch(() => undefined);
+        } else if (analyzedPlan.draftId && detectedFormat && detectedFormat !== "API") {
+          await discardOnboarding(analyzedPlan.draftId).catch(() => undefined);
         }
-        if (plan.published) {
-          setNotice("工作流已添加到列表，可在项目设置中选择。");
-          await loadWorkspace("refresh");
-          await onCatalogChanged();
-        } else {
-          setNotice(undefined);
-        }
+        setNotice(undefined);
       } else {
         await discardReplacedDraft(previousDraftId);
         resetImportViewForNewWorkflow();
@@ -611,7 +388,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       reset();
       setPublished(undefined);
       setAutoPlan(undefined);
-      setAnalysisMode("V2");
       setShowAdvanced(false);
       setError(undefined);
       setAutoImportError(workflowImportErrorView(importError));
@@ -1029,7 +805,12 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         setWorkspaceError(validation.issues.map(localizeWorkflowIssue).join("；"));
         return;
       }
-      const result = await publishOnboarding(currentDraft.draftId);
+      const result = await commitWorkflowImport({
+        draftId: currentDraft.draftId,
+        action: "NEW_RECIPE",
+        workflowId: currentDraft.manifest.workflowId,
+        setCurrent: false,
+      });
       const publishedDraftId = currentDraft.draftId;
       try {
         await discardOnboarding(publishedDraftId);
@@ -1103,26 +884,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       : current.length < 2 ? [...current, item.workflowVersionId!] : [current[1], item.workflowVersionId!]);
   }
 
-  const visibleItems = items.filter((item) => {
-    const matchesSearch = !search.trim() || (item.name ?? item.packageName).toLowerCase().includes(search.trim().toLowerCase());
-    const removed = item.libraryState === "REMOVED" || item.archived;
-    const needsAction = !removed && (
-      !item.enabled
-      || item.packageStatus !== "VALID"
-      || item.capability !== "READY"
-      || item.readiness !== "READY"
-      || item.diagnostics.length > 0
-    );
-    const matchesFilter = filter === "archived"
-      ? removed
-      : filter === "available"
-        ? !removed && !needsAction
-        : filter === "issues"
-          ? !removed && needsAction
-          : !removed;
-    return matchesSearch && matchesFilter;
-  });
-
   async function checkCapability() {
     if (!draft) return;
     await runDraftAction(async () => {
@@ -1144,7 +905,11 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   async function publishDraft() {
     if (!draft || !draft.validation.readyToPublish) return;
     await runDraftAction(async () => {
-      const result = await publishOnboarding(draft.draftId);
+      const result = await commitWorkflowImport({
+        draftId: draft.draftId,
+        action: "NEW_WORKFLOW",
+        setCurrent: false,
+      });
       setPublished({ workflowId: result.workflowId, recipeId: result.recipeId });
       setNotice(`已发布 ${result.packageName}，运行目录已刷新。`);
       await loadWorkspace("refresh");
@@ -1234,21 +999,11 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   async function resumeAutoImport() {
     if (!autoPlan) return;
     await runDraftAction(async () => {
-      if (analysisMode === "V2") {
-        const nextPlan = await analyzeWorkflowImport(autoPlan.existingWorkflowId);
-        if (!nextPlan) return;
-        setAutoPlan(nextPlan);
-        setNotice(nextPlan.message || "识别已刷新，请确认后再添加。");
-        return;
-      }
-      const nextPlan = await autoConfirmOnboarding(autoPlan.draftId);
+      const nextPlan = await analyzeWorkflowImport(autoPlan.existingWorkflowId);
+      if (!nextPlan) return;
       setAutoPlan(nextPlan);
-      setDraft(await getOnboardingDraft(nextPlan.draftId));
-      setNotice(nextPlan.message);
-      if (nextPlan.published) {
-        await loadWorkspace("refresh");
-        await onCatalogChanged();
-      }
+      if (nextPlan.draftId) setDraft(await getOnboardingDraft(nextPlan.draftId));
+      setNotice(nextPlan.message || "识别已刷新，请确认后再添加。");
     });
   }
 
@@ -1317,18 +1072,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           targetInput: candidate.inputName,
         });
       }
-      if (analysisMode === "V2") {
-        setNotice("已记录这项选择，请重新分析工作流后再添加。");
-        return;
-      }
-      const nextPlan = await autoConfirmOnboarding(autoPlan.draftId);
-      setAutoPlan(nextPlan);
-      setDraft(await getOnboardingDraft(nextPlan.draftId));
-      setNotice(nextPlan.message);
-      if (nextPlan.published) {
-        await loadWorkspace("refresh");
-        await onCatalogChanged();
-      }
+      setNotice("已记录这项选择，请重新分析工作流后再添加。");
     });
   }
 
@@ -1425,18 +1169,17 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           <h2>工作流管理</h2>
           <p className="section-description">导入 ComfyUI API 工作流，配置安全输入后发布工作流运行包。</p>
         </div>
-        <div className="workflow-workspace-actions">
-          <button type="button" onClick={() => void loadWorkspace("refresh")} disabled={workspaceLoading}>{workspaceLoading ? "正在刷新..." : "刷新"}</button>
-          <button type="button" onClick={() => void smartImportWorkflow()} disabled={loading || importBusyRef.current}>+ 添加工作流</button>
-          <details className="workflow-advanced-actions">
-            <summary>更多</summary>
-            <div className="workflow-advanced-actions-content">
-              <button type="button" className="quiet-button" onClick={() => void recheckAllVersions()} disabled={checkingAll || workspaceLoading}>{checkingAll ? "检查中..." : "检查全部兼容性"}</button>
-              <button type="button" className="quiet-button" onClick={() => void importWorkflow()} disabled={loading || importBusyRef.current}>手动配置工作流</button>
-              <button type="button" className="quiet-button" onClick={() => void importBackup()} disabled={loading || importBusyRef.current}>导入工作流备份</button>
-            </div>
-          </details>
-        </div>
+        <WorkflowRegistryActions
+          loading={loading}
+          workspaceLoading={workspaceLoading}
+          checkingAll={checkingAll}
+          importBusy={importBusyRef.current}
+          onRefresh={() => void loadWorkspace("refresh")}
+          onAdd={() => void smartImportWorkflow()}
+          onCheckAll={() => void recheckAllVersions()}
+          onManualImport={() => void importWorkflow()}
+          onImportBackup={() => void importBackup()}
+        />
       </div>
 
       <section className="workflow-import-quality" aria-label="工作流导入质量门">
@@ -1456,7 +1199,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       {error && <p className="error-message" role="alert">{error}</p>}
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
 
-      <WorkflowSmartImport
+      <WorkflowImportController
         plan={autoPlan}
         importError={autoImportError}
         draft={draft}
@@ -1473,7 +1216,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onCommitImport={(action) => void commitAnalyzedImport(action)}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
         onRetry={() => void smartImportWorkflow()}
-        onCancel={() => void returnToWorkflowList()}
         onReturnToList={() => void returnToWorkflowList()}
       />
 
@@ -1484,116 +1226,37 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         <div><span>阻塞诊断</span><strong>{items.filter((item) => item.libraryState !== "REMOVED" && !item.archived && item.readiness === "BLOCKED").length}</strong></div>
       </section>
 
-      <div className="workflow-production-toolbar">
-        <input aria-label="搜索工作流" placeholder="按名称搜索" value={search} onChange={(event) => setSearch(event.target.value)} />
-        <select aria-label="工作流筛选" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
-          <option value="all">全部</option><option value="available">可用</option><option value="issues">需处理</option><option value="archived">已删除</option>
-        </select>
-        <button type="button" onClick={() => void compareSelected()} disabled={selectedVersions.length !== 2}>比较选中的版本</button>
-      </div>
-      <div className="workflow-catalog" aria-label="工作流运行包">
-        <div className="workflow-catalog-header">
-          <span>比较</span><span>工作流</span><span>当前版本</span><span>当前 Recipe</span><span>来源</span><span>可用性</span><span>运行记录</span><span>操作</span>
-        </div>
-        {workspaceLoading && !visibleItems.length && <p className="loading-state">正在读取已注册工作流…</p>}
-        {visibleItems.map((item) => {
-          const removed = item.libraryState === "REMOVED" || item.archived;
-          const currentVersionId = item.currentVersionId ?? item.workflowVersionId;
-          const currentRecipe = item.currentRecipe ?? item.recipes[item.recipes.length - 1];
-          const versionsForDisplay: WorkflowRegistryVersionView[] = item.versions.length
-            ? item.versions
-            : currentVersionId
-              ? [{ workflowVersionId: currentVersionId, version: item.workflowVersion, workflowId: item.workflowId, recipes: item.recipes }]
-              : [];
-          const recipesForDisplay = item.registryRecipes.length ? item.registryRecipes : item.recipes;
-          const canPurge = item.registryBacked
-            && removed
-            && item.sourceKind === "USER"
-            && item.historyCount === 0
-            && item.projectUsageCount === 0
-            && item.activeTasks === 0
-            && item.versions.every((version) => (version.activeQueueItemCount ?? 0) === 0);
-          return (
-            <article className="workflow-catalog-row" key={item.workflowId ?? item.packageName}>
-              <input type="checkbox" aria-label={`比较 ${workflowDisplayName(item.workflowId, item.name ?? item.packageName)}`} checked={currentVersionId ? selectedVersions.includes(currentVersionId) : false} onChange={() => toggleSelected(item)} disabled={!currentVersionId} />
-              <div className="workflow-row-identity">
-                <strong>{workflowDisplayName(item.workflowId, item.name ?? item.packageName)}</strong>
-                <small>{workflowSourceLabel(item)} · {item.versions.length || 1} 个版本</small>
-              </div>
-              <span>{item.workflowVersion ?? "—"}{removed ? " · 已删除" : ""}</span>
-              <span>{currentRecipe?.version ?? "—"} · {item.recipes.length} 个配方</span>
-              <span>{workflowSourceLabel(item)}</span>
-              <span className={`workflow-capability workflow-capability-${item.capability.toLowerCase()}`}>{formatCapability(item.capability)}</span>
-              <span>{item.hasSuccessfulRun ? "已有成功运行" : `共 ${item.totalTasks} 个任务`}</span>
-              <div className="workflow-row-actions">
-                {!removed && currentVersionId && (() => {
-                  const projectRecipe = latestCatalogRecipeForWorkflowItem(item, catalog);
-                  return <button type="button" className="quiet-button" onClick={() => { if (projectRecipe) void onUseInProject(projectRecipe.workflowId, projectRecipe.recipeId); }} disabled={!projectId || !projectRecipe} title={!projectId ? "请先选择或创建一个项目" : !projectRecipe ? "该工作流尚未进入生产目录" : "在当前项目中配置这个工作流"}>用于当前项目</button>;
-                })()}
-                {currentVersionId && !removed && <button type="button" className="quiet-button" onClick={() => void quickTest(item)} disabled={quickTestingId === currentVersionId}>{quickTestingId === currentVersionId ? "测试中..." : "测试"}</button>}
-                {!removed && <button type="button" className="quiet-button danger-button" onClick={() => void inspectForDeletion(item)} title="从工作流库移除这个工作流">删除</button>}
-                {removed && <button type="button" className="quiet-button" onClick={() => void restoreArchivedWorkflow(item)}>恢复工作流</button>}
-                <details className="workflow-row-menu">
-                  <summary aria-label="更多工作流操作">⋯</summary>
-                  <div className="workflow-row-menu-content">
-                    {!removed && item.registryBacked && <button type="button" className="quiet-button" onClick={() => openRename(item)}>重命名</button>}
-                    {!removed && currentVersionId && item.workflowId && item.workflowVersion && <button type="button" className="quiet-button" onClick={() => void reidentifyWorkflow(item)}>重新识别</button>}
-                    {!removed && currentVersionId && <button type="button" className="quiet-button" onClick={() => void recheckVersion(item)}>重新检查</button>}
-                    {!removed && currentVersionId && <button type="button" className="quiet-button" onClick={() => void duplicateRecipe(item)}>创建新 Recipe 版本</button>}
-                    {!removed && currentVersionId && <button type="button" className="quiet-button workflow-parameter-button" onClick={() => void openParameterExposure(item)}>生产参数</button>}
-                    {currentVersionId && <button type="button" className="quiet-button" onClick={() => void exportWorkflowPackage(currentVersionId)}>导出工作流</button>}
-                    {!removed && currentVersionId && <button type="button" className="quiet-button" onClick={() => void toggleVersion(item)}>{item.enabled ? "停用" : "启用"}</button>}
-                    {canPurge && <button type="button" className="quiet-button danger-button" onClick={() => void inspectForPurge(item)}>彻底删除</button>}
-                  </div>
-                </details>
-              </div>
-              <details className="workflow-catalog-detail">
-                <summary>查看详情</summary>
-                <div className="workflow-detail-grid">
-                  <span>启用状态 <strong>{removed ? "已删除" : item.enabled ? "已启用" : "已停用"}</strong></span>
-                  <span>工作流状态 <strong>{removed ? "已删除" : "活跃"}</strong></span>
-                  <span>来源 <strong>{workflowSourceLabel(item)}</strong></span>
-                  <span>工作流 SHA-256 <strong>{item.workflowSha256 || "—"}</strong></span>
-                  <span>配方 SHA-256 <strong>{item.recipeSha256 ?? "—"}</strong></span>
-                  <span>节点数量 <strong>{item.nodeCount}</strong></span>
-                  <span>当前版本 <strong>{item.workflowVersion ?? "—"}</strong></span>
-                  <span>当前 Recipe <strong>{currentRecipe?.version ?? "—"}</strong></span>
-                  <span>项目使用数 <strong>{item.projectUsageCount}</strong></span>
-                  <span>历史记录数 <strong>{item.historyCount}</strong></span>
-                  <span>活动任务 <strong>{item.activeTasks}</strong></span>
-                  <span>任务总数 <strong>{item.totalTasks}</strong></span>
-                  <span>最近真实验证 <strong>{item.liveVerifiedAt ? formatDateTime(item.liveVerifiedAt) : "尚未验证"}</strong></span>
-                </div>
-                {!!item.readinessReasons.length && <ul className="workflow-issue-list">{item.readinessReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
-                {!!item.capabilityIssues.length && <section className="workflow-dependency-diagnostics"><strong>依赖诊断 · 来源：ComfyUI /object_info</strong><IssueList issues={item.capabilityIssues} /></section>}
-                {!item.capabilityIssues.length && item.packageStatus === "VALID" && <p className="disabled-note">未发现节点依赖问题。模型或文件依赖只有在运行包明确声明并有可验证来源时才会报告，AI Studio 不猜测未声明依赖。</p>}
-                {!!item.diagnostics.length && <ul className="workflow-issue-list">{item.diagnostics.map((diagnostic) => <li key={diagnostic.code}>{toUserMessage({ code: diagnostic.code, message: diagnostic.message })}</li>)}</ul>}
-                {item.diagnostics.some((diagnostic) => diagnostic.code === "BUILTIN_PACKAGE_HASH_MISMATCH") && <button type="button" className="quiet-button danger-button" onClick={() => void repairBuiltinPackage(item)}>修复内置包哈希</button>}
-                <section className="workflow-registry-nested" aria-label="工作流版本">
-                  <h4>Versions</h4>
-                  {versionsForDisplay.map((version) => (
-                    <div className="workflow-registry-version" key={version.workflowVersionId}>
-                      <input type="checkbox" aria-label={`比较版本 ${version.version ?? version.workflowVersion ?? "—"}`} checked={selectedVersions.includes(version.workflowVersionId)} onChange={() => setSelectedVersions((current) => current.includes(version.workflowVersionId) ? current.filter((id) => id !== version.workflowVersionId) : current.length < 2 ? [...current, version.workflowVersionId] : [current[1], version.workflowVersionId])} />
-                      <strong>{version.version ?? version.workflowVersion ?? "—"}{version.workflowVersionId === currentVersionId ? " · 当前" : ""}</strong>
-                      <span>{(version.recipes ?? []).length || (version.workflowVersionId === currentVersionId ? item.recipes.length : 0)} 个 Recipe</span>
-                      {item.registryBacked && !removed && version.workflowVersionId !== currentVersionId && <button type="button" className="quiet-button" onClick={() => void setCurrentVersion(item, version)}>设为当前版本</button>}
-                    </div>
-                  ))}
-                </section>
-                <section className="workflow-registry-nested" aria-label="工作流 Recipe">
-                  <h4>Recipes</h4>
-                  <div className="workflow-recipe-summary">
-                    {recipesForDisplay.map((recipe) => <span key={`${recipe.workflowVersionId ?? currentVersionId ?? "version"}:${recipe.recipeId}`}>配方 {recipe.version ?? ("recipeVersion" in recipe ? recipe.recipeVersion : undefined) ?? "—"} · {recipe.inputCount ?? 0} 个输入 · {recipe.outputCount ?? 0} 个输出</span>)}
-                  </div>
-                </section>
-              </details>
-            </article>
-          );
-        })}
-        {!visibleItems.length && !workspaceLoading && <p className="empty-state">当前筛选条件下没有找到工作流。</p>}
-      </div>
-
-      {!!staging.length && <div className="workflow-diagnostics-panel"><h3>运行诊断</h3>{staging.map((entry) => <div key={entry.stagingId}><span>{stagingStatusLabel(entry.status)}</span><code>{entry.stagingId}</code><button type="button" className="quiet-button" onClick={() => void cleanWorkflowStaging(entry.stagingId)} disabled={entry.inUse}>{entry.inUse ? "使用中" : "清理暂存"}</button></div>)}</div>}
+      <WorkflowWorkspaceList
+        items={items}
+        staging={staging}
+        catalog={catalog}
+        projectId={projectId}
+        search={search}
+        filter={filter}
+        selectedVersions={selectedVersions}
+        workspaceLoading={workspaceLoading}
+        quickTestingId={quickTestingId}
+        onSearchChange={setSearch}
+        onFilterChange={setFilter}
+        onCompareSelected={() => void compareSelected()}
+        onToggleSelected={toggleSelected}
+        onToggleVersionSelection={(workflowVersionId) => setSelectedVersions((current) => current.includes(workflowVersionId) ? current.filter((id) => id !== workflowVersionId) : current.length < 2 ? [...current, workflowVersionId] : [current[1], workflowVersionId])}
+        onUseInProject={(workflowId, recipeId) => void onUseInProject(workflowId, recipeId)}
+        onQuickTest={(item) => void quickTest(item)}
+        onInspectForDeletion={(item) => void inspectForDeletion(item)}
+        onRestore={(item) => void restoreArchivedWorkflow(item)}
+        onRename={openRename}
+        onReidentify={(item) => void reidentifyWorkflow(item)}
+        onRecheck={(item) => void recheckVersion(item)}
+        onDuplicateRecipe={(item) => void duplicateRecipe(item)}
+        onOpenParameters={(item) => void openParameterExposure(item)}
+        onExport={(item) => { if (item.currentVersionId) void exportWorkflowPackage(item.currentVersionId); }}
+        onToggle={(item) => void toggleVersion(item)}
+        onPurge={(item) => void inspectForPurge(item)}
+        onRepairBuiltinPackage={(item) => void repairBuiltinPackage(item)}
+        onSetCurrentVersion={(item, version) => void setCurrentVersion(item, version)}
+        onCleanStaging={(stagingId) => void cleanWorkflowStaging(stagingId)}
+      />
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
 
       {parameterDraft && parameterItem && (
@@ -2173,10 +1836,6 @@ function formatCapability(value: string): string {
     COMFY_OFFLINE: "ComfyUI 离线",
     NOT_CHECKED: "尚未检查",
   }[value] ?? "未知状态";
-}
-
-function workflowSourceLabel(item: WorkflowProductionWorkspaceView): string {
-  return item.builtin || item.source?.trim().toUpperCase() === "PRODUCT" ? "系统自带" : "用户导入";
 }
 
 function fieldTypeLabel(value: WorkflowFieldType): string {

@@ -134,12 +134,12 @@ pub use workflow_package_store::{
     WorkflowPackageBytes, WorkflowPackageStore, WorkflowPackageStoreError,
 };
 pub use workflow_registry_repository::{
-    WorkflowRegistryRecord, WorkflowRegistryRepository, WORKFLOW_SOURCE_PRODUCT,
-    WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
+    WorkflowPurgeReferenceCounts, WorkflowRegistryRecord, WorkflowRegistryRepository,
+    WORKFLOW_SOURCE_PRODUCT, WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
 };
 pub use workflow_run_repository::WorkflowRunRepository;
 pub use workflow_runtime_artifact_repository::{
-    WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
+    WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository, RUNTIME_ARTIFACT_CONFLICT,
     RUNTIME_ARTIFACT_SOURCE_PRODUCT, RUNTIME_ARTIFACT_SOURCE_USER,
 };
 pub use workflow_runtime_repository::{

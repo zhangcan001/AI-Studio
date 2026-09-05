@@ -39,6 +39,7 @@ pub mod workflow_library;
 pub mod workflow_lifecycle;
 pub mod workflow_onboarding;
 pub mod workflow_registry;
+pub mod workflow_workspace;
 
 use crate::{app_state::AppState, error::AppError};
 use serde::Serialize;

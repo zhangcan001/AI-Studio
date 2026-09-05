@@ -338,8 +338,14 @@ pub(crate) fn map_generation_error(error: GenerationServiceError) -> AppError {
         | GenerationServiceError::StreamDisconnected(_)
         | GenerationServiceError::OutputCollection(_)
         | GenerationServiceError::AssetImport(_)
-        | GenerationServiceError::TaskCreatedHook { .. }
-        | GenerationServiceError::ExecutionFailed { .. } => AppError::internal(error.to_string()),
+        | GenerationServiceError::TaskCreatedHook { .. } => AppError::internal(error.to_string()),
+        GenerationServiceError::ExecutionFailed { code, .. }
+            if code
+                == crate::application::generation_service::WORKFLOW_UNAVAILABLE_FOR_NEW_GENERATION =>
+        {
+            AppError::invalid_input(error.to_string())
+        }
+        GenerationServiceError::ExecutionFailed { .. } => AppError::internal(error.to_string()),
     }
 }
 
