@@ -14,6 +14,7 @@ import {
   getOnboardingDraft,
   importWorkflowPackageBackup,
   inspectWorkflowDeletion,
+  inspectWorkflowPurge,
   repairBuiltinWorkflowPackage,
   pickApiWorkflow,
   recheckWorkflowCapability,
@@ -47,6 +48,8 @@ import type {
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingOutputMappingRequest,
   WorkflowProductionWorkspaceView,
+  WorkflowPurgeInspection,
+  WorkflowPurgeResult,
   WorkflowRegistryVersionView,
   WorkflowDeletionResult,
   WorkflowVersionDiffView,
@@ -57,7 +60,7 @@ import { formatDateTime } from "../../i18n/statusLabels";
 import { WorkflowImportController } from "./WorkflowImportController";
 import { workflowImportFormat } from "./WorkflowSmartImport";
 import type { WorkflowImportErrorView } from "./WorkflowImportIssues";
-import { WorkflowDeleteDialog } from "./WorkflowDeleteDialog";
+import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
 import {
   normalizeWorkspaceItems,
   type WorkflowWorkspaceItem,
@@ -154,8 +157,8 @@ interface MetadataDraft {
 
 interface WorkflowDeletionTarget {
   item: WorkflowWorkspaceItem;
-  inspection: WorkflowDeletionInspection;
-  mode: "REMOVE" | "PURGE";
+  inspection: WorkflowDeletionInspection | WorkflowPurgeInspection;
+  mode: WorkflowDeletionMode;
 }
 
 
@@ -468,12 +471,17 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
 
   async function inspectForPurge(item: WorkflowWorkspaceItem) {
     if (!item.registryBacked || item.libraryState !== "REMOVED" || item.sourceKind !== "USER") return;
-    const inspection = registryDeletionInspection(item);
-    if (inspection.activeTaskCount || inspection.activeQueueItemCount || item.historyCount || item.projectUsageCount) {
-      setWorkspaceError("该用户工作流仍有活动任务、历史或项目引用，不能彻底删除。");
-      return;
+    setWorkspaceError(undefined);
+    try {
+      const inspection = await inspectWorkflowPurge(item.workflowId!);
+      if (!inspection.canPurge) {
+        setWorkspaceError(inspection.blockingReasons.join(" ") || "该工作流当前不能彻底删除。");
+        return;
+      }
+      setDeletionTarget({ item, inspection, mode: "PURGE" });
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
     }
-    setDeletionTarget({ item, inspection, mode: "PURGE" });
   }
 
   async function confirmWorkflowDeletion() {
@@ -482,10 +490,27 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     setWorkspaceError(undefined);
     try {
       const { item, mode, inspection } = deletionTarget;
-      let result: Array<WorkflowDeletionResult | { projectBindingCount?: number; action?: string }>;
       if (mode === "PURGE" && item.workflowId) {
-        result = [await purgeWorkflow(item.workflowId)];
-      } else if (item.registryBacked && item.workflowId) {
+        const purgeResult: WorkflowPurgeResult = await purgeWorkflow(item.workflowId);
+        setDeletionTarget(undefined);
+        let refreshFailed = false;
+        try {
+          await loadWorkspace("refresh");
+          await onCatalogChanged();
+        } catch {
+          refreshFailed = true;
+        }
+        setNotice([
+          `${inspection.name} 已永久删除，无法恢复。`,
+          purgeResult.cleanupPending && "部分隔离临时文件尚未清理，不影响删除结果。",
+        ].filter((part): part is string => Boolean(part)).join(" "));
+        if (refreshFailed) setWorkspaceError("工作流已永久删除，但页面刷新未完成，请手动刷新。");
+        return;
+      }
+
+      const removeInspection = inspection as WorkflowDeletionInspection;
+      let result: Array<WorkflowDeletionResult | { projectBindingCount?: number; action?: string }>;
+      if (item.registryBacked && item.workflowId) {
         result = [await removeWorkflow(item.workflowId)];
       } else if (item.workflowId) {
         try {
@@ -500,15 +525,14 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       await loadWorkspace("refresh");
       await onCatalogChanged();
       const projectBindingCount = result.reduce((total, entry) => total + (entry.projectBindingCount ?? 0), 0);
-      const hasHistory = inspection.historicalTaskCount > 0
-        || inspection.productionBatchItemCount > 0
-        || inspection.benchmarkReferenceCount > 0;
-      const permanentlyDeleted = mode === "PURGE";
+      const hasHistory = removeInspection.historicalTaskCount > 0
+        || removeInspection.productionBatchItemCount > 0
+        || removeInspection.benchmarkReferenceCount > 0;
       const message = [
         `${inspection.name} 已删除。`,
         projectBindingCount > 0 && `已解除 ${projectBindingCount} 项项目工作流配置。`,
         hasHistory && "历史生产记录仍然保留。",
-        permanentlyDeleted ? "工作流已永久删除。" : "已从工作流库移除，可在“已删除”中恢复。",
+        "已从工作流库移除，可在“已删除”中恢复。",
       ].filter((part): part is string => Boolean(part)).join(" ");
       setNotice(message);
     } catch (actionError: unknown) {
@@ -1348,6 +1372,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         <WorkflowDeleteDialog
           item={deletionTarget.item}
           inspection={deletionTarget.inspection}
+          mode={deletionTarget.mode}
           deleting={deleting}
           onClose={() => setDeletionTarget(undefined)}
           onConfirm={() => void confirmWorkflowDeletion()}

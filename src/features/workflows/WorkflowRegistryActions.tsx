@@ -1,7 +1,7 @@
 import type { RecipeViewModel } from "../../types/generation";
 import type { WorkflowRegistryVersionView } from "../../types/workflowOnboarding";
 import { workflowDisplayName } from "../../i18n/statusLabels";
-import { type WorkflowWorkspaceItem, canPurgeWorkflow } from "./workflowWorkspaceAdapters";
+import type { WorkflowWorkspaceItem } from "./workflowWorkspaceAdapters";
 
 export interface WorkflowRegistryActionsProps {
   loading: boolean;
@@ -84,7 +84,9 @@ export function WorkflowRegistryRowActions({
   onPurge,
 }: WorkflowRegistryRowActionsProps) {
   const removed = item.libraryState === "REMOVED" || item.archived;
-  const canPurge = item.registryBacked && canPurgeWorkflow(item);
+  const canRequestPurge = item.registryBacked
+    && item.libraryState === "REMOVED"
+    && item.sourceKind === "USER";
   return (
     <div className="workflow-row-actions">
       {!removed && currentVersionId && (() => (
@@ -109,7 +111,7 @@ export function WorkflowRegistryRowActions({
           {!removed && currentVersionId && <button type="button" className="quiet-button workflow-parameter-button" onClick={onOpenParameters}>生产参数</button>}
           {currentVersionId && <button type="button" className="quiet-button" onClick={onExport}>导出工作流</button>}
           {!removed && currentVersionId && <button type="button" className="quiet-button" onClick={onToggle}>{item.enabled ? "停用" : "启用"}</button>}
-          {canPurge && <button type="button" className="quiet-button danger-button" onClick={onPurge}>彻底删除</button>}
+          {canRequestPurge && <button type="button" className="quiet-button danger-button" onClick={onPurge}>彻底删除</button>}
         </div>
       </details>
     </div>

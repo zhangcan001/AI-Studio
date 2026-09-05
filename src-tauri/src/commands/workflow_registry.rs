@@ -7,7 +7,7 @@ use crate::{
             WorkflowOnboardingPublishView,
         },
         workflow_registry_service::{
-            WorkflowRegistryMutationResult, WorkflowRegistryPurgeResult,
+            WorkflowPurgeInspection, WorkflowRegistryMutationResult, WorkflowRegistryPurgeResult,
             WorkflowRegistryRestoreResult, WorkflowRegistryServiceError, WorkflowRegistryView,
         },
     },
@@ -26,7 +26,6 @@ fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
         | WorkflowRegistryServiceError::NotRemoved(message)
         | WorkflowRegistryServiceError::PurgeBlocked(message)
         | WorkflowRegistryServiceError::PurgePackage(message)
-        | WorkflowRegistryServiceError::PurgeCleanupFailed(message)
         | WorkflowRegistryServiceError::CompensationFailed {
             operation: message, ..
         } => AppError::invalid_input(format!("{code}: {message}")),
@@ -234,6 +233,18 @@ pub async fn workflow_purge(
     state
         .workflow_registry_service
         .purge(&workflow_id)
+        .await
+        .map_err(map_registry_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_inspect_purge(
+    state: State<'_, AppState>,
+    workflow_id: String,
+) -> Result<WorkflowPurgeInspection, AppError> {
+    state
+        .workflow_registry_service
+        .inspect_purge(&workflow_id)
         .await
         .map_err(map_registry_error)
 }

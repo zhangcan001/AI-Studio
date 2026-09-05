@@ -3,8 +3,9 @@ use crate::application::{
     ports::{
         Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RepositoryError,
         RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
-        WorkflowPackageStore, WorkflowRegistryRepository, WorkflowRuntimeArtifactRepository,
-        WorkflowRuntimeRepository, WorkflowRuntimeState, WorkflowRuntimeStateRepository,
+        WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowRegistryRepository,
+        WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository, WorkflowRuntimeState,
+        WorkflowRuntimeStateRepository,
     },
     workflow_manifest::WorkflowManifest,
 };
@@ -128,6 +129,30 @@ pub struct WorkflowRegistryPurgeResult {
     pub workflow_id: String,
     pub version_count: u64,
     pub recipe_count: u64,
+    pub committed: bool,
+    pub cleanup_pending: bool,
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowPurgeInspection {
+    pub workflow_id: String,
+    pub name: String,
+    pub source_kind: String,
+    pub library_state: String,
+    pub task_count: u64,
+    pub batch_item_count: u64,
+    pub preset_count: u64,
+    pub template_count: u64,
+    pub shot_config_count: u64,
+    pub benchmark_count: u64,
+    pub binding_count: u64,
+    pub stage_count: u64,
+    pub run_template_count: u64,
+    pub package_count: u64,
+    pub can_purge: bool,
+    pub blocking_reasons: Vec<String>,
 }
 
 /// DB-backed identity candidate used by import/recognition.  The candidate is
@@ -259,6 +284,78 @@ impl WorkflowRegistryService {
             .into_iter()
             .find(|workflow| workflow.workflow_id == workflow_id)
             .ok_or_else(|| WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned()))
+    }
+
+    pub async fn inspect_purge(
+        &self,
+        workflow_id: &str,
+    ) -> Result<WorkflowPurgeInspection, WorkflowRegistryServiceError> {
+        let Some(repository) = &self.registry_repository else {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::database("workflow registry repository is not configured"),
+            ));
+        };
+        let record = repository.get(workflow_id).await?.ok_or_else(|| {
+            WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned())
+        })?;
+        let (all_versions, states) = self.load_runtime().await?;
+        let versions = all_versions
+            .into_iter()
+            .filter(|version| version.workflow_id == workflow_id)
+            .collect::<Vec<_>>();
+        if versions.is_empty() {
+            return Err(WorkflowRegistryServiceError::WorkflowNotFound(
+                workflow_id.to_owned(),
+            ));
+        }
+
+        let references = repository
+            .inspect_purge(workflow_id)
+            .await?
+            .ok_or_else(|| {
+                WorkflowRegistryServiceError::WorkflowNotFound(workflow_id.to_owned())
+            })?;
+        let package_count = self.runtime_artifact_package_count(&versions).await?;
+        let mut blocking_reasons = Vec::new();
+        if record.source_kind != WORKFLOW_SOURCE_USER {
+            blocking_reasons.push("PRODUCT workflows can never be purged".to_owned());
+        }
+        if record.library_state != WORKFLOW_LIBRARY_REMOVED {
+            blocking_reasons.push("workflow must be REMOVED before purge".to_owned());
+        }
+        if versions
+            .iter()
+            .any(|version| !state_for(&states, &version.workflow_version_id).archived)
+        {
+            blocking_reasons
+                .push("every workflow version must be archived before purge".to_owned());
+        }
+        append_purge_reference_reasons(&references, &mut blocking_reasons);
+        if self.runtime_artifact_repository.is_none() {
+            blocking_reasons.push("runtime artifact repository is not configured".to_owned());
+        }
+        if self.package_store.is_none() {
+            blocking_reasons.push("runtime package store is not configured".to_owned());
+        }
+
+        Ok(WorkflowPurgeInspection {
+            workflow_id: record.id,
+            name: record.name,
+            source_kind: record.source_kind,
+            library_state: record.library_state,
+            task_count: references.task_count,
+            batch_item_count: references.batch_item_count,
+            preset_count: references.preset_count,
+            template_count: references.template_count,
+            shot_config_count: references.shot_config_count,
+            benchmark_count: references.benchmark_count,
+            binding_count: references.binding_count,
+            stage_count: references.stage_count,
+            run_template_count: references.run_template_count,
+            package_count,
+            can_purge: blocking_reasons.is_empty(),
+            blocking_reasons,
+        })
     }
 
     /// Return immutable identity candidates from the database Registry.  A
@@ -863,25 +960,34 @@ impl WorkflowRegistryService {
             let operation_id = format!("purge_{}", Uuid::new_v4());
             let mut quarantined = Vec::with_capacity(package_names.len());
             for package_name in &package_names {
-                if let Err(error) = package_store
+                let quarantine = package_store
                     .quarantine_published(&operation_id, package_name)
-                    .await
-                {
-                    let compensation = self
-                        .restore_quarantined_packages(package_store, &operation_id, &quarantined)
-                        .await;
-                    if let Err(compensation) = compensation {
-                        return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
-                            operation: operation_id,
-                            cause: error.to_string(),
-                            compensation,
-                        });
+                    .await;
+                match quarantine {
+                    Ok(WorkflowPackageQuarantineResult::Quarantined) => {
+                        quarantined.push(package_name.clone());
                     }
-                    return Err(WorkflowRegistryServiceError::PurgePackage(
-                        error.to_string(),
-                    ));
+                    Ok(WorkflowPackageQuarantineResult::AlreadyMissing) => {}
+                    Err(error) => {
+                        let compensation = self
+                            .restore_quarantined_packages(
+                                package_store,
+                                &operation_id,
+                                &quarantined,
+                            )
+                            .await;
+                        if let Err(compensation) = compensation {
+                            return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
+                                operation: operation_id,
+                                cause: error.to_string(),
+                                compensation,
+                            });
+                        }
+                        return Err(WorkflowRegistryServiceError::PurgePackage(
+                            error.to_string(),
+                        ));
+                    }
                 }
-                quarantined.push(package_name.clone());
             }
 
             if let Err(error) = repository.purge(workflow_id).await {
@@ -897,15 +1003,29 @@ impl WorkflowRegistryService {
                 }
                 return Err(error.into());
             }
-            if let Err(error) = package_store.remove_quarantine(&operation_id).await {
-                return Err(WorkflowRegistryServiceError::PurgeCleanupFailed(
-                    error.to_string(),
-                ));
-            }
+            let (cleanup_pending, warning) =
+                match package_store.remove_quarantine(&operation_id).await {
+                    Ok(()) => (false, None),
+                    Err(error) => {
+                        tracing::error!(
+                            workflow_id,
+                            operation_id = %operation_id,
+                            error = %error,
+                            "workflow purge committed but quarantine cleanup failed"
+                        );
+                        (
+                            true,
+                            Some("工作流已永久删除，但临时隔离文件清理未完成。".to_owned()),
+                        )
+                    }
+                };
             return Ok(WorkflowRegistryPurgeResult {
                 workflow_id: workflow_id.to_owned(),
                 version_count,
                 recipe_count,
+                committed: true,
+                cleanup_pending,
+                warning,
             });
         }
         let source_kind = source_kind_for(&versions).as_str();
@@ -952,6 +1072,9 @@ impl WorkflowRegistryService {
             workflow_id: workflow_id.to_owned(),
             version_count: versions.len() as u64,
             recipe_count,
+            committed: true,
+            cleanup_pending: false,
+            warning: None,
         })
     }
 
@@ -1026,6 +1149,25 @@ impl WorkflowRegistryService {
             }
         }
         Ok(package_names)
+    }
+
+    async fn runtime_artifact_package_count(
+        &self,
+        versions: &[RuntimeWorkflowVersionRecord],
+    ) -> Result<u64, WorkflowRegistryServiceError> {
+        let Some(repository) = &self.runtime_artifact_repository else {
+            return Ok(0);
+        };
+        let mut package_names = BTreeSet::new();
+        for version in versions {
+            for artifact in repository
+                .list_for_workflow_version(&version.workflow_version_id)
+                .await?
+            {
+                package_names.insert(artifact.package_name);
+            }
+        }
+        Ok(package_names.len() as u64)
     }
 
     async fn restore_quarantined_packages(
@@ -1381,6 +1523,28 @@ fn has_purge_references(counts: &WorkflowDeletionCounts) -> bool {
         || counts.benchmark_reference_count > 0
 }
 
+fn append_purge_reference_reasons(
+    references: &crate::application::ports::WorkflowPurgeReferenceCounts,
+    reasons: &mut Vec<String>,
+) {
+    let reference_labels = [
+        (references.task_count, "任务"),
+        (references.batch_item_count, "生产批次条目"),
+        (references.preset_count, "预设"),
+        (references.template_count, "项目模板"),
+        (references.shot_config_count, "镜头阶段配置"),
+        (references.benchmark_count, "基准候选"),
+        (references.binding_count, "项目工作流绑定"),
+        (references.stage_count, "生产阶段"),
+        (references.run_template_count, "生产运行模板"),
+    ];
+    for (count, label) in reference_labels {
+        if count > 0 {
+            reasons.push(format!("仍有 {count} 个{label}引用"));
+        }
+    }
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -1417,7 +1581,6 @@ pub enum WorkflowRegistryServiceError {
     NotRemoved(String),
     PurgeBlocked(String),
     PurgePackage(String),
-    PurgeCleanupFailed(String),
     PurgeCompensationFailed {
         operation: String,
         cause: String,
@@ -1440,7 +1603,6 @@ impl WorkflowRegistryServiceError {
             Self::NotRemoved(_) => "WORKFLOW_NOT_REMOVED",
             Self::PurgeBlocked(_) => "WORKFLOW_PURGE_BLOCKED",
             Self::PurgePackage(_) => "WORKFLOW_PURGE_PACKAGE_ERROR",
-            Self::PurgeCleanupFailed(_) => "WORKFLOW_PURGE_CLEANUP_FAILED",
             Self::PurgeCompensationFailed { .. } => "WORKFLOW_PURGE_COMPENSATION_FAILED",
             Self::CompensationFailed { .. } => "WORKFLOW_REGISTRY_COMPENSATION_FAILED",
         }
@@ -1469,10 +1631,6 @@ impl fmt::Display for WorkflowRegistryServiceError {
             Self::PurgePackage(message) => {
                 write!(formatter, "WORKFLOW_PURGE_PACKAGE_ERROR: {message}")
             }
-            Self::PurgeCleanupFailed(message) => write!(
-                formatter,
-                "WORKFLOW_PURGE_CLEANUP_FAILED: {message}"
-            ),
             Self::PurgeCompensationFailed {
                 operation,
                 cause,

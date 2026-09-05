@@ -3,7 +3,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkflowDeletionInspection, WorkflowProductionWorkspaceView } from "../../types/workflowOnboarding";
+import type { WorkflowDeletionInspection, WorkflowProductionWorkspaceView, WorkflowPurgeInspection } from "../../types/workflowOnboarding";
 import { WorkflowDeleteDialog } from "./WorkflowDeleteDialog";
 
 const item: WorkflowProductionWorkspaceView = {
@@ -54,7 +54,7 @@ describe("WorkflowDeleteDialog", () => {
     const user = userEvent.setup();
     const onConfirm = vi.fn();
 
-    render(<WorkflowDeleteDialog item={item} inspection={inspection} onClose={vi.fn()} onConfirm={onConfirm} />);
+    render(<WorkflowDeleteDialog item={item} inspection={inspection} mode="REMOVE" onClose={vi.fn()} onConfirm={onConfirm} />);
 
     expect(screen.getByRole("heading", { name: "删除工作流" })).toBeTruthy();
     expect(screen.getByText("系统自带")).toBeTruthy();
@@ -69,6 +69,7 @@ describe("WorkflowDeleteDialog", () => {
       <WorkflowDeleteDialog
         item={{ ...item, builtin: false }}
         inspection={{ ...inspection, builtin: false, activeTaskCount: 1, deleteAction: "BLOCKED", blockingReasons: ["有活动任务"] }}
+        mode="REMOVE"
         onClose={vi.fn()}
         onConfirm={vi.fn()}
       />,
@@ -90,13 +91,59 @@ describe("WorkflowDeleteDialog", () => {
           projectBindingCount: 2,
           deleteAction: "REMOVE",
         }}
+        mode="REMOVE"
         onClose={vi.fn()}
         onConfirm={vi.fn()}
       />,
     );
 
-    expect(screen.getByText(/你可以稍后恢复该工作流/)).toBeTruthy();
+    expect(screen.getByText(/你可以稍后恢复。/)).toBeTruthy();
     expect(screen.queryByText(/历史生产记录仍然保留/)).toBeNull();
     expect(screen.queryByText(/历史任务、生产批次和其他历史引用会保留/)).toBeNull();
+  });
+
+  it("PURGE 使用不可恢复文案，并要求输入永久删除", async () => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn();
+    const purgeInspection: WorkflowPurgeInspection = {
+      workflowId: "WF1",
+      name: "用户工作流",
+      sourceKind: "USER",
+      libraryState: "REMOVED",
+      taskCount: 0,
+      batchItemCount: 0,
+      presetCount: 0,
+      templateCount: 0,
+      shotConfigCount: 0,
+      benchmarkCount: 0,
+      bindingCount: 0,
+      stageCount: 0,
+      runTemplateCount: 0,
+      packageCount: 1,
+      canPurge: true,
+      blockingReasons: [],
+    };
+
+    render(
+      <WorkflowDeleteDialog
+        item={{ ...item, builtin: false, name: "用户工作流" }}
+        inspection={purgeInspection}
+        mode="PURGE"
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "彻底删除工作流" })).toBeTruthy();
+    expect(screen.getByText("这是不可恢复操作。")).toBeTruthy();
+    expect(screen.getByText(/将永久删除该用户工作流的运行包、Recipe、工作流版本和工作流记录/)).toBeTruthy();
+    expect(screen.queryByText(/可以稍后恢复|可在已删除中恢复|历史数据继续保留/)).toBeNull();
+    const confirm = screen.getByRole("button", { name: "永久删除" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+
+    await user.type(screen.getByLabelText("输入“永久删除”以确认"), "永久删除");
+    expect(confirm.disabled).toBe(false);
+    await user.click(confirm);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });

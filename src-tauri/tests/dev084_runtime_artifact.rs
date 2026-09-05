@@ -8,7 +8,8 @@ use ai_studio_lib::application::{
         ComfyEventSubscription, ComfyHistory, ComfyOutputData, ComfyOutputFile,
         GenerationDefinitionRepository, GenerationSnapshotRepository, ProjectRepository,
         ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, PromptSubmission,
-        RepositoryError, SystemStats, TaskRepository, WorkflowLibrarySource, WorkflowPackageStore,
+        RepositoryError, SystemStats, TaskRepository, WorkflowLibrarySource, WorkflowPackageBytes,
+        WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowPackageStoreError,
         WorkflowRunRepository, WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
@@ -338,6 +339,118 @@ async fn registry_purge_harness(
         workflow_id: workflow_id.to_owned(),
         pool,
         registry,
+    }
+}
+
+fn registry_service_with_package_store(
+    harness: &RegistryPurgeHarness,
+    package_store: Arc<dyn WorkflowPackageStore>,
+) -> Arc<WorkflowRegistryService> {
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let runtime_repository: Arc<dyn WorkflowRuntimeRepository> =
+        Arc::new(SqliteWorkflowRuntimeRepository::new(harness.pool.clone()));
+    let state_repository: Arc<dyn WorkflowRuntimeStateRepository> = Arc::new(
+        SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone()),
+    );
+    let binding_repository: Arc<dyn ProjectWorkflowBindingRepository> = Arc::new(
+        SqliteProjectWorkflowBindingRepository::new(harness.pool.clone()),
+    );
+    let registry_repository = Arc::new(SqliteWorkflowRegistryRepository::new(harness.pool.clone()));
+    let artifact_repository = Arc::new(SqliteWorkflowRuntimeArtifactRepository::new(
+        harness.pool.clone(),
+    ));
+    Arc::new(
+        WorkflowRegistryService::new(
+            runtime_repository,
+            state_repository,
+            binding_repository,
+            clock,
+        )
+        .with_registry_repository(registry_repository)
+        .with_runtime_artifact_repository(artifact_repository)
+        .with_package_store(package_store),
+    )
+}
+
+struct CleanupFailingPackageStore {
+    inner: FileSystemWorkflowPackageStore,
+}
+
+#[async_trait::async_trait]
+impl WorkflowPackageStore for CleanupFailingPackageStore {
+    async fn stage(
+        &self,
+        staging_id: &str,
+        package: &WorkflowPackageBytes,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        self.inner.stage(staging_id, package).await
+    }
+
+    async fn read_staging(
+        &self,
+        staging_id: &str,
+    ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+        self.inner.read_staging(staging_id).await
+    }
+
+    async fn publish_atomic(
+        &self,
+        staging_id: &str,
+        package_name: &str,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        self.inner.publish_atomic(staging_id, package_name).await
+    }
+
+    async fn remove_staging(&self, staging_id: &str) -> Result<(), WorkflowPackageStoreError> {
+        self.inner.remove_staging(staging_id).await
+    }
+
+    async fn remove_published(&self, package_name: &str) -> Result<(), WorkflowPackageStoreError> {
+        self.inner.remove_published(package_name).await
+    }
+
+    async fn quarantine_published(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<WorkflowPackageQuarantineResult, WorkflowPackageStoreError> {
+        self.inner
+            .quarantine_published(operation_id, package_name)
+            .await
+    }
+
+    async fn restore_quarantined(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        self.inner
+            .restore_quarantined(operation_id, package_name)
+            .await
+    }
+
+    async fn remove_quarantine(
+        &self,
+        _operation_id: &str,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        Err(WorkflowPackageStoreError {
+            message: "test quarantine cleanup failure".to_owned(),
+        })
+    }
+
+    async fn list_published(&self) -> Result<Vec<String>, WorkflowPackageStoreError> {
+        self.inner.list_published().await
+    }
+
+    async fn read_runtime(
+        &self,
+        package_name: &str,
+    ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+        self.inner.read_runtime(package_name).await
+    }
+
+    async fn list_staging_ids(&self) -> Result<Vec<String>, WorkflowPackageStoreError> {
+        self.inner.list_staging_ids().await
     }
 }
 
@@ -845,6 +958,295 @@ async fn dev084_purge_removes_runtime_package() {
 }
 
 #[tokio::test]
+async fn dev084_purge_inspection_reports_exact_references() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_purge_inspection",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+
+    let (workflow_version_id, recipe_id) = sqlx::query_as::<_, (String, String)>(
+        "SELECT workflow_versions.id, recipes.id
+         FROM workflow_versions
+         JOIN recipes ON recipes.workflow_version_id = workflow_versions.id
+         WHERE workflow_versions.workflow_id = ?
+         ORDER BY workflow_versions.id, recipes.id
+         LIMIT 1",
+    )
+    .bind(&harness.workflow_id)
+    .fetch_one(&harness.pool)
+    .await
+    .expect("synced workflow identity should be readable");
+
+    sqlx::query(
+        "INSERT INTO tasks
+            (id, project_id, workflow_id, workflow_version_id, recipe_id, status, created_at)
+         VALUES (?, 'prj_default', ?, ?, ?, 'CREATED', '2026-01-01T00:00:00Z')",
+    )
+    .bind("dev084-task")
+    .bind(&harness.workflow_id)
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("task reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO production_batches
+            (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+         VALUES ('dev084-batch', 'prj_default', 'DEV-084 batch', 'DRAFT', 0,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .execute(&harness.pool)
+    .await
+    .expect("batch reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO production_batch_items
+            (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status,
+             created_at, updated_at)
+         VALUES ('dev084-batch-item', 'dev084-batch', 0, ?, ?, '{}', 'PENDING',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("batch item reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO presets
+            (id, project_id, workflow_version_id, recipe_id, name, values_json, created_at, updated_at)
+         VALUES ('dev084-preset', 'prj_default', ?, ?, 'DEV-084 preset', '{}',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("preset reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO project_templates
+            (id, name, normalized_name, description, workflow_version_id, recipe_id, values_json,
+             created_at, updated_at)
+         VALUES ('dev084-template', 'DEV-084 template', 'dev084-template', NULL, ?, ?, '{}',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("template reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO shots
+            (id, project_id, ordinal, name, prompt_text, created_at, updated_at)
+         VALUES ('dev084-shot', 'prj_default', 0, 'DEV-084 shot', '',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .execute(&harness.pool)
+    .await
+    .expect("shot reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO shot_stage_configs
+            (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+         VALUES ('dev084-shot', 'video', ?, ?, '{}', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("shot config reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO benchmark_experiments
+            (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
+             created_at, updated_at)
+         VALUES ('dev084-experiment', 'prj_default', 'DEV-084 benchmark', 'VIDEO', 'DRAFT',
+                 '{}', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .execute(&harness.pool)
+    .await
+    .expect("benchmark reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO benchmark_candidates
+            (id, experiment_id, position, workflow_version_id, recipe_id, label, values_json,
+             asset_ids_json, created_at)
+         VALUES ('dev084-candidate', 'dev084-experiment', 0, ?, ?, 'DEV-084 candidate', '{}',
+                 '[]', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("benchmark candidate reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO project_workflow_bindings
+            (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+         VALUES ('prj_default', 'VIDEO', 'FL2VA_TEXT_TO_VIDEO', ?, ?,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("binding reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO production_runs
+            (id, project_id, name, status, current_stage_ordinal, created_at, updated_at)
+         VALUES ('dev084-run', 'prj_default', 'DEV-084 run', 'DRAFT', 0,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .execute(&harness.pool)
+    .await
+    .expect("production run reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO production_stages
+            (id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id,
+             frozen_config_json, created_at, updated_at)
+         VALUES ('dev084-stage', 'dev084-run', 0, 'H3_VIDEO_GENERATION', 'PENDING', ?, ?, '{}',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("production stage reference fixture should insert");
+    sqlx::query(
+        "INSERT INTO production_run_templates
+            (id, project_id, name, krea2_workflow_version_id, krea2_recipe_id,
+             h3_workflow_version_id, h3_recipe_id, created_at, updated_at)
+         VALUES ('dev084-run-template', 'prj_default', 'DEV-084 run template', NULL, NULL, ?, ?,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&workflow_version_id)
+    .bind(&recipe_id)
+    .execute(&harness.pool)
+    .await
+    .expect("run template reference fixture should insert");
+
+    let inspection = harness
+        .registry
+        .inspect_purge(&harness.workflow_id)
+        .await
+        .expect("purge inspection should succeed");
+    assert_eq!(inspection.task_count, 1);
+    assert_eq!(inspection.batch_item_count, 1);
+    assert_eq!(inspection.preset_count, 1);
+    assert_eq!(inspection.template_count, 1);
+    assert_eq!(inspection.shot_config_count, 1);
+    assert_eq!(inspection.benchmark_count, 1);
+    assert_eq!(inspection.binding_count, 1);
+    assert_eq!(inspection.stage_count, 1);
+    assert_eq!(inspection.run_template_count, 1);
+    assert_eq!(inspection.package_count, 1);
+    assert!(!inspection.can_purge);
+    assert!(inspection
+        .blocking_reasons
+        .iter()
+        .any(|reason| reason.contains("任务")));
+}
+
+#[tokio::test]
+async fn dev084_missing_runtime_package_does_not_block_purge() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_missing_package",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+    fs::remove_dir_all(harness.library_root.join(&harness.package_name))
+        .expect("runtime package should be removable for the fixture");
+
+    let result = harness
+        .registry
+        .purge_workflow(&harness.workflow_id)
+        .await
+        .expect("missing runtime package should not block purge");
+    assert!(result.committed);
+    assert!(!result.cleanup_pending);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("workflow count should be readable"),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_runtime_artifacts")
+            .fetch_one(&harness.pool)
+            .await
+            .expect("artifact count should be readable"),
+        0
+    );
+    let sync = WorkflowLibraryService::new(
+        Arc::new(FileSystemWorkflowLibrarySource::new(
+            harness.library_root.clone(),
+        )),
+        Arc::new(SqliteWorkflowLibraryRepository::new(harness.pool.clone())),
+        Arc::new(SystemClock),
+    )
+    .sync()
+    .await
+    .expect("restart sync should tolerate the missing package");
+    assert_eq!(sync.packages_found, 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("workflow count should be readable after sync"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn dev084_purge_cleanup_failure_returns_committed_success() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_cleanup_pending",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+    let package_store = Arc::new(CleanupFailingPackageStore {
+        inner: FileSystemWorkflowPackageStore::new(
+            harness.library_root.clone(),
+            harness._directory.path().join("workflow-staging"),
+        ),
+    });
+    let registry = registry_service_with_package_store(&harness, package_store);
+    let result = registry
+        .purge_workflow(&harness.workflow_id)
+        .await
+        .expect("cleanup failure must not undo a committed purge");
+
+    assert!(result.committed);
+    assert!(result.cleanup_pending);
+    assert_eq!(
+        result.warning.as_deref(),
+        Some("工作流已永久删除，但临时隔离文件清理未完成。")
+    );
+    assert!(!harness.library_root.join(&harness.package_name).exists());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("workflow count should be readable"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn dev084_purged_user_workflow_does_not_resurrect_after_library_sync() {
     let harness = registry_purge_harness(
         "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
@@ -885,7 +1287,7 @@ async fn dev084_purged_user_workflow_does_not_resurrect_after_library_sync() {
 }
 
 #[tokio::test]
-async fn dev084_product_workflow_cannot_be_purged() {
+async fn dev084_product_purge_still_blocked() {
     let harness = registry_purge_harness(
         "minimax_h3_fl2va_1_0_0",
         "minimax_h3_fl2va_1_0_0",

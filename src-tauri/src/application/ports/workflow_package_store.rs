@@ -23,6 +23,12 @@ pub struct WorkflowPackageStoreError {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkflowPackageQuarantineResult {
+    Quarantined,
+    AlreadyMissing,
+}
+
 impl fmt::Display for WorkflowPackageStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
@@ -62,7 +68,7 @@ pub trait WorkflowPackageStore: Send + Sync {
         &self,
         operation_id: &str,
         package_name: &str,
-    ) -> Result<(), WorkflowPackageStoreError>;
+    ) -> Result<WorkflowPackageQuarantineResult, WorkflowPackageStoreError>;
 
     /// Restore one package from an operation-scoped quarantine.
     async fn restore_quarantined(

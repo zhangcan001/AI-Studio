@@ -227,12 +227,3 @@ export function normalizeWorkspaceItem(item: WorkflowWorkspaceQueryItem): Workfl
 export function normalizeWorkspaceItems(items: WorkflowWorkspaceQueryItem[]): WorkflowWorkspaceItem[] {
   return items.map(normalizeWorkspaceItem);
 }
-
-export function canPurgeWorkflow(item: WorkflowWorkspaceItem): boolean {
-  return item.libraryState === "REMOVED"
-    && item.sourceKind === "USER"
-    && item.historyCount === 0
-    && item.projectUsageCount === 0
-    && item.activeTasks === 0
-    && item.versions.every((version) => (version.activeQueueItemCount ?? 0) === 0);
-}

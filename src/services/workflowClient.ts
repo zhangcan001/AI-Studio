@@ -130,6 +130,7 @@ export {
   getOnboardingDraft,
   importWorkflowPackageBackup,
   inspectWorkflowDeletion,
+  inspectWorkflowPurge,
   repairBuiltinWorkflowPackage,
   pickApiWorkflow,
   publishOnboarding,

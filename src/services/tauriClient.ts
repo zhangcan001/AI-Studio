@@ -219,6 +219,8 @@ import type {
   WorkflowCapabilityBatchView,
   WorkflowDeletionInspection,
   WorkflowDeletionResult,
+  WorkflowPurgeInspection,
+  WorkflowPurgeResult,
   WorkflowImportCommitRequest,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
@@ -584,8 +586,8 @@ export function restoreWorkflow(workflowId: string): Promise<WorkflowRegistryMut
   return invoke<WorkflowRegistryMutationResult>("workflow_restore", { workflowId });
 }
 
-export function purgeWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
-  return invoke<WorkflowRegistryMutationResult>("workflow_purge", { workflowId });
+export function purgeWorkflow(workflowId: string): Promise<WorkflowPurgeResult> {
+  return invoke<WorkflowPurgeResult>("workflow_purge", { workflowId });
 }
 
 export function refreshWorkflowProductionWorkspace(): Promise<WorkflowProductionWorkspaceResponse> {
@@ -638,6 +640,10 @@ export function cleanWorkflowStaging(stagingId: string): Promise<void> {
 
 export function inspectWorkflowDeletion(workflowVersionId: string): Promise<WorkflowDeletionInspection> {
   return invoke<WorkflowDeletionInspection>("workflow_inspect_deletion", { workflowVersionId });
+}
+
+export function inspectWorkflowPurge(workflowId: string): Promise<WorkflowPurgeInspection> {
+  return invoke<WorkflowPurgeInspection>("workflow_inspect_purge", { workflowId });
 }
 
 export function deleteWorkflowVersion(workflowVersionId: string): Promise<WorkflowDeletionResult> {

@@ -527,6 +527,25 @@ export interface WorkflowDeletionInspection {
   historyCount?: number;
 }
 
+export interface WorkflowPurgeInspection {
+  workflowId: string;
+  name: string;
+  sourceKind: WorkflowSourceKind | string;
+  libraryState: WorkflowLibraryState | string;
+  taskCount: number;
+  batchItemCount: number;
+  presetCount: number;
+  templateCount: number;
+  shotConfigCount: number;
+  benchmarkCount: number;
+  bindingCount: number;
+  stageCount: number;
+  runTemplateCount: number;
+  packageCount: number;
+  canPurge: boolean;
+  blockingReasons: string[];
+}
+
 export interface WorkflowDeletionResult {
   action: "HARD_DELETE" | "REMOVE" | "ARCHIVE";
   deleteAction?: "REMOVE" | "HARD_DELETE" | "BLOCKED" | string;
@@ -534,6 +553,15 @@ export interface WorkflowDeletionResult {
   workflowId: string;
   workflowVersionId: string;
   archived: boolean;
+}
+
+export interface WorkflowPurgeResult {
+  workflowId: string;
+  versionCount: number;
+  recipeCount: number;
+  committed: boolean;
+  cleanupPending: boolean;
+  warning?: string;
 }
 
 export interface WorkflowRestoreResult {

@@ -1,5 +1,6 @@
 use crate::application::ports::{
-    WorkflowPackageBytes, WorkflowPackageStore, WorkflowPackageStoreError,
+    WorkflowPackageBytes, WorkflowPackageQuarantineResult, WorkflowPackageStore,
+    WorkflowPackageStoreError,
 };
 use async_trait::async_trait;
 use std::{
@@ -134,19 +135,36 @@ impl WorkflowPackageStore for FileSystemWorkflowPackageStore {
         &self,
         operation_id: &str,
         package_name: &str,
-    ) -> Result<(), WorkflowPackageStoreError> {
+    ) -> Result<WorkflowPackageQuarantineResult, WorkflowPackageStoreError> {
         let source = self.runtime_path(package_name)?;
         let target = self.quarantine_path(operation_id, package_name)?;
-        if !source.is_dir() {
-            return Err(store_error("workflow package is unavailable"));
+        match fs::metadata(&target) {
+            Ok(_) => {
+                return Err(store_error(
+                    "workflow package quarantine target already exists",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(error)),
         }
-        if target.exists() {
-            return Err(store_error(
-                "workflow package quarantine target already exists",
-            ));
+        match fs::metadata(&source) {
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(store_error("workflow package is unavailable"));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(WorkflowPackageQuarantineResult::AlreadyMissing);
+            }
+            Err(error) => return Err(io_error(error)),
         }
         fs::create_dir_all(self.quarantine_root(operation_id)?).map_err(io_error)?;
-        fs::rename(source, target).map_err(io_error)
+        match fs::rename(source, target) {
+            Ok(()) => Ok(WorkflowPackageQuarantineResult::Quarantined),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(WorkflowPackageQuarantineResult::AlreadyMissing)
+            }
+            Err(error) => Err(io_error(error)),
+        }
     }
 
     async fn restore_quarantined(
@@ -170,8 +188,11 @@ impl WorkflowPackageStore for FileSystemWorkflowPackageStore {
 
     async fn remove_quarantine(&self, operation_id: &str) -> Result<(), WorkflowPackageStoreError> {
         let path = self.quarantine_root(operation_id)?;
-        if path.exists() {
-            fs::remove_dir_all(path).map_err(io_error)?;
+        match fs::metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).map_err(io_error)?,
+            Ok(_) => return Err(store_error("workflow package quarantine is unavailable")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(error)),
         }
         Ok(())
     }

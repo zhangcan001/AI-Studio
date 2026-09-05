@@ -1075,6 +1075,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_set_current_version,
             commands::workflow_registry::workflow_remove,
             commands::workflow_registry::workflow_restore,
+            commands::workflow_registry::workflow_inspect_purge,
             commands::workflow_registry::workflow_purge,
             commands::workflow_registry::workflow_rerecognize,
             commands::workflow_workspace::workflow_workspace_query,
