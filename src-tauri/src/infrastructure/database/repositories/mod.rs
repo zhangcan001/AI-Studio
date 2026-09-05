@@ -24,8 +24,10 @@ mod shot_consistency;
 mod task;
 mod task_history;
 mod workflow_library;
+mod workflow_registry;
 mod workflow_run;
 mod workflow_runtime;
+mod workflow_runtime_artifact;
 mod workflow_runtime_state;
 
 pub use asset::SqliteAssetRepository;
@@ -54,8 +56,10 @@ pub use shot_consistency::SqliteShotConsistencyRepository;
 pub use task::SqliteTaskRepository;
 pub use task_history::SqliteTaskHistoryRepository;
 pub use workflow_library::SqliteWorkflowLibraryRepository;
+pub use workflow_registry::SqliteWorkflowRegistryRepository;
 pub use workflow_run::SqliteWorkflowRunRepository;
 pub use workflow_runtime::SqliteWorkflowRuntimeRepository;
+pub use workflow_runtime_artifact::SqliteWorkflowRuntimeArtifactRepository;
 pub use workflow_runtime_state::SqliteWorkflowRuntimeStateRepository;
 
 use crate::application::ports::RepositoryError;

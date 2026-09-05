@@ -20,6 +20,9 @@ pub struct RuntimeWorkflowVersionRecord {
     pub mode: String,
     pub workflow_version: String,
     pub workflow_sha256: String,
+    /// The immutable API graph snapshot stored with the version. This is the
+    /// Registry identity source; package files are only runtime artifacts.
+    pub api_workflow_json: String,
     pub package_name: Option<String>,
     pub is_current: bool,
     pub recipes: Vec<RuntimeRecipeRecord>,

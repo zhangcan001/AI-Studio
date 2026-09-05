@@ -2,6 +2,7 @@ import type {
   WorkflowAutoIssueCandidateView,
   WorkflowAutoIssueView,
   WorkflowAutoOnboardingPlanView,
+  WorkflowImportCommitAction,
   WorkflowImportFormat,
   WorkflowOnboardingDraftView,
 } from "../../types/workflowOnboarding";
@@ -18,6 +19,7 @@ interface Props {
   onOpenExistingVersion?: () => void;
   onRegenerateRecipe?: () => void;
   onRestoreExisting?: () => void;
+  onCommitImport?: (action: WorkflowImportCommitAction) => void;
   onOpenStudio?: (workflowId: string, recipeId: string) => void;
   onUseInProject?: (workflowId: string, recipeId: string) => void;
   onReturnToList?: () => void;
@@ -70,7 +72,7 @@ function formatIssue(format: WorkflowImportFormat): WorkflowImportErrorView | un
   return undefined;
 }
 
-export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onRegenerateRecipe, onRestoreExisting, onOpenStudio, onUseInProject, onReturnToList, onCancel, onRetry, importError, projectId }: Props) {
+export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume, onOpenAdvanced, onOpenExisting, onOpenExistingVersion, onRegenerateRecipe, onRestoreExisting, onCommitImport, onOpenStudio, onUseInProject, onReturnToList, onCancel, onRetry, importError, projectId }: Props) {
   if (importError) {
     return <WorkflowImportFormatIssue issue={importError} loading={loading} onRetry={onRetry} onCancel={onReturnToList ?? onCancel} />;
   }
@@ -105,6 +107,7 @@ export function WorkflowSmartImport({ plan, draft, loading, onResolve, onResume,
       onUseInProject={projectId ? onUseInProject : undefined}
       onRegenerateRecipe={onRegenerateRecipe}
       onRestoreExisting={onRestoreExisting}
+      onCommitImport={onCommitImport}
       onCancel={onCancel}
     />
   );

@@ -1,4 +1,4 @@
-//! DEV-057 Agent-D: Backup 16, compatibility, isolation, and capacity gates.
+//! DEV-057 Agent-D: Backup 17, compatibility, isolation, and capacity gates.
 
 use ai_studio_lib::application::ports::ScriptDraftPageQuery;
 use ai_studio_lib::application::project_backup_service::ProjectBackupService;
@@ -45,7 +45,7 @@ async fn insert_project(pool: &SqlitePool, id: &str, root: &Path) {
     fs::create_dir_all(root).unwrap();
     sqlx::query(
         "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
-         VALUES (?, 'DEV-057 Project', 'Backup 16 fixture', ?, ?, ?)",
+         VALUES (?, 'DEV-057 Project', 'Backup 17 fixture', ?, ?, ?)",
     )
     .bind(id)
     .bind(root.to_string_lossy().to_string())
@@ -324,7 +324,7 @@ async fn backup16_roundtrip_remaps_sources_revisions_and_previous_links() {
     let archive = directory.path().join("backup16.zip");
     service.export(project_id, archive.clone()).await.unwrap();
     let document = read_zip_json(&archive, "project.json");
-    assert_eq!(read_zip_json(&archive, "manifest.json")["version"], 16);
+    assert_eq!(read_zip_json(&archive, "manifest.json")["version"], 17);
     assert_eq!(document["scriptSources"].as_array().unwrap().len(), 3);
     assert_eq!(
         document["scriptDraftRevisions"].as_array().unwrap().len(),

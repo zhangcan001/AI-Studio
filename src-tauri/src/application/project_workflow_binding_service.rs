@@ -2,6 +2,7 @@ use crate::application::ports::{
     Clock, ProjectRepository, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository,
     RepositoryError, WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
 };
+use crate::application::workflow_registry_service::WorkflowRegistryService;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
@@ -63,6 +64,7 @@ pub struct ProjectWorkflowBindingService {
     runtime_repository: Arc<dyn WorkflowRuntimeRepository>,
     runtime_state_repository: Arc<dyn WorkflowRuntimeStateRepository>,
     clock: Arc<dyn Clock>,
+    registry: Option<Arc<WorkflowRegistryService>>,
 }
 
 impl ProjectWorkflowBindingService {
@@ -79,7 +81,15 @@ impl ProjectWorkflowBindingService {
             runtime_repository,
             runtime_state_repository,
             clock,
+            registry: None,
         }
+    }
+
+    /// Lets the V2 Registry own logical Workflow state while keeping the
+    /// legacy constructor source-compatible during the strangler cutover.
+    pub fn with_registry(mut self, registry: Arc<WorkflowRegistryService>) -> Self {
+        self.registry = Some(registry);
+        self
     }
 
     pub async fn get(
@@ -156,14 +166,9 @@ impl ProjectWorkflowBindingService {
                 )));
             }
 
-            let state = self
-                .runtime_state_repository
-                .find_state(&workflow_version_id)
-                .await?;
-            if !version.is_current
-                || state
-                    .as_ref()
-                    .is_some_and(|state| !state.enabled || state.archived)
+            if !self
+                .is_workflow_available_for_recipe(&workflow_version_id, &recipe_id)
+                .await?
             {
                 return Err(ProjectWorkflowBindingServiceError::Invalid(format!(
                     "PROJECT_WORKFLOW_WORKFLOW_UNAVAILABLE: workflow version {workflow_version_id} is unavailable"
@@ -219,6 +224,13 @@ impl ProjectWorkflowBindingService {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<bool, ProjectWorkflowBindingServiceError> {
+        if let Some(registry) = &self.registry {
+            return registry
+                .is_available(workflow_version_id, recipe_id)
+                .await
+                .map_err(|error| ProjectWorkflowBindingServiceError::Registry(error.to_string()));
+        }
+
         let Some(version) = self
             .runtime_repository
             .find_version(workflow_version_id)
@@ -226,19 +238,36 @@ impl ProjectWorkflowBindingService {
         else {
             return Ok(false);
         };
-        if !version.is_current
-            || !version
-                .recipes
-                .iter()
-                .any(|recipe| recipe.recipe_id == recipe_id)
+        if !version
+            .recipes
+            .iter()
+            .any(|recipe| recipe.recipe_id == recipe_id)
         {
             return Ok(false);
         }
-        Ok(self
+        let state_available = self
             .runtime_state_repository
             .find_state(workflow_version_id)
             .await?
-            .is_none_or(|state| state.enabled && !state.archived))
+            .is_none_or(|state| state.enabled && !state.archived);
+        if !state_available {
+            return Ok(false);
+        }
+
+        // Migration 028 will persist library_state on workflows. Until that
+        // port exists, an all-archived logical Workflow is the legacy REMOVED
+        // representation; a non-current version remains available otherwise.
+        let versions = self.runtime_repository.list_versions().await?;
+        let states = self.runtime_state_repository.list_states().await?;
+        Ok(versions
+            .iter()
+            .filter(|candidate| candidate.workflow_id == version.workflow_id)
+            .any(|candidate| {
+                states
+                    .iter()
+                    .find(|state| state.workflow_version_id == candidate.workflow_version_id)
+                    .is_none_or(|state| !state.archived)
+            }))
     }
 
     async fn ensure_project(
@@ -331,6 +360,7 @@ fn config_from_bindings(
 pub enum ProjectWorkflowBindingServiceError {
     ProjectNotFound(String),
     Invalid(String),
+    Registry(String),
     Repository(RepositoryError),
 }
 
@@ -344,6 +374,7 @@ impl fmt::Display for ProjectWorkflowBindingServiceError {
                 )
             }
             Self::Invalid(message) => formatter.write_str(message),
+            Self::Registry(message) => write!(formatter, "WORKFLOW_REGISTRY_ERROR: {message}"),
             Self::Repository(error) => error.fmt(formatter),
         }
     }

@@ -20,6 +20,8 @@ import { WorkflowWorkspace } from "./WorkflowWorkspace";
 
 const serviceMocks = vi.hoisted(() => ({
   autoOnboardWorkflow: vi.fn(),
+  analyzeWorkflowImport: vi.fn(),
+  commitWorkflowImport: vi.fn(),
   getOnboardingDraft: vi.fn(),
   setOnboardingInputMapping: vi.fn(),
   listWorkflowProductionWorkspace: vi.fn(),
@@ -199,7 +201,15 @@ function onboardingDraft(recipe: RecipeViewModel): WorkflowOnboardingDraftView {
 }
 
 function prepareTauriBoundary(recipe: RecipeViewModel) {
-  serviceMocks.autoOnboardWorkflow.mockResolvedValue(publishedPlan(recipe));
+  const published = publishedPlan(recipe);
+  serviceMocks.analyzeWorkflowImport.mockResolvedValue({
+    ...published,
+    state: "NEEDS_REVIEW",
+    published: undefined,
+    commitRequired: true,
+    message: "识别完成。请点击“添加工作流”后写入工作流库。",
+  });
+  serviceMocks.commitWorkflowImport.mockResolvedValue(published.published);
   serviceMocks.getOnboardingDraft.mockResolvedValue(onboardingDraft(recipe));
   serviceMocks.listWorkflowProductionWorkspace.mockResolvedValue(EMPTY_WORKSPACE);
   serviceMocks.refreshWorkflowProductionWorkspace.mockResolvedValue(EMPTY_WORKSPACE);
@@ -333,7 +343,7 @@ describe("DEV-079 添加工作流前端 UAT", () => {
 
   it("非格式导入异常显示可展开的详细原因，而不是裸 IMPORT_FAILED", async () => {
     const user = userEvent.setup();
-    serviceMocks.autoOnboardWorkflow.mockRejectedValue({
+    serviceMocks.analyzeWorkflowImport.mockRejectedValue({
       code: "IMPORT_FAILED",
       message: "graph inference could not resolve duration source",
     });
@@ -374,8 +384,16 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
+    await screen.findByRole("heading", { name: "识别完成" });
+    await user.click(screen.getByRole("button", { name: "添加工作流" }));
     await screen.findByRole("heading", { name: "✓ 工作流已添加" });
-    await waitFor(() => expect(serviceMocks.autoOnboardWorkflow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(serviceMocks.analyzeWorkflowImport).toHaveBeenCalledTimes(1));
+    expect(serviceMocks.commitWorkflowImport).toHaveBeenCalledWith({
+      draftId: "dev079-p1-draft",
+      action: "NEW_WORKFLOW",
+      workflowId: undefined,
+      setCurrent: false,
+    });
     await waitFor(() => expect(onCatalogChanged).toHaveBeenCalledTimes(1));
     expect(screen.getByText(recipe.name)).toBeTruthy();
 
@@ -405,6 +423,8 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
+    await screen.findByRole("heading", { name: "识别完成" });
+    await user.click(screen.getByRole("button", { name: "添加工作流" }));
     await screen.findByRole("heading", { name: "✓ 工作流已添加" });
     await waitFor(() => expect(onCatalogChanged).toHaveBeenCalledTimes(1));
 
@@ -468,7 +488,7 @@ describe("DEV-079 添加工作流前端 UAT", () => {
         }],
       }],
     };
-    serviceMocks.autoOnboardWorkflow.mockResolvedValue(reviewPlan);
+    serviceMocks.analyzeWorkflowImport.mockResolvedValue(reviewPlan);
     serviceMocks.getOnboardingDraft.mockResolvedValue(linkedDraft);
     serviceMocks.setOnboardingInputMapping.mockResolvedValue(linkedDraft);
     serviceMocks.listWorkflowProductionWorkspace.mockResolvedValue(EMPTY_WORKSPACE);
@@ -485,7 +505,7 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "+ 添加工作流" }));
-    await screen.findByRole("heading", { name: "需要确认后添加" });
+    await screen.findByRole("heading", { name: "识别完成" });
     await user.click(screen.getByRole("button", { name: "高级编辑" }));
     await user.click(screen.getByRole("tab", { name: "输入映射" }));
 

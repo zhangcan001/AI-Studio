@@ -4,12 +4,15 @@ use crate::application::{
         WorkflowPackageFiles, WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
-    workflow_graph_analysis::{WorkflowGraph, WorkflowSource},
+    workflow_analysis_service::{WorkflowAnalysisReport, WorkflowAnalysisService},
     workflow_library_service::{WorkflowLibraryService, WorkflowSyncReport},
     workflow_manifest::WorkflowManifest,
     workflow_recognition_service::{
         structural_workflow_sha256, RuntimeCapabilityState, RuntimeCapabilitySummary,
         WorkflowRecognitionReport, WorkflowRecognitionService,
+    },
+    workflow_registry_service::{
+        WorkflowRegistryIdentityCandidate, WorkflowRegistryService, WORKFLOW_LIBRARY_REMOVED,
     },
     workflow_semantic_identity::semantic_workflow_sha256,
 };
@@ -401,6 +404,27 @@ pub struct WorkflowOnboardingPublishView {
     pub package_name: String,
     pub workflow_sha256: String,
     pub refreshed: WorkflowSyncReport,
+    pub workflow_version_id: Option<String>,
+    pub source_kind: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkflowImportCommitAction {
+    NewWorkflow,
+    NewVersion,
+    NewRecipe,
+    RestoreExisting,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowImportCommitRequest {
+    pub draft_id: String,
+    pub action: WorkflowImportCommitAction,
+    pub workflow_id: Option<String>,
+    #[serde(default)]
+    pub set_current: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -447,6 +471,9 @@ pub struct WorkflowAutoExistingRecipeView {
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowAutoOnboardingPlanView {
     pub draft_id: String,
+    pub analysis_id: Option<String>,
+    pub analysis: Option<WorkflowAnalysisReport>,
+    pub commit_required: bool,
     pub state: WorkflowAutoOnboardingState,
     pub workflow_kind: String,
     pub workflow_sha256: String,
@@ -466,6 +493,8 @@ pub struct WorkflowAutoOnboardingPlanView {
     pub existing_workflow_version: Option<String>,
     pub existing_workflow_name: Option<String>,
     pub existing_workflow_source: Option<String>,
+    pub existing_workflow_source_kind: Option<String>,
+    pub existing_workflow_library_state: Option<String>,
     pub suggested_recipe_version: Option<String>,
     pub existing_package_name: Option<String>,
     pub existing_match_type: Option<String>,
@@ -534,6 +563,9 @@ struct WorkflowOnboardingDraft {
     capability: CapabilityCheckView,
     input_mappings: Vec<InputMapping>,
     output_mappings: Vec<OutputMapping>,
+    /// The pure graph analysis captured at import time. Test-only/manual
+    /// drafts may leave this empty and use the compatibility fallback.
+    analysis: Option<WorkflowAnalysisReport>,
     recognition: WorkflowRecognitionReport,
 }
 
@@ -594,6 +626,8 @@ struct ExistingWorkflowPackage {
     files: WorkflowPackageFiles,
     recipe: Recipe,
     match_type: ExistingWorkflowMatchType,
+    source_kind: Option<String>,
+    library_state: Option<String>,
 }
 
 struct ParsedExistingWorkflowPackage {
@@ -631,6 +665,29 @@ fn parse_existing_workflow_package(
     })
 }
 
+fn identity_candidate_files(candidate: WorkflowRegistryIdentityCandidate) -> WorkflowPackageFiles {
+    let manifest = WorkflowManifest {
+        schema_version: 1,
+        id: candidate.workflow_id,
+        name: candidate.workflow_name,
+        workflow_version: candidate.workflow_version,
+        recipe_version: candidate.recipe_version,
+        category: candidate.category,
+        mode: candidate.mode,
+    };
+    WorkflowPackageFiles {
+        package_name: candidate
+            .package_name
+            .unwrap_or_else(|| format!("registry_{}", candidate.recipe_id)),
+        package_source_path: candidate.package_source_path,
+        manifest_yaml: manifest
+            .to_yaml()
+            .expect("workflow registry identity manifest should serialize"),
+        recipe_yaml: candidate.recipe_yaml,
+        workflow_json: candidate.api_workflow_json,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct RecipeSignatureInput {
     semantic_key: String,
@@ -666,6 +723,7 @@ pub struct WorkflowOnboardingService {
     clock: Arc<dyn Clock>,
     runtime_repository: Option<Arc<dyn WorkflowRuntimeRepository>>,
     state_repository: Option<Arc<dyn WorkflowRuntimeStateRepository>>,
+    registry_service: Option<Arc<WorkflowRegistryService>>,
     registry: Mutex<WorkflowOnboardingRegistry>,
 }
 
@@ -687,6 +745,7 @@ impl WorkflowOnboardingService {
             clock,
             runtime_repository: None,
             state_repository: None,
+            registry_service: None,
             registry: Mutex::new(WorkflowOnboardingRegistry::default()),
         }
     }
@@ -701,6 +760,11 @@ impl WorkflowOnboardingService {
         self
     }
 
+    pub fn with_registry_service(mut self, registry_service: Arc<WorkflowRegistryService>) -> Self {
+        self.registry_service = Some(registry_service);
+        self
+    }
+
     /// Recognize a selected file without contacting ComfyUI or creating a
     /// draft. The import path remains API-only, while UI/invalid/unknown
     /// feedback is still available to a recognition surface.
@@ -712,20 +776,17 @@ impl WorkflowOnboardingService {
         &self,
         draft: &WorkflowOnboardingDraft,
     ) -> Result<WorkflowRecognitionReport, WorkflowOnboardingError> {
-        let packages = self.source.load_packages().await.map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
-        })?;
-        let existing = packages
-            .into_iter()
-            .filter_map(|package| match package {
-                WorkflowPackageLoad::Loaded(files) => Some(files),
-                WorkflowPackageLoad::Invalid { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        Ok(
-            WorkflowRecognitionService::recognize_bytes(&draft.raw_bytes, &existing)
-                .with_runtime_capability(runtime_capability_summary(&draft.capability)),
+        let existing = self.identity_package_files().await?;
+        let analysis = draft.analysis.clone().unwrap_or_else(|| {
+            WorkflowAnalysisService::analyze_workflow(&draft.workflow, &draft.raw_bytes)
+        });
+        Ok(WorkflowRecognitionService::recognize_analysis(
+            &draft.workflow,
+            &draft.raw_bytes,
+            &existing,
+            &analysis,
         )
+        .with_runtime_capability(runtime_capability_summary(&draft.capability)))
     }
 
     pub async fn import_bytes(
@@ -747,15 +808,18 @@ impl WorkflowOnboardingService {
         let workflow = parse_import_workflow(&bytes)?;
         let nodes = inspect_workflow(&workflow)?;
         let workflow_sha256 = sha256(&bytes);
+        let analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &bytes);
         let recognition =
-            WorkflowRecognitionService::recognize_api_workflow(&workflow, &bytes, &[]);
+            WorkflowRecognitionService::recognize_analysis(&workflow, &bytes, &[], &analysis);
         let is_new_version = existing_workflow_id.is_some();
         let workflow_id = match existing_workflow_id {
             Some(value) => validate_workflow_id(&value)?,
-            None => format!("wfl_{}", slugify(&filename_stem(&original_filename))),
+            // The filename is display metadata only. A new logical Workflow
+            // must receive a durable collision-free identity.
+            None => format!("wfl_{}", Uuid::new_v4()),
         };
         let workflow_version = if is_new_version {
-            self.next_workflow_version(&workflow_id).await
+            self.next_workflow_version(&workflow_id).await?
         } else {
             "1.0.0".to_owned()
         };
@@ -794,6 +858,7 @@ impl WorkflowOnboardingService {
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            analysis: Some(analysis),
             recognition,
         };
         let draft_id = draft.draft_id.clone();
@@ -816,9 +881,127 @@ impl WorkflowOnboardingService {
         self.auto_confirm(&draft.draft_id).await
     }
 
+    /// V2 import phase: create only an in-memory draft and return the same
+    /// analysis/validation plan used by the explicit commit phase. Selecting
+    /// a file never stages or publishes a runtime package.
+    pub async fn analyze_import_bytes(
+        &self,
+        bytes: Vec<u8>,
+        original_filename: String,
+        existing_workflow_id: Option<String>,
+    ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
+        let draft = self
+            .import_bytes(bytes, original_filename, existing_workflow_id)
+            .await?;
+        self.analyze_draft(&draft.draft_id).await
+    }
+
+    pub async fn analyze_draft(
+        &self,
+        draft_id: &str,
+    ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
+        self.auto_confirm_internal(draft_id, false).await
+    }
+
+    /// Re-read one logical Workflow from the Registry and create a fresh,
+    /// read-only recognition draft for its current version. Runtime package
+    /// directories are not searched and no package is published here.
+    pub async fn rerecognize_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
+        let registry = self.registry_service.as_ref().ok_or_else(|| {
+            WorkflowOnboardingError::new(
+                "WORKFLOW_REGISTRY_ERROR",
+                "workflow registry is not configured",
+            )
+        })?;
+        let workflow_view = registry.get(workflow_id).await.map_err(|error| {
+            WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+        })?;
+        let workflow_version_id = workflow_view.current_version_id.clone().ok_or_else(|| {
+            WorkflowOnboardingError::new(
+                "WORKFLOW_VERSION_NOT_FOUND",
+                "the workflow has no current version",
+            )
+        })?;
+        let candidates = registry.identity_candidates().await.map_err(|error| {
+            WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+        })?;
+        let candidate = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.workflow_id == workflow_id
+                    && candidate.workflow_version_id == workflow_version_id
+            })
+            .max_by(|left, right| compare_semver(&left.recipe_version, &right.recipe_version))
+            .cloned()
+            .ok_or_else(|| {
+                WorkflowOnboardingError::new(
+                    "WORKFLOW_RECIPE_NOT_FOUND",
+                    "the current workflow version has no registered recipe",
+                )
+            })?;
+        let raw_bytes = candidate.api_workflow_json.as_bytes().to_vec();
+        let workflow = parse_api_workflow_string(&candidate.api_workflow_json)?;
+        let analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &raw_bytes);
+        let identity_files = candidates
+            .into_iter()
+            .map(identity_candidate_files)
+            .collect::<Vec<_>>();
+        let recognition = WorkflowRecognitionService::recognize_analysis(
+            &workflow,
+            &raw_bytes,
+            &identity_files,
+            &analysis,
+        );
+        let draft = WorkflowOnboardingDraft {
+            draft_id: format!("onb_{}", Uuid::new_v4()),
+            workflow_sha256: sha256(&raw_bytes),
+            original_filename: safe_filename(&format!("{}.json", workflow_view.name)),
+            nodes: inspect_workflow(&workflow)?,
+            workflow,
+            raw_bytes,
+            manifest: WorkflowManifest {
+                schema_version: 1,
+                id: candidate.workflow_id,
+                name: workflow_view.name,
+                workflow_version: candidate.workflow_version,
+                recipe_version: candidate.recipe_version,
+                category: candidate.category,
+                mode: candidate.mode,
+            },
+            recipe_id: candidate.recipe_id,
+            allow_existing_workflow_sha: true,
+            capability: CapabilityCheckView {
+                state: CapabilityState::NotChecked,
+                checked_at: None,
+                issues: Vec::new(),
+            },
+            input_mappings: Vec::new(),
+            output_mappings: Vec::new(),
+            analysis: Some(analysis),
+            recognition,
+        };
+        let draft_id = draft.draft_id.clone();
+        self.with_registry(|registry| {
+            registry.insert(draft);
+            Ok(())
+        })??;
+        self.analyze_draft(&draft_id).await
+    }
+
     pub async fn auto_confirm(
         &self,
         draft_id: &str,
+    ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
+        self.auto_confirm_internal(draft_id, true).await
+    }
+
+    async fn auto_confirm_internal(
+        &self,
+        draft_id: &str,
+        allow_publish: bool,
     ) -> Result<WorkflowAutoOnboardingPlanView, WorkflowOnboardingError> {
         let initial = self.with_registry(|registry| registry.get(draft_id))??;
         let existing = self
@@ -944,16 +1127,21 @@ impl WorkflowOnboardingService {
             );
             plan.existing_match_type = Some(representative.match_type.as_str().to_owned());
             plan.existing_workflow_name = Some(representative.manifest.name.clone());
-            plan.existing_workflow_source = Some(
+            let source_kind = representative.source_kind.clone().unwrap_or_else(|| {
                 if crate::application::builtin_runtime_packages::is_builtin_package_name(
                     &representative.files.package_name,
                 ) {
-                    "BUILTIN"
+                    "PRODUCT".to_owned()
                 } else {
-                    "USER"
+                    "USER".to_owned()
                 }
-                .to_owned(),
-            );
+            });
+            plan.existing_workflow_source = Some(source_kind.clone());
+            plan.existing_workflow_source_kind = Some(source_kind);
+            plan.existing_workflow_library_state = representative.library_state.clone();
+            if matching && archived {
+                plan.recognition.suggested_action = "RESTORE_EXISTING".to_owned();
+            }
             plan.suggested_recipe_version = existing
                 .iter()
                 .map(|package| package.manifest.recipe_version.as_str())
@@ -962,6 +1150,21 @@ impl WorkflowOnboardingService {
             plan.existing_recipes = existing_recipes;
             plan.expected_inference = inference.inferences.clone();
             return Ok(plan);
+        }
+
+        if auto_importable && !allow_publish {
+            return Ok(auto_plan_for_draft(
+                &current,
+                WorkflowAutoOnboardingState::NeedsReview,
+                &inference.inferences,
+                &auto_issues_from_capability(&current.capability),
+                auto_publishable,
+                None,
+                None,
+                None,
+                None,
+                "识别完成。请点击“添加工作流”后写入工作流库。".to_owned(),
+            ));
         }
 
         if auto_importable {
@@ -1025,6 +1228,63 @@ impl WorkflowOnboardingService {
             None,
             message,
         ))
+    }
+
+    /// V2 commit phase. This is the only import path allowed to call the
+    /// package publisher. Existing bindings are never changed here.
+    pub async fn commit_import(
+        &self,
+        request: WorkflowImportCommitRequest,
+    ) -> Result<WorkflowOnboardingPublishView, WorkflowOnboardingError> {
+        match request.action {
+            WorkflowImportCommitAction::RestoreExisting => {
+                return Err(WorkflowOnboardingError::new(
+                    "WORKFLOW_RESTORE_REQUIRES_REGISTRY",
+                    "restore an existing removed workflow through the workflow registry",
+                ));
+            }
+            WorkflowImportCommitAction::NewWorkflow => {}
+            WorkflowImportCommitAction::NewVersion | WorkflowImportCommitAction::NewRecipe => {
+                let workflow_id = request.workflow_id.as_deref().ok_or_else(|| {
+                    WorkflowOnboardingError::new(
+                        "WORKFLOW_ID_REQUIRED",
+                        "an existing workflow id is required for this import action",
+                    )
+                })?;
+                let workflow_id = validate_workflow_id(workflow_id)?;
+                let draft = self.with_registry(|registry| registry.get(&request.draft_id))??;
+                let workflow_version =
+                    if matches!(request.action, WorkflowImportCommitAction::NewVersion) {
+                        self.next_workflow_version(&workflow_id).await?
+                    } else {
+                        draft.manifest.workflow_version.clone()
+                    };
+                let recipe_version =
+                    if matches!(request.action, WorkflowImportCommitAction::NewRecipe) {
+                        increment_semver(
+                            &self
+                                .latest_recipe_version(&workflow_id, &workflow_version)
+                                .await?,
+                        )
+                    } else {
+                        draft.manifest.recipe_version.clone()
+                    };
+                self.with_registry(|registry| {
+                    let draft = registry.get_mut(&request.draft_id)?;
+                    draft.manifest.id = workflow_id;
+                    draft.manifest.workflow_version = workflow_version;
+                    draft.manifest.recipe_version = recipe_version;
+                    draft.allow_existing_workflow_sha = true;
+                    Ok(())
+                })??;
+            }
+        }
+        let published = self.publish(&request.draft_id).await?;
+        if request.set_current {
+            // The command layer owns the Registry repository and will perform
+            // the explicit current-version mutation after this publish.
+        }
+        Ok(published)
     }
 
     async fn run_current_inference(
@@ -1093,6 +1353,12 @@ impl WorkflowOnboardingService {
         workflow_sha256: &str,
         workflow: &WorkflowDocument,
     ) -> Result<Vec<ExistingWorkflowPackage>, WorkflowOnboardingError> {
+        if self.registry_service.is_some() {
+            return self
+                .existing_packages_from_registry(workflow_sha256, workflow)
+                .await;
+        }
+
         let packages = self.source.load_packages().await.map_err(|error| {
             WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
         })?;
@@ -1116,6 +1382,8 @@ impl WorkflowOnboardingService {
                 files: package.files.clone(),
                 recipe: package.recipe.clone(),
                 match_type: ExistingWorkflowMatchType::RawSha,
+                source_kind: None,
+                library_state: None,
             })
             .collect::<Vec<_>>();
         if !raw_matches.is_empty() {
@@ -1136,6 +1404,8 @@ impl WorkflowOnboardingService {
                     files: package.files.clone(),
                     recipe: package.recipe.clone(),
                     match_type: ExistingWorkflowMatchType::SemanticSha,
+                    source_kind: None,
+                    library_state: None,
                 })
             })
             .collect::<Vec<_>>();
@@ -1158,6 +1428,117 @@ impl WorkflowOnboardingService {
                     files: package.files,
                     recipe: package.recipe,
                     match_type: ExistingWorkflowMatchType::StructuralSha,
+                    source_kind: None,
+                    library_state: None,
+                })
+            })
+            .collect())
+    }
+
+    async fn identity_package_files(
+        &self,
+    ) -> Result<Vec<WorkflowPackageFiles>, WorkflowOnboardingError> {
+        if let Some(registry) = &self.registry_service {
+            return Ok(registry
+                .identity_candidates()
+                .await
+                .map_err(|error| {
+                    WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+                })?
+                .into_iter()
+                .map(identity_candidate_files)
+                .collect());
+        }
+        let packages = self.source.load_packages().await.map_err(|error| {
+            WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
+        })?;
+        Ok(packages
+            .into_iter()
+            .filter_map(|package| match package {
+                WorkflowPackageLoad::Loaded(files) => Some(files),
+                WorkflowPackageLoad::Invalid { .. } => None,
+            })
+            .collect())
+    }
+
+    async fn existing_packages_from_registry(
+        &self,
+        workflow_sha256: &str,
+        workflow: &WorkflowDocument,
+    ) -> Result<Vec<ExistingWorkflowPackage>, WorkflowOnboardingError> {
+        let candidates = self
+            .registry_service
+            .as_ref()
+            .expect("registry service is checked before registry identity lookup")
+            .identity_candidates()
+            .await
+            .map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+            })?;
+
+        let parsed = candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                let existing_workflow =
+                    parse_api_workflow_string(&candidate.api_workflow_json).ok()?;
+                let files = identity_candidate_files(candidate.clone());
+                let recipe = RecipeParser::parse(&candidate.recipe_yaml).ok()?;
+                let manifest = WorkflowManifest::parse(&files.manifest_yaml).ok()?;
+                Some((candidate, existing_workflow, manifest, files, recipe))
+            })
+            .collect::<Vec<_>>();
+
+        let raw_matches = parsed
+            .iter()
+            .filter(|(candidate, _, _, _, _)| candidate.workflow_sha256 == workflow_sha256)
+            .map(
+                |(candidate, _, manifest, files, recipe)| ExistingWorkflowPackage {
+                    manifest: manifest.clone(),
+                    files: files.clone(),
+                    recipe: recipe.clone(),
+                    match_type: ExistingWorkflowMatchType::RawSha,
+                    source_kind: Some(candidate.source_kind.clone()),
+                    library_state: Some(candidate.library_state.clone()),
+                },
+            )
+            .collect::<Vec<_>>();
+        if !raw_matches.is_empty() {
+            return Ok(raw_matches);
+        }
+
+        let semantic_sha = semantic_workflow_sha256(workflow);
+        let semantic_matches = parsed
+            .iter()
+            .filter(|(_, existing_workflow, _, _, _)| {
+                semantic_workflow_sha256(existing_workflow) == semantic_sha
+            })
+            .map(
+                |(candidate, _, manifest, files, recipe)| ExistingWorkflowPackage {
+                    manifest: manifest.clone(),
+                    files: files.clone(),
+                    recipe: recipe.clone(),
+                    match_type: ExistingWorkflowMatchType::SemanticSha,
+                    source_kind: Some(candidate.source_kind.clone()),
+                    library_state: Some(candidate.library_state.clone()),
+                },
+            )
+            .collect::<Vec<_>>();
+        if !semantic_matches.is_empty() {
+            return Ok(semantic_matches);
+        }
+
+        Ok(parsed
+            .into_iter()
+            .filter_map(|(candidate, existing_workflow, manifest, files, recipe)| {
+                (structural_workflow_sha256(&existing_workflow)
+                    == structural_workflow_sha256(workflow))
+                .then_some(ExistingWorkflowPackage {
+                    manifest,
+                    files,
+                    recipe,
+                    match_type: ExistingWorkflowMatchType::StructuralSha,
+                    source_kind: Some(candidate.source_kind),
+                    library_state: Some(candidate.library_state),
                 })
             })
             .collect())
@@ -1168,6 +1549,12 @@ impl WorkflowOnboardingService {
         workflow_id: &str,
         workflow_version: &str,
     ) -> Result<bool, WorkflowOnboardingError> {
+        if let Some(registry) = &self.registry_service {
+            let workflow = registry.get(workflow_id).await.map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+            })?;
+            return Ok(workflow.library_state == WORKFLOW_LIBRARY_REMOVED);
+        }
         let (Some(runtime_repository), Some(state_repository)) =
             (&self.runtime_repository, &self.state_repository)
         else {
@@ -1254,8 +1641,9 @@ impl WorkflowOnboardingService {
             &next_manifest.mode,
         )?;
         let raw_bytes = files.workflow_json.into_bytes();
+        let analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &raw_bytes);
         let recognition =
-            WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
+            WorkflowRecognitionService::recognize_analysis(&workflow, &raw_bytes, &[], &analysis);
         let draft = WorkflowOnboardingDraft {
             draft_id: format!("onb_{}", Uuid::new_v4()),
             workflow_sha256: sha256(&raw_bytes),
@@ -1277,6 +1665,7 @@ impl WorkflowOnboardingService {
                 .iter()
                 .map(output_mapping_from_recipe)
                 .collect(),
+            analysis: Some(analysis),
             recognition,
         };
         let draft_id = draft.draft_id.clone();
@@ -1327,8 +1716,9 @@ impl WorkflowOnboardingService {
         let workflow_json = files.workflow_json.clone();
         let workflow = parse_api_workflow_string(&workflow_json)?;
         let raw_bytes = workflow_json.into_bytes();
+        let analysis = WorkflowAnalysisService::analyze_workflow(&workflow, &raw_bytes);
         let recognition =
-            WorkflowRecognitionService::recognize_api_workflow(&workflow, &raw_bytes, &[]);
+            WorkflowRecognitionService::recognize_analysis(&workflow, &raw_bytes, &[], &analysis);
         manifest.recipe_version = increment_semver(
             &self
                 .latest_recipe_version(workflow_id, workflow_version)
@@ -1351,6 +1741,7 @@ impl WorkflowOnboardingService {
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            analysis: Some(analysis),
             recognition,
         };
         let draft_id = draft.draft_id.clone();
@@ -1399,6 +1790,20 @@ impl WorkflowOnboardingService {
         workflow_id: &str,
         workflow_version: &str,
     ) -> Result<String, WorkflowOnboardingError> {
+        if let Some(registry) = &self.registry_service {
+            let candidates = registry.identity_candidates().await.map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+            })?;
+            return Ok(candidates
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.workflow_id == workflow_id
+                        && candidate.workflow_version == workflow_version
+                })
+                .map(|candidate| candidate.recipe_version)
+                .max_by(|left, right| compare_semver(left, right))
+                .unwrap_or_else(|| "1.0.0".to_owned()));
+        }
         let packages = self.source.load_packages().await.map_err(|error| {
             WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
         })?;
@@ -1878,17 +2283,13 @@ impl WorkflowOnboardingService {
             ));
         }
 
-        let existing_packages = self.source.load_packages().await.map_err(|error| {
-            WorkflowOnboardingError::new("WORKFLOW_LIBRARY_ERROR", error.to_string())
-        })?;
+        let existing_packages = self
+            .existing_packages_for_identity(&draft.workflow_sha256, &draft.workflow)
+            .await?;
         if !draft.allow_existing_workflow_sha
-            && existing_packages.iter().any(|package| {
-                if let WorkflowPackageLoad::Loaded(files) = package {
-                    sha256(files.workflow_json.as_bytes()) == draft.workflow_sha256
-                } else {
-                    false
-                }
-            })
+            && existing_packages
+                .iter()
+                .any(|package| package.match_type == ExistingWorkflowMatchType::RawSha)
         {
             return Err(WorkflowOnboardingError::new(
                 "IDENTICAL_WORKFLOW_ALREADY_EXISTS",
@@ -1979,7 +2380,9 @@ impl WorkflowOnboardingService {
             }
         };
 
-        let published_recipe_id = if let Some(runtime_repository) = &self.runtime_repository {
+        let (published_version_id, published_recipe_id) = if let Some(runtime_repository) =
+            &self.runtime_repository
+        {
             match runtime_repository.list_versions().await {
                 Ok(versions) => versions
                     .into_iter()
@@ -1987,14 +2390,17 @@ impl WorkflowOnboardingService {
                         version.workflow_id == draft.manifest.id
                             && version.workflow_version == draft.manifest.workflow_version
                     })
-                    .and_then(|version| {
-                        version
+                    .map(|version| {
+                        let version_id = version.workflow_version_id;
+                        let recipe_id = version
                             .recipes
                             .into_iter()
                             .find(|recipe| recipe.version == draft.manifest.recipe_version)
+                            .map(|recipe| recipe.recipe_id)
+                            .unwrap_or_else(|| draft.recipe_id.clone());
+                        (Some(version_id), recipe_id)
                     })
-                    .map(|recipe| recipe.recipe_id)
-                    .unwrap_or_else(|| draft.recipe_id.clone()),
+                    .unwrap_or_else(|| (None, draft.recipe_id.clone())),
                 Err(error) => {
                     tracing::warn!(
                         workflow_id = %draft.manifest.id,
@@ -2003,11 +2409,11 @@ impl WorkflowOnboardingService {
                         error = %error,
                         "published recipe identity could not be reloaded; returning draft identity"
                     );
-                    draft.recipe_id.clone()
+                    (None, draft.recipe_id.clone())
                 }
             }
         } else {
-            draft.recipe_id.clone()
+            (None, draft.recipe_id.clone())
         };
 
         if allow_unready_capability && draft.capability.state != CapabilityState::Ready {
@@ -2031,6 +2437,14 @@ impl WorkflowOnboardingService {
             }
         }
 
+        let source_kind =
+            if crate::application::builtin_runtime_packages::is_builtin_package_name(&package_name)
+            {
+                "PRODUCT"
+            } else {
+                "USER"
+            }
+            .to_owned();
         Ok(WorkflowOnboardingPublishView {
             workflow_id: draft.manifest.id,
             workflow_version: draft.manifest.workflow_version,
@@ -2038,6 +2452,8 @@ impl WorkflowOnboardingService {
             package_name,
             workflow_sha256: draft.workflow_sha256,
             refreshed,
+            workflow_version_id: published_version_id,
+            source_kind: Some(source_kind),
         })
     }
 
@@ -2177,9 +2593,25 @@ impl WorkflowOnboardingService {
         Ok(views)
     }
 
-    async fn next_workflow_version(&self, workflow_id: &str) -> String {
+    async fn next_workflow_version(
+        &self,
+        workflow_id: &str,
+    ) -> Result<String, WorkflowOnboardingError> {
+        if let Some(registry) = &self.registry_service {
+            let workflow = registry.get(workflow_id).await.map_err(|error| {
+                WorkflowOnboardingError::new("WORKFLOW_REGISTRY_ERROR", error.to_string())
+            })?;
+            let latest = workflow
+                .versions
+                .iter()
+                .map(|version| version.version.as_str())
+                .max_by(|left, right| compare_semver(left, right));
+            return Ok(latest
+                .map(increment_semver)
+                .unwrap_or_else(|| "1.0.0".to_owned()));
+        }
         let Ok(packages) = self.source.load_packages().await else {
-            return "1.0.0".to_owned();
+            return Ok("1.0.0".to_owned());
         };
         let mut latest: Option<String> = None;
         for package in packages {
@@ -2202,9 +2634,9 @@ impl WorkflowOnboardingService {
                 }
             }
         }
-        latest
+        Ok(latest
             .map(|value| increment_semver(&value))
-            .unwrap_or_else(|| "1.0.0".to_owned())
+            .unwrap_or_else(|| "1.0.0".to_owned()))
     }
 
     async fn check_capability_for_workflow(
@@ -2426,23 +2858,6 @@ fn onboarding_state_and_message(
     }
 }
 
-#[derive(Clone)]
-struct AutoInputCandidate {
-    mapping: InputMapping,
-    inference: WorkflowAutoInferenceView,
-    issue_candidate: WorkflowAutoIssueCandidateView,
-    confidence: InferenceConfidence,
-}
-
-#[derive(Clone, Copy)]
-struct AutoInputGuess {
-    semantic_key: &'static str,
-    field_type: SemanticFieldType,
-    confidence: InferenceConfidence,
-    source: &'static str,
-    required: bool,
-}
-
 fn auto_plan_for_draft(
     draft: &WorkflowOnboardingDraft,
     state: WorkflowAutoOnboardingState,
@@ -2459,6 +2874,9 @@ fn auto_plan_for_draft(
     let workflow_kind = workflow_kind_for_outputs(&draft.output_mappings);
     WorkflowAutoOnboardingPlanView {
         draft_id: draft.draft_id.clone(),
+        analysis_id: Some(format!("ana_{}", draft.draft_id.trim_start_matches("onb_"))),
+        analysis: Some(analysis_for_draft(draft)),
+        commit_required: published.is_none(),
         state,
         workflow_kind,
         workflow_sha256: draft.workflow_sha256.clone(),
@@ -2478,6 +2896,8 @@ fn auto_plan_for_draft(
         existing_workflow_version,
         existing_workflow_name: None,
         existing_workflow_source: None,
+        existing_workflow_source_kind: None,
+        existing_workflow_library_state: None,
         suggested_recipe_version: None,
         existing_package_name,
         existing_match_type: None,
@@ -2489,1145 +2909,175 @@ fn auto_plan_for_draft(
 }
 
 fn infer_auto_onboarding(draft: &WorkflowOnboardingDraft) -> AutoInferenceResult {
-    let mut result = AutoInferenceResult {
-        name: infer_workflow_name(&draft.workflow, &draft.original_filename),
-        ..AutoInferenceResult::default()
-    };
-    let mut candidates_by_key: BTreeMap<String, Vec<AutoInputCandidate>> = BTreeMap::new();
-
-    let (output_mappings, output_inferences, output_issues) = infer_auto_outputs(draft);
-    result.output_mappings = output_mappings;
-    result.inferences.extend(output_inferences);
-    result.issues.extend(output_issues);
-
-    let graph = WorkflowGraph::from_document(&draft.workflow).unwrap_or_default();
-    let mut output_roots = result
-        .output_mappings
-        .iter()
-        .map(|output| output.node_id.clone())
-        .collect::<BTreeSet<_>>();
-    if output_roots.is_empty() {
-        output_roots = draft
-            .output_mappings
-            .iter()
-            .map(|output| output.node_id.clone())
-            .collect();
-    }
-    if output_roots.is_empty() {
-        output_roots = draft
-            .nodes
-            .iter()
-            .filter(|node| output_candidate_score(draft, node) > 0)
-            .map(|node| node.node_id.clone())
-            .collect();
-    }
-    let inference_scope = output_roots
-        .iter()
-        .flat_map(|node_id| graph.upstream_closure(node_id))
-        .collect::<BTreeSet<_>>();
-
-    for node in &draft.nodes {
-        if !inference_scope.is_empty() && !inference_scope.contains(&node.node_id) {
-            continue;
-        }
-        for input in &node.inputs {
-            if !input.bindable || input.is_linked {
-                continue;
-            }
-            let Some(value) = draft
-                .workflow
-                .inputs(&node.node_id)
-                .and_then(|inputs| inputs.get(&input.name))
-            else {
-                continue;
-            };
-            let Some(guess) = auto_input_guess(&node.class_type, &input.name, value) else {
-                continue;
-            };
-            if let Some(suggested_type) = input
-                .suggested_type
-                .as_deref()
-                .and_then(|value| SemanticFieldType::parse(value).ok())
-            {
-                let explicit_frame = matches!(guess.semantic_key, "first_frame" | "last_frame");
-                if suggested_type != guess.field_type && !explicit_frame {
-                    continue;
-                }
-            }
-            let Ok(mapping) = auto_input_mapping(&node.node_id, input, value, guess) else {
-                continue;
-            };
-            let inference = WorkflowAutoInferenceView {
-                field: guess.semantic_key.to_owned(),
-                value: Some(guess.field_type.as_str().to_owned()),
-                confidence: guess.confidence,
-                source: guess.source.to_owned(),
-                alternatives: Vec::new(),
-                node_id: Some(node.node_id.clone()),
-                input_name: Some(input.name.clone()),
-            };
-            let issue_candidate = WorkflowAutoIssueCandidateView {
-                label: format!("节点 {} · {}", node.node_id, input.name),
-                node_id: Some(node.node_id.clone()),
-                input_name: Some(input.name.clone()),
-                output_id: None,
-                output_type: None,
-                field_type: Some(guess.field_type.as_str().to_owned()),
-            };
-            append_auto_input_candidate(
-                &mut candidates_by_key,
-                AutoInputCandidate {
-                    mapping,
-                    inference,
-                    issue_candidate,
-                    confidence: guess.confidence,
-                },
-            );
-        }
-    }
-
-    infer_graph_linked_inputs(draft, &graph, &inference_scope, &mut candidates_by_key);
-    match infer_video_duration_source(draft, &graph, &inference_scope, &result.output_mappings) {
-        DurationSourceInference::Found(candidate) => {
-            append_auto_input_candidate(&mut candidates_by_key, candidate);
-        }
-        DurationSourceInference::Ambiguous(candidates) => {
-            let alternatives = candidates
-                .iter()
-                .map(|candidate| candidate.label.clone())
-                .collect::<Vec<_>>();
-            result.inferences.push(WorkflowAutoInferenceView {
-                field: "duration_seconds".to_owned(),
-                value: Some("number".to_owned()),
-                confidence: InferenceConfidence::Ambiguous,
-                source: "GRAPH_DURATION_SOURCE".to_owned(),
-                alternatives,
-                node_id: None,
-                input_name: None,
-            });
-            result.issues.push(WorkflowAutoIssueView {
-                code: "AMBIGUOUS_DURATION_SOURCE".to_owned(),
-                message: "无法自动确认视频时长来源，请选择唯一的动态数值源。".to_owned(),
-                field: Some("duration_seconds".to_owned()),
-                candidates,
-            });
-        }
-        DurationSourceInference::None => {}
-    }
-
-    for (semantic_key, mut candidates) in candidates_by_key {
-        if draft
-            .input_mappings
-            .iter()
-            .any(|mapping| mapping.semantic_key == semantic_key)
-        {
-            continue;
-        }
-        candidates.sort_by(|left, right| {
-            left.mapping
-                .target_node
-                .cmp(&right.mapping.target_node)
-                .then(left.mapping.target_input.cmp(&right.mapping.target_input))
-        });
-        let certain = candidates
-            .iter()
-            .filter(|candidate| candidate.confidence == InferenceConfidence::Certain)
-            .cloned()
-            .collect::<Vec<_>>();
-        let selected = if certain.len() == 1 {
-            Some(certain[0].clone())
-        } else if candidates.len() == 1 {
-            Some(candidates[0].clone())
-        } else {
-            None
-        };
-        if let Some(mut selected) = selected {
-            if candidates.len() == 1 && selected.confidence == InferenceConfidence::Ambiguous {
-                selected.confidence = InferenceConfidence::High;
-                selected.inference.confidence = InferenceConfidence::High;
-            }
-            result.input_mappings.push(selected.mapping);
-            result.inferences.push(selected.inference);
-        } else {
-            let alternatives = candidates
-                .iter()
-                .map(|candidate| candidate.issue_candidate.label.clone())
-                .collect::<Vec<_>>();
-            let issue_candidates = candidates
-                .iter()
-                .map(|candidate| candidate.issue_candidate.clone())
-                .collect::<Vec<_>>();
-            for candidate in candidates {
-                let mut inference = candidate.inference;
-                inference.confidence = InferenceConfidence::Ambiguous;
-                inference.alternatives = alternatives.clone();
-                result.inferences.push(inference);
-            }
-            result.issues.push(WorkflowAutoIssueView {
-                code: "AMBIGUOUS_INPUT".to_owned(),
-                message: format!("无法唯一判断 {semantic_key} 输入，请选择一个节点字段。"),
-                field: Some(semantic_key),
-                candidates: issue_candidates,
-            });
-        }
-    }
-
-    let has_first_frame = result
-        .input_mappings
-        .iter()
-        .any(|mapping| mapping.semantic_key == "first_frame")
-        || draft
-            .input_mappings
-            .iter()
-            .any(|mapping| mapping.semantic_key == "first_frame");
-    let has_last_frame = result
-        .input_mappings
-        .iter()
-        .any(|mapping| mapping.semantic_key == "last_frame")
-        || draft
-            .input_mappings
-            .iter()
-            .any(|mapping| mapping.semantic_key == "last_frame");
-    let has_reference_media = result
-        .input_mappings
-        .iter()
-        .any(|mapping| mapping.semantic_key.starts_with("reference_"))
-        || draft
-            .input_mappings
-            .iter()
-            .any(|mapping| mapping.semantic_key.starts_with("reference_"));
-    let outputs = if result.output_mappings.is_empty() {
-        &draft.output_mappings
-    } else {
-        &result.output_mappings
-    };
-    let (category, mode) = infer_manifest_media(
-        outputs,
-        &result.input_mappings,
-        has_first_frame,
-        has_last_frame,
-        has_reference_media,
-    );
-    result.category = category;
-    result.mode = mode;
-    result
+    let analysis = analysis_for_draft(draft);
+    auto_inference_from_analysis(draft, &analysis)
 }
 
-enum DurationSourceInference {
-    None,
-    Found(AutoInputCandidate),
-    Ambiguous(Vec<WorkflowAutoIssueCandidateView>),
+fn analysis_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowAnalysisReport {
+    draft.analysis.clone().unwrap_or_else(|| {
+        WorkflowAnalysisService::analyze_workflow(&draft.workflow, &draft.raw_bytes)
+    })
 }
 
-fn append_auto_input_candidate(
-    candidates_by_key: &mut BTreeMap<String, Vec<AutoInputCandidate>>,
-    candidate: AutoInputCandidate,
-) {
-    let key = candidate.mapping.semantic_key.clone();
-    let candidates = candidates_by_key.entry(key).or_default();
-    if let Some(existing) = candidates.iter_mut().find(|existing| {
-        existing.mapping.target_node == candidate.mapping.target_node
-            && existing.mapping.target_input == candidate.mapping.target_input
-            && existing.mapping.item_index == candidate.mapping.item_index
-    }) {
-        if inference_confidence_rank(candidate.confidence)
-            > inference_confidence_rank(existing.confidence)
-        {
-            *existing = candidate;
-        }
-    } else {
-        candidates.push(candidate);
-    }
-}
-
-fn inference_confidence_rank(confidence: InferenceConfidence) -> u8 {
-    match confidence {
-        InferenceConfidence::Certain => 3,
-        InferenceConfidence::High => 2,
-        InferenceConfidence::Ambiguous => 1,
-        InferenceConfidence::Unknown => 0,
-    }
-}
-
-fn inference_scope_for_node(scope: &BTreeSet<String>, node_id: &str) -> bool {
-    scope.is_empty() || scope.contains(node_id)
-}
-
-fn graph_numeric_leaves(graph: &WorkflowGraph, node_id: &str) -> Vec<WorkflowSource> {
-    let mut unique = BTreeMap::new();
-    for link in graph.upstream_of(node_id) {
-        for trace in graph.trace_scalar_sources(node_id, &link.target_input) {
-            unique
-                .entry((trace.source.node_id.clone(), trace.source.input.clone()))
-                .or_insert(trace.source);
-        }
-    }
-    unique.into_values().collect()
-}
-
-fn linked_target_semantic(input_name: &str) -> Option<&'static str> {
-    match input_name.to_ascii_lowercase().as_str() {
-        "prompt" | "text" | "positive" | "positive_prompt" => Some("prompt"),
-        "negative" | "negative_prompt" => Some("negative_prompt"),
-        "width" => Some("width"),
-        "height" => Some("height"),
-        "seed" | "noise_seed" | "random_seed" => Some("seed"),
-        "length" | "frames" | "num_frames" | "frame_count" => Some("duration_seconds"),
-        "image" | "input_image" => Some("reference_image"),
-        "images" | "reference_images" => Some("reference_images"),
-        "video" | "input_video" => Some("reference_video"),
-        "videos" | "reference_videos" => Some("reference_videos"),
-        "audio" | "input_audio" => Some("reference_audio"),
-        "audios" | "reference_audios" => Some("reference_audios"),
-        _ => None,
-    }
-}
-
-fn infer_graph_linked_inputs(
+fn auto_inference_from_analysis(
     draft: &WorkflowOnboardingDraft,
-    graph: &WorkflowGraph,
-    inference_scope: &BTreeSet<String>,
-    candidates_by_key: &mut BTreeMap<String, Vec<AutoInputCandidate>>,
-) {
-    for node in &draft.nodes {
-        if !inference_scope_for_node(inference_scope, &node.node_id) {
-            continue;
-        }
-        for input in &node.inputs {
-            if graph.incoming_source(&node.node_id, &input.name).is_none() {
-                continue;
-            }
-            let Some(semantic_key) = linked_target_semantic(&input.name) else {
-                continue;
-            };
-            if matches!(semantic_key, "width" | "height") {
-                let guess = AutoInputGuess {
-                    semantic_key,
-                    field_type: SemanticFieldType::Integer,
-                    confidence: InferenceConfidence::Certain,
-                    source: "GRAPH_LINKED_DIRECT_SINK",
-                    required: true,
-                };
-                let Ok(mapping) = auto_linked_input_mapping(&node.node_id, input, guess) else {
-                    continue;
-                };
-                append_auto_input_candidate(
-                    candidates_by_key,
-                    AutoInputCandidate {
-                        mapping,
-                        inference: WorkflowAutoInferenceView {
-                            field: semantic_key.to_owned(),
-                            value: Some(guess.field_type.as_str().to_owned()),
-                            confidence: guess.confidence,
-                            source: guess.source.to_owned(),
-                            alternatives: Vec::new(),
-                            node_id: Some(node.node_id.clone()),
-                            input_name: Some(input.name.clone()),
-                        },
-                        issue_candidate: WorkflowAutoIssueCandidateView {
-                            label: format!("节点 {} · {}", node.node_id, input.name),
-                            node_id: Some(node.node_id.clone()),
-                            input_name: Some(input.name.clone()),
-                            output_id: None,
-                            output_type: None,
-                            field_type: Some(guess.field_type.as_str().to_owned()),
-                        },
-                        confidence: guess.confidence,
-                    },
-                );
-                continue;
-            }
-
-            for trace in graph.trace_sources(&node.node_id, &input.name) {
-                let leaf = trace.source;
-                let class_type = draft.workflow.class_type(&leaf.node_id).unwrap_or_default();
-                let Some(guess) = auto_input_guess(class_type, &leaf.input, &leaf.value) else {
-                    continue;
-                };
-                if guess.semantic_key != semantic_key {
-                    continue;
-                }
-                let Some(source_input) = draft
-                    .nodes
-                    .iter()
-                    .find(|candidate| candidate.node_id == leaf.node_id)
-                    .and_then(|candidate| {
-                        candidate
-                            .inputs
-                            .iter()
-                            .find(|candidate| candidate.name == leaf.input)
-                    })
-                else {
-                    continue;
-                };
-                let Ok(mapping) =
-                    auto_input_mapping(&leaf.node_id, source_input, &leaf.value, guess)
-                else {
-                    continue;
-                };
-                append_auto_input_candidate(
-                    candidates_by_key,
-                    AutoInputCandidate {
-                        mapping,
-                        inference: WorkflowAutoInferenceView {
-                            field: semantic_key.to_owned(),
-                            value: Some(guess.field_type.as_str().to_owned()),
-                            confidence: guess.confidence,
-                            source: "GRAPH_LINKED_SOURCE_LEAF".to_owned(),
-                            alternatives: Vec::new(),
-                            node_id: Some(leaf.node_id.clone()),
-                            input_name: Some(leaf.input.clone()),
-                        },
-                        issue_candidate: WorkflowAutoIssueCandidateView {
-                            label: format!("节点 {} · {}", leaf.node_id, leaf.input),
-                            node_id: Some(leaf.node_id.clone()),
-                            input_name: Some(leaf.input.clone()),
-                            output_id: None,
-                            output_type: None,
-                            field_type: Some(guess.field_type.as_str().to_owned()),
-                        },
-                        confidence: guess.confidence,
-                    },
-                );
-            }
-        }
-    }
-}
-
-fn infer_video_duration_source(
-    draft: &WorkflowOnboardingDraft,
-    graph: &WorkflowGraph,
-    inference_scope: &BTreeSet<String>,
-    outputs: &[OutputMapping],
-) -> DurationSourceInference {
-    let has_video_output = outputs.iter().any(|output| {
-        output.output_type == OutputType::Video
-            && inference_scope_for_node(inference_scope, &output.node_id)
-    }) || (outputs.is_empty()
-        && draft.nodes.iter().any(|node| {
-            inference_scope_for_node(inference_scope, &node.node_id)
-                && output_candidate_score(draft, node) > 0
-                && output_type_for_node(draft, node) == OutputType::Video
-        }));
-    if !has_video_output {
-        return DurationSourceInference::None;
-    }
-
-    let mut found = Vec::new();
-    let mut issue_candidates = BTreeMap::new();
-    let mut saw_linked_length = false;
-    let mut saw_unproven_chain = false;
-    for node in &draft.nodes {
-        if !inference_scope_for_node(inference_scope, &node.node_id) {
-            continue;
-        }
-        for input in &node.inputs {
-            if !is_video_length_input(&input.name) {
-                continue;
-            }
-            let Some(expression_node) = graph.incoming_source(&node.node_id, &input.name) else {
-                continue;
-            };
-            saw_linked_length = true;
-            let numeric_leaves = graph_numeric_leaves(graph, expression_node);
-            let expression = draft
-                .workflow
-                .inputs(expression_node)
-                .and_then(|inputs| inputs.get("expression"))
-                .and_then(Value::as_str);
-            let expression_class = draft
-                .workflow
-                .class_type(expression_node)
-                .unwrap_or_default();
-            let proven = expression.is_some_and(expression_proves_duration)
-                && is_arithmetic_node(expression_class)
-                && arithmetic_chain_is_safe(
-                    &draft.workflow,
-                    graph,
-                    expression_node,
-                    &mut BTreeSet::new(),
-                );
-            if !proven || numeric_leaves.len() != 1 {
-                saw_unproven_chain = true;
-                if numeric_leaves.is_empty() {
-                    issue_candidates
-                        .entry((node.node_id.clone(), input.name.clone()))
-                        .or_insert(WorkflowAutoIssueCandidateView {
-                            label: format!("节点 {} · {}", node.node_id, input.name),
-                            node_id: Some(node.node_id.clone()),
-                            input_name: Some(input.name.clone()),
-                            output_id: None,
-                            output_type: Some("duration_seconds".to_owned()),
-                            field_type: Some("number".to_owned()),
-                        });
+    analysis: &WorkflowAnalysisReport,
+) -> AutoInferenceResult {
+    let input_mappings = analysis
+        .inputs
+        .iter()
+        .filter_map(|input| analysis_input_mapping(draft, input))
+        .collect::<Vec<_>>();
+    let output_mappings = if analysis
+        .issues
+        .iter()
+        .any(|issue| issue.code == "AMBIGUOUS_OUTPUT")
+    {
+        Vec::new()
+    } else {
+        analysis
+            .outputs
+            .iter()
+            .map(|output| OutputMapping {
+                output_id: output.output_id.clone(),
+                label: output.label.clone(),
+                output_type: if output.output_type == "video" {
+                    OutputType::Video
                 } else {
-                    for leaf in numeric_leaves {
-                        issue_candidates
-                            .entry((leaf.node_id.clone(), leaf.input.clone()))
-                            .or_insert(WorkflowAutoIssueCandidateView {
-                                label: format!("节点 {} · {}", leaf.node_id, leaf.input),
-                                node_id: Some(leaf.node_id),
-                                input_name: Some(leaf.input),
-                                output_id: None,
-                                output_type: Some("duration_seconds".to_owned()),
-                                field_type: Some(
-                                    if is_integer_number(&leaf.value) {
-                                        "integer"
-                                    } else {
-                                        "number"
-                                    }
-                                    .to_owned(),
-                                ),
-                            });
-                    }
-                }
-                continue;
-            }
-
-            let leaf = numeric_leaves
-                .into_iter()
-                .next()
-                .expect("length checked above");
-            let Some(leaf_input) = draft
-                .nodes
-                .iter()
-                .find(|candidate| candidate.node_id == leaf.node_id)
-                .and_then(|candidate| {
-                    candidate
-                        .inputs
-                        .iter()
-                        .find(|candidate| candidate.name == leaf.input)
-                })
-            else {
-                saw_unproven_chain = true;
-                continue;
-            };
-            let guess = AutoInputGuess {
-                semantic_key: "duration_seconds",
-                field_type: if is_integer_number(&leaf.value) {
-                    SemanticFieldType::Integer
-                } else {
-                    SemanticFieldType::Number
+                    OutputType::Image
                 },
-                confidence: InferenceConfidence::Certain,
-                source: "GRAPH_DURATION_SOURCE",
-                required: true,
-            };
-            let Ok(mapping) = auto_input_mapping(&leaf.node_id, leaf_input, &leaf.value, guess)
-            else {
-                saw_unproven_chain = true;
-                continue;
-            };
-            let label = format!("节点 {} · {}", leaf.node_id, leaf.input);
-            issue_candidates
-                .entry((leaf.node_id.clone(), leaf.input.clone()))
-                .or_insert_with(|| WorkflowAutoIssueCandidateView {
-                    label: label.clone(),
-                    node_id: Some(leaf.node_id.clone()),
-                    input_name: Some(leaf.input.clone()),
-                    output_id: None,
-                    output_type: Some("duration_seconds".to_owned()),
-                    field_type: Some(guess.field_type.as_str().to_owned()),
-                });
-            found.push(AutoInputCandidate {
-                mapping,
-                inference: WorkflowAutoInferenceView {
-                    field: "duration_seconds".to_owned(),
-                    value: Some(guess.field_type.as_str().to_owned()),
-                    confidence: guess.confidence,
-                    source: guess.source.to_owned(),
+                node_id: output.node_id.clone(),
+                required: output.required,
+            })
+            .collect::<Vec<_>>()
+    };
+    let inferences = analysis
+        .inputs
+        .iter()
+        .map(|input| WorkflowAutoInferenceView {
+            field: input.semantic_key.clone(),
+            value: Some(input.field_type.clone()),
+            confidence: inference_confidence(input.confidence),
+            source: input.source.clone(),
+            alternatives: Vec::new(),
+            node_id: Some(input.node_id.clone()),
+            input_name: Some(input.input_name.clone()),
+        })
+        .chain(
+            analysis
+                .outputs
+                .iter()
+                .map(|output| WorkflowAutoInferenceView {
+                    field: output.output_id.clone(),
+                    value: Some(output.output_type.clone()),
+                    confidence: inference_confidence(output.confidence),
+                    source: "OUTPUT_ANALYSIS".to_owned(),
                     alternatives: Vec::new(),
-                    node_id: Some(leaf.node_id.clone()),
-                    input_name: Some(leaf.input.clone()),
-                },
-                issue_candidate: WorkflowAutoIssueCandidateView {
-                    label,
-                    node_id: Some(leaf.node_id),
-                    input_name: Some(leaf.input),
-                    output_id: None,
-                    output_type: Some("duration_seconds".to_owned()),
-                    field_type: Some(guess.field_type.as_str().to_owned()),
-                },
-                confidence: guess.confidence,
-            });
-        }
-    }
-
-    if !saw_linked_length {
-        return DurationSourceInference::None;
-    }
-    if found.len() == 1 && !saw_unproven_chain {
-        return DurationSourceInference::Found(found.remove(0));
-    }
-    for candidate in found {
-        issue_candidates
-            .entry((
-                candidate.mapping.target_node.clone(),
-                candidate.mapping.target_input.clone(),
-            ))
-            .or_insert(candidate.issue_candidate);
-    }
-    DurationSourceInference::Ambiguous(issue_candidates.into_values().collect())
-}
-
-fn is_video_length_input(input_name: &str) -> bool {
-    matches!(
-        input_name.to_ascii_lowercase().as_str(),
-        "length" | "frames" | "num_frames" | "frame_count"
-    )
-}
-
-fn is_arithmetic_node(class_type: &str) -> bool {
-    let lower = class_type.to_ascii_lowercase();
-    ["math", "expression", "arithmetic", "convert", "conversion"]
+                    node_id: Some(output.node_id.clone()),
+                    input_name: None,
+                }),
+        )
+        .collect::<Vec<_>>();
+    let issues = analysis
+        .issues
         .iter()
-        .any(|marker| lower.contains(marker))
+        .map(|issue| WorkflowAutoIssueView {
+            code: issue.code.clone(),
+            message: issue.message.clone(),
+            field: issue.field.clone(),
+            candidates: issue
+                .candidates
+                .iter()
+                .map(|candidate| WorkflowAutoIssueCandidateView {
+                    label: candidate.label.clone(),
+                    node_id: candidate.node_id.clone(),
+                    input_name: candidate.input_name.clone(),
+                    output_id: candidate.output_id.clone(),
+                    output_type: candidate.output_type.clone(),
+                    field_type: candidate.field_type.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    AutoInferenceResult {
+        name: infer_workflow_name(&draft.workflow, &draft.original_filename),
+        category: analysis.category.clone(),
+        mode: analysis.mode.clone(),
+        input_mappings,
+        output_mappings,
+        inferences,
+        issues,
+    }
 }
 
-fn arithmetic_chain_is_safe(
-    workflow: &WorkflowDocument,
-    graph: &WorkflowGraph,
-    node_id: &str,
-    visited: &mut BTreeSet<String>,
-) -> bool {
-    if !visited.insert(node_id.to_owned()) {
-        return true;
-    }
-    if workflow.inputs(node_id).is_none() {
-        return false;
-    }
-    for link in graph.upstream_of(node_id) {
-        let source_node = &link.source_node_id;
-        if workflow.inputs(source_node).is_none() {
-            return false;
-        }
-        let has_linked_input = !graph.upstream_of(source_node).is_empty();
-        if has_linked_input {
-            if !is_arithmetic_node(workflow.class_type(source_node).unwrap_or_default())
-                || !arithmetic_chain_is_safe(workflow, graph, source_node, visited)
-            {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn expression_proves_duration(expression: &str) -> bool {
-    let compact = expression
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    if !compact.contains('*') && !compact.contains('×') {
-        return false;
-    }
-    if !compact
-        .chars()
-        .any(|character| character.is_ascii_alphabetic())
-    {
-        return false;
-    }
-    let fps = duration_fps_literals(expression);
-    fps.len() == 1 && fps[0].is_finite() && (1.0..=240.0).contains(&fps[0])
-}
-
-fn duration_fps_literals(expression: &str) -> Vec<f64> {
-    let chars = expression.chars().collect::<Vec<_>>();
-    let mut literals = Vec::new();
-    for (index, character) in chars.iter().enumerate() {
-        if !matches!(character, '*' | '×') {
-            continue;
-        }
-        let mut left = index;
-        while left > 0 && chars[left - 1].is_whitespace() {
-            left -= 1;
-        }
-        let mut right = index + 1;
-        while right < chars.len() && chars[right].is_whitespace() {
-            right += 1;
-        }
-        let left_number = number_ending_at(&chars, left);
-        let right_number = number_starting_at(&chars, right);
-        let left_is_identifier = left > 0 && chars[left - 1].is_ascii_alphabetic();
-        let right_is_identifier = right < chars.len() && chars[right].is_ascii_alphabetic();
-        if left_number.is_some() && right_is_identifier {
-            if let Some(number) = left_number {
-                if !literals.contains(&number) {
-                    literals.push(number);
-                }
-            }
-        } else if right_number.is_some() && left_is_identifier {
-            if let Some(number) = right_number {
-                if !literals.contains(&number) {
-                    literals.push(number);
-                }
-            }
-        }
-    }
-    literals
-}
-
-fn number_ending_at(chars: &[char], end: usize) -> Option<f64> {
-    if end == 0 || !chars[end - 1].is_ascii_digit() && chars[end - 1] != '.' {
-        return None;
-    }
-    let mut start = end - 1;
-    while start > 0 && (chars[start - 1].is_ascii_digit() || chars[start - 1] == '.') {
-        start -= 1;
-    }
-    chars[start..end].iter().collect::<String>().parse().ok()
-}
-
-fn number_starting_at(chars: &[char], start: usize) -> Option<f64> {
-    if start >= chars.len() || !chars[start].is_ascii_digit() && chars[start] != '.' {
-        return None;
-    }
-    let mut end = start + 1;
-    while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
-        end += 1;
-    }
-    chars[start..end].iter().collect::<String>().parse().ok()
-}
-
-fn auto_input_guess(class_type: &str, name: &str, value: &Value) -> Option<AutoInputGuess> {
-    let name = name.to_ascii_lowercase();
-    let is_text = value.is_string();
-    let is_number = value.is_number();
-    let is_media = value.is_string() || value.is_array();
-    if is_text
-        && (name == "negative" || name == "negative_prompt" || name.contains("negative_prompt"))
-    {
-        return Some(AutoInputGuess {
-            semantic_key: "negative_prompt",
-            field_type: SemanticFieldType::Textarea,
-            confidence: if name == "negative_prompt" {
-                InferenceConfidence::Certain
-            } else {
-                InferenceConfidence::High
-            },
-            source: "INPUT_NAME_NEGATIVE_PROMPT",
-            required: false,
-        });
-    }
-    if is_text && name == "prompt" {
-        return Some(AutoInputGuess {
-            semantic_key: "prompt",
-            field_type: SemanticFieldType::Textarea,
-            confidence: InferenceConfidence::Certain,
-            source: "INPUT_NAME_EXACT",
-            required: true,
-        });
-    }
-    if is_text && ["text", "positive", "positive_prompt"].contains(&name.as_str()) {
-        return Some(AutoInputGuess {
-            semantic_key: "prompt",
-            field_type: SemanticFieldType::Textarea,
-            confidence: InferenceConfidence::High,
-            source: "INPUT_NAME_PROMPT_ALIAS",
-            required: true,
-        });
-    }
-    if is_text && (name.starts_with("prompt_") || name.ends_with("_prompt")) {
-        return Some(AutoInputGuess {
-            semantic_key: "prompt",
-            field_type: SemanticFieldType::Textarea,
-            confidence: InferenceConfidence::Ambiguous,
-            source: "INPUT_NAME_PROMPT_HEURISTIC",
-            required: true,
-        });
-    }
-    if is_number && ["seed", "noise_seed", "random_seed"].contains(&name.as_str()) {
-        if !is_integer_number(value) {
-            return None;
-        }
-        return Some(AutoInputGuess {
-            semantic_key: "seed",
-            field_type: SemanticFieldType::Seed,
-            confidence: if name == "seed" {
-                InferenceConfidence::Certain
-            } else {
-                InferenceConfidence::High
-            },
-            source: "INPUT_NAME_SEED_AND_INTEGER_LITERAL",
-            required: true,
-        });
-    }
-    if is_number && name == "width" {
-        return Some(numeric_guess("width", value, InferenceConfidence::Certain));
-    }
-    if is_number && name == "height" {
-        return Some(numeric_guess("height", value, InferenceConfidence::Certain));
-    }
-    if is_number && ["steps", "num_steps", "sampling_steps"].contains(&name.as_str()) {
-        return Some(numeric_guess(
-            "steps",
-            value,
-            if name == "steps" {
-                InferenceConfidence::Certain
-            } else {
-                InferenceConfidence::High
-            },
-        ));
-    }
-    if is_number && ["duration", "duration_seconds", "seconds"].contains(&name.as_str()) {
-        return Some(numeric_guess(
-            "duration_seconds",
-            value,
-            InferenceConfidence::High,
-        ));
-    }
-    if is_number {
-        let semantic_key = match name.as_str() {
-            "cfg" | "cfg_scale" => Some("cfg"),
-            "guidance" => Some("guidance"),
-            "denoise" => Some("denoise"),
-            "strength" => Some("strength"),
-            "shift" => Some("shift"),
-            "scale" => Some("scale"),
-            "weight" => Some("weight"),
-            "fps" | "frame_rate" => Some("fps"),
-            _ => None,
-        };
-        if let Some(semantic_key) = semantic_key {
-            return Some(numeric_guess(
-                semantic_key,
-                value,
-                InferenceConfidence::High,
-            ));
-        }
-    }
-    if is_text && (name == "first_frame" || name == "start_frame") {
-        return Some(AutoInputGuess {
-            semantic_key: "first_frame",
-            field_type: SemanticFieldType::Image,
-            confidence: InferenceConfidence::Certain,
-            source: "INPUT_NAME_FIRST_FRAME",
-            required: true,
-        });
-    }
-    if is_text && (name == "last_frame" || name == "end_frame") {
-        return Some(AutoInputGuess {
-            semantic_key: "last_frame",
-            field_type: SemanticFieldType::Image,
-            confidence: InferenceConfidence::Certain,
-            source: "INPUT_NAME_LAST_FRAME",
-            required: true,
-        });
-    }
-    if is_media && name.contains("image") && !is_non_media_image_parameter(&name) {
-        let plural = name.contains("images") || name.contains("reference_images");
-        return Some(AutoInputGuess {
-            semantic_key: if plural {
-                "reference_images"
-            } else {
-                "reference_image"
-            },
-            field_type: if plural {
-                SemanticFieldType::Images
-            } else {
-                SemanticFieldType::Image
-            },
-            confidence: if name == "image" || name == "input_image" {
-                InferenceConfidence::High
-            } else {
-                InferenceConfidence::Certain
-            },
-            source: if class_type.to_ascii_lowercase().contains("loadimage") {
-                "INPUT_NAME_AND_NODE_CLASS"
-            } else {
-                "INPUT_NAME_MEDIA_SEMANTICS"
-            },
-            required: true,
-        });
-    }
-    if is_media && name.contains("video") {
-        let plural = name.contains("videos") || name.contains("reference_videos");
-        return Some(AutoInputGuess {
-            semantic_key: if plural {
-                "reference_videos"
-            } else {
-                "reference_video"
-            },
-            field_type: if plural {
-                SemanticFieldType::Videos
-            } else {
-                SemanticFieldType::Video
-            },
-            confidence: InferenceConfidence::High,
-            source: "INPUT_NAME_MEDIA_SEMANTICS",
-            required: true,
-        });
-    }
-    if is_media && name.contains("audio") {
-        let plural = name.contains("audios") || name.contains("reference_audios");
-        return Some(AutoInputGuess {
-            semantic_key: if plural {
-                "reference_audios"
-            } else {
-                "reference_audio"
-            },
-            field_type: if plural {
-                SemanticFieldType::Audios
-            } else {
-                SemanticFieldType::Audio
-            },
-            confidence: InferenceConfidence::High,
-            source: "INPUT_NAME_MEDIA_SEMANTICS",
-            required: true,
-        });
-    }
-    None
-}
-
-fn is_non_media_image_parameter(name: &str) -> bool {
-    ["image_size", "image_scale", "ref_image_size"]
+fn analysis_input_mapping(
+    draft: &WorkflowOnboardingDraft,
+    input: &crate::application::workflow_analysis_service::WorkflowAnalysisInput,
+) -> Option<InputMapping> {
+    let node_input = draft
+        .nodes
         .iter()
-        .any(|marker| name == *marker || name.ends_with(marker))
-}
-
-fn numeric_guess(
-    key: &'static str,
-    value: &Value,
-    confidence: InferenceConfidence,
-) -> AutoInputGuess {
-    AutoInputGuess {
-        semantic_key: key,
-        field_type: if is_integer_number(value) {
-            SemanticFieldType::Integer
-        } else {
-            SemanticFieldType::Number
-        },
-        confidence,
-        source: if is_integer_number(value) {
-            "INPUT_NAME_INTEGER_PARAMETER"
-        } else {
-            "INPUT_NAME_NUMBER_PARAMETER"
-        },
-        required: matches!(key, "prompt" | "width" | "height" | "duration_seconds"),
-    }
-}
-
-fn is_integer_number(value: &Value) -> bool {
-    value.as_i64().is_some() || value.as_u64().is_some()
-}
-
-fn auto_input_mapping(
-    node_id: &str,
-    input: &WorkflowInputView,
-    value: &Value,
-    guess: AutoInputGuess,
-) -> Result<InputMapping, WorkflowOnboardingError> {
-    validate_mapping_value(guess.field_type, value)?;
-    auto_input_mapping_at_target(node_id, input, Some(value), guess)
-}
-
-fn auto_linked_input_mapping(
-    node_id: &str,
-    input: &WorkflowInputView,
-    guess: AutoInputGuess,
-) -> Result<InputMapping, WorkflowOnboardingError> {
-    auto_input_mapping_at_target(node_id, input, None, guess)
-}
-
-fn auto_input_mapping_at_target(
-    node_id: &str,
-    input: &WorkflowInputView,
-    value: Option<&Value>,
-    guess: AutoInputGuess,
-) -> Result<InputMapping, WorkflowOnboardingError> {
-    let default_value = match guess.field_type {
+        .find(|node| node.node_id == input.node_id)
+        .and_then(|node| {
+            node.inputs
+                .iter()
+                .find(|value| value.name == input.input_name)
+        });
+    let field_type = SemanticFieldType::parse(&input.field_type).ok()?;
+    let default_value = match field_type {
         SemanticFieldType::Textarea | SemanticFieldType::Integer | SemanticFieldType::Number => {
-            value.map(current_value_summary)
+            input.value.as_ref().map(current_value_summary)
         }
         SemanticFieldType::Seed => Some("random".to_owned()),
         _ => None,
     };
+    let numeric = matches!(
+        field_type,
+        SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
+    );
     let step = if matches!(
-        guess.field_type,
+        field_type,
         SemanticFieldType::Integer | SemanticFieldType::Number
     ) {
-        input.numeric_step.clone().filter(|value| {
-            if guess.field_type == SemanticFieldType::Integer {
-                value.parse::<i64>().ok().is_some_and(|step| step > 0)
-            } else {
-                value
-                    .parse::<f64>()
-                    .ok()
-                    .is_some_and(|step| step.is_finite() && step > 0.0)
-            }
-        })
+        node_input.and_then(|value| value.numeric_step.clone())
     } else {
         None
     };
-    Ok(InputMapping {
-        semantic_key: guess.semantic_key.to_owned(),
-        field_type: guess.field_type,
-        label: humanize_field_key(guess.semantic_key),
-        required: guess.required,
+    Some(InputMapping {
+        semantic_key: input.semantic_key.clone(),
+        field_type,
+        label: input.label.clone(),
+        required: input.required,
         default_value,
-        min_value: if matches!(
-            guess.field_type,
-            SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
-        ) {
-            input.numeric_min.clone()
-        } else {
-            None
-        },
-        max_value: if matches!(
-            guess.field_type,
-            SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
-        ) {
-            input.numeric_max.clone()
-        } else {
-            None
-        },
+        min_value: numeric
+            .then(|| node_input.and_then(|value| value.numeric_min.clone()))
+            .flatten(),
+        max_value: numeric
+            .then(|| node_input.and_then(|value| value.numeric_max.clone()))
+            .flatten(),
         step,
-        min_items: guess.field_type.is_plural().then_some(0),
-        max_items: guess.field_type.is_plural().then_some(8),
-        target_node: node_id.to_owned(),
-        target_input: input.name.clone(),
+        min_items: field_type.is_plural().then_some(0),
+        max_items: field_type.is_plural().then_some(8),
+        target_node: input.node_id.clone(),
+        target_input: input.input_name.clone(),
         item_index: None,
     })
 }
 
-fn infer_auto_outputs(
-    draft: &WorkflowOnboardingDraft,
-) -> (
-    Vec<OutputMapping>,
-    Vec<WorkflowAutoInferenceView>,
-    Vec<WorkflowAutoIssueView>,
-) {
-    if !draft.output_mappings.is_empty() {
-        return (Vec::new(), Vec::new(), Vec::new());
+fn inference_confidence(
+    confidence: crate::application::workflow_recognition_service::RecognitionConfidence,
+) -> InferenceConfidence {
+    match confidence {
+        crate::application::workflow_recognition_service::RecognitionConfidence::High => {
+            InferenceConfidence::Certain
+        }
+        crate::application::workflow_recognition_service::RecognitionConfidence::Medium => {
+            InferenceConfidence::High
+        }
+        crate::application::workflow_recognition_service::RecognitionConfidence::Low => {
+            InferenceConfidence::Ambiguous
+        }
     }
-    let mut candidates = draft
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let score = output_candidate_score(draft, node);
-            (score > 0).then(|| {
-                let output_type = output_type_for_node(draft, node);
-                let label = if node.title.trim().is_empty() {
-                    format!("节点 {}", node.node_id)
-                } else {
-                    node.title.clone()
-                };
-                (node.node_id.clone(), label, output_type, score)
-            })
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| left.0.cmp(&right.0));
-    candidates.dedup_by(|left, right| left.0 == right.0);
-    if candidates.is_empty() {
-        return (
-            Vec::new(),
-            vec![WorkflowAutoInferenceView {
-                field: "output_1".to_owned(),
-                value: None,
-                confidence: InferenceConfidence::Unknown,
-                source: "OUTPUT_NODE_SEMANTICS".to_owned(),
-                alternatives: Vec::new(),
-                node_id: None,
-                input_name: None,
-            }],
-            vec![WorkflowAutoIssueView {
-                code: "UNKNOWN_OUTPUT".to_owned(),
-                message: "未能识别唯一的最终输出节点。".to_owned(),
-                field: Some("output_1".to_owned()),
-                candidates: Vec::new(),
-            }],
-        );
-    }
-    let best_score = candidates
-        .iter()
-        .map(|candidate| candidate.3)
-        .max()
-        .expect("output candidates are not empty");
-    let best = candidates
-        .iter()
-        .filter(|candidate| candidate.3 == best_score)
-        .cloned()
-        .collect::<Vec<_>>();
-    let selected = (best.len() == 1).then(|| best[0].clone());
-    if let Some((node_id, label, output_type, _)) = selected {
-        let output_name = match output_type {
-            OutputType::Image => "图片",
-            OutputType::Video => "视频",
-        };
-        return (
-            vec![OutputMapping {
-                output_id: "output_1".to_owned(),
-                label: if label.trim().is_empty() {
-                    format!("输出{output_name}")
-                } else {
-                    label.clone()
-                },
-                output_type,
-                node_id: node_id.clone(),
-                required: true,
-            }],
-            vec![WorkflowAutoInferenceView {
-                field: "output_1".to_owned(),
-                value: Some(match output_type {
-                    OutputType::Image => "image".to_owned(),
-                    OutputType::Video => "video".to_owned(),
-                }),
-                confidence: if candidates.len() == 1 {
-                    InferenceConfidence::Certain
-                } else {
-                    InferenceConfidence::High
-                },
-                source: "OUTPUT_CANDIDATE_SCORE".to_owned(),
-                alternatives: Vec::new(),
-                node_id: Some(node_id),
-                input_name: None,
-            }],
-            Vec::new(),
-        );
-    }
-    let issue_candidates = candidates
-        .iter()
-        .map(
-            |(node_id, label, output_type, _)| WorkflowAutoIssueCandidateView {
-                label: format!("节点 {node_id} · {label}"),
-                node_id: Some(node_id.clone()),
-                input_name: None,
-                output_id: Some("output_1".to_owned()),
-                output_type: Some(match output_type {
-                    OutputType::Image => "image".to_owned(),
-                    OutputType::Video => "video".to_owned(),
-                }),
-                field_type: None,
-            },
-        )
-        .collect::<Vec<_>>();
-    (
-        Vec::new(),
-        candidates
-            .iter()
-            .map(|(node_id, _, output_type, _)| WorkflowAutoInferenceView {
-                field: "output_1".to_owned(),
-                value: Some(match output_type {
-                    OutputType::Image => "image".to_owned(),
-                    OutputType::Video => "video".to_owned(),
-                }),
-                confidence: InferenceConfidence::Ambiguous,
-                source: "OUTPUT_NODE_SEMANTICS".to_owned(),
-                alternatives: issue_candidates
-                    .iter()
-                    .map(|candidate| candidate.label.clone())
-                    .collect(),
-                node_id: Some(node_id.clone()),
-                input_name: None,
-            })
-            .collect(),
-        vec![WorkflowAutoIssueView {
-            code: "AMBIGUOUS_OUTPUT".to_owned(),
-            message: "检测到多个可能的最终输出节点，请选择要发布的输出。".to_owned(),
-            field: Some("output_1".to_owned()),
-            candidates: issue_candidates,
-        }],
-    )
 }
 
 fn auto_issues_from_capability(capability: &CapabilityCheckView) -> Vec<WorkflowAutoIssueView> {
@@ -3665,62 +3115,6 @@ fn runtime_capability_summary(capability: &CapabilityCheckView) -> RuntimeCapabi
     }
 }
 
-fn infer_manifest_media(
-    outputs: &[OutputMapping],
-    input_mappings: &[InputMapping],
-    has_first_frame: bool,
-    has_last_frame: bool,
-    has_reference_media: bool,
-) -> (String, String) {
-    let has_video = outputs
-        .iter()
-        .any(|output| output.output_type == OutputType::Video);
-    let has_image = outputs
-        .iter()
-        .any(|output| output.output_type == OutputType::Image);
-    if has_video {
-        let mode = if has_first_frame && has_last_frame {
-            "image_to_video"
-        } else if has_reference_media {
-            "reference_to_video"
-        } else if input_mappings.iter().any(|mapping| {
-            matches!(
-                mapping.field_type,
-                SemanticFieldType::Image
-                    | SemanticFieldType::Images
-                    | SemanticFieldType::Video
-                    | SemanticFieldType::Videos
-                    | SemanticFieldType::Audio
-                    | SemanticFieldType::Audios
-            )
-        }) {
-            "image_to_video"
-        } else {
-            "text_to_video"
-        };
-        ("video".to_owned(), mode.to_owned())
-    } else if has_image {
-        let mode = if input_mappings.iter().any(|mapping| {
-            matches!(
-                mapping.field_type,
-                SemanticFieldType::Image
-                    | SemanticFieldType::Images
-                    | SemanticFieldType::Video
-                    | SemanticFieldType::Videos
-                    | SemanticFieldType::Audio
-                    | SemanticFieldType::Audios
-            )
-        }) {
-            "image_to_image"
-        } else {
-            "text_to_image"
-        };
-        ("image".to_owned(), mode.to_owned())
-    } else {
-        ("image".to_owned(), "text_to_image".to_owned())
-    }
-}
-
 fn workflow_kind_for_outputs(outputs: &[OutputMapping]) -> String {
     let has_image = outputs
         .iter()
@@ -3733,85 +3127,6 @@ fn workflow_kind_for_outputs(outputs: &[OutputMapping]) -> String {
         (false, true) => "VIDEO".to_owned(),
         (true, false) => "IMAGE".to_owned(),
         (false, false) => "UNKNOWN".to_owned(),
-    }
-}
-
-fn output_candidate_score(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView) -> i32 {
-    let class_type = node.class_type.to_ascii_lowercase();
-    let title = node.title.to_ascii_lowercase();
-    let text = format!("{class_type} {title}");
-    if [
-        "clearcache",
-        "clear cache",
-        "cacheall",
-        "debug",
-        "log",
-        "show text",
-        "utility",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
-    {
-        return -1000;
-    }
-
-    if ["saveimage", "savevideo", "vhs_videocombine", "videocombine"]
-        .iter()
-        .any(|marker| text.contains(marker))
-    {
-        return 100;
-    }
-    if ["previewimage", "previewvideo"]
-        .iter()
-        .any(|marker| text.contains(marker))
-    {
-        return 80;
-    }
-    if node.is_output_node && node_has_media_semantics(draft, node) {
-        return 50;
-    }
-    if text.contains("output") && node_has_media_semantics(draft, node) {
-        return 40;
-    }
-    0
-}
-
-fn node_has_media_semantics(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView) -> bool {
-    let text = format!("{} {}", node.class_type, node.title).to_ascii_lowercase();
-    if ["image", "video", "animated", "webm", "frames", "media"]
-        .iter()
-        .any(|marker| text.contains(marker))
-    {
-        return true;
-    }
-    draft.workflow.inputs(&node.node_id).is_some_and(|inputs| {
-        inputs.keys().any(|name| {
-            let name = name.to_ascii_lowercase();
-            ["image", "images", "video", "videos", "frames"]
-                .iter()
-                .any(|marker| name.contains(marker))
-        })
-    })
-}
-
-fn output_type_for_node(draft: &WorkflowOnboardingDraft, node: &WorkflowNodeView) -> OutputType {
-    let text = format!("{} {}", node.class_type, node.title).to_ascii_lowercase();
-    if text.contains("video")
-        || text.contains("animated")
-        || text.contains("webm")
-        || node.inputs.iter().any(|input| {
-            let name = input.name.to_ascii_lowercase();
-            name.contains("video") || name.contains("frames")
-        })
-        || draft.workflow.inputs(&node.node_id).is_some_and(|inputs| {
-            inputs
-                .keys()
-                .any(|name| name.to_ascii_lowercase().contains("video"))
-        })
-    {
-        OutputType::Video
-    } else {
-        OutputType::Image
     }
 }
 
@@ -3865,21 +3180,6 @@ fn is_generic_workflow_name(value: &str) -> bool {
             | "preview_image"
             | "preview_video"
     )
-}
-
-fn humanize_field_key(value: &str) -> String {
-    value
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn view_for_draft(draft: &WorkflowOnboardingDraft) -> WorkflowOnboardingDraftView {
@@ -4824,6 +4124,7 @@ fn runtime_check_draft(
         },
         input_mappings: Vec::new(),
         output_mappings: Vec::new(),
+        analysis: None,
         recognition,
     })
 }
@@ -5446,12 +4747,35 @@ fn is_safe_key(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
+fn linked_target_semantic(input_name: &str) -> Option<&'static str> {
+    match input_name.to_ascii_lowercase().as_str() {
+        "prompt" | "text" | "positive" | "positive_prompt" => Some("prompt"),
+        "negative" | "negative_prompt" => Some("negative_prompt"),
+        "width" => Some("width"),
+        "height" => Some("height"),
+        "seed" | "noise_seed" | "random_seed" => Some("seed"),
+        "length" | "frames" | "num_frames" | "frame_count" => Some("duration_seconds"),
+        "image" | "input_image" => Some("reference_image"),
+        "images" | "reference_images" => Some("reference_images"),
+        "video" | "input_video" => Some("reference_video"),
+        "videos" | "reference_videos" => Some("reference_videos"),
+        "audio" | "input_audio" => Some("reference_audio"),
+        "audios" | "reference_audios" => Some("reference_audios"),
+        _ => None,
+    }
+}
+
+fn is_integer_number(value: &Value) -> bool {
+    value.as_i64().is_some() || value.as_u64().is_some()
+}
+
 fn validate_workflow_id(value: &str) -> Result<String, WorkflowOnboardingError> {
     let suffix = value.strip_prefix("wfl_").unwrap_or("");
-    if suffix.is_empty() || !is_safe_key(suffix) {
+    let is_uuid_identity = Uuid::parse_str(suffix).is_ok();
+    if suffix.is_empty() || (!is_safe_key(suffix) && !is_uuid_identity) {
         return Err(WorkflowOnboardingError::new(
             "MANIFEST_INVALID",
-            "workflow id must match wfl_[a-z][a-z0-9_]{0,63}",
+            "workflow id must match wfl_[a-z][a-z0-9_]{0,63} or wfl_<uuid>",
         ));
     }
     Ok(value.to_owned())
@@ -5888,6 +5212,7 @@ mod tests {
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            analysis: None,
             recognition,
         }
     }
@@ -5935,10 +5260,23 @@ mod tests {
         ];
 
         for (input_name, value, semantic_key, field_type) in cases {
-            let guess = auto_input_guess("CustomNode", input_name, &value)
+            let mut inputs = Map::new();
+            inputs.insert(input_name.to_owned(), value);
+            let workflow = WorkflowDocument::parse(json!({
+                "1": {"class_type": "CustomNode", "inputs": inputs}
+            }))
+            .unwrap();
+            let analysis = WorkflowAnalysisService::analyze_workflow(
+                &workflow,
+                serde_json::to_vec(workflow.value()).unwrap().as_slice(),
+            );
+            let input = analysis
+                .inputs
+                .iter()
+                .find(|input| input.node_id == "1" && input.input_name == input_name)
                 .unwrap_or_else(|| panic!("expected inference for {input_name}"));
-            assert_eq!(guess.semantic_key, semantic_key, "{input_name}");
-            assert_eq!(guess.field_type.as_str(), field_type, "{input_name}");
+            assert_eq!(input.semantic_key, semantic_key, "{input_name}");
+            assert_eq!(input.field_type, field_type, "{input_name}");
         }
     }
 
@@ -6406,7 +5744,11 @@ outputs: []
         let validation = service.validate(&draft.draft_id).unwrap();
         assert!(validation.ready_to_publish);
         let published = service.publish(&draft.draft_id).await.unwrap();
-        assert!(published.package_name.starts_with("onboarded_t2i_1_0_0_"));
+        assert!(!published.package_name.is_empty());
+        assert!(published
+            .package_name
+            .ends_with(&published.workflow_sha256[..8]));
+        assert_ne!(published.workflow_id, "wfl_onboarded_t2i");
         assert!(library_root.join(&published.package_name).is_dir());
         assert!(!staging_root.join(&draft.draft_id).exists());
         assert_eq!(adapter.submit_calls(), 0);
@@ -6429,7 +5771,7 @@ outputs: []
         assert_eq!(versions[0].recipes[0].recipe_id, published.recipe_id);
 
         let duplicate = service
-            .duplicate_recipe_draft("wfl_onboarded_t2i", "1.0.0", Some("1.0.0"), None)
+            .duplicate_recipe_draft(&published.workflow_id, "1.0.0", Some("1.0.0"), None)
             .await
             .unwrap();
         assert_eq!(duplicate.manifest.recipe_version, "1.0.1");
@@ -6593,6 +5935,12 @@ outputs: []
         assert_eq!(plan.metadata.mode, "text_to_image");
         assert!(plan.auto_publishable);
         assert!(plan.published.is_some());
+        let published_workflow_id = plan
+            .published
+            .as_ref()
+            .expect("auto onboarding should publish")
+            .workflow_id
+            .clone();
         assert!(plan
             .input_mappings
             .iter()
@@ -6615,7 +5963,7 @@ outputs: []
         assert_eq!(duplicate.state, WorkflowAutoOnboardingState::AlreadyExists);
         assert_eq!(
             duplicate.existing_workflow_id.as_deref(),
-            Some("wfl_simple_t2i")
+            Some(published_workflow_id.as_str())
         );
         assert!(duplicate.published.is_none());
 
@@ -6628,7 +5976,7 @@ outputs: []
             .auto_onboard_bytes(
                 next_raw,
                 "renamed_copy.json".to_owned(),
-                Some("wfl_simple_t2i".to_owned()),
+                Some(published_workflow_id),
             )
             .await
             .unwrap();
@@ -6925,6 +6273,7 @@ outputs: []
             },
             input_mappings: Vec::new(),
             output_mappings: Vec::new(),
+            analysis: None,
             recognition,
         };
         let result = infer_auto_onboarding(&draft);
@@ -7096,6 +6445,7 @@ outputs: []
                 },
                 input_mappings: Vec::new(),
                 output_mappings: Vec::new(),
+                analysis: None,
                 recognition,
             });
         }
@@ -7183,6 +6533,7 @@ outputs: []
                 node_id: "2".to_owned(),
                 required: true,
             }],
+            analysis: None,
             recognition,
         }
     }

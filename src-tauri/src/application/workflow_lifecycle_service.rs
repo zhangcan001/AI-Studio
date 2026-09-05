@@ -1,9 +1,10 @@
 use crate::application::{
     builtin_runtime_packages::{audit_installed, is_builtin_package_name},
     ports::{
-        Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository,
+        Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RuntimeRecipeRecord,
         RuntimeWorkflowVersionRecord, WorkflowLibrarySource, WorkflowPackageBytes,
-        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeRepository, WorkflowRuntimeState,
+        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeArtifactRecord,
+        WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository, WorkflowRuntimeState,
         WorkflowRuntimeStateRepository,
     },
     workflow_library_service::WorkflowLibraryService,
@@ -270,6 +271,7 @@ pub struct WorkflowLifecycleService {
     state_repository: Arc<dyn WorkflowRuntimeStateRepository>,
     package_store: Arc<dyn WorkflowPackageStore>,
     project_workflow_binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
+    runtime_artifact_repository: Option<Arc<dyn WorkflowRuntimeArtifactRepository>>,
     clock: Arc<dyn Clock>,
     capability_cache: Arc<RwLock<HashMap<String, CapabilityCheckView>>>,
     workspace_cache: Arc<RwLock<HashMap<String, WorkflowProductionWorkspaceView>>>,
@@ -294,6 +296,7 @@ impl WorkflowLifecycleService {
             state_repository,
             package_store,
             project_workflow_binding_repository: None,
+            runtime_artifact_repository: None,
             clock,
             capability_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -305,6 +308,14 @@ impl WorkflowLifecycleService {
         repository: Arc<dyn ProjectWorkflowBindingRepository>,
     ) -> Self {
         self.project_workflow_binding_repository = Some(repository);
+        self
+    }
+
+    pub fn with_runtime_artifact_repository(
+        mut self,
+        repository: Arc<dyn WorkflowRuntimeArtifactRepository>,
+    ) -> Self {
+        self.runtime_artifact_repository = Some(repository);
         self
     }
 
@@ -1244,14 +1255,7 @@ impl WorkflowLifecycleService {
             }
         };
 
-        let package = match self
-            .find_package(
-                &version.workflow_id,
-                &version.workflow_version,
-                Some(&recipe.version),
-            )
-            .await
-        {
+        let package = match self.find_exact_package(&version, recipe).await {
             Ok(package) => package,
             Err(error) if error.code() == "RUNTIME_PACKAGE_MISSING" => {
                 return Ok(invalid(
@@ -1357,6 +1361,56 @@ impl WorkflowLifecycleService {
         })
     }
 
+    async fn find_exact_package(
+        &self,
+        version: &RuntimeWorkflowVersionRecord,
+        recipe: &crate::application::ports::RuntimeRecipeRecord,
+    ) -> Result<crate::application::ports::WorkflowPackageFiles, WorkflowLifecycleError> {
+        if let Some(repository) = &self.runtime_artifact_repository {
+            let artifacts = repository
+                .list_for_recipe(&version.workflow_version_id, &recipe.recipe_id)
+                .await
+                .map_err(db_error)?;
+            let artifact = match artifacts.as_slice() {
+                [] => {
+                    return Err(WorkflowLifecycleError::new(
+                        "RUNTIME_PACKAGE_MISSING",
+                        "the exact recipe runtime artifact was not registered",
+                    ))
+                }
+                [artifact] => artifact,
+                _ => {
+                    return Err(WorkflowLifecycleError::new(
+                        "RUNTIME_PACKAGE_AMBIGUOUS",
+                        "more than one runtime artifact is registered for the exact recipe",
+                    ))
+                }
+            };
+            let bytes = self
+                .package_store
+                .read_runtime(&artifact.package_name)
+                .await
+                .map_err(|error| {
+                    WorkflowLifecycleError::new("RUNTIME_PACKAGE_MISSING", error.to_string())
+                })?;
+            let (manifest_yaml, recipe_yaml, workflow_json) =
+                validate_exact_runtime_package(&bytes, version, recipe, artifact)?;
+            return Ok(crate::application::ports::WorkflowPackageFiles {
+                package_name: artifact.package_name.clone(),
+                package_source_path: artifact.package_source_path.clone(),
+                manifest_yaml,
+                recipe_yaml,
+                workflow_json,
+            });
+        }
+        self.find_package(
+            &version.workflow_id,
+            &version.workflow_version,
+            Some(&recipe.version),
+        )
+        .await
+    }
+
     async fn restore_removed_packages(&self, packages: &[(String, WorkflowPackageBytes)]) {
         for (package_name, bytes) in packages {
             let staging_id = format!("onb_{}", Uuid::new_v4());
@@ -1388,9 +1442,7 @@ impl WorkflowLifecycleService {
                     "workflow version was not found",
                 )
             })?;
-        let package = self
-            .find_package(&version.workflow_id, &version.workflow_version, None)
-            .await?;
+        let package = self.find_default_recipe_package(&version).await?;
         let recipe = RecipeParser::parse(&package.recipe_yaml)
             .map_err(|error| invalid_error(error.to_string()))?;
         let capability = self
@@ -1516,9 +1568,7 @@ impl WorkflowLifecycleService {
                     "workflow version was not found",
                 )
             })?;
-        let package = self
-            .find_package(&version.workflow_id, &version.workflow_version, None)
-            .await?;
+        let package = self.find_default_recipe_package(&version).await?;
         let bytes = self
             .package_store
             .read_runtime(&package.package_name)
@@ -1845,10 +1895,25 @@ impl WorkflowLifecycleService {
                     "workflow version was not found",
                 )
             })?;
-        let package = self
-            .find_package(&version.workflow_id, &version.workflow_version, None)
-            .await?;
+        let package = self.find_default_recipe_package(&version).await?;
         Ok((version, package))
+    }
+
+    async fn find_default_recipe_package(
+        &self,
+        version: &RuntimeWorkflowVersionRecord,
+    ) -> Result<crate::application::ports::WorkflowPackageFiles, WorkflowLifecycleError> {
+        let recipe = version
+            .recipes
+            .iter()
+            .max_by(|left, right| compare_versions(&left.version, &right.version))
+            .ok_or_else(|| {
+                WorkflowLifecycleError::new(
+                    "RUNTIME_PACKAGE_MISSING",
+                    "the workflow version has no registered recipe",
+                )
+            })?;
+        self.find_exact_package(version, recipe).await
     }
 
     async fn find_package(
@@ -2170,6 +2235,65 @@ fn parse_workflow(value: &str) -> Result<WorkflowDocument, WorkflowLifecycleErro
     let parsed: Value =
         serde_json::from_str(value).map_err(|error| invalid_error(error.to_string()))?;
     WorkflowDocument::parse(parsed).map_err(|error| invalid_error(error.to_string()))
+}
+
+fn validate_exact_runtime_package(
+    package: &WorkflowPackageBytes,
+    version: &RuntimeWorkflowVersionRecord,
+    recipe: &RuntimeRecipeRecord,
+    artifact: &WorkflowRuntimeArtifactRecord,
+) -> Result<(String, String, String), WorkflowLifecycleError> {
+    if artifact.workflow_sha256 != version.workflow_sha256
+        || artifact.recipe_sha256 != recipe.recipe_sha256
+    {
+        return Err(WorkflowLifecycleError::new(
+            "RUNTIME_ARTIFACT_HASH_MISMATCH",
+            "runtime artifact hashes do not match the registered workflow version and recipe",
+        ));
+    }
+
+    read_back_and_validate_package(package)
+        .map_err(|error| WorkflowLifecycleError::new(error.code(), error.to_string()))?;
+
+    let manifest_yaml = String::from_utf8(package.manifest_yaml.clone()).map_err(|error| {
+        WorkflowLifecycleError::new("WORKFLOW_PACKAGE_INVALID", error.to_string())
+    })?;
+    let manifest = WorkflowManifest::parse(&manifest_yaml)
+        .map_err(|error| WorkflowLifecycleError::new("WORKFLOW_PACKAGE_INVALID", error))?;
+    if manifest.id != version.workflow_id
+        || manifest.workflow_version != version.workflow_version
+        || manifest.recipe_version != recipe.version
+    {
+        return Err(WorkflowLifecycleError::new(
+            "WORKFLOW_PACKAGE_INVALID",
+            "runtime manifest does not match the exact workflow version and recipe",
+        ));
+    }
+
+    if sha256(&package.workflow_api_json) != version.workflow_sha256
+        || sha256(&package.workflow_api_json) != artifact.workflow_sha256
+    {
+        return Err(WorkflowLifecycleError::new(
+            "WORKFLOW_RUNTIME_HASH_MISMATCH",
+            "runtime workflow bytes do not match the exact registered artifact hash",
+        ));
+    }
+    if sha256(&package.recipe_yaml) != recipe.recipe_sha256
+        || sha256(&package.recipe_yaml) != artifact.recipe_sha256
+    {
+        return Err(WorkflowLifecycleError::new(
+            "RECIPE_RUNTIME_HASH_MISMATCH",
+            "runtime recipe bytes do not match the exact registered artifact hash",
+        ));
+    }
+
+    let recipe_yaml = String::from_utf8(package.recipe_yaml.clone()).map_err(|error| {
+        WorkflowLifecycleError::new("WORKFLOW_PACKAGE_INVALID", error.to_string())
+    })?;
+    let workflow_json = String::from_utf8(package.workflow_api_json.clone()).map_err(|error| {
+        WorkflowLifecycleError::new("WORKFLOW_PACKAGE_INVALID", error.to_string())
+    })?;
+    Ok((manifest_yaml, recipe_yaml, workflow_json))
 }
 
 fn build_archive(package: &WorkflowPackageBytes) -> Result<Vec<u8>, WorkflowLifecycleError> {
@@ -3097,6 +3221,7 @@ outputs: []
             mode: "text_to_image".to_owned(),
             workflow_version: "1.0.0".to_owned(),
             workflow_sha256: sha256(EXACT_WORKFLOW_JSON.as_bytes()),
+            api_workflow_json: EXACT_WORKFLOW_JSON.to_owned(),
             package_name: Some("pkg-exact-a".to_owned()),
             is_current: true,
             recipes: vec![
@@ -3474,6 +3599,7 @@ outputs: []
             mode: "image_to_video".to_owned(),
             workflow_version: "1.0.0".to_owned(),
             workflow_sha256: "workflow-sha".to_owned(),
+            api_workflow_json: "{}".to_owned(),
             package_name: None,
             is_current: true,
             recipes: vec![RuntimeRecipeRecord {

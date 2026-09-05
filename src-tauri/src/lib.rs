@@ -88,6 +88,7 @@ use application::{
     workflow_library_service::WorkflowLibraryService,
     workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::WorkflowOnboardingService,
+    workflow_registry_service::WorkflowRegistryService,
 };
 use infrastructure::logging::LoggingStatus;
 use infrastructure::{
@@ -354,6 +355,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 ),
             );
+            let workflow_registry_repository: Arc<
+                dyn application::ports::WorkflowRegistryRepository,
+            > = Arc::new(infrastructure::database::SqliteWorkflowRegistryRepository::new(
+                database_pool.clone(),
+            ));
             let workflow_library_source: Arc<dyn WorkflowLibrarySource> = Arc::new(
                 FileSystemWorkflowLibrarySource::new(data_dirs.workflow_library.clone()),
             );
@@ -425,6 +431,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 ),
             );
+            let runtime_artifact_repository: Arc<
+                dyn application::ports::WorkflowRuntimeArtifactRepository,
+            > = Arc::new(
+                infrastructure::database::SqliteWorkflowRuntimeArtifactRepository::new(
+                    database_pool.clone(),
+                ),
+            );
             let package_store: Arc<dyn application::ports::WorkflowPackageStore> =
                 Arc::new(FileSystemWorkflowPackageStore::new(
                     data_dirs.workflow_library.clone(),
@@ -437,13 +450,26 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 ),
             );
-            let project_workflow_binding_service = Arc::new(ProjectWorkflowBindingService::new(
-                project_workflow_binding_repository.clone(),
-                project_repository.clone(),
-                runtime_repository.clone(),
-                runtime_state_repository.clone(),
-                clock.clone(),
-            ));
+            let workflow_registry_service = Arc::new(
+                WorkflowRegistryService::new(
+                    runtime_repository.clone(),
+                    runtime_state_repository.clone(),
+                    project_workflow_binding_repository.clone(),
+                    clock.clone(),
+                )
+                .with_registry_repository(workflow_registry_repository)
+                .with_runtime_artifact_repository(runtime_artifact_repository.clone()),
+            );
+            let project_workflow_binding_service = Arc::new(
+                ProjectWorkflowBindingService::new(
+                    project_workflow_binding_repository.clone(),
+                    project_repository.clone(),
+                    runtime_repository.clone(),
+                    runtime_state_repository.clone(),
+                    clock.clone(),
+                )
+                .with_registry(workflow_registry_service.clone()),
+            );
             let workflow_onboarding_service = Arc::new(WorkflowOnboardingService::new(
                 workflow_library_source.clone(),
                 comfy_adapter.clone(),
@@ -452,7 +478,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 package_store.clone(),
                 clock.clone(),
             )
-            .with_runtime_state(runtime_repository.clone(), runtime_state_repository.clone()));
+            .with_runtime_state(runtime_repository.clone(), runtime_state_repository.clone())
+            .with_registry_service(workflow_registry_service.clone()));
             let workflow_lifecycle_service = Arc::new(WorkflowLifecycleService::new(
                 workflow_library_source.clone(),
                 workflow_library_service.clone(),
@@ -464,7 +491,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             )
             .with_project_workflow_binding_repository(
                 project_workflow_binding_repository.clone(),
-            ));
+            )
+            .with_runtime_artifact_repository(runtime_artifact_repository.clone()));
             let task_update_sink: Arc<dyn application::ports::TaskUpdateSink> =
                 Arc::new(TauriTaskUpdateSink::new(app.handle().clone()));
             let execution_registry = TaskExecutionRegistry::default();
@@ -811,6 +839,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 comfy_memory_service,
                 generation_service,
                 workflow_library_service,
+                workflow_registry_service,
                 workflow_onboarding_service,
                 workflow_lifecycle_service,
                 workflow_benchmark_service,
@@ -1025,6 +1054,16 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_onboarding::workflow_onboarding_publish,
             commands::workflow_onboarding::workflow_onboarding_discard,
             commands::workflow_onboarding::workflow_workspace_list,
+            commands::workflow_registry::workflow_analyze_import,
+            commands::workflow_registry::workflow_commit_import,
+            commands::workflow_registry::workflow_list_registry,
+            commands::workflow_registry::workflow_get_registry,
+            commands::workflow_registry::workflow_rename,
+            commands::workflow_registry::workflow_set_current_version,
+            commands::workflow_registry::workflow_remove,
+            commands::workflow_registry::workflow_restore,
+            commands::workflow_registry::workflow_purge,
+            commands::workflow_registry::workflow_rerecognize,
             commands::workflow_lifecycle::workflow_runtime_workspace_list,
             commands::workflow_lifecycle::workflow_runtime_workspace_refresh,
             commands::workflow_lifecycle::workflow_runtime_diagnostics,

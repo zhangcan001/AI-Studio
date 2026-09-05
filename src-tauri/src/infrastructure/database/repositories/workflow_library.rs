@@ -36,8 +36,9 @@ async fn register_package(
 ) -> Result<WorkflowPackageRegistration, RepositoryError> {
     sqlx::query(
         "INSERT INTO workflows (
-            id, name, category, mode, current_version_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, NULL, ?, ?)
+            id, name, category, mode, current_version_id, created_at, updated_at,
+            source_kind, library_state, removed_at
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'ACTIVE', NULL)
         ON CONFLICT(id) DO NOTHING",
     )
     .bind(&package.workflow_id)
@@ -46,9 +47,21 @@ async fn register_package(
     .bind(&package.mode)
     .bind(format_datetime(package.created_at))
     .bind(format_datetime(package.created_at))
+    .bind(&package.source_kind)
     .execute(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
+
+    if package.source_kind == "PRODUCT" {
+        sqlx::query(
+            "UPDATE workflows SET source_kind = 'PRODUCT'
+             WHERE id = ? AND source_kind <> 'PRODUCT'",
+        )
+        .bind(&package.workflow_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sqlx_error)?;
+    }
 
     let existing_version = sqlx::query_as::<_, WorkflowVersionRow>(
         "SELECT id, workflow_sha256
@@ -94,20 +107,8 @@ async fn register_package(
         }
     };
 
-    sqlx::query(
-        "UPDATE workflow_versions
-         SET package_name = ?, package_source_path = ?
-         WHERE id = ?",
-    )
-    .bind(&package.package_name)
-    .bind(&package.package_source_path)
-    .bind(&workflow_version_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sqlx_error)?;
-
     let existing_recipe = sqlx::query_as::<_, RecipeVersionRow>(
-        "SELECT recipe_sha256
+        "SELECT id, recipe_sha256
          FROM recipes
          WHERE workflow_version_id = ? AND version = ?",
     )
@@ -117,12 +118,12 @@ async fn register_package(
     .await
     .map_err(map_sqlx_error)?;
 
-    let registration = match existing_recipe {
+    let (registration, recipe_id) = match existing_recipe {
         Some(existing) if existing.recipe_sha256 == package.recipe_sha256 => {
             if inserted_workflow_version {
-                WorkflowPackageRegistration::Inserted
+                (WorkflowPackageRegistration::Inserted, existing.id)
             } else {
-                WorkflowPackageRegistration::Reused
+                (WorkflowPackageRegistration::Reused, existing.id)
             }
         }
         Some(_) => {
@@ -132,13 +133,14 @@ async fn register_package(
             ))
         }
         None => {
+            let recipe_id = format!("rcp_{}", Uuid::new_v4());
             sqlx::query(
                 "INSERT INTO recipes (
                     id, workflow_version_id, version, schema_version,
                     recipe_yaml, recipe_sha256, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
-            .bind(format!("rcp_{}", Uuid::new_v4()))
+            .bind(&recipe_id)
             .bind(&workflow_version_id)
             .bind(&package.recipe_version)
             .bind(i64::from(package.recipe_schema_version))
@@ -148,71 +150,69 @@ async fn register_package(
             .execute(&mut **transaction)
             .await
             .map_err(map_sqlx_error)?;
-            WorkflowPackageRegistration::Inserted
+            (WorkflowPackageRegistration::Inserted, recipe_id)
         }
     };
 
-    select_latest_current_version(transaction, &package.workflow_id, package.created_at).await?;
+    sqlx::query(
+        "UPDATE workflows SET current_version_id = ?, updated_at = ?
+         WHERE id = ? AND current_version_id IS NULL",
+    )
+    .bind(&workflow_version_id)
+    .bind(format_datetime(package.created_at))
+    .bind(&package.workflow_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    register_runtime_artifact(transaction, package, &workflow_version_id, &recipe_id).await?;
     Ok(registration)
 }
 
-async fn select_latest_current_version(
+async fn register_runtime_artifact(
     transaction: &mut Transaction<'_, Sqlite>,
-    workflow_id: &str,
-    updated_at: chrono::DateTime<chrono::Utc>,
+    package: &WorkflowPackageRecord,
+    workflow_version_id: &str,
+    recipe_id: &str,
 ) -> Result<(), RepositoryError> {
-    #[derive(sqlx::FromRow)]
-    struct VersionCandidate {
-        id: String,
-        version: String,
-    }
-
-    let versions = sqlx::query_as::<_, VersionCandidate>(
-        "SELECT id, version FROM workflow_versions WHERE workflow_id = ?",
+    let existing = sqlx::query_as::<_, RuntimeArtifactRow>(
+        "SELECT workflow_version_id, recipe_id, workflow_sha256, recipe_sha256
+         FROM workflow_runtime_artifacts WHERE package_name = ?",
     )
-    .bind(workflow_id)
-    .fetch_all(&mut **transaction)
+    .bind(&package.package_name)
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
-    let Some(latest) = versions.into_iter().max_by(|left, right| {
-        compare_semver(&left.version, &right.version).then_with(|| left.id.cmp(&right.id))
-    }) else {
+    if let Some(existing) = existing {
+        if existing.workflow_version_id != workflow_version_id
+            || existing.recipe_id != recipe_id
+            || existing.workflow_sha256 != package.workflow_sha256
+            || existing.recipe_sha256 != package.recipe_sha256
+        {
+            return Err(RepositoryError::integrity(
+                "runtime package is already mapped to a different immutable workflow/recipe",
+            ));
+        }
         return Ok(());
-    };
-
+    }
     sqlx::query(
-        "UPDATE workflows
-         SET current_version_id = ?, updated_at = ?
-         WHERE id = ?",
+        "INSERT INTO workflow_runtime_artifacts (
+            id, workflow_version_id, recipe_id, package_name, source_kind,
+            package_source_path, workflow_sha256, recipe_sha256, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(latest.id)
-    .bind(format_datetime(updated_at))
-    .bind(workflow_id)
+    .bind(format!("wra_{}", Uuid::new_v4()))
+    .bind(workflow_version_id)
+    .bind(recipe_id)
+    .bind(&package.package_name)
+    .bind(&package.source_kind)
+    .bind(&package.package_source_path)
+    .bind(&package.workflow_sha256)
+    .bind(&package.recipe_sha256)
+    .bind(format_datetime(package.created_at))
     .execute(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
     Ok(())
-}
-
-fn compare_semver(left: &str, right: &str) -> std::cmp::Ordering {
-    let left_parts = left
-        .split('.')
-        .map(|part| part.parse::<u64>().unwrap_or(0))
-        .collect::<Vec<_>>();
-    let right_parts = right
-        .split('.')
-        .map(|part| part.parse::<u64>().unwrap_or(0))
-        .collect::<Vec<_>>();
-    (0..3)
-        .map(|index| {
-            left_parts
-                .get(index)
-                .copied()
-                .unwrap_or(0)
-                .cmp(&right_parts.get(index).copied().unwrap_or(0))
-        })
-        .find(|ordering| *ordering != std::cmp::Ordering::Equal)
-        .unwrap_or_else(|| left.cmp(right))
 }
 
 #[derive(sqlx::FromRow)]
@@ -223,6 +223,15 @@ struct WorkflowVersionRow {
 
 #[derive(sqlx::FromRow)]
 struct RecipeVersionRow {
+    id: String,
+    recipe_sha256: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct RuntimeArtifactRow {
+    workflow_version_id: String,
+    recipe_id: String,
+    workflow_sha256: String,
     recipe_sha256: String,
 }
 
@@ -253,6 +262,7 @@ mod tests {
     fn package(workflow_hash: &str, recipe_hash: &str) -> WorkflowPackageRecord {
         WorkflowPackageRecord {
             workflow_id: "wfl_test".to_owned(),
+            source_kind: "USER".to_owned(),
             package_name: "test-package".to_owned(),
             package_source_path: None,
             name: "Test Workflow".to_owned(),
@@ -312,15 +322,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selects_highest_semver_as_current_even_when_packages_arrive_out_of_order() {
+    async fn keeps_first_version_current_when_packages_arrive_out_of_order() {
         let (_directory, pool, repository) = setup().await;
         let mut v110 = package("workflow-1.10.0", "recipe-1.10.0");
         v110.workflow_version = "1.10.0".to_owned();
         let mut v190 = package("workflow-1.9.0", "recipe-1.9.0");
         v190.workflow_version = "1.9.0".to_owned();
+        v190.package_name = "test-package-1-9".to_owned();
+        v110.package_name = "test-package-1-10".to_owned();
 
-        repository.register_package(&v110).await.unwrap();
         repository.register_package(&v190).await.unwrap();
+        repository.register_package(&v110).await.unwrap();
 
         let current = sqlx::query_scalar::<_, String>(
             "SELECT current_version_id FROM workflows WHERE id = ?",
@@ -335,7 +347,11 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(current_version, "1.10.0");
+        assert_eq!(current_version, "1.9.0");
+
+        // Registering a later version must never silently replace the user's
+        // default. The first package was 1.9.0, so it remains current even
+        // though 1.10.0 arrived afterwards.
     }
 
     #[tokio::test]

@@ -20,6 +20,35 @@ export type WorkflowImportFormat = "API" | "UI" | "UNKNOWN" | "INVALID_JSON";
 export type WorkflowRecognitionIdentity = "NEW" | "EXACT_RAW" | "EXACT_SEMANTIC" | "STRUCTURAL_VARIANT";
 export type WorkflowRecipeStatus = "CURRENT" | "OUTDATED" | "MISSING";
 export type WorkflowRuntimeCapability = "READY" | "MISSING_NODES" | "OFFLINE" | "INCOMPATIBLE" | "NOT_CHECKED";
+export type WorkflowSourceKind = "PRODUCT" | "USER";
+export type WorkflowLibraryState = "ACTIVE" | "REMOVED";
+export type WorkflowImportCommitAction = "NEW_WORKFLOW" | "NEW_VERSION" | "NEW_RECIPE" | "RESTORE_EXISTING";
+
+export interface WorkflowImportCommitRequest {
+  draftId: string;
+  action: WorkflowImportCommitAction;
+  workflowId?: string;
+  setCurrent?: boolean;
+}
+
+export interface WorkflowAnalysisReportView {
+  format: WorkflowImportFormat;
+  identity: WorkflowRecognitionIdentity;
+  existingWorkflowId?: string;
+  existingWorkflowVersionId?: string;
+  rawSha?: string;
+  semanticSha?: string;
+  structuralSha?: string;
+  category?: string;
+  mode?: string;
+  inputs?: WorkflowRecognitionInputView[];
+  outputs?: WorkflowRecognitionOutputView[];
+  confidence?: string;
+  issues?: WorkflowRecognitionIssueView[];
+  recipeFreshness?: WorkflowRecipeStatus | string;
+  runtimeCapability?: WorkflowRuntimeCapability | string;
+  suggestedActions?: string[];
+}
 
 export interface WorkflowStructuralChangeView {
   field?: string;
@@ -223,10 +252,13 @@ export interface WorkflowOnboardingDraftView {
 export interface WorkflowOnboardingPublishView {
   workflowId: string;
   workflowVersion: string;
+  recipeVersion?: string;
   recipeId: string;
   packageName: string;
   workflowSha256: string;
   refreshed: WorkflowSyncReport;
+  workflowVersionId?: string;
+  sourceKind?: WorkflowSourceKind | string;
 }
 
 export interface WorkflowAutoInferenceView {
@@ -263,6 +295,9 @@ export interface WorkflowAutoExistingRecipeView {
 
 export interface WorkflowAutoOnboardingPlanView {
   draftId: string;
+  analysisId?: string;
+  analysis?: WorkflowAnalysisReportView;
+  commitRequired?: boolean;
   state: WorkflowAutoOnboardingState;
   /** Optional until the native onboarding response exposes format detection. */
   format?: WorkflowImportFormat;
@@ -292,6 +327,8 @@ export interface WorkflowAutoOnboardingPlanView {
   existingWorkflowVersion?: string;
   existingWorkflowName?: string;
   existingWorkflowSource?: string;
+  existingWorkflowSourceKind?: WorkflowSourceKind | string;
+  existingWorkflowLibraryState?: WorkflowLibraryState | string;
   existingMatchType?: "RAW_SHA" | "SEMANTIC_SHA" | "STRUCTURAL_SHA" | string;
   existingPackageName?: string;
   existingRecipes?: WorkflowAutoExistingRecipeView[];
@@ -319,10 +356,102 @@ export interface WorkflowWorkspaceView {
 
 export interface WorkflowRecipeSummaryView {
   recipeId: string;
+  workflowVersionId?: string;
   version: string;
   inputCount: number;
   outputCount: number;
   presetCount?: number;
+}
+
+export interface WorkflowRegistryRecipeView {
+  recipeId: string;
+  workflowVersionId?: string;
+  version?: string;
+  recipeVersion?: string;
+  packageName?: string;
+  packageStatus?: string;
+  workflowSha256?: string;
+  recipeSha256?: string;
+  enabled?: boolean;
+  archived?: boolean;
+  capability?: string;
+  readiness?: string;
+  inputCount?: number;
+  outputCount?: number;
+  presetCount?: number;
+}
+
+export interface WorkflowRegistryVersionView {
+  workflowVersionId: string;
+  workflowId?: string;
+  version?: string;
+  workflowVersion?: string;
+  rawSha256?: string;
+  workflowSha256?: string;
+  packageName?: string;
+  packageSourcePath?: string;
+  packageStatus?: string;
+  enabled?: boolean;
+  archived?: boolean;
+  archivedAt?: string;
+  capability?: string;
+  capabilityIssues?: CapabilityIssueView[];
+  readiness?: string;
+  readinessReasons?: string[];
+  nodeCount?: number;
+  activeTasks?: number;
+  activeQueueItemCount?: number;
+  totalTasks?: number;
+  hasSuccessfulRun?: boolean;
+  latestSuccessAt?: string;
+  latestFailureAt?: string;
+  liveVerifiedAt?: string;
+  diagnostics?: WorkflowDiagnosticView[];
+  recipes?: WorkflowRegistryRecipeView[];
+}
+
+export interface WorkflowRegistryView {
+  workflowId: string;
+  name: string;
+  sourceKind: WorkflowSourceKind | string;
+  libraryState: WorkflowLibraryState | string;
+  currentVersionId?: string | null;
+  currentVersion?: WorkflowRegistryVersionView | null;
+  currentRecipe?: WorkflowRegistryRecipeView | null;
+  versions?: WorkflowRegistryVersionView[];
+  recipes?: WorkflowRegistryRecipeView[];
+  capability?: string;
+  capabilityIssues?: CapabilityIssueView[];
+  projectUsageCount?: number;
+  historyCount?: number;
+  activeTaskCount?: number;
+  activeQueueItemCount?: number;
+  totalTaskCount?: number;
+  hasSuccessfulRun?: boolean;
+  latestSuccessAt?: string;
+  latestFailureAt?: string;
+  liveVerifiedAt?: string;
+  removedAt?: string | null;
+}
+
+export interface WorkflowRegistryResponse {
+  items: WorkflowRegistryView[];
+  staging?: WorkflowStagingView[];
+}
+
+export interface WorkflowRegistryMutationResult {
+  workflowId: string;
+  libraryState?: WorkflowLibraryState | string;
+  sourceKind?: WorkflowSourceKind | string;
+  currentVersionId?: string | null;
+  workflowVersionId?: string;
+  recipeId?: string;
+  enabled?: boolean;
+  capability?: string;
+  readiness?: string;
+  projectBindingCount?: number;
+  historyCount?: number;
+  purged?: boolean;
 }
 
 export interface WorkflowDiagnosticView {
@@ -393,6 +522,9 @@ export interface WorkflowDeletionInspection {
   canHardDelete: boolean;
   requiresArchive: boolean;
   blockingReasons: string[];
+  sourceKind?: WorkflowSourceKind | string;
+  libraryState?: WorkflowLibraryState | string;
+  historyCount?: number;
 }
 
 export interface WorkflowDeletionResult {
@@ -410,6 +542,10 @@ export interface WorkflowRestoreResult {
   enabled: boolean;
   capability: string;
   readiness: string;
+  workflowId?: string;
+  libraryState?: WorkflowLibraryState | string;
+  projectBindingCount?: number;
+  needsAttention?: boolean;
 }
 
 export interface WorkflowCapabilityBatchView {

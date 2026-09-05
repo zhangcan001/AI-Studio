@@ -20,7 +20,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 16;
+const BACKUP_VERSION: u32 = 17;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -851,6 +851,12 @@ impl ProjectBackupService {
         }
         let project_workflow_bindings =
             query_project_workflow_bindings(&mut transaction, project_id).await?;
+        let workflow_registry = query_workflow_registry_snapshot(
+            &mut transaction,
+            &workflow_refs,
+            &project_workflow_bindings,
+        )
+        .await?;
         transaction
             .commit()
             .await
@@ -981,6 +987,7 @@ impl ProjectBackupService {
             preparation_snapshots,
             workflow_refs,
             project_workflow_bindings,
+            workflow_registry: Some(workflow_registry),
             asset_tags,
             asset_tag_links,
             asset_favorites,
@@ -1148,6 +1155,8 @@ struct BackupDocument {
     #[serde(default)]
     project_workflow_bindings: Vec<BackupProjectWorkflowBinding>,
     #[serde(default)]
+    workflow_registry: Option<BackupWorkflowRegistry>,
+    #[serde(default)]
     asset_tags: Vec<BackupAssetTag>,
     #[serde(default)]
     asset_tag_links: Vec<BackupAssetTagLink>,
@@ -1221,6 +1230,72 @@ struct BackupDocument {
     scope_profile_bindings: Vec<BackupScopeProfileBinding>,
     #[serde(default)]
     scope_reference_set_bindings: Vec<BackupScopeReferenceSetBinding>,
+}
+
+/// Registry metadata is part of a project backup because bindings and history
+/// refer to global immutable workflow IDs. The optional field keeps Backup16
+/// documents readable; Backup17 always writes it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupWorkflowRegistry {
+    workflows: Vec<BackupWorkflow>,
+    versions: Vec<BackupWorkflowVersion>,
+    recipes: Vec<BackupWorkflowRecipe>,
+    runtime_artifacts: Vec<BackupWorkflowRuntimeArtifact>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupWorkflow {
+    id: String,
+    name: String,
+    category: String,
+    mode: String,
+    source_kind: String,
+    library_state: String,
+    current_version_id: Option<String>,
+    removed_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupWorkflowVersion {
+    id: String,
+    workflow_id: String,
+    version: String,
+    api_workflow_json: String,
+    workflow_sha256: String,
+    package_name: Option<String>,
+    package_source_path: Option<String>,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupWorkflowRecipe {
+    id: String,
+    workflow_version_id: String,
+    version: String,
+    schema_version: i64,
+    recipe_yaml: String,
+    recipe_sha256: String,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct BackupWorkflowRuntimeArtifact {
+    id: String,
+    workflow_version_id: String,
+    recipe_id: String,
+    package_name: String,
+    source_kind: String,
+    package_source_path: Option<String>,
+    workflow_sha256: String,
+    recipe_sha256: String,
+    created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
@@ -2829,6 +2904,102 @@ async fn query_project_workflow_bindings(
     .map_err(|error| AppError::database(error.to_string()))
 }
 
+async fn query_workflow_registry_snapshot(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workflow_refs: &[WorkflowReference],
+    bindings: &[BackupProjectWorkflowBinding],
+) -> Result<BackupWorkflowRegistry, AppError> {
+    let mut workflow_ids = workflow_refs
+        .iter()
+        .map(|reference| reference.workflow_id.clone())
+        .filter(|id| !id.trim().is_empty())
+        .collect::<HashSet<_>>();
+    let version_ids = workflow_refs
+        .iter()
+        .map(|reference| reference.workflow_version_id.clone())
+        .chain(
+            bindings
+                .iter()
+                .map(|binding| binding.workflow_version_id.clone()),
+        )
+        .collect::<HashSet<_>>();
+    workflow_ids.extend(
+        bindings
+            .iter()
+            .filter_map(|binding| binding.workflow_id.clone())
+            .filter(|id| !id.trim().is_empty()),
+    );
+
+    let all_versions = sqlx::query_as::<_, BackupWorkflowVersion>(
+        "SELECT id, workflow_id, version, api_workflow_json, workflow_sha256,
+                package_name, package_source_path, created_at
+         FROM workflow_versions ORDER BY workflow_id, version, id",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?;
+    let versions = all_versions
+        .into_iter()
+        .filter(|version| {
+            workflow_ids.contains(&version.workflow_id) || version_ids.contains(&version.id)
+        })
+        .collect::<Vec<_>>();
+    workflow_ids.extend(versions.iter().map(|version| version.workflow_id.clone()));
+    let selected_version_ids = versions
+        .iter()
+        .map(|version| version.id.clone())
+        .collect::<HashSet<_>>();
+
+    let workflows = sqlx::query_as::<_, BackupWorkflow>(
+        "SELECT id, name, category, mode, source_kind, library_state,
+                current_version_id, removed_at, created_at, updated_at
+         FROM workflows ORDER BY id",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .filter(|workflow| workflow_ids.contains(&workflow.id))
+    .collect::<Vec<_>>();
+
+    let recipes = sqlx::query_as::<_, BackupWorkflowRecipe>(
+        "SELECT id, workflow_version_id, version, schema_version, recipe_yaml,
+                recipe_sha256, created_at
+         FROM recipes ORDER BY workflow_version_id, version, id",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .filter(|recipe| selected_version_ids.contains(&recipe.workflow_version_id))
+    .collect::<Vec<_>>();
+    let recipe_ids = recipes
+        .iter()
+        .map(|recipe| recipe.id.clone())
+        .collect::<HashSet<_>>();
+    let runtime_artifacts = sqlx::query_as::<_, BackupWorkflowRuntimeArtifact>(
+        "SELECT id, workflow_version_id, recipe_id, package_name, source_kind,
+                package_source_path, workflow_sha256, recipe_sha256, created_at
+         FROM workflow_runtime_artifacts ORDER BY workflow_version_id, recipe_id, package_name, id",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| AppError::database(error.to_string()))?
+    .into_iter()
+    .filter(|artifact| {
+        selected_version_ids.contains(&artifact.workflow_version_id)
+            && recipe_ids.contains(&artifact.recipe_id)
+    })
+    .collect();
+
+    Ok(BackupWorkflowRegistry {
+        workflows,
+        versions,
+        recipes,
+        runtime_artifacts,
+    })
+}
+
 fn collect_workflow_refs(tasks: &[BackupTask]) -> Vec<WorkflowReference> {
     let mut refs = tasks
         .iter()
@@ -4142,7 +4313,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -4188,6 +4359,7 @@ fn validate_document_entries(
     }
     validate_asset_video_prompt_document(document)?;
     validate_project_workflow_binding_document(document, version)?;
+    validate_workflow_registry_document(document, version)?;
     validate_production_item_review_document(document)?;
     validate_organization_document(document)?;
     validate_reference_anchor_document(document)?;
@@ -4199,6 +4371,131 @@ fn validate_document_entries(
     validate_production_orchestrator_document(document)?;
     validate_shot_document(document, version)?;
     validate_script_draft_document(document, version)?;
+    Ok(())
+}
+
+fn validate_workflow_registry_document(
+    document: &BackupDocument,
+    version: u32,
+) -> Result<(), AppError> {
+    let Some(registry) = &document.workflow_registry else {
+        return Ok(());
+    };
+    if version < 17 {
+        if !registry.workflows.is_empty()
+            || !registry.versions.is_empty()
+            || !registry.recipes.is_empty()
+            || !registry.runtime_artifacts.is_empty()
+        {
+            return Err(AppError::backup_invalid(
+                "旧版备份不应包含 Workflow Registry 数据",
+            ));
+        }
+        return Ok(());
+    }
+
+    let mut workflow_ids = HashSet::new();
+    let mut workflow_versions = HashMap::new();
+    for workflow in &registry.workflows {
+        if workflow.id.trim().is_empty()
+            || !workflow_ids.insert(workflow.id.as_str())
+            || workflow.name.trim().is_empty()
+            || !matches!(workflow.source_kind.as_str(), "PRODUCT" | "USER")
+            || !matches!(workflow.library_state.as_str(), "ACTIVE" | "REMOVED")
+            || workflow.created_at.trim().is_empty()
+            || workflow.updated_at.trim().is_empty()
+        {
+            return Err(AppError::backup_invalid(
+                "Workflow Registry 逻辑工作流数据无效",
+            ));
+        }
+    }
+
+    for workflow_version in &registry.versions {
+        if workflow_version.id.trim().is_empty()
+            || workflow_version.workflow_id.trim().is_empty()
+            || !workflow_ids.contains(workflow_version.workflow_id.as_str())
+            || workflow_version.version.trim().is_empty()
+            || workflow_version.api_workflow_json.trim().is_empty()
+            || workflow_version.workflow_sha256.trim().is_empty()
+            || workflow_version.created_at.trim().is_empty()
+            || workflow_versions
+                .insert(workflow_version.id.as_str(), workflow_version)
+                .is_some()
+        {
+            return Err(AppError::backup_invalid("Workflow Registry 版本数据无效"));
+        }
+    }
+
+    for workflow in &registry.workflows {
+        if let Some(current_version_id) = workflow.current_version_id.as_deref() {
+            let Some(current_version) = workflow_versions.get(current_version_id) else {
+                return Err(AppError::backup_invalid(
+                    "Workflow Registry currentVersionId 不存在",
+                ));
+            };
+            if current_version.workflow_id != workflow.id {
+                return Err(AppError::backup_invalid(
+                    "Workflow Registry currentVersionId 跨 Workflow",
+                ));
+            }
+        }
+    }
+
+    let mut recipe_ids = HashMap::new();
+    for recipe in &registry.recipes {
+        if recipe.id.trim().is_empty()
+            || recipe.workflow_version_id.trim().is_empty()
+            || !workflow_versions.contains_key(recipe.workflow_version_id.as_str())
+            || recipe.version.trim().is_empty()
+            || recipe.schema_version <= 0
+            || recipe.recipe_yaml.trim().is_empty()
+            || recipe.recipe_sha256.trim().is_empty()
+            || recipe.created_at.trim().is_empty()
+            || recipe_ids.insert(recipe.id.as_str(), recipe).is_some()
+        {
+            return Err(AppError::backup_invalid(
+                "Workflow Registry Recipe 数据无效",
+            ));
+        }
+    }
+
+    let mut artifact_ids = HashSet::new();
+    let mut package_names = HashSet::new();
+    let mut artifact_keys = HashSet::new();
+    for artifact in &registry.runtime_artifacts {
+        let Some(workflow_version) = workflow_versions.get(artifact.workflow_version_id.as_str())
+        else {
+            return Err(AppError::backup_invalid(
+                "Workflow Runtime Artifact 引用了不存在的 WorkflowVersion",
+            ));
+        };
+        let Some(recipe) = recipe_ids.get(artifact.recipe_id.as_str()) else {
+            return Err(AppError::backup_invalid(
+                "Workflow Runtime Artifact 引用了不存在的 Recipe",
+            ));
+        };
+        if recipe.workflow_version_id != artifact.workflow_version_id
+            || artifact.id.trim().is_empty()
+            || !artifact_ids.insert(artifact.id.as_str())
+            || artifact.package_name.trim().is_empty()
+            || !package_names.insert(artifact.package_name.as_str())
+            || !artifact_keys.insert((
+                artifact.workflow_version_id.as_str(),
+                artifact.recipe_id.as_str(),
+                artifact.package_name.as_str(),
+            ))
+            || !matches!(artifact.source_kind.as_str(), "PRODUCT" | "USER")
+            || artifact.workflow_sha256 != workflow_version.workflow_sha256
+            || artifact.recipe_sha256 != recipe.recipe_sha256
+            || artifact.created_at.trim().is_empty()
+        {
+            return Err(AppError::backup_invalid(
+                "Workflow Runtime Artifact 精确映射数据无效",
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -6283,6 +6580,10 @@ async fn restore_rows_in_transaction(
     .await
     .map_err(|error| AppError::database(error.to_string()))?;
 
+    if let Some(registry) = &document.workflow_registry {
+        restore_workflow_registry(transaction, registry).await?;
+    }
+
     for binding in &document.project_workflow_bindings {
         sqlx::query(
             "INSERT INTO project_workflow_bindings
@@ -7961,6 +8262,159 @@ async fn ensure_workflow_dependency(
     .await
 }
 
+async fn restore_workflow_registry(
+    transaction: &mut Transaction<'_, sqlx::Sqlite>,
+    snapshot: &BackupWorkflowRegistry,
+) -> Result<(), AppError> {
+    for workflow in &snapshot.workflows {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&workflow.id)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(|error| AppError::database(error.to_string()))?;
+        if exists == 0 {
+            sqlx::query(
+                "INSERT INTO workflows
+                 (id, name, category, mode, source_kind, library_state, current_version_id,
+                  removed_at, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&workflow.id)
+            .bind(&workflow.name)
+            .bind(&workflow.category)
+            .bind(&workflow.mode)
+            .bind(&workflow.source_kind)
+            .bind(&workflow.library_state)
+            .bind(&workflow.current_version_id)
+            .bind(&workflow.removed_at)
+            .bind(&workflow.created_at)
+            .bind(&workflow.updated_at)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| AppError::database(error.to_string()))?;
+        }
+    }
+
+    for version in &snapshot.versions {
+        let existing = sqlx::query_as::<_, (String, String)>(
+            "SELECT workflow_id, workflow_sha256 FROM workflow_versions WHERE id = ?",
+        )
+        .bind(&version.id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        if let Some((workflow_id, workflow_sha256)) = existing {
+            if workflow_id != version.workflow_id || workflow_sha256 != version.workflow_sha256 {
+                return Err(AppError::backup_invalid(format!(
+                    "工作流版本 {} 的不可变身份与当前数据库冲突",
+                    version.id
+                )));
+            }
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, package_name,
+              package_source_path, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&version.id)
+        .bind(&version.workflow_id)
+        .bind(&version.version)
+        .bind(&version.api_workflow_json)
+        .bind(&version.workflow_sha256)
+        .bind(&version.package_name)
+        .bind(&version.package_source_path)
+        .bind(&version.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+
+    for recipe in &snapshot.recipes {
+        let existing = sqlx::query_as::<_, (String, String)>(
+            "SELECT workflow_version_id, recipe_sha256 FROM recipes WHERE id = ?",
+        )
+        .bind(&recipe.id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        if let Some((workflow_version_id, recipe_sha256)) = existing {
+            if workflow_version_id != recipe.workflow_version_id
+                || recipe_sha256 != recipe.recipe_sha256
+            {
+                return Err(AppError::backup_invalid(format!(
+                    "Recipe {} 的不可变身份与当前数据库冲突",
+                    recipe.id
+                )));
+            }
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256,
+              created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&recipe.id)
+        .bind(&recipe.workflow_version_id)
+        .bind(&recipe.version)
+        .bind(recipe.schema_version)
+        .bind(&recipe.recipe_yaml)
+        .bind(&recipe.recipe_sha256)
+        .bind(&recipe.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+
+    for artifact in &snapshot.runtime_artifacts {
+        let existing = sqlx::query_as::<_, BackupWorkflowRuntimeArtifact>(
+            "SELECT id, workflow_version_id, recipe_id, package_name, source_kind,
+                    package_source_path, workflow_sha256, recipe_sha256, created_at
+             FROM workflow_runtime_artifacts
+             WHERE package_name = ?",
+        )
+        .bind(&artifact.package_name)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+        if let Some(existing) = existing {
+            if existing.id != artifact.id
+                || existing.workflow_version_id != artifact.workflow_version_id
+                || existing.recipe_id != artifact.recipe_id
+                || existing.workflow_sha256 != artifact.workflow_sha256
+                || existing.recipe_sha256 != artifact.recipe_sha256
+            {
+                return Err(AppError::backup_invalid(format!(
+                    "Runtime Artifact {} 的精确映射与当前数据库冲突",
+                    artifact.package_name
+                )));
+            }
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO workflow_runtime_artifacts
+             (id, workflow_version_id, recipe_id, package_name, source_kind,
+              package_source_path, workflow_sha256, recipe_sha256, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&artifact.id)
+        .bind(&artifact.workflow_version_id)
+        .bind(&artifact.recipe_id)
+        .bind(&artifact.package_name)
+        .bind(&artifact.source_kind)
+        .bind(&artifact.package_source_path)
+        .bind(&artifact.workflow_sha256)
+        .bind(&artifact.recipe_sha256)
+        .bind(&artifact.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| AppError::database(error.to_string()))?;
+    }
+    Ok(())
+}
+
 async fn ensure_version_recipe_dependency(
     transaction: &mut Transaction<'_, sqlx::Sqlite>,
     workflow_version_id: &str,
@@ -8198,6 +8652,7 @@ mod tests {
             preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
             project_workflow_bindings: Vec::new(),
+            workflow_registry: None,
             asset_tags: tags,
             asset_tag_links: links,
             asset_favorites: Vec::new(),
@@ -9200,7 +9655,7 @@ mod tests {
         assert!(exported.entries >= 6);
         let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 16);
+        assert_eq!(manifest.version, 17);
         assert_eq!(document.project_workflow_bindings.len(), 2);
         assert_eq!(document.project_workflow_bindings[0].stage, "IMAGE");
         assert_eq!(
@@ -10068,6 +10523,7 @@ mod tests {
             preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
             project_workflow_bindings: Vec::new(),
+            workflow_registry: None,
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),
@@ -10241,6 +10697,7 @@ mod tests {
             preparation_snapshots: Vec::new(),
             workflow_refs: Vec::new(),
             project_workflow_bindings: Vec::new(),
+            workflow_registry: None,
             asset_tags: Vec::new(),
             asset_tag_links: Vec::new(),
             asset_favorites: Vec::new(),

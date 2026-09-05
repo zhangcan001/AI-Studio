@@ -1,3 +1,4 @@
+use crate::application::builtin_runtime_packages::is_builtin_package_name;
 use crate::application::ports::{
     Clock, RepositoryError, WorkflowLibraryRepository, WorkflowLibrarySource, WorkflowPackageFiles,
     WorkflowPackageLoad, WorkflowPackageRecord, WorkflowPackageRegistration,
@@ -130,6 +131,11 @@ impl WorkflowLibraryService {
 
         let package = WorkflowPackageRecord {
             workflow_id: manifest.id,
+            source_kind: if is_builtin_package_name(&files.package_name) {
+                "PRODUCT".to_owned()
+            } else {
+                "USER".to_owned()
+            },
             package_name: files.package_name.clone(),
             package_source_path: files.package_source_path.clone(),
             name: manifest.name,

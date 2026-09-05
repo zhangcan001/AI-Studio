@@ -310,8 +310,8 @@ describe("WorkflowImportIssues", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "检测到结构相似的工作流" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "添加为现有工作流的新版本" }));
+    expect(screen.getByRole("heading", { name: "发现结构相似工作流" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "作为新版本添加" }));
     expect(onOpenExistingVersion).toHaveBeenCalledTimes(1);
   });
 });

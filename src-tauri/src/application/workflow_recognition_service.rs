@@ -6,8 +6,11 @@
 
 use crate::{
     application::{
-        ports::WorkflowPackageFiles, workflow_graph_analysis::WorkflowGraph,
-        workflow_manifest::WorkflowManifest, workflow_semantic_identity::semantic_workflow_sha256,
+        ports::WorkflowPackageFiles,
+        workflow_analysis_service::{WorkflowAnalysisReport, WorkflowAnalysisService},
+        workflow_graph_analysis::WorkflowGraph,
+        workflow_manifest::WorkflowManifest,
+        workflow_semantic_identity::semantic_workflow_sha256,
     },
     compiler::RecipeParser,
     domain::{OutputType, Recipe, WorkflowDocument},
@@ -15,7 +18,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -152,17 +155,6 @@ struct ExistingCandidate {
     structural_sha256: String,
 }
 
-#[derive(Clone, Debug)]
-struct GraphRecognition {
-    graph: WorkflowGraph,
-    inputs: Vec<WorkflowRecognitionInput>,
-    outputs: Vec<WorkflowRecognitionOutput>,
-    category: String,
-    mode: String,
-    confidence: RecognitionConfidence,
-    issues: Vec<WorkflowRecognitionIssue>,
-}
-
 /// Stateless workflow recognition entry point.
 pub struct WorkflowRecognitionService;
 
@@ -231,46 +223,76 @@ impl WorkflowRecognitionService {
         raw_bytes: &[u8],
         existing_packages: &[WorkflowPackageFiles],
     ) -> WorkflowRecognitionReport {
-        let raw_sha256 = sha256(raw_bytes);
-        let semantic_sha256 = semantic_workflow_sha256(workflow);
-        let structural_sha256 = structural_workflow_sha256(workflow);
-        let analysis = match recognize_graph(workflow) {
-            Ok(analysis) => analysis,
-            Err(message) => {
-                return api_error_report_with_identity(
-                    raw_sha256,
-                    Some(semantic_sha256),
-                    Some(structural_sha256),
-                    "GRAPH_INVALID",
-                    message,
-                )
-            }
-        };
+        let analysis = WorkflowAnalysisService::analyze_workflow(workflow, raw_bytes);
+        Self::recognize_analysis(workflow, raw_bytes, existing_packages, &analysis)
+    }
 
+    /// Map one already-computed analysis into the compatibility recognition
+    /// report. This keeps import preview, onboarding, and recipe creation on
+    /// the same pure graph analysis result.
+    pub fn recognize_analysis(
+        workflow: &WorkflowDocument,
+        _raw_bytes: &[u8],
+        existing_packages: &[WorkflowPackageFiles],
+        analysis: &WorkflowAnalysisReport,
+    ) -> WorkflowRecognitionReport {
         let mut report = WorkflowRecognitionReport {
-            format: WorkflowRecognitionFormat::Api,
-            recognized: true,
-            importable: true,
+            format: analysis.format,
+            recognized: analysis.recognized,
+            importable: analysis.importable,
             executable: false,
-            identity: WorkflowIdentity::New,
-            raw_sha256,
-            semantic_sha256: Some(semantic_sha256),
-            structural_sha256: Some(structural_sha256),
+            identity: analysis.identity,
+            raw_sha256: analysis.raw_sha256.clone(),
+            semantic_sha256: Some(analysis.semantic_sha256.clone()),
+            structural_sha256: Some(analysis.structural_sha256.clone()),
             existing_workflow_id: None,
             existing_workflow_version: None,
             existing_name: None,
-            category: analysis.category,
-            mode: analysis.mode,
+            category: analysis.category.clone(),
+            mode: analysis.mode.clone(),
             confidence: analysis.confidence,
-            inputs: analysis.inputs,
-            outputs: analysis.outputs,
+            inputs: analysis
+                .inputs
+                .iter()
+                .map(|input| WorkflowRecognitionInput {
+                    semantic_key: input.semantic_key.clone(),
+                    field_type: input.field_type.clone(),
+                    label: input.label.clone(),
+                    required: input.required,
+                    node_id: input.node_id.clone(),
+                    input_name: input.input_name.clone(),
+                    confidence: input.confidence,
+                })
+                .collect(),
+            outputs: analysis
+                .outputs
+                .iter()
+                .map(|output| WorkflowRecognitionOutput {
+                    output_id: output.output_id.clone(),
+                    output_type: output.output_type.clone(),
+                    node_id: output.node_id.clone(),
+                    required: output.required,
+                    confidence: output.confidence,
+                })
+                .collect(),
             recipe_status: RecipeFreshness::Missing,
             runtime_capability: RuntimeCapabilityState::NotChecked,
             capability_issues: Vec::new(),
-            issues: analysis.issues,
-            suggested_action: "ADD_TO_LIBRARY".to_owned(),
-            node_count: analysis.graph.nodes.len(),
-            unique_class_count: unique_class_count(workflow),
+            issues: analysis
+                .issues
+                .iter()
+                .map(|issue| WorkflowRecognitionIssue {
+                    code: issue.code.clone(),
+                    message: issue.message.clone(),
+                })
+                .collect(),
+            suggested_action: analysis
+                .suggested_actions
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "REVIEW_RECOGNITION".to_owned()),
+            node_count: analysis.node_count,
+            unique_class_count: analysis.unique_class_count,
         };
 
         apply_existing_identity(&mut report, workflow, existing_packages);
@@ -339,7 +361,6 @@ pub fn structural_workflow_sha256(workflow: &WorkflowDocument) -> String {
     sha256(&bytes)
 }
 
-/// Short alias used by diagnostics and tests.
 pub fn structural_fingerprint(workflow: &WorkflowDocument) -> String {
     structural_workflow_sha256(workflow)
 }
@@ -349,7 +370,7 @@ fn apply_existing_identity(
     workflow: &WorkflowDocument,
     packages: &[WorkflowPackageFiles],
 ) {
-    let mut loaded = packages
+    let loaded = packages
         .iter()
         .filter_map(parse_existing_candidate)
         .collect::<Vec<_>>();
@@ -422,8 +443,6 @@ fn apply_existing_identity(
         (WorkflowIdentity::StructuralVariant, _) => "CHOOSE_VARIANT_ACTION".to_owned(),
         (WorkflowIdentity::New, _) => "ADD_TO_LIBRARY".to_owned(),
     };
-    // Structural identity is deliberately informational. It never changes
-    // `importable` into a duplicate rejection and never auto-merges a graph.
     if identity == WorkflowIdentity::StructuralVariant {
         report.issues.push(WorkflowRecognitionIssue {
             code: "STRUCTURAL_VARIANT".to_owned(),
@@ -431,7 +450,6 @@ fn apply_existing_identity(
         });
     }
     let _ = workflow;
-    loaded.clear();
 }
 
 fn parse_existing_candidate(files: &WorkflowPackageFiles) -> Option<ExistingCandidate> {
@@ -494,396 +512,6 @@ fn recipe_matches_report(recipe: &Recipe, report: &WorkflowRecognitionReport) ->
         return false;
     }
     true
-}
-
-fn recognize_graph(workflow: &WorkflowDocument) -> Result<GraphRecognition, String> {
-    let graph = WorkflowGraph::from_document(workflow).map_err(|error| error.to_string())?;
-    let Some(root) = workflow.value().as_object() else {
-        return Err("workflow root is not an object".to_owned());
-    };
-    let mut inputs = BTreeMap::<String, WorkflowRecognitionInput>::new();
-    let mut media = BTreeSet::new();
-
-    for (node_id, node) in root {
-        let Some(node) = node.as_object() else {
-            continue;
-        };
-        let class_type = node
-            .get("class_type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let Some(node_inputs) = node.get("inputs").and_then(Value::as_object) else {
-            return Err(format!("node {node_id} is missing object inputs"));
-        };
-        for (input_name, value) in node_inputs {
-            let Some(candidate) = recognize_input(node_id, class_type, input_name, value) else {
-                continue;
-            };
-            if let Some(media_kind) = media_kind(&candidate.semantic_key) {
-                media.insert(media_kind);
-            }
-            let replace = inputs
-                .get(&candidate.semantic_key)
-                .is_none_or(|current| candidate.confidence > current.confidence);
-            if replace {
-                inputs.insert(candidate.semantic_key.clone(), candidate);
-            }
-        }
-    }
-
-    let mut issues = Vec::new();
-    let (outputs, output_ambiguous) = recognize_outputs(workflow, &graph);
-    if output_ambiguous {
-        issues.push(WorkflowRecognitionIssue {
-            code: "AMBIGUOUS_OUTPUT".to_owned(),
-            message: "检测到多个同等优先级的输出节点，请确认输出。".to_owned(),
-        });
-    }
-    let category = if outputs.iter().any(|output| output.output_type == "video") {
-        "video"
-    } else if outputs.iter().any(|output| output.output_type == "image") {
-        "image"
-    } else {
-        "unknown"
-    }
-    .to_owned();
-    let mode = infer_mode(&media, &category);
-    let mut confidence = inputs
-        .values()
-        .map(|input| input.confidence)
-        .chain(outputs.iter().map(|output| output.confidence))
-        .min()
-        .unwrap_or(RecognitionConfidence::Low);
-    if output_ambiguous {
-        confidence = RecognitionConfidence::Low;
-    }
-    Ok(GraphRecognition {
-        graph,
-        inputs: inputs.into_values().collect(),
-        outputs,
-        category,
-        mode,
-        confidence,
-        issues,
-    })
-}
-
-fn recognize_input(
-    node_id: &str,
-    class_type: &str,
-    input_name: &str,
-    value: &Value,
-) -> Option<WorkflowRecognitionInput> {
-    let normalized = input_name
-        .to_ascii_lowercase()
-        .replace(['-', ' ', '.'], "_");
-    if matches!(
-        normalized.as_str(),
-        "filename"
-            | "filename_prefix"
-            | "format"
-            | "codec"
-            | "aspect_ratio"
-            | "multiple"
-            | "megapixels"
-    ) || normalized.contains("model")
-        || normalized.contains("vae")
-        || normalized.contains("clip")
-        || normalized.contains("lora")
-        || normalized.contains("scheduler")
-    {
-        return None;
-    }
-    let linked = value.as_array().is_some_and(|link| {
-        link.len() == 2 && link[0].as_str().is_some() && link[1].as_u64().is_some()
-    });
-    let (semantic_key, field_type, confidence, required, label) = if normalized == "prompt"
-        || normalized.contains("prompt")
-    {
-        (
-            "prompt",
-            "textarea",
-            RecognitionConfidence::High,
-            true,
-            "Prompt",
-        )
-    } else if normalized == "text"
-        && (class_type.to_ascii_lowercase().contains("text")
-            || class_type.to_ascii_lowercase().contains("prompt"))
-    {
-        (
-            "prompt",
-            "textarea",
-            RecognitionConfidence::Medium,
-            true,
-            "Prompt",
-        )
-    } else if normalized.contains("seed") {
-        ("seed", "seed", RecognitionConfidence::High, true, "Seed")
-    } else if normalized == "width" || normalized.ends_with("_width") {
-        (
-            "width",
-            "integer",
-            RecognitionConfidence::High,
-            true,
-            "Width",
-        )
-    } else if normalized == "height" || normalized.ends_with("_height") {
-        (
-            "height",
-            "integer",
-            RecognitionConfidence::High,
-            true,
-            "Height",
-        )
-    } else if matches!(
-        normalized.as_str(),
-        "duration" | "duration_seconds" | "seconds"
-    ) || normalized == "length"
-    {
-        (
-            "duration_seconds",
-            "number",
-            if normalized == "length" {
-                RecognitionConfidence::Medium
-            } else {
-                RecognitionConfidence::High
-            },
-            true,
-            "Duration (seconds)",
-        )
-    } else if normalized == "steps" || normalized.ends_with("_steps") {
-        (
-            "steps",
-            "integer",
-            RecognitionConfidence::High,
-            false,
-            "Steps",
-        )
-    } else if normalized == "denoise" || normalized.contains("denoise") {
-        (
-            "denoise",
-            "number",
-            RecognitionConfidence::High,
-            false,
-            "Denoise",
-        )
-    } else if matches!(normalized.as_str(), "fps" | "frame_rate" | "framerate") {
-        ("fps", "number", RecognitionConfidence::High, false, "FPS")
-    } else if normalized.contains("first_frame") || normalized == "first_image" {
-        (
-            "first_frame",
-            "image",
-            RecognitionConfidence::High,
-            false,
-            "First frame",
-        )
-    } else if normalized.contains("last_frame") || normalized == "last_image" {
-        (
-            "last_frame",
-            "image",
-            RecognitionConfidence::High,
-            false,
-            "Last frame",
-        )
-    } else if normalized.contains("ref_images") || normalized.contains("reference_images") {
-        (
-            "reference_images",
-            "images",
-            RecognitionConfidence::High,
-            false,
-            "Reference images",
-        )
-    } else if normalized.contains("ref_video") || normalized.contains("reference_video") {
-        (
-            "reference_video",
-            "video",
-            RecognitionConfidence::High,
-            false,
-            "Reference video",
-        )
-    } else if normalized.contains("audio") {
-        let lower_class = class_type.to_ascii_lowercase();
-        if lower_class.contains("createvideo")
-            || lower_class.contains("savevideo")
-            || lower_class.contains("videocombine")
-        {
-            return None;
-        }
-        (
-            "reference_audio",
-            "audio",
-            RecognitionConfidence::High,
-            false,
-            "Reference audio",
-        )
-    } else if normalized == "image" && linked && !class_type.to_ascii_lowercase().contains("load") {
-        (
-            "image",
-            "image",
-            RecognitionConfidence::Medium,
-            false,
-            "Image",
-        )
-    } else if normalized == "video" && linked && !class_type.to_ascii_lowercase().contains("load") {
-        (
-            "video",
-            "video",
-            RecognitionConfidence::Medium,
-            false,
-            "Video",
-        )
-    } else {
-        return None;
-    };
-    Some(WorkflowRecognitionInput {
-        semantic_key: semantic_key.to_owned(),
-        field_type: field_type.to_owned(),
-        label: label.to_owned(),
-        required,
-        node_id: node_id.to_owned(),
-        input_name: input_name.to_owned(),
-        confidence,
-    })
-}
-
-fn recognize_outputs(
-    workflow: &WorkflowDocument,
-    graph: &WorkflowGraph,
-) -> (Vec<WorkflowRecognitionOutput>, bool) {
-    let Some(root) = workflow.value().as_object() else {
-        return (Vec::new(), false);
-    };
-    let mut candidates = Vec::new();
-    for (node_id, node) in root {
-        let Some(node) = node.as_object() else {
-            continue;
-        };
-        let class_type = node
-            .get("class_type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let lower = class_type.to_ascii_lowercase();
-        if is_utility_class(&lower) {
-            continue;
-        }
-        let explicit = node
-            .get("output_node")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let video = is_video_output_class(&lower);
-        let image = is_image_output_class(&lower);
-        let preview = lower.contains("preview");
-        if !(explicit || video || image || preview) {
-            continue;
-        }
-        let (output_type, base_score) = if video {
-            ("video", 100)
-        } else if image {
-            ("image", 90)
-        } else {
-            ("image", 30)
-        };
-        let score = base_score
-            + if explicit { 20 } else { 0 }
-            + if graph.downstream_of(node_id).is_empty() {
-                10
-            } else {
-                0
-            };
-        candidates.push((score, node_id.clone(), output_type.to_owned()));
-    }
-    candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
-    let Some((best_score, _, _)) = candidates.first() else {
-        return (Vec::new(), false);
-    };
-    let ambiguous = candidates
-        .iter()
-        .filter(|candidate| candidate.0 == *best_score)
-        .count()
-        > 1;
-    let outputs = candidates
-        .iter()
-        .filter(|candidate| candidate.0 == *best_score)
-        .enumerate()
-        .map(
-            |(index, (_, node_id, output_type))| WorkflowRecognitionOutput {
-                output_id: if index == 0 {
-                    format!("generated_{output_type}")
-                } else {
-                    format!("generated_{output_type}_{index}")
-                },
-                output_type: output_type.clone(),
-                node_id: node_id.clone(),
-                required: true,
-                confidence: if ambiguous {
-                    RecognitionConfidence::Low
-                } else if *best_score >= 90 {
-                    RecognitionConfidence::High
-                } else {
-                    RecognitionConfidence::Medium
-                },
-            },
-        )
-        .collect();
-    (outputs, ambiguous)
-}
-
-fn infer_mode(media: &BTreeSet<&'static str>, category: &str) -> String {
-    if media.contains("reference_video") && media.contains("image") {
-        "reference_video_image_video".to_owned()
-    } else if media.contains("reference_image") && media.contains("reference_audio") {
-        "reference_image_audio_video".to_owned()
-    } else if media.contains("reference_image") {
-        "reference_image_video".to_owned()
-    } else if media.contains("reference_audio") {
-        "reference_audio_video".to_owned()
-    } else if media.contains("first_frame") && media.contains("last_frame") {
-        "first_last_video".to_owned()
-    } else if media.contains("first_frame")
-        || media.contains("last_frame")
-        || media.contains("image")
-    {
-        "image_to_video".to_owned()
-    } else if category == "video" {
-        "text_to_video".to_owned()
-    } else if category == "image" {
-        "text_to_image".to_owned()
-    } else {
-        "unknown".to_owned()
-    }
-}
-
-fn media_kind(semantic_key: &str) -> Option<&'static str> {
-    match semantic_key {
-        "first_frame" => Some("first_frame"),
-        "last_frame" => Some("last_frame"),
-        "reference_images" => Some("reference_image"),
-        "reference_video" => Some("reference_video"),
-        "reference_audio" => Some("reference_audio"),
-        "image" => Some("image"),
-        "video" => Some("video"),
-        _ => None,
-    }
-}
-
-fn is_utility_class(class_type: &str) -> bool {
-    class_type.contains("clearcache")
-        || class_type.contains("debug")
-        || class_type.contains("log")
-        || class_type.contains("preview") && class_type.contains("latent")
-}
-
-fn is_video_output_class(class_type: &str) -> bool {
-    class_type.contains("savevideo")
-        || class_type.contains("vhs_videocombine")
-        || class_type.contains("videocombine")
-        || class_type.contains("createvideo")
-        || class_type.contains("videooutput")
-}
-
-fn is_image_output_class(class_type: &str) -> bool {
-    class_type.contains("saveimage") || class_type.contains("imageoutput")
 }
 
 fn detect_format_value(value: &Value) -> WorkflowRecognitionFormat {
@@ -992,17 +620,6 @@ fn api_error_report_with_identity(
         node_count: 0,
         unique_class_count: 0,
     }
-}
-
-fn unique_class_count(workflow: &WorkflowDocument) -> usize {
-    workflow
-        .value()
-        .as_object()
-        .into_iter()
-        .flat_map(|nodes| nodes.values())
-        .filter_map(|node| node.get("class_type").and_then(Value::as_str))
-        .collect::<BTreeSet<_>>()
-        .len()
 }
 
 fn is_numeric_node_id(value: &str) -> bool {

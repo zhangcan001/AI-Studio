@@ -16,7 +16,7 @@ fn map_onboarding_error(error: WorkflowOnboardingError) -> AppError {
     AppError::workflow_onboarding(format!("{}: {}", error.code(), error))
 }
 
-async fn pick_api_workflow_file(
+pub(crate) async fn pick_api_workflow_file(
     app_handle: &AppHandle,
 ) -> Result<Option<(Vec<u8>, String)>, AppError> {
     let Some(file) = app_handle

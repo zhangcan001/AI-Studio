@@ -37,7 +37,9 @@ pub mod task_update_sink;
 pub mod workflow_library_repository;
 pub mod workflow_library_source;
 pub mod workflow_package_store;
+pub mod workflow_registry_repository;
 pub mod workflow_run_repository;
+pub mod workflow_runtime_artifact_repository;
 pub mod workflow_runtime_repository;
 pub mod workflow_runtime_state_repository;
 
@@ -131,7 +133,15 @@ pub use workflow_library_source::{
 pub use workflow_package_store::{
     WorkflowPackageBytes, WorkflowPackageStore, WorkflowPackageStoreError,
 };
+pub use workflow_registry_repository::{
+    WorkflowRegistryRecord, WorkflowRegistryRepository, WORKFLOW_SOURCE_PRODUCT,
+    WORKFLOW_SOURCE_USER, WORKFLOW_STATE_ACTIVE, WORKFLOW_STATE_REMOVED,
+};
 pub use workflow_run_repository::WorkflowRunRepository;
+pub use workflow_runtime_artifact_repository::{
+    WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
+    RUNTIME_ARTIFACT_SOURCE_PRODUCT, RUNTIME_ARTIFACT_SOURCE_USER,
+};
 pub use workflow_runtime_repository::{
     RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
     WorkflowRuntimeRepository,

@@ -219,6 +219,7 @@ import type {
   WorkflowCapabilityBatchView,
   WorkflowDeletionInspection,
   WorkflowDeletionResult,
+  WorkflowImportCommitRequest,
   WorkflowOnboardingDraftView,
   WorkflowOnboardingInputMappingRequest,
   WorkflowOnboardingMetadataRequest,
@@ -229,6 +230,9 @@ import type {
   WorkflowProductionWorkspaceResponse,
   WorkflowRestoreResult,
   WorkflowRestoreView,
+  WorkflowRegistryMutationResult,
+  WorkflowRegistryResponse,
+  WorkflowRegistryView,
   WorkflowVersionDiffView,
   WorkflowWorkspaceView,
 } from "../types/workflowOnboarding";
@@ -466,6 +470,17 @@ export function autoOnboardWorkflow(existingWorkflowId?: string): Promise<Workfl
   });
 }
 
+/** V2 is deliberately separate from the legacy auto-onboarding command. */
+export function analyzeWorkflowImport(existingWorkflowId?: string): Promise<WorkflowAutoOnboardingPlanView | null> {
+  return invoke<WorkflowAutoOnboardingPlanView | null>("workflow_analyze_import", {
+    existingWorkflowId,
+  });
+}
+
+export function commitWorkflowImport(request: WorkflowImportCommitRequest): Promise<WorkflowOnboardingPublishView> {
+  return invoke<WorkflowOnboardingPublishView>("workflow_commit_import", { request });
+}
+
 export function autoConfirmOnboarding(draftId: string): Promise<WorkflowAutoOnboardingPlanView> {
   return invoke<WorkflowAutoOnboardingPlanView>("workflow_onboarding_auto_confirm", { draftId });
 }
@@ -480,6 +495,10 @@ export function regenerateWorkflowRecipe(
     workflowVersion,
     sourceRecipeVersion,
   });
+}
+
+export function rerecognizeWorkflow(workflowId: string): Promise<WorkflowAutoOnboardingPlanView> {
+  return invoke<WorkflowAutoOnboardingPlanView>("workflow_rerecognize", { workflowId });
 }
 
 export function getOnboardingDraft(draftId: string): Promise<WorkflowOnboardingDraftView> {
@@ -536,6 +555,34 @@ export function listWorkflowWorkspace(): Promise<WorkflowWorkspaceView[]> {
 
 export function listWorkflowProductionWorkspace(): Promise<WorkflowProductionWorkspaceResponse> {
   return invoke<WorkflowProductionWorkspaceResponse>("workflow_runtime_workspace_list");
+}
+
+export function listWorkflowRegistry(): Promise<WorkflowRegistryView[] | WorkflowRegistryResponse> {
+  return invoke<WorkflowRegistryView[] | WorkflowRegistryResponse>("workflow_list_registry");
+}
+
+export function getWorkflowRegistry(workflowId: string): Promise<WorkflowRegistryView> {
+  return invoke<WorkflowRegistryView>("workflow_get_registry", { workflowId });
+}
+
+export function renameWorkflow(workflowId: string, name: string): Promise<WorkflowRegistryMutationResult> {
+  return invoke<WorkflowRegistryMutationResult>("workflow_rename", { workflowId, name });
+}
+
+export function setWorkflowCurrentVersion(workflowId: string, workflowVersionId: string): Promise<WorkflowRegistryMutationResult> {
+  return invoke<WorkflowRegistryMutationResult>("workflow_set_current_version", { workflowId, workflowVersionId });
+}
+
+export function removeWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
+  return invoke<WorkflowRegistryMutationResult>("workflow_remove", { workflowId });
+}
+
+export function restoreWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
+  return invoke<WorkflowRegistryMutationResult>("workflow_restore", { workflowId });
+}
+
+export function purgeWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
+  return invoke<WorkflowRegistryMutationResult>("workflow_purge", { workflowId });
 }
 
 export function refreshWorkflowProductionWorkspace(): Promise<WorkflowProductionWorkspaceResponse> {

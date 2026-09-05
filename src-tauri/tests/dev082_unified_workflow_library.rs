@@ -379,6 +379,7 @@ fn dev082_existing_production_regression_seams_are_reused() {
 #[test]
 fn dev082_recognition_engine_contract_is_ready_for_integration() {
     let recognition = read_repo("src-tauri/src/application/workflow_recognition_service.rs");
+    let analysis = read_repo("src-tauri/src/application/workflow_analysis_service.rs");
     assert_contains_all(
         &recognition,
         &[
@@ -389,6 +390,11 @@ fn dev082_recognition_engine_contract_is_ready_for_integration() {
             "runtime_capability",
             "RuntimeCapabilityState::Offline",
             "RuntimeCapabilityState::MissingNodes",
+        ],
+    );
+    assert_contains_all(
+        &analysis,
+        &[
             "RecognitionConfidence::High",
             "RecognitionConfidence::Medium",
             "RecognitionConfidence::Low",

@@ -186,6 +186,7 @@ fn map_project_workflow_error(error: ProjectWorkflowBindingServiceError) -> AppE
             AppError::project_not_found(format!("project {project_id} was not found"))
         }
         ProjectWorkflowBindingServiceError::Invalid(message) => AppError::invalid_input(message),
+        ProjectWorkflowBindingServiceError::Registry(message) => AppError::internal(message),
         ProjectWorkflowBindingServiceError::Repository(error) => {
             super::map_repository_error(&error)
         }

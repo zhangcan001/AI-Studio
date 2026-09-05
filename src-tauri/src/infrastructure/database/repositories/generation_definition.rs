@@ -33,12 +33,26 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                 r.id AS recipe_id,
                 wv.version AS workflow_version,
                 wv.workflow_sha256,
-                wv.package_name,
-                wv.package_source_path,
                 r.version AS recipe_version,
                 r.recipe_sha256,
                 wv.api_workflow_json,
-                r.recipe_yaml
+                r.recipe_yaml,
+                COALESCE(
+                    (SELECT wra.package_name
+                     FROM workflow_runtime_artifacts wra
+                     WHERE wra.workflow_version_id = wv.id
+                       AND wra.recipe_id = r.id
+                     ORDER BY wra.id ASC LIMIT 1),
+                    wv.package_name
+                ) AS package_name,
+                COALESCE(
+                    (SELECT wra.package_source_path
+                     FROM workflow_runtime_artifacts wra
+                     WHERE wra.workflow_version_id = wv.id
+                       AND wra.recipe_id = r.id
+                     ORDER BY wra.id ASC LIMIT 1),
+                    wv.package_source_path
+                ) AS package_source_path
              FROM workflows w
              INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
              INNER JOIN recipes r ON r.workflow_version_id = wv.id
@@ -73,12 +87,26 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
                     r.id AS recipe_id,
                     wv.version AS workflow_version,
                     wv.workflow_sha256,
-                    wv.package_name,
-                    wv.package_source_path,
                     r.version AS recipe_version,
                     r.recipe_sha256,
                     wv.api_workflow_json,
-                    r.recipe_yaml
+                    r.recipe_yaml,
+                    COALESCE(
+                        (SELECT wra.package_name
+                         FROM workflow_runtime_artifacts wra
+                         WHERE wra.workflow_version_id = wv.id
+                           AND wra.recipe_id = r.id
+                         ORDER BY wra.id ASC LIMIT 1),
+                        wv.package_name
+                    ) AS package_name,
+                    COALESCE(
+                        (SELECT wra.package_source_path
+                         FROM workflow_runtime_artifacts wra
+                         WHERE wra.workflow_version_id = wv.id
+                           AND wra.recipe_id = r.id
+                         ORDER BY wra.id ASC LIMIT 1),
+                        wv.package_source_path
+                    ) AS package_source_path
                  FROM workflows w
                  INNER JOIN workflow_versions wv ON wv.workflow_id = w.id
                  INNER JOIN recipes r ON r.workflow_version_id = wv.id
@@ -128,6 +156,7 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
              INNER JOIN recipes r ON r.workflow_version_id = wv.id
              LEFT JOIN workflow_runtime_states wrs ON wrs.workflow_version_id = wv.id
              WHERE w.current_version_id = wv.id
+               AND w.library_state = 'ACTIVE'
                AND COALESCE(wrs.enabled, 1) = 1
                AND COALESCE(wrs.archived, 0) = 0
              ORDER BY w.name ASC, wv.version ASC, r.created_at DESC, r.id DESC",
