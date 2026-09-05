@@ -19,6 +19,13 @@ CRASH_AFTER_PURGE_DB_COMMIT=CLEANUP
 PURGE_CLEANUP_PENDING_NEXT_START=CLEANED
 PURGE_RECOVERY_MALFORMED=FAIL_CLOSED
 PURGE_LIFECYCLE_MUTATIONS=SERIALIZED
+WORKFLOW_LIFECYCLE_AUTHORITY=SINGLE_COORDINATOR
+REGISTRY_BACKED_HARD_DELETE_BYPASS=NO
+REMOVE_RESTORE_PURGE_SERIALIZED=YES
+RESTORE_REMOVE_RACE=SAFE
+RESTORE_PURGE_RACE=SAFE
+LEGACY_DELETE_VERSION_REGISTRY_ROUTE=REMOVE
+PERMANENT_DELETE_ONLY=WORKFLOW_PURGE
 PURGED_WORKFLOW_RESURRECTION=NO
 LEGACY_ARTIFACT_GUESSING=NO
 EXACT_RECIPE_ARTIFACT_UNIQUE=YES
@@ -71,6 +78,20 @@ executor, implicit auto-start, automatic retry, or rebinding path was added.
   lifecycle gate. Registry reads remain unlocked. Concurrent purge calls
   therefore produce one committed purge and, at most, a stable
   `WORKFLOW_NOT_FOUND` for the follower without runtime resurrection.
+- One application-level lifecycle coordinator is the mutation authority for
+  formal remove, restore, and purge commands. Restore holds the shared gate
+  through runtime capability revalidation and the final enabled-state write,
+  so remove/restore, restore/purge, and remove/purge cannot interleave into a
+  split Registry/runtime state.
+- Compatibility delete and restore commands decide their route by exact
+  Registry existence. Registry-backed delete-version and delete-workflow calls
+  map to logical `REMOVE`; Registry-backed restore-version calls restore the
+  logical workflow and its current version. Only genuinely legacy-only rows use
+  the old lifecycle path, and only `workflow_purge` permanently deletes a
+  Registry-backed user workflow. Product packages remain protected.
+- Registry remove now upserts runtime state for every version in the same
+  transaction. Existing restored rows are therefore reliably reset to
+  disabled and archived instead of escaping the conflict-update branch.
 - A package rename that returns `NotFound` rechecks the source path and reports
   `AlreadyMissing` only when the source is actually absent. Product workflows
   remain non-purgeable.
@@ -88,6 +109,9 @@ executor, implicit auto-start, automatic retry, or rebinding path was added.
 - Formal import is explicitly split into analyze then commit. The frontend
   workspace is separated into import control, Registry actions, list rendering,
   and the unified workspace adapter/client boundary.
+- The frontend `restoreWorkflow` client now returns the exact Registry restore
+  result, including current version, enabled/readiness/capability state, and
+  project-binding count.
 
 ## Verification
 
@@ -97,12 +121,14 @@ product purge blocking, direct-generation state admission, unified workspace
 missing/refresh diagnostics, capability cache persistence, restore
 revalidation, project-binding isolation, crashes on both sides of the database
 commit, deferred cleanup, partial quarantine recovery, malformed journal
-fail-closed behavior, legacy quarantine recovery, and concurrent purge safety.
+fail-closed behavior, legacy quarantine recovery, concurrent purge safety,
+all three lifecycle race pairings, Registry-backed legacy delete routing,
+product delete/restore protection, and multi-version legacy restore routing.
 
 The final validation command results and source commit are recorded below:
 
 ```text
-DEV084_FOCUSED_RUST=24_PASS
+DEV084_FOCUSED_RUST=30_PASS
 FULL_RUST=PASS_0_FAILED_788_UNIT_PASS_1_IGNORED
 RUST_FMT=PASS
 RUST_CHECK=PASS
@@ -112,7 +138,7 @@ TSC=PASS
 FRONTEND_BUILD=PASS
 TAURI_BUILD=PASS
 DIFF_CHECK=PASS
-SOURCE_COMMIT=205719f1318de94f8d338737a56480f437ca1ced
+SOURCE_COMMIT=efadc33062e483de9c6fd9c11536c34d0e01ce32
 ```
 
 Strict Clippy was not rerun for this closeout. The previously recorded
