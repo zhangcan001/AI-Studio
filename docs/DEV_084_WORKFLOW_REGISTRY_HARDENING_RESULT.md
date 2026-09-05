@@ -80,7 +80,7 @@ FRONTEND_TEST=PASS_118_FILES_563_TESTS
 FRONTEND_BUILD=PASS
 TAURI_BUILD=PASS
 DIFF_CHECK=PASS
-SOURCE_COMMIT=e1c5cc0b1de9cd115076cfc0c1fcb04d572d9ce5
+SOURCE_COMMIT=d47e0e28c7566f92c2c156e4c3ceb4f127cd359f
 ```
 
 Strict Clippy was run with `-D warnings` and remains blocked by the repository's
