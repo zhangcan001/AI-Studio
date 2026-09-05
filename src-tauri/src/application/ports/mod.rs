@@ -132,7 +132,7 @@ pub use workflow_library_source::{
 };
 pub use workflow_package_store::{
     WorkflowPackageBytes, WorkflowPackageQuarantineResult, WorkflowPackageStore,
-    WorkflowPackageStoreError,
+    WorkflowPackageStoreError, WorkflowPurgeOperationEntry, WorkflowPurgeOperationRecord,
 };
 pub use workflow_registry_repository::{
     WorkflowPurgeReferenceCounts, WorkflowRegistryRecord, WorkflowRegistryRepository,

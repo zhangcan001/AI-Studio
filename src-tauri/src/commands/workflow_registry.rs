@@ -29,6 +29,9 @@ fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
         | WorkflowRegistryServiceError::CompensationFailed {
             operation: message, ..
         } => AppError::invalid_input(format!("{code}: {message}")),
+        WorkflowRegistryServiceError::PurgeRecoveryBlocked {
+            operation: message, ..
+        } => AppError::invalid_input(format!("{code}: {message}")),
         WorkflowRegistryServiceError::PurgeCompensationFailed {
             operation: message, ..
         } => AppError::invalid_input(format!("{code}: {message}")),

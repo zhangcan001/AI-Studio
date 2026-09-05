@@ -364,16 +364,71 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let workflow_library_source: Arc<dyn WorkflowLibrarySource> = Arc::new(
                 FileSystemWorkflowLibrarySource::new(data_dirs.workflow_library.clone()),
             );
-            if let Err(error) = application::builtin_runtime_packages::ensure_installed(
-                &data_dirs.workflow_library,
-            ) {
-                tracing::warn!(error_type = "builtin_runtime_package_install", %error, "builtin H3 runtime package installation skipped");
-            }
+            let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
+                infrastructure::database::SqliteWorkflowRunRepository::new(database_pool.clone()),
+            );
+            let runtime_repository: Arc<dyn WorkflowRuntimeRepository> = Arc::new(
+                infrastructure::database::SqliteWorkflowRuntimeRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let runtime_state_repository: Arc<dyn WorkflowRuntimeStateRepository> = Arc::new(
+                infrastructure::database::SqliteWorkflowRuntimeStateRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let runtime_artifact_repository: Arc<
+                dyn application::ports::WorkflowRuntimeArtifactRepository,
+            > = Arc::new(
+                infrastructure::database::SqliteWorkflowRuntimeArtifactRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let package_store: Arc<dyn application::ports::WorkflowPackageStore> =
+                Arc::new(FileSystemWorkflowPackageStore::new(
+                    data_dirs.workflow_library.clone(),
+                    data_dirs.workflow_staging.clone(),
+                ));
+            let project_workflow_binding_repository: Arc<
+                dyn application::ports::ProjectWorkflowBindingRepository,
+            > = Arc::new(
+                infrastructure::database::SqliteProjectWorkflowBindingRepository::new(
+                    database_pool.clone(),
+                ),
+            );
+            let workflow_registry_service = Arc::new(
+                WorkflowRegistryService::new(
+                    runtime_repository.clone(),
+                    runtime_state_repository.clone(),
+                    project_workflow_binding_repository.clone(),
+                    clock.clone(),
+                )
+                .with_registry_repository(workflow_registry_repository)
+                .with_runtime_artifact_repository(runtime_artifact_repository.clone())
+                .with_package_store(package_store.clone()),
+            );
             let workflow_library_service = Arc::new(WorkflowLibraryService::new(
                 workflow_library_source.clone(),
                 workflow_library_repository,
                 clock.clone(),
             ));
+            if let Err(error) = tauri::async_runtime::block_on(
+                workflow_registry_service.recover_pending_purges(),
+            ) {
+                tracing::error!(
+                    error_type = "WORKFLOW_PURGE_RECOVERY_BLOCKED",
+                    error = %error,
+                    "workflow purge recovery blocked application startup"
+                );
+                return Err(AppError::initialization(
+                    "workflow purge recovery blocked application startup",
+                ));
+            }
+            if let Err(error) = application::builtin_runtime_packages::ensure_installed(
+                &data_dirs.workflow_library,
+            ) {
+                tracing::warn!(error_type = "builtin_runtime_package_install", %error, "builtin H3 runtime package installation skipped");
+            }
             match tauri::async_runtime::block_on(workflow_library_service.sync()) {
                 Ok(report) => tracing::info!(
                     packages = report.packages_found,
@@ -419,49 +474,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_repository.clone(),
                 production_queue_repository.clone(),
             ));
-            let workflow_run_repository: Arc<dyn WorkflowRunRepository> = Arc::new(
-                infrastructure::database::SqliteWorkflowRunRepository::new(database_pool.clone()),
-            );
-            let runtime_repository: Arc<dyn WorkflowRuntimeRepository> = Arc::new(
-                infrastructure::database::SqliteWorkflowRuntimeRepository::new(
-                    database_pool.clone(),
-                ),
-            );
-            let runtime_state_repository: Arc<dyn WorkflowRuntimeStateRepository> = Arc::new(
-                infrastructure::database::SqliteWorkflowRuntimeStateRepository::new(
-                    database_pool.clone(),
-                ),
-            );
-            let runtime_artifact_repository: Arc<
-                dyn application::ports::WorkflowRuntimeArtifactRepository,
-            > = Arc::new(
-                infrastructure::database::SqliteWorkflowRuntimeArtifactRepository::new(
-                    database_pool.clone(),
-                ),
-            );
-            let package_store: Arc<dyn application::ports::WorkflowPackageStore> =
-                Arc::new(FileSystemWorkflowPackageStore::new(
-                    data_dirs.workflow_library.clone(),
-                    data_dirs.workflow_staging.clone(),
-                ));
-            let project_workflow_binding_repository: Arc<
-                dyn application::ports::ProjectWorkflowBindingRepository,
-            > = Arc::new(
-                infrastructure::database::SqliteProjectWorkflowBindingRepository::new(
-                    database_pool.clone(),
-                ),
-            );
-            let workflow_registry_service = Arc::new(
-                WorkflowRegistryService::new(
-                    runtime_repository.clone(),
-                    runtime_state_repository.clone(),
-                    project_workflow_binding_repository.clone(),
-                    clock.clone(),
-                )
-                .with_registry_repository(workflow_registry_repository)
-                .with_runtime_artifact_repository(runtime_artifact_repository.clone())
-                .with_package_store(package_store.clone()),
-            );
             let project_workflow_binding_service = Arc::new(
                 ProjectWorkflowBindingService::new(
                     project_workflow_binding_repository.clone(),

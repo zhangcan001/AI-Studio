@@ -1,10 +1,11 @@
 use crate::application::ports::{
     WorkflowPackageBytes, WorkflowPackageQuarantineResult, WorkflowPackageStore,
-    WorkflowPackageStoreError,
+    WorkflowPackageStoreError, WorkflowPurgeOperationEntry, WorkflowPurgeOperationRecord,
 };
 use async_trait::async_trait;
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
@@ -50,6 +51,13 @@ impl FileSystemWorkflowPackageStore {
     fn quarantine_root(&self, operation_id: &str) -> Result<PathBuf, WorkflowPackageStoreError> {
         validate_operation_id(operation_id)?;
         Ok(self.library_root.join(".purge").join(operation_id))
+    }
+
+    fn operation_json_path(
+        &self,
+        operation_id: &str,
+    ) -> Result<PathBuf, WorkflowPackageStoreError> {
+        Ok(self.quarantine_root(operation_id)?.join("operation.json"))
     }
 
     fn write_package(
@@ -131,6 +139,133 @@ impl WorkflowPackageStore for FileSystemWorkflowPackageStore {
         Ok(())
     }
 
+    async fn prepare_purge_operation(
+        &self,
+        operation: &WorkflowPurgeOperationRecord,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        validate_operation_record(operation)?;
+        let serialized = serde_json::to_vec(operation)
+            .map_err(|error| store_error(format!("serialize purge operation: {error}")))?;
+        let purge_root = self.library_root.join(".purge");
+        fs::create_dir_all(&purge_root).map_err(io_error)?;
+        let operation_root = self.quarantine_root(&operation.operation_id)?;
+        fs::create_dir(&operation_root).map_err(io_error)?;
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(self.operation_json_path(&operation.operation_id)?)
+                .map_err(io_error)?;
+            file.write_all(&serialized).map_err(io_error)?;
+            file.sync_all().map_err(io_error)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_dir_all(operation_root);
+        }
+        result
+    }
+
+    async fn list_purge_operations(
+        &self,
+    ) -> Result<Vec<WorkflowPurgeOperationEntry>, WorkflowPackageStoreError> {
+        let purge_root = self.library_root.join(".purge");
+        let entries = match fs::read_dir(&purge_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error(error)),
+        };
+        let mut operations = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(io_error)?;
+            let operation_id = entry.file_name().to_string_lossy().to_string();
+            let path = entry.path();
+            if !path.is_dir() {
+                operations.push(WorkflowPurgeOperationEntry::Malformed {
+                    operation_id,
+                    message: "purge entry is not a directory".to_owned(),
+                });
+                continue;
+            }
+            if let Err(error) = validate_operation_id(&operation_id) {
+                operations.push(WorkflowPurgeOperationEntry::Malformed {
+                    operation_id,
+                    message: error.message,
+                });
+                continue;
+            }
+            match fs::read(self.operation_json_path(&operation_id)?) {
+                Ok(bytes) => match serde_json::from_slice::<WorkflowPurgeOperationRecord>(&bytes) {
+                    Ok(record) => match validate_operation_record(&record) {
+                        Ok(()) if record.operation_id == operation_id => {
+                            operations.push(WorkflowPurgeOperationEntry::Journal(record));
+                        }
+                        Ok(()) => operations.push(WorkflowPurgeOperationEntry::Malformed {
+                            operation_id,
+                            message: "purge journal operationId does not match directory"
+                                .to_owned(),
+                        }),
+                        Err(error) => operations.push(WorkflowPurgeOperationEntry::Malformed {
+                            operation_id,
+                            message: error.message,
+                        }),
+                    },
+                    Err(error) => operations.push(WorkflowPurgeOperationEntry::Malformed {
+                        operation_id,
+                        message: format!("invalid purge journal: {error}"),
+                    }),
+                },
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    operations.push(WorkflowPurgeOperationEntry::Legacy { operation_id });
+                }
+                Err(error) => operations.push(WorkflowPurgeOperationEntry::Malformed {
+                    operation_id,
+                    message: format!("read purge journal: {error}"),
+                }),
+            }
+        }
+        operations.sort_by(|left, right| left.operation_id().cmp(right.operation_id()));
+        Ok(operations)
+    }
+
+    async fn list_quarantined_packages(
+        &self,
+        operation_id: &str,
+    ) -> Result<Vec<String>, WorkflowPackageStoreError> {
+        let root = self.quarantine_root(operation_id)?;
+        let entries = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error(error)),
+        };
+        let mut packages = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(io_error)?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == "operation.json" {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(entry.path()).map_err(io_error)?;
+            if !metadata.is_dir() {
+                return Err(store_error(format!(
+                    "unexpected purge entry for {operation_id}: {name}"
+                )));
+            }
+            validate_package_name(&name)?;
+            packages.push(name);
+        }
+        packages.sort();
+        Ok(packages)
+    }
+
+    async fn read_quarantined(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+        Self::read_package(&self.quarantine_path(operation_id, package_name)?)
+    }
+
     async fn quarantine_published(
         &self,
         operation_id: &str,
@@ -158,10 +293,10 @@ impl WorkflowPackageStore for FileSystemWorkflowPackageStore {
             Err(error) => return Err(io_error(error)),
         }
         fs::create_dir_all(self.quarantine_root(operation_id)?).map_err(io_error)?;
-        match fs::rename(source, target) {
+        match fs::rename(&source, &target) {
             Ok(()) => Ok(WorkflowPackageQuarantineResult::Quarantined),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(WorkflowPackageQuarantineResult::AlreadyMissing)
+                classify_rename_not_found(&source)
             }
             Err(error) => Err(io_error(error)),
         }
@@ -263,7 +398,8 @@ fn validate_package_name(value: &str) -> Result<(), WorkflowPackageStoreError> {
 }
 
 fn validate_operation_id(value: &str) -> Result<(), WorkflowPackageStoreError> {
-    if value.is_empty()
+    if !value.starts_with("purge_")
+        || value.is_empty()
         || value.len() > 160
         || !value.chars().all(|character| {
             character.is_ascii_alphanumeric() || character == '-' || character == '_'
@@ -272,6 +408,49 @@ fn validate_operation_id(value: &str) -> Result<(), WorkflowPackageStoreError> {
         return Err(store_error("invalid workflow package operation identifier"));
     }
     Ok(())
+}
+
+fn validate_workflow_id(value: &str) -> Result<(), WorkflowPackageStoreError> {
+    if value.trim().is_empty() || value.len() > 160 {
+        return Err(store_error("invalid purge workflow identifier"));
+    }
+    Ok(())
+}
+
+fn validate_operation_record(
+    operation: &WorkflowPurgeOperationRecord,
+) -> Result<(), WorkflowPackageStoreError> {
+    if operation.schema_version != 1 {
+        return Err(store_error("unsupported purge journal schema version"));
+    }
+    validate_operation_id(&operation.operation_id)?;
+    validate_workflow_id(&operation.workflow_id)?;
+    if operation.created_at.trim().is_empty() {
+        return Err(store_error("purge journal createdAt must not be empty"));
+    }
+    let mut package_names = std::collections::BTreeSet::new();
+    for package_name in &operation.package_names {
+        validate_package_name(package_name)?;
+        if !package_names.insert(package_name) {
+            return Err(store_error("purge journal packageNames must be unique"));
+        }
+    }
+    Ok(())
+}
+
+fn classify_rename_not_found(
+    source: &Path,
+) -> Result<WorkflowPackageQuarantineResult, WorkflowPackageStoreError> {
+    match fs::metadata(source) {
+        Ok(metadata) if metadata.is_dir() => Err(store_error(
+            "workflow package rename failed after NotFound; source still exists",
+        )),
+        Ok(_) => Err(store_error("workflow package is unavailable")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(WorkflowPackageQuarantineResult::AlreadyMissing)
+        }
+        Err(error) => Err(io_error(error)),
+    }
 }
 
 fn io_error(error: std::io::Error) -> WorkflowPackageStoreError {
@@ -286,8 +465,12 @@ fn store_error(message: impl Into<String>) -> WorkflowPackageStoreError {
 
 #[cfg(test)]
 mod tests {
-    use super::FileSystemWorkflowPackageStore;
-    use crate::application::ports::{WorkflowPackageBytes, WorkflowPackageStore};
+    use super::{classify_rename_not_found, FileSystemWorkflowPackageStore};
+    use crate::application::ports::{
+        WorkflowPackageBytes, WorkflowPackageQuarantineResult, WorkflowPackageStore,
+        WorkflowPurgeOperationEntry, WorkflowPurgeOperationRecord,
+    };
+    use std::fs;
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -325,5 +508,48 @@ mod tests {
         );
         assert!(store.read_runtime("../escape").await.is_err());
         assert!(store.read_staging("onb_../escape").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn purge_journal_is_persisted_before_any_package_move() {
+        let directory = tempdir().unwrap();
+        let library = directory.path().join("library");
+        let staging = directory.path().join("staging");
+        fs::create_dir_all(&library).unwrap();
+        fs::create_dir_all(&staging).unwrap();
+        let store = FileSystemWorkflowPackageStore::new(library.clone(), staging);
+        let operation = WorkflowPurgeOperationRecord {
+            schema_version: 1,
+            operation_id: format!("purge_{}", Uuid::new_v4()),
+            workflow_id: "wfl_journal_test".to_owned(),
+            package_names: vec!["journal_package".to_owned()],
+            created_at: "2026-09-05T00:00:00Z".to_owned(),
+        };
+
+        store.prepare_purge_operation(&operation).await.unwrap();
+
+        assert!(library
+            .join(".purge")
+            .join(&operation.operation_id)
+            .join("operation.json")
+            .is_file());
+        assert_eq!(
+            store.list_purge_operations().await.unwrap(),
+            vec![WorkflowPurgeOperationEntry::Journal(operation)]
+        );
+    }
+
+    #[test]
+    fn rename_not_found_rechecks_the_source() {
+        let directory = tempdir().unwrap();
+        let missing = directory.path().join("missing");
+        assert_eq!(
+            classify_rename_not_found(&missing).unwrap(),
+            WorkflowPackageQuarantineResult::AlreadyMissing
+        );
+
+        let present = directory.path().join("present");
+        fs::create_dir_all(&present).unwrap();
+        assert!(classify_rename_not_found(&present).is_err());
     }
 }

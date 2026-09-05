@@ -10,6 +10,7 @@ use ai_studio_lib::application::{
         ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, PromptSubmission,
         RepositoryError, SystemStats, TaskRepository, WorkflowLibrarySource, WorkflowPackageBytes,
         WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowPackageStoreError,
+        WorkflowPurgeOperationEntry, WorkflowPurgeOperationRecord, WorkflowRegistryRepository,
         WorkflowRunRepository, WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
@@ -372,6 +373,44 @@ fn registry_service_with_package_store(
     )
 }
 
+fn filesystem_package_store(harness: &RegistryPurgeHarness) -> FileSystemWorkflowPackageStore {
+    FileSystemWorkflowPackageStore::new(
+        harness.library_root.clone(),
+        harness._directory.path().join("workflow-staging"),
+    )
+}
+
+async fn prepare_and_quarantine(
+    harness: &RegistryPurgeHarness,
+    operation_id: &str,
+    package_names: &[&str],
+    moved_package_names: &[&str],
+) {
+    let store = filesystem_package_store(harness);
+    store
+        .prepare_purge_operation(&WorkflowPurgeOperationRecord {
+            schema_version: 1,
+            operation_id: operation_id.to_owned(),
+            workflow_id: harness.workflow_id.clone(),
+            package_names: package_names
+                .iter()
+                .map(|package_name| (*package_name).to_owned())
+                .collect(),
+            created_at: Utc::now().to_rfc3339(),
+        })
+        .await
+        .expect("purge journal should be durable before package movement");
+    for package_name in moved_package_names {
+        assert_eq!(
+            store
+                .quarantine_published(operation_id, package_name)
+                .await
+                .expect("package quarantine should succeed"),
+            WorkflowPackageQuarantineResult::Quarantined
+        );
+    }
+}
+
 struct CleanupFailingPackageStore {
     inner: FileSystemWorkflowPackageStore,
 }
@@ -407,6 +446,36 @@ impl WorkflowPackageStore for CleanupFailingPackageStore {
 
     async fn remove_published(&self, package_name: &str) -> Result<(), WorkflowPackageStoreError> {
         self.inner.remove_published(package_name).await
+    }
+
+    async fn prepare_purge_operation(
+        &self,
+        operation: &WorkflowPurgeOperationRecord,
+    ) -> Result<(), WorkflowPackageStoreError> {
+        self.inner.prepare_purge_operation(operation).await
+    }
+
+    async fn list_purge_operations(
+        &self,
+    ) -> Result<Vec<WorkflowPurgeOperationEntry>, WorkflowPackageStoreError> {
+        self.inner.list_purge_operations().await
+    }
+
+    async fn list_quarantined_packages(
+        &self,
+        operation_id: &str,
+    ) -> Result<Vec<String>, WorkflowPackageStoreError> {
+        self.inner.list_quarantined_packages(operation_id).await
+    }
+
+    async fn read_quarantined(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+        self.inner
+            .read_quarantined(operation_id, package_name)
+            .await
     }
 
     async fn quarantine_published(
@@ -958,6 +1027,146 @@ async fn dev084_purge_removes_runtime_package() {
 }
 
 #[tokio::test]
+async fn dev084_purge_recovery_restores_after_crash_before_db_commit() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_crash_before_commit",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+    let operation_id = "purge_dev084_before_commit";
+    prepare_and_quarantine(
+        &harness,
+        operation_id,
+        &[&harness.package_name],
+        &[&harness.package_name],
+    )
+    .await;
+    assert!(harness
+        .library_root
+        .join(".purge")
+        .join(operation_id)
+        .join("operation.json")
+        .is_file());
+
+    let restarted =
+        registry_service_with_package_store(&harness, Arc::new(filesystem_package_store(&harness)));
+    let recovery = restarted
+        .recover_pending_purges()
+        .await
+        .expect("startup recovery should restore the pre-commit quarantine");
+    assert_eq!(recovery.reconciled_operations, 1);
+    assert!(harness.library_root.join(&harness.package_name).is_dir());
+    assert!(!harness
+        .library_root
+        .join(".purge")
+        .join(operation_id)
+        .exists());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("workflow count should be readable"),
+        1
+    );
+
+    let sync = WorkflowLibraryService::new(
+        Arc::new(FileSystemWorkflowLibrarySource::new(
+            harness.library_root.clone(),
+        )),
+        Arc::new(SqliteWorkflowLibraryRepository::new(harness.pool.clone())),
+        Arc::new(SystemClock),
+    )
+    .sync()
+    .await
+    .expect("recovered package should synchronize without duplication");
+    assert_eq!(sync.packages_found, 1);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("workflow count after sync should be readable"),
+        1
+    );
+    let registry_record = SqliteWorkflowRegistryRepository::new(harness.pool.clone())
+        .get(&harness.workflow_id)
+        .await
+        .expect("workflow registry row should be readable")
+        .expect("workflow registry row should remain present");
+    assert_eq!(registry_record.library_state, "REMOVED");
+    restarted
+        .restore_workflow(&harness.workflow_id)
+        .await
+        .expect("recovered removed workflow should remain restorable");
+}
+
+#[tokio::test]
+async fn dev084_purge_recovery_cleans_after_crash_following_db_commit() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_crash_after_commit",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+    let operation_id = "purge_dev084_after_commit";
+    prepare_and_quarantine(
+        &harness,
+        operation_id,
+        &[&harness.package_name],
+        &[&harness.package_name],
+    )
+    .await;
+    assert!(SqliteWorkflowRegistryRepository::new(harness.pool.clone())
+        .purge(&harness.workflow_id)
+        .await
+        .expect("database purge should commit"));
+
+    let restarted =
+        registry_service_with_package_store(&harness, Arc::new(filesystem_package_store(&harness)));
+    restarted
+        .recover_pending_purges()
+        .await
+        .expect("startup recovery should clean the committed quarantine");
+    assert!(!harness.library_root.join(&harness.package_name).exists());
+    assert!(!harness
+        .library_root
+        .join(".purge")
+        .join(operation_id)
+        .exists());
+    let sync = WorkflowLibraryService::new(
+        Arc::new(FileSystemWorkflowLibrarySource::new(
+            harness.library_root.clone(),
+        )),
+        Arc::new(SqliteWorkflowLibraryRepository::new(harness.pool.clone())),
+        Arc::new(SystemClock),
+    )
+    .sync()
+    .await
+    .expect("sync should tolerate a committed purge");
+    assert_eq!(sync.packages_found, 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("purged workflow count should be readable"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn dev084_purge_inspection_reports_exact_references() {
     let harness = registry_purge_harness(
         "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
@@ -1234,6 +1443,211 @@ async fn dev084_purge_cleanup_failure_returns_committed_success() {
     assert_eq!(
         result.warning.as_deref(),
         Some("工作流已永久删除，但临时隔离文件清理未完成。")
+    );
+    assert!(!harness.library_root.join(&harness.package_name).exists());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
+            .bind(&harness.workflow_id)
+            .fetch_one(&harness.pool)
+            .await
+            .expect("workflow count should be readable"),
+        0
+    );
+    let restarted =
+        registry_service_with_package_store(&harness, Arc::new(filesystem_package_store(&harness)));
+    restarted
+        .recover_pending_purges()
+        .await
+        .expect("next startup should clean cleanup-pending quarantine");
+    assert!(fs::read_dir(harness.library_root.join(".purge"))
+        .expect("purge root should remain readable")
+        .next()
+        .is_none());
+    let sync = WorkflowLibraryService::new(
+        Arc::new(FileSystemWorkflowLibrarySource::new(
+            harness.library_root.clone(),
+        )),
+        Arc::new(SqliteWorkflowLibraryRepository::new(harness.pool.clone())),
+        Arc::new(SystemClock),
+    )
+    .sync()
+    .await
+    .expect("sync should not resurrect cleanup-pending purge");
+    assert_eq!(sync.packages_found, 0);
+}
+
+#[tokio::test]
+async fn dev084_purge_recovery_restores_only_partially_quarantined_packages() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_partial_quarantine",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let second_package = "dev084_partial_package_b";
+    let second_root = harness.library_root.join(second_package);
+    fs::create_dir_all(&second_root).expect("second package directory should exist");
+    let first_root = harness.library_root.join(&harness.package_name);
+    for file_name in ["manifest.yaml", "recipe.yaml", "workflow_api.json"] {
+        fs::copy(first_root.join(file_name), second_root.join(file_name))
+            .expect("second package file should copy");
+    }
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+
+    let operation_id = "purge_dev084_partial_quarantine";
+    prepare_and_quarantine(
+        &harness,
+        operation_id,
+        &[&harness.package_name, second_package],
+        &[&harness.package_name],
+    )
+    .await;
+    let restarted =
+        registry_service_with_package_store(&harness, Arc::new(filesystem_package_store(&harness)));
+    restarted
+        .recover_pending_purges()
+        .await
+        .expect("partial pre-commit quarantine should recover");
+    assert!(harness.library_root.join(&harness.package_name).is_dir());
+    assert!(second_root.is_dir());
+    assert!(!harness
+        .library_root
+        .join(".purge")
+        .join(operation_id)
+        .exists());
+    let published_packages = fs::read_dir(&harness.library_root)
+        .expect("library root should be readable")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.path().is_dir() && !entry.file_name().to_string_lossy().starts_with('.')
+        })
+        .count();
+    assert_eq!(published_packages, 2);
+}
+
+#[tokio::test]
+async fn dev084_purge_recovery_fails_closed_on_malformed_journal() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_malformed_journal",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let operation_id = "purge_dev084_malformed";
+    let operation_root = harness.library_root.join(".purge").join(operation_id);
+    let package_root = operation_root.join(&harness.package_name);
+    fs::create_dir_all(&package_root).expect("malformed quarantine should exist");
+    let published_root = harness.library_root.join(&harness.package_name);
+    for file_name in ["manifest.yaml", "recipe.yaml", "workflow_api.json"] {
+        fs::copy(published_root.join(file_name), package_root.join(file_name))
+            .expect("malformed quarantine package file should copy");
+    }
+    fs::write(operation_root.join("operation.json"), b"{ not valid json")
+        .expect("malformed journal should be written");
+
+    let error =
+        registry_service_with_package_store(&harness, Arc::new(filesystem_package_store(&harness)))
+            .recover_pending_purges()
+            .await
+            .expect_err("malformed journal must block recovery");
+    assert_eq!(error.code(), "WORKFLOW_PURGE_RECOVERY_BLOCKED");
+    assert!(operation_root.is_dir());
+    assert!(package_root.is_dir());
+    assert!(published_root.is_dir());
+}
+
+#[tokio::test]
+async fn dev084_legacy_quarantine_recovers_by_manifest_identity() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_legacy_quarantine",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+    let store = filesystem_package_store(&harness);
+    let restore_operation = "purge_dev084_legacy_restore";
+    assert_eq!(
+        store
+            .quarantine_published(restore_operation, &harness.package_name)
+            .await
+            .expect("legacy package quarantine should succeed"),
+        WorkflowPackageQuarantineResult::Quarantined
+    );
+    assert!(!harness
+        .library_root
+        .join(".purge")
+        .join(restore_operation)
+        .join("operation.json")
+        .exists());
+
+    let restarted =
+        registry_service_with_package_store(&harness, Arc::new(filesystem_package_store(&harness)));
+    restarted
+        .recover_pending_purges()
+        .await
+        .expect("legacy pre-commit quarantine should restore by manifest identity");
+    assert!(harness.library_root.join(&harness.package_name).is_dir());
+
+    let cleanup_operation = "purge_dev084_legacy_cleanup";
+    assert_eq!(
+        store
+            .quarantine_published(cleanup_operation, &harness.package_name)
+            .await
+            .expect("second legacy package quarantine should succeed"),
+        WorkflowPackageQuarantineResult::Quarantined
+    );
+    assert!(SqliteWorkflowRegistryRepository::new(harness.pool.clone())
+        .purge(&harness.workflow_id)
+        .await
+        .expect("database purge should commit"));
+    restarted
+        .recover_pending_purges()
+        .await
+        .expect("legacy post-commit quarantine should clean by manifest identity");
+    assert!(!harness.library_root.join(&harness.package_name).exists());
+    assert!(!harness
+        .library_root
+        .join(".purge")
+        .join(cleanup_operation)
+        .exists());
+}
+
+#[tokio::test]
+async fn dev084_concurrent_purge_requests_leave_no_runtime_resurrection() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_user_concurrent_purge",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("logical removal should succeed");
+    let first_registry = harness.registry.clone();
+    let second_registry = harness.registry.clone();
+    let (first, second) = tokio::join!(
+        first_registry.purge_workflow(&harness.workflow_id),
+        second_registry.purge_workflow(&harness.workflow_id),
+    );
+    assert_eq!(first.is_ok() as u8 + second.is_ok() as u8, 1);
+    assert_eq!(
+        first
+            .as_ref()
+            .err()
+            .or_else(|| second.as_ref().err())
+            .map(|error| error.code()),
+        Some("WORKFLOW_NOT_FOUND")
     );
     assert!(!harness.library_root.join(&harness.package_name).exists());
     assert_eq!(

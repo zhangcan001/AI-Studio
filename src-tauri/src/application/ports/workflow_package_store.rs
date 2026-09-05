@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +28,37 @@ pub struct WorkflowPackageStoreError {
 pub enum WorkflowPackageQuarantineResult {
     Quarantined,
     AlreadyMissing,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkflowPurgeOperationRecord {
+    pub schema_version: u32,
+    pub operation_id: String,
+    pub workflow_id: String,
+    pub package_names: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkflowPurgeOperationEntry {
+    Journal(WorkflowPurgeOperationRecord),
+    Legacy {
+        operation_id: String,
+    },
+    Malformed {
+        operation_id: String,
+        message: String,
+    },
+}
+
+impl WorkflowPurgeOperationEntry {
+    pub fn operation_id(&self) -> &str {
+        match self {
+            Self::Journal(record) => &record.operation_id,
+            Self::Legacy { operation_id } | Self::Malformed { operation_id, .. } => operation_id,
+        }
+    }
 }
 
 impl fmt::Display for WorkflowPackageStoreError {
@@ -60,6 +92,29 @@ pub trait WorkflowPackageStore: Send + Sync {
 
     /// Only used to compensate a publication that failed registration in the same request.
     async fn remove_published(&self, package_name: &str) -> Result<(), WorkflowPackageStoreError>;
+
+    /// Persist the operation record before any package directory is moved.
+    async fn prepare_purge_operation(
+        &self,
+        operation: &WorkflowPurgeOperationRecord,
+    ) -> Result<(), WorkflowPackageStoreError>;
+
+    /// Enumerate both current journals and pre-journal quarantine directories.
+    async fn list_purge_operations(
+        &self,
+    ) -> Result<Vec<WorkflowPurgeOperationEntry>, WorkflowPackageStoreError>;
+
+    /// List the package directories that were actually moved for an operation.
+    async fn list_quarantined_packages(
+        &self,
+        operation_id: &str,
+    ) -> Result<Vec<String>, WorkflowPackageStoreError>;
+
+    async fn read_quarantined(
+        &self,
+        operation_id: &str,
+        package_name: &str,
+    ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError>;
 
     /// Move an installed runtime package into an operation-scoped quarantine.
     /// Implementations must use an atomic same-filesystem rename so a failed

@@ -2702,8 +2702,9 @@ mod tests {
             WorkflowLibraryRepository, WorkflowLibrarySource, WorkflowLibrarySourceError,
             WorkflowPackageBytes, WorkflowPackageFiles, WorkflowPackageLoad,
             WorkflowPackageQuarantineResult, WorkflowPackageRecord, WorkflowPackageRegistration,
-            WorkflowPackageStore, WorkflowPackageStoreError, WorkflowRunRepository,
-            WorkflowRuntimeRepository, WorkflowRuntimeState, WorkflowRuntimeStateRepository,
+            WorkflowPackageStore, WorkflowPackageStoreError, WorkflowPurgeOperationEntry,
+            WorkflowPurgeOperationRecord, WorkflowRunRepository, WorkflowRuntimeRepository,
+            WorkflowRuntimeState, WorkflowRuntimeStateRepository,
         },
         workflow_library_service::WorkflowLibraryService,
         workflow_onboarding_service::WorkflowOnboardingService,
@@ -2849,6 +2850,34 @@ outputs: []
             _package_name: &str,
         ) -> Result<(), WorkflowPackageStoreError> {
             Ok(())
+        }
+
+        async fn prepare_purge_operation(
+            &self,
+            _operation: &WorkflowPurgeOperationRecord,
+        ) -> Result<(), WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn list_purge_operations(
+            &self,
+        ) -> Result<Vec<WorkflowPurgeOperationEntry>, WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn list_quarantined_packages(
+            &self,
+            _operation_id: &str,
+        ) -> Result<Vec<String>, WorkflowPackageStoreError> {
+            Err(package_store_error())
+        }
+
+        async fn read_quarantined(
+            &self,
+            _operation_id: &str,
+            _package_name: &str,
+        ) -> Result<WorkflowPackageBytes, WorkflowPackageStoreError> {
+            Err(package_store_error())
         }
 
         async fn quarantine_published(

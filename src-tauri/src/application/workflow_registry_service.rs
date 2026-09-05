@@ -3,7 +3,8 @@ use crate::application::{
     ports::{
         Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RepositoryError,
         RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
-        WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowRegistryRepository,
+        WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowPurgeOperationEntry,
+        WorkflowPurgeOperationRecord, WorkflowRegistryRepository,
         WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository, WorkflowRuntimeState,
         WorkflowRuntimeStateRepository,
     },
@@ -18,6 +19,7 @@ use std::{
     fmt,
     sync::Arc,
 };
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub const WORKFLOW_SOURCE_PRODUCT: &str = "PRODUCT";
@@ -155,6 +157,11 @@ pub struct WorkflowPurgeInspection {
     pub blocking_reasons: Vec<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkflowPurgeRecoveryReport {
+    pub reconciled_operations: u64,
+}
+
 /// DB-backed identity candidate used by import/recognition.  The candidate is
 /// built from the immutable version/recipe rows and the exact artifact table;
 /// the package directory is deliberately not consulted to decide whether a
@@ -191,6 +198,7 @@ pub struct WorkflowRegistryService {
     registry_repository: Option<Arc<dyn WorkflowRegistryRepository>>,
     runtime_artifact_repository: Option<Arc<dyn WorkflowRuntimeArtifactRepository>>,
     package_store: Option<Arc<dyn WorkflowPackageStore>>,
+    lifecycle_gate: Arc<Mutex<()>>,
 }
 
 impl WorkflowRegistryService {
@@ -208,6 +216,7 @@ impl WorkflowRegistryService {
             registry_repository: None,
             runtime_artifact_repository: None,
             package_store: None,
+            lifecycle_gate: Arc::new(Mutex::new(())),
         }
     }
 
@@ -233,6 +242,196 @@ impl WorkflowRegistryService {
     pub fn with_package_store(mut self, package_store: Arc<dyn WorkflowPackageStore>) -> Self {
         self.package_store = Some(package_store);
         self
+    }
+
+    /// Reconcile purge journals before the runtime library is scanned. A
+    /// present Registry row means the database purge did not commit and the
+    /// quarantined packages must be restored; an absent row means cleanup is
+    /// committed and the quarantine must not be restored.
+    pub async fn recover_pending_purges(
+        &self,
+    ) -> Result<WorkflowPurgeRecoveryReport, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
+        self.recover_pending_purges_inner().await
+    }
+
+    async fn recover_pending_purges_inner(
+        &self,
+    ) -> Result<WorkflowPurgeRecoveryReport, WorkflowRegistryServiceError> {
+        let Some(package_store) = &self.package_store else {
+            return Ok(WorkflowPurgeRecoveryReport::default());
+        };
+        let operations = package_store
+            .list_purge_operations()
+            .await
+            .map_err(|error| purge_recovery_blocked("<purge-root>", error.to_string()))?;
+        if operations.is_empty() {
+            return Ok(WorkflowPurgeRecoveryReport::default());
+        }
+        let Some(repository) = &self.registry_repository else {
+            return Err(purge_recovery_blocked(
+                "<registry>",
+                "workflow registry repository is not configured",
+            ));
+        };
+
+        let mut report = WorkflowPurgeRecoveryReport::default();
+        let mut first_error = None;
+        for operation in operations {
+            let operation_id = operation.operation_id().to_owned();
+            let result = match operation {
+                WorkflowPurgeOperationEntry::Journal(record) => {
+                    self.recover_journal_operation(package_store, repository, &record)
+                        .await
+                }
+                WorkflowPurgeOperationEntry::Legacy { operation_id } => {
+                    self.recover_legacy_operation(package_store, repository, &operation_id)
+                        .await
+                }
+                WorkflowPurgeOperationEntry::Malformed {
+                    operation_id,
+                    message,
+                } => Err(purge_recovery_blocked(&operation_id, message)),
+            };
+            match result {
+                Ok(()) => report.reconciled_operations += 1,
+                Err(error) => {
+                    tracing::error!(
+                        error_type = "WORKFLOW_PURGE_RECOVERY_BLOCKED",
+                        operation_id = %operation_id,
+                        error = %error,
+                        "workflow purge recovery left operation untouched"
+                    );
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        first_error.map_or(Ok(report), Err)
+    }
+
+    async fn recover_journal_operation(
+        &self,
+        package_store: &Arc<dyn WorkflowPackageStore>,
+        repository: &Arc<dyn WorkflowRegistryRepository>,
+        operation: &WorkflowPurgeOperationRecord,
+    ) -> Result<(), WorkflowRegistryServiceError> {
+        let quarantined = package_store
+            .list_quarantined_packages(&operation.operation_id)
+            .await
+            .map_err(|error| purge_recovery_blocked(&operation.operation_id, error.to_string()))?;
+        if quarantined
+            .iter()
+            .any(|package_name| !operation.package_names.contains(package_name))
+        {
+            return Err(purge_recovery_blocked(
+                &operation.operation_id,
+                "quarantine contains a package not listed in the purge journal",
+            ));
+        }
+        let workflow = repository
+            .get(&operation.workflow_id)
+            .await
+            .map_err(|error| purge_recovery_blocked(&operation.operation_id, error.to_string()))?;
+        if let Some(workflow) = workflow {
+            if workflow.source_kind != WORKFLOW_SOURCE_USER {
+                return Err(purge_recovery_blocked(
+                    &operation.operation_id,
+                    "purge journal points to a PRODUCT workflow",
+                ));
+            }
+            self.restore_quarantined_packages(package_store, &operation.operation_id, &quarantined)
+                .await
+                .map_err(|error| purge_recovery_blocked(&operation.operation_id, error))?;
+        }
+        package_store
+            .remove_quarantine(&operation.operation_id)
+            .await
+            .map_err(|error| purge_recovery_blocked(&operation.operation_id, error.to_string()))
+    }
+
+    async fn recover_legacy_operation(
+        &self,
+        package_store: &Arc<dyn WorkflowPackageStore>,
+        repository: &Arc<dyn WorkflowRegistryRepository>,
+        operation_id: &str,
+    ) -> Result<(), WorkflowRegistryServiceError> {
+        let package_names = package_store
+            .list_quarantined_packages(operation_id)
+            .await
+            .map_err(|error| purge_recovery_blocked(operation_id, error.to_string()))?;
+        let Some(workflow_id) = self
+            .legacy_quarantine_workflow_id(package_store, operation_id, &package_names)
+            .await?
+        else {
+            return Err(purge_recovery_blocked(
+                operation_id,
+                "legacy quarantine has no unambiguous USER workflow identity",
+            ));
+        };
+        let workflow = repository
+            .get(&workflow_id)
+            .await
+            .map_err(|error| purge_recovery_blocked(operation_id, error.to_string()))?;
+        if let Some(workflow) = workflow {
+            if workflow.source_kind != WORKFLOW_SOURCE_USER {
+                return Err(purge_recovery_blocked(
+                    operation_id,
+                    "legacy quarantine points to a PRODUCT workflow",
+                ));
+            }
+            self.restore_quarantined_packages(package_store, operation_id, &package_names)
+                .await
+                .map_err(|error| purge_recovery_blocked(operation_id, error))?;
+        }
+        package_store
+            .remove_quarantine(operation_id)
+            .await
+            .map_err(|error| purge_recovery_blocked(operation_id, error.to_string()))
+    }
+
+    async fn legacy_quarantine_workflow_id(
+        &self,
+        package_store: &Arc<dyn WorkflowPackageStore>,
+        operation_id: &str,
+        package_names: &[String],
+    ) -> Result<Option<String>, WorkflowRegistryServiceError> {
+        let mut workflow_id = None;
+        for package_name in package_names {
+            if is_builtin_package_name(package_name) {
+                return Err(purge_recovery_blocked(
+                    operation_id,
+                    "legacy quarantine contains a PRODUCT package",
+                ));
+            }
+            let package = package_store
+                .read_quarantined(operation_id, package_name)
+                .await
+                .map_err(|error| purge_recovery_blocked(operation_id, error.to_string()))?;
+            let manifest_yaml = String::from_utf8(package.manifest_yaml).map_err(|error| {
+                purge_recovery_blocked(
+                    operation_id,
+                    format!("invalid quarantined manifest: {error}"),
+                )
+            })?;
+            let manifest = WorkflowManifest::parse(&manifest_yaml)
+                .map_err(|error| purge_recovery_blocked(operation_id, error))?;
+            manifest
+                .validate()
+                .map_err(|error| purge_recovery_blocked(operation_id, error))?;
+            if let Some(existing) = &workflow_id {
+                if existing != &manifest.id {
+                    return Err(purge_recovery_blocked(
+                        operation_id,
+                        "legacy quarantine packages identify different workflows",
+                    ));
+                }
+            } else {
+                workflow_id = Some(manifest.id);
+            }
+        }
+        Ok(workflow_id)
     }
 
     /// Reads the Registry read model and groups every version into one logical
@@ -654,6 +853,14 @@ impl WorkflowRegistryService {
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryMutationResult, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
+        self.remove_workflow_inner(workflow_id).await
+    }
+
+    async fn remove_workflow_inner(
+        &self,
+        workflow_id: &str,
+    ) -> Result<WorkflowRegistryMutationResult, WorkflowRegistryServiceError> {
         let (versions, states) = self.load_runtime().await?;
         let versions = versions
             .into_iter()
@@ -761,6 +968,14 @@ impl WorkflowRegistryService {
     /// Restores only the logical library state. Bindings are deliberately not
     /// recreated; the user must explicitly bind the exact pair again.
     pub async fn restore_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> Result<WorkflowRegistryRestoreResult, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
+        self.restore_workflow_inner(workflow_id).await
+    }
+
+    async fn restore_workflow_inner(
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryRestoreResult, WorkflowRegistryServiceError> {
@@ -893,6 +1108,14 @@ impl WorkflowRegistryService {
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryPurgeResult, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
+        self.purge_workflow_inner(workflow_id).await
+    }
+
+    async fn purge_workflow_inner(
+        &self,
+        workflow_id: &str,
+    ) -> Result<WorkflowRegistryPurgeResult, WorkflowRegistryServiceError> {
         let (all_versions, states) = self.load_runtime().await?;
         let versions = all_versions
             .into_iter()
@@ -957,7 +1180,18 @@ impl WorkflowRegistryService {
                 )
             })?;
             let package_names = self.runtime_package_names(&versions).await?;
-            let operation_id = format!("purge_{}", Uuid::new_v4());
+            let operation = WorkflowPurgeOperationRecord {
+                schema_version: 1,
+                operation_id: format!("purge_{}", Uuid::new_v4()),
+                workflow_id: workflow_id.to_owned(),
+                package_names: package_names.iter().cloned().collect(),
+                created_at: self.clock.now().to_rfc3339(),
+            };
+            let operation_id = operation.operation_id.clone();
+            package_store
+                .prepare_purge_operation(&operation)
+                .await
+                .map_err(|error| WorkflowRegistryServiceError::PurgePackage(error.to_string()))?;
             let mut quarantined = Vec::with_capacity(package_names.len());
             for package_name in &package_names {
                 let quarantine = package_store
@@ -970,15 +1204,11 @@ impl WorkflowRegistryService {
                     Ok(WorkflowPackageQuarantineResult::AlreadyMissing) => {}
                     Err(error) => {
                         let compensation = self
-                            .restore_quarantined_packages(
-                                package_store,
-                                &operation_id,
-                                &quarantined,
-                            )
+                            .rollback_purge_operation(package_store, &operation_id, &quarantined)
                             .await;
                         if let Err(compensation) = compensation {
                             return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
-                                operation: operation_id,
+                                operation: operation_id.clone(),
                                 cause: error.to_string(),
                                 compensation,
                             });
@@ -990,18 +1220,55 @@ impl WorkflowRegistryService {
                 }
             }
 
-            if let Err(error) = repository.purge(workflow_id).await {
-                let compensation = self
-                    .restore_quarantined_packages(package_store, &operation_id, &quarantined)
-                    .await;
-                if let Err(compensation) = compensation {
-                    return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
-                        operation: operation_id,
-                        cause: error.to_string(),
-                        compensation,
-                    });
+            match repository.purge(workflow_id).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    let compensation = self
+                        .rollback_purge_operation(package_store, &operation_id, &quarantined)
+                        .await;
+                    if let Err(compensation) = compensation {
+                        return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
+                            operation: operation_id,
+                            cause: "workflow purge did not find the workflow".to_owned(),
+                            compensation,
+                        });
+                    }
+                    return Err(WorkflowRegistryServiceError::WorkflowNotFound(
+                        workflow_id.to_owned(),
+                    ));
                 }
-                return Err(error.into());
+                Err(error) => match repository.get(workflow_id).await {
+                    Ok(Some(_)) => {
+                        let compensation = self
+                            .rollback_purge_operation(package_store, &operation_id, &quarantined)
+                            .await;
+                        if let Err(compensation) = compensation {
+                            return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
+                                operation: operation_id,
+                                cause: error.to_string(),
+                                compensation,
+                            });
+                        }
+                        return Err(error.into());
+                    }
+                    Ok(None) => {
+                        tracing::warn!(
+                            workflow_id,
+                            operation_id = %operation_id,
+                            error = %error,
+                            "workflow purge database outcome reported an error after commit"
+                        );
+                    }
+                    Err(recheck_error) => {
+                        return Err(WorkflowRegistryServiceError::PurgeCompensationFailed {
+                            operation: operation_id,
+                            cause: format!(
+                                "{error}; database outcome recheck failed: {recheck_error}"
+                            ),
+                            compensation: "purge journal preserved for startup recovery".to_owned(),
+                        });
+                    }
+                },
             }
             let (cleanup_pending, warning) =
                 match package_store.remove_quarantine(&operation_id).await {
@@ -1190,6 +1457,20 @@ impl WorkflowRegistryService {
         } else {
             Err(failures.join("; "))
         }
+    }
+
+    async fn rollback_purge_operation(
+        &self,
+        package_store: &Arc<dyn WorkflowPackageStore>,
+        operation_id: &str,
+        package_names: &[String],
+    ) -> Result<(), String> {
+        self.restore_quarantined_packages(package_store, operation_id, package_names)
+            .await?;
+        package_store
+            .remove_quarantine(operation_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn load_runtime(
@@ -1435,6 +1716,16 @@ fn compensation_or_repository(
     }
 }
 
+fn purge_recovery_blocked(
+    operation: &str,
+    reason: impl Into<String>,
+) -> WorkflowRegistryServiceError {
+    WorkflowRegistryServiceError::PurgeRecoveryBlocked {
+        operation: operation.to_owned(),
+        reason: reason.into(),
+    }
+}
+
 fn state_for(
     states: &HashMap<String, WorkflowRuntimeState>,
     workflow_version_id: &str,
@@ -1586,6 +1877,10 @@ pub enum WorkflowRegistryServiceError {
         cause: String,
         compensation: String,
     },
+    PurgeRecoveryBlocked {
+        operation: String,
+        reason: String,
+    },
     CompensationFailed {
         operation: String,
         cause: String,
@@ -1604,6 +1899,7 @@ impl WorkflowRegistryServiceError {
             Self::PurgeBlocked(_) => "WORKFLOW_PURGE_BLOCKED",
             Self::PurgePackage(_) => "WORKFLOW_PURGE_PACKAGE_ERROR",
             Self::PurgeCompensationFailed { .. } => "WORKFLOW_PURGE_COMPENSATION_FAILED",
+            Self::PurgeRecoveryBlocked { .. } => "WORKFLOW_PURGE_RECOVERY_BLOCKED",
             Self::CompensationFailed { .. } => "WORKFLOW_REGISTRY_COMPENSATION_FAILED",
         }
     }
@@ -1638,6 +1934,10 @@ impl fmt::Display for WorkflowRegistryServiceError {
             } => write!(
                 formatter,
                 "WORKFLOW_PURGE_COMPENSATION_FAILED: {operation} failed ({cause}); compensation failed ({compensation})"
+            ),
+            Self::PurgeRecoveryBlocked { operation, reason } => write!(
+                formatter,
+                "WORKFLOW_PURGE_RECOVERY_BLOCKED: {operation} is unresolved ({reason})"
             ),
             Self::CompensationFailed {
                 operation,
