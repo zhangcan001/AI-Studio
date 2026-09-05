@@ -3031,17 +3031,33 @@ fn analysis_input_mapping(
         SemanticFieldType::Seed => Some("random".to_owned()),
         _ => None,
     };
-    let numeric = matches!(
-        field_type,
-        SemanticFieldType::Integer | SemanticFieldType::Number | SemanticFieldType::Seed
-    );
-    let step = if matches!(
-        field_type,
-        SemanticFieldType::Integer | SemanticFieldType::Number
-    ) {
-        node_input.and_then(|value| value.numeric_step.clone())
-    } else {
-        None
+    let (min_value, max_value, step) = match field_type {
+        SemanticFieldType::Integer => (
+            node_input
+                .and_then(|value| value.numeric_min.clone())
+                .and_then(parse_inferred_i64),
+            node_input
+                .and_then(|value| value.numeric_max.clone())
+                .and_then(parse_inferred_i64),
+            node_input
+                .and_then(|value| value.numeric_step.clone())
+                .and_then(parse_inferred_i64),
+        ),
+        SemanticFieldType::Number => (
+            node_input.and_then(|value| value.numeric_min.clone()),
+            node_input.and_then(|value| value.numeric_max.clone()),
+            node_input.and_then(|value| value.numeric_step.clone()),
+        ),
+        SemanticFieldType::Seed => (
+            node_input
+                .and_then(|value| value.numeric_min.clone())
+                .and_then(parse_inferred_u64),
+            node_input
+                .and_then(|value| value.numeric_max.clone())
+                .and_then(parse_inferred_u64),
+            None,
+        ),
+        _ => (None, None, None),
     };
     Some(InputMapping {
         semantic_key: input.semantic_key.clone(),
@@ -3049,12 +3065,8 @@ fn analysis_input_mapping(
         label: input.label.clone(),
         required: input.required,
         default_value,
-        min_value: numeric
-            .then(|| node_input.and_then(|value| value.numeric_min.clone()))
-            .flatten(),
-        max_value: numeric
-            .then(|| node_input.and_then(|value| value.numeric_max.clone()))
-            .flatten(),
+        min_value,
+        max_value,
         step,
         min_items: field_type.is_plural().then_some(0),
         max_items: field_type.is_plural().then_some(8),
@@ -3062,6 +3074,14 @@ fn analysis_input_mapping(
         target_input: input.input_name.clone(),
         item_index: None,
     })
+}
+
+fn parse_inferred_i64(value: String) -> Option<String> {
+    value.parse::<i64>().ok().map(|value| value.to_string())
+}
+
+fn parse_inferred_u64(value: String) -> Option<String> {
+    value.parse::<u64>().ok().map(|value| value.to_string())
 }
 
 fn inference_confidence(
@@ -6217,6 +6237,45 @@ outputs: []
         assert_eq!(
             possible_link(&draft.workflow.inputs("63").unwrap()["length"]),
             Some(("35", 1))
+        );
+    }
+
+    #[test]
+    fn graph_inference_accepts_float_constant_bounds_for_integer_duration() {
+        let mut draft = graph_video_draft();
+        let object_info: Value = serde_json::from_str(
+            r#"{
+                "FloatConstant": {"input": {"required": {
+                    "value": ["FLOAT", {
+                        "min": -18446744073709551615,
+                        "max": 18446744073709551615,
+                        "step": 0.00001
+                    }]
+                }}}
+            }"#,
+        )
+        .unwrap();
+        enrich_nodes_with_capability(&mut draft.nodes, &object_info);
+
+        let result = infer_auto_onboarding(&draft);
+        let duration = result
+            .input_mappings
+            .iter()
+            .find(|mapping| mapping.semantic_key == "duration_seconds")
+            .expect("duration mapping should be inferred");
+        assert_eq!(duration.min_value, None);
+        assert_eq!(duration.max_value, None);
+        assert_eq!(duration.step, None);
+        let recipe = build_recipe(&WorkflowOnboardingDraft {
+            input_mappings: result.input_mappings.clone(),
+            output_mappings: result.output_mappings.clone(),
+            ..draft
+        })
+        .expect("FLOAT capability bounds must not invalidate integer duration mapping");
+
+        assert_eq!(
+            recipe.inputs.get("duration_seconds").unwrap().kind(),
+            "integer"
         );
     }
 
