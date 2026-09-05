@@ -86,6 +86,7 @@ use application::{
     task_recovery_service::TaskRecoveryService,
     workflow_benchmark_service::WorkflowBenchmarkService,
     workflow_library_service::WorkflowLibraryService,
+    workflow_lifecycle_coordinator::WorkflowLifecycleCoordinator,
     workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::WorkflowOnboardingService,
     workflow_registry_service::WorkflowRegistryService,
@@ -507,6 +508,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_workflow_binding_repository.clone(),
             )
             .with_runtime_artifact_repository(runtime_artifact_repository.clone()));
+            let workflow_lifecycle_coordinator = Arc::new(WorkflowLifecycleCoordinator::new(
+                workflow_registry_service.clone(),
+                workflow_lifecycle_service.clone(),
+            ));
             let workflow_workspace_query_service = Arc::new(WorkflowWorkspaceQueryService::new(
                 workflow_registry_service.clone(),
                 runtime_repository.clone(),
@@ -867,6 +872,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_workspace_query_service,
                 workflow_onboarding_service,
                 workflow_lifecycle_service,
+                workflow_lifecycle_coordinator,
                 workflow_benchmark_service,
                 production_orchestrator_service,
                 generation_catalog_service,

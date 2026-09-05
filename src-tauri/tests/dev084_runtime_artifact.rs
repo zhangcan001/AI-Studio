@@ -15,6 +15,7 @@ use ai_studio_lib::application::{
         WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     workflow_library_service::WorkflowLibraryService,
+    workflow_lifecycle_coordinator::WorkflowLifecycleCoordinator,
     workflow_lifecycle_service::WorkflowLifecycleService,
     workflow_onboarding_service::{
         CapabilityCheckView, CapabilityState, WorkflowOnboardingService,
@@ -45,6 +46,7 @@ use std::{
     sync::Arc,
 };
 use tempfile::tempdir;
+use tokio::sync::Notify;
 
 const MIGRATIONS_THROUGH_028: [&str; 28] = [
     include_str!(concat!(
@@ -523,7 +525,16 @@ impl WorkflowPackageStore for CleanupFailingPackageStore {
     }
 }
 
-struct NonSubmittingComfy;
+#[derive(Default)]
+struct NonSubmittingComfy {
+    object_info_gate: Option<Arc<ObjectInfoGate>>,
+}
+
+#[derive(Default)]
+struct ObjectInfoGate {
+    entered: Notify,
+    release: Notify,
+}
 
 #[async_trait::async_trait]
 impl ComfyAdapter for NonSubmittingComfy {
@@ -542,6 +553,11 @@ impl ComfyAdapter for NonSubmittingComfy {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
+        if let Some(gate) = &self.object_info_gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+            return Ok(serde_json::json!({}));
+        }
         Err(ComfyAdapterError::Offline(
             "DEV-084 admission fixture".to_owned(),
         ))
@@ -597,6 +613,13 @@ impl WorkflowRunRepository for NoopWorkflowRunRepository {
 }
 
 fn onboarding_service_for(harness: &RegistryPurgeHarness) -> Arc<WorkflowOnboardingService> {
+    onboarding_service_with_comfy(harness, Arc::new(NonSubmittingComfy::default()))
+}
+
+fn onboarding_service_with_comfy(
+    harness: &RegistryPurgeHarness,
+    comfy_adapter: Arc<dyn ComfyAdapter>,
+) -> Arc<WorkflowOnboardingService> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let source: Arc<dyn WorkflowLibrarySource> = Arc::new(FileSystemWorkflowLibrarySource::new(
         harness.library_root.clone(),
@@ -619,7 +642,7 @@ fn onboarding_service_for(harness: &RegistryPurgeHarness) -> Arc<WorkflowOnboard
     Arc::new(
         WorkflowOnboardingService::new(
             source,
-            Arc::new(NonSubmittingComfy),
+            comfy_adapter,
             library_service,
             Arc::new(NoopWorkflowRunRepository),
             package_store.clone(),
@@ -657,6 +680,13 @@ fn workspace_query_service_for(harness: &RegistryPurgeHarness) -> WorkflowWorksp
 }
 
 fn lifecycle_service_for(harness: &RegistryPurgeHarness) -> WorkflowLifecycleService {
+    lifecycle_service_with_comfy(harness, Arc::new(NonSubmittingComfy::default()))
+}
+
+fn lifecycle_service_with_comfy(
+    harness: &RegistryPurgeHarness,
+    comfy_adapter: Arc<dyn ComfyAdapter>,
+) -> WorkflowLifecycleService {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let source: Arc<dyn WorkflowLibrarySource> = Arc::new(FileSystemWorkflowLibrarySource::new(
         harness.library_root.clone(),
@@ -679,12 +709,29 @@ fn lifecycle_service_for(harness: &RegistryPurgeHarness) -> WorkflowLifecycleSer
     WorkflowLifecycleService::new(
         source,
         library_service,
-        onboarding_service_for(harness),
+        onboarding_service_with_comfy(harness, comfy_adapter),
         runtime_repository,
         state_repository,
         package_store,
         clock,
     )
+}
+
+fn lifecycle_coordinator_for(harness: &RegistryPurgeHarness) -> Arc<WorkflowLifecycleCoordinator> {
+    Arc::new(WorkflowLifecycleCoordinator::new(
+        harness.registry.clone(),
+        Arc::new(lifecycle_service_for(harness)),
+    ))
+}
+
+fn lifecycle_coordinator_with_comfy(
+    harness: &RegistryPurgeHarness,
+    comfy_adapter: Arc<dyn ComfyAdapter>,
+) -> Arc<WorkflowLifecycleCoordinator> {
+    Arc::new(WorkflowLifecycleCoordinator::new(
+        harness.registry.clone(),
+        Arc::new(lifecycle_service_with_comfy(harness, comfy_adapter)),
+    ))
 }
 
 async fn exact_generation_identity(harness: &RegistryPurgeHarness) -> (String, String) {
@@ -729,7 +776,7 @@ fn generation_service_for(harness: &RegistryPurgeHarness) -> Arc<GenerationServi
     let asset_repository: Arc<dyn AssetRepository> =
         Arc::new(SqliteAssetRepository::new(harness.pool.clone()));
     let asset_store: Arc<dyn AssetStore> = Arc::new(FileSystemAssetStore::new());
-    let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(NonSubmittingComfy);
+    let comfy_adapter: Arc<dyn ComfyAdapter> = Arc::new(NonSubmittingComfy::default());
 
     Arc::new(
         GenerationService::new(
@@ -2039,4 +2086,307 @@ async fn dev084_project_bindings_not_restored_implicitly() {
         .await
         .expect("binding list should remain readable")
         .is_empty());
+}
+
+#[tokio::test]
+async fn dev084_coordinator_serializes_restore_then_remove() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_restore_remove_race",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let (workflow_version_id, _) = exact_generation_identity(&harness).await;
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("fixture workflow should start removed");
+    let object_info_gate = Arc::new(ObjectInfoGate::default());
+    let coordinator = lifecycle_coordinator_with_comfy(
+        &harness,
+        Arc::new(NonSubmittingComfy {
+            object_info_gate: Some(object_info_gate.clone()),
+        }),
+    );
+
+    let restore = {
+        let coordinator = coordinator.clone();
+        let workflow_id = harness.workflow_id.clone();
+        tokio::spawn(async move { coordinator.restore_workflow(&workflow_id).await })
+    };
+    object_info_gate.entered.notified().await;
+    let remove = {
+        let coordinator = coordinator.clone();
+        let workflow_id = harness.workflow_id.clone();
+        tokio::spawn(async move { coordinator.remove_workflow(&workflow_id).await })
+    };
+    tokio::task::yield_now().await;
+    assert!(!remove.is_finished());
+    object_info_gate.release.notify_one();
+
+    assert_eq!(restore.await.unwrap().unwrap().library_state, "ACTIVE");
+    assert_eq!(remove.await.unwrap().unwrap().library_state, "REMOVED");
+    let workflow = harness.registry.get(&harness.workflow_id).await.unwrap();
+    let state = SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone())
+        .find_state(&workflow_version_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(workflow.library_state, "REMOVED");
+    assert!(state.archived);
+    assert!(!state.enabled);
+}
+
+#[tokio::test]
+async fn dev084_coordinator_serializes_restore_then_purge() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_restore_purge_race",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .expect("fixture workflow should start removed");
+    let object_info_gate = Arc::new(ObjectInfoGate::default());
+    let coordinator = lifecycle_coordinator_with_comfy(
+        &harness,
+        Arc::new(NonSubmittingComfy {
+            object_info_gate: Some(object_info_gate.clone()),
+        }),
+    );
+
+    let restore = {
+        let coordinator = coordinator.clone();
+        let workflow_id = harness.workflow_id.clone();
+        tokio::spawn(async move { coordinator.restore_workflow(&workflow_id).await })
+    };
+    object_info_gate.entered.notified().await;
+    let purge = {
+        let coordinator = coordinator.clone();
+        let workflow_id = harness.workflow_id.clone();
+        tokio::spawn(async move { coordinator.purge_workflow(&workflow_id).await })
+    };
+    object_info_gate.release.notify_one();
+
+    assert_eq!(restore.await.unwrap().unwrap().library_state, "ACTIVE");
+    assert_eq!(
+        purge.await.unwrap().unwrap_err().code(),
+        "WORKFLOW_PURGE_BLOCKED"
+    );
+    assert!(harness.library_root.join(&harness.package_name).is_dir());
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .library_state,
+        "ACTIVE"
+    );
+}
+
+#[tokio::test]
+async fn dev084_coordinator_serializes_remove_and_purge() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_remove_purge_race",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let coordinator = lifecycle_coordinator_for(&harness);
+    let (remove, purge) = tokio::join!(
+        coordinator.remove_workflow(&harness.workflow_id),
+        coordinator.purge_workflow(&harness.workflow_id),
+    );
+    assert_eq!(remove.unwrap().library_state, "REMOVED");
+    match purge {
+        Ok(result) => {
+            assert!(result.committed);
+            assert!(harness.registry.get(&harness.workflow_id).await.is_err());
+            assert!(!harness.library_root.join(&harness.package_name).exists());
+        }
+        Err(error) => {
+            assert_eq!(error.code(), "WORKFLOW_PURGE_BLOCKED");
+            assert_eq!(
+                harness
+                    .registry
+                    .get(&harness.workflow_id)
+                    .await
+                    .unwrap()
+                    .library_state,
+                "REMOVED"
+            );
+            assert!(harness.library_root.join(&harness.package_name).is_dir());
+        }
+    }
+}
+
+#[tokio::test]
+async fn dev084_legacy_delete_version_routes_registry_workflow_to_remove() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_legacy_delete_version",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let (workflow_version_id, _) = exact_generation_identity(&harness).await;
+    let result = lifecycle_coordinator_for(&harness)
+        .delete_version(&workflow_version_id)
+        .await
+        .expect("legacy delete-version route should logically remove Registry workflow");
+
+    assert_eq!(result.action, "REMOVE");
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .library_state,
+        "REMOVED"
+    );
+    let version_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM workflow_versions WHERE id = ?")
+            .bind(&workflow_version_id)
+            .fetch_one(&harness.pool)
+            .await
+            .unwrap();
+    assert!(version_count > 0);
+    for table in ["recipes", "workflow_runtime_artifacts"] {
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM {table} WHERE workflow_version_id = ?"
+        ))
+        .bind(&workflow_version_id)
+        .fetch_one(&harness.pool)
+        .await
+        .unwrap();
+        assert!(count > 0, "{table} should remain after logical remove");
+    }
+    assert!(harness.library_root.join(&harness.package_name).is_dir());
+    assert!(
+        lifecycle_coordinator_for(&harness)
+            .purge_workflow(&harness.workflow_id)
+            .await
+            .expect("only coordinator purge should permanently delete the workflow")
+            .committed
+    );
+    assert!(harness.registry.get(&harness.workflow_id).await.is_err());
+    assert!(!harness.library_root.join(&harness.package_name).exists());
+}
+
+#[tokio::test]
+async fn dev084_legacy_product_delete_retains_package_and_can_restore() {
+    let package_name = "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0";
+    let harness = registry_purge_harness(
+        package_name,
+        package_name,
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let coordinator = lifecycle_coordinator_for(&harness);
+    let removed = coordinator
+        .delete_workflow(&harness.workflow_id)
+        .await
+        .expect("legacy product delete should route to logical remove");
+    assert!(removed.iter().all(|result| result.action == "REMOVE"));
+    assert!(harness.library_root.join(package_name).is_dir());
+
+    let library_service = WorkflowLibraryService::new(
+        Arc::new(FileSystemWorkflowLibrarySource::new(
+            harness.library_root.clone(),
+        )),
+        Arc::new(SqliteWorkflowLibraryRepository::new(harness.pool.clone())),
+        Arc::new(SystemClock),
+    );
+    library_service.sync().await.unwrap();
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .library_state,
+        "REMOVED"
+    );
+    assert_eq!(
+        coordinator
+            .restore_workflow(&harness.workflow_id)
+            .await
+            .unwrap()
+            .library_state,
+        "ACTIVE"
+    );
+    assert!(harness.library_root.join(package_name).is_dir());
+}
+
+#[tokio::test]
+async fn dev084_legacy_restore_version_routes_to_current_logical_workflow() {
+    let harness = registry_purge_harness(
+        "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0",
+        "dev084_legacy_restore_version",
+        "wfl_aitudou_minimax_h3_lightx2v_8step_fast",
+    )
+    .await;
+    let (current_version_id, _) = exact_generation_identity(&harness).await;
+    let older_version_id = "dev084-older-version";
+    sqlx::query(
+        "INSERT INTO workflow_versions
+         (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+         VALUES (?, ?, '0.9.0', '{}', 'dev084-older-sha', ?)",
+    )
+    .bind(older_version_id)
+    .bind(&harness.workflow_id)
+    .bind("2026-01-01T00:00:00Z")
+    .execute(&harness.pool)
+    .await
+    .unwrap();
+    harness
+        .registry
+        .remove_workflow(&harness.workflow_id)
+        .await
+        .unwrap();
+
+    let restored = lifecycle_coordinator_for(&harness)
+        .restore_version(&current_version_id)
+        .await
+        .expect("legacy restore-version route should restore the logical workflow");
+    assert_eq!(restored.workflow_version_id, current_version_id);
+    assert_eq!(
+        harness
+            .registry
+            .get(&harness.workflow_id)
+            .await
+            .unwrap()
+            .library_state,
+        "ACTIVE"
+    );
+    let states = SqliteWorkflowRuntimeStateRepository::new(harness.pool.clone())
+        .list_states()
+        .await
+        .unwrap();
+    assert!(
+        !states
+            .iter()
+            .find(|state| state.workflow_version_id == current_version_id)
+            .unwrap()
+            .archived
+    );
+    assert!(
+        states
+            .iter()
+            .find(|state| state.workflow_version_id == older_version_id)
+            .unwrap()
+            .archived
+    );
+    assert!(
+        SqliteProjectWorkflowBindingRepository::new(harness.pool.clone())
+            .list_for_project("prj_default")
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

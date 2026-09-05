@@ -244,6 +244,38 @@ impl WorkflowRegistryService {
         self
     }
 
+    pub(crate) fn lifecycle_gate(&self) -> Arc<Mutex<()>> {
+        self.lifecycle_gate.clone()
+    }
+
+    pub(crate) async fn registry_contains(
+        &self,
+        workflow_id: &str,
+    ) -> Result<bool, WorkflowRegistryServiceError> {
+        let Some(repository) = &self.registry_repository else {
+            return Ok(false);
+        };
+        Ok(repository.get(workflow_id).await?.is_some())
+    }
+
+    pub(crate) async fn registry_workflow_id_for_version(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<Option<String>, WorkflowRegistryServiceError> {
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        if self.registry_contains(&version.workflow_id).await? {
+            Ok(Some(version.workflow_id))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Reconcile purge journals before the runtime library is scanned. A
     /// present Registry row means the database purge did not commit and the
     /// quarantined packages must be restored; an absent row means cleanup is
@@ -857,7 +889,7 @@ impl WorkflowRegistryService {
         self.remove_workflow_inner(workflow_id).await
     }
 
-    async fn remove_workflow_inner(
+    pub(crate) async fn remove_workflow_inner(
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryMutationResult, WorkflowRegistryServiceError> {
@@ -975,7 +1007,7 @@ impl WorkflowRegistryService {
         self.restore_workflow_inner(workflow_id).await
     }
 
-    async fn restore_workflow_inner(
+    pub(crate) async fn restore_workflow_inner(
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryRestoreResult, WorkflowRegistryServiceError> {
@@ -1112,7 +1144,7 @@ impl WorkflowRegistryService {
         self.purge_workflow_inner(workflow_id).await
     }
 
-    async fn purge_workflow_inner(
+    pub(crate) async fn purge_workflow_inner(
         &self,
         workflow_id: &str,
     ) -> Result<WorkflowRegistryPurgeResult, WorkflowRegistryServiceError> {

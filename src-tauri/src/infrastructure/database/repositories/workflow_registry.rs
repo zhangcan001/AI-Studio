@@ -160,9 +160,7 @@ impl WorkflowRegistryRepository for SqliteWorkflowRegistryRepository {
              )
              SELECT wv.id, 0, ?, 1, ?
              FROM workflow_versions wv
-             LEFT JOIN workflow_runtime_states wrs
-                ON wrs.workflow_version_id = wv.id
-             WHERE wv.workflow_id = ? AND wrs.workflow_version_id IS NULL
+             WHERE wv.workflow_id = ?
              ON CONFLICT(workflow_version_id) DO UPDATE SET
                  enabled = 0,
                  updated_at = excluded.updated_at,

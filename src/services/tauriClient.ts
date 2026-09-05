@@ -233,6 +233,7 @@ import type {
   WorkflowRestoreResult,
   WorkflowRestoreView,
   WorkflowRegistryMutationResult,
+  WorkflowRegistryRestoreResult,
   WorkflowRegistryView,
   WorkflowVersionDiffView,
   WorkflowWorkspaceView,
@@ -582,8 +583,8 @@ export function removeWorkflow(workflowId: string): Promise<WorkflowRegistryMuta
   return invoke<WorkflowRegistryMutationResult>("workflow_remove", { workflowId });
 }
 
-export function restoreWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
-  return invoke<WorkflowRegistryMutationResult>("workflow_restore", { workflowId });
+export function restoreWorkflow(workflowId: string): Promise<WorkflowRegistryRestoreResult> {
+  return invoke<WorkflowRegistryRestoreResult>("workflow_restore", { workflowId });
 }
 
 export function purgeWorkflow(workflowId: string): Promise<WorkflowPurgeResult> {

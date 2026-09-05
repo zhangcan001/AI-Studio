@@ -1,5 +1,6 @@
 use crate::{
     app_state::AppState,
+    application::workflow_lifecycle_coordinator::WorkflowLifecycleCoordinatorError,
     application::workflow_lifecycle_service::{
         WorkflowDeletionInspection, WorkflowDeletionResult, WorkflowExportView,
         WorkflowLifecycleError, WorkflowProductionWorkspaceResponse, WorkflowRestoreResult,
@@ -12,6 +13,15 @@ use tauri_plugin_dialog::DialogExt;
 
 fn map_error(error: WorkflowLifecycleError) -> AppError {
     AppError::workflow_onboarding(format!("{}: {}", error.code(), error))
+}
+
+fn map_coordinator_error(error: WorkflowLifecycleCoordinatorError) -> AppError {
+    match error {
+        WorkflowLifecycleCoordinatorError::Registry(error) => {
+            super::workflow_registry::map_registry_error(error)
+        }
+        WorkflowLifecycleCoordinatorError::Lifecycle(error) => map_error(error),
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -254,10 +264,10 @@ pub async fn workflow_delete_version(
     workflow_version_id: String,
 ) -> Result<WorkflowDeletionResult, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow_lifecycle_coordinator
         .delete_version(&workflow_version_id)
         .await
-        .map_err(map_error)
+        .map_err(map_coordinator_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -266,10 +276,10 @@ pub async fn workflow_delete_workflow(
     workflow_id: String,
 ) -> Result<Vec<WorkflowDeletionResult>, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow_lifecycle_coordinator
         .delete_workflow(&workflow_id)
         .await
-        .map_err(map_error)
+        .map_err(map_coordinator_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -278,8 +288,8 @@ pub async fn workflow_restore_version(
     workflow_version_id: String,
 ) -> Result<WorkflowRestoreResult, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow_lifecycle_coordinator
         .restore_version(&workflow_version_id)
         .await
-        .map_err(map_error)
+        .map_err(map_coordinator_error)
 }

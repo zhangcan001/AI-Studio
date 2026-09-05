@@ -454,6 +454,16 @@ export interface WorkflowRegistryMutationResult {
   purged?: boolean;
 }
 
+export interface WorkflowRegistryRestoreResult {
+  workflowId: string;
+  libraryState: WorkflowLibraryState | string;
+  currentVersionId: string | null;
+  enabled: boolean;
+  readiness: string;
+  capability: string;
+  projectBindingCount: number;
+}
+
 export interface WorkflowDiagnosticView {
   code: string;
   message: string;

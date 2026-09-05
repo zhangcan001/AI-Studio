@@ -88,6 +88,7 @@ pub mod workflow_analysis_service;
 pub mod workflow_benchmark_service;
 pub mod workflow_graph_analysis;
 pub mod workflow_library_service;
+pub mod workflow_lifecycle_coordinator;
 pub mod workflow_lifecycle_service;
 pub mod workflow_manifest;
 pub mod workflow_onboarding_service;

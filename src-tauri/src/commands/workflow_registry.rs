@@ -1,7 +1,7 @@
 use crate::{
     app_state::AppState,
     application::{
-        workflow_onboarding_service::CapabilityState,
+        workflow_lifecycle_coordinator::WorkflowLifecycleCoordinatorError,
         workflow_onboarding_service::{
             WorkflowAutoOnboardingPlanView, WorkflowImportCommitRequest,
             WorkflowOnboardingPublishView,
@@ -15,7 +15,7 @@ use crate::{
 };
 use tauri::{AppHandle, State};
 
-fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
+pub(super) fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
     let code = error.code();
     match error {
         WorkflowRegistryServiceError::WorkflowNotFound(message)
@@ -36,6 +36,15 @@ fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
             operation: message, ..
         } => AppError::invalid_input(format!("{code}: {message}")),
         WorkflowRegistryServiceError::Repository(error) => super::map_repository_error(&error),
+    }
+}
+
+fn map_coordinator_error(error: WorkflowLifecycleCoordinatorError) -> AppError {
+    match error {
+        WorkflowLifecycleCoordinatorError::Registry(error) => map_registry_error(error),
+        WorkflowLifecycleCoordinatorError::Lifecycle(error) => {
+            AppError::invalid_input(error.to_string())
+        }
     }
 }
 
@@ -136,10 +145,10 @@ pub async fn workflow_remove(
     workflow_id: String,
 ) -> Result<WorkflowRegistryMutationResult, AppError> {
     state
-        .workflow_registry_service
-        .remove(&workflow_id)
+        .workflow_lifecycle_coordinator
+        .remove_workflow(&workflow_id)
         .await
-        .map_err(map_registry_error)
+        .map_err(map_coordinator_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -147,85 +156,11 @@ pub async fn workflow_restore(
     state: State<'_, AppState>,
     workflow_id: String,
 ) -> Result<WorkflowRegistryRestoreResult, AppError> {
-    let mut restored = state
-        .workflow_registry_service
-        .restore(&workflow_id)
+    state
+        .workflow_lifecycle_coordinator
+        .restore_workflow(&workflow_id)
         .await
-        .map_err(map_registry_error)?;
-
-    if let Some(version_id) = restored.current_version_id.clone() {
-        match state
-            .workflow_lifecycle_service
-            .restore_version(&version_id)
-            .await
-        {
-            Ok(version_restore) => {
-                restored.enabled = version_restore.enabled;
-                restored.capability = version_restore.capability;
-                restored.readiness = version_restore.readiness;
-                return Ok(restored);
-            }
-            Err(error) if error.code() == "WORKFLOW_NOT_ARCHIVED" => {}
-            Err(error) => return Err(AppError::invalid_input(error.to_string())),
-        }
-
-        match state
-            .workflow_lifecycle_service
-            .recheck_capability(&version_id)
-            .await
-        {
-            Ok(capability) => {
-                restored.capability = capability_state_name(capability.state).to_owned();
-                if capability.state == CapabilityState::Ready {
-                    state
-                        .workflow_lifecycle_service
-                        .set_enabled(&version_id, true)
-                        .await
-                        .map_err(|error| AppError::invalid_input(error.to_string()))?;
-                    restored.enabled = true;
-                    restored.readiness = "ACTIVE".to_owned();
-                } else {
-                    state
-                        .workflow_lifecycle_service
-                        .set_enabled(&version_id, false)
-                        .await
-                        .map_err(|error| AppError::invalid_input(error.to_string()))?;
-                    restored.enabled = false;
-                    restored.readiness = "RESTORED_NEEDS_ATTENTION".to_owned();
-                }
-            }
-            Err(error) => {
-                let capability = match error.code() {
-                    "COMFY_OFFLINE" => "COMFY_OFFLINE",
-                    "MISSING_NODES" | "MISSING_NODE" => "MISSING_NODES",
-                    "INCOMPATIBLE_INPUT_VALUES" | "COMFY_PROTOCOL_ERROR" => {
-                        "INCOMPATIBLE_INPUT_VALUES"
-                    }
-                    _ => "NOT_CHECKED",
-                };
-                state
-                    .workflow_lifecycle_service
-                    .set_enabled(&version_id, false)
-                    .await
-                    .map_err(|set_error| AppError::invalid_input(set_error.to_string()))?;
-                restored.enabled = false;
-                restored.capability = capability.to_owned();
-                restored.readiness = "RESTORED_NEEDS_ATTENTION".to_owned();
-            }
-        }
-    }
-
-    Ok(restored)
-}
-
-fn capability_state_name(state: CapabilityState) -> &'static str {
-    match state {
-        CapabilityState::NotChecked => "NOT_CHECKED",
-        CapabilityState::Ready => "READY",
-        CapabilityState::MissingNodes => "MISSING_NODES",
-        CapabilityState::IncompatibleInputValues => "INCOMPATIBLE_INPUT_VALUES",
-        CapabilityState::ComfyOffline => "COMFY_OFFLINE",
-    }
+        .map_err(map_coordinator_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -234,10 +169,10 @@ pub async fn workflow_purge(
     workflow_id: String,
 ) -> Result<WorkflowRegistryPurgeResult, AppError> {
     state
-        .workflow_registry_service
-        .purge(&workflow_id)
+        .workflow_lifecycle_coordinator
+        .purge_workflow(&workflow_id)
         .await
-        .map_err(map_registry_error)
+        .map_err(map_coordinator_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]

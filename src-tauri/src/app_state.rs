@@ -52,6 +52,7 @@ use crate::application::task_query_service::TaskQueryService;
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::application::workflow_benchmark_service::WorkflowBenchmarkService;
 use crate::application::workflow_library_service::WorkflowLibraryService;
+use crate::application::workflow_lifecycle_coordinator::WorkflowLifecycleCoordinator;
 use crate::application::workflow_lifecycle_service::WorkflowLifecycleService;
 use crate::application::workflow_onboarding_service::WorkflowOnboardingService;
 use crate::application::workflow_registry_service::WorkflowRegistryService;
@@ -69,6 +70,7 @@ pub struct AppState {
     pub workflow_workspace_query_service: Arc<WorkflowWorkspaceQueryService>,
     pub workflow_onboarding_service: Arc<WorkflowOnboardingService>,
     pub workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
+    pub workflow_lifecycle_coordinator: Arc<WorkflowLifecycleCoordinator>,
     pub workflow_benchmark_service: Arc<WorkflowBenchmarkService>,
     pub production_orchestrator_service: Arc<ProductionOrchestratorService>,
     pub generation_catalog_service: Arc<GenerationCatalogService>,
@@ -132,6 +134,7 @@ impl AppState {
         workflow_workspace_query_service: Arc<WorkflowWorkspaceQueryService>,
         workflow_onboarding_service: Arc<WorkflowOnboardingService>,
         workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
+        workflow_lifecycle_coordinator: Arc<WorkflowLifecycleCoordinator>,
         workflow_benchmark_service: Arc<WorkflowBenchmarkService>,
         production_orchestrator_service: Arc<ProductionOrchestratorService>,
         generation_catalog_service: Arc<GenerationCatalogService>,
@@ -193,6 +196,7 @@ impl AppState {
             workflow_workspace_query_service,
             workflow_onboarding_service,
             workflow_lifecycle_service,
+            workflow_lifecycle_coordinator,
             workflow_benchmark_service,
             production_orchestrator_service,
             generation_catalog_service,
