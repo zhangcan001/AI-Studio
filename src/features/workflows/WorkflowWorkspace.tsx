@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createGeneration } from "../../services/tauriClient";
+import { createGeneration, getProjectWorkflowConfig, listRuntimeProfiles } from "../../services/tauriClient";
 import {
   analyzeWorkflowImport,
   checkOnboardingCapability,
@@ -55,6 +55,8 @@ import type {
   WorkflowVersionDiffView,
 } from "../../types/workflowOnboarding";
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
+import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
+import type { RuntimeParameterProfile } from "../../types/settings";
 import { formatUiError, toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { WorkflowImportController } from "./WorkflowImportController";
@@ -67,6 +69,8 @@ import {
 } from "./workflowWorkspaceAdapters";
 import { WorkflowRegistryActions } from "./WorkflowRegistryActions";
 import { WorkflowWorkspaceList } from "./WorkflowWorkspaceList";
+import { WorkflowCenterOverview } from "./WorkflowCenterOverview";
+import { buildProductionProfiles, buildWorkflowCenterSummary } from "./workflowCenterModel";
 
 export { latestCatalogRecipeForWorkflowItem } from "./workflowWorkspaceAdapters";
 
@@ -77,6 +81,7 @@ interface Props {
   onCatalogChanged: () => Promise<void>;
   onOpenStudio: (workflowId: string, recipeId: string) => Promise<void>;
   onUseInProject: (workflowId: string, recipeId: string) => Promise<void>;
+  onOpenProjectSettings?: () => void;
   onOpenTask?: (taskId: string) => void;
 }
 
@@ -185,7 +190,7 @@ function workflowImportErrorView(error: unknown): WorkflowImportErrorView {
 }
 
 
-export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenTask }: Props) {
+export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenProjectSettings, onOpenTask }: Props) {
   const [items, setItems] = useState<WorkflowWorkspaceItem[]>([]);
   const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
   const [search, setSearch] = useState("");
@@ -211,6 +216,12 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [renameTarget, setRenameTarget] = useState<WorkflowWorkspaceItem>();
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
+  const [projectWorkflowLoading, setProjectWorkflowLoading] = useState(false);
+  const [projectWorkflowError, setProjectWorkflowError] = useState<string>();
+  const [runtimeProfiles, setRuntimeProfiles] = useState<RuntimeParameterProfile[]>([]);
+  const [runtimeProfilesLoading, setRuntimeProfilesLoading] = useState(false);
+  const [runtimeProfilesError, setRuntimeProfilesError] = useState<string>();
   const draft = useWorkflowOnboardingStore((state) => state.draft);
   const step = useWorkflowOnboardingStore((state) => state.step);
   const loading = useWorkflowOnboardingStore((state) => state.loading);
@@ -243,6 +254,47 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   useEffect(() => {
     void loadWorkspace("fast");
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    let active = true;
+    setProjectWorkflowConfig(undefined);
+    setProjectWorkflowError(undefined);
+    if (!projectId) {
+      setProjectWorkflowLoading(false);
+      return () => { active = false; };
+    }
+    setProjectWorkflowLoading(true);
+    void Promise.resolve()
+      .then(() => getProjectWorkflowConfig(projectId))
+      .then((config) => {
+        if (active && config) setProjectWorkflowConfig(config);
+      })
+      .catch((value: unknown) => {
+        if (active) setProjectWorkflowError(toUserMessage(value));
+      })
+      .finally(() => {
+        if (active) setProjectWorkflowLoading(false);
+      });
+    return () => { active = false; };
+  }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    setRuntimeProfilesLoading(true);
+    setRuntimeProfilesError(undefined);
+    void Promise.resolve()
+      .then(() => listRuntimeProfiles())
+      .then((profiles) => {
+        if (active) setRuntimeProfiles(profiles);
+      })
+      .catch((value: unknown) => {
+        if (active) setRuntimeProfilesError(toUserMessage(value));
+      })
+      .finally(() => {
+        if (active) setRuntimeProfilesLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!draft) {
@@ -1184,6 +1236,16 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     () => draft?.nodes.filter((node) => node.isOutputNode) ?? [],
     [draft],
   );
+  const productionProfiles = useMemo(
+    () => projectWorkflowConfig
+      ? buildProductionProfiles(projectWorkflowConfig, catalog, items, runtimeProfiles)
+      : [],
+    [catalog, items, projectWorkflowConfig, runtimeProfiles],
+  );
+  const centerSummary = useMemo(
+    () => buildWorkflowCenterSummary(items, runtimeProfiles, productionProfiles),
+    [items, productionProfiles, runtimeProfiles],
+  );
 
   return (
     <section className="workspace-panel workflow-workspace" aria-busy={loading || workspaceLoading}>
@@ -1205,6 +1267,20 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           onImportBackup={() => void importBackup()}
         />
       </div>
+
+      <WorkflowCenterOverview
+        summary={centerSummary}
+        profiles={productionProfiles}
+        projectId={projectId}
+        comfyConnected={comfyConnected}
+        workspaceLoading={workspaceLoading}
+        projectConfigLoading={projectWorkflowLoading}
+        projectConfigError={projectWorkflowError}
+        runtimeProfilesLoading={runtimeProfilesLoading}
+        runtimeProfilesError={runtimeProfilesError}
+        onOpenProjectSettings={onOpenProjectSettings ?? (() => undefined)}
+        onManageParameters={(recipe) => void onOpenStudio(recipe.workflowId, recipe.recipeId)}
+      />
 
       <section className="workflow-import-quality" aria-label="工作流导入质量门">
         <div>
@@ -1242,13 +1318,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onRetry={() => void smartImportWorkflow()}
         onReturnToList={() => void returnToWorkflowList()}
       />
-
-      <section className="workflow-health-dashboard" aria-label="运行环境健康概览">
-        <div><span>工作流总数</span><strong>{items.filter((item) => item.libraryState !== "REMOVED" && !item.archived).length}</strong></div>
-        <div><span>生产就绪</span><strong>{items.filter((item) => item.libraryState !== "REMOVED" && !item.archived && item.readiness === "READY").length}</strong></div>
-        <div><span>待验证</span><strong>{items.filter((item) => item.libraryState !== "REMOVED" && !item.archived && item.readiness === "DEGRADED").length}</strong></div>
-        <div><span>阻塞诊断</span><strong>{items.filter((item) => item.libraryState !== "REMOVED" && !item.archived && item.readiness === "BLOCKED").length}</strong></div>
-      </section>
 
       <WorkflowWorkspaceList
         items={items}

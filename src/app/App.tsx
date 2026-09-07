@@ -983,6 +983,7 @@ function App() {
           onCatalogChanged={reloadCatalog}
           onOpenStudio={openPublishedWorkflow}
           onUseInProject={openWorkflowForProject}
+          onOpenProjectSettings={() => navigateToWorkspace("projects")}
           onOpenTask={(taskId) => {
             setFocusedTaskId(taskId);
             navigateToWorkspace("tasks");
