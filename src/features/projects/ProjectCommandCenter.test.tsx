@@ -113,14 +113,14 @@ function aggregate(overrides: Partial<ProjectCommandCenterAggregate> = {}): Proj
 }
 
 describe("ProjectCommandCenter", () => {
-  it("renders project, readiness, content, production, runtime, and summary surfaces", () => {
+  it("renders project, progress, review, issues, runtime, and summary surfaces", () => {
     const html = renderToStaticMarkup(<ProjectCommandCenterView {...viewProps()} />);
-    expect(html).toContain("项目指挥中心");
+    expect(html).toContain("项目总览");
     expect(html).toContain(project.name);
-    expect(html).toContain("就绪度");
-    expect(html).toContain("内容");
-    expect(html).toContain("生产");
-    expect(html).toContain("运行参数");
+    expect(html).toContain("总体进度");
+    expect(html).toContain("待审核");
+    expect(html).toContain("需要处理");
+    expect(html).toContain("运行环境");
     expect(html).toContain("继续工作");
   });
 
@@ -142,6 +142,17 @@ describe("ProjectCommandCenter", () => {
     const html = renderToStaticMarkup(<ProjectCommandCenterView onNavigate={vi.fn()} />);
     expect(html).toContain("暂无项目");
     expect(html).toContain("管理项目");
+  });
+
+  it("offers a single creative entry point for an active empty project", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} onNavigate={onNavigate} />);
+
+    expect(screen.getByRole("button", { name: "开始创作" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "开始创作" }));
+
+    expect(onNavigate).toHaveBeenCalledWith({ destination: "shots", section: "creation", actionKind: "NO_SHOTS" });
   });
 
   it("renders complete progress and recommends a next creative round", () => {
@@ -201,7 +212,7 @@ describe("ProjectCommandCenter", () => {
 
   it("offers retry for a failed initial load", () => {
     const html = renderToStaticMarkup(<ProjectCommandCenterView project={project} error="读取项目状态失败" onRetry={vi.fn()} />);
-    expect(html).toContain("项目指挥中心加载失败");
+    expect(html).toContain("项目总览加载失败");
     expect(html).toContain("读取项目状态失败");
     expect(html).toContain("重试");
   });
@@ -236,7 +247,7 @@ describe("ProjectCommandCenter", () => {
     await user.click(screen.getByRole("button", { name: /一致性资产/ }));
     await user.click(screen.getByRole("button", { name: /生产准备/ }));
 
-    expect(onNavigate.mock.calls).toEqual([["assets"], ["shots"]]);
+    expect(onNavigate.mock.calls).toEqual([[{ destination: "assets" }], [{ destination: "shots" }]]);
   });
 
   it("offers the project-level bulk import dry-run entry without changing navigation", async () => {
@@ -254,7 +265,39 @@ describe("ProjectCommandCenter", () => {
     render(<ProjectCommandCenterView {...viewProps()} onNavigate={onNavigate} />);
 
     await user.click(screen.getByRole("button", { name: "管理项目" }));
-    expect(onNavigate).toHaveBeenCalledWith("projects");
+    expect(onNavigate).toHaveBeenCalledWith({ destination: "projects" });
+  });
+
+  it.each([
+    ["IMAGE_REVIEW", { kind: "IMAGE_REVIEW", shotId: "shot-image" }, { destination: "shots", section: "review", shotId: "shot-image", actionKind: "IMAGE_REVIEW" }],
+    ["VIDEO_REVIEW", { kind: "VIDEO_REVIEW", shotId: "shot-video" }, { destination: "shots", section: "review", shotId: "shot-video", actionKind: "VIDEO_REVIEW" }],
+    ["ACTIVE_PRODUCTION", { kind: "ACTIVE_PRODUCTION", batchId: "batch-active" }, { destination: "shots", section: "production", batchId: "batch-active", actionKind: "ACTIVE_PRODUCTION" }],
+    ["AUTO_RESUMABLE", { kind: "AUTO_RESUMABLE", batchId: "batch-resume" }, { destination: "shots", section: "production", batchId: "batch-resume", actionKind: "AUTO_RESUMABLE" }],
+    ["MISSING_CONFIG", { kind: "MISSING_CONFIG", shotId: "shot-config" }, { destination: "shots", section: "creation", shotId: "shot-config", actionKind: "MISSING_CONFIG" }],
+    ["COMFY_BLOCKED", { kind: "COMFY_BLOCKED" }, { destination: "settings", section: "settings", actionKind: "COMFY_BLOCKED" }],
+    ["NO_SHOTS", { kind: "NO_SHOTS" }, { destination: "shots", section: "creation", actionKind: "NO_SHOTS" }],
+    ["READY", { kind: "READY", shotId: "shot-ready" }, { destination: "shots", section: "production", shotId: "shot-ready", actionKind: "READY" }],
+  ] as const)("routes %s to a precise navigation request without side effects", async (_kind, action, expected) => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({ recommendedAction: { ...aggregate().recommendedAction, shotId: null, batchId: null, ...action } })} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "继续工作" }));
+
+    expect(onNavigate).toHaveBeenCalledWith(expected);
+  });
+
+  it("uses the aggregate first batch target when an action omits its deep-link ID", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      queue: { ...aggregate().queue, firstActiveBatchId: "batch-first" },
+      recommendedAction: { ...aggregate().recommendedAction, kind: "ACTIVE_PRODUCTION", shotId: null, batchId: null },
+    })} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "继续工作" }));
+
+    expect(onNavigate).toHaveBeenCalledWith({ destination: "shots", section: "production", batchId: "batch-first", actionKind: "ACTIVE_PRODUCTION" });
   });
 
   it("recommends binding configuration only for consistency projects with profiles but no bindings", () => {

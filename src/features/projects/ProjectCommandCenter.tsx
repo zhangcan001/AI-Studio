@@ -32,6 +32,24 @@ export type ProjectCommandCenterDestination =
 
 export type ProjectCommandDestination = ProjectCommandCenterDestination;
 
+export type ProjectCommandCenterNavigationSection =
+  | "project"
+  | "creation"
+  | "assets"
+  | "production"
+  | "review"
+  | "workflows"
+  | "analysis"
+  | "settings";
+
+export interface ProjectCommandCenterNavigationRequest {
+  destination: ProjectCommandCenterDestination;
+  section?: ProjectCommandCenterNavigationSection;
+  shotId?: string;
+  batchId?: string;
+  actionKind?: string;
+}
+
 export interface ProjectCommandCenterSceneProgress {
   id: string;
   name: string;
@@ -87,6 +105,10 @@ export interface RecommendedAction {
   label: string;
   detail: string;
   destination: ProjectCommandCenterDestination;
+  section?: ProjectCommandCenterNavigationSection;
+  shotId?: string;
+  batchId?: string;
+  actionKind?: string;
 }
 
 export const COMMAND_CENTER_QUICK_ACTIONS: ReadonlyArray<{
@@ -105,7 +127,7 @@ export const COMMAND_CENTER_QUICK_ACTIONS: ReadonlyArray<{
 
 interface ProjectCommandCenterProps {
   project?: ProjectView;
-  onNavigate?: (destination: ProjectCommandCenterDestination) => void;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
 }
 
 export interface ProjectCommandCenterViewProps {
@@ -125,7 +147,7 @@ export interface ProjectCommandCenterViewProps {
   onRefresh?: () => void;
   onRetry?: () => void;
   onRepreflight?: () => void;
-  onNavigate?: (destination: ProjectCommandCenterDestination) => void;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
   onOpenImport?: () => void;
 }
 
@@ -267,6 +289,11 @@ export function ProjectCommandCenterView({
   const displayActivity = aggregate?.recentActivity ?? activity;
   const hasSnapshot = Boolean(aggregate || summary || integrity || preflight || displayActivity.length || shots.length || structure);
   const action = aggregate ? recommendedActionFromAggregate(aggregate.recommendedAction, aggregate) : recommendedAction(derived);
+  const reviewCount = aggregate
+    ? aggregate.shots.imageReview + aggregate.shots.videoReview + aggregate.queue.reviewRequiredItems
+    : derived.production.reviewRequired + derived.progress.pendingVideoReview;
+  const issueCount = derived.issues.filter((issue) => issue.severity !== "INFO").length;
+  const errorCount = derived.issues.filter((issue) => issue.severity === "ERROR").length;
   const busyNow = busy || refreshBusy || preflightBusy || loading;
   const refreshDisabled = busyNow || !onRefresh;
   const preflightDisabled = busyNow || !onRepreflight;
@@ -275,12 +302,12 @@ export function ProjectCommandCenterView({
     <section className="workspace-panel project-command-center" aria-busy={busyNow || undefined}>
       <div className="section-heading workspace-heading project-command-heading">
         <div className="project-command-title-block">
-          <span className="section-label">项目指挥中心</span>
-          <h2>项目指挥中心</h2>
-          <p className="section-description">从项目状态、运行环境到镜头进度，集中决定下一步工作。</p>
+          <span className="section-label">项目总览</span>
+          <h2>项目总览</h2>
+          <p className="section-description">快速了解项目进度、待处理事项和下一步工作。</p>
         </div>
         <div className="project-command-heading-actions">
-          <button type="button" className="quiet-button" onClick={() => onNavigate?.("projects")} disabled={!onNavigate || busyNow}>管理项目</button>
+          <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "projects" })} disabled={!onNavigate || busyNow}>管理项目</button>
           {project && onOpenImport && <button type="button" className="quiet-button" onClick={onOpenImport} disabled={busyNow}>批量导入预检</button>}
           <button type="button" onClick={onRefresh} disabled={refreshDisabled}>
             {refreshBusy || loading ? "正在刷新……" : "刷新项目"}
@@ -298,7 +325,6 @@ export function ProjectCommandCenterView({
             <h3 id="project-command-project-title">{projectDisplayName(project.id, project.name)}</h3>
             <p>{project.description?.trim() || "暂无项目说明。"}</p>
             <dl className="project-command-project-meta">
-              <div><dt>项目 ID</dt><dd>{project.id}</dd></div>
               <div><dt>更新时间</dt><dd>{formatDateTime(project.updatedAt)}</dd></div>
             </dl>
           </div>
@@ -306,7 +332,7 @@ export function ProjectCommandCenterView({
             <span className="section-label">继续工作</span>
             <strong>推荐下一步：{action.label}</strong>
             <p>{action.detail}</p>
-            <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="继续工作">
+            <button type="button" className="primary-action" onClick={() => onNavigate?.(navigationRequestFromAction(action))} disabled={!onNavigate || busyNow} aria-label="继续工作">
               继续工作
             </button>
           </div>
@@ -316,7 +342,7 @@ export function ProjectCommandCenterView({
       {loading && !hasSnapshot && <LoadingState />}
       {!loading && error && (
         <section className="project-command-error" role="alert">
-          <div><strong>项目指挥中心加载失败</strong><p>{error}</p></div>
+          <div><strong>项目总览加载失败</strong><p>{error}</p></div>
           <button type="button" onClick={onRetry} disabled={!onRetry || busyNow}>重试</button>
         </section>
       )}
@@ -326,28 +352,32 @@ export function ProjectCommandCenterView({
           <span className="section-label">项目为空</span>
           <h3>{project ? "当前项目还没有内容" : "暂无项目"}</h3>
           <p>{project ? "先创建镜头或开始一次创作，完成后这里会汇总项目状态。" : "选择一个项目后，这里会显示项目就绪度、生产进度和最近活动。"}</p>
-          {!project && <button type="button" onClick={() => onNavigate?.("projects")} disabled={!onNavigate}>管理项目</button>}
+          {project ? (
+            <button type="button" onClick={() => onNavigate?.({ destination: "shots", section: "creation", actionKind: "NO_SHOTS" })} disabled={!onNavigate}>开始创作</button>
+          ) : (
+            <button type="button" onClick={() => onNavigate?.({ destination: "projects" })} disabled={!onNavigate}>管理项目</button>
+          )}
         </section>
       )}
 
       {hasSnapshot && (
         <>
           <div className="project-command-summary-grid" aria-label="项目摘要">
-            <SummaryCard label="就绪度" title={derived.readiness.label} tone={derived.readiness.status.toLowerCase()}>
-              <span>{derived.readiness.workflowReady} / {derived.readiness.workflowTotal} 个工作流可用</span>
-              <small>{derived.readiness.connection}</small>
+            <SummaryCard label="总体进度" title={`${derived.progress.completed} / ${derived.progress.total}`}>
+              <span>{derived.progress.percent}% 已完成</span>
+              <small>{derived.content.shots} 个镜头</small>
             </SummaryCard>
-            <SummaryCard label="内容" title={`${derived.content.shots} 个镜头`}>
-              <span>{derived.content.prompts} 个提示词 · {derived.content.assets} 个素材</span>
-              <small>{derived.content.scenes} 个场景 · {derived.content.configuredShots} 个已配置</small>
+            <SummaryCard label="待审核" title={`${reviewCount} 项`} tone={reviewCount ? "warning" : undefined}>
+              <span>{aggregate ? `${aggregate.shots.imageReview} 个图片 · ${aggregate.shots.videoReview} 个视频` : "人工检查"}</span>
+              <small>{derived.production.reviewRequired} 个生产项待处理</small>
             </SummaryCard>
-            <SummaryCard label="生产" title={`${derived.production.active} 个活动项`} tone={derived.production.failed ? "warning" : undefined}>
-              <span>{derived.production.completed} 个运行完成 · {derived.production.failed} 个失败</span>
-              <small>{derived.production.reviewRequired} 个待人工检查</small>
+            <SummaryCard label="需要处理" title={`${issueCount} 项`} tone={issueCount ? "warning" : undefined}>
+              <span>{errorCount} 个阻塞 · {Math.max(0, issueCount - errorCount)} 个提醒</span>
+              <small>{issueCount ? "请先处理项目问题" : "未发现需要处理的问题"}</small>
             </SummaryCard>
-            <SummaryCard label="运行参数" title={derived.runtime.busy ? "运行中" : "空闲"} tone={derived.runtime.busy ? "active" : undefined}>
-              <span>{derived.readiness.connection} · {derived.runtime.activeTaskCount} 个活动任务</span>
-              <small>{derived.runtime.gpu || "GPU 不可用"} · {derived.runtime.vram}</small>
+            <SummaryCard label="运行环境" title={derived.readiness.label} tone={derived.readiness.status.toLowerCase()}>
+              <span>{derived.readiness.connection} · {derived.runtime.busy ? "运行中" : "空闲"}</span>
+              <small>{derived.runtime.activeTaskCount} 个活动任务</small>
             </SummaryCard>
           </div>
 
@@ -363,7 +393,7 @@ export function ProjectCommandCenterView({
                 <h3 id="project-command-recommendation-title">推荐下一步：{action.label}</h3>
                 <p>{action.detail}</p>
               </div>
-              <button type="button" className="primary-action" onClick={() => onNavigate?.(action.destination)} disabled={!onNavigate || busyNow} aria-label="继续工作">
+              <button type="button" className="primary-action" onClick={() => onNavigate?.(navigationRequestFromAction(action))} disabled={!onNavigate || busyNow} aria-label="继续工作">
                 继续工作
               </button>
             </section>
@@ -419,7 +449,7 @@ export function ProjectCommandCenterView({
               <section className="project-command-card project-command-quick-actions" aria-labelledby="project-command-quick-actions-title">
                 <CardHeading eyebrow="快速操作" title="快速操作" id="project-command-quick-actions-title" />
                 <div className="project-command-action-grid">
-                  {COMMAND_CENTER_QUICK_ACTIONS.slice(0, 3).map((item) => <button type="button" className="project-command-action" data-command-action={item.id} key={item.id} onClick={() => onNavigate?.(item.destination)} disabled={!onNavigate || busyNow}><strong>{item.label}</strong><span>{item.detail}</span></button>)}
+                  {COMMAND_CENTER_QUICK_ACTIONS.slice(0, 3).map((item) => <button type="button" className="project-command-action" data-command-action={item.id} key={item.id} onClick={() => onNavigate?.({ destination: item.destination })} disabled={!onNavigate || busyNow}><strong>{item.label}</strong><span>{item.detail}</span></button>)}
                 </div>
                 <small className="project-command-quick-actions-hint">其他管理入口已收进左侧“管理与设置”。</small>
               </section>
@@ -526,22 +556,36 @@ function recommendedActionFromAggregate(
   aggregate: ProjectCommandCenterAggregate,
 ): RecommendedAction {
   const consistencyAction = consistencyRecommendedAction(aggregate);
-  if (consistencyAction) return consistencyAction;
-  const actions: Record<string, RecommendedAction> = {
-    STRUCTURAL_BLOCKED: { label: "修复项目结构", detail: "项目结构或生产链路存在阻断，先处理结构问题。", destination: "shots" },
-    COMFY_BLOCKED: { label: "修复运行环境", detail: "当前 ComfyUI 或生产工作流被阻断，先完成运行时预检。", destination: "settings" },
-    REVIEW_REQUIRED: { label: "处理生产复核", detail: "有失败或不可自动恢复的生产项需要人工检查。", destination: "shots" },
-    AUTO_RESUMABLE: { label: "恢复生产", detail: "有可自动恢复的生产项，继续处理未完成工作。", destination: "shots" },
-    ACTIVE_PRODUCTION: { label: "查看运行进度", detail: "项目仍有任务或生产批次活动中，先确认当前进度。", destination: "tasks" },
-    IMAGE_REVIEW: { label: "完成图片复核", detail: "有关键帧候选等待人工确认。", destination: "shots" },
-    VIDEO_REVIEW: { label: "完成视频复核", detail: "有视频候选等待人工确认。", destination: "shots" },
-    MISSING_CONFIG: { label: "配置下一镜头", detail: "还有镜头缺少工作流或配方配置。", destination: "shots" },
-    UNASSIGNED: { label: "整理项目结构", detail: "还有镜头尚未分配到场景。", destination: "shots" },
-    NO_SHOTS: { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots" },
-    READY: { label: "继续创作", detail: "项目已经准备好进入下一步生产。", destination: "shots" },
-    COMPLETE: { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio" },
+  const shotId = action.shotId
+    ?? (action.kind === "IMAGE_REVIEW" ? aggregate.shots.firstImageReviewShotId : undefined)
+    ?? (action.kind === "VIDEO_REVIEW" ? aggregate.shots.firstVideoReviewShotId : undefined)
+    ?? (action.kind === "MISSING_CONFIG" ? aggregate.shots.firstMissingConfigShotId : undefined)
+    ?? (action.kind === "READY" ? aggregate.shots.firstReadyShotId : undefined);
+  const batchId = action.batchId
+    ?? (action.kind === "ACTIVE_PRODUCTION" ? aggregate.queue.firstActiveBatchId : undefined)
+    ?? (action.kind === "AUTO_RESUMABLE" ? aggregate.queue.firstAutoResumableBatchId : undefined)
+    ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.queue.firstReviewRequiredBatchId : undefined);
+  const target = {
+    actionKind: action.kind,
+    shotId: shotId ?? undefined,
+    batchId: batchId ?? undefined,
   };
-  return actions[action.kind] ?? { label: "继续工作", detail: action.reason, destination: "shots" };
+  if (consistencyAction) return { ...consistencyAction, ...target };
+  const actions: Record<string, Omit<RecommendedAction, "actionKind" | "shotId" | "batchId">> = {
+    STRUCTURAL_BLOCKED: { label: "修复项目结构", detail: "项目结构或生产链路存在阻断，先处理结构问题。", destination: "shots", section: "creation" },
+    COMFY_BLOCKED: { label: "修复运行环境", detail: "当前 ComfyUI 或生产工作流被阻断，先完成运行时预检。", destination: "settings", section: "settings" },
+    REVIEW_REQUIRED: { label: "处理生产复核", detail: "有失败或不可自动恢复的生产项需要人工检查。", destination: "shots", section: "production" },
+    AUTO_RESUMABLE: { label: "恢复生产", detail: "有可自动恢复的生产项，继续处理未完成工作。", destination: "shots", section: "production" },
+    ACTIVE_PRODUCTION: { label: "查看运行进度", detail: "项目仍有任务或生产批次活动中，先确认当前进度。", destination: "shots", section: "production" },
+    IMAGE_REVIEW: { label: "完成图片复核", detail: "有关键帧候选等待人工确认。", destination: "shots", section: "review" },
+    VIDEO_REVIEW: { label: "完成视频复核", detail: "有视频候选等待人工确认。", destination: "shots", section: "review" },
+    MISSING_CONFIG: { label: "配置下一镜头", detail: "还有镜头缺少工作流或配方配置。", destination: "shots", section: "creation" },
+    UNASSIGNED: { label: "整理项目结构", detail: "还有镜头尚未分配到场景。", destination: "shots", section: "creation" },
+    NO_SHOTS: { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots", section: "creation" },
+    READY: { label: "继续创作", detail: "项目已经准备好进入下一步生产。", destination: "shots", section: "production" },
+    COMPLETE: { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio", section: "creation" },
+  };
+  return { ...(actions[action.kind] ?? { label: "继续工作", detail: action.reason, destination: "shots", section: "creation" }), ...target };
 }
 
 function consistencyRecommendedAction(aggregate: ProjectCommandCenterAggregate): RecommendedAction | undefined {
@@ -661,15 +705,25 @@ export function buildProjectCommandCenterIssues(
 }
 
 export function recommendedAction(summary: ProjectCommandCenterSummary): RecommendedAction {
-  if (summary.readiness.status === "BLOCKED") return { label: "修复运行环境", detail: "当前 ComfyUI 或生产工作流被阻断，先完成运行时预检。", destination: "settings" };
-  if (summary.issues.some((issue) => issue.severity === "ERROR")) return { label: "处理生产问题", detail: "项目存在失败或断链记录，先检查问题再继续生产。", destination: "shots" };
-  if (summary.progress.needsAttention > 0) return { label: "处理失败镜头", detail: "有镜头生成失败，打开镜头生产工作区继续处理。", destination: "shots" };
-  if (summary.runtime.activeTaskCount > 0 || summary.production.active > 0) return { label: "查看运行进度", detail: "项目仍有任务或生产批次活动中，先确认当前进度。", destination: "tasks" };
-  if (summary.progress.total === 0) return { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots" };
-  if (summary.progress.pendingVideoReview > 0) return { label: "完成视频复核", detail: "有视频候选等待人工确认，完成选择后再进入下一步。", destination: "shots" };
-  if (summary.progress.completed === summary.progress.total) return { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio" };
-  if (summary.progress.pendingKeyframes > 0) return { label: "生成关键帧", detail: "还有镜头等待关键帧生成，继续完成项目的图像阶段。", destination: "shots" };
-  return { label: "继续创作", detail: "回到创作工作台继续使用当前项目。", destination: "studio" };
+  if (summary.readiness.status === "BLOCKED") return { label: "修复运行环境", detail: "当前 ComfyUI 或生产工作流被阻断，先完成运行时预检。", destination: "settings", section: "settings", actionKind: "COMFY_BLOCKED" };
+  if (summary.issues.some((issue) => issue.severity === "ERROR")) return { label: "处理生产问题", detail: "项目存在失败或断链记录，先检查问题再继续生产。", destination: "shots", section: "review", actionKind: "REVIEW_REQUIRED" };
+  if (summary.progress.needsAttention > 0) return { label: "处理失败镜头", detail: "有镜头生成失败，打开镜头生产工作区继续处理。", destination: "shots", section: "review", actionKind: "REVIEW_REQUIRED" };
+  if (summary.runtime.activeTaskCount > 0 || summary.production.active > 0) return { label: "查看运行进度", detail: "项目仍有任务或生产批次活动中，先确认当前进度。", destination: "shots", section: "production", actionKind: "ACTIVE_PRODUCTION" };
+  if (summary.progress.total === 0) return { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots", section: "creation", actionKind: "NO_SHOTS" };
+  if (summary.progress.pendingVideoReview > 0) return { label: "完成视频复核", detail: "有视频候选等待人工确认，完成选择后再进入下一步。", destination: "shots", section: "review", actionKind: "VIDEO_REVIEW" };
+  if (summary.progress.completed === summary.progress.total) return { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio", section: "creation", actionKind: "COMPLETE" };
+  if (summary.progress.pendingKeyframes > 0) return { label: "生成关键帧", detail: "还有镜头等待关键帧生成，继续完成项目的图像阶段。", destination: "shots", section: "creation", actionKind: "READY" };
+  return { label: "继续创作", detail: "回到创作工作台继续使用当前项目。", destination: "studio", section: "creation", actionKind: "READY" };
+}
+
+function navigationRequestFromAction(action: RecommendedAction): ProjectCommandCenterNavigationRequest {
+  return {
+    destination: action.destination,
+    ...(action.section ? { section: action.section } : {}),
+    ...(action.shotId ? { shotId: action.shotId } : {}),
+    ...(action.batchId ? { batchId: action.batchId } : {}),
+    ...(action.actionKind ? { actionKind: action.actionKind } : {}),
+  };
 }
 
 function auditIssue(issue: ProductionAuditIssue): ProjectCommandCenterIssue {

@@ -13,13 +13,12 @@ export interface StudioRailItem {
 }
 
 export const defaultStudioRailItems: readonly StudioRailItem[] = [
-  { id: "project", label: "项目", destination: "command-center", icon: "project", hint: "项目指挥中心" },
+  { id: "project", label: "项目", destination: "command-center", icon: "project", hint: "项目总览" },
   { id: "creation", label: "创作", destination: "shots", icon: "creation", hint: "镜头创作工作区" },
   { id: "assets", label: "资产", destination: "assets", icon: "assets", hint: "资产库" },
   { id: "production", label: "生产", destination: "shots", icon: "production", hint: "生产队列与批量运行" },
   { id: "review", label: "审核", destination: "shots", icon: "review", hint: "镜头审核与任务" },
   { id: "workflows", label: "工作流", destination: "workflows", icon: "workflows", hint: "添加和管理 ComfyUI 工作流" },
-  { id: "analysis", label: "分析", destination: "command-center", icon: "analysis", hint: "项目进度与生产概览" },
   { id: "settings", label: "设置", destination: "settings", icon: "settings", hint: "运行时与应用设置" },
 ];
 

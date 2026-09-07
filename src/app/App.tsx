@@ -32,7 +32,10 @@ import { AssetWorkspace } from "../features/assets/AssetWorkspace";
 import { AssetVideoBatchWorkspace } from "../features/assets/AssetVideoBatchWorkspace";
 import { TaskHistory } from "../features/tasks/TaskHistory";
 import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
-import { ProjectCommandCenter, type ProjectCommandDestination } from "../features/projects/ProjectCommandCenter";
+import {
+  ProjectCommandCenter,
+  type ProjectCommandCenterNavigationRequest,
+} from "../features/projects/ProjectCommandCenter";
 import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
 import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
 import { ShotWorkspace, type ShotContextPathItem } from "../features/shots/ShotWorkspace";
@@ -93,6 +96,31 @@ export function workflowUseProjectDestination(
   return catalog.some((recipe) => recipe.workflowId === workflowId && recipe.recipeId === recipeId)
     ? "projects"
     : undefined;
+}
+
+export interface ResolvedProjectCommandCenterNavigation {
+  workspace: Workspace;
+  section: StudioSection;
+  shotId?: string;
+  batchId?: string;
+}
+
+export function resolveProjectCommandCenterNavigation(
+  request: ProjectCommandCenterNavigationRequest,
+): ResolvedProjectCommandCenterNavigation {
+  if (request.section) {
+    const route = studioRouteForSection(request.section);
+    return { workspace: route.workspace, section: route.section, shotId: request.shotId, batchId: request.batchId };
+  }
+  if (request.destination === "studio" || request.destination === "shots") {
+    return { workspace: "shots", section: "creation", shotId: request.shotId, batchId: request.batchId };
+  }
+  return {
+    workspace: request.destination,
+    section: defaultStudioSectionForWorkspace(request.destination),
+    shotId: request.shotId,
+    batchId: request.batchId,
+  };
 }
 
 export type WorkflowDefaultStage = "IMAGE" | "VIDEO";
@@ -681,12 +709,18 @@ function App() {
     setError(null);
   }
 
-  function navigateFromCommandCenter(destination: ProjectCommandDestination) {
-    if (destination === "studio" || destination === "shots") {
-      navigateToStudioSection("creation");
+  function navigateFromCommandCenter(request: ProjectCommandCenterNavigationRequest) {
+    const navigation = resolveProjectCommandCenterNavigation(request);
+    setFocusedProductionBatchId(navigation.batchId);
+    if (navigation.shotId) {
+      setResumeShotId(navigation.shotId);
+      void recordShotChange(navigation.shotId);
+    }
+    if (request.section || request.destination === "studio" || request.destination === "shots") {
+      navigateToStudioSection(navigation.section);
       return;
     }
-    navigateToWorkspace(destination);
+    navigateToWorkspace(navigation.workspace);
   }
 
   const comfy = bootstrapState?.comfy;

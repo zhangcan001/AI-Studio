@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultStudioRailItems, StudioGlobalRail } from "./StudioGlobalRail";
 
 describe("StudioGlobalRail", () => {
-  it("includes workflows in the default menu between review and analysis", () => {
+  it("shows the seven primary product areas without a duplicate analysis entry", () => {
     expect(defaultStudioRailItems.map((item) => item.id)).toEqual([
       "project",
       "creation",
@@ -11,9 +11,9 @@ describe("StudioGlobalRail", () => {
       "production",
       "review",
       "workflows",
-      "analysis",
       "settings",
     ]);
+    expect(defaultStudioRailItems).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "analysis" })]));
     expect(defaultStudioRailItems[5]).toMatchObject({
       id: "workflows",
       label: "工作流",
