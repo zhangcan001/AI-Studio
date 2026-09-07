@@ -13,7 +13,7 @@ use ai_studio_lib::domain::script_draft::{
     DraftStructureV1, SourceId,
 };
 use ai_studio_lib::infrastructure::database::{
-    SqliteScriptDraftRepository, SqliteScriptSourceRepository,
+    SqliteProjectManifestRepository, SqliteScriptDraftRepository, SqliteScriptSourceRepository,
 };
 use ai_studio_lib::infrastructure::filesystem::AppDataDirs;
 use ai_studio_lib::infrastructure::time::SystemClock;
@@ -439,7 +439,7 @@ async fn backup14_13_12_and_manifest2_import_compatibility_hold() {
     }
 
     let manifest_path = directory.path().join("manifest-v2.json");
-    ProjectManifestService::new(pool.clone())
+    ProjectManifestService::new(Arc::new(SqliteProjectManifestRepository::new(pool.clone())))
         .export(project_id, manifest_path.clone())
         .await
         .unwrap();

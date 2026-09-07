@@ -5,6 +5,14 @@
 //! joins them in memory.  This keeps audit useful for large projects without
 //! turning the audit page into an N+1 query surface.
 
+use crate::application::ports::{
+    ProductionAuditAssetRecord as AssetRow, ProductionAuditBatchItemRecord as BatchItemRow,
+    ProductionAuditBatchRecord as BatchRow, ProductionAuditGraph as AuditGraph,
+    ProductionAuditPreparationSnapshotRecord as PreparationSnapshotRow, ProductionAuditRepository,
+    ProductionAuditRunRecord as RunRow, ProductionAuditShotRecord as ShotRow,
+    ProductionAuditStageItemRecord as StageItemRow, ProductionAuditStageRecord as StageRow,
+    ProductionAuditTaskRecord as TaskRow, RepositoryError,
+};
 use crate::application::production_queue_service::{
     build_retry_lineages_from_edges, RetryLineage, RetryLineageEdge,
 };
@@ -12,11 +20,11 @@ use crate::domain::{validate_project_id, PREPARATION_SNAPSHOT_SCHEMA_VERSION};
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{FromRow, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
     fmt,
+    sync::Arc,
 };
 
 pub const DEFAULT_ACTIVITY_LIMIT: u32 = 50;
@@ -158,33 +166,41 @@ pub struct ProductionAuditIntegrity {
 pub enum ProductionAuditError {
     InvalidInput(String),
     NotFound(String),
-    Database(sqlx::Error),
+    Database(String),
 }
 
 impl fmt::Display for ProductionAuditError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidInput(message) | Self::NotFound(message) => formatter.write_str(message),
-            Self::Database(error) => write!(formatter, "production audit database error: {error}"),
+            Self::Database(message) => {
+                write!(formatter, "production audit database error: {message}")
+            }
         }
     }
 }
 
 impl Error for ProductionAuditError {}
 
-impl From<sqlx::Error> for ProductionAuditError {
-    fn from(error: sqlx::Error) -> Self {
-        Self::Database(error)
+impl From<RepositoryError> for ProductionAuditError {
+    fn from(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::NotFound { entity, id } if entity == "project" => {
+                Self::NotFound(format!("project not found: {id}"))
+            }
+            RepositoryError::Database { message } => Self::Database(message),
+            other => Self::Database(other.to_string()),
+        }
     }
 }
 
 pub struct ProductionAuditService {
-    pool: SqlitePool,
+    repository: Arc<dyn ProductionAuditRepository>,
 }
 
 impl ProductionAuditService {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(repository: Arc<dyn ProductionAuditRepository>) -> Self {
+        Self { repository }
     }
 
     pub async fn project_summary(
@@ -683,23 +699,10 @@ impl ProductionAuditService {
     ) -> Result<Option<ProductionAuditSnapshotDetail>, ProductionAuditError> {
         validate_project_id(project_id)
             .map_err(|error| ProductionAuditError::InvalidInput(error.to_string()))?;
-        let row = sqlx::query_as::<_, SnapshotDetailRow>(
-            "SELECT s.id, s.project_id, s.shot_id, s.stage, s.context_hash,
-                    s.production_batch_id, s.production_batch_item_id,
-                    s.snapshot_json, s.created_at
-             FROM production_preparation_snapshots s
-             JOIN production_batches b ON b.id = s.production_batch_id
-             JOIN production_batch_items i ON i.id = s.production_batch_item_id
-             JOIN shots sh ON sh.id = s.shot_id
-             WHERE s.project_id = ? AND b.project_id = ? AND sh.project_id = ?
-               AND s.production_batch_item_id = ?",
-        )
-        .bind(project_id)
-        .bind(project_id)
-        .bind(project_id)
-        .bind(production_batch_item_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = self
+            .repository
+            .find_snapshot_detail(project_id, production_batch_item_id)
+            .await?;
         let Some(row) = row else {
             return Ok(None);
         };
@@ -765,299 +768,11 @@ impl ProductionAuditService {
     async fn load_graph(&self, project_id: &str) -> Result<AuditGraph, ProductionAuditError> {
         validate_project_id(project_id)
             .map_err(|error| ProductionAuditError::InvalidInput(error.to_string()))?;
-        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = ?")
-            .bind(project_id)
-            .fetch_one(&self.pool)
-            .await?;
-        if exists == 0 {
-            return Err(ProductionAuditError::NotFound(format!(
-                "project not found: {project_id}"
-            )));
-        }
-
-        let runs = sqlx::query_as::<_, RunRow>(
-            "SELECT id, project_id, name, status, created_at, updated_at, started_at, finished_at
-             FROM production_runs WHERE project_id = ?",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let stages = sqlx::query_as::<_, StageRow>(
-            "SELECT s.id, s.run_id, s.ordinal, s.stage_type, s.status, s.production_batch_id,
-                    s.created_at, s.updated_at, s.started_at, s.finished_at
-             FROM production_stages s JOIN production_runs r ON r.id = s.run_id
-             WHERE r.project_id = ? ORDER BY s.run_id, s.ordinal, s.id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let batches = sqlx::query_as::<_, BatchRow>(
-            "SELECT id, project_id, name, status, created_at, updated_at
-             FROM production_batches WHERE project_id = ?",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let batch_items = sqlx::query_as::<_, BatchItemRow>(
-            "SELECT i.id, i.batch_id, i.ordinal, i.status, i.task_id, i.retry_of_item_id,
-                    i.error_code, i.error_message, i.created_at, i.updated_at
-             FROM production_batch_items i JOIN production_batches b ON b.id = i.batch_id
-             WHERE b.project_id = ? ORDER BY i.batch_id, i.ordinal, i.id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let stage_items = sqlx::query_as::<_, StageItemRow>(
-            "SELECT i.id, i.stage_id, i.ordinal, i.status, i.production_batch_item_id,
-                    i.task_id, i.asset_id, i.parent_stage_item_id, i.error_code
-             FROM production_stage_items i
-             JOIN production_stages s ON s.id = i.stage_id
-             JOIN production_runs r ON r.id = s.run_id
-             WHERE r.project_id = ? ORDER BY i.stage_id, i.ordinal, i.id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let tasks = sqlx::query_as::<_, TaskRow>(
-            "SELECT id, project_id, status, error_code, created_at,
-                    COALESCE(finished_at, started_at, queued_at, created_at) AS updated_at,
-                    finished_at
-             FROM tasks WHERE project_id = ?",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let snapshots = sqlx::query_as::<_, SnapshotRow>(
-            "SELECT s.id, s.task_id, s.created_at
-             FROM generation_snapshots s JOIN tasks t ON t.id = s.task_id
-             WHERE t.project_id = ?",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let preparation_snapshots = sqlx::query_as::<_, PreparationSnapshotRow>(
-            "SELECT s.id, s.project_id, s.shot_id, s.stage, s.context_hash,
-                    s.production_batch_id, s.production_batch_item_id, s.created_at
-             FROM production_preparation_snapshots s
-             JOIN production_batches b ON b.id = s.production_batch_id
-             JOIN production_batch_items i ON i.id = s.production_batch_item_id
-             JOIN shots sh ON sh.id = s.shot_id
-             WHERE s.project_id = ? AND b.project_id = ? AND sh.project_id = ?
-             ORDER BY s.created_at ASC, s.id ASC",
-        )
-        .bind(project_id)
-        .bind(project_id)
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let assets = sqlx::query_as::<_, AssetRow>(
-            "SELECT id, project_id, name, source_task_id, created_at, updated_at
-             FROM assets WHERE project_id = ?",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let task_outputs = sqlx::query_as::<_, TaskOutputRow>(
-            "SELECT o.task_id, o.output_id, o.ordinal, o.asset_id, o.created_at
-             FROM task_output_assets o JOIN tasks t ON t.id = o.task_id
-             WHERE t.project_id = ? ORDER BY o.task_id, o.output_id, o.ordinal",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let shots = sqlx::query_as::<_, ShotRow>(
-            "SELECT id, project_id, name, selected_image_asset_id, selected_video_asset_id,
-                    created_at, updated_at
-             FROM shots WHERE project_id = ? ORDER BY ordinal, id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let shot_links = sqlx::query_as::<_, ShotLinkRow>(
-            "SELECT l.id, l.shot_id, l.stage, l.task_id, l.production_batch_item_id, l.created_at
-             FROM shot_generation_links l JOIN shots s ON s.id = l.shot_id
-             WHERE s.project_id = ? ORDER BY l.shot_id, l.created_at, l.id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(AuditGraph {
-            runs,
-            stages,
-            batches,
-            batch_items,
-            stage_items,
-            tasks,
-            snapshots,
-            preparation_snapshots,
-            assets,
-            task_outputs,
-            shots,
-            shot_links,
-        })
+        self.repository
+            .load_project_graph(project_id)
+            .await
+            .map_err(ProductionAuditError::from)
     }
-}
-
-#[derive(Debug, FromRow)]
-struct RunRow {
-    id: String,
-    project_id: String,
-    name: String,
-    status: String,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct StageRow {
-    id: String,
-    run_id: String,
-    ordinal: i64,
-    stage_type: String,
-    status: String,
-    production_batch_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct BatchRow {
-    id: String,
-    project_id: String,
-    name: String,
-    status: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct BatchItemRow {
-    id: String,
-    batch_id: String,
-    ordinal: i64,
-    status: String,
-    task_id: Option<String>,
-    retry_of_item_id: Option<String>,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct StageItemRow {
-    id: String,
-    stage_id: String,
-    ordinal: i64,
-    status: String,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    asset_id: Option<String>,
-    parent_stage_item_id: Option<String>,
-    error_code: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct TaskRow {
-    id: String,
-    project_id: String,
-    status: String,
-    error_code: Option<String>,
-    created_at: String,
-    updated_at: String,
-    finished_at: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct SnapshotRow {
-    id: String,
-    task_id: String,
-    created_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct PreparationSnapshotRow {
-    id: String,
-    project_id: String,
-    shot_id: String,
-    stage: String,
-    context_hash: String,
-    production_batch_id: String,
-    production_batch_item_id: String,
-    created_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct SnapshotDetailRow {
-    id: String,
-    project_id: String,
-    shot_id: String,
-    stage: String,
-    context_hash: String,
-    production_batch_id: String,
-    production_batch_item_id: String,
-    snapshot_json: String,
-    created_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct AssetRow {
-    id: String,
-    project_id: String,
-    name: String,
-    source_task_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct TaskOutputRow {
-    task_id: String,
-    output_id: String,
-    ordinal: i64,
-    asset_id: String,
-    created_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct ShotRow {
-    id: String,
-    project_id: String,
-    name: String,
-    selected_image_asset_id: Option<String>,
-    selected_video_asset_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct ShotLinkRow {
-    id: String,
-    shot_id: String,
-    stage: String,
-    task_id: Option<String>,
-    production_batch_item_id: Option<String>,
-    created_at: String,
-}
-
-struct AuditGraph {
-    runs: Vec<RunRow>,
-    stages: Vec<StageRow>,
-    batches: Vec<BatchRow>,
-    batch_items: Vec<BatchItemRow>,
-    stage_items: Vec<StageItemRow>,
-    tasks: Vec<TaskRow>,
-    snapshots: Vec<SnapshotRow>,
-    preparation_snapshots: Vec<PreparationSnapshotRow>,
-    assets: Vec<AssetRow>,
-    task_outputs: Vec<TaskOutputRow>,
-    shots: Vec<ShotRow>,
-    shot_links: Vec<ShotLinkRow>,
 }
 
 fn now_string() -> String {
@@ -1865,12 +1580,17 @@ fn preparation_snapshot_node(
 #[cfg(test)]
 mod tests {
     use super::{ProductionAuditHealth, ProductionAuditService};
-    use crate::infrastructure::database::initialize;
+    use crate::infrastructure::database::{initialize, SqliteProductionAuditRepository};
     use sqlx::SqlitePool;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     const PROJECT: &str = "prj_default";
     const NOW: &str = "2026-08-18T00:00:00Z";
+
+    fn service(pool: &SqlitePool) -> ProductionAuditService {
+        ProductionAuditService::new(Arc::new(SqliteProductionAuditRepository::new(pool.clone())))
+    }
 
     async fn fixture() -> (tempfile::TempDir, SqlitePool) {
         let directory = tempdir().expect("temporary database directory should exist");
@@ -2078,7 +1798,7 @@ mod tests {
         .await
         .expect("shot link should insert");
 
-        let service = ProductionAuditService::new(pool.clone());
+        let service = service(&pool);
         let summary = service
             .project_summary(PROJECT)
             .await
@@ -2133,7 +1853,7 @@ mod tests {
     #[tokio::test]
     async fn healthy_and_corrupt_retry_fixtures_have_explicit_health() {
         let (_directory, pool) = fixture().await;
-        let service = ProductionAuditService::new(pool.clone());
+        let service = service(&pool);
         assert_eq!(
             service.audit_integrity(PROJECT).await.unwrap().health,
             ProductionAuditHealth::Healthy
@@ -2228,7 +1948,7 @@ mod tests {
         }
         transaction.commit().await.unwrap();
 
-        let service = ProductionAuditService::new(pool);
+        let service = service(&pool);
         let summary = service.project_summary(PROJECT).await.unwrap();
         assert_eq!(summary.tasks, 1000);
         assert_eq!(summary.unassigned_shots, 500);

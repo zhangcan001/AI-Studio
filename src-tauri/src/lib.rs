@@ -649,7 +649,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 )
                 .with_start_admission_service(production_start_admission_service.clone()),
             );
-            let production_audit_service = Arc::new(ProductionAuditService::new(database_pool.clone()));
+            let production_audit_service = Arc::new(ProductionAuditService::new(Arc::new(
+                database::SqliteProductionAuditRepository::new(database_pool.clone()),
+            )));
             let workflow_benchmark_service = Arc::new(
                 WorkflowBenchmarkService::new(
                     database_pool.clone(),
@@ -719,7 +721,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             )
             .with_project_workflow_binding_service(project_workflow_binding_service.clone()));
             let diagnostics_service = Arc::new(DiagnosticsService::new(
-                database_pool.clone(),
+                Arc::new(database::SqliteDatabaseHealthProbe::new(database_pool.clone())),
                 task_repository.clone(),
                 comfy_service.clone(),
                 workflow_lifecycle_service.clone(),
@@ -748,8 +750,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_structure_repository.clone(),
             ));
             let project_command_center_service = Arc::new(
-                ProjectCommandCenterService::new(database_pool.clone())
-                    .with_audit_service(production_audit_service.clone())
+                ProjectCommandCenterService::new(
+                    Arc::new(database::SqliteProjectCommandCenterRepository::new(
+                        database_pool.clone(),
+                    )),
+                    production_audit_service.clone(),
+                )
                     .with_comfy_cache_services(
                         comfy_service.clone(),
                         comfy_preflight_service.clone(),
@@ -777,7 +783,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 data_dirs.projects.clone(),
                 data_dirs.cache.clone(),
             ));
-            let project_manifest_service = Arc::new(ProjectManifestService::new(database_pool.clone()));
+            let project_manifest_service = Arc::new(ProjectManifestService::new(Arc::new(
+                database::SqliteProjectManifestRepository::new(database_pool.clone()),
+            )));
             let preset_service = Arc::new(PresetService::new(
                 preset_repository.clone(),
                 definition_repository.clone(),

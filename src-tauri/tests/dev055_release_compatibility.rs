@@ -10,6 +10,7 @@
 
 use ai_studio_lib::application::project_backup_service::ProjectBackupService;
 use ai_studio_lib::application::project_manifest_service::ProjectManifestService;
+use ai_studio_lib::infrastructure::database::SqliteProjectManifestRepository;
 use ai_studio_lib::initialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -23,6 +24,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -1538,7 +1540,8 @@ async fn dev055_backup_17_roundtrip_preserves_consistency_and_preparation_snapsh
 async fn dev055_manifest_v1_v2_and_project_kinds_are_compatible() {
     let (directory, pool) = database().await;
     seed_projects(&directory, &pool).await;
-    let service = ProjectManifestService::new(pool.clone());
+    let service =
+        ProjectManifestService::new(Arc::new(SqliteProjectManifestRepository::new(pool.clone())));
 
     let legacy_path = directory.path().join("legacy-manifest-v2.json");
     service
@@ -1660,7 +1663,8 @@ async fn dev055_manifest_v1_v2_and_project_kinds_are_compatible() {
 async fn dev055_legacy_and_consistency_projects_both_remain_openable() {
     let (directory, pool) = database().await;
     seed_projects(&directory, &pool).await;
-    let service = ProjectManifestService::new(pool.clone());
+    let service =
+        ProjectManifestService::new(Arc::new(SqliteProjectManifestRepository::new(pool.clone())));
     let legacy_path = directory.path().join("legacy-openable.json");
     let consistency_path = directory.path().join("consistency-openable.json");
     service

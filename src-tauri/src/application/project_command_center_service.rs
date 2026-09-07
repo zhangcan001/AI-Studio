@@ -8,6 +8,11 @@ use crate::application::comfy_preflight_service::{
     ComfyPreflightReport, ComfyPreflightService, ComfyPreflightStatus,
 };
 use crate::application::comfy_service::{ComfyConnectionStatus, ComfyService, ComfyStatusView};
+use crate::application::ports::{
+    ProjectCommandCenterData, ProjectCommandCenterProjectRecord as ProjectRow,
+    ProjectCommandCenterQueueItemRecord as QueueItemRow, ProjectCommandCenterRepository,
+    RepositoryError,
+};
 use crate::application::production_audit_service::{
     ProductionAuditActivity, ProductionAuditHealth, ProductionAuditIssue, ProductionAuditService,
     ProductionAuditSummary,
@@ -17,7 +22,6 @@ use crate::application::production_queue_service::{
 };
 use crate::domain::validate_project_id;
 use serde::Serialize;
-use sqlx::{FromRow, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -293,7 +297,7 @@ pub struct ProjectCommandCenterView {
 pub enum ProjectCommandCenterError {
     InvalidInput(String),
     NotFound(String),
-    Database(sqlx::Error),
+    Database(String),
     Audit(String),
 }
 
@@ -303,8 +307,11 @@ impl fmt::Display for ProjectCommandCenterError {
             Self::InvalidInput(message) | Self::NotFound(message) | Self::Audit(message) => {
                 formatter.write_str(message)
             }
-            Self::Database(error) => {
-                write!(formatter, "project command center database error: {error}")
+            Self::Database(message) => {
+                write!(
+                    formatter,
+                    "project command center database error: {message}"
+                )
             }
         }
     }
@@ -312,24 +319,33 @@ impl fmt::Display for ProjectCommandCenterError {
 
 impl Error for ProjectCommandCenterError {}
 
-impl From<sqlx::Error> for ProjectCommandCenterError {
-    fn from(error: sqlx::Error) -> Self {
-        Self::Database(error)
-    }
-}
-
 pub struct ProjectCommandCenterService {
-    pool: SqlitePool,
+    repository: Arc<dyn ProjectCommandCenterRepository>,
     audit_service: Arc<ProductionAuditService>,
     comfy_service: Option<Arc<ComfyService>>,
     comfy_preflight_service: Option<Arc<ComfyPreflightService>>,
 }
 
+fn map_repository_error(error: RepositoryError) -> ProjectCommandCenterError {
+    match error {
+        RepositoryError::NotFound { entity, id } if entity == "project" => {
+            ProjectCommandCenterError::NotFound(format!(
+                "PROJECT_NOT_FOUND: project {id} was not found"
+            ))
+        }
+        RepositoryError::Database { message } => ProjectCommandCenterError::Database(message),
+        other => ProjectCommandCenterError::Database(other.to_string()),
+    }
+}
+
 impl ProjectCommandCenterService {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(
+        repository: Arc<dyn ProjectCommandCenterRepository>,
+        audit_service: Arc<ProductionAuditService>,
+    ) -> Self {
         Self {
-            audit_service: Arc::new(ProductionAuditService::new(pool.clone())),
-            pool,
+            repository,
+            audit_service,
             comfy_service: None,
             comfy_preflight_service: None,
         }
@@ -357,27 +373,25 @@ impl ProjectCommandCenterService {
         validate_project_id(project_id)
             .map_err(|error| ProjectCommandCenterError::InvalidInput(error.to_string()))?;
 
-        let project = sqlx::query_as::<_, ProjectRow>(
-            "SELECT id, name, description, created_at, updated_at
-             FROM projects WHERE id = ?",
-        )
-        .bind(project_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| {
+        let data = self
+            .repository
+            .load_project_command_center_data(project_id)
+            .await
+            .map_err(map_repository_error)?;
+        let project = data.project.as_ref().ok_or_else(|| {
             ProjectCommandCenterError::NotFound(format!(
                 "PROJECT_NOT_FOUND: project {project_id} was not found"
             ))
         })?;
-
-        let structure = load_structure(&self.pool, project_id).await?;
-        let shots = load_shots(&self.pool, project_id).await?;
-        let queue = load_queue(&self.pool, project_id).await?;
-        let tasks_assets = load_tasks_assets(&self.pool, project_id).await?;
-        let consistency = load_consistency(&self.pool, project_id).await?;
-        let preparation = load_preparation(&self.pool, project_id).await?;
-        let reference_anchors = load_reference_anchors(&self.pool, project_id).await?;
-        let prompt_templates = load_prompt_templates(&self.pool, project_id).await?;
+        let project = project_view(project);
+        let structure = load_structure(&data)?;
+        let shots = load_shots(&data)?;
+        let queue = load_queue(&data)?;
+        let tasks_assets = load_tasks_assets(&data)?;
+        let consistency = load_consistency(&data)?;
+        let preparation = load_preparation(&data)?;
+        let reference_anchors = load_reference_anchors(&data)?;
+        let prompt_templates = load_prompt_templates(&data)?;
         let audit = self
             .audit_service
             .project_summary(project_id)
@@ -423,7 +437,7 @@ impl ProjectCommandCenterService {
         let checked_at = audit.checked_at.clone();
 
         let mut view = ProjectCommandCenterView {
-            project: project.into_view(),
+            project,
             structure,
             shots,
             queue,
@@ -641,202 +655,65 @@ fn action(
     }
 }
 
-#[derive(Debug, FromRow)]
-struct ProjectRow {
-    id: String,
-    name: String,
-    description: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-impl ProjectRow {
-    fn into_view(self) -> ProjectCommandCenterProjectView {
-        ProjectCommandCenterProjectView {
-            id: self.id,
-            name: self.name,
-            description: self.description,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        }
+fn project_view(row: &ProjectRow) -> ProjectCommandCenterProjectView {
+    ProjectCommandCenterProjectView {
+        id: row.id.clone(),
+        name: row.name.clone(),
+        description: row.description.clone(),
+        created_at: row.created_at.clone(),
+        updated_at: row.updated_at.clone(),
     }
 }
 
-#[derive(Debug, FromRow)]
-struct StructureRow {
-    series_count: i64,
-    episode_count: i64,
-    scene_count: i64,
-    assigned_shot_count: i64,
-    unassigned_shot_count: i64,
-    first_unassigned_shot_id: Option<String>,
-    orphan_count: i64,
-}
-
-async fn load_structure(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_structure(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterStructureView, ProjectCommandCenterError> {
-    let row = sqlx::query_as::<_, StructureRow>(
-        "SELECT
-           (SELECT COUNT(*) FROM production_series WHERE project_id = ?) AS series_count,
-           (SELECT COUNT(*) FROM production_episodes e
-              JOIN production_series s ON s.id = e.series_id
-              WHERE s.project_id = ?) AS episode_count,
-           (SELECT COUNT(*) FROM production_scenes c
-              JOIN production_episodes e ON e.id = c.episode_id
-              JOIN production_series s ON s.id = e.series_id
-              WHERE s.project_id = ?) AS scene_count,
-           (SELECT COUNT(*) FROM shot_scene_assignments a
-              JOIN shots sh ON sh.id = a.shot_id
-              WHERE sh.project_id = ?) AS assigned_shot_count,
-           (SELECT COUNT(*) FROM shots sh
-              LEFT JOIN shot_scene_assignments a ON a.shot_id = sh.id
-              WHERE sh.project_id = ? AND a.shot_id IS NULL) AS unassigned_shot_count,
-           (SELECT MIN(sh.id) FROM shots sh
-              LEFT JOIN shot_scene_assignments a ON a.shot_id = sh.id
-              WHERE sh.project_id = ? AND a.shot_id IS NULL) AS first_unassigned_shot_id,
-           (SELECT COUNT(*) FROM production_episodes e
-              LEFT JOIN production_series s ON s.id = e.series_id WHERE s.id IS NULL)
-           + (SELECT COUNT(*) FROM production_scenes c
-              LEFT JOIN production_episodes e ON e.id = c.episode_id WHERE e.id IS NULL)
-           + (SELECT COUNT(*) FROM shot_scene_assignments a
-              LEFT JOIN shots sh ON sh.id = a.shot_id WHERE sh.id IS NULL) AS orphan_count",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_one(pool)
-    .await?;
-    let scenes = sqlx::query_as::<_, SceneSummaryRow>(
-        "SELECT c.id, c.name, s.name AS series_name, e.name AS episode_name,
-                COUNT(a.shot_id) AS total,
-                COALESCE(SUM(CASE WHEN sh.selected_video_asset_id IS NOT NULL
-                    OR (sh.selected_image_asset_id IS NOT NULL AND NOT EXISTS (
-                        SELECT 1 FROM shot_stage_configs vc
-                        WHERE vc.shot_id = sh.id AND vc.stage = 'video'
-                    )) THEN 1 ELSE 0 END), 0) AS completed
-         FROM production_scenes c
-         JOIN production_episodes e ON e.id = c.episode_id
-         JOIN production_series s ON s.id = e.series_id
-         LEFT JOIN shot_scene_assignments a ON a.scene_id = c.id
-         LEFT JOIN shots sh ON sh.id = a.shot_id AND sh.project_id = ?
-         WHERE s.project_id = ?
-         GROUP BY c.id, c.name, s.name, e.name
-         ORDER BY s.ordinal, e.ordinal, c.ordinal, c.id",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|row| ProjectCommandCenterSceneView {
-        id: row.id,
-        name: row.name,
-        path: format!("{} / {}", row.series_name, row.episode_name),
-        total: count(row.total),
-        completed: count(row.completed),
-    })
-    .collect();
-
+    let row = &data.structure;
     Ok(ProjectCommandCenterStructureView {
         series_count: count(row.series_count),
         episode_count: count(row.episode_count),
         scene_count: count(row.scene_count),
         assigned_shot_count: count(row.assigned_shot_count),
         unassigned_shot_count: count(row.unassigned_shot_count),
-        first_unassigned_shot_id: row.first_unassigned_shot_id,
+        first_unassigned_shot_id: row.first_unassigned_shot_id.clone(),
         blocked: row.orphan_count > 0,
-        scenes,
+        scenes: data
+            .scenes
+            .iter()
+            .map(|row| ProjectCommandCenterSceneView {
+                id: row.id.clone(),
+                name: row.name.clone(),
+                path: format!("{} / {}", row.series_name, row.episode_name),
+                total: count(row.total),
+                completed: count(row.completed),
+            })
+            .collect(),
     })
 }
 
-#[derive(Debug, FromRow)]
-struct SceneSummaryRow {
-    id: String,
-    name: String,
-    series_name: String,
-    episode_name: String,
-    total: i64,
-    completed: i64,
-}
-
-#[derive(Debug, FromRow)]
-struct ShotRow {
-    id: String,
-    selected_image_asset_id: Option<String>,
-    selected_video_asset_id: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct ShotConfigRow {
-    shot_id: String,
-    stage: String,
-}
-
-#[derive(Debug, FromRow)]
-struct ShotLinkStatusRow {
-    shot_id: String,
-    stage: String,
-    task_status: Option<String>,
-}
-
-async fn load_shots(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_shots(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterShotView, ProjectCommandCenterError> {
-    let shots = sqlx::query_as::<_, ShotRow>(
-        "SELECT id, selected_image_asset_id, selected_video_asset_id
-         FROM shots WHERE project_id = ? ORDER BY ordinal ASC, id ASC",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-    if shots.is_empty() {
+    if data.shots.is_empty() {
         return Ok(ProjectCommandCenterShotView::default());
     }
-
-    let config_rows = sqlx::query_as::<_, ShotConfigRow>(
-        "SELECT c.shot_id, c.stage
-         FROM shot_stage_configs c JOIN shots sh ON sh.id = c.shot_id
-         WHERE sh.project_id = ? ORDER BY c.shot_id, c.stage",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-    let mut configured = HashSet::with_capacity(config_rows.len());
-    for row in config_rows {
-        configured.insert((row.shot_id, row.stage));
+    let mut configured = HashSet::with_capacity(data.shot_configs.len());
+    for row in &data.shot_configs {
+        configured.insert((row.shot_id.clone(), row.stage.clone()));
     }
-
-    let links = sqlx::query_as::<_, ShotLinkStatusRow>(
-        "SELECT l.shot_id, l.stage, t.status AS task_status
-         FROM shot_generation_links l
-         JOIN shots sh ON sh.id = l.shot_id
-         LEFT JOIN tasks t ON t.id = l.task_id
-         WHERE sh.project_id = ?
-         ORDER BY l.shot_id ASC, l.stage ASC, l.created_at DESC, l.id DESC",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
     let mut latest_status = HashMap::<(String, String), String>::new();
-    for row in links {
-        if let Some(status) = row.task_status {
+    for row in &data.shot_links {
+        if let Some(status) = row.task_status.as_deref() {
             latest_status
-                .entry((row.shot_id, row.stage))
-                .or_insert(status);
+                .entry((row.shot_id.clone(), row.stage.clone()))
+                .or_insert_with(|| status.to_owned());
         }
     }
-
     let mut view = ProjectCommandCenterShotView {
-        total: shots.len(),
+        total: data.shots.len(),
         ..Default::default()
     };
-    for shot in shots {
+    for shot in &data.shots {
         let image_configured = configured.contains(&(shot.id.clone(), "image".to_owned()));
         let video_configured = configured.contains(&(shot.id.clone(), "video".to_owned()));
         let image_status = stage_status(
@@ -856,7 +733,6 @@ async fn load_shots(
                 .map(String::as_str),
         );
         let overall = overall_status(image_status, video_status, video_configured);
-
         match overall {
             "DRAFT" => view.draft += 1,
             "READY" => view.ready += 1,
@@ -972,43 +848,11 @@ fn set_first(slot: &mut Option<String>, id: &str) {
     }
 }
 
-#[derive(Debug, FromRow)]
-struct QueueBatchRow {
-    id: String,
-    status: String,
-    archived_at: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct QueueItemRow {
-    id: String,
-    batch_id: String,
-    ordinal: i64,
-    status: String,
-    retry_of_item_id: Option<String>,
-    error_code: Option<String>,
-}
-
-async fn load_queue(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_queue(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterQueueView, ProjectCommandCenterError> {
-    let batches = sqlx::query_as::<_, QueueBatchRow>(
-        "SELECT id, status, archived_at FROM production_batches
-         WHERE project_id = ? ORDER BY id ASC",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-    let items = sqlx::query_as::<_, QueueItemRow>(
-        "SELECT i.id, i.batch_id, i.ordinal, i.status, i.retry_of_item_id, i.error_code
-         FROM production_batch_items i JOIN production_batches b ON b.id = i.batch_id
-         WHERE b.project_id = ? ORDER BY i.batch_id ASC, i.ordinal ASC, i.id ASC",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-
+    let batches = &data.queue_batches;
+    let items = &data.queue_items;
     let active_batch_ids = batches
         .iter()
         .filter(|batch| batch.archived_at.is_none() && batch.status == "RUNNING")
@@ -1026,7 +870,7 @@ async fn load_queue(
             .count(),
         ..Default::default()
     };
-    for batch in &batches {
+    for batch in batches {
         if batch.archived_at.is_some() {
             continue;
         }
@@ -1041,9 +885,8 @@ async fn load_queue(
             set_first(&mut view.first_active_batch_id, &batch.id);
         }
     }
-
     let mut items_by_batch = HashMap::<String, Vec<&QueueItemRow>>::new();
-    for item in &items {
+    for item in items {
         if active_batches.contains(&item.batch_id) {
             items_by_batch
                 .entry(item.batch_id.clone())
@@ -1064,7 +907,6 @@ async fn load_queue(
             }
         }
     }
-
     let mut batch_ids = items_by_batch.keys().cloned().collect::<Vec<_>>();
     batch_ids.sort();
     for batch_id in batch_ids {
@@ -1129,38 +971,11 @@ fn is_auto_resumable(status: &str, error_code: Option<&str>) -> bool {
         )
 }
 
-#[derive(Debug, FromRow)]
-struct AssetTypeRow {
-    asset_type: String,
-    count: i64,
-}
-
-#[derive(Debug, FromRow)]
-struct TaskCountRow {
-    status: String,
-    count: i64,
-}
-
-async fn load_tasks_assets(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_tasks_assets(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterTaskAssetView, ProjectCommandCenterError> {
-    let tasks = sqlx::query_as::<_, TaskCountRow>(
-        "SELECT status, COUNT(*) AS count FROM tasks
-         WHERE project_id = ? GROUP BY status ORDER BY status",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-    let assets = sqlx::query_as::<_, AssetTypeRow>(
-        "SELECT UPPER(type) AS asset_type, COUNT(*) AS count FROM assets
-         WHERE project_id = ? GROUP BY UPPER(type) ORDER BY UPPER(type)",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
     let mut view = ProjectCommandCenterTaskAssetView::default();
-    for row in tasks {
+    for row in &data.task_counts {
         let amount = count(row.count);
         view.task_count += amount;
         match row.status.as_str() {
@@ -1171,7 +986,7 @@ async fn load_tasks_assets(
             _ => {}
         }
     }
-    for row in assets {
+    for row in &data.asset_counts {
         let amount = count(row.count);
         view.asset_count += amount;
         match row.asset_type.as_str() {
@@ -1184,53 +999,10 @@ async fn load_tasks_assets(
     Ok(view)
 }
 
-#[derive(Debug, FromRow)]
-struct ConsistencySummaryRow {
-    character_profiles: i64,
-    scene_profiles: i64,
-    prop_profiles: i64,
-    style_profiles: i64,
-    reference_sets: i64,
-    shot_profile_bindings: i64,
-    shot_reference_set_bindings: i64,
-    scope_profile_bindings: i64,
-    scope_reference_set_bindings: i64,
-}
-
-async fn load_consistency(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_consistency(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterConsistencyView, ProjectCommandCenterError> {
-    let row = sqlx::query_as::<_, ConsistencySummaryRow>(
-        "SELECT
-           (SELECT COUNT(*) FROM character_profiles WHERE project_id = ?) AS character_profiles,
-           (SELECT COUNT(*) FROM scene_profiles WHERE project_id = ?) AS scene_profiles,
-           (SELECT COUNT(*) FROM prop_profiles WHERE project_id = ?) AS prop_profiles,
-           (SELECT COUNT(*) FROM style_profiles WHERE project_id = ?) AS style_profiles,
-           (SELECT COUNT(*) FROM reference_sets WHERE project_id = ?) AS reference_sets,
-           (SELECT COUNT(*) FROM shot_profile_bindings b
-              JOIN shots s ON s.id = b.shot_id
-              WHERE s.project_id = ?) AS shot_profile_bindings,
-           (SELECT COUNT(*) FROM shot_reference_set_bindings b
-              JOIN shots s ON s.id = b.shot_id
-              WHERE s.project_id = ?) AS shot_reference_set_bindings,
-           (SELECT COUNT(*) FROM consistency_scope_profile_bindings
-              WHERE project_id = ?) AS scope_profile_bindings,
-           (SELECT COUNT(*) FROM consistency_scope_reference_set_bindings
-              WHERE project_id = ?) AS scope_reference_set_bindings",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_one(pool)
-    .await?;
-
+    let row = &data.consistency;
     let consistency_in_use = [
         row.character_profiles,
         row.scene_profiles,
@@ -1244,7 +1016,6 @@ async fn load_consistency(
     ]
     .into_iter()
     .any(|value| value > 0);
-
     Ok(ProjectCommandCenterConsistencyView {
         character_profiles: count(row.character_profiles),
         scene_profiles: count(row.scene_profiles),
@@ -1259,73 +1030,27 @@ async fn load_consistency(
     })
 }
 
-#[derive(Debug, FromRow)]
-struct PreparationSummaryRow {
-    snapshot_count: i64,
-    prepared_image_items: i64,
-    prepared_video_items: i64,
-    active_prepared_items: i64,
-    latest_prepared_at: Option<String>,
-}
-
-async fn load_preparation(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_preparation(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterPreparationView, ProjectCommandCenterError> {
-    let row = sqlx::query_as::<_, PreparationSummaryRow>(
-        "SELECT
-           COUNT(*) AS snapshot_count,
-           COALESCE(SUM(CASE WHEN s.stage = 'image' THEN 1 ELSE 0 END), 0)
-             AS prepared_image_items,
-           COALESCE(SUM(CASE WHEN s.stage = 'video' THEN 1 ELSE 0 END), 0)
-             AS prepared_video_items,
-           COALESCE(SUM(CASE WHEN i.status IN
-             ('PENDING', 'DISPATCHING', 'DISPATCHED') THEN 1 ELSE 0 END), 0)
-             AS active_prepared_items,
-           MAX(s.created_at) AS latest_prepared_at
-         FROM production_preparation_snapshots s
-         JOIN production_batches b ON b.id = s.production_batch_id
-         JOIN production_batch_items i ON i.id = s.production_batch_item_id
-         WHERE s.project_id = ? AND b.project_id = ?",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_one(pool)
-    .await?;
-
+    let row = &data.preparation;
     Ok(ProjectCommandCenterPreparationView {
         snapshot_count: count(row.snapshot_count),
         prepared_image_items: count(row.prepared_image_items),
         prepared_video_items: count(row.prepared_video_items),
         active_prepared_items: count(row.active_prepared_items),
-        latest_prepared_at: row.latest_prepared_at,
+        latest_prepared_at: row.latest_prepared_at.clone(),
     })
 }
 
-#[derive(Debug, FromRow)]
-struct AnchorRow {
-    kind: String,
-    asset_count: i64,
-}
-
-async fn load_reference_anchors(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_reference_anchors(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterReferenceAnchorView, ProjectCommandCenterError> {
-    let rows = sqlx::query_as::<_, AnchorRow>(
-        "SELECT a.kind, COUNT(aa.asset_id) AS asset_count
-         FROM reference_anchors a
-         LEFT JOIN reference_anchor_assets aa ON aa.anchor_id = a.id
-         WHERE a.project_id = ? GROUP BY a.id, a.kind ORDER BY a.kind, a.id",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
     let mut view = ProjectCommandCenterReferenceAnchorView {
-        total: rows.len(),
+        total: data.reference_anchors.len(),
         ..Default::default()
     };
-    for row in rows {
+    for row in &data.reference_anchors {
         if row.asset_count > 0 {
             view.usable += 1;
         }
@@ -1340,41 +1065,25 @@ async fn load_reference_anchors(
     Ok(view)
 }
 
-#[derive(Debug, FromRow)]
-struct PromptTemplateRow {
-    id: String,
-    name: String,
-    version_count: i64,
-    updated_at: String,
-}
-
-async fn load_prompt_templates(
-    pool: &SqlitePool,
-    project_id: &str,
+fn load_prompt_templates(
+    data: &ProjectCommandCenterData,
 ) -> Result<ProjectCommandCenterPromptTemplateSummary, ProjectCommandCenterError> {
-    let rows = sqlx::query_as::<_, PromptTemplateRow>(
-        "SELECT e.id, e.name, COUNT(v.id) AS version_count, e.updated_at
-         FROM prompt_entries e
-         JOIN prompt_versions v ON v.prompt_id = e.id
-         WHERE e.project_id = ? AND e.kind = 'prompt'
-           AND instr(v.text, '{{') > 0
-         GROUP BY e.id, e.name, e.updated_at
-         ORDER BY e.updated_at DESC, e.id DESC",
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-    let versions = rows.iter().map(|row| count(row.version_count)).sum();
+    let versions = data
+        .prompt_templates
+        .iter()
+        .map(|row| count(row.version_count))
+        .sum();
     Ok(ProjectCommandCenterPromptTemplateSummary {
-        total: rows.len(),
+        total: data.prompt_templates.len(),
         versions,
-        items: rows
-            .into_iter()
+        items: data
+            .prompt_templates
+            .iter()
             .map(|row| ProjectCommandCenterPromptTemplateView {
-                id: row.id,
-                name: row.name,
+                id: row.id.clone(),
+                name: row.name.clone(),
                 version_count: count(row.version_count),
-                updated_at: row.updated_at,
+                updated_at: row.updated_at.clone(),
             })
             .collect(),
     })
@@ -1503,11 +1212,24 @@ fn default_quick_actions() -> Vec<ProjectCommandCenterQuickActionView> {
 mod tests {
     use super::*;
     use crate::application::production_audit_service::ProductionAuditIssue;
-    use crate::infrastructure::database::initialize;
+    use crate::infrastructure::database::{
+        initialize, SqliteProductionAuditRepository, SqliteProjectCommandCenterRepository,
+    };
+    use sqlx::SqlitePool;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     const PROJECT: &str = "prj_00000000-0000-0000-0000-000000000039";
     const NOW: &str = "2026-08-18T00:00:00Z";
+
+    fn service(pool: &SqlitePool) -> ProjectCommandCenterService {
+        ProjectCommandCenterService::new(
+            Arc::new(SqliteProjectCommandCenterRepository::new(pool.clone())),
+            Arc::new(ProductionAuditService::new(Arc::new(
+                SqliteProductionAuditRepository::new(pool.clone()),
+            ))),
+        )
+    }
 
     fn base_view() -> ProjectCommandCenterView {
         ProjectCommandCenterView {
@@ -1712,7 +1434,7 @@ mod tests {
         .await
         .expect("project should insert");
 
-        let view = ProjectCommandCenterService::new(pool)
+        let view = service(&pool)
             .get(PROJECT)
             .await
             .expect("empty project should load");
@@ -1768,7 +1490,7 @@ mod tests {
             .await
             .expect("transaction should commit");
 
-        let view = ProjectCommandCenterService::new(pool)
+        let view = service(&pool)
             .get(PROJECT)
             .await
             .expect("500-shot project should load");

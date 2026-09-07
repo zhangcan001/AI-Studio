@@ -1,6 +1,6 @@
 use crate::application::{
     comfy_service::{ComfyConnectionStatus, ComfyService, ComfyStatusView},
-    ports::TaskRepository,
+    ports::{DatabaseHealthProbe, TaskRepository},
     production_queue_service::ProductionQueueService,
     workflow_lifecycle_service::WorkflowLifecycleService,
 };
@@ -9,7 +9,6 @@ use crate::infrastructure::logging::{
     read_recent_logs, LoggingStatus, DIAGNOSTIC_LOG_BYTES, DIAGNOSTIC_LOG_FILE_LIMIT,
 };
 use serde::Serialize;
-use sqlx::SqlitePool;
 use std::{
     fs,
     io::{Cursor, Write},
@@ -57,7 +56,7 @@ pub struct DiagnosticsExportView {
 }
 
 pub struct DiagnosticsService {
-    database_pool: SqlitePool,
+    database_health_probe: Arc<dyn DatabaseHealthProbe>,
     task_repository: Arc<dyn TaskRepository>,
     comfy_service: Arc<ComfyService>,
     workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
@@ -68,7 +67,7 @@ pub struct DiagnosticsService {
 
 impl DiagnosticsService {
     pub fn new(
-        database_pool: SqlitePool,
+        database_health_probe: Arc<dyn DatabaseHealthProbe>,
         task_repository: Arc<dyn TaskRepository>,
         comfy_service: Arc<ComfyService>,
         workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
@@ -77,7 +76,7 @@ impl DiagnosticsService {
         logging_status: LoggingStatus,
     ) -> Self {
         Self {
-            database_pool,
+            database_health_probe,
             task_repository,
             comfy_service,
             workflow_lifecycle_service,
@@ -88,10 +87,7 @@ impl DiagnosticsService {
     }
 
     pub async fn summary(&self) -> DiagnosticsSummaryView {
-        let database_healthy = sqlx::query_scalar::<_, i64>("SELECT 1")
-            .fetch_one(&self.database_pool)
-            .await
-            .is_ok();
+        let database_healthy = self.database_health_probe.is_healthy().await;
 
         let active_task_count = match self.task_repository.list_active().await {
             Ok(tasks) => tasks.len(),

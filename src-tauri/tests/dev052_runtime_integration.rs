@@ -50,12 +50,12 @@ use ai_studio_lib::infrastructure::database::repositories::SqliteConsistencyScop
 use ai_studio_lib::infrastructure::{
     database::{
         initialize, SqliteAssetRepository, SqliteConsistencyProfileRepository,
-        SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
-        SqliteProductionQueueRepository, SqliteProductionStructureRepository,
-        SqliteProjectRepository, SqliteReferenceSetRepository, SqliteShotConsistencyRepository,
-        SqliteShotRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-        SqliteWorkflowRunRepository, SqliteWorkflowRuntimeRepository,
-        SqliteWorkflowRuntimeStateRepository,
+        SqliteDatabaseHealthProbe, SqliteGenerationDefinitionRepository,
+        SqliteGenerationSnapshotRepository, SqliteProductionQueueRepository,
+        SqliteProductionStructureRepository, SqliteProjectRepository, SqliteReferenceSetRepository,
+        SqliteShotConsistencyRepository, SqliteShotRepository, SqliteTaskRepository,
+        SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+        SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
     },
     filesystem::{FileSystemAssetStore, FileSystemWorkflowPackageStore},
     logging::LoggingStatus,
@@ -691,7 +691,7 @@ async fn harness_with_packages(
         workflow_lifecycle_service.clone(),
     ));
     let diagnostics_service = Arc::new(DiagnosticsService::new(
-        pool.clone(),
+        Arc::new(SqliteDatabaseHealthProbe::new(pool.clone())),
         task_repository,
         comfy_service.clone(),
         workflow_lifecycle_service.clone(),

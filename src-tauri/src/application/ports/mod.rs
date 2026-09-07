@@ -10,15 +10,19 @@ pub mod clock;
 pub mod comfy_adapter;
 pub mod consistency_profile_repository;
 pub mod consistency_scope_repository;
+pub mod database_health_probe;
 pub mod generation_definition_repository;
 pub mod generation_snapshot_repository;
 pub mod organization_repository;
 pub mod preset_repository;
+pub mod production_audit_repository;
 pub mod production_item_review_repository;
 pub mod production_queue_repository;
 pub mod production_structure_repository;
 pub mod project_backup_repository;
+pub mod project_command_center_repository;
 pub mod project_directory_store;
+pub mod project_manifest_repository;
 pub mod project_repository;
 pub mod project_workflow_binding_repository;
 pub mod prompt_library_repository;
@@ -71,6 +75,7 @@ pub use comfy_adapter::{
 };
 pub use consistency_profile_repository::ConsistencyProfileRepository;
 pub use consistency_scope_repository::ConsistencyScopeRepository;
+pub use database_health_probe::DatabaseHealthProbe;
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
 };
@@ -79,6 +84,7 @@ pub use organization_repository::{
     AssetOrganization, AssetTag, NewProjectTemplate, OrganizationRepository, ProjectTemplate,
 };
 pub use preset_repository::PresetRepository;
+pub use production_audit_repository::*;
 pub use production_item_review_repository::{
     ProductionItemReviewRecord, ProductionItemReviewRepository,
 };
@@ -90,7 +96,9 @@ pub use project_backup_repository::{
     ProjectBackupAssetSource, ProjectBackupRepository, ProjectBackupRepositorySource,
     ProjectBackupRestorePlan, ProjectBackupSnapshot,
 };
+pub use project_command_center_repository::*;
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
+pub use project_manifest_repository::*;
 pub use project_repository::{ProjectRecord, ProjectRepository};
 pub use project_workflow_binding_repository::{
     ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository,

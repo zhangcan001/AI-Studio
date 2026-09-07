@@ -1,3 +1,9 @@
+use crate::application::ports::{
+    ManifestAssignmentRecord as AssignmentRow,
+    ManifestConsistencyRecords as ConsistencyManifestRows, ManifestEpisodeRecord as EpisodeRow,
+    ManifestSceneRecord as SceneRow, ManifestSeriesRecord as SeriesRow, ProjectManifestRepository,
+    ProjectManifestSnapshot, RepositoryError,
+};
 use crate::domain::{
     derive_stage_status, BindingRole, InheritanceMode, ProfileType, ReferenceSetPurpose, ShotStage,
     TaskStatus,
@@ -6,12 +12,12 @@ use crate::error::AppError;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{FromRow, SqlitePool};
 use std::{
     collections::HashMap,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use uuid::Uuid;
 
@@ -20,7 +26,7 @@ const MANIFEST_VERSION: u32 = 2;
 
 #[derive(Clone)]
 pub struct ProjectManifestService {
-    pool: SqlitePool,
+    repository: Arc<dyn ProjectManifestRepository>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -272,240 +278,14 @@ pub struct ManifestScopeReferenceSetBinding {
     pub inheritance_mode: String,
 }
 
-#[derive(FromRow)]
-struct ProjectRow {
-    id: String,
-    name: String,
-    description: Option<String>,
-}
-
-#[derive(FromRow)]
-struct SeriesRow {
-    id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-}
-
-#[derive(FromRow)]
-struct EpisodeRow {
-    id: String,
-    series_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-}
-
-#[derive(FromRow)]
-struct SceneRow {
-    id: String,
-    episode_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-}
-
-#[derive(FromRow)]
-struct AssignmentRow {
-    shot_id: String,
-    scene_id: String,
-    ordinal: i64,
-}
-
-#[derive(FromRow)]
-struct ShotRow {
-    id: String,
-    ordinal: i64,
-    name: String,
-    prompt_text: String,
-    prompt_entry_id: Option<String>,
-    prompt_version_id: Option<String>,
-    selected_image_asset_id: Option<String>,
-    selected_video_asset_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct StageConfigRow {
-    shot_id: String,
-    stage: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    scalar_values_json: String,
-}
-
-#[derive(FromRow)]
-struct ReferenceRow {
-    shot_id: String,
-    stage: String,
-    asset_id: String,
-    ordinal: i64,
-}
-
-#[derive(FromRow)]
-struct GenerationLinkRow {
-    shot_id: String,
-    stage: String,
-    task_status: Option<String>,
-}
-
-#[derive(FromRow)]
-struct AnchorRow {
-    id: String,
-    kind: String,
-    name: String,
-    description: String,
-}
-
-#[derive(FromRow)]
-struct AnchorAssetRow {
-    anchor_id: String,
-    asset_id: String,
-    ordinal: i64,
-}
-
-#[derive(FromRow)]
-struct CharacterProfileRow {
-    id: String,
-    name: String,
-    description: String,
-    canonical_prompt: String,
-    negative_prompt: String,
-    default_style_profile_id: Option<String>,
-    default_reference_set_id: Option<String>,
-    active_revision_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct SceneProfileRow {
-    id: String,
-    name: String,
-    description: String,
-    environment_prompt: String,
-    lighting_prompt: Option<String>,
-    negative_prompt: Option<String>,
-    default_style_profile_id: Option<String>,
-    default_reference_set_id: Option<String>,
-    active_revision_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct PropProfileRow {
-    id: String,
-    name: String,
-    description: String,
-    canonical_prompt: String,
-    material_prompt: Option<String>,
-    scale_prompt: Option<String>,
-    default_reference_set_id: Option<String>,
-    active_revision_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct StyleProfileRow {
-    id: String,
-    name: String,
-    style_prompt: String,
-    color_prompt: Option<String>,
-    line_prompt: Option<String>,
-    negative_prompt: Option<String>,
-    output_notes: Option<String>,
-    active_revision_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct CostumeVariantRow {
-    id: String,
-    character_profile_id: String,
-    name: String,
-    prompt_fragment: String,
-    reference_set_id: Option<String>,
-    is_default: i64,
-    ordinal: i64,
-    active_revision_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct ReferenceSetRow {
-    id: String,
-    name: String,
-    purpose: String,
-    description: String,
-    owner_profile_type: Option<String>,
-    owner_profile_id: Option<String>,
-    active_revision_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct ReferenceSetItemRow {
-    reference_set_id: String,
-    asset_id: String,
-    ordinal: i64,
-    role: Option<String>,
-    is_primary: i64,
-}
-
-#[derive(FromRow)]
-struct ShotProfileBindingRow {
-    id: String,
-    shot_id: String,
-    role: String,
-    profile_type: String,
-    profile_id: String,
-    costume_variant_id: Option<String>,
-    ordinal: i64,
-    inheritance_mode: String,
-}
-
-#[derive(FromRow)]
-struct ShotReferenceSetBindingRow {
-    id: String,
-    shot_id: String,
-    role: String,
-    reference_set_id: String,
-    ordinal: i64,
-    required: i64,
-    inheritance_mode: String,
-}
-
-#[derive(FromRow)]
-struct ScopeProfileBindingRow {
-    id: String,
-    project_id: String,
-    scope_type: String,
-    scope_id: String,
-    role: String,
-    profile_type: String,
-    profile_id: String,
-    costume_variant_id: Option<String>,
-    ordinal: i64,
-    inheritance_mode: String,
-}
-
-#[derive(FromRow)]
-struct ScopeReferenceSetBindingRow {
-    id: String,
-    project_id: String,
-    scope_type: String,
-    scope_id: String,
-    role: String,
-    reference_set_id: String,
-    ordinal: i64,
-    required: i64,
-    inheritance_mode: String,
-}
-
-struct ConsistencyManifestRows {
-    character_profiles: Vec<CharacterProfileRow>,
-    scene_profiles: Vec<SceneProfileRow>,
-    prop_profiles: Vec<PropProfileRow>,
-    style_profiles: Vec<StyleProfileRow>,
-    costume_variants: Vec<CostumeVariantRow>,
-    reference_sets: Vec<ReferenceSetRow>,
-    reference_set_items: Vec<ReferenceSetItemRow>,
-    shot_profile_bindings: Vec<ShotProfileBindingRow>,
-    shot_reference_set_bindings: Vec<ShotReferenceSetBindingRow>,
-    scope_profile_bindings: Vec<ScopeProfileBindingRow>,
-    scope_reference_set_bindings: Vec<ScopeReferenceSetBindingRow>,
+fn map_repository_error(error: RepositoryError) -> AppError {
+    match error {
+        RepositoryError::NotFound { entity, id } if entity == "project" => {
+            AppError::project_not_found(id)
+        }
+        RepositoryError::Database { message } => AppError::database(message),
+        other => AppError::database(other.to_string()),
+    }
 }
 
 impl ProjectManifestService {
@@ -518,8 +298,8 @@ impl ProjectManifestService {
         Ok(manifest)
     }
 
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(repository: Arc<dyn ProjectManifestRepository>) -> Self {
+        Self { repository }
     }
 
     pub async fn export(
@@ -563,72 +343,26 @@ impl ProjectManifestService {
     }
 
     async fn build(&self, project_id: &str) -> Result<ProjectManifest, AppError> {
-        let mut transaction = self
-            .pool
-            .begin()
+        let snapshot: ProjectManifestSnapshot = self
+            .repository
+            .load_manifest_snapshot(project_id)
             .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-        let project = sqlx::query_as::<_, ProjectRow>(
-            "SELECT id, name, description FROM projects WHERE id = ?",
-        )
-        .bind(project_id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?
-        .ok_or_else(|| AppError::project_not_found(project_id.to_owned()))?;
-
-        let (series, episodes, scenes, assignments) =
-            query_structure(&mut transaction, project_id).await?;
+            .map_err(map_repository_error)?;
+        let ProjectManifestSnapshot {
+            project,
+            series,
+            episodes,
+            scenes,
+            assignments,
+            shots,
+            configs,
+            references,
+            links,
+            anchors,
+            anchor_assets,
+            consistency,
+        } = snapshot;
         let (structure, scene_by_shot) = assemble_structure(series, episodes, scenes, assignments);
-        let shots = sqlx::query_as::<_, ShotRow>(
-            "SELECT id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
-                    selected_image_asset_id, selected_video_asset_id
-             FROM shots WHERE project_id = ? ORDER BY ordinal, id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let configs = sqlx::query_as::<_, StageConfigRow>(
-            "SELECT shot_id, stage, workflow_version_id, recipe_id, scalar_values_json
-             FROM shot_stage_configs
-             WHERE shot_id IN (SELECT id FROM shots WHERE project_id = ?)
-             ORDER BY shot_id, stage",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let references = sqlx::query_as::<_, ReferenceRow>(
-            "SELECT r.shot_id, r.stage, r.asset_id, r.ordinal
-             FROM shot_reference_assets r
-             JOIN shots s ON s.id = r.shot_id
-             WHERE s.project_id = ?
-             ORDER BY r.shot_id, r.stage, r.ordinal, r.asset_id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let links = sqlx::query_as::<_, GenerationLinkRow>(
-            "SELECT l.shot_id, l.stage, t.status AS task_status
-             FROM shot_generation_links l
-             JOIN shots s ON s.id = l.shot_id
-             LEFT JOIN tasks t ON t.id = l.task_id
-             WHERE s.project_id = ?
-             ORDER BY l.shot_id, l.stage, l.created_at DESC, l.id DESC",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let (anchors, anchor_assets) = query_anchors(&mut transaction, project_id).await?;
-        let consistency = query_consistency(&mut transaction, project_id).await?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-
         let mut configs_by_shot = HashMap::<String, Vec<ManifestStageConfig>>::new();
         for config in configs {
             let values = serde_json::from_str(&config.scalar_values_json)
@@ -771,81 +505,6 @@ impl ProjectManifestService {
     }
 }
 
-async fn query_structure(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    project_id: &str,
-) -> Result<
-    (
-        Vec<SeriesRow>,
-        Vec<EpisodeRow>,
-        Vec<SceneRow>,
-        Vec<AssignmentRow>,
-    ),
-    AppError,
-> {
-    let table_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM sqlite_master
-         WHERE type = 'table' AND name IN
-           ('production_series', 'production_episodes', 'production_scenes',
-            'shot_scene_assignments')",
-    )
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    if table_count == 0 {
-        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-    }
-    if table_count != 4 {
-        return Err(AppError::database(
-            "生产结构表不完整，请先应用 migration 021",
-        ));
-    }
-    let series = sqlx::query_as::<_, SeriesRow>(
-        "SELECT id, ordinal, name, description FROM production_series
-         WHERE project_id = ? ORDER BY ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let episodes = sqlx::query_as::<_, EpisodeRow>(
-        "SELECT e.id, e.series_id, e.ordinal, e.name, e.description
-         FROM production_episodes e JOIN production_series s ON s.id = e.series_id
-         WHERE s.project_id = ? ORDER BY e.series_id, e.ordinal, e.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let scenes = sqlx::query_as::<_, SceneRow>(
-        "SELECT c.id, c.episode_id, c.ordinal, c.name, c.description
-         FROM production_scenes c
-         JOIN production_episodes e ON e.id = c.episode_id
-         JOIN production_series s ON s.id = e.series_id
-         WHERE s.project_id = ? ORDER BY c.episode_id, c.ordinal, c.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let assignments = sqlx::query_as::<_, AssignmentRow>(
-        "SELECT a.shot_id, a.scene_id, a.ordinal
-         FROM shot_scene_assignments a
-         JOIN production_scenes c ON c.id = a.scene_id
-         JOIN production_episodes e ON e.id = c.episode_id
-         JOIN production_series s ON s.id = e.series_id
-         JOIN shots h ON h.id = a.shot_id
-         WHERE s.project_id = ? AND h.project_id = ?
-         ORDER BY a.scene_id, a.ordinal, a.shot_id",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok((series, episodes, scenes, assignments))
-}
-
 fn assemble_structure(
     series: Vec<SeriesRow>,
     episodes: Vec<EpisodeRow>,
@@ -929,175 +588,6 @@ fn assemble_structure(
         );
     }
     (structure, scene_by_shot)
-}
-
-async fn query_anchors(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    project_id: &str,
-) -> Result<(Vec<AnchorRow>, Vec<AnchorAssetRow>), AppError> {
-    let anchors = sqlx::query_as::<_, AnchorRow>(
-        "SELECT id, kind, name, description FROM reference_anchors
-         WHERE project_id = ? ORDER BY kind, name, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let assets = sqlx::query_as::<_, AnchorAssetRow>(
-        "SELECT m.anchor_id, m.asset_id, m.ordinal
-         FROM reference_anchor_assets m
-         JOIN reference_anchors a ON a.id = m.anchor_id
-         WHERE a.project_id = ? ORDER BY m.anchor_id, m.ordinal, m.asset_id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok((anchors, assets))
-}
-
-async fn query_consistency(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    project_id: &str,
-) -> Result<ConsistencyManifestRows, AppError> {
-    let character_profiles = sqlx::query_as::<_, CharacterProfileRow>(
-        "SELECT id, name, description, canonical_prompt, negative_prompt,
-                default_style_profile_id, default_reference_set_id, active_revision_id
-         FROM character_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let scene_profiles = sqlx::query_as::<_, SceneProfileRow>(
-        "SELECT id, name, description, environment_prompt, lighting_prompt,
-                negative_prompt, default_style_profile_id, default_reference_set_id,
-                active_revision_id
-         FROM scene_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let prop_profiles = sqlx::query_as::<_, PropProfileRow>(
-        "SELECT id, name, description, canonical_prompt, material_prompt, scale_prompt,
-                default_reference_set_id, active_revision_id
-         FROM prop_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let style_profiles = sqlx::query_as::<_, StyleProfileRow>(
-        "SELECT id, name, style_prompt, color_prompt, line_prompt, negative_prompt,
-                output_notes, active_revision_id
-         FROM style_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let costume_variants = sqlx::query_as::<_, CostumeVariantRow>(
-        "SELECT v.id, v.character_profile_id, v.name, v.prompt_fragment,
-                v.reference_set_id, v.is_default, v.ordinal, v.active_revision_id
-         FROM costume_variants v
-         JOIN character_profiles p ON p.id = v.character_profile_id
-         WHERE p.project_id = ?
-         ORDER BY v.character_profile_id, v.ordinal, v.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let reference_sets = sqlx::query_as::<_, ReferenceSetRow>(
-        "SELECT id, name, purpose, description, owner_profile_type,
-                owner_profile_id, active_revision_id
-         FROM reference_sets
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let reference_set_items = sqlx::query_as::<_, ReferenceSetItemRow>(
-        "SELECT i.reference_set_id, i.asset_id, i.ordinal, i.role, i.is_primary
-         FROM reference_set_items i
-         JOIN reference_sets r ON r.id = i.reference_set_id
-         WHERE r.project_id = ?
-         ORDER BY i.reference_set_id, i.ordinal, i.asset_id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let shot_profile_bindings = sqlx::query_as::<_, ShotProfileBindingRow>(
-        "SELECT b.id, b.shot_id, b.role, b.profile_type, b.profile_id,
-                b.costume_variant_id, b.ordinal, b.inheritance_mode
-         FROM shot_profile_bindings b
-         JOIN shots s ON s.id = b.shot_id
-         WHERE s.project_id = ?
-         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let shot_reference_set_bindings = sqlx::query_as::<_, ShotReferenceSetBindingRow>(
-        "SELECT b.id, b.shot_id, b.role, b.reference_set_id, b.ordinal,
-                b.required, b.inheritance_mode
-         FROM shot_reference_set_bindings b
-         JOIN shots s ON s.id = b.shot_id
-         WHERE s.project_id = ?
-         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let scope_profile_bindings = sqlx::query_as::<_, ScopeProfileBindingRow>(
-        "SELECT id, project_id, scope_type, scope_id, role, profile_type,
-                profile_id, costume_variant_id, ordinal, inheritance_mode
-         FROM consistency_scope_profile_bindings
-         WHERE project_id = ?
-         ORDER BY scope_type, scope_id, role, ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let scope_reference_set_bindings = sqlx::query_as::<_, ScopeReferenceSetBindingRow>(
-        "SELECT id, project_id, scope_type, scope_id, role, reference_set_id,
-                ordinal, required, inheritance_mode
-         FROM consistency_scope_reference_set_bindings
-         WHERE project_id = ?
-         ORDER BY scope_type, scope_id, role, ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(ConsistencyManifestRows {
-        character_profiles,
-        scene_profiles,
-        prop_profiles,
-        style_profiles,
-        costume_variants,
-        reference_sets,
-        reference_set_items,
-        shot_profile_bindings,
-        shot_reference_set_bindings,
-        scope_profile_bindings,
-        scope_reference_set_bindings,
-    })
 }
 
 struct AssembledConsistency {

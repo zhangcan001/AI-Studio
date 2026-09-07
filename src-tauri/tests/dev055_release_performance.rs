@@ -44,12 +44,13 @@ use ai_studio_lib::{
     infrastructure::{
         database::{
             initialize, SqliteAssetRepository, SqliteConsistencyProfileRepository,
-            SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
+            SqliteDatabaseHealthProbe, SqliteGenerationDefinitionRepository,
+            SqliteGenerationSnapshotRepository, SqliteProductionAuditRepository,
             SqliteProductionQueueRepository, SqliteProductionStructureRepository,
-            SqliteProjectRepository, SqliteReferenceSetRepository, SqliteShotConsistencyRepository,
-            SqliteShotRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-            SqliteWorkflowRunRepository, SqliteWorkflowRuntimeRepository,
-            SqliteWorkflowRuntimeStateRepository,
+            SqliteProjectCommandCenterRepository, SqliteProjectRepository,
+            SqliteReferenceSetRepository, SqliteShotConsistencyRepository, SqliteShotRepository,
+            SqliteTaskRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+            SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
         },
         filesystem::{FileSystemAssetStore, FileSystemWorkflowPackageStore},
         logging::LoggingStatus,
@@ -1494,7 +1495,7 @@ async fn performance_harness() -> PerformanceHarness {
         clock.clone(),
     ));
     let diagnostics = Arc::new(DiagnosticsService::new(
-        pool.clone(),
+        Arc::new(SqliteDatabaseHealthProbe::new(pool.clone())),
         task_repository,
         comfy_service.clone(),
         lifecycle.clone(),
@@ -2530,8 +2531,16 @@ async fn dev055_command_center_and_audit_keep_500_shots_identity_only() {
     let harness = performance_harness().await;
     seed_audit_snapshot_identity_fixture(&harness.pool, &harness.shot_ids).await;
 
+    let audit = Arc::new(
+        ai_studio_lib::application::production_audit_service::ProductionAuditService::new(
+            Arc::new(SqliteProductionAuditRepository::new(harness.pool.clone())),
+        ),
+    );
     let command_center = ai_studio_lib::application::project_command_center_service::
-        ProjectCommandCenterService::new(harness.pool.clone());
+        ProjectCommandCenterService::new(
+            Arc::new(SqliteProjectCommandCenterRepository::new(harness.pool.clone())),
+            audit.clone(),
+        );
     let center = command_center
         .get(PROJECT_ID)
         .await
@@ -2539,9 +2548,6 @@ async fn dev055_command_center_and_audit_keep_500_shots_identity_only() {
     assert_eq!(center.shots.total, SHOT_COUNT);
     assert_eq!(center.preparation.snapshot_count, SHOT_COUNT);
 
-    let audit = ai_studio_lib::application::production_audit_service::ProductionAuditService::new(
-        harness.pool.clone(),
-    );
     let summary = audit
         .summary(PROJECT_ID)
         .await
@@ -2582,10 +2588,13 @@ async fn dev055_command_center_and_audit_keep_500_shots_identity_only() {
     }
     let audit_source =
         include_str!("../src/application/production_audit_service.rs").replace("\r\n", "\n");
+    let audit_repository_source =
+        include_str!("../src/infrastructure/database/repositories/production_audit.rs")
+            .replace("\r\n", "\n");
     let load_graph = source_section(
-        &audit_source,
-        "async fn load_graph",
-        "\n}\n\n#[derive(Debug, FromRow)]\nstruct RunRow",
+        &audit_repository_source,
+        "async fn load_project_graph",
+        "    async fn find_snapshot_detail",
     );
     assert!(load_graph.contains("production_preparation_snapshots"));
     assert!(

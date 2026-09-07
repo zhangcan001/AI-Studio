@@ -8,14 +8,28 @@ use ai_studio_lib::application::{
     production_audit_service::ProductionAuditService,
     project_command_center_service::ProjectCommandCenterService,
 };
-use ai_studio_lib::infrastructure::database::initialize;
+use ai_studio_lib::infrastructure::database::{
+    initialize, SqliteProductionAuditRepository, SqliteProjectCommandCenterRepository,
+};
 use serde_json::json;
 use sqlx::SqlitePool;
+use std::sync::Arc;
 use tempfile::{tempdir, TempDir};
 
 const LEGACY_PROJECT: &str = "prj_default";
 const CONSISTENCY_PROJECT: &str = "prj_550e8400-e29b-41d4-a716-446655440000";
 const NOW: &str = "2026-08-27T00:00:00Z";
+
+fn audit_service(pool: &SqlitePool) -> ProductionAuditService {
+    ProductionAuditService::new(Arc::new(SqliteProductionAuditRepository::new(pool.clone())))
+}
+
+fn command_center_service(pool: &SqlitePool) -> ProjectCommandCenterService {
+    ProjectCommandCenterService::new(
+        Arc::new(SqliteProjectCommandCenterRepository::new(pool.clone())),
+        Arc::new(audit_service(pool)),
+    )
+}
 
 async fn fixture() -> (TempDir, SqlitePool) {
     let directory = tempdir().expect("temporary database directory should exist");
@@ -253,7 +267,7 @@ async fn fixture() -> (TempDir, SqlitePool) {
 #[tokio::test]
 async fn command_center_distinguishes_legacy_and_consistency_projects() {
     let (_directory, pool) = fixture().await;
-    let service = ProjectCommandCenterService::new(pool.clone());
+    let service = command_center_service(&pool);
 
     let legacy = service
         .get(LEGACY_PROJECT)
@@ -302,12 +316,12 @@ async fn command_center_and_audit_reads_do_not_mutate_queue_state() {
     .await
     .expect("before counts should load");
 
-    let command_center = ProjectCommandCenterService::new(pool.clone());
+    let command_center = command_center_service(&pool);
     let _ = command_center
         .get(CONSISTENCY_PROJECT)
         .await
         .expect("command center should load");
-    let audit = ProductionAuditService::new(pool.clone());
+    let audit = audit_service(&pool);
     let _ = audit
         .project_summary(CONSISTENCY_PROJECT)
         .await
@@ -332,7 +346,7 @@ async fn command_center_and_audit_reads_do_not_mutate_queue_state() {
 #[tokio::test]
 async fn audit_exposes_preparation_lineage_activity_and_lazy_historical_detail() {
     let (_directory, pool) = fixture().await;
-    let service = ProductionAuditService::new(pool.clone());
+    let service = audit_service(&pool);
 
     let activity = service
         .recent_activity(CONSISTENCY_PROJECT, Some(200))
