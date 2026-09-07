@@ -16,10 +16,11 @@ use crate::domain::{
     PromptAnchor, PromptAnchorContext, PromptAnchorKind, PromptProjectContext, PromptShotContext,
     PromptStructureContext, PromptTemplateContext,
 };
-use crate::infrastructure::database::initialize;
+use crate::infrastructure::database::{initialize, SqliteProjectBackupRepository};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
+use std::sync::Arc;
 use tempfile::tempdir;
 use zip::ZipArchive;
 
@@ -257,7 +258,7 @@ async fn dev036_backup_v17_preserves_template_source_and_frozen_stage_snapshot()
     .expect("backup video prompt should insert");
 
     let service = ProjectBackupService::new(
-        pool,
+        Arc::new(SqliteProjectBackupRepository::new(pool)),
         directory.path().join("projects"),
         directory.path().join("cache"),
     );

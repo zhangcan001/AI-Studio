@@ -1,4 +1,7 @@
-use crate::application::ports::ProjectRecord;
+use crate::application::ports::{
+    ProjectBackupRepository, ProjectBackupRepositorySource, ProjectBackupRestorePlan,
+    ProjectRecord, RepositoryError,
+};
 use crate::domain::consistency::{
     BindingRole, InheritanceMode, ProfileRevisionStatus, ProfileType, ReferenceSetPurpose,
 };
@@ -7,13 +10,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     io::{self, BufWriter, Read, Write},
     path::{Component, Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use uuid::Uuid;
@@ -87,17 +89,35 @@ struct Inspection {
     expires_at: std::time::Instant,
 }
 
+fn map_repository_error(error: RepositoryError) -> AppError {
+    match error {
+        RepositoryError::Database { message } => AppError::database(message),
+        RepositoryError::NotFound { entity, id } if entity == "project" => {
+            AppError::project_not_found(id)
+        }
+        RepositoryError::Serialization { context, message } => {
+            AppError::backup_invalid(format!("{context}: {message}"))
+        }
+        RepositoryError::Integrity { message } => AppError::backup_invalid(message),
+        other => AppError::backup_invalid(other.to_string()),
+    }
+}
+
 pub struct ProjectBackupService {
-    pool: SqlitePool,
+    repository: Arc<dyn ProjectBackupRepository>,
     projects_dir: PathBuf,
     inspection_dir: PathBuf,
     inspections: Mutex<HashMap<String, Inspection>>,
 }
 
 impl ProjectBackupService {
-    pub fn new(pool: SqlitePool, projects_dir: PathBuf, cache_dir: PathBuf) -> Self {
+    pub fn new<R: ProjectBackupRepositorySource>(
+        repository: R,
+        projects_dir: PathBuf,
+        cache_dir: PathBuf,
+    ) -> Self {
         Self {
-            pool,
+            repository: repository.into_repository(),
             projects_dir,
             inspection_dir: cache_dir.join("backup-inspections"),
             inspections: Mutex::new(HashMap::new()),
@@ -435,54 +455,59 @@ impl ProjectBackupService {
             )));
         }
 
+        let restored_project = project.clone();
+        let restored_snapshots = prepare_restored_snapshots(&document, &asset_ids)?;
         let restore_result = self
-            .restore_rows(
-                &project,
-                &document,
-                &task_ids,
-                &asset_ids,
-                &snapshot_ids,
-                &preset_ids,
-                &prompt_ids,
-                &prompt_version_ids,
-                &batch_ids,
-                &item_ids,
-                &preparation_snapshot_ids,
-                &benchmark_experiment_ids,
-                &benchmark_candidate_ids,
-                &production_run_ids,
-                &production_stage_ids,
-                &production_stage_item_ids,
-                &production_run_template_ids,
-                &benchmark_run_ids,
-                &benchmark_quality_score_ids,
-                &tag_ids,
-                &reference_anchor_ids,
-                &ProductionStructureIds {
+            .repository
+            .restore_atomic(ProjectBackupRestorePlan {
+                project,
+                document,
+                task_ids,
+                asset_ids,
+                snapshot_ids,
+                preset_ids,
+                prompt_ids,
+                prompt_version_ids,
+                batch_ids,
+                item_ids,
+                preparation_snapshot_ids,
+                benchmark_experiment_ids,
+                benchmark_candidate_ids,
+                production_run_ids,
+                production_stage_ids,
+                production_stage_item_ids,
+                production_run_template_ids,
+                benchmark_run_ids,
+                benchmark_quality_score_ids,
+                tag_ids,
+                reference_anchor_ids,
+                production_structure_ids: ProductionStructureIds {
                     series: production_series_ids,
                     episodes: production_episode_ids,
                     scenes: production_scene_ids,
                 },
-                &script_source_ids,
-                &script_draft_ids,
-                &script_revision_ids,
-                &consistency_ids,
-                &shot_ids,
-                &shot_generation_link_ids,
-                &restored_assets,
-            )
-            .await;
+                script_source_ids,
+                script_draft_ids,
+                script_revision_ids,
+                consistency_ids,
+                shot_ids,
+                shot_generation_link_ids,
+                restored_assets,
+                restored_snapshots,
+            })
+            .await
+            .map_err(map_repository_error);
         if let Err(error) = restore_result {
             let _ = fs::remove_dir_all(&final_root);
             return Err(error);
         }
         let _ = fs::remove_file(&inspection.archive_path);
         Ok(RestoredProjectView {
-            id: project.id,
-            name: project.name,
-            description: project.description,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
+            id: restored_project.id,
+            name: restored_project.name,
+            description: restored_project.description,
+            created_at: restored_project.created_at,
+            updated_at: restored_project.updated_at,
         })
     }
 
@@ -509,371 +534,22 @@ impl ProjectBackupService {
         &self,
         document: &BackupDocument,
     ) -> Result<Vec<String>, AppError> {
-        let mut missing = Vec::new();
-        for reference in &document.workflow_refs {
-            let exists =
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
-                    .bind(&reference.workflow_id)
-                    .fetch_one(&self.pool)
-                    .await
-                    .map_err(|error| AppError::database(error.to_string()))?
-                    > 0;
-            if !exists && !missing.contains(&reference.workflow_id) {
-                missing.push(reference.workflow_id.clone());
-            }
-        }
-        for binding in &document.project_workflow_bindings {
-            if let Some(workflow_id) = &binding.workflow_id {
-                let exists =
-                    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
-                        .bind(workflow_id)
-                        .fetch_one(&self.pool)
-                        .await
-                        .map_err(|error| AppError::database(error.to_string()))?
-                        > 0;
-                if !exists && !missing.contains(workflow_id) {
-                    missing.push(workflow_id.clone());
-                }
-            }
-            let version_exists =
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions WHERE id = ?")
-                    .bind(&binding.workflow_version_id)
-                    .fetch_one(&self.pool)
-                    .await
-                    .map_err(|error| AppError::database(error.to_string()))?
-                    > 0;
-            if !version_exists && !missing.contains(&binding.workflow_version_id) {
-                missing.push(binding.workflow_version_id.clone());
-            }
-            let recipe_exists = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM recipes WHERE id = ? AND workflow_version_id = ?",
-            )
-            .bind(&binding.recipe_id)
-            .bind(&binding.workflow_version_id)
-            .fetch_one(&self.pool)
+        self.repository
+            .find_missing_workflows(document)
             .await
-            .map_err(|error| AppError::database(error.to_string()))?
-                > 0;
-            if !recipe_exists && !missing.contains(&binding.recipe_id) {
-                missing.push(binding.recipe_id.clone());
-            }
-        }
-        Ok(missing)
+            .map_err(map_repository_error)
     }
 
     async fn build_backup(&self, project_id: &str) -> Result<BuiltBackup, AppError> {
-        // Keep the metadata snapshot short: no filesystem reads or ZIP writes
-        // happen while this SQLite read transaction is open.
-        let mut transaction = self
-            .pool
-            .begin()
+        let snapshot = self
+            .repository
+            .load_export_snapshot(project_id)
             .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-        let project = query_project(&mut transaction, project_id)
-            .await?
-            .ok_or_else(|| AppError::project_not_found(project_id.to_owned()))?;
-        let db_tasks = sqlx::query_as::<_, DbTask>(
-            "SELECT id, project_id, workflow_id, workflow_version_id, recipe_id, status,
-             app_version, build_commit, workflow_version, workflow_sha256, recipe_version,
-             recipe_sha256, package_name, package_source_path, dynamic_binding_targets_json,
-             generation_execution_id, compiled_workflow_sha256, runtime_profile,
-             concurrency_class, prepare_started_at, prepared_at, submitted_at,
-             execution_started_at, execution_finished_at, collection_finished_at,
-             prompt_id, queue_number, progress_mode, progress_current, progress_total,
-             current_node_id, error_code, error_message, raw_error_json, created_at,
-             queued_at, started_at, finished_at FROM tasks WHERE project_id = ? ORDER BY created_at, id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let db_assets = sqlx::query_as::<_, DbAsset>(
-            "SELECT id, project_id, type, category, name, original_name, storage_path,
-             thumbnail_path, sha256, mime_type, width, height, duration_ms, file_size,
-             source_task_id, metadata_json, created_at, updated_at FROM assets WHERE project_id = ? ORDER BY created_at, id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let active_ids = db_tasks
-            .iter()
-            .filter(|task| !is_terminal_task(&task.status))
-            .map(|task| task.id.clone())
-            .collect::<HashSet<_>>();
-        let excluded_tasks = active_ids.clone();
-        let included_task_ids = db_tasks
-            .iter()
-            .filter(|task| !excluded_tasks.contains(&task.id))
-            .map(|task| task.id.clone())
-            .collect::<HashSet<_>>();
-        let included_asset_ids = db_assets
-            .iter()
-            .filter(|asset| {
-                asset
-                    .source_task_id
-                    .as_ref()
-                    .is_none_or(|task_id| !excluded_tasks.contains(task_id))
-            })
-            .map(|asset| asset.id.as_str())
-            .collect::<HashSet<_>>();
-        let tasks = db_tasks
-            .into_iter()
-            .filter(|task| included_task_ids.contains(&task.id))
-            .map(BackupTask::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        let task_events = query_task_events(&mut transaction, &included_task_ids).await?;
-        let snapshots = query_snapshots(&mut transaction, &included_task_ids).await?;
-        let mappings = query_mappings(&mut transaction, &included_task_ids).await?;
-        let presets = query_presets(&mut transaction, project_id).await?;
-        let prompt_entries = query_prompt_entries(&mut transaction, project_id).await?;
-        let prompt_versions = query_prompt_versions(&mut transaction, project_id).await?;
-        let batches = query_batches(&mut transaction, project_id).await?;
-        let items = query_batch_items(&mut transaction, &batches).await?;
-        let preparation_snapshots =
-            query_production_preparation_snapshots(&mut transaction, project_id).await?;
-        let benchmark_experiments =
-            query_benchmark_experiments(&mut transaction, project_id).await?;
-        let mut benchmark_candidates =
-            query_benchmark_candidates(&mut transaction, project_id).await?;
-        for candidate in &mut benchmark_candidates {
-            if candidate
-                .task_id
-                .as_ref()
-                .is_some_and(|task_id| !included_task_ids.contains(task_id))
-            {
-                candidate.task_id = None;
-            }
-        }
-        let production_runs = query_production_runs(&mut transaction, project_id).await?;
-        let production_stages = query_production_stages(&mut transaction, &production_runs).await?;
-        let mut production_stage_items =
-            query_production_stage_items(&mut transaction, &production_stages).await?;
-        for item in &mut production_stage_items {
-            if item
-                .task_id
-                .as_ref()
-                .is_some_and(|task_id| !included_task_ids.contains(task_id))
-            {
-                item.task_id = None;
-            }
-            if item
-                .asset_id
-                .as_ref()
-                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
-            {
-                item.asset_id = None;
-            }
-            if item
-                .source_asset_id
-                .as_ref()
-                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
-            {
-                item.source_asset_id = None;
-            }
-        }
-        let production_run_templates =
-            query_production_run_templates(&mut transaction, project_id).await?;
-        let mut benchmark_runs = query_benchmark_runs(&mut transaction, project_id).await?;
-        for run in &mut benchmark_runs {
-            if run
-                .task_id
-                .as_ref()
-                .is_some_and(|task_id| !included_task_ids.contains(task_id))
-            {
-                run.task_id = None;
-            }
-            if run.snapshot_id.as_ref().is_some_and(|snapshot_id| {
-                !snapshots.iter().any(|snapshot| snapshot.id == *snapshot_id)
-            }) {
-                run.snapshot_id = None;
-            }
-            if run
-                .output_asset_id
-                .as_ref()
-                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
-            {
-                run.output_asset_id = None;
-            }
-        }
-        let benchmark_quality_scores =
-            query_benchmark_quality_scores(&mut transaction, project_id).await?;
-        let mut production_item_reviews =
-            query_production_item_reviews(&mut transaction, project_id).await?;
-        let mut shots = query_shots(&mut transaction, project_id).await?;
-        let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
-        let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
-        let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
-        let mut shot_generation_links = query_shot_generation_links(&mut transaction).await?;
-        let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
-            "SELECT id, project_id, name, normalized_name, created_at, updated_at FROM asset_tags WHERE project_id = ? ORDER BY created_at, id",
-        ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-        let mut asset_tag_links = sqlx::query_as::<_, BackupAssetTagLink>(
-            "SELECT asset_id, tag_id, project_id, created_at FROM asset_tag_links WHERE project_id = ? ORDER BY created_at, asset_id, tag_id",
-        ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-        let mut asset_favorites = sqlx::query_as::<_, BackupAssetFavorite>(
-            "SELECT asset_id, project_id, created_at FROM asset_favorites WHERE project_id = ? ORDER BY created_at, asset_id",
-        ).bind(project_id).fetch_all(&mut *transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-        let mut asset_video_prompts = sqlx::query_as::<_, DbAssetVideoPrompt>(
-            "SELECT asset_id, project_id, prompt_text, updated_at
-             FROM asset_video_prompts WHERE project_id = ? ORDER BY asset_id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?
-        .into_iter()
-        .map(|row| BackupAssetVideoPrompt {
-            asset_id: row.asset_id,
-            project_id: row.project_id,
-            prompt_text: row.prompt_text,
-            updated_at: row.updated_at,
-        })
-        .collect::<Vec<_>>();
-        let reference_anchor_rows = sqlx::query_as::<_, DbReferenceAnchor>(
-            "SELECT id, project_id, kind, name, normalized_name, description, created_at, updated_at
-             FROM reference_anchors WHERE project_id = ? ORDER BY created_at, id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let reference_anchor_asset_rows = sqlx::query_as::<_, DbReferenceAnchorAsset>(
-            "SELECT m.anchor_id, m.asset_id, m.ordinal, m.created_at
-             FROM reference_anchor_assets m
-             JOIN reference_anchors a ON a.id = m.anchor_id
-             WHERE a.project_id = ? ORDER BY m.anchor_id, m.ordinal, m.asset_id",
-        )
-        .bind(project_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        let (production_series, production_episodes, production_scenes, shot_scene_assignments) =
-            query_production_structure(&mut transaction, project_id).await?;
-        let script_sources = query_script_sources(&mut transaction, project_id).await?;
-        let script_draft_revisions =
-            query_script_draft_revisions(&mut transaction, project_id).await?;
-        let character_profiles = query_character_profiles(&mut transaction, project_id).await?;
-        let scene_profiles = query_scene_profiles(&mut transaction, project_id).await?;
-        let prop_profiles = query_prop_profiles(&mut transaction, project_id).await?;
-        let style_profiles = query_style_profiles(&mut transaction, project_id).await?;
-        let costume_variants = query_costume_variants(&mut transaction, project_id).await?;
-        let profile_revisions = query_profile_revisions(&mut transaction, project_id).await?;
-        let reference_sets = query_reference_sets(&mut transaction, project_id).await?;
-        let reference_set_items = query_reference_set_items(&mut transaction, project_id).await?;
-        let shot_profile_bindings =
-            query_shot_profile_bindings(&mut transaction, project_id).await?;
-        let shot_reference_set_bindings =
-            query_shot_reference_set_bindings(&mut transaction, project_id).await?;
-        let scope_profile_bindings =
-            query_scope_profile_bindings(&mut transaction, project_id).await?;
-        let scope_reference_set_bindings =
-            query_scope_reference_set_bindings(&mut transaction, project_id).await?;
-        let included_asset_ids = db_assets
-            .iter()
-            .filter(|asset| {
-                asset
-                    .source_task_id
-                    .as_ref()
-                    .is_none_or(|task_id| !excluded_tasks.contains(task_id))
-            })
-            .map(|asset| asset.id.as_str())
-            .collect::<HashSet<_>>();
-        let included_batch_item_ids = items
-            .iter()
-            .map(|item| item.id.as_str())
-            .collect::<HashSet<_>>();
-        production_item_reviews.retain(|review| {
-            included_batch_item_ids.contains(review.production_batch_item_id.as_str())
-                && review
-                    .task_id
-                    .as_ref()
-                    .is_none_or(|task_id| included_task_ids.contains(task_id))
-        });
-        let included_shot_ids = shots
-            .iter()
-            .map(|shot| shot.id.clone())
-            .collect::<HashSet<_>>();
-        for shot in &mut shots {
-            if shot
-                .selected_image_asset_id
-                .as_ref()
-                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
-            {
-                shot.selected_image_asset_id = None;
-            }
-            if shot
-                .selected_video_asset_id
-                .as_ref()
-                .is_some_and(|asset_id| !included_asset_ids.contains(asset_id.as_str()))
-            {
-                shot.selected_video_asset_id = None;
-            }
-        }
-        shot_stage_configs.retain(|config| included_shot_ids.contains(config.shot_id.as_str()));
-        shot_stage_prompts.retain(|prompt| included_shot_ids.contains(prompt.shot_id.as_str()));
-        shot_reference_assets.retain(|reference| {
-            included_shot_ids.contains(reference.shot_id.as_str())
-                && included_asset_ids.contains(reference.asset_id.as_str())
-        });
-        shot_generation_links.retain(|link| {
-            included_shot_ids.contains(link.shot_id.as_str())
-                && link
-                    .task_id
-                    .as_ref()
-                    .is_none_or(|task_id| included_task_ids.contains(task_id))
-                && link
-                    .production_batch_item_id
-                    .as_ref()
-                    .is_none_or(|item_id| included_batch_item_ids.contains(item_id.as_str()))
-        });
-        let mut workflow_refs = collect_workflow_refs(&tasks);
-        for reference in query_benchmark_workflow_refs(&mut transaction, project_id).await? {
-            if !workflow_refs.iter().any(|item| {
-                item.workflow_version_id == reference.workflow_version_id
-                    && item.recipe_id == reference.recipe_id
-            }) {
-                workflow_refs.push(reference);
-            }
-        }
-        for config in &shot_stage_configs {
-            let reference = WorkflowReference {
-                workflow_id: config.workflow_id.clone(),
-                workflow_version_id: config.workflow_version_id.clone(),
-                recipe_id: config.recipe_id.clone(),
-            };
-            if !workflow_refs.iter().any(|item| {
-                item.workflow_version_id == reference.workflow_version_id
-                    && item.recipe_id == reference.recipe_id
-            }) {
-                workflow_refs.push(reference);
-            }
-        }
-        let project_workflow_bindings =
-            query_project_workflow_bindings(&mut transaction, project_id).await?;
-        let workflow_registry = query_workflow_registry_snapshot(
-            &mut transaction,
-            &workflow_refs,
-            &project_workflow_bindings,
-        )
-        .await?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-
-        // Only after the short metadata transaction commits do we inspect and
-        // stream potentially large asset files.
+            .map_err(map_repository_error)?;
+        let mut document = snapshot.document;
         let mut files = Vec::new();
         let mut assets = Vec::new();
-        for asset in db_assets {
-            if asset
-                .source_task_id
-                .as_ref()
-                .is_some_and(|task_id| excluded_tasks.contains(task_id))
-            {
-                continue;
-            }
+        for asset in snapshot.assets {
             if !safe_component(&asset.id) {
                 return Err(AppError::backup_invalid("资产 ID 不能用于备份路径"));
             }
@@ -926,7 +602,7 @@ impl ProjectBackupService {
             });
             assets.push(BackupAsset {
                 id: asset.id,
-                asset_type: asset.r#type,
+                asset_type: asset.asset_type,
                 category: asset.category.unwrap_or_default(),
                 name: asset.name,
                 original_name: asset.original_name.unwrap_or_default(),
@@ -948,87 +624,12 @@ impl ProjectBackupService {
                 thumbnail_path,
             });
         }
-        let included_asset_ids = assets
-            .iter()
-            .map(|asset| asset.id.clone())
-            .collect::<HashSet<_>>();
-        asset_tag_links.retain(|link| included_asset_ids.contains(link.asset_id.as_str()));
-        asset_favorites.retain(|favorite| included_asset_ids.contains(favorite.asset_id.as_str()));
-        asset_video_prompts.retain(|prompt| included_asset_ids.contains(prompt.asset_id.as_str()));
-        let reference_anchors = assemble_reference_anchor_backups(
-            reference_anchor_rows,
-            reference_anchor_asset_rows,
-            &included_asset_ids,
-        );
-        let shot_scene_assignments = shot_scene_assignments
-            .into_iter()
-            .filter(|assignment| included_shot_ids.contains(assignment.shot_id.as_str()))
-            .collect::<Vec<_>>();
-        let document = BackupDocument {
-            project: BackupProject {
-                id: project.id,
-                name: project.name,
-            },
-            description: project.description,
-            created_at: project.created_at.to_rfc3339(),
-            updated_at: project.updated_at.to_rfc3339(),
-            active_tasks_excluded: active_ids.len(),
-            incomplete_tasks_excluded: 0,
-            tasks,
-            task_events,
-            assets,
-            mappings,
-            snapshots,
-            presets,
-            prompt_entries,
-            prompt_versions,
-            batches,
-            items,
-            preparation_snapshots,
-            workflow_refs,
-            project_workflow_bindings,
-            workflow_registry: Some(workflow_registry),
-            asset_tags,
-            asset_tag_links,
-            asset_favorites,
-            asset_video_prompts,
-            reference_anchors,
-            production_series,
-            production_episodes,
-            production_scenes,
-            shot_scene_assignments,
-            script_sources,
-            script_draft_revisions,
-            production_item_reviews,
-            benchmark_experiments,
-            benchmark_candidates,
-            production_runs,
-            production_stages,
-            production_stage_items,
-            production_run_templates,
-            benchmark_runs,
-            benchmark_quality_scores,
-            shots,
-            shot_stage_configs,
-            shot_stage_prompts,
-            shot_reference_assets,
-            shot_generation_links,
-            character_profiles,
-            scene_profiles,
-            prop_profiles,
-            style_profiles,
-            costume_variants,
-            profile_revisions,
-            reference_sets,
-            reference_set_items,
-            shot_profile_bindings,
-            shot_reference_set_bindings,
-            scope_profile_bindings,
-            scope_reference_set_bindings,
-        };
+
+        document.assets = assets;
         Ok(BuiltBackup { document, files })
     }
 
+    #[cfg(test)]
     async fn restore_rows(
         &self,
         project: &ProjectRecord,
@@ -1061,56 +662,59 @@ impl ProjectBackupService {
         shot_generation_link_ids: &HashMap<String, String>,
         restored_assets: &[RestoredAsset],
     ) -> Result<(), AppError> {
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| AppError::database(error.to_string()))?;
         let restored_snapshots = prepare_restored_snapshots(document, asset_ids)?;
-        let result = restore_rows_in_transaction(
-            &mut transaction,
-            project,
-            document,
-            task_ids,
-            asset_ids,
-            snapshot_ids,
-            preset_ids,
-            prompt_ids,
-            prompt_version_ids,
-            batch_ids,
-            item_ids,
-            preparation_snapshot_ids,
-            benchmark_experiment_ids,
-            benchmark_candidate_ids,
-            production_run_ids,
-            production_stage_ids,
-            production_stage_item_ids,
-            production_run_template_ids,
-            benchmark_run_ids,
-            benchmark_quality_score_ids,
-            tag_ids,
-            reference_anchor_ids,
-            production_structure_ids,
-            script_source_ids,
-            script_draft_ids,
-            script_revision_ids,
-            consistency_ids,
-            shot_ids,
-            shot_generation_link_ids,
-            restored_assets,
-            &restored_snapshots,
-        )
-        .await;
-        match result {
-            Ok(()) => transaction
-                .commit()
-                .await
-                .map_err(|error| AppError::database(error.to_string())),
-            Err(error) => {
-                let _ = transaction.rollback().await;
-                Err(error)
-            }
-        }
+        self.repository
+            .restore_atomic(ProjectBackupRestorePlan {
+                project: project.clone(),
+                document: document.clone(),
+                task_ids: task_ids.clone(),
+                asset_ids: asset_ids.clone(),
+                snapshot_ids: snapshot_ids.clone(),
+                preset_ids: preset_ids.clone(),
+                prompt_ids: prompt_ids.clone(),
+                prompt_version_ids: prompt_version_ids.clone(),
+                batch_ids: batch_ids.clone(),
+                item_ids: item_ids.clone(),
+                preparation_snapshot_ids: preparation_snapshot_ids.clone(),
+                benchmark_experiment_ids: benchmark_experiment_ids.clone(),
+                benchmark_candidate_ids: benchmark_candidate_ids.clone(),
+                production_run_ids: production_run_ids.clone(),
+                production_stage_ids: production_stage_ids.clone(),
+                production_stage_item_ids: production_stage_item_ids.clone(),
+                production_run_template_ids: production_run_template_ids.clone(),
+                benchmark_run_ids: benchmark_run_ids.clone(),
+                benchmark_quality_score_ids: benchmark_quality_score_ids.clone(),
+                tag_ids: tag_ids.clone(),
+                reference_anchor_ids: reference_anchor_ids.clone(),
+                production_structure_ids: ProductionStructureIds {
+                    series: production_structure_ids.series.clone(),
+                    episodes: production_structure_ids.episodes.clone(),
+                    scenes: production_structure_ids.scenes.clone(),
+                },
+                script_source_ids: script_source_ids.clone(),
+                script_draft_ids: script_draft_ids.clone(),
+                script_revision_ids: script_revision_ids.clone(),
+                consistency_ids: ConsistencyRestoreIds {
+                    profiles: consistency_ids.profiles.clone(),
+                    costume_variants: consistency_ids.costume_variants.clone(),
+                    profile_revisions: consistency_ids.profile_revisions.clone(),
+                    reference_sets: consistency_ids.reference_sets.clone(),
+                    shot_profile_bindings: consistency_ids.shot_profile_bindings.clone(),
+                    shot_reference_set_bindings: consistency_ids
+                        .shot_reference_set_bindings
+                        .clone(),
+                    scope_profile_bindings: consistency_ids.scope_profile_bindings.clone(),
+                    scope_reference_set_bindings: consistency_ids
+                        .scope_reference_set_bindings
+                        .clone(),
+                },
+                shot_ids: shot_ids.clone(),
+                shot_generation_link_ids: shot_generation_link_ids.clone(),
+                restored_assets: restored_assets.to_vec(),
+                restored_snapshots,
+            })
+            .await
+            .map_err(map_repository_error)
     }
 }
 
@@ -1121,115 +725,116 @@ struct BuiltBackup {
 }
 
 #[derive(Clone)]
-struct BackupFileSource {
-    zip_path: String,
-    source_path: PathBuf,
-    expected_size: u64,
-    expected_sha256: Option<String>,
+pub(crate) struct BackupFileSource {
+    pub(crate) zip_path: String,
+    pub(crate) source_path: PathBuf,
+    pub(crate) expected_size: u64,
+    pub(crate) expected_sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupDocument {
-    project: BackupProject,
-    description: Option<String>,
-    created_at: String,
-    updated_at: String,
-    active_tasks_excluded: usize,
-    incomplete_tasks_excluded: usize,
-    tasks: Vec<BackupTask>,
-    task_events: Vec<BackupTaskEvent>,
-    assets: Vec<BackupAsset>,
-    mappings: Vec<BackupMapping>,
-    snapshots: Vec<BackupSnapshot>,
-    presets: Vec<BackupPreset>,
+pub struct BackupDocument {
+    pub(crate) project: BackupProject,
+    pub(crate) description: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) active_tasks_excluded: usize,
+    pub(crate) incomplete_tasks_excluded: usize,
+    pub(crate) tasks: Vec<BackupTask>,
+    pub(crate) task_events: Vec<BackupTaskEvent>,
+    pub(crate) assets: Vec<BackupAsset>,
+    pub(crate) mappings: Vec<BackupMapping>,
+    pub(crate) snapshots: Vec<BackupSnapshot>,
+    pub(crate) presets: Vec<BackupPreset>,
     #[serde(default)]
-    prompt_entries: Vec<BackupPromptEntry>,
+    pub(crate) prompt_entries: Vec<BackupPromptEntry>,
     #[serde(default)]
-    prompt_versions: Vec<BackupPromptVersion>,
-    batches: Vec<BackupBatch>,
-    items: Vec<BackupBatchItem>,
+    pub(crate) prompt_versions: Vec<BackupPromptVersion>,
+    pub(crate) batches: Vec<BackupBatch>,
+    pub(crate) items: Vec<BackupBatchItem>,
     #[serde(default)]
-    preparation_snapshots: Vec<BackupProductionPreparationSnapshot>,
-    workflow_refs: Vec<WorkflowReference>,
+    pub(crate) preparation_snapshots: Vec<BackupProductionPreparationSnapshot>,
+    pub(crate) workflow_refs: Vec<WorkflowReference>,
     #[serde(default)]
-    project_workflow_bindings: Vec<BackupProjectWorkflowBinding>,
+    pub(crate) project_workflow_bindings: Vec<BackupProjectWorkflowBinding>,
     #[serde(default)]
-    workflow_registry: Option<BackupWorkflowRegistry>,
+    pub(crate) workflow_registry: Option<BackupWorkflowRegistry>,
     #[serde(default)]
-    asset_tags: Vec<BackupAssetTag>,
+    pub(crate) asset_tags: Vec<BackupAssetTag>,
     #[serde(default)]
-    asset_tag_links: Vec<BackupAssetTagLink>,
+    pub(crate) asset_tag_links: Vec<BackupAssetTagLink>,
     #[serde(default)]
-    asset_favorites: Vec<BackupAssetFavorite>,
+    pub(crate) asset_favorites: Vec<BackupAssetFavorite>,
     #[serde(default)]
-    asset_video_prompts: Vec<BackupAssetVideoPrompt>,
+    pub(crate) asset_video_prompts: Vec<BackupAssetVideoPrompt>,
     #[serde(default)]
-    reference_anchors: Vec<BackupReferenceAnchor>,
+    pub(crate) reference_anchors: Vec<BackupReferenceAnchor>,
     #[serde(default)]
-    production_series: Vec<BackupProductionSeries>,
+    pub(crate) production_series: Vec<BackupProductionSeries>,
     #[serde(default)]
-    production_episodes: Vec<BackupProductionEpisode>,
+    pub(crate) production_episodes: Vec<BackupProductionEpisode>,
     #[serde(default)]
-    production_scenes: Vec<BackupProductionScene>,
+    pub(crate) production_scenes: Vec<BackupProductionScene>,
     #[serde(default)]
-    shot_scene_assignments: Vec<BackupShotSceneAssignment>,
+    pub(crate) shot_scene_assignments: Vec<BackupShotSceneAssignment>,
     #[serde(default)]
-    script_sources: Vec<BackupScriptSource>,
+    pub(crate) script_sources: Vec<BackupScriptSource>,
     #[serde(default)]
-    script_draft_revisions: Vec<BackupScriptDraftRevision>,
+    pub(crate) script_draft_revisions: Vec<BackupScriptDraftRevision>,
     #[serde(default)]
-    production_item_reviews: Vec<BackupProductionItemReview>,
+    pub(crate) production_item_reviews: Vec<BackupProductionItemReview>,
     #[serde(default)]
-    benchmark_experiments: Vec<BackupBenchmarkExperiment>,
+    pub(crate) benchmark_experiments: Vec<BackupBenchmarkExperiment>,
     #[serde(default)]
-    benchmark_candidates: Vec<BackupBenchmarkCandidate>,
+    pub(crate) benchmark_candidates: Vec<BackupBenchmarkCandidate>,
     #[serde(default)]
-    production_runs: Vec<BackupProductionRun>,
+    pub(crate) production_runs: Vec<BackupProductionRun>,
     #[serde(default)]
-    production_stages: Vec<BackupProductionStage>,
+    pub(crate) production_stages: Vec<BackupProductionStage>,
     #[serde(default)]
-    production_stage_items: Vec<BackupProductionStageItem>,
+    pub(crate) production_stage_items: Vec<BackupProductionStageItem>,
     #[serde(default)]
-    production_run_templates: Vec<BackupProductionRunTemplate>,
+    pub(crate) production_run_templates: Vec<BackupProductionRunTemplate>,
     #[serde(default)]
-    benchmark_runs: Vec<BackupBenchmarkRun>,
+    pub(crate) benchmark_runs: Vec<BackupBenchmarkRun>,
     #[serde(default)]
-    benchmark_quality_scores: Vec<BackupBenchmarkQualityScore>,
+    pub(crate) benchmark_quality_scores: Vec<BackupBenchmarkQualityScore>,
     #[serde(default)]
-    shots: Vec<BackupShot>,
+    pub(crate) shots: Vec<BackupShot>,
+
     #[serde(default)]
-    shot_stage_configs: Vec<BackupShotStageConfig>,
+    pub(crate) shot_stage_configs: Vec<BackupShotStageConfig>,
     #[serde(default)]
-    shot_stage_prompts: Vec<BackupShotStagePrompt>,
+    pub(crate) shot_stage_prompts: Vec<BackupShotStagePrompt>,
     #[serde(default)]
-    shot_reference_assets: Vec<BackupShotReferenceAsset>,
+    pub(crate) shot_reference_assets: Vec<BackupShotReferenceAsset>,
     #[serde(default)]
-    shot_generation_links: Vec<BackupShotGenerationLink>,
+    pub(crate) shot_generation_links: Vec<BackupShotGenerationLink>,
     #[serde(default)]
-    character_profiles: Vec<BackupCharacterProfile>,
+    pub(crate) character_profiles: Vec<BackupCharacterProfile>,
     #[serde(default)]
-    scene_profiles: Vec<BackupSceneProfile>,
+    pub(crate) scene_profiles: Vec<BackupSceneProfile>,
     #[serde(default)]
-    prop_profiles: Vec<BackupPropProfile>,
+    pub(crate) prop_profiles: Vec<BackupPropProfile>,
     #[serde(default)]
-    style_profiles: Vec<BackupStyleProfile>,
+    pub(crate) style_profiles: Vec<BackupStyleProfile>,
     #[serde(default)]
-    costume_variants: Vec<BackupCostumeVariant>,
+    pub(crate) costume_variants: Vec<BackupCostumeVariant>,
     #[serde(default)]
-    profile_revisions: Vec<BackupProfileRevision>,
+    pub(crate) profile_revisions: Vec<BackupProfileRevision>,
     #[serde(default)]
-    reference_sets: Vec<BackupReferenceSet>,
+    pub(crate) reference_sets: Vec<BackupReferenceSet>,
     #[serde(default)]
-    reference_set_items: Vec<BackupReferenceSetItem>,
+    pub(crate) reference_set_items: Vec<BackupReferenceSetItem>,
     #[serde(default)]
-    shot_profile_bindings: Vec<BackupShotProfileBinding>,
+    pub(crate) shot_profile_bindings: Vec<BackupShotProfileBinding>,
     #[serde(default)]
-    shot_reference_set_bindings: Vec<BackupShotReferenceSetBinding>,
+    pub(crate) shot_reference_set_bindings: Vec<BackupShotReferenceSetBinding>,
     #[serde(default)]
-    scope_profile_bindings: Vec<BackupScopeProfileBinding>,
+    pub(crate) scope_profile_bindings: Vec<BackupScopeProfileBinding>,
     #[serde(default)]
-    scope_reference_set_bindings: Vec<BackupScopeReferenceSetBinding>,
+    pub(crate) scope_reference_set_bindings: Vec<BackupScopeReferenceSetBinding>,
 }
 
 /// Registry metadata is part of a project backup because bindings and history
@@ -1237,432 +842,432 @@ struct BackupDocument {
 /// documents readable; Backup17 always writes it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupWorkflowRegistry {
-    workflows: Vec<BackupWorkflow>,
-    versions: Vec<BackupWorkflowVersion>,
-    recipes: Vec<BackupWorkflowRecipe>,
-    runtime_artifacts: Vec<BackupWorkflowRuntimeArtifact>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupWorkflow {
-    id: String,
-    name: String,
-    category: String,
-    mode: String,
-    source_kind: String,
-    library_state: String,
-    current_version_id: Option<String>,
-    removed_at: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupWorkflowVersion {
-    id: String,
-    workflow_id: String,
-    version: String,
-    api_workflow_json: String,
-    workflow_sha256: String,
-    package_name: Option<String>,
-    package_source_path: Option<String>,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupWorkflowRecipe {
-    id: String,
-    workflow_version_id: String,
-    version: String,
-    schema_version: i64,
-    recipe_yaml: String,
-    recipe_sha256: String,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupWorkflowRuntimeArtifact {
-    id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    package_name: String,
-    source_kind: String,
-    package_source_path: Option<String>,
-    workflow_sha256: String,
-    recipe_sha256: String,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupCharacterProfile {
-    id: String,
-    project_id: String,
-    name: String,
-    description: String,
-    canonical_prompt: String,
-    negative_prompt: String,
-    default_style_profile_id: Option<String>,
-    default_reference_set_id: Option<String>,
-    active_revision_id: Option<String>,
-    metadata_json: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupSceneProfile {
-    id: String,
-    project_id: String,
-    name: String,
-    description: String,
-    environment_prompt: String,
-    lighting_prompt: Option<String>,
-    negative_prompt: Option<String>,
-    default_style_profile_id: Option<String>,
-    default_reference_set_id: Option<String>,
-    active_revision_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupPropProfile {
-    id: String,
-    project_id: String,
-    name: String,
-    description: String,
-    canonical_prompt: String,
-    material_prompt: Option<String>,
-    scale_prompt: Option<String>,
-    default_reference_set_id: Option<String>,
-    active_revision_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupStyleProfile {
-    id: String,
-    project_id: String,
-    name: String,
-    style_prompt: String,
-    color_prompt: Option<String>,
-    line_prompt: Option<String>,
-    negative_prompt: Option<String>,
-    output_notes: Option<String>,
-    active_revision_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupCostumeVariant {
-    id: String,
-    character_profile_id: String,
-    name: String,
-    prompt_fragment: String,
-    reference_set_id: Option<String>,
-    is_default: i64,
-    ordinal: i64,
-    active_revision_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupProfileRevision {
-    id: String,
-    profile_type: String,
-    profile_id: String,
-    revision_number: i64,
-    content_json: String,
-    content_sha256: String,
-    status: String,
-    created_at: String,
-    created_by: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupReferenceSet {
-    id: String,
-    project_id: String,
-    name: String,
-    purpose: String,
-    description: String,
-    owner_profile_type: Option<String>,
-    owner_profile_id: Option<String>,
-    active_revision_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupReferenceSetItem {
-    reference_set_id: String,
-    asset_id: String,
-    ordinal: i64,
-    role: Option<String>,
-    is_primary: i64,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupShotProfileBinding {
-    id: String,
-    shot_id: String,
-    role: String,
-    profile_type: String,
-    profile_id: String,
-    costume_variant_id: Option<String>,
-    ordinal: i64,
-    inheritance_mode: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupShotReferenceSetBinding {
-    id: String,
-    shot_id: String,
-    role: String,
-    reference_set_id: String,
-    ordinal: i64,
-    required: i64,
-    inheritance_mode: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupScopeProfileBinding {
-    id: String,
-    project_id: String,
-    scope_type: String,
-    scope_id: String,
-    role: String,
-    profile_type: String,
-    profile_id: String,
-    costume_variant_id: Option<String>,
-    ordinal: i64,
-    inheritance_mode: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupScopeReferenceSetBinding {
-    id: String,
-    project_id: String,
-    scope_type: String,
-    scope_id: String,
-    role: String,
-    reference_set_id: String,
-    ordinal: i64,
-    required: i64,
-    inheritance_mode: String,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupWorkflowRegistry {
+    pub(crate) workflows: Vec<BackupWorkflow>,
+    pub(crate) versions: Vec<BackupWorkflowVersion>,
+    pub(crate) recipes: Vec<BackupWorkflowRecipe>,
+    pub(crate) runtime_artifacts: Vec<BackupWorkflowRuntimeArtifact>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupPromptEntry {
-    id: String,
-    project_id: String,
-    kind: String,
-    name: String,
-    normalized_name: String,
-    tags: Vec<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupWorkflow {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) category: String,
+    pub(crate) mode: String,
+    pub(crate) source_kind: String,
+    pub(crate) library_state: String,
+    pub(crate) current_version_id: Option<String>,
+    pub(crate) removed_at: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupPromptVersion {
-    id: String,
-    project_id: String,
-    prompt_id: String,
-    version: i64,
-    text: String,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupAssetTag {
-    id: String,
-    project_id: String,
-    name: String,
-    normalized_name: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupAssetTagLink {
-    asset_id: String,
-    tag_id: String,
-    project_id: String,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupAssetFavorite {
-    asset_id: String,
-    project_id: String,
-    created_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-struct BackupAssetVideoPrompt {
-    asset_id: String,
-    project_id: String,
-    prompt_text: String,
-    updated_at: String,
+pub(crate) struct BackupWorkflowVersion {
+    pub(crate) id: String,
+    pub(crate) workflow_id: String,
+    pub(crate) version: String,
+    pub(crate) api_workflow_json: String,
+    pub(crate) workflow_sha256: String,
+    pub(crate) package_name: Option<String>,
+    pub(crate) package_source_path: Option<String>,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupReferenceAnchor {
-    id: String,
-    project_id: String,
-    kind: String,
-    name: String,
-    normalized_name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
-    assets: Vec<BackupReferenceAnchorAsset>,
+pub(crate) struct BackupWorkflowRecipe {
+    pub(crate) id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) version: String,
+    pub(crate) schema_version: i64,
+    pub(crate) recipe_yaml: String,
+    pub(crate) recipe_sha256: String,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupReferenceAnchorAsset {
-    asset_id: String,
-    ordinal: i64,
-    created_at: String,
+pub(crate) struct BackupWorkflowRuntimeArtifact {
+    pub(crate) id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) package_name: String,
+    pub(crate) source_kind: String,
+    pub(crate) package_source_path: Option<String>,
+    pub(crate) workflow_sha256: String,
+    pub(crate) recipe_sha256: String,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionSeries {
-    id: String,
-    project_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupCharacterProfile {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) canonical_prompt: String,
+    pub(crate) negative_prompt: String,
+    pub(crate) default_style_profile_id: Option<String>,
+    pub(crate) default_reference_set_id: Option<String>,
+    pub(crate) active_revision_id: Option<String>,
+    pub(crate) metadata_json: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionEpisode {
-    id: String,
-    series_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupSceneProfile {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) environment_prompt: String,
+    pub(crate) lighting_prompt: Option<String>,
+    pub(crate) negative_prompt: Option<String>,
+    pub(crate) default_style_profile_id: Option<String>,
+    pub(crate) default_reference_set_id: Option<String>,
+    pub(crate) active_revision_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionScene {
-    id: String,
-    episode_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupPropProfile {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) canonical_prompt: String,
+    pub(crate) material_prompt: Option<String>,
+    pub(crate) scale_prompt: Option<String>,
+    pub(crate) default_reference_set_id: Option<String>,
+    pub(crate) active_revision_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupShotSceneAssignment {
-    shot_id: String,
-    scene_id: String,
-    ordinal: i64,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupStyleProfile {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) style_prompt: String,
+    pub(crate) color_prompt: Option<String>,
+    pub(crate) line_prompt: Option<String>,
+    pub(crate) negative_prompt: Option<String>,
+    pub(crate) output_notes: Option<String>,
+    pub(crate) active_revision_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupScriptSource {
-    id: String,
-    project_id: String,
-    format: String,
-    original_filename: Option<String>,
-    source_checksum: String,
-    source_bytes: i64,
-    source_text: String,
-    schema_version: i64,
-    created_at: String,
+pub(crate) struct BackupCostumeVariant {
+    pub(crate) id: String,
+    pub(crate) character_profile_id: String,
+    pub(crate) name: String,
+    pub(crate) prompt_fragment: String,
+    pub(crate) reference_set_id: Option<String>,
+    pub(crate) is_default: i64,
+    pub(crate) ordinal: i64,
+    pub(crate) active_revision_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupScriptDraftRevision {
-    id: String,
-    draft_id: String,
-    project_id: String,
-    source_id: String,
-    revision: i64,
-    previous_revision_id: Option<String>,
-    schema_version: i64,
-    revision_kind: String,
-    parser_version: String,
-    contract_version: i64,
-    provider_kind: Option<String>,
-    provider_model: Option<String>,
-    provider_metadata_json: Option<String>,
-    payload_checksum: String,
-    summary_json: String,
-    payload_json: String,
-    created_at: String,
+pub(crate) struct BackupProfileRevision {
+    pub(crate) id: String,
+    pub(crate) profile_type: String,
+    pub(crate) profile_id: String,
+    pub(crate) revision_number: i64,
+    pub(crate) content_json: String,
+    pub(crate) content_sha256: String,
+    pub(crate) status: String,
+    pub(crate) created_at: String,
+    pub(crate) created_by: Option<String>,
 }
 
-#[derive(Default)]
-struct ProductionStructureIds {
-    series: HashMap<String, String>,
-    episodes: HashMap<String, String>,
-    scenes: HashMap<String, String>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupReferenceSet {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) purpose: String,
+    pub(crate) description: String,
+    pub(crate) owner_profile_type: Option<String>,
+    pub(crate) owner_profile_id: Option<String>,
+    pub(crate) active_revision_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
-#[derive(Default)]
-struct ConsistencyRestoreIds {
-    profiles: HashMap<String, String>,
-    costume_variants: HashMap<String, String>,
-    profile_revisions: HashMap<String, String>,
-    reference_sets: HashMap<String, String>,
-    shot_profile_bindings: HashMap<String, String>,
-    shot_reference_set_bindings: HashMap<String, String>,
-    scope_profile_bindings: HashMap<String, String>,
-    scope_reference_set_bindings: HashMap<String, String>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupReferenceSetItem {
+    pub(crate) reference_set_id: String,
+    pub(crate) asset_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) role: Option<String>,
+    pub(crate) is_primary: i64,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupShotProfileBinding {
+    pub(crate) id: String,
+    pub(crate) shot_id: String,
+    pub(crate) role: String,
+    pub(crate) profile_type: String,
+    pub(crate) profile_id: String,
+    pub(crate) costume_variant_id: Option<String>,
+    pub(crate) ordinal: i64,
+    pub(crate) inheritance_mode: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupShotReferenceSetBinding {
+    pub(crate) id: String,
+    pub(crate) shot_id: String,
+    pub(crate) role: String,
+    pub(crate) reference_set_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) required: i64,
+    pub(crate) inheritance_mode: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupScopeProfileBinding {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) scope_type: String,
+    pub(crate) scope_id: String,
+    pub(crate) role: String,
+    pub(crate) profile_type: String,
+    pub(crate) profile_id: String,
+    pub(crate) costume_variant_id: Option<String>,
+    pub(crate) ordinal: i64,
+    pub(crate) inheritance_mode: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupScopeReferenceSetBinding {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) scope_type: String,
+    pub(crate) scope_id: String,
+    pub(crate) role: String,
+    pub(crate) reference_set_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) required: i64,
+    pub(crate) inheritance_mode: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupPromptEntry {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) kind: String,
+    pub(crate) name: String,
+    pub(crate) normalized_name: String,
+    pub(crate) tags: Vec<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupPromptVersion {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) prompt_id: String,
+    pub(crate) version: i64,
+    pub(crate) text: String,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupAssetTag {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) normalized_name: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupAssetTagLink {
+    pub(crate) asset_id: String,
+    pub(crate) tag_id: String,
+    pub(crate) project_id: String,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupAssetFavorite {
+    pub(crate) asset_id: String,
+    pub(crate) project_id: String,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupAssetVideoPrompt {
+    pub(crate) asset_id: String,
+    pub(crate) project_id: String,
+    pub(crate) prompt_text: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupReferenceAnchor {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) kind: String,
+    pub(crate) name: String,
+    pub(crate) normalized_name: String,
+    pub(crate) description: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) assets: Vec<BackupReferenceAnchorAsset>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupReferenceAnchorAsset {
+    pub(crate) asset_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupProductionSeries {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupProductionEpisode {
+    pub(crate) id: String,
+    pub(crate) series_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupProductionScene {
+    pub(crate) id: String,
+    pub(crate) episode_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupShotSceneAssignment {
+    pub(crate) shot_id: String,
+    pub(crate) scene_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupScriptSource {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) format: String,
+    pub(crate) original_filename: Option<String>,
+    pub(crate) source_checksum: String,
+    pub(crate) source_bytes: i64,
+    pub(crate) source_text: String,
+    pub(crate) schema_version: i64,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupScriptDraftRevision {
+    pub(crate) id: String,
+    pub(crate) draft_id: String,
+    pub(crate) project_id: String,
+    pub(crate) source_id: String,
+    pub(crate) revision: i64,
+    pub(crate) previous_revision_id: Option<String>,
+    pub(crate) schema_version: i64,
+    pub(crate) revision_kind: String,
+    pub(crate) parser_version: String,
+    pub(crate) contract_version: i64,
+    pub(crate) provider_kind: Option<String>,
+    pub(crate) provider_model: Option<String>,
+    pub(crate) provider_metadata_json: Option<String>,
+    pub(crate) payload_checksum: String,
+    pub(crate) summary_json: String,
+    pub(crate) payload_json: String,
+    pub(crate) created_at: String,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ProductionStructureIds {
+    pub(crate) series: HashMap<String, String>,
+    pub(crate) episodes: HashMap<String, String>,
+    pub(crate) scenes: HashMap<String, String>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ConsistencyRestoreIds {
+    pub(crate) profiles: HashMap<String, String>,
+    pub(crate) costume_variants: HashMap<String, String>,
+    pub(crate) profile_revisions: HashMap<String, String>,
+    pub(crate) reference_sets: HashMap<String, String>,
+    pub(crate) shot_profile_bindings: HashMap<String, String>,
+    pub(crate) shot_reference_set_bindings: HashMap<String, String>,
+    pub(crate) scope_profile_bindings: HashMap<String, String>,
+    pub(crate) scope_reference_set_bindings: HashMap<String, String>,
 }
 
 fn consistency_required_id<'a>(
@@ -1709,1071 +1314,449 @@ fn remap_consistency_scope_id(
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupTask {
-    id: String,
-    workflow_id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    app_version: Option<String>,
-    build_commit: Option<String>,
-    workflow_version: Option<String>,
-    workflow_sha256: Option<String>,
-    recipe_version: Option<String>,
-    recipe_sha256: Option<String>,
-    package_name: Option<String>,
-    package_source_path: Option<String>,
-    dynamic_binding_targets: Option<Value>,
+pub(crate) struct BackupTask {
+    pub(crate) id: String,
+    pub(crate) workflow_id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) app_version: Option<String>,
+    pub(crate) build_commit: Option<String>,
+    pub(crate) workflow_version: Option<String>,
+    pub(crate) workflow_sha256: Option<String>,
+    pub(crate) recipe_version: Option<String>,
+    pub(crate) recipe_sha256: Option<String>,
+    pub(crate) package_name: Option<String>,
+    pub(crate) package_source_path: Option<String>,
+    pub(crate) dynamic_binding_targets: Option<Value>,
     #[serde(default)]
-    generation_execution_id: Option<String>,
+    pub(crate) generation_execution_id: Option<String>,
     #[serde(default)]
-    compiled_workflow_sha256: Option<String>,
+    pub(crate) compiled_workflow_sha256: Option<String>,
     #[serde(default)]
-    runtime_profile: Option<String>,
+    pub(crate) runtime_profile: Option<String>,
     #[serde(default)]
-    concurrency_class: Option<String>,
+    pub(crate) concurrency_class: Option<String>,
     #[serde(default)]
-    prepare_started_at: Option<String>,
+    pub(crate) prepare_started_at: Option<String>,
     #[serde(default)]
-    prepared_at: Option<String>,
+    pub(crate) prepared_at: Option<String>,
     #[serde(default)]
-    submitted_at: Option<String>,
+    pub(crate) submitted_at: Option<String>,
     #[serde(default)]
-    execution_started_at: Option<String>,
+    pub(crate) execution_started_at: Option<String>,
     #[serde(default)]
-    execution_finished_at: Option<String>,
+    pub(crate) execution_finished_at: Option<String>,
     #[serde(default)]
-    collection_finished_at: Option<String>,
-    status: String,
-    prompt_id: Option<String>,
-    queue_number: Option<i64>,
-    progress_mode: String,
-    progress_current: Option<i64>,
-    progress_total: Option<i64>,
-    current_node_id: Option<String>,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    raw_error: Option<Value>,
-    created_at: String,
-    queued_at: Option<String>,
-    started_at: Option<String>,
-    finished_at: Option<String>,
+    pub(crate) collection_finished_at: Option<String>,
+    pub(crate) status: String,
+    pub(crate) prompt_id: Option<String>,
+    pub(crate) queue_number: Option<i64>,
+    pub(crate) progress_mode: String,
+    pub(crate) progress_current: Option<i64>,
+    pub(crate) progress_total: Option<i64>,
+    pub(crate) current_node_id: Option<String>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) raw_error: Option<Value>,
+    pub(crate) created_at: String,
+    pub(crate) queued_at: Option<String>,
+    pub(crate) started_at: Option<String>,
+    pub(crate) finished_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupTaskEvent {
-    id: String,
-    task_id: String,
-    sequence: i64,
-    event_type: String,
-    payload: Option<Value>,
-    created_at: String,
+pub(crate) struct BackupTaskEvent {
+    pub(crate) id: String,
+    pub(crate) task_id: String,
+    pub(crate) sequence: i64,
+    pub(crate) event_type: String,
+    pub(crate) payload: Option<Value>,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupAsset {
-    id: String,
-    asset_type: String,
-    category: String,
-    name: String,
-    original_name: String,
-    sha256: String,
-    mime_type: String,
-    width: i64,
-    height: i64,
-    duration_ms: Option<i64>,
-    file_size: i64,
-    source_task_id: Option<String>,
-    metadata: Value,
-    created_at: String,
-    updated_at: String,
-    content_path: String,
-    thumbnail_path: Option<String>,
+pub(crate) struct BackupAsset {
+    pub(crate) id: String,
+    pub(crate) asset_type: String,
+    pub(crate) category: String,
+    pub(crate) name: String,
+    pub(crate) original_name: String,
+    pub(crate) sha256: String,
+    pub(crate) mime_type: String,
+    pub(crate) width: i64,
+    pub(crate) height: i64,
+    pub(crate) duration_ms: Option<i64>,
+    pub(crate) file_size: i64,
+    pub(crate) source_task_id: Option<String>,
+    pub(crate) metadata: Value,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) content_path: String,
+    pub(crate) thumbnail_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupMapping {
-    task_id: String,
-    output_id: String,
-    ordinal: i64,
-    asset_id: String,
-    created_at: String,
+pub(crate) struct BackupMapping {
+    pub(crate) task_id: String,
+    pub(crate) output_id: String,
+    pub(crate) ordinal: i64,
+
+    pub(crate) asset_id: String,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupSnapshot {
-    id: String,
-    task_id: String,
-    workflow: Value,
-    recipe_yaml: String,
-    user_inputs: Value,
-    resolved_inputs: Value,
-    created_at: String,
+pub(crate) struct BackupSnapshot {
+    pub(crate) id: String,
+    pub(crate) task_id: String,
+    pub(crate) workflow: Value,
+    pub(crate) recipe_yaml: String,
+    pub(crate) user_inputs: Value,
+    pub(crate) resolved_inputs: Value,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupPreset {
-    id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    name: String,
-    values: Value,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupPreset {
+    pub(crate) id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) name: String,
+    pub(crate) values: Value,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupBatch {
-    id: String,
-    name: String,
-    status: String,
-    continue_on_failure: i64,
-    archived_at: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupBatch {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) status: String,
+    pub(crate) continue_on_failure: i64,
+    pub(crate) archived_at: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupBatchItem {
-    id: String,
-    batch_id: String,
-    ordinal: i64,
-    workflow_version_id: String,
-    recipe_id: String,
-    values: Value,
-    status: String,
-    task_id: Option<String>,
-    retry_of_item_id: Option<String>,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupBatchItem {
+    pub(crate) id: String,
+    pub(crate) batch_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) values: Value,
+    pub(crate) status: String,
+    pub(crate) task_id: Option<String>,
+    pub(crate) retry_of_item_id: Option<String>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionPreparationSnapshot {
-    id: String,
-    project_id: String,
-    shot_id: String,
-    stage: String,
-    context_hash: String,
-    production_batch_id: String,
-    production_batch_item_id: String,
+pub(crate) struct BackupProductionPreparationSnapshot {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) shot_id: String,
+    pub(crate) stage: String,
+    pub(crate) context_hash: String,
+    pub(crate) production_batch_id: String,
+    pub(crate) production_batch_item_id: String,
     /// Immutable historical evidence. Runtime relations use the outer IDs above.
-    snapshot_json: String,
-    created_at: String,
+    pub(crate) snapshot_json: String,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ProductionPreparationSnapshotV1 {
-    schema_version: u32,
-    project_id: String,
-    shot_id: String,
-    stage: String,
-    context_hash: String,
-    resolved_at: String,
-    prepared_at: String,
-    structure: Value,
-    profiles: Value,
-    reference_sets: Value,
-    reference_assets: Value,
-    prompt: Value,
-    workflow: Value,
-    output_spec: Value,
-    stage_input: Value,
-    frozen_generation_values: Value,
-    readiness: Value,
-    comfy_capability_evidence: Value,
+pub(crate) struct ProductionPreparationSnapshotV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) project_id: String,
+    pub(crate) shot_id: String,
+    pub(crate) stage: String,
+    pub(crate) context_hash: String,
+    pub(crate) resolved_at: String,
+    pub(crate) prepared_at: String,
+    pub(crate) structure: Value,
+    pub(crate) profiles: Value,
+    pub(crate) reference_sets: Value,
+    pub(crate) reference_assets: Value,
+    pub(crate) prompt: Value,
+    pub(crate) workflow: Value,
+    pub(crate) output_spec: Value,
+    pub(crate) stage_input: Value,
+    pub(crate) frozen_generation_values: Value,
+    pub(crate) readiness: Value,
+    pub(crate) comfy_capability_evidence: Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupBenchmarkExperiment {
-    id: String,
-    name: String,
-    media_type: String,
-    status: String,
-    base_values: Value,
-    asset_ids: Vec<String>,
-    winner_candidate_id: Option<String>,
-    production_batch_id: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupBenchmarkExperiment {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) media_type: String,
+    pub(crate) status: String,
+    pub(crate) base_values: Value,
+    pub(crate) asset_ids: Vec<String>,
+    pub(crate) winner_candidate_id: Option<String>,
+    pub(crate) production_batch_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupBenchmarkCandidate {
-    id: String,
-    experiment_id: String,
-    position: i64,
-    workflow_version_id: String,
-    recipe_id: String,
-    preset_id: Option<String>,
-    preset_name: Option<String>,
-    label: String,
-    values: Value,
-    asset_ids: Vec<String>,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    created_at: String,
+pub(crate) struct BackupBenchmarkCandidate {
+    pub(crate) id: String,
+    pub(crate) experiment_id: String,
+    pub(crate) position: i64,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) preset_id: Option<String>,
+    pub(crate) preset_name: Option<String>,
+    pub(crate) label: String,
+    pub(crate) values: Value,
+    pub(crate) asset_ids: Vec<String>,
+    pub(crate) production_batch_item_id: Option<String>,
+    pub(crate) task_id: Option<String>,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionRun {
-    id: String,
-    project_id: String,
-    name: String,
-    status: String,
-    current_stage_ordinal: i64,
-    template_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
+pub(crate) struct BackupProductionRun {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) status: String,
+    pub(crate) current_stage_ordinal: i64,
+    pub(crate) template_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) started_at: Option<String>,
+    pub(crate) finished_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionStage {
-    id: String,
-    run_id: String,
-    ordinal: i64,
-    stage_type: String,
-    status: String,
-    workflow_version_id: Option<String>,
-    recipe_id: Option<String>,
-    production_batch_id: Option<String>,
-    frozen_config: Value,
-    prompt: Option<String>,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
+pub(crate) struct BackupProductionStage {
+    pub(crate) id: String,
+    pub(crate) run_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) stage_type: String,
+    pub(crate) status: String,
+    pub(crate) workflow_version_id: Option<String>,
+    pub(crate) recipe_id: Option<String>,
+    pub(crate) production_batch_id: Option<String>,
+    pub(crate) frozen_config: Value,
+    pub(crate) prompt: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) started_at: Option<String>,
+    pub(crate) finished_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionStageItem {
-    id: String,
-    stage_id: String,
-    ordinal: i64,
-    status: String,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    asset_id: Option<String>,
-    source_asset_id: Option<String>,
-    reference_index: Option<i64>,
-    attempt: i64,
-    submission_idempotency_key: Option<String>,
-    parent_stage_item_id: Option<String>,
-    frozen_values: Value,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupProductionStageItem {
+    pub(crate) id: String,
+    pub(crate) stage_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) status: String,
+    pub(crate) production_batch_item_id: Option<String>,
+    pub(crate) task_id: Option<String>,
+    pub(crate) asset_id: Option<String>,
+    pub(crate) source_asset_id: Option<String>,
+    pub(crate) reference_index: Option<i64>,
+    pub(crate) attempt: i64,
+    pub(crate) submission_idempotency_key: Option<String>,
+    pub(crate) parent_stage_item_id: Option<String>,
+    pub(crate) frozen_values: Value,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionRunTemplate {
-    id: String,
-    project_id: String,
-    name: String,
-    krea2_workflow_version_id: Option<String>,
-    krea2_recipe_id: Option<String>,
-    krea2_preset_id: Option<String>,
-    default_image_count: i64,
-    h3_workflow_version_id: Option<String>,
-    h3_recipe_id: Option<String>,
-    h3_profile: Option<String>,
-    default_duration_seconds: Option<i64>,
-    default_width: Option<i64>,
-    default_height: Option<i64>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupProductionRunTemplate {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) name: String,
+    pub(crate) krea2_workflow_version_id: Option<String>,
+    pub(crate) krea2_recipe_id: Option<String>,
+    pub(crate) krea2_preset_id: Option<String>,
+    pub(crate) default_image_count: i64,
+    pub(crate) h3_workflow_version_id: Option<String>,
+    pub(crate) h3_recipe_id: Option<String>,
+    pub(crate) h3_profile: Option<String>,
+    pub(crate) default_duration_seconds: Option<i64>,
+    pub(crate) default_width: Option<i64>,
+    pub(crate) default_height: Option<i64>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupBenchmarkRun {
-    id: String,
-    experiment_id: String,
-    candidate_id: String,
-    run_number: i64,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    snapshot_id: Option<String>,
-    output_asset_id: Option<String>,
-    generation_execution_id: Option<String>,
-    compiled_workflow_sha256: Option<String>,
-    runtime_profile: Option<String>,
-    concurrency_class: Option<String>,
-    queue_wait_ms: Option<i64>,
-    prepare_ms: Option<i64>,
-    submit_ms: Option<i64>,
-    comfy_execution_ms: Option<i64>,
-    collect_ms: Option<i64>,
-    total_ms: Option<i64>,
-    status: Option<String>,
-    error_code: Option<String>,
-    output_file_size: Option<i64>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupBenchmarkRun {
+    pub(crate) id: String,
+    pub(crate) experiment_id: String,
+    pub(crate) candidate_id: String,
+    pub(crate) run_number: i64,
+    pub(crate) production_batch_item_id: Option<String>,
+    pub(crate) task_id: Option<String>,
+    pub(crate) snapshot_id: Option<String>,
+    pub(crate) output_asset_id: Option<String>,
+    pub(crate) generation_execution_id: Option<String>,
+    pub(crate) compiled_workflow_sha256: Option<String>,
+    pub(crate) runtime_profile: Option<String>,
+    pub(crate) concurrency_class: Option<String>,
+    pub(crate) queue_wait_ms: Option<i64>,
+    pub(crate) prepare_ms: Option<i64>,
+    pub(crate) submit_ms: Option<i64>,
+    pub(crate) comfy_execution_ms: Option<i64>,
+    pub(crate) collect_ms: Option<i64>,
+    pub(crate) total_ms: Option<i64>,
+    pub(crate) status: Option<String>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) output_file_size: Option<i64>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupBenchmarkQualityScore {
-    id: String,
-    candidate_id: String,
-    prompt_adherence: Option<i64>,
-    visual_quality: Option<i64>,
-    motion_quality: Option<i64>,
-    reference_consistency: Option<i64>,
-    overall: Option<i64>,
-    note: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupBenchmarkQualityScore {
+    pub(crate) id: String,
+    pub(crate) candidate_id: String,
+    pub(crate) prompt_adherence: Option<i64>,
+    pub(crate) visual_quality: Option<i64>,
+    pub(crate) motion_quality: Option<i64>,
+    pub(crate) reference_consistency: Option<i64>,
+    pub(crate) overall: Option<i64>,
+    pub(crate) note: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProductionItemReview {
-    id: String,
-    project_id: String,
-    production_batch_id: String,
-    production_batch_item_id: String,
-    task_id: Option<String>,
-    result_asset_id: Option<String>,
-    review_status: String,
-    review_note: String,
-    version: i64,
-    lineage_key: String,
-    parent_batch_id: Option<String>,
-    parent_item_id: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupProductionItemReview {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) production_batch_id: String,
+    pub(crate) production_batch_item_id: String,
+    pub(crate) task_id: Option<String>,
+    pub(crate) result_asset_id: Option<String>,
+    pub(crate) review_status: String,
+    pub(crate) review_note: String,
+    pub(crate) version: i64,
+    pub(crate) lineage_key: String,
+    pub(crate) parent_batch_id: Option<String>,
+    pub(crate) parent_item_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupShot {
-    id: String,
-    project_id: String,
-    ordinal: i64,
-    name: String,
-    prompt_text: String,
-    prompt_entry_id: Option<String>,
-    prompt_version_id: Option<String>,
-    selected_image_asset_id: Option<String>,
-    selected_video_asset_id: Option<String>,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupShot {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) ordinal: i64,
+    pub(crate) name: String,
+    pub(crate) prompt_text: String,
+    pub(crate) prompt_entry_id: Option<String>,
+    pub(crate) prompt_version_id: Option<String>,
+    pub(crate) selected_image_asset_id: Option<String>,
+    pub(crate) selected_video_asset_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupShotStageConfig {
-    shot_id: String,
-    stage: String,
-    workflow_id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    scalar_values: Value,
-    updated_at: String,
+pub(crate) struct BackupShotStageConfig {
+    pub(crate) shot_id: String,
+    pub(crate) stage: String,
+    pub(crate) workflow_id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) scalar_values: Value,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupShotStagePrompt {
-    shot_id: String,
-    stage: String,
-    prompt_text: String,
-    prompt_entry_id: Option<String>,
-    prompt_version_id: Option<String>,
-    updated_at: String,
+pub(crate) struct BackupShotStagePrompt {
+    pub(crate) shot_id: String,
+    pub(crate) stage: String,
+    pub(crate) prompt_text: String,
+    pub(crate) prompt_entry_id: Option<String>,
+    pub(crate) prompt_version_id: Option<String>,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupShotReferenceAsset {
-    shot_id: String,
-    stage: String,
-    asset_id: String,
-    ordinal: i64,
+pub(crate) struct BackupShotReferenceAsset {
+    pub(crate) shot_id: String,
+    pub(crate) stage: String,
+    pub(crate) asset_id: String,
+    pub(crate) ordinal: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupShotGenerationLink {
-    id: String,
-    shot_id: String,
-    stage: String,
-    task_id: Option<String>,
-    production_batch_item_id: Option<String>,
-    created_at: String,
+pub(crate) struct BackupShotGenerationLink {
+    pub(crate) id: String,
+    pub(crate) shot_id: String,
+    pub(crate) stage: String,
+    pub(crate) task_id: Option<String>,
+    pub(crate) production_batch_item_id: Option<String>,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
-struct WorkflowReference {
-    workflow_id: String,
-    workflow_version_id: String,
-    recipe_id: String,
+pub(crate) struct WorkflowReference {
+    pub(crate) workflow_id: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupProjectWorkflowBinding {
-    stage: String,
-    mode: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct BackupProjectWorkflowBinding {
+    pub(crate) stage: String,
+    pub(crate) mode: String,
+    pub(crate) workflow_version_id: String,
+    pub(crate) recipe_id: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
     #[serde(default, skip_serializing)]
-    workflow_id: Option<String>,
-}
-
-#[derive(FromRow)]
-struct DbProject {
-    id: String,
-    name: String,
-    description: Option<String>,
-    root_path: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbTask {
-    id: String,
-    workflow_id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    app_version: Option<String>,
-    build_commit: Option<String>,
-    workflow_version: Option<String>,
-    workflow_sha256: Option<String>,
-    recipe_version: Option<String>,
-    recipe_sha256: Option<String>,
-    package_name: Option<String>,
-    package_source_path: Option<String>,
-    dynamic_binding_targets_json: Option<String>,
-    generation_execution_id: Option<String>,
-    compiled_workflow_sha256: Option<String>,
-    runtime_profile: Option<String>,
-    concurrency_class: Option<String>,
-    prepare_started_at: Option<String>,
-    prepared_at: Option<String>,
-    submitted_at: Option<String>,
-    execution_started_at: Option<String>,
-    execution_finished_at: Option<String>,
-    collection_finished_at: Option<String>,
-    status: String,
-    prompt_id: Option<String>,
-    queue_number: Option<i64>,
-    progress_mode: String,
-    progress_current: Option<i64>,
-    progress_total: Option<i64>,
-    current_node_id: Option<String>,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    raw_error_json: Option<String>,
-    created_at: String,
-    queued_at: Option<String>,
-    started_at: Option<String>,
-    finished_at: Option<String>,
-}
-
-impl TryFrom<DbTask> for BackupTask {
-    type Error = AppError;
-
-    fn try_from(task: DbTask) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: task.id,
-            workflow_id: task.workflow_id,
-            workflow_version_id: task.workflow_version_id,
-            recipe_id: task.recipe_id,
-            app_version: task.app_version,
-            build_commit: task.build_commit,
-            workflow_version: task.workflow_version,
-            workflow_sha256: task.workflow_sha256,
-            recipe_version: task.recipe_version,
-            recipe_sha256: task.recipe_sha256,
-            package_name: task.package_name,
-            package_source_path: task.package_source_path,
-            dynamic_binding_targets: parse_optional_value(
-                task.dynamic_binding_targets_json.as_deref(),
-                "task dynamic binding targets",
-            )?,
-            generation_execution_id: task.generation_execution_id,
-            compiled_workflow_sha256: task.compiled_workflow_sha256,
-            runtime_profile: task.runtime_profile,
-            concurrency_class: task.concurrency_class,
-            prepare_started_at: task.prepare_started_at,
-            prepared_at: task.prepared_at,
-            submitted_at: task.submitted_at,
-            execution_started_at: task.execution_started_at,
-            execution_finished_at: task.execution_finished_at,
-            collection_finished_at: task.collection_finished_at,
-            status: task.status,
-            prompt_id: task.prompt_id,
-            queue_number: task.queue_number,
-            progress_mode: task.progress_mode,
-            progress_current: task.progress_current,
-            progress_total: task.progress_total,
-            current_node_id: task.current_node_id,
-            error_code: task.error_code,
-            error_message: task.error_message,
-            raw_error: parse_optional_value(task.raw_error_json.as_deref(), "task error")?,
-            created_at: task.created_at,
-            queued_at: task.queued_at,
-            started_at: task.started_at,
-            finished_at: task.finished_at,
-        })
-    }
-}
-
-#[derive(FromRow)]
-struct DbAsset {
-    id: String,
-    r#type: String,
-    category: Option<String>,
-    name: String,
-    original_name: Option<String>,
-    storage_path: String,
-    thumbnail_path: Option<String>,
-    sha256: String,
-    mime_type: Option<String>,
-    width: Option<i64>,
-    height: Option<i64>,
-    duration_ms: Option<i64>,
-    file_size: Option<i64>,
-    source_task_id: Option<String>,
-    metadata_json: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbAssetVideoPrompt {
-    asset_id: String,
-    project_id: String,
-    prompt_text: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbReferenceAnchor {
-    id: String,
-    project_id: String,
-    kind: String,
-    name: String,
-    normalized_name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbReferenceAnchorAsset {
-    anchor_id: String,
-    asset_id: String,
-    ordinal: i64,
-    created_at: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionSeries {
-    id: String,
-    project_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionEpisode {
-    id: String,
-    series_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionScene {
-    id: String,
-    episode_id: String,
-    ordinal: i64,
-    name: String,
-    description: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbShotSceneAssignment {
-    shot_id: String,
-    scene_id: String,
-    ordinal: i64,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbTaskEvent {
-    id: String,
-    task_id: String,
-    sequence: i64,
-    event_type: String,
-    payload_json: Option<String>,
-    created_at: String,
-}
-
-#[derive(FromRow)]
-struct DbSnapshot {
-    id: String,
-    task_id: String,
-    workflow_json: String,
-    recipe_yaml: String,
-    user_inputs_json: String,
-    resolved_inputs_json: String,
-    created_at: String,
-}
-
-#[derive(FromRow)]
-struct DbPreset {
-    id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    name: String,
-    values_json: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbPromptEntry {
-    id: String,
-    project_id: String,
-    kind: String,
-    name: String,
-    normalized_name: String,
-    tags_json: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbPromptVersion {
-    id: String,
-    prompt_id: String,
-    version: i64,
-    text: String,
-    created_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBatch {
-    id: String,
-    name: String,
-    status: String,
-    continue_on_failure: i64,
-    archived_at: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBatchItem {
-    id: String,
-    batch_id: String,
-    ordinal: i64,
-    workflow_version_id: String,
-    recipe_id: String,
-    values_json: String,
-    status: String,
-    task_id: Option<String>,
-    retry_of_item_id: Option<String>,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionPreparationSnapshot {
-    id: String,
-    project_id: String,
-    shot_id: String,
-    stage: String,
-    context_hash: String,
-    production_batch_id: String,
-    production_batch_item_id: String,
-    snapshot_json: String,
-    created_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBenchmarkExperiment {
-    id: String,
-    name: String,
-    media_type: String,
-    status: String,
-    base_values_json: String,
-    asset_ids_json: String,
-    winner_candidate_id: Option<String>,
-    production_batch_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBenchmarkCandidate {
-    id: String,
-    experiment_id: String,
-    position: i64,
-    workflow_version_id: String,
-    recipe_id: String,
-    preset_id: Option<String>,
-    preset_name: Option<String>,
-    label: String,
-    values_json: String,
-    asset_ids_json: String,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    created_at: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionRun {
-    id: String,
-    project_id: String,
-    name: String,
-    status: String,
-    current_stage_ordinal: i64,
-    template_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
-}
-
-#[derive(FromRow)]
-struct DbProductionStage {
-    id: String,
-    run_id: String,
-    ordinal: i64,
-    stage_type: String,
-    status: String,
-    workflow_version_id: Option<String>,
-    recipe_id: Option<String>,
-    production_batch_id: Option<String>,
-    frozen_config_json: String,
-    prompt: Option<String>,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
-}
-
-#[derive(FromRow)]
-struct DbProductionStageItem {
-    id: String,
-    stage_id: String,
-    ordinal: i64,
-    status: String,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    asset_id: Option<String>,
-    source_asset_id: Option<String>,
-    reference_index: Option<i64>,
-    attempt: i64,
-    submission_idempotency_key: Option<String>,
-    parent_stage_item_id: Option<String>,
-    frozen_values_json: String,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionRunTemplate {
-    id: String,
-    project_id: String,
-    name: String,
-    krea2_workflow_version_id: Option<String>,
-    krea2_recipe_id: Option<String>,
-    krea2_preset_id: Option<String>,
-    default_image_count: i64,
-    h3_workflow_version_id: Option<String>,
-    h3_recipe_id: Option<String>,
-    h3_profile: Option<String>,
-    default_duration_seconds: Option<i64>,
-    default_width: Option<i64>,
-    default_height: Option<i64>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBenchmarkRun {
-    id: String,
-    experiment_id: String,
-    candidate_id: String,
-    run_number: i64,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    snapshot_id: Option<String>,
-    output_asset_id: Option<String>,
-    generation_execution_id: Option<String>,
-    compiled_workflow_sha256: Option<String>,
-    runtime_profile: Option<String>,
-    concurrency_class: Option<String>,
-    queue_wait_ms: Option<i64>,
-    prepare_ms: Option<i64>,
-    submit_ms: Option<i64>,
-    comfy_execution_ms: Option<i64>,
-    collect_ms: Option<i64>,
-    total_ms: Option<i64>,
-    status: Option<String>,
-    error_code: Option<String>,
-    output_file_size: Option<i64>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBenchmarkQualityScore {
-    id: String,
-    candidate_id: String,
-    prompt_adherence: Option<i64>,
-    visual_quality: Option<i64>,
-    motion_quality: Option<i64>,
-    reference_consistency: Option<i64>,
-    overall: Option<i64>,
-    note: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbBenchmarkWorkflowRef {
-    workflow_id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-}
-
-#[derive(FromRow)]
-struct DbProductionItemReview {
-    id: String,
-    project_id: String,
-    production_batch_id: String,
-    production_batch_item_id: String,
-    task_id: Option<String>,
-    result_asset_id: Option<String>,
-    review_status: String,
-    review_note: String,
-    version: i64,
-    lineage_key: String,
-    parent_batch_id: Option<String>,
-    parent_item_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbMapping {
-    task_id: String,
-    output_id: String,
-    ordinal: i64,
-    asset_id: String,
-    created_at: String,
+    pub(crate) workflow_id: Option<String>,
 }
 
 #[derive(Clone)]
-struct RestoredAsset {
-    old_id: String,
-    new_id: String,
-    storage_path: String,
-    thumbnail_path: Option<String>,
-}
-
-fn assemble_reference_anchor_backups(
-    anchors: Vec<DbReferenceAnchor>,
-    memberships: Vec<DbReferenceAnchorAsset>,
-    included_asset_ids: &HashSet<String>,
-) -> Vec<BackupReferenceAnchor> {
-    let mut assets_by_anchor = HashMap::<String, Vec<BackupReferenceAnchorAsset>>::new();
-    for membership in memberships {
-        if included_asset_ids.contains(&membership.asset_id) {
-            assets_by_anchor
-                .entry(membership.anchor_id)
-                .or_default()
-                .push(BackupReferenceAnchorAsset {
-                    asset_id: membership.asset_id,
-                    ordinal: membership.ordinal,
-                    created_at: membership.created_at,
-                });
-        }
-    }
-    for assets in assets_by_anchor.values_mut() {
-        assets.sort_by(|left, right| {
-            left.ordinal
-                .cmp(&right.ordinal)
-                .then_with(|| left.asset_id.cmp(&right.asset_id))
-        });
-    }
-    anchors
-        .into_iter()
-        .map(|anchor| BackupReferenceAnchor {
-            assets: assets_by_anchor.remove(&anchor.id).unwrap_or_default(),
-            id: anchor.id,
-            project_id: anchor.project_id,
-            kind: anchor.kind,
-            name: anchor.name,
-            normalized_name: anchor.normalized_name,
-            description: anchor.description,
-            created_at: anchor.created_at,
-            updated_at: anchor.updated_at,
-        })
-        .collect()
-}
-
-async fn query_production_structure(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<
-    (
-        Vec<BackupProductionSeries>,
-        Vec<BackupProductionEpisode>,
-        Vec<BackupProductionScene>,
-        Vec<BackupShotSceneAssignment>,
-    ),
-    AppError,
-> {
-    let table_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM sqlite_master
-         WHERE type = 'table' AND name IN
-           ('production_series', 'production_episodes', 'production_scenes',
-            'shot_scene_assignments')",
-    )
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    if table_count == 0 {
-        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
-    }
-    if table_count != 4 {
-        return Err(AppError::database(
-            "生产结构表不完整，请先应用 migration 021",
-        ));
-    }
-
-    let series = sqlx::query_as::<_, DbProductionSeries>(
-        "SELECT id, project_id, ordinal, name, description, created_at, updated_at
-         FROM production_series WHERE project_id = ? ORDER BY ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .map(|row| BackupProductionSeries {
-        id: row.id,
-        project_id: row.project_id,
-        ordinal: row.ordinal,
-        name: row.name,
-        description: row.description,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    })
-    .collect();
-    let episodes = sqlx::query_as::<_, DbProductionEpisode>(
-        "SELECT e.id, e.series_id, e.ordinal, e.name, e.description, e.created_at, e.updated_at
-         FROM production_episodes e
-         JOIN production_series s ON s.id = e.series_id
-         WHERE s.project_id = ? ORDER BY e.series_id, e.ordinal, e.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .map(|row| BackupProductionEpisode {
-        id: row.id,
-        series_id: row.series_id,
-        ordinal: row.ordinal,
-        name: row.name,
-        description: row.description,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    })
-    .collect();
-    let scenes = sqlx::query_as::<_, DbProductionScene>(
-        "SELECT c.id, c.episode_id, c.ordinal, c.name, c.description, c.created_at, c.updated_at
-         FROM production_scenes c
-         JOIN production_episodes e ON e.id = c.episode_id
-         JOIN production_series s ON s.id = e.series_id
-         WHERE s.project_id = ? ORDER BY c.episode_id, c.ordinal, c.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .map(|row| BackupProductionScene {
-        id: row.id,
-        episode_id: row.episode_id,
-        ordinal: row.ordinal,
-        name: row.name,
-        description: row.description,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    })
-    .collect();
-    let assignments = sqlx::query_as::<_, DbShotSceneAssignment>(
-        "SELECT a.shot_id, a.scene_id, a.ordinal, a.created_at, a.updated_at
-         FROM shot_scene_assignments a
-         JOIN production_scenes c ON c.id = a.scene_id
-         JOIN production_episodes e ON e.id = c.episode_id
-         JOIN production_series s ON s.id = e.series_id
-         JOIN shots h ON h.id = a.shot_id
-         WHERE s.project_id = ? AND h.project_id = ?
-         ORDER BY a.scene_id, a.ordinal, a.shot_id",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .map(|row| BackupShotSceneAssignment {
-        shot_id: row.shot_id,
-        scene_id: row.scene_id,
-        ordinal: row.ordinal,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    })
-    .collect();
-    Ok((series, episodes, scenes, assignments))
+pub(crate) struct RestoredAsset {
+    pub(crate) old_id: String,
+    pub(crate) new_id: String,
+    pub(crate) storage_path: String,
+    pub(crate) thumbnail_path: Option<String>,
 }
 
 fn remap_reference_anchor_assets(
@@ -2797,7 +1780,7 @@ fn remap_reference_anchor_assets(
 }
 
 impl BackupTask {
-    fn is_terminal(&self) -> bool {
+    pub(crate) fn is_terminal(&self) -> bool {
         is_terminal_task(&self.status)
     }
 }
@@ -2853,153 +1836,6 @@ fn hash_bytes(bytes: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-async fn query_project(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Option<ProjectRecord>, AppError> {
-    let row = sqlx::query_as::<_, DbProject>(
-        "SELECT id, name, description, root_path, created_at, updated_at FROM projects WHERE id = ?",
-    )
-    .bind(project_id)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    row.map(|row| {
-        if row.root_path.trim().is_empty() {
-            return Err(AppError::database("项目 root_path 不能为空"));
-        }
-        let created_at = DateTime::parse_from_rfc3339(&row.created_at)
-            .map(|value| value.with_timezone(&Utc))
-            .map_err(|error| AppError::database(format!("项目 created_at 无效：{error}")))?;
-        let updated_at = DateTime::parse_from_rfc3339(&row.updated_at)
-            .map(|value| value.with_timezone(&Utc))
-            .map_err(|error| AppError::database(format!("项目 updated_at 无效：{error}")))?;
-        Ok(ProjectRecord {
-            id: row.id,
-            name: row.name,
-            description: row.description,
-            root_path: PathBuf::from(row.root_path),
-            created_at,
-            updated_at,
-        })
-    })
-    .transpose()
-}
-
-async fn query_project_workflow_bindings(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupProjectWorkflowBinding>, AppError> {
-    sqlx::query_as::<_, BackupProjectWorkflowBinding>(
-        "SELECT b.stage, b.mode, b.workflow_version_id, b.recipe_id,
-                b.created_at, b.updated_at, wv.workflow_id
-         FROM project_workflow_bindings b
-         LEFT JOIN workflow_versions wv ON wv.id = b.workflow_version_id
-         WHERE b.project_id = ?
-         ORDER BY b.stage ASC, b.mode ASC",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_workflow_registry_snapshot(
-    transaction: &mut Transaction<'_, Sqlite>,
-    workflow_refs: &[WorkflowReference],
-    bindings: &[BackupProjectWorkflowBinding],
-) -> Result<BackupWorkflowRegistry, AppError> {
-    let mut workflow_ids = workflow_refs
-        .iter()
-        .map(|reference| reference.workflow_id.clone())
-        .filter(|id| !id.trim().is_empty())
-        .collect::<HashSet<_>>();
-    let version_ids = workflow_refs
-        .iter()
-        .map(|reference| reference.workflow_version_id.clone())
-        .chain(
-            bindings
-                .iter()
-                .map(|binding| binding.workflow_version_id.clone()),
-        )
-        .collect::<HashSet<_>>();
-    workflow_ids.extend(
-        bindings
-            .iter()
-            .filter_map(|binding| binding.workflow_id.clone())
-            .filter(|id| !id.trim().is_empty()),
-    );
-
-    let all_versions = sqlx::query_as::<_, BackupWorkflowVersion>(
-        "SELECT id, workflow_id, version, api_workflow_json, workflow_sha256,
-                package_name, package_source_path, created_at
-         FROM workflow_versions ORDER BY workflow_id, version, id",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    let versions = all_versions
-        .into_iter()
-        .filter(|version| {
-            workflow_ids.contains(&version.workflow_id) || version_ids.contains(&version.id)
-        })
-        .collect::<Vec<_>>();
-    workflow_ids.extend(versions.iter().map(|version| version.workflow_id.clone()));
-    let selected_version_ids = versions
-        .iter()
-        .map(|version| version.id.clone())
-        .collect::<HashSet<_>>();
-
-    let workflows = sqlx::query_as::<_, BackupWorkflow>(
-        "SELECT id, name, category, mode, source_kind, library_state,
-                current_version_id, removed_at, created_at, updated_at
-         FROM workflows ORDER BY id",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .filter(|workflow| workflow_ids.contains(&workflow.id))
-    .collect::<Vec<_>>();
-
-    let recipes = sqlx::query_as::<_, BackupWorkflowRecipe>(
-        "SELECT id, workflow_version_id, version, schema_version, recipe_yaml,
-                recipe_sha256, created_at
-         FROM recipes ORDER BY workflow_version_id, version, id",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .filter(|recipe| selected_version_ids.contains(&recipe.workflow_version_id))
-    .collect::<Vec<_>>();
-    let recipe_ids = recipes
-        .iter()
-        .map(|recipe| recipe.id.clone())
-        .collect::<HashSet<_>>();
-    let runtime_artifacts = sqlx::query_as::<_, BackupWorkflowRuntimeArtifact>(
-        "SELECT id, workflow_version_id, recipe_id, package_name, source_kind,
-                package_source_path, workflow_sha256, recipe_sha256, created_at
-         FROM workflow_runtime_artifacts ORDER BY workflow_version_id, recipe_id, package_name, id",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?
-    .into_iter()
-    .filter(|artifact| {
-        selected_version_ids.contains(&artifact.workflow_version_id)
-            && recipe_ids.contains(&artifact.recipe_id)
-    })
-    .collect();
-
-    Ok(BackupWorkflowRegistry {
-        workflows,
-        versions,
-        recipes,
-        runtime_artifacts,
-    })
-}
-
 fn collect_workflow_refs(tasks: &[BackupTask]) -> Vec<WorkflowReference> {
     let mut refs = tasks
         .iter()
@@ -3012,1077 +1848,6 @@ fn collect_workflow_refs(tasks: &[BackupTask]) -> Vec<WorkflowReference> {
     refs.sort_by(|a, b| a.workflow_id.cmp(&b.workflow_id));
     refs.dedup();
     refs
-}
-
-async fn query_task_events(
-    transaction: &mut Transaction<'_, Sqlite>,
-    task_ids: &HashSet<String>,
-) -> Result<Vec<BackupTaskEvent>, AppError> {
-    let mut result = Vec::new();
-    for task_id in task_ids {
-        let rows = sqlx::query_as::<_, DbTaskEvent>(
-            "SELECT id, task_id, sequence, event_type, payload_json, created_at FROM task_events WHERE task_id = ? ORDER BY sequence",
-        )
-        .bind(task_id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        for row in rows {
-            result.push(BackupTaskEvent {
-                id: row.id,
-                task_id: row.task_id,
-                sequence: row.sequence,
-                event_type: row.event_type,
-                payload: parse_optional_value(row.payload_json.as_deref(), "任务事件")?,
-                created_at: row.created_at,
-            });
-        }
-    }
-    Ok(result)
-}
-
-async fn query_snapshots(
-    transaction: &mut Transaction<'_, Sqlite>,
-    task_ids: &HashSet<String>,
-) -> Result<Vec<BackupSnapshot>, AppError> {
-    let mut result = Vec::new();
-    for task_id in task_ids {
-        let row = sqlx::query_as::<_, DbSnapshot>(
-            "SELECT id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, created_at FROM generation_snapshots WHERE task_id = ?",
-        )
-        .bind(task_id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        if let Some(row) = row {
-            result.push(BackupSnapshot {
-                id: row.id,
-                task_id: row.task_id,
-                workflow: parse_value(Some(&row.workflow_json), "工作流快照")?,
-                recipe_yaml: row.recipe_yaml,
-                user_inputs: parse_value(Some(&row.user_inputs_json), "用户输入快照")?,
-                resolved_inputs: parse_value(Some(&row.resolved_inputs_json), "解析输入快照")?,
-                created_at: row.created_at,
-            });
-        }
-    }
-    Ok(result)
-}
-
-async fn query_mappings(
-    transaction: &mut Transaction<'_, Sqlite>,
-    task_ids: &HashSet<String>,
-) -> Result<Vec<BackupMapping>, AppError> {
-    let mut result = Vec::new();
-    for task_id in task_ids {
-        let rows = sqlx::query_as::<_, DbMapping>(
-            "SELECT task_id, output_id, ordinal, asset_id, created_at FROM task_output_assets WHERE task_id = ? ORDER BY output_id, ordinal",
-        )
-        .bind(task_id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        result.extend(rows.into_iter().map(|row| BackupMapping {
-            task_id: row.task_id,
-            output_id: row.output_id,
-            ordinal: row.ordinal,
-            asset_id: row.asset_id,
-            created_at: row.created_at,
-        }));
-    }
-    Ok(result)
-}
-
-async fn query_presets(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupPreset>, AppError> {
-    let rows = sqlx::query_as::<_, DbPreset>(
-        "SELECT id, project_id, workflow_version_id, recipe_id, name, values_json, created_at, updated_at FROM presets WHERE project_id = ? ORDER BY updated_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(BackupPreset {
-                id: row.id,
-                workflow_version_id: row.workflow_version_id,
-                recipe_id: row.recipe_id,
-                name: row.name,
-                values: parse_value(Some(&row.values_json), "预设")?,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            })
-        })
-        .collect()
-}
-
-async fn query_prompt_entries(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupPromptEntry>, AppError> {
-    let rows = sqlx::query_as::<_, DbPromptEntry>(
-        "SELECT id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at
-         FROM prompt_entries WHERE project_id = ? ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    rows.into_iter()
-        .map(|row| {
-            let tags = serde_json::from_str::<Vec<String>>(&row.tags_json)
-                .map_err(|error| AppError::database(format!("提示词标签 JSON 无效：{error}")))?;
-            Ok(BackupPromptEntry {
-                id: row.id,
-                project_id: row.project_id,
-                kind: row.kind,
-                name: row.name,
-                normalized_name: row.normalized_name,
-                tags,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            })
-        })
-        .collect()
-}
-
-async fn query_prompt_versions(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupPromptVersion>, AppError> {
-    let rows = sqlx::query_as::<_, DbPromptVersion>(
-        "SELECT v.id, v.prompt_id, v.version, v.text, v.created_at
-         FROM prompt_versions v
-         JOIN prompt_entries e ON e.id = v.prompt_id
-         WHERE e.project_id = ? ORDER BY v.prompt_id, v.version",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupPromptVersion {
-            id: row.id,
-            project_id: project_id.to_owned(),
-            prompt_id: row.prompt_id,
-            version: row.version,
-            text: row.text,
-            created_at: row.created_at,
-        })
-        .collect())
-}
-
-async fn query_batches(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupBatch>, AppError> {
-    let rows = sqlx::query_as::<_, DbBatch>(
-        "SELECT id, project_id, name, status, continue_on_failure, archived_at, created_at, updated_at FROM production_batches WHERE project_id = ? ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupBatch {
-            id: row.id,
-            name: row.name,
-            status: row.status,
-            continue_on_failure: row.continue_on_failure,
-            archived_at: row.archived_at,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-async fn query_batch_items(
-    transaction: &mut Transaction<'_, Sqlite>,
-    batches: &[BackupBatch],
-) -> Result<Vec<BackupBatchItem>, AppError> {
-    let mut result = Vec::new();
-    for batch in batches {
-        let rows = sqlx::query_as::<_, DbBatchItem>(
-            "SELECT id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, retry_of_item_id, error_code, error_message, created_at, updated_at FROM production_batch_items WHERE batch_id = ? ORDER BY ordinal",
-        )
-        .bind(&batch.id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        for row in rows {
-            result.push(BackupBatchItem {
-                id: row.id,
-                batch_id: row.batch_id,
-                ordinal: row.ordinal,
-                workflow_version_id: row.workflow_version_id,
-                recipe_id: row.recipe_id,
-                values: parse_value(Some(&row.values_json), "生产队列输入")?,
-                status: row.status,
-                task_id: row.task_id,
-                retry_of_item_id: row.retry_of_item_id,
-                error_code: row.error_code,
-                error_message: row.error_message,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            });
-        }
-    }
-    Ok(result)
-}
-
-async fn query_production_preparation_snapshots(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupProductionPreparationSnapshot>, AppError> {
-    let rows = sqlx::query_as::<_, DbProductionPreparationSnapshot>(
-        "SELECT p.id, p.project_id, p.shot_id, p.stage, p.context_hash,
-                p.production_batch_id, p.production_batch_item_id, p.snapshot_json,
-                p.created_at
-         FROM production_preparation_snapshots p
-         JOIN projects pr ON pr.id = p.project_id
-         JOIN shots s ON s.id = p.shot_id AND s.project_id = p.project_id
-         JOIN production_batches b
-           ON b.id = p.production_batch_id AND b.project_id = p.project_id
-         JOIN production_batch_items i
-           ON i.id = p.production_batch_item_id AND i.batch_id = p.production_batch_id
-         WHERE pr.id = ?
-         ORDER BY p.created_at, p.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    rows.into_iter()
-        .map(|row| {
-            validate_production_preparation_snapshot_json(&row.snapshot_json)?;
-            Ok(BackupProductionPreparationSnapshot {
-                id: row.id,
-                project_id: row.project_id,
-                shot_id: row.shot_id,
-                stage: row.stage,
-                context_hash: row.context_hash,
-                production_batch_id: row.production_batch_id,
-                production_batch_item_id: row.production_batch_item_id,
-                snapshot_json: row.snapshot_json,
-                created_at: row.created_at,
-            })
-        })
-        .collect()
-}
-
-async fn query_benchmark_experiments(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupBenchmarkExperiment>, AppError> {
-    let rows = sqlx::query_as::<_, DbBenchmarkExperiment>(
-        "SELECT id, name, media_type, status, base_values_json, asset_ids_json,
-                winner_candidate_id, production_batch_id, created_at, updated_at
-         FROM benchmark_experiments WHERE project_id = ? ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(BackupBenchmarkExperiment {
-                id: row.id,
-                name: row.name,
-                media_type: row.media_type,
-                status: row.status,
-                base_values: parse_value(Some(&row.base_values_json), "Benchmark 基准输入")?,
-                asset_ids: parse_string_array(Some(&row.asset_ids_json), "Benchmark 素材")?,
-                winner_candidate_id: row.winner_candidate_id,
-                production_batch_id: row.production_batch_id,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            })
-        })
-        .collect()
-}
-
-async fn query_benchmark_candidates(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupBenchmarkCandidate>, AppError> {
-    let rows = sqlx::query_as::<_, DbBenchmarkCandidate>(
-        "SELECT c.id, c.experiment_id, c.position, c.workflow_version_id, c.recipe_id,
-                c.preset_id, c.preset_name, c.label, c.values_json, c.asset_ids_json,
-                c.production_batch_item_id, c.task_id, c.created_at
-         FROM benchmark_candidates c
-         JOIN benchmark_experiments e ON e.id = c.experiment_id
-         WHERE e.project_id = ? ORDER BY c.experiment_id, c.position, c.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(BackupBenchmarkCandidate {
-                id: row.id,
-                experiment_id: row.experiment_id,
-                position: row.position,
-                workflow_version_id: row.workflow_version_id,
-                recipe_id: row.recipe_id,
-                preset_id: row.preset_id,
-                preset_name: row.preset_name,
-                label: row.label,
-                values: parse_value(Some(&row.values_json), "Benchmark 候选输入")?,
-                asset_ids: parse_string_array(Some(&row.asset_ids_json), "Benchmark 候选素材")?,
-                production_batch_item_id: row.production_batch_item_id,
-                task_id: row.task_id,
-                created_at: row.created_at,
-            })
-        })
-        .collect()
-}
-
-async fn query_production_runs(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupProductionRun>, AppError> {
-    let rows = sqlx::query_as::<_, DbProductionRun>(
-        "SELECT id, project_id, name, status, current_stage_ordinal, template_id,
-                created_at, updated_at, started_at, finished_at
-         FROM production_runs WHERE project_id = ? ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupProductionRun {
-            id: row.id,
-            project_id: row.project_id,
-            name: row.name,
-            status: row.status,
-            current_stage_ordinal: row.current_stage_ordinal,
-            template_id: row.template_id,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            started_at: row.started_at,
-            finished_at: row.finished_at,
-        })
-        .collect())
-}
-
-async fn query_production_stages(
-    transaction: &mut Transaction<'_, Sqlite>,
-    runs: &[BackupProductionRun],
-) -> Result<Vec<BackupProductionStage>, AppError> {
-    let mut result = Vec::new();
-    for run in runs {
-        let rows = sqlx::query_as::<_, DbProductionStage>(
-            "SELECT id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id,
-                    production_batch_id, frozen_config_json, prompt, created_at, updated_at,
-                    started_at, finished_at
-             FROM production_stages WHERE run_id = ? ORDER BY ordinal, id",
-        )
-        .bind(&run.id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        result.extend(rows.into_iter().map(|row| {
-            Ok(BackupProductionStage {
-                id: row.id,
-                run_id: row.run_id,
-                ordinal: row.ordinal,
-                stage_type: row.stage_type,
-                status: row.status,
-                workflow_version_id: row.workflow_version_id,
-                recipe_id: row.recipe_id,
-                production_batch_id: row.production_batch_id,
-                frozen_config: parse_value(Some(&row.frozen_config_json), "Production Stage 配置")?,
-                prompt: row.prompt,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-                started_at: row.started_at,
-                finished_at: row.finished_at,
-            })
-        }));
-    }
-    result.into_iter().collect()
-}
-
-async fn query_production_stage_items(
-    transaction: &mut Transaction<'_, Sqlite>,
-    stages: &[BackupProductionStage],
-) -> Result<Vec<BackupProductionStageItem>, AppError> {
-    let mut result = Vec::new();
-    for stage in stages {
-        let rows = sqlx::query_as::<_, DbProductionStageItem>(
-            "SELECT id, stage_id, ordinal, status, production_batch_item_id, task_id,
-                    asset_id, source_asset_id, reference_index, attempt,
-                    submission_idempotency_key, parent_stage_item_id, frozen_values_json,
-                    error_code, error_message, created_at, updated_at
-             FROM production_stage_items WHERE stage_id = ? ORDER BY ordinal, id",
-        )
-        .bind(&stage.id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        result.extend(rows.into_iter().map(|row| {
-            Ok(BackupProductionStageItem {
-                id: row.id,
-                stage_id: row.stage_id,
-                ordinal: row.ordinal,
-                status: row.status,
-                production_batch_item_id: row.production_batch_item_id,
-                task_id: row.task_id,
-                asset_id: row.asset_id,
-                source_asset_id: row.source_asset_id,
-                reference_index: row.reference_index,
-                attempt: row.attempt,
-                submission_idempotency_key: row.submission_idempotency_key,
-                parent_stage_item_id: row.parent_stage_item_id,
-                frozen_values: parse_value(
-                    Some(&row.frozen_values_json),
-                    "Production Stage Item 输入",
-                )?,
-                error_code: row.error_code,
-                error_message: row.error_message,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            })
-        }));
-    }
-    result.into_iter().collect()
-}
-
-async fn query_production_run_templates(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupProductionRunTemplate>, AppError> {
-    let rows = sqlx::query_as::<_, DbProductionRunTemplate>(
-        "SELECT id, project_id, name, krea2_workflow_version_id, krea2_recipe_id,
-                krea2_preset_id, default_image_count, h3_workflow_version_id, h3_recipe_id,
-                h3_profile, default_duration_seconds, default_width, default_height,
-                created_at, updated_at
-         FROM production_run_templates WHERE project_id = ? ORDER BY updated_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupProductionRunTemplate {
-            id: row.id,
-            project_id: row.project_id,
-            name: row.name,
-            krea2_workflow_version_id: row.krea2_workflow_version_id,
-            krea2_recipe_id: row.krea2_recipe_id,
-            krea2_preset_id: row.krea2_preset_id,
-            default_image_count: row.default_image_count,
-            h3_workflow_version_id: row.h3_workflow_version_id,
-            h3_recipe_id: row.h3_recipe_id,
-            h3_profile: row.h3_profile,
-            default_duration_seconds: row.default_duration_seconds,
-            default_width: row.default_width,
-            default_height: row.default_height,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-async fn query_benchmark_runs(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupBenchmarkRun>, AppError> {
-    let rows = sqlx::query_as::<_, DbBenchmarkRun>(
-        "SELECT r.id, r.experiment_id, r.candidate_id, r.run_number,
-                r.production_batch_item_id, r.task_id, r.snapshot_id, r.output_asset_id,
-                r.generation_execution_id, r.compiled_workflow_sha256, r.runtime_profile,
-                r.concurrency_class, r.queue_wait_ms, r.prepare_ms, r.submit_ms,
-                r.comfy_execution_ms, r.collect_ms, r.total_ms, r.status, r.error_code,
-                r.output_file_size, r.created_at, r.updated_at
-         FROM benchmark_runs r
-         JOIN benchmark_experiments e ON e.id = r.experiment_id
-         WHERE e.project_id = ? ORDER BY r.experiment_id, r.candidate_id, r.run_number, r.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupBenchmarkRun {
-            id: row.id,
-            experiment_id: row.experiment_id,
-            candidate_id: row.candidate_id,
-            run_number: row.run_number,
-            production_batch_item_id: row.production_batch_item_id,
-            task_id: row.task_id,
-            snapshot_id: row.snapshot_id,
-            output_asset_id: row.output_asset_id,
-            generation_execution_id: row.generation_execution_id,
-            compiled_workflow_sha256: row.compiled_workflow_sha256,
-            runtime_profile: row.runtime_profile,
-            concurrency_class: row.concurrency_class,
-            queue_wait_ms: row.queue_wait_ms,
-            prepare_ms: row.prepare_ms,
-            submit_ms: row.submit_ms,
-            comfy_execution_ms: row.comfy_execution_ms,
-            collect_ms: row.collect_ms,
-            total_ms: row.total_ms,
-            status: row.status,
-            error_code: row.error_code,
-            output_file_size: row.output_file_size,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-async fn query_benchmark_quality_scores(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupBenchmarkQualityScore>, AppError> {
-    let rows = sqlx::query_as::<_, DbBenchmarkQualityScore>(
-        "SELECT q.id, q.candidate_id, q.prompt_adherence, q.visual_quality,
-                q.motion_quality, q.reference_consistency, q.overall, q.note,
-                q.created_at, q.updated_at
-         FROM benchmark_quality_scores q
-         JOIN benchmark_candidates c ON c.id = q.candidate_id
-         JOIN benchmark_experiments e ON e.id = c.experiment_id
-         WHERE e.project_id = ? ORDER BY q.candidate_id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupBenchmarkQualityScore {
-            id: row.id,
-            candidate_id: row.candidate_id,
-            prompt_adherence: row.prompt_adherence,
-            visual_quality: row.visual_quality,
-            motion_quality: row.motion_quality,
-            reference_consistency: row.reference_consistency,
-            overall: row.overall,
-            note: row.note,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-async fn query_benchmark_workflow_refs(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<WorkflowReference>, AppError> {
-    let rows = sqlx::query_as::<_, DbBenchmarkWorkflowRef>(
-        "SELECT DISTINCT wv.workflow_id, c.workflow_version_id, c.recipe_id
-         FROM benchmark_candidates c
-         JOIN benchmark_experiments e ON e.id = c.experiment_id
-         JOIN workflow_versions wv ON wv.id = c.workflow_version_id
-         WHERE e.project_id = ? ORDER BY wv.workflow_id, c.workflow_version_id, c.recipe_id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| WorkflowReference {
-            workflow_id: row.workflow_id,
-            workflow_version_id: row.workflow_version_id,
-            recipe_id: row.recipe_id,
-        })
-        .collect())
-}
-
-async fn query_production_item_reviews(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupProductionItemReview>, AppError> {
-    let rows = sqlx::query_as::<_, DbProductionItemReview>(
-        "SELECT id, project_id, production_batch_id, production_batch_item_id,
-                task_id, result_asset_id, review_status, review_note, version,
-                lineage_key, parent_batch_id, parent_item_id, created_at, updated_at
-         FROM production_item_reviews
-         WHERE project_id = ?
-         ORDER BY lineage_key, version, production_batch_item_id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupProductionItemReview {
-            id: row.id,
-            project_id: row.project_id,
-            production_batch_id: row.production_batch_id,
-            production_batch_item_id: row.production_batch_item_id,
-            task_id: row.task_id,
-            result_asset_id: row.result_asset_id,
-            review_status: row.review_status,
-            review_note: row.review_note,
-            version: row.version,
-            lineage_key: row.lineage_key,
-            parent_batch_id: row.parent_batch_id,
-            parent_item_id: row.parent_item_id,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-#[derive(FromRow)]
-struct DbShot {
-    id: String,
-    project_id: String,
-    ordinal: i64,
-    name: String,
-    prompt_text: String,
-    prompt_entry_id: Option<String>,
-    prompt_version_id: Option<String>,
-    selected_image_asset_id: Option<String>,
-    selected_video_asset_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbShotStageConfig {
-    shot_id: String,
-    stage: String,
-    workflow_id: String,
-    workflow_version_id: String,
-    recipe_id: String,
-    scalar_values_json: String,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbShotStagePrompt {
-    shot_id: String,
-    stage: String,
-    prompt_text: String,
-    prompt_entry_id: Option<String>,
-    prompt_version_id: Option<String>,
-    updated_at: String,
-}
-
-#[derive(FromRow)]
-struct DbShotReferenceAsset {
-    shot_id: String,
-    stage: String,
-    asset_id: String,
-    ordinal: i64,
-}
-
-#[derive(FromRow)]
-struct DbShotGenerationLink {
-    id: String,
-    shot_id: String,
-    stage: String,
-    task_id: Option<String>,
-    production_batch_item_id: Option<String>,
-    created_at: String,
-}
-
-async fn query_shots(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupShot>, AppError> {
-    let rows = sqlx::query_as::<_, DbShot>(
-        "SELECT id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
-                selected_image_asset_id, selected_video_asset_id, created_at, updated_at
-         FROM shots WHERE project_id = ? ORDER BY ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupShot {
-            id: row.id,
-            project_id: row.project_id,
-            ordinal: row.ordinal,
-            name: row.name,
-            prompt_text: row.prompt_text,
-            prompt_entry_id: row.prompt_entry_id,
-            prompt_version_id: row.prompt_version_id,
-            selected_image_asset_id: row.selected_image_asset_id,
-            selected_video_asset_id: row.selected_video_asset_id,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-async fn query_shot_stage_configs(
-    transaction: &mut Transaction<'_, Sqlite>,
-) -> Result<Vec<BackupShotStageConfig>, AppError> {
-    let rows = sqlx::query_as::<_, DbShotStageConfig>(
-        "SELECT c.shot_id, c.stage, v.workflow_id, c.workflow_version_id, c.recipe_id,
-                c.scalar_values_json, c.updated_at
-         FROM shot_stage_configs c
-         JOIN workflow_versions v ON v.id = c.workflow_version_id
-         ORDER BY c.shot_id, c.stage",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(BackupShotStageConfig {
-                shot_id: row.shot_id,
-                stage: row.stage,
-                workflow_id: row.workflow_id,
-                workflow_version_id: row.workflow_version_id,
-                recipe_id: row.recipe_id,
-                scalar_values: parse_value(Some(&row.scalar_values_json), "镜头阶段参数")?,
-                updated_at: row.updated_at,
-            })
-        })
-        .collect()
-}
-
-async fn query_shot_stage_prompts(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupShotStagePrompt>, AppError> {
-    let rows = sqlx::query_as::<_, DbShotStagePrompt>(
-        "SELECT p.shot_id, p.stage, p.prompt_text, p.prompt_entry_id,
-                p.prompt_version_id, p.updated_at
-         FROM shot_stage_prompts p
-         JOIN shots s ON s.id = p.shot_id
-         WHERE s.project_id = ?
-         ORDER BY p.shot_id, p.stage",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupShotStagePrompt {
-            shot_id: row.shot_id,
-            stage: row.stage,
-            prompt_text: row.prompt_text,
-            prompt_entry_id: row.prompt_entry_id,
-            prompt_version_id: row.prompt_version_id,
-            updated_at: row.updated_at,
-        })
-        .collect())
-}
-
-async fn query_shot_reference_assets(
-    transaction: &mut Transaction<'_, Sqlite>,
-) -> Result<Vec<BackupShotReferenceAsset>, AppError> {
-    let rows = sqlx::query_as::<_, DbShotReferenceAsset>(
-        "SELECT shot_id, stage, asset_id, ordinal
-         FROM shot_reference_assets ORDER BY shot_id, stage, ordinal, asset_id",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupShotReferenceAsset {
-            shot_id: row.shot_id,
-            stage: row.stage,
-            asset_id: row.asset_id,
-            ordinal: row.ordinal,
-        })
-        .collect())
-}
-
-async fn query_shot_generation_links(
-    transaction: &mut Transaction<'_, Sqlite>,
-) -> Result<Vec<BackupShotGenerationLink>, AppError> {
-    let rows = sqlx::query_as::<_, DbShotGenerationLink>(
-        "SELECT id, shot_id, stage, task_id, production_batch_item_id, created_at
-         FROM shot_generation_links ORDER BY shot_id, created_at, id",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .map(|row| BackupShotGenerationLink {
-            id: row.id,
-            shot_id: row.shot_id,
-            stage: row.stage,
-            task_id: row.task_id,
-            production_batch_item_id: row.production_batch_item_id,
-            created_at: row.created_at,
-        })
-        .collect())
-}
-
-async fn query_character_profiles(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupCharacterProfile>, AppError> {
-    sqlx::query_as::<_, BackupCharacterProfile>(
-        "SELECT id, project_id, name, description, canonical_prompt, negative_prompt,
-                default_style_profile_id, default_reference_set_id, active_revision_id,
-                metadata_json, created_at, updated_at
-         FROM character_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_scene_profiles(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupSceneProfile>, AppError> {
-    sqlx::query_as::<_, BackupSceneProfile>(
-        "SELECT id, project_id, name, description, environment_prompt, lighting_prompt,
-                negative_prompt, default_style_profile_id, default_reference_set_id,
-                active_revision_id, created_at, updated_at
-         FROM scene_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_prop_profiles(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupPropProfile>, AppError> {
-    sqlx::query_as::<_, BackupPropProfile>(
-        "SELECT id, project_id, name, description, canonical_prompt, material_prompt,
-                scale_prompt, default_reference_set_id, active_revision_id, created_at,
-                updated_at
-         FROM prop_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_style_profiles(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupStyleProfile>, AppError> {
-    sqlx::query_as::<_, BackupStyleProfile>(
-        "SELECT id, project_id, name, style_prompt, color_prompt, line_prompt,
-                negative_prompt, output_notes, active_revision_id, created_at, updated_at
-         FROM style_profiles
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_costume_variants(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupCostumeVariant>, AppError> {
-    sqlx::query_as::<_, BackupCostumeVariant>(
-        "SELECT v.id, v.character_profile_id, v.name, v.prompt_fragment,
-                v.reference_set_id, v.is_default, v.ordinal, v.active_revision_id,
-                v.created_at, v.updated_at
-         FROM costume_variants v
-         JOIN character_profiles p ON p.id = v.character_profile_id
-         WHERE p.project_id = ?
-         ORDER BY v.character_profile_id, v.ordinal, v.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_profile_revisions(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupProfileRevision>, AppError> {
-    sqlx::query_as::<_, BackupProfileRevision>(
-        "SELECT id, profile_type, profile_id, revision_number, content_json,
-                content_sha256, status, created_at, created_by
-         FROM profile_revisions
-         WHERE (profile_type = 'CHARACTER' AND profile_id IN
-                    (SELECT id FROM character_profiles WHERE project_id = ?))
-            OR (profile_type = 'SCENE' AND profile_id IN
-                    (SELECT id FROM scene_profiles WHERE project_id = ?))
-            OR (profile_type = 'PROP' AND profile_id IN
-                    (SELECT id FROM prop_profiles WHERE project_id = ?))
-            OR (profile_type = 'STYLE' AND profile_id IN
-                    (SELECT id FROM style_profiles WHERE project_id = ?))
-         ORDER BY profile_type, profile_id, revision_number, id",
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_reference_sets(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupReferenceSet>, AppError> {
-    sqlx::query_as::<_, BackupReferenceSet>(
-        "SELECT id, project_id, name, purpose, description, owner_profile_type,
-                owner_profile_id, active_revision_id, created_at, updated_at
-         FROM reference_sets
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_reference_set_items(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupReferenceSetItem>, AppError> {
-    sqlx::query_as::<_, BackupReferenceSetItem>(
-        "SELECT i.reference_set_id, i.asset_id, i.ordinal, i.role, i.is_primary,
-                i.created_at
-         FROM reference_set_items i
-         JOIN reference_sets r ON r.id = i.reference_set_id
-         WHERE r.project_id = ?
-         ORDER BY i.reference_set_id, i.ordinal, i.asset_id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_shot_profile_bindings(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupShotProfileBinding>, AppError> {
-    sqlx::query_as::<_, BackupShotProfileBinding>(
-        "SELECT b.id, b.shot_id, b.role, b.profile_type, b.profile_id,
-                b.costume_variant_id, b.ordinal, b.inheritance_mode,
-                b.created_at, b.updated_at
-         FROM shot_profile_bindings b
-         JOIN shots s ON s.id = b.shot_id
-         WHERE s.project_id = ?
-         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_shot_reference_set_bindings(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupShotReferenceSetBinding>, AppError> {
-    sqlx::query_as::<_, BackupShotReferenceSetBinding>(
-        "SELECT b.id, b.shot_id, b.role, b.reference_set_id, b.ordinal,
-                b.required, b.inheritance_mode, b.created_at, b.updated_at
-         FROM shot_reference_set_bindings b
-         JOIN shots s ON s.id = b.shot_id
-         WHERE s.project_id = ?
-         ORDER BY b.shot_id, b.role, b.ordinal, b.id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_scope_profile_bindings(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupScopeProfileBinding>, AppError> {
-    sqlx::query_as::<_, BackupScopeProfileBinding>(
-        "SELECT id, project_id, scope_type, scope_id, role, profile_type,
-                profile_id, costume_variant_id, ordinal, inheritance_mode,
-                created_at, updated_at
-         FROM consistency_scope_profile_bindings
-         WHERE project_id = ?
-         ORDER BY scope_type, scope_id, role, ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_scope_reference_set_bindings(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupScopeReferenceSetBinding>, AppError> {
-    sqlx::query_as::<_, BackupScopeReferenceSetBinding>(
-        "SELECT id, project_id, scope_type, scope_id, role, reference_set_id,
-                ordinal, required, inheritance_mode, created_at, updated_at
-         FROM consistency_scope_reference_set_bindings
-         WHERE project_id = ?
-         ORDER BY scope_type, scope_id, role, ordinal, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_script_sources(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupScriptSource>, AppError> {
-    sqlx::query_as::<_, BackupScriptSource>(
-        "SELECT id, project_id, format, original_filename, source_checksum, source_bytes, source_text,
-                schema_version, created_at
-         FROM script_sources
-         WHERE project_id = ?
-         ORDER BY created_at, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
-}
-
-async fn query_script_draft_revisions(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-) -> Result<Vec<BackupScriptDraftRevision>, AppError> {
-    sqlx::query_as::<_, BackupScriptDraftRevision>(
-        "SELECT id, draft_id, project_id, source_id, revision, previous_revision_id,
-                schema_version, revision_kind, parser_version, contract_version,
-                provider_kind, provider_model, provider_metadata_json,
-                payload_checksum, summary_json, payload_json,
-                created_at
-         FROM script_import_drafts
-         WHERE project_id = ?
-         ORDER BY draft_id, revision, id",
-    )
-    .bind(project_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))
 }
 
 const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
@@ -6534,1920 +4299,10 @@ fn prepare_restored_snapshots(
         .collect()
 }
 
-async fn restore_rows_in_transaction(
-    transaction: &mut Transaction<'_, sqlx::Sqlite>,
-    project: &ProjectRecord,
-    document: &BackupDocument,
-    task_ids: &HashMap<String, String>,
-    asset_ids: &HashMap<String, String>,
-    snapshot_ids: &HashMap<String, String>,
-    preset_ids: &HashMap<String, String>,
-    prompt_ids: &HashMap<String, String>,
-    prompt_version_ids: &HashMap<String, String>,
-    batch_ids: &HashMap<String, String>,
-    item_ids: &HashMap<String, String>,
-    preparation_snapshot_ids: &HashMap<String, String>,
-    benchmark_experiment_ids: &HashMap<String, String>,
-    benchmark_candidate_ids: &HashMap<String, String>,
-    production_run_ids: &HashMap<String, String>,
-    production_stage_ids: &HashMap<String, String>,
-    production_stage_item_ids: &HashMap<String, String>,
-    production_run_template_ids: &HashMap<String, String>,
-    benchmark_run_ids: &HashMap<String, String>,
-    benchmark_quality_score_ids: &HashMap<String, String>,
-    tag_ids: &HashMap<String, String>,
-    reference_anchor_ids: &HashMap<String, String>,
-    production_structure_ids: &ProductionStructureIds,
-    script_source_ids: &HashMap<String, String>,
-    script_draft_ids: &HashMap<String, String>,
-    script_revision_ids: &HashMap<String, String>,
-    consistency_ids: &ConsistencyRestoreIds,
-    shot_ids: &HashMap<String, String>,
-    shot_generation_link_ids: &HashMap<String, String>,
-    restored_assets: &[RestoredAsset],
-    restored_snapshots: &[BackupSnapshot],
-) -> Result<(), AppError> {
-    sqlx::query(
-        "INSERT INTO projects (id, name, description, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&project.id)
-    .bind(&project.name)
-    .bind(&project.description)
-    .bind(project.root_path.to_string_lossy().to_string())
-    .bind(project.created_at.to_rfc3339())
-    .bind(project.updated_at.to_rfc3339())
-    .execute(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-
-    if let Some(registry) = &document.workflow_registry {
-        restore_workflow_registry(transaction, registry).await?;
-    }
-
-    for binding in &document.project_workflow_bindings {
-        sqlx::query(
-            "INSERT INTO project_workflow_bindings
-             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&project.id)
-        .bind(&binding.stage)
-        .bind(&binding.mode)
-        .bind(&binding.workflow_version_id)
-        .bind(&binding.recipe_id)
-        .bind(&binding.created_at)
-        .bind(&binding.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-
-    for entry in &document.prompt_entries {
-        let prompt_id = prompt_ids
-            .get(&entry.id)
-            .ok_or_else(|| AppError::backup_invalid("提示词 ID 映射缺失"))?;
-        let tags_json = serde_json::to_string(&entry.tags)
-            .map_err(|error| AppError::backup_invalid(format!("提示词标签序列化失败：{error}")))?;
-        sqlx::query(
-            "INSERT INTO prompt_entries
-             (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(prompt_id)
-        .bind(&project.id)
-        .bind(&entry.kind)
-        .bind(&entry.name)
-        .bind(&entry.normalized_name)
-        .bind(tags_json)
-        .bind(&entry.created_at)
-        .bind(&entry.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for version in &document.prompt_versions {
-        let version_id = prompt_version_ids
-            .get(&version.id)
-            .ok_or_else(|| AppError::backup_invalid("提示词版本 ID 映射缺失"))?;
-        let prompt_id = prompt_ids
-            .get(&version.prompt_id)
-            .ok_or_else(|| AppError::backup_invalid("提示词版本引用缺少提示词映射"))?;
-        sqlx::query(
-            "INSERT INTO prompt_versions (id, prompt_id, version, text, created_at)
-             VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(version_id)
-        .bind(prompt_id)
-        .bind(version.version)
-        .bind(&version.text)
-        .bind(&version.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-
-    for reference in &document.workflow_refs {
-        ensure_workflow_dependency(transaction, reference).await?;
-    }
-    for task in &document.tasks {
-        let new_task_id = task_ids
-            .get(&task.id)
-            .ok_or_else(|| AppError::backup_invalid("任务 ID 映射缺失"))?;
-        let terminal = task.is_terminal();
-        let status = if terminal {
-            task.status.clone()
-        } else {
-            "FAILED".to_owned()
-        };
-        let error_code = if terminal {
-            task.error_code.clone()
-        } else {
-            Some("RESTORED_INCOMPLETE_TASK".to_owned())
-        };
-        let error_message = if terminal {
-            task.error_message.clone()
-        } else {
-            Some("恢复时发现任务未完成，已安全标记为失败；不会自动重新提交。".to_owned())
-        };
-        let finished_at = if terminal {
-            task.finished_at.clone()
-        } else {
-            Some(Utc::now().to_rfc3339())
-        };
-        sqlx::query(
-            "INSERT INTO tasks (id, project_id, workflow_id, workflow_version_id, recipe_id,
-             app_version, build_commit, workflow_version, workflow_sha256, recipe_version,
-             recipe_sha256, package_name, package_source_path, dynamic_binding_targets_json, status,
-             prompt_id, queue_number, progress_mode, progress_current, progress_total, current_node_id,
-             error_code, error_message, raw_error_json, created_at, queued_at, started_at, finished_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(new_task_id)
-        .bind(&project.id)
-        .bind(&task.workflow_id)
-        .bind(&task.workflow_version_id)
-        .bind(&task.recipe_id)
-        .bind(&task.app_version)
-        .bind(&task.build_commit)
-        .bind(&task.workflow_version)
-        .bind(&task.workflow_sha256)
-        .bind(&task.recipe_version)
-        .bind(&task.recipe_sha256)
-        .bind(&task.package_name)
-        .bind(&task.package_source_path)
-        .bind(task.dynamic_binding_targets.as_ref().map(|value| value.to_string()))
-        .bind(status)
-        .bind(&task.prompt_id)
-        .bind(task.queue_number)
-        .bind(&task.progress_mode)
-        .bind(task.progress_current)
-        .bind(task.progress_total)
-        .bind(&task.current_node_id)
-        .bind(error_code)
-        .bind(error_message)
-        .bind(task.raw_error.as_ref().map(|value| value.to_string()))
-        .bind(&task.created_at)
-        .bind(&task.queued_at)
-        .bind(&task.started_at)
-        .bind(finished_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        sqlx::query(
-            "UPDATE tasks SET
-                generation_execution_id = ?, compiled_workflow_sha256 = ?,
-                runtime_profile = ?, concurrency_class = ?,
-                prepare_started_at = ?, prepared_at = ?, submitted_at = ?,
-                execution_started_at = ?, execution_finished_at = ?,
-                collection_finished_at = ?
-             WHERE id = ?",
-        )
-        .bind(&task.generation_execution_id)
-        .bind(&task.compiled_workflow_sha256)
-        .bind(&task.runtime_profile)
-        .bind(&task.concurrency_class)
-        .bind(&task.prepare_started_at)
-        .bind(&task.prepared_at)
-        .bind(&task.submitted_at)
-        .bind(&task.execution_started_at)
-        .bind(&task.execution_finished_at)
-        .bind(&task.collection_finished_at)
-        .bind(new_task_id)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for event in &document.task_events {
-        let Some(task_id) = task_ids.get(&event.task_id) else {
-            continue;
-        };
-        sqlx::query(
-            "INSERT INTO task_events (id, task_id, sequence, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(format!("evt_{}", Uuid::new_v4()))
-        .bind(task_id)
-        .bind(event.sequence)
-        .bind(&event.event_type)
-        .bind(event.payload.as_ref().map(|value| value.to_string()))
-        .bind(&event.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for snapshot in restored_snapshots {
-        let (Some(snapshot_id), Some(task_id)) = (
-            snapshot_ids.get(&snapshot.id),
-            task_ids.get(&snapshot.task_id),
-        ) else {
-            continue;
-        };
-        sqlx::query(
-            "INSERT INTO generation_snapshots (id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(snapshot_id)
-        .bind(task_id)
-        .bind(snapshot.workflow.to_string())
-        .bind(&snapshot.recipe_yaml)
-        .bind(snapshot.user_inputs.to_string())
-        .bind(snapshot.resolved_inputs.to_string())
-        .bind(&snapshot.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for asset in &document.assets {
-        let Some(restored) = restored_assets.iter().find(|item| item.old_id == asset.id) else {
-            continue;
-        };
-        sqlx::query(
-            "INSERT INTO assets (id, project_id, type, category, name, original_name, storage_path, thumbnail_path,
-             sha256, mime_type, width, height, duration_ms, file_size, source_task_id, metadata_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&restored.new_id)
-        .bind(&project.id)
-        .bind(&asset.asset_type)
-        .bind(&asset.category)
-        .bind(&asset.name)
-        .bind(&asset.original_name)
-        .bind(&restored.storage_path)
-        .bind(&restored.thumbnail_path)
-        .bind(&asset.sha256)
-        .bind(&asset.mime_type)
-        .bind(asset.width)
-        .bind(asset.height)
-        .bind(asset.duration_ms)
-        .bind(asset.file_size)
-        .bind(asset.source_task_id.as_ref().and_then(|id| task_ids.get(id)))
-        .bind(asset.metadata.to_string())
-        .bind(&asset.created_at)
-        .bind(&asset.updated_at)
-        .execute(&mut **transaction)
-        .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for profile in &document.style_profiles {
-        let profile_id =
-            consistency_required_id(&consistency_ids.profiles, &profile.id, "Style Profile")?;
-        let active_revision_id = consistency_optional_id(
-            &consistency_ids.profile_revisions,
-            profile.active_revision_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO style_profiles
-             (id, project_id, name, style_prompt, color_prompt, line_prompt,
-              negative_prompt, output_notes, active_revision_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(&project.id)
-        .bind(&profile.name)
-        .bind(&profile.style_prompt)
-        .bind(&profile.color_prompt)
-        .bind(&profile.line_prompt)
-        .bind(&profile.negative_prompt)
-        .bind(&profile.output_notes)
-        .bind(active_revision_id)
-        .bind(&profile.created_at)
-        .bind(&profile.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for reference_set in &document.reference_sets {
-        let reference_set_id = consistency_required_id(
-            &consistency_ids.reference_sets,
-            &reference_set.id,
-            "Reference Set",
-        )?;
-        let owner_profile_id = consistency_optional_id(
-            &consistency_ids.profiles,
-            reference_set.owner_profile_id.as_ref(),
-        );
-        let active_revision_id = consistency_optional_id(
-            &consistency_ids.profile_revisions,
-            reference_set.active_revision_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO reference_sets
-             (id, project_id, name, purpose, description, owner_profile_type,
-              owner_profile_id, active_revision_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(reference_set_id)
-        .bind(&project.id)
-        .bind(&reference_set.name)
-        .bind(&reference_set.purpose)
-        .bind(&reference_set.description)
-        .bind(&reference_set.owner_profile_type)
-        .bind(owner_profile_id)
-        .bind(active_revision_id)
-        .bind(&reference_set.created_at)
-        .bind(&reference_set.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for profile in &document.character_profiles {
-        let profile_id =
-            consistency_required_id(&consistency_ids.profiles, &profile.id, "Character Profile")?;
-        let default_style_profile_id = consistency_optional_id(
-            &consistency_ids.profiles,
-            profile.default_style_profile_id.as_ref(),
-        );
-        let default_reference_set_id = consistency_optional_id(
-            &consistency_ids.reference_sets,
-            profile.default_reference_set_id.as_ref(),
-        );
-        let active_revision_id = consistency_optional_id(
-            &consistency_ids.profile_revisions,
-            profile.active_revision_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO character_profiles
-             (id, project_id, name, description, canonical_prompt, negative_prompt,
-              default_style_profile_id, default_reference_set_id, active_revision_id,
-              metadata_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(&project.id)
-        .bind(&profile.name)
-        .bind(&profile.description)
-        .bind(&profile.canonical_prompt)
-        .bind(&profile.negative_prompt)
-        .bind(default_style_profile_id)
-        .bind(default_reference_set_id)
-        .bind(active_revision_id)
-        .bind(&profile.metadata_json)
-        .bind(&profile.created_at)
-        .bind(&profile.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for profile in &document.scene_profiles {
-        let profile_id =
-            consistency_required_id(&consistency_ids.profiles, &profile.id, "Scene Profile")?;
-        let default_style_profile_id = consistency_optional_id(
-            &consistency_ids.profiles,
-            profile.default_style_profile_id.as_ref(),
-        );
-        let default_reference_set_id = consistency_optional_id(
-            &consistency_ids.reference_sets,
-            profile.default_reference_set_id.as_ref(),
-        );
-        let active_revision_id = consistency_optional_id(
-            &consistency_ids.profile_revisions,
-            profile.active_revision_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO scene_profiles
-             (id, project_id, name, description, environment_prompt, lighting_prompt,
-              negative_prompt, default_style_profile_id, default_reference_set_id,
-              active_revision_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(&project.id)
-        .bind(&profile.name)
-        .bind(&profile.description)
-        .bind(&profile.environment_prompt)
-        .bind(&profile.lighting_prompt)
-        .bind(&profile.negative_prompt)
-        .bind(default_style_profile_id)
-        .bind(default_reference_set_id)
-        .bind(active_revision_id)
-        .bind(&profile.created_at)
-        .bind(&profile.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for profile in &document.prop_profiles {
-        let profile_id =
-            consistency_required_id(&consistency_ids.profiles, &profile.id, "Prop Profile")?;
-        let default_reference_set_id = consistency_optional_id(
-            &consistency_ids.reference_sets,
-            profile.default_reference_set_id.as_ref(),
-        );
-        let active_revision_id = consistency_optional_id(
-            &consistency_ids.profile_revisions,
-            profile.active_revision_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO prop_profiles
-             (id, project_id, name, description, canonical_prompt, material_prompt,
-              scale_prompt, default_reference_set_id, active_revision_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(profile_id)
-        .bind(&project.id)
-        .bind(&profile.name)
-        .bind(&profile.description)
-        .bind(&profile.canonical_prompt)
-        .bind(&profile.material_prompt)
-        .bind(&profile.scale_prompt)
-        .bind(default_reference_set_id)
-        .bind(active_revision_id)
-        .bind(&profile.created_at)
-        .bind(&profile.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for variant in &document.costume_variants {
-        let variant_id = consistency_required_id(
-            &consistency_ids.costume_variants,
-            &variant.id,
-            "Costume Variant",
-        )?;
-        let character_profile_id = consistency_required_id(
-            &consistency_ids.profiles,
-            &variant.character_profile_id,
-            "Costume Character Profile",
-        )?;
-        let reference_set_id = consistency_optional_id(
-            &consistency_ids.reference_sets,
-            variant.reference_set_id.as_ref(),
-        );
-        let active_revision_id = consistency_optional_id(
-            &consistency_ids.profile_revisions,
-            variant.active_revision_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO costume_variants
-             (id, character_profile_id, name, prompt_fragment, reference_set_id,
-              is_default, ordinal, active_revision_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(variant_id)
-        .bind(character_profile_id)
-        .bind(&variant.name)
-        .bind(&variant.prompt_fragment)
-        .bind(reference_set_id)
-        .bind(variant.is_default)
-        .bind(variant.ordinal)
-        .bind(active_revision_id)
-        .bind(&variant.created_at)
-        .bind(&variant.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for item in &document.reference_set_items {
-        let reference_set_id = consistency_required_id(
-            &consistency_ids.reference_sets,
-            &item.reference_set_id,
-            "Reference Set Item",
-        )?;
-        let asset_id = asset_ids
-            .get(&item.asset_id)
-            .ok_or_else(|| AppError::backup_invalid("Reference Set Item 素材映射缺失"))?;
-        sqlx::query(
-            "INSERT INTO reference_set_items
-             (reference_set_id, asset_id, ordinal, role, is_primary, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(reference_set_id)
-        .bind(asset_id)
-        .bind(item.ordinal)
-        .bind(&item.role)
-        .bind(item.is_primary)
-        .bind(&item.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for revision in &document.profile_revisions {
-        let revision_id = consistency_required_id(
-            &consistency_ids.profile_revisions,
-            &revision.id,
-            "Profile Revision",
-        )?;
-        let profile_id = consistency_required_id(
-            &consistency_ids.profiles,
-            &revision.profile_id,
-            "Profile Revision",
-        )?;
-        sqlx::query(
-            "INSERT INTO profile_revisions
-             (id, profile_type, profile_id, revision_number, content_json,
-              content_sha256, status, created_at, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(revision_id)
-        .bind(&revision.profile_type)
-        .bind(profile_id)
-        .bind(revision.revision_number)
-        .bind(&revision.content_json)
-        .bind(&revision.content_sha256)
-        .bind(&revision.status)
-        .bind(&revision.created_at)
-        .bind(&revision.created_by)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for anchor in &document.reference_anchors {
-        let anchor_id = reference_anchor_ids
-            .get(&anchor.id)
-            .ok_or_else(|| AppError::backup_invalid("参考锚点 ID 映射缺失"))?;
-        sqlx::query(
-            "INSERT INTO reference_anchors
-             (id, project_id, kind, name, normalized_name, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(anchor_id)
-        .bind(&project.id)
-        .bind(&anchor.kind)
-        .bind(&anchor.name)
-        .bind(&anchor.normalized_name)
-        .bind(&anchor.description)
-        .bind(&anchor.created_at)
-        .bind(&anchor.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        for asset in remap_reference_anchor_assets(anchor, asset_ids)? {
-            sqlx::query(
-                "INSERT INTO reference_anchor_assets (anchor_id, asset_id, ordinal, created_at)
-                 VALUES (?, ?, ?, ?)",
-            )
-            .bind(anchor_id)
-            .bind(&asset.asset_id)
-            .bind(asset.ordinal)
-            .bind(&asset.created_at)
-            .execute(&mut **transaction)
-            .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-        }
-    }
-    for prompt in &document.asset_video_prompts {
-        let Some(asset_id) = asset_ids.get(&prompt.asset_id) else {
-            continue;
-        };
-        sqlx::query(
-            "INSERT INTO asset_video_prompts (asset_id, project_id, prompt_text, updated_at)
-             VALUES (?, ?, ?, ?)",
-        )
-        .bind(asset_id)
-        .bind(&project.id)
-        .bind(&prompt.prompt_text)
-        .bind(&prompt.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for tag in &document.asset_tags {
-        let tag_id = tag_ids
-            .get(&tag.id)
-            .ok_or_else(|| AppError::backup_invalid("标签 ID 映射缺失"))?;
-        sqlx::query("INSERT INTO asset_tags (id, project_id, name, normalized_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-            .bind(tag_id).bind(&project.id).bind(&tag.name).bind(&tag.normalized_name).bind(&tag.created_at).bind(&tag.updated_at)
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for link in &document.asset_tag_links {
-        let asset_id = asset_ids
-            .get(&link.asset_id)
-            .ok_or_else(|| AppError::backup_invalid("标签链接缺少资产映射"))?;
-        let tag_id = tag_ids
-            .get(&link.tag_id)
-            .ok_or_else(|| AppError::backup_invalid("标签链接缺少标签映射"))?;
-        sqlx::query("INSERT INTO asset_tag_links (asset_id, tag_id, project_id, created_at) VALUES (?, ?, ?, ?)")
-            .bind(asset_id).bind(tag_id).bind(&project.id).bind(&link.created_at)
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for favorite in &document.asset_favorites {
-        let asset_id = asset_ids
-            .get(&favorite.asset_id)
-            .ok_or_else(|| AppError::backup_invalid("收藏缺少资产映射"))?;
-        sqlx::query(
-            "INSERT INTO asset_favorites (asset_id, project_id, created_at) VALUES (?, ?, ?)",
-        )
-        .bind(asset_id)
-        .bind(&project.id)
-        .bind(&favorite.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    validate_restored_snapshot_asset_ownership(
-        transaction,
-        &project.id,
-        restored_snapshots,
-        asset_ids,
-    )
-    .await?;
-    for mapping in &document.mappings {
-        let (Some(task_id), Some(asset_id)) = (
-            task_ids.get(&mapping.task_id),
-            asset_ids.get(&mapping.asset_id),
-        ) else {
-            continue;
-        };
-        if !restored_assets
-            .iter()
-            .any(|asset| asset.old_id == mapping.asset_id)
-        {
-            continue;
-        }
-        sqlx::query("INSERT INTO task_output_assets (task_id, output_id, ordinal, asset_id, created_at) VALUES (?, ?, ?, ?, ?)")
-            .bind(task_id).bind(&mapping.output_id).bind(mapping.ordinal).bind(asset_id).bind(&mapping.created_at)
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for preset in &document.presets {
-        let Some(preset_id) = preset_ids.get(&preset.id) else {
-            continue;
-        };
-        ensure_version_recipe_dependency(
-            transaction,
-            &preset.workflow_version_id,
-            &preset.recipe_id,
-        )
-        .await?;
-        sqlx::query("INSERT INTO presets (id, project_id, workflow_version_id, recipe_id, name, values_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(preset_id).bind(&project.id).bind(&preset.workflow_version_id).bind(&preset.recipe_id).bind(&preset.name).bind(preset.values.to_string()).bind(&preset.created_at).bind(&preset.updated_at)
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for batch in &document.batches {
-        let Some(batch_id) = batch_ids.get(&batch.id) else {
-            continue;
-        };
-        let status = if batch.status == "RUNNING" {
-            "PAUSED"
-        } else {
-            &batch.status
-        };
-        sqlx::query("INSERT INTO production_batches (id, project_id, name, status, continue_on_failure, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(batch_id).bind(&project.id).bind(&batch.name).bind(status).bind(batch.continue_on_failure).bind(&batch.created_at).bind(&batch.updated_at).bind(&batch.archived_at)
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for item in &document.items {
-        let (Some(item_id), Some(batch_id)) =
-            (item_ids.get(&item.id), batch_ids.get(&item.batch_id))
-        else {
-            continue;
-        };
-        ensure_version_recipe_dependency(transaction, &item.workflow_version_id, &item.recipe_id)
-            .await?;
-        let linked_task = item.task_id.as_ref().and_then(|id| task_ids.get(id));
-        let terminal = matches!(
-            item.status.as_str(),
-            "SUCCEEDED" | "FAILED" | "CANCELLED" | "SKIPPED"
-        );
-        let status = if terminal {
-            item.status.clone()
-        } else {
-            "FAILED".to_owned()
-        };
-        let error_code = if terminal {
-            item.error_code.clone()
-        } else {
-            Some("RESTORED_INCOMPLETE_TASK".to_owned())
-        };
-        let error_message = if terminal {
-            item.error_message.clone()
-        } else {
-            Some("恢复时未自动重新提交生产队列项目。".to_owned())
-        };
-        sqlx::query("INSERT INTO production_batch_items (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status, task_id, error_code, error_message, created_at, updated_at, retry_of_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(item_id).bind(batch_id).bind(item.ordinal).bind(&item.workflow_version_id).bind(&item.recipe_id).bind(item.values.to_string()).bind(status).bind(linked_task).bind(error_code).bind(error_message).bind(&item.created_at).bind(&item.updated_at).bind(item.retry_of_item_id.as_ref().and_then(|id| item_ids.get(id)))
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for template in &document.production_run_templates {
-        let Some(template_id) = production_run_template_ids.get(&template.id) else {
-            continue;
-        };
-        if let (Some(workflow_version_id), Some(recipe_id)) = (
-            template.krea2_workflow_version_id.as_deref(),
-            template.krea2_recipe_id.as_deref(),
-        ) {
-            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
-        }
-        if let (Some(workflow_version_id), Some(recipe_id)) = (
-            template.h3_workflow_version_id.as_deref(),
-            template.h3_recipe_id.as_deref(),
-        ) {
-            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
-        }
-        sqlx::query(
-            "INSERT INTO production_run_templates
-             (id, project_id, name, krea2_workflow_version_id, krea2_recipe_id, krea2_preset_id,
-              default_image_count, h3_workflow_version_id, h3_recipe_id, h3_profile,
-              default_duration_seconds, default_width, default_height, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(template_id)
-        .bind(&project.id)
-        .bind(&template.name)
-        .bind(&template.krea2_workflow_version_id)
-        .bind(&template.krea2_recipe_id)
-        .bind(
-            template
-                .krea2_preset_id
-                .as_ref()
-                .and_then(|id| preset_ids.get(id)),
-        )
-        .bind(template.default_image_count)
-        .bind(&template.h3_workflow_version_id)
-        .bind(&template.h3_recipe_id)
-        .bind(&template.h3_profile)
-        .bind(template.default_duration_seconds)
-        .bind(template.default_width)
-        .bind(template.default_height)
-        .bind(&template.created_at)
-        .bind(&template.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for run in &document.production_runs {
-        let Some(run_id) = production_run_ids.get(&run.id) else {
-            continue;
-        };
-        let status = if run.status == "RUNNING" {
-            "FAILED"
-        } else {
-            &run.status
-        };
-        sqlx::query(
-            "INSERT INTO production_runs
-             (id, project_id, name, status, current_stage_ordinal, template_id,
-              created_at, updated_at, started_at, finished_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(run_id)
-        .bind(&project.id)
-        .bind(&run.name)
-        .bind(status)
-        .bind(run.current_stage_ordinal)
-        .bind(
-            run.template_id
-                .as_ref()
-                .and_then(|id| production_run_template_ids.get(id)),
-        )
-        .bind(&run.created_at)
-        .bind(&run.updated_at)
-        .bind(&run.started_at)
-        .bind(&run.finished_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for stage in &document.production_stages {
-        let (Some(stage_id), Some(run_id)) = (
-            production_stage_ids.get(&stage.id),
-            production_run_ids.get(&stage.run_id),
-        ) else {
-            continue;
-        };
-        if let (Some(workflow_version_id), Some(recipe_id)) = (
-            stage.workflow_version_id.as_deref(),
-            stage.recipe_id.as_deref(),
-        ) {
-            ensure_version_recipe_dependency(transaction, workflow_version_id, recipe_id).await?;
-        }
-        let status = if stage.status == "RUNNING" {
-            "FAILED"
-        } else {
-            &stage.status
-        };
-        let mut frozen_config = stage.frozen_config.clone();
-        remap_snapshot_asset_references(&mut frozen_config, asset_ids);
-        sqlx::query(
-            "INSERT INTO production_stages
-             (id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id,
-              production_batch_id, frozen_config_json, prompt, created_at, updated_at,
-              started_at, finished_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(stage_id)
-        .bind(run_id)
-        .bind(stage.ordinal)
-        .bind(&stage.stage_type)
-        .bind(status)
-        .bind(&stage.workflow_version_id)
-        .bind(&stage.recipe_id)
-        .bind(
-            stage
-                .production_batch_id
-                .as_ref()
-                .and_then(|id| batch_ids.get(id)),
-        )
-        .bind(frozen_config.to_string())
-        .bind(&stage.prompt)
-        .bind(&stage.created_at)
-        .bind(&stage.updated_at)
-        .bind(&stage.started_at)
-        .bind(&stage.finished_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for item in &document.production_stage_items {
-        let (Some(item_id), Some(stage_id)) = (
-            production_stage_item_ids.get(&item.id),
-            production_stage_ids.get(&item.stage_id),
-        ) else {
-            continue;
-        };
-        let status = if matches!(item.status.as_str(), "PENDING" | "READY" | "RUNNING") {
-            "FAILED"
-        } else {
-            &item.status
-        };
-        let mut frozen_values = item.frozen_values.clone();
-        remap_snapshot_asset_references(&mut frozen_values, asset_ids);
-        sqlx::query(
-            "INSERT INTO production_stage_items
-             (id, stage_id, ordinal, status, production_batch_item_id, task_id, asset_id,
-              source_asset_id, reference_index, attempt, submission_idempotency_key,
-              parent_stage_item_id, frozen_values_json, error_code, error_message,
-              created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(item_id)
-        .bind(stage_id)
-        .bind(item.ordinal)
-        .bind(status)
-        .bind(
-            item.production_batch_item_id
-                .as_ref()
-                .and_then(|id| item_ids.get(id)),
-        )
-        .bind(item.task_id.as_ref().and_then(|id| task_ids.get(id)))
-        .bind(item.asset_id.as_ref().and_then(|id| asset_ids.get(id)))
-        .bind(
-            item.source_asset_id
-                .as_ref()
-                .and_then(|id| asset_ids.get(id)),
-        )
-        .bind(item.reference_index)
-        .bind(item.attempt)
-        .bind(&item.submission_idempotency_key)
-        .bind(
-            item.parent_stage_item_id
-                .as_ref()
-                .and_then(|id| production_stage_item_ids.get(id)),
-        )
-        .bind(frozen_values.to_string())
-        .bind(&item.error_code)
-        .bind(&item.error_message)
-        .bind(&item.created_at)
-        .bind(&item.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for review in &document.production_item_reviews {
-        let (Some(item_id), Some(batch_id)) = (
-            item_ids.get(&review.production_batch_item_id),
-            batch_ids.get(&review.production_batch_id),
-        ) else {
-            continue;
-        };
-        let lineage_key = item_ids
-            .get(&review.lineage_key)
-            .cloned()
-            .unwrap_or_else(|| review.lineage_key.clone());
-        sqlx::query(
-            "INSERT INTO production_item_reviews
-             (id, project_id, production_batch_id, production_batch_item_id, task_id,
-              result_asset_id, review_status, review_note, version, lineage_key,
-              parent_batch_id, parent_item_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(format!("pri_{}", Uuid::new_v4().simple()))
-        .bind(&project.id)
-        .bind(batch_id)
-        .bind(item_id)
-        .bind(review.task_id.as_ref().and_then(|id| task_ids.get(id)))
-        .bind(
-            review
-                .result_asset_id
-                .as_ref()
-                .and_then(|id| asset_ids.get(id)),
-        )
-        .bind(&review.review_status)
-        .bind(&review.review_note)
-        .bind(review.version)
-        .bind(lineage_key)
-        .bind(
-            review
-                .parent_batch_id
-                .as_ref()
-                .and_then(|id| batch_ids.get(id)),
-        )
-        .bind(
-            review
-                .parent_item_id
-                .as_ref()
-                .and_then(|id| item_ids.get(id)),
-        )
-        .bind(&review.created_at)
-        .bind(&review.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for experiment in &document.benchmark_experiments {
-        let experiment_id = benchmark_experiment_ids
-            .get(&experiment.id)
-            .ok_or_else(|| AppError::backup_invalid("Benchmark 实验 ID 映射缺失"))?;
-        let status = match experiment.status.as_str() {
-            "QUEUED" | "RUNNING" => "FAILED_TO_QUEUE",
-            other => other,
-        };
-        let winner_candidate_id = experiment
-            .winner_candidate_id
-            .as_ref()
-            .and_then(|id| benchmark_candidate_ids.get(id));
-        let production_batch_id = experiment
-            .production_batch_id
-            .as_ref()
-            .and_then(|id| batch_ids.get(id));
-        let mut base_values = experiment.base_values.clone();
-        remap_snapshot_asset_references(&mut base_values, asset_ids);
-        let asset_ids = experiment
-            .asset_ids
-            .iter()
-            .filter_map(|id| asset_ids.get(id))
-            .cloned()
-            .collect::<Vec<_>>();
-        sqlx::query(
-            "INSERT INTO benchmark_experiments
-             (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
-              winner_candidate_id, production_batch_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(experiment_id)
-        .bind(&project.id)
-        .bind(&experiment.name)
-        .bind(&experiment.media_type)
-        .bind(status)
-        .bind(base_values.to_string())
-        .bind(serde_json::to_string(&asset_ids).map_err(|error| {
-            AppError::backup_invalid(format!("Benchmark 素材序列化失败：{error}"))
-        })?)
-        .bind(winner_candidate_id)
-        .bind(production_batch_id)
-        .bind(&experiment.created_at)
-        .bind(&experiment.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for candidate in &document.benchmark_candidates {
-        let candidate_id = benchmark_candidate_ids
-            .get(&candidate.id)
-            .ok_or_else(|| AppError::backup_invalid("Benchmark 候选 ID 映射缺失"))?;
-        let experiment_id = benchmark_experiment_ids
-            .get(&candidate.experiment_id)
-            .ok_or_else(|| AppError::backup_invalid("Benchmark 候选缺少实验映射"))?;
-        ensure_version_recipe_dependency(
-            transaction,
-            &candidate.workflow_version_id,
-            &candidate.recipe_id,
-        )
-        .await?;
-        let mut values = candidate.values.clone();
-        remap_snapshot_asset_references(&mut values, asset_ids);
-        let restored_asset_ids = candidate
-            .asset_ids
-            .iter()
-            .filter_map(|id| asset_ids.get(id))
-            .cloned()
-            .collect::<Vec<_>>();
-        sqlx::query(
-            "INSERT INTO benchmark_candidates
-             (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
-              preset_name, label, values_json, asset_ids_json, production_batch_item_id,
-              task_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(candidate_id)
-        .bind(experiment_id)
-        .bind(candidate.position)
-        .bind(&candidate.workflow_version_id)
-        .bind(&candidate.recipe_id)
-        .bind(
-            candidate
-                .preset_id
-                .as_ref()
-                .and_then(|id| preset_ids.get(id)),
-        )
-        .bind(&candidate.preset_name)
-        .bind(&candidate.label)
-        .bind(values.to_string())
-        .bind(serde_json::to_string(&restored_asset_ids).map_err(|error| {
-            AppError::backup_invalid(format!("Benchmark 候选素材序列化失败：{error}"))
-        })?)
-        .bind(
-            candidate
-                .production_batch_item_id
-                .as_ref()
-                .and_then(|id| item_ids.get(id)),
-        )
-        .bind(candidate.task_id.as_ref().and_then(|id| task_ids.get(id)))
-        .bind(&candidate.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for run in &document.benchmark_runs {
-        let (Some(run_id), Some(experiment_id), Some(candidate_id)) = (
-            benchmark_run_ids.get(&run.id),
-            benchmark_experiment_ids.get(&run.experiment_id),
-            benchmark_candidate_ids.get(&run.candidate_id),
-        ) else {
-            continue;
-        };
-        sqlx::query(
-            "INSERT INTO benchmark_runs
-             (id, experiment_id, candidate_id, run_number, production_batch_item_id, task_id,
-              snapshot_id, output_asset_id, generation_execution_id, compiled_workflow_sha256,
-              runtime_profile, concurrency_class, queue_wait_ms, prepare_ms, submit_ms,
-              comfy_execution_ms, collect_ms, total_ms, status, error_code, output_file_size,
-              created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(run_id)
-        .bind(experiment_id)
-        .bind(candidate_id)
-        .bind(run.run_number)
-        .bind(
-            run.production_batch_item_id
-                .as_ref()
-                .and_then(|id| item_ids.get(id)),
-        )
-        .bind(run.task_id.as_ref().and_then(|id| task_ids.get(id)))
-        .bind(run.snapshot_id.as_ref().and_then(|id| snapshot_ids.get(id)))
-        .bind(
-            run.output_asset_id
-                .as_ref()
-                .and_then(|id| asset_ids.get(id)),
-        )
-        .bind(&run.generation_execution_id)
-        .bind(&run.compiled_workflow_sha256)
-        .bind(&run.runtime_profile)
-        .bind(&run.concurrency_class)
-        .bind(run.queue_wait_ms)
-        .bind(run.prepare_ms)
-        .bind(run.submit_ms)
-        .bind(run.comfy_execution_ms)
-        .bind(run.collect_ms)
-        .bind(run.total_ms)
-        .bind(&run.status)
-        .bind(&run.error_code)
-        .bind(run.output_file_size)
-        .bind(&run.created_at)
-        .bind(&run.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for score in &document.benchmark_quality_scores {
-        let (Some(score_id), Some(candidate_id)) = (
-            benchmark_quality_score_ids.get(&score.id),
-            benchmark_candidate_ids.get(&score.candidate_id),
-        ) else {
-            continue;
-        };
-        sqlx::query(
-            "INSERT INTO benchmark_quality_scores
-             (id, candidate_id, prompt_adherence, visual_quality, motion_quality,
-              reference_consistency, overall, note, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(score_id)
-        .bind(candidate_id)
-        .bind(score.prompt_adherence)
-        .bind(score.visual_quality)
-        .bind(score.motion_quality)
-        .bind(score.reference_consistency)
-        .bind(score.overall)
-        .bind(&score.note)
-        .bind(&score.created_at)
-        .bind(&score.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for series in &document.production_series {
-        let series_id = production_structure_ids
-            .series
-            .get(&series.id)
-            .ok_or_else(|| AppError::backup_invalid("Series ID 映射缺失"))?;
-        sqlx::query(
-            "INSERT INTO production_series
-             (id, project_id, ordinal, name, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(series_id)
-        .bind(&project.id)
-        .bind(series.ordinal)
-        .bind(&series.name)
-        .bind(&series.description)
-        .bind(&series.created_at)
-        .bind(&series.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for episode in &document.production_episodes {
-        let episode_id = production_structure_ids
-            .episodes
-            .get(&episode.id)
-            .ok_or_else(|| AppError::backup_invalid("Episode ID 映射缺失"))?;
-        let series_id = production_structure_ids
-            .series
-            .get(&episode.series_id)
-            .ok_or_else(|| AppError::backup_invalid("Episode 缺少 Series 映射"))?;
-        sqlx::query(
-            "INSERT INTO production_episodes
-             (id, series_id, ordinal, name, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(episode_id)
-        .bind(series_id)
-        .bind(episode.ordinal)
-        .bind(&episode.name)
-        .bind(&episode.description)
-        .bind(&episode.created_at)
-        .bind(&episode.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for scene in &document.production_scenes {
-        let scene_id = production_structure_ids
-            .scenes
-            .get(&scene.id)
-            .ok_or_else(|| AppError::backup_invalid("Scene ID 映射缺失"))?;
-        let episode_id = production_structure_ids
-            .episodes
-            .get(&scene.episode_id)
-            .ok_or_else(|| AppError::backup_invalid("Scene 缺少 Episode 映射"))?;
-        sqlx::query(
-            "INSERT INTO production_scenes
-             (id, episode_id, ordinal, name, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(scene_id)
-        .bind(episode_id)
-        .bind(scene.ordinal)
-        .bind(&scene.name)
-        .bind(&scene.description)
-        .bind(&scene.created_at)
-        .bind(&scene.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for shot in &document.shots {
-        let shot_id = shot_ids
-            .get(&shot.id)
-            .ok_or_else(|| AppError::backup_invalid("镜头 ID 映射缺失"))?;
-        let prompt_entry_id = shot
-            .prompt_entry_id
-            .as_ref()
-            .and_then(|id| prompt_ids.get(id))
-            .map(String::as_str);
-        let prompt_version_id = shot
-            .prompt_version_id
-            .as_ref()
-            .and_then(|id| prompt_version_ids.get(id))
-            .map(String::as_str);
-        let selected_image_asset_id = shot
-            .selected_image_asset_id
-            .as_ref()
-            .and_then(|id| asset_ids.get(id))
-            .map(String::as_str);
-        let selected_video_asset_id = shot
-            .selected_video_asset_id
-            .as_ref()
-            .and_then(|id| asset_ids.get(id))
-            .map(String::as_str);
-        sqlx::query(
-            "INSERT INTO shots (id, project_id, ordinal, name, prompt_text, prompt_entry_id,
-             prompt_version_id, selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(shot_id)
-        .bind(&project.id)
-        .bind(shot.ordinal)
-        .bind(&shot.name)
-        .bind(&shot.prompt_text)
-        .bind(prompt_entry_id)
-        .bind(prompt_version_id)
-        .bind(selected_image_asset_id)
-        .bind(selected_video_asset_id)
-        .bind(&shot.created_at)
-        .bind(&shot.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    // `snapshot_json` is immutable historical evidence. Only the outer
-    // relational IDs are remapped so live associations point at the restored
-    // project; IDs inside the evidence are intentionally left untouched.
-    for snapshot in &document.preparation_snapshots {
-        let snapshot_id = preparation_snapshot_ids
-            .get(&snapshot.id)
-            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot ID 映射缺失"))?;
-        let shot_id = shot_ids
-            .get(&snapshot.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot 镜头映射缺失"))?;
-        let batch_id = batch_ids
-            .get(&snapshot.production_batch_id)
-            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot 批次映射缺失"))?;
-        let item_id = item_ids
-            .get(&snapshot.production_batch_item_id)
-            .ok_or_else(|| AppError::backup_invalid("Preparation Snapshot 项目映射缺失"))?;
-        sqlx::query(
-            "INSERT INTO production_preparation_snapshots
-             (id, project_id, shot_id, stage, context_hash, production_batch_id,
-              production_batch_item_id, snapshot_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(snapshot_id)
-        .bind(&project.id)
-        .bind(shot_id)
-        .bind(&snapshot.stage)
-        .bind(&snapshot.context_hash)
-        .bind(batch_id)
-        .bind(item_id)
-        .bind(&snapshot.snapshot_json)
-        .bind(&snapshot.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for binding in &document.shot_profile_bindings {
-        let binding_id = consistency_required_id(
-            &consistency_ids.shot_profile_bindings,
-            &binding.id,
-            "Shot Profile Binding",
-        )?;
-        let shot_id = shot_ids
-            .get(&binding.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("Shot Profile Binding 镜头映射缺失"))?;
-        let profile_id = consistency_required_id(
-            &consistency_ids.profiles,
-            &binding.profile_id,
-            "Shot Profile Binding",
-        )?;
-        let costume_variant_id = consistency_optional_id(
-            &consistency_ids.costume_variants,
-            binding.costume_variant_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO shot_profile_bindings
-             (id, shot_id, role, profile_type, profile_id, costume_variant_id,
-              ordinal, inheritance_mode, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(binding_id)
-        .bind(shot_id)
-        .bind(&binding.role)
-        .bind(&binding.profile_type)
-        .bind(profile_id)
-        .bind(costume_variant_id)
-        .bind(binding.ordinal)
-        .bind(&binding.inheritance_mode)
-        .bind(&binding.created_at)
-        .bind(&binding.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for binding in &document.shot_reference_set_bindings {
-        let binding_id = consistency_required_id(
-            &consistency_ids.shot_reference_set_bindings,
-            &binding.id,
-            "Shot Reference Set Binding",
-        )?;
-        let shot_id = shot_ids
-            .get(&binding.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("Shot Reference Set Binding 镜头映射缺失"))?;
-        let reference_set_id = consistency_required_id(
-            &consistency_ids.reference_sets,
-            &binding.reference_set_id,
-            "Shot Reference Set Binding",
-        )?;
-        sqlx::query(
-            "INSERT INTO shot_reference_set_bindings
-             (id, shot_id, role, reference_set_id, ordinal, required,
-              inheritance_mode, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(binding_id)
-        .bind(shot_id)
-        .bind(&binding.role)
-        .bind(reference_set_id)
-        .bind(binding.ordinal)
-        .bind(binding.required)
-        .bind(&binding.inheritance_mode)
-        .bind(&binding.created_at)
-        .bind(&binding.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for binding in &document.scope_profile_bindings {
-        let binding_id = consistency_required_id(
-            &consistency_ids.scope_profile_bindings,
-            &binding.id,
-            "Scope Profile Binding",
-        )?;
-        if binding.project_id != document.project.id {
-            return Err(AppError::backup_invalid(
-                "Scope Profile Binding 项目归属不一致",
-            ));
-        }
-        let scope_id = remap_consistency_scope_id(
-            &binding.scope_type,
-            &binding.scope_id,
-            &document.project.id,
-            &project.id,
-            production_structure_ids,
-        )?;
-        let profile_id = consistency_required_id(
-            &consistency_ids.profiles,
-            &binding.profile_id,
-            "Scope Profile Binding",
-        )?;
-        let costume_variant_id = consistency_optional_id(
-            &consistency_ids.costume_variants,
-            binding.costume_variant_id.as_ref(),
-        );
-        sqlx::query(
-            "INSERT INTO consistency_scope_profile_bindings
-             (id, project_id, scope_type, scope_id, role, profile_type,
-              profile_id, costume_variant_id, ordinal, inheritance_mode,
-              created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(binding_id)
-        .bind(&project.id)
-        .bind(&binding.scope_type)
-        .bind(scope_id)
-        .bind(&binding.role)
-        .bind(&binding.profile_type)
-        .bind(profile_id)
-        .bind(costume_variant_id)
-        .bind(binding.ordinal)
-        .bind(&binding.inheritance_mode)
-        .bind(&binding.created_at)
-        .bind(&binding.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for binding in &document.scope_reference_set_bindings {
-        let binding_id = consistency_required_id(
-            &consistency_ids.scope_reference_set_bindings,
-            &binding.id,
-            "Scope Reference Set Binding",
-        )?;
-        if binding.project_id != document.project.id {
-            return Err(AppError::backup_invalid(
-                "Scope Reference Set Binding 项目归属不一致",
-            ));
-        }
-        let scope_id = remap_consistency_scope_id(
-            &binding.scope_type,
-            &binding.scope_id,
-            &document.project.id,
-            &project.id,
-            production_structure_ids,
-        )?;
-        let reference_set_id = consistency_required_id(
-            &consistency_ids.reference_sets,
-            &binding.reference_set_id,
-            "Scope Reference Set Binding",
-        )?;
-        sqlx::query(
-            "INSERT INTO consistency_scope_reference_set_bindings
-             (id, project_id, scope_type, scope_id, role, reference_set_id,
-              ordinal, required, inheritance_mode, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(binding_id)
-        .bind(&project.id)
-        .bind(&binding.scope_type)
-        .bind(scope_id)
-        .bind(&binding.role)
-        .bind(reference_set_id)
-        .bind(binding.ordinal)
-        .bind(binding.required)
-        .bind(&binding.inheritance_mode)
-        .bind(&binding.created_at)
-        .bind(&binding.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for assignment in &document.shot_scene_assignments {
-        let shot_id = shot_ids
-            .get(&assignment.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("Scene Assignment 缺少镜头映射"))?;
-        let scene_id = production_structure_ids
-            .scenes
-            .get(&assignment.scene_id)
-            .ok_or_else(|| AppError::backup_invalid("Scene Assignment 缺少 Scene 映射"))?;
-        sqlx::query(
-            "INSERT INTO shot_scene_assignments
-             (shot_id, scene_id, ordinal, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(shot_id)
-        .bind(scene_id)
-        .bind(assignment.ordinal)
-        .bind(&assignment.created_at)
-        .bind(&assignment.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for source in &document.script_sources {
-        let source_id = script_source_ids
-            .get(&source.id)
-            .ok_or_else(|| AppError::backup_invalid("Script Source ID 映射缺失"))?;
-        sqlx::query(
-            "INSERT INTO script_sources
-             (id, project_id, format, original_filename, source_checksum, source_bytes, source_text,
-              schema_version, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(source_id)
-        .bind(&project.id)
-        .bind(&source.format)
-        .bind(&source.original_filename)
-        .bind(&source.source_checksum)
-        .bind(source.source_bytes)
-        .bind(&source.source_text)
-        .bind(source.schema_version)
-        .bind(&source.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    let mut script_draft_revisions = document.script_draft_revisions.clone();
-    script_draft_revisions.sort_by(|left, right| {
-        left.draft_id
-            .cmp(&right.draft_id)
-            .then(left.revision.cmp(&right.revision))
-            .then(left.id.cmp(&right.id))
-    });
-    for revision in &script_draft_revisions {
-        let revision_id = script_revision_ids
-            .get(&revision.id)
-            .ok_or_else(|| AppError::backup_invalid("Script Draft Revision ID 映射缺失"))?;
-        let draft_id = script_draft_ids
-            .get(&revision.draft_id)
-            .ok_or_else(|| AppError::backup_invalid("Script Draft ID 映射缺失"))?;
-        let source_id = script_source_ids
-            .get(&revision.source_id)
-            .ok_or_else(|| AppError::backup_invalid("Script Draft Source 映射缺失"))?;
-        let previous_revision_id = revision
-            .previous_revision_id
-            .as_ref()
-            .map(|id| {
-                script_revision_ids.get(id).ok_or_else(|| {
-                    AppError::backup_invalid("Script Draft previous revision 映射缺失")
-                })
-            })
-            .transpose()?;
-        let mut payload = serde_json::from_str::<Value>(&revision.payload_json)
-            .map_err(|_| AppError::backup_invalid("Script Draft payload JSON 无效"))?;
-        let mut script_id_map = HashMap::new();
-        script_id_map.extend(
-            script_source_ids
-                .iter()
-                .map(|(old, new)| (old.clone(), new.clone())),
-        );
-        script_id_map.extend(
-            script_draft_ids
-                .iter()
-                .map(|(old, new)| (old.clone(), new.clone())),
-        );
-        script_id_map.extend(
-            script_revision_ids
-                .iter()
-                .map(|(old, new)| (old.clone(), new.clone())),
-        );
-        remap_exact_string_ids(&mut payload, &script_id_map);
-        let payload_json = serde_json::to_string(&payload)
-            .map_err(|_| AppError::backup_invalid("Script Draft payload 序列化失败"))?;
-        let payload_checksum = hash_bytes(payload_json.as_bytes());
-        sqlx::query(
-            "INSERT INTO script_import_drafts
-             (id, draft_id, project_id, source_id, revision, previous_revision_id,
-              schema_version, revision_kind, parser_version, contract_version,
-              provider_kind, provider_model, provider_metadata_json,
-              payload_checksum, summary_json, payload_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(revision_id)
-        .bind(draft_id)
-        .bind(&project.id)
-        .bind(source_id)
-        .bind(revision.revision)
-        .bind(previous_revision_id)
-        .bind(revision.schema_version)
-        .bind(&revision.revision_kind)
-        .bind(&revision.parser_version)
-        .bind(revision.contract_version)
-        .bind(&revision.provider_kind)
-        .bind(&revision.provider_model)
-        .bind(&revision.provider_metadata_json)
-        .bind(payload_checksum)
-        .bind(&revision.summary_json)
-        .bind(payload_json)
-        .bind(&revision.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for config in &document.shot_stage_configs {
-        let shot_id = shot_ids
-            .get(&config.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("镜头阶段配置缺少镜头映射"))?;
-        ensure_workflow_dependency(
-            transaction,
-            &WorkflowReference {
-                workflow_id: config.workflow_id.clone(),
-                workflow_version_id: config.workflow_version_id.clone(),
-                recipe_id: config.recipe_id.clone(),
-            },
-        )
-        .await?;
-        sqlx::query(
-            "INSERT INTO shot_stage_configs
-             (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(shot_id)
-        .bind(&config.stage)
-        .bind(&config.workflow_version_id)
-        .bind(&config.recipe_id)
-        .bind(config.scalar_values.to_string())
-        .bind(&config.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for prompt in &document.shot_stage_prompts {
-        let shot_id = shot_ids
-            .get(&prompt.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("镜头阶段 Prompt 缺少镜头映射"))?;
-        let prompt_entry_id = prompt
-            .prompt_entry_id
-            .as_ref()
-            .and_then(|id| prompt_ids.get(id))
-            .map(String::as_str);
-        let prompt_version_id = prompt
-            .prompt_version_id
-            .as_ref()
-            .and_then(|id| prompt_version_ids.get(id))
-            .map(String::as_str);
-        sqlx::query(
-            "INSERT INTO shot_stage_prompts
-             (shot_id, stage, prompt_text, prompt_entry_id, prompt_version_id, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(shot_id)
-        .bind(&prompt.stage)
-        .bind(&prompt.prompt_text)
-        .bind(prompt_entry_id)
-        .bind(prompt_version_id)
-        .bind(&prompt.updated_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for reference in &document.shot_reference_assets {
-        let shot_id = shot_ids
-            .get(&reference.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("镜头 Reference 缺少镜头映射"))?;
-        let asset_id = asset_ids
-            .get(&reference.asset_id)
-            .ok_or_else(|| AppError::backup_invalid("镜头 Reference 缺少素材映射"))?;
-        sqlx::query(
-            "INSERT INTO shot_reference_assets (shot_id, stage, asset_id, ordinal)
-             VALUES (?, ?, ?, ?)",
-        )
-        .bind(shot_id)
-        .bind(&reference.stage)
-        .bind(asset_id)
-        .bind(reference.ordinal)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    for link in &document.shot_generation_links {
-        let link_id = shot_generation_link_ids
-            .get(&link.id)
-            .ok_or_else(|| AppError::backup_invalid("镜头生成关联 ID 映射缺失"))?;
-        let shot_id = shot_ids
-            .get(&link.shot_id)
-            .ok_or_else(|| AppError::backup_invalid("镜头生成关联缺少镜头映射"))?;
-        let task_id = link
-            .task_id
-            .as_ref()
-            .and_then(|id| task_ids.get(id))
-            .map(String::as_str);
-        let item_id = link
-            .production_batch_item_id
-            .as_ref()
-            .and_then(|id| item_ids.get(id))
-            .map(String::as_str);
-        sqlx::query(
-            "INSERT INTO shot_generation_links
-             (id, shot_id, stage, task_id, production_batch_item_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(link_id)
-        .bind(shot_id)
-        .bind(&link.stage)
-        .bind(task_id)
-        .bind(item_id)
-        .bind(&link.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    Ok(())
-}
-
-async fn validate_restored_snapshot_asset_ownership(
-    transaction: &mut Transaction<'_, Sqlite>,
-    project_id: &str,
-    snapshots: &[BackupSnapshot],
-    asset_ids: &HashMap<String, String>,
-) -> Result<(), AppError> {
-    let restored_asset_ids = asset_ids.values().cloned().collect::<HashSet<_>>();
-    let references = snapshots
-        .iter()
-        .flat_map(|snapshot| {
-            collect_exact_asset_id_references(&snapshot.user_inputs, &restored_asset_ids)
-                .into_iter()
-                .chain(collect_exact_asset_id_references(
-                    &snapshot.resolved_inputs,
-                    &restored_asset_ids,
-                ))
-        })
-        .collect::<HashSet<_>>();
-
-    for asset_id in references {
-        let owned = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM assets WHERE id = ? AND project_id = ?",
-        )
-        .bind(&asset_id)
-        .bind(project_id)
-        .fetch_one(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        if owned == 0 {
-            return Err(AppError::backup_snapshot_asset_remap_failed(
-                "恢复后的任务快照引用了不属于当前项目的素材，恢复已取消。",
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-async fn ensure_workflow_dependency(
-    transaction: &mut Transaction<'_, sqlx::Sqlite>,
-    reference: &WorkflowReference,
-) -> Result<(), AppError> {
-    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
-        .bind(&reference.workflow_id)
-        .fetch_one(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    if exists == 0 {
-        sqlx::query("INSERT INTO workflows (id, name, category, mode, current_version_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(&reference.workflow_id).bind("已恢复历史工作流").bind("restored").bind("api").bind(&reference.workflow_version_id).bind(Utc::now().to_rfc3339()).bind(Utc::now().to_rfc3339())
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    ensure_version_recipe_dependency(
-        transaction,
-        &reference.workflow_version_id,
-        &reference.recipe_id,
-    )
-    .await
-}
-
-async fn restore_workflow_registry(
-    transaction: &mut Transaction<'_, sqlx::Sqlite>,
-    snapshot: &BackupWorkflowRegistry,
-) -> Result<(), AppError> {
-    for workflow in &snapshot.workflows {
-        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows WHERE id = ?")
-            .bind(&workflow.id)
-            .fetch_one(&mut **transaction)
-            .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-        if exists == 0 {
-            sqlx::query(
-                "INSERT INTO workflows
-                 (id, name, category, mode, source_kind, library_state, current_version_id,
-                  removed_at, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&workflow.id)
-            .bind(&workflow.name)
-            .bind(&workflow.category)
-            .bind(&workflow.mode)
-            .bind(&workflow.source_kind)
-            .bind(&workflow.library_state)
-            .bind(&workflow.current_version_id)
-            .bind(&workflow.removed_at)
-            .bind(&workflow.created_at)
-            .bind(&workflow.updated_at)
-            .execute(&mut **transaction)
-            .await
-            .map_err(|error| AppError::database(error.to_string()))?;
-        }
-    }
-
-    for version in &snapshot.versions {
-        let existing = sqlx::query_as::<_, (String, String)>(
-            "SELECT workflow_id, workflow_sha256 FROM workflow_versions WHERE id = ?",
-        )
-        .bind(&version.id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        if let Some((workflow_id, workflow_sha256)) = existing {
-            if workflow_id != version.workflow_id || workflow_sha256 != version.workflow_sha256 {
-                return Err(AppError::backup_invalid(format!(
-                    "工作流版本 {} 的不可变身份与当前数据库冲突",
-                    version.id
-                )));
-            }
-            continue;
-        }
-        sqlx::query(
-            "INSERT INTO workflow_versions
-             (id, workflow_id, version, api_workflow_json, workflow_sha256, package_name,
-              package_source_path, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&version.id)
-        .bind(&version.workflow_id)
-        .bind(&version.version)
-        .bind(&version.api_workflow_json)
-        .bind(&version.workflow_sha256)
-        .bind(&version.package_name)
-        .bind(&version.package_source_path)
-        .bind(&version.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-
-    for recipe in &snapshot.recipes {
-        let existing = sqlx::query_as::<_, (String, String)>(
-            "SELECT workflow_version_id, recipe_sha256 FROM recipes WHERE id = ?",
-        )
-        .bind(&recipe.id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        if let Some((workflow_version_id, recipe_sha256)) = existing {
-            if workflow_version_id != recipe.workflow_version_id
-                || recipe_sha256 != recipe.recipe_sha256
-            {
-                return Err(AppError::backup_invalid(format!(
-                    "Recipe {} 的不可变身份与当前数据库冲突",
-                    recipe.id
-                )));
-            }
-            continue;
-        }
-        sqlx::query(
-            "INSERT INTO recipes
-             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256,
-              created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&recipe.id)
-        .bind(&recipe.workflow_version_id)
-        .bind(&recipe.version)
-        .bind(recipe.schema_version)
-        .bind(&recipe.recipe_yaml)
-        .bind(&recipe.recipe_sha256)
-        .bind(&recipe.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-
-    for artifact in &snapshot.runtime_artifacts {
-        let existing = sqlx::query_as::<_, BackupWorkflowRuntimeArtifact>(
-            "SELECT id, workflow_version_id, recipe_id, package_name, source_kind,
-                    package_source_path, workflow_sha256, recipe_sha256, created_at
-             FROM workflow_runtime_artifacts
-             WHERE package_name = ?",
-        )
-        .bind(&artifact.package_name)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-        if let Some(existing) = existing {
-            if existing.id != artifact.id
-                || existing.workflow_version_id != artifact.workflow_version_id
-                || existing.recipe_id != artifact.recipe_id
-                || existing.workflow_sha256 != artifact.workflow_sha256
-                || existing.recipe_sha256 != artifact.recipe_sha256
-            {
-                return Err(AppError::backup_invalid(format!(
-                    "Runtime Artifact {} 的精确映射与当前数据库冲突",
-                    artifact.package_name
-                )));
-            }
-            continue;
-        }
-        sqlx::query(
-            "INSERT INTO workflow_runtime_artifacts
-             (id, workflow_version_id, recipe_id, package_name, source_kind,
-              package_source_path, workflow_sha256, recipe_sha256, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&artifact.id)
-        .bind(&artifact.workflow_version_id)
-        .bind(&artifact.recipe_id)
-        .bind(&artifact.package_name)
-        .bind(&artifact.source_kind)
-        .bind(&artifact.package_source_path)
-        .bind(&artifact.workflow_sha256)
-        .bind(&artifact.recipe_sha256)
-        .bind(&artifact.created_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    }
-    Ok(())
-}
-
-async fn ensure_version_recipe_dependency(
-    transaction: &mut Transaction<'_, sqlx::Sqlite>,
-    workflow_version_id: &str,
-    recipe_id: &str,
-) -> Result<(), AppError> {
-    let version = sqlx::query_as::<_, (String, String)>(
-        "SELECT workflow_id, version FROM workflow_versions WHERE id = ?",
-    )
-    .bind(workflow_version_id)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|error| AppError::database(error.to_string()))?;
-    if version.is_none() {
-        let workflow_id = format!("wf_restored_{}", Uuid::new_v4());
-        sqlx::query("INSERT OR IGNORE INTO workflows (id, name, category, mode, current_version_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(&workflow_id).bind("已恢复历史工作流").bind("restored").bind("api").bind(workflow_version_id).bind(Utc::now().to_rfc3339()).bind(Utc::now().to_rfc3339())
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-        sqlx::query("INSERT OR IGNORE INTO workflow_versions (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-            .bind(workflow_version_id).bind(&workflow_id).bind("restored").bind("{}").bind(hash_bytes(b"{}")).bind(Utc::now().to_rfc3339())
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    let recipe_exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes WHERE id = ?")
-        .bind(recipe_id)
-        .fetch_one(&mut **transaction)
-        .await
-        .map_err(|error| AppError::database(error.to_string()))?;
-    if recipe_exists == 0 {
-        sqlx::query("INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(recipe_id).bind(workflow_version_id).bind("restored").bind(1_i64).bind("schema_version: 1\ninputs: {}\n").bind(hash_bytes(b"schema_version: 1\ninputs: {}\n")).bind(Utc::now().to_rfc3339())
-            .execute(&mut **transaction).await.map_err(|error| AppError::database(error.to_string()))?;
-    }
-    Ok(())
-}
+#[cfg(test)]
+pub(crate) use crate::infrastructure::database::{
+    assemble_reference_anchor_backups, DbReferenceAnchor, DbReferenceAnchorAsset,
+};
 
 #[cfg(test)]
 mod tests {
@@ -8464,14 +4319,30 @@ mod tests {
         ProductionStructureIds, ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
-    use crate::infrastructure::{database::initialize, filesystem::AppDataDirs};
+    use crate::infrastructure::{
+        database::{initialize, SqliteProjectBackupRepository},
+        filesystem::AppDataDirs,
+    };
     use chrono::Utc;
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
     use std::{fs::File, io::Write, path::PathBuf};
     use tempfile::tempdir;
     use zip::{write::FileOptions, CompressionMethod, ZipWriter};
+
+    fn test_service(
+        pool: &sqlx::SqlitePool,
+        projects_dir: PathBuf,
+        cache_dir: PathBuf,
+    ) -> ProjectBackupService {
+        ProjectBackupService::new(
+            Arc::new(SqliteProjectBackupRepository::new(pool.clone())),
+            projects_dir,
+            cache_dir,
+        )
+    }
 
     #[test]
     fn backup_path_validation_rejects_traversal_and_absolute_paths() {
@@ -8998,6 +4869,7 @@ mod tests {
         duplicate_version
             .prompt_versions
             .push(duplicate_version.prompt_versions[0].clone());
+
         assert!(validate_prompt_document(&duplicate_version).is_err());
 
         let mut invalid_text = valid;
@@ -9598,6 +5470,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO shot_reference_set_bindings
              (id, shot_id, role, reference_set_id, ordinal, required,
+
               inheritance_mode, created_at, updated_at)
              VALUES
              ('srb_backup_character', 'sht_backup', 'CHARACTER',
@@ -9642,11 +5515,7 @@ mod tests {
         .unwrap();
         sqlx::query("INSERT INTO project_templates (id, name, normalized_name, description, workflow_version_id, recipe_id, values_json, created_at, updated_at) VALUES ('ptm_global', '全局模板', '全局模板', NULL, 'workflow-version-1', 'recipe-1', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").execute(&pool).await.unwrap();
 
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let archive_path = directory.path().join("backup.zip");
         let exported = service
             .export("project-backup", archive_path.clone())
@@ -10133,11 +6002,7 @@ mod tests {
             .write_all(serde_json::to_string(&project).unwrap().as_bytes())
             .unwrap();
         writer.finish().unwrap();
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let preview = service.inspect(archive_path).await.unwrap();
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         let tags: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM asset_tags WHERE project_id = ?")
@@ -10180,11 +6045,7 @@ mod tests {
             .write_all(serde_json::to_string(&project).unwrap().as_bytes())
             .unwrap();
         writer.finish().unwrap();
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let preview = service.inspect(archive_path).await.unwrap();
         assert_eq!(preview.prompt_entries, 0);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
@@ -10226,11 +6087,7 @@ mod tests {
             .write_all(serde_json::to_string(&project).unwrap().as_bytes())
             .unwrap();
         writer.finish().unwrap();
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let preview = service.inspect(archive_path).await.unwrap();
         assert_eq!(preview.shots, 0);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
@@ -10270,11 +6127,7 @@ mod tests {
             .write_all(serde_json::to_string(&project).unwrap().as_bytes())
             .unwrap();
         writer.finish().unwrap();
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let preview = service.inspect(archive_path).await.unwrap();
         assert_eq!(preview.shots, 0);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
@@ -10293,11 +6146,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
 
         for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32, 12_u32, 13_u32] {
             let project_id = format!("legacy-v{version}-project");
@@ -10401,11 +6250,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let now = Utc::now();
         let project_id = "prj_snapshot_remap_atomicity".to_owned();
         let task_id = "tsk_original".to_owned();
@@ -10777,11 +6622,7 @@ mod tests {
         .await
         .unwrap();
 
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let archive_path = directory.path().join("stale-binding.zip");
         service
             .export("stale-binding", archive_path.clone())
@@ -10798,6 +6639,7 @@ mod tests {
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         let restored_binding: (String, String, String, String) = sqlx::query_as(
             "SELECT stage, mode, workflow_version_id, recipe_id
+
              FROM project_workflow_bindings WHERE project_id = ?",
         )
         .bind(&restored.id)
@@ -10861,11 +6703,7 @@ mod tests {
             .unwrap();
         writer.finish().unwrap();
 
-        let service = ProjectBackupService::new(
-            pool.clone(),
-            data_dirs.projects.clone(),
-            data_dirs.cache.clone(),
-        );
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
         let preview = service.inspect(archive_path).await.unwrap();
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, "legacy-v15");

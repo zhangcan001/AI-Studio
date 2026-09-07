@@ -12,12 +12,17 @@ pub use repositories::{
     SqliteAssetVideoPromptRepository, SqliteConsistencyProfileRepository,
     SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
     SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionItemReviewRepository,
-    SqliteProductionQueueRepository, SqliteProductionStructureRepository, SqliteProjectRepository,
-    SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository,
-    SqliteReferenceAnchorRepository, SqliteReferenceSetRepository, SqliteScriptDraftRepository,
-    SqliteScriptSourceRepository, SqliteShotConsistencyRepository, SqliteShotRepository,
-    SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
+    SqliteProductionQueueRepository, SqliteProductionStructureRepository,
+    SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
+    SqlitePromptLibraryRepository, SqliteReferenceAnchorRepository, SqliteReferenceSetRepository,
+    SqliteScriptDraftRepository, SqliteScriptSourceRepository, SqliteShotConsistencyRepository,
+    SqliteShotRepository, SqliteTaskHistoryRepository, SqliteTaskRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
     SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
     SqliteWorkflowRuntimeStateRepository,
+};
+
+#[cfg(test)]
+pub(crate) use repositories::{
+    assemble_reference_anchor_backups, DbReferenceAnchor, DbReferenceAnchorAsset,
 };

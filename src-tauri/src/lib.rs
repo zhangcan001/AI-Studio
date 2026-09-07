@@ -10,7 +10,7 @@ pub use application::ports::{
     AssetDeletionRepository, AssetRepository, AssetStore, AssetUsageRepository,
     AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProductionItemReviewRepository, ProductionQueueRepository,
-    ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
+    ProjectBackupRepository, ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
     ProjectWorkflowBindingRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
     WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
@@ -20,9 +20,10 @@ pub use infrastructure::database::{
     initialize, SqliteAssetDeletionRepository, SqliteAssetRepository,
     SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
     SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
-    SqliteProductionItemReviewRepository, SqliteProductionQueueRepository, SqliteProjectRepository,
-    SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository, SqliteTaskRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteProductionItemReviewRepository, SqliteProductionQueueRepository,
+    SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
+    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -769,8 +770,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_service.clone(),
                 clock.clone(),
             ));
+            let project_backup_repository: Arc<dyn ProjectBackupRepository> =
+                Arc::new(SqliteProjectBackupRepository::new(database_pool.clone()));
             let project_backup_service = Arc::new(ProjectBackupService::new(
-                database_pool.clone(),
+                project_backup_repository,
                 data_dirs.projects.clone(),
                 data_dirs.cache.clone(),
             ));

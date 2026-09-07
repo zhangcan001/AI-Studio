@@ -13,6 +13,7 @@ mod production_item_review;
 mod production_queue;
 mod production_structure;
 mod project;
+mod project_backup;
 mod project_workflow_binding;
 mod prompt_library;
 mod reference_anchor;
@@ -45,6 +46,11 @@ pub use production_item_review::SqliteProductionItemReviewRepository;
 pub use production_queue::SqliteProductionQueueRepository;
 pub use production_structure::SqliteProductionStructureRepository;
 pub use project::SqliteProjectRepository;
+pub use project_backup::SqliteProjectBackupRepository;
+#[cfg(test)]
+pub(crate) use project_backup::{
+    assemble_reference_anchor_backups, DbReferenceAnchor, DbReferenceAnchorAsset,
+};
 pub use project_workflow_binding::SqliteProjectWorkflowBindingRepository;
 pub use prompt_library::SqlitePromptLibraryRepository;
 pub use reference_anchor::SqliteReferenceAnchorRepository;

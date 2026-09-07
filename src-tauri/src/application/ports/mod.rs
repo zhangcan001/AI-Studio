@@ -17,6 +17,7 @@ pub mod preset_repository;
 pub mod production_item_review_repository;
 pub mod production_queue_repository;
 pub mod production_structure_repository;
+pub mod project_backup_repository;
 pub mod project_directory_store;
 pub mod project_repository;
 pub mod project_workflow_binding_repository;
@@ -84,6 +85,10 @@ pub use production_item_review_repository::{
 pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepository};
 pub use production_structure_repository::{
     ProductionStructureRepository, ProductionStructureTreeData,
+};
+pub use project_backup_repository::{
+    ProjectBackupAssetSource, ProjectBackupRepository, ProjectBackupRepositorySource,
+    ProjectBackupRestorePlan, ProjectBackupSnapshot,
 };
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
 pub use project_repository::{ProjectRecord, ProjectRepository};
