@@ -78,7 +78,14 @@ RUST_CHECK=PASS (cargo check --manifest-path src-tauri/Cargo.toml --all-targets)
 
 The build emitted only the repository's existing chunk-size and Rust dead-code warnings; no PX-01 failure was reported.
 
-Remote Source-only CI status is recorded after the implementation push.
+Remote Source-only CI verification:
+
+```text
+REMOTE_CI_RUN=34088729027
+RUST_GITHUB_CI=PASS
+FRONTEND_GITHUB_CI=PASS
+MASTER_CI=GREEN
+```
 
 ## Frozen invariants
 
