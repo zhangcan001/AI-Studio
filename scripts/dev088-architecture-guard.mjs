@@ -43,6 +43,16 @@ if (missingCommands.length) {
   throw new Error(`RPC_PARITY failed:\n${missingCommands.join("\n")}`);
 }
 
+const shotWorkspaceSource = readFileSync(join(root, "src/features/shots/ShotWorkspace.tsx"), "utf8");
+if (shotWorkspaceSource.includes("subscribeTaskUpdates")) {
+  throw new Error("SHOT_WORKSPACE_DIRECT_TASK_SUBSCRIPTION failed: ShotWorkspace must delegate task events to useShotTaskEvents");
+}
+if (!shotWorkspaceSource.includes("useShotQueueController")) {
+  throw new Error("SHOT_WORKSPACE_QUEUE_CONTROLLER failed: ShotWorkspace must delegate queue ownership to useShotQueueController");
+}
+
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
 console.log(`RPC_PARITY=PASS (${frontendCommands.size} frontend commands checked)`);
+console.log(`SHOT_WORKSPACE_DIRECT_TASK_SUBSCRIPTION=PASS`);
+console.log(`SHOT_WORKSPACE_QUEUE_CONTROLLER=PASS`);
