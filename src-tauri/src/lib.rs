@@ -666,7 +666,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let production_orchestrator_service = Arc::new(
                 ProductionOrchestratorService::new(
-                    database_pool.clone(),
+                    Arc::new(database::SqliteProductionOrchestratorRepository::new(
+                        database_pool.clone(),
+                    )),
                     definition_repository.clone(),
                     production_queue_service.clone(),
                     task_cancellation_service.clone(),

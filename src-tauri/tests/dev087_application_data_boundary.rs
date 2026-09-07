@@ -25,7 +25,6 @@ const EXISTING_APPLICATION_SQLX_ALLOWLIST: &[&str] = &[
     "generation_catalog_service.rs",
     "h3_local_import_service.rs",
     "preset_service.rs",
-    "production_orchestrator_service.rs",
     "production_structure_service.rs",
     "project_backup_service.rs",
     "project_template_service.rs",
@@ -138,5 +137,17 @@ fn workflow_benchmark_application_sqlx_is_zero() {
     assert!(
         !contains_direct_sqlx(production_source(&source)),
         "WORKFLOW_BENCHMARK_APPLICATION_SQLX=0"
+    );
+}
+
+#[test]
+fn production_orchestrator_application_sqlx_is_zero() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/application/production_orchestrator_service.rs");
+    let source =
+        fs::read_to_string(path).expect("production orchestrator service should be readable");
+    assert!(
+        !contains_direct_sqlx(production_source(&source)),
+        "PRODUCTION_ORCHESTRATOR_APPLICATION_SQLX=0"
     );
 }

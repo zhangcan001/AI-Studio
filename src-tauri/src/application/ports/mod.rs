@@ -17,6 +17,7 @@ pub mod organization_repository;
 pub mod preset_repository;
 pub mod production_audit_repository;
 pub mod production_item_review_repository;
+pub mod production_orchestrator_repository;
 pub mod production_queue_repository;
 pub mod production_structure_repository;
 pub mod project_backup_repository;
@@ -89,6 +90,7 @@ pub use production_audit_repository::*;
 pub use production_item_review_repository::{
     ProductionItemReviewRecord, ProductionItemReviewRepository,
 };
+pub use production_orchestrator_repository::*;
 pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepository};
 pub use production_structure_repository::{
     ProductionStructureRepository, ProductionStructureTreeData,
