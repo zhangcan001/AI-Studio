@@ -9,11 +9,33 @@ permissions:
   contents: read
 
 jobs:
-  source-only:
-    name: Windows source checks
+  rust:
+    name: Rust source checks
     runs-on: windows-latest
     env:
       AI_STUDIO_LIVE_COMFY: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Rust format check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Rust check
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
+
+  frontend:
+    name: Frontend source checks
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,23 +54,8 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Rust stable
-        shell: pwsh
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Rust format check
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-
-      - name: Rust check
-        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
-
-      - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --test-threads=1
-
       - name: Frontend tests
-        run: pnpm test -- --run
+        run: pnpm test
 
       - name: TypeScript check
         run: pnpm exec tsc --noEmit

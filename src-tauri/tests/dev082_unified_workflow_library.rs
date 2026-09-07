@@ -16,7 +16,7 @@ use ai_studio_lib::compiler::RecipeParser;
 use ai_studio_lib::domain::WorkflowDocument;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf};
+use std::{borrow::Cow, fs, path::PathBuf};
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 const DEV081_GRAPH: &str = include_str!(concat!(
@@ -68,6 +68,14 @@ fn read_repo(relative: &str) -> String {
     fs::read_to_string(repo_root().join(relative))
         .unwrap_or_else(|error| panic!("{relative} should be readable: {error}"))
         .replace("\r\n", "\n")
+}
+
+fn normalize_newlines(value: &str) -> Cow<'_, str> {
+    if value.contains('\r') {
+        Cow::Owned(value.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        Cow::Borrowed(value)
+    }
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -249,7 +257,10 @@ fn dev082_aitudou_and_three_item_package_fixtures_are_product_safe() {
     let manifest = read_repo(
         "src-tauri/runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/manifest.yaml",
     );
-    assert_eq!(manifest, AITUDOU_MANIFEST);
+    assert_eq!(
+        normalize_newlines(&manifest),
+        normalize_newlines(AITUDOU_MANIFEST)
+    );
     assert!(manifest.contains("id: wfl_aitudou_minimax_h3_lightx2v_8step_fast"));
     assert!(manifest.contains("recipe_version: 1.0.0"));
 
