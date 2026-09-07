@@ -39,6 +39,7 @@ pub mod shot_repository;
 pub mod task_history_repository;
 pub mod task_repository;
 pub mod task_update_sink;
+pub mod workflow_benchmark_repository;
 pub mod workflow_library_repository;
 pub mod workflow_library_source;
 pub mod workflow_package_store;
@@ -137,6 +138,7 @@ pub use task_repository::TaskRepository;
 pub use task_update_sink::{
     NoopTaskUpdateSink, TaskUpdatePayload, TaskUpdateSink, TASK_UPDATED_EVENT,
 };
+pub use workflow_benchmark_repository::*;
 pub use workflow_library_repository::{
     WorkflowLibraryRepository, WorkflowPackageRecord, WorkflowPackageRegistration,
 };

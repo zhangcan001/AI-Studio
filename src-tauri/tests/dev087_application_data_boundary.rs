@@ -35,7 +35,6 @@ const EXISTING_APPLICATION_SQLX_ALLOWLIST: &[&str] = &[
     "shot_batch_service.rs",
     "shot_bulk_service.rs",
     "task_recovery_service.rs",
-    "workflow_benchmark_service.rs",
     "workflow_onboarding_service.rs",
 ];
 
@@ -44,6 +43,7 @@ const READ_SIDE_APPLICATION_SERVICES: &[&str] = &[
     "project_command_center_service.rs",
     "project_manifest_service.rs",
     "diagnostics_service.rs",
+    "workflow_benchmark_service.rs",
 ];
 
 fn visit_rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
@@ -127,5 +127,16 @@ fn application_ports_do_not_leak_sqlx_types() {
     assert!(
         leaking.is_empty(),
         "application ports leak SQLx: {leaking:#?}"
+    );
+}
+
+#[test]
+fn workflow_benchmark_application_sqlx_is_zero() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/workflow_benchmark_service.rs");
+    let source = fs::read_to_string(path).expect("workflow benchmark service should be readable");
+    assert!(
+        !contains_direct_sqlx(production_source(&source)),
+        "WORKFLOW_BENCHMARK_APPLICATION_SQLX=0"
     );
 }

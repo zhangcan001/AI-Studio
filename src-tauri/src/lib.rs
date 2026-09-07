@@ -654,7 +654,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             )));
             let workflow_benchmark_service = Arc::new(
                 WorkflowBenchmarkService::new(
-                    database_pool.clone(),
+                    Arc::new(database::SqliteWorkflowBenchmarkRepository::new(
+                        database_pool.clone(),
+                    )),
                     definition_repository.clone(),
                     preset_repository.clone(),
                     production_queue_service.clone(),

@@ -1,6 +1,9 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::ports::{
     Clock, GenerationDefinitionRepository, PresetRepository, RepositoryError,
+    WorkflowBenchmarkCandidateRecord, WorkflowBenchmarkDraft, WorkflowBenchmarkExperimentRecord,
+    WorkflowBenchmarkQueueLink, WorkflowBenchmarkRepository, WorkflowBenchmarkRunRecord,
+    WorkflowBenchmarkSnapshot,
 };
 use crate::application::production_queue_service::{
     generation_values_from_json, generation_values_to_json, CreateProductionBatchItem,
@@ -13,7 +16,6 @@ use crate::domain::{InputDefinition, OutputType, PresetId, Recipe, SeedValue};
 use chrono::DateTime;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{FromRow, SqlitePool};
 use std::{
     collections::{BTreeMap, HashSet},
     error::Error,
@@ -310,7 +312,7 @@ impl From<RepositoryError> for WorkflowBenchmarkError {
 
 #[derive(Clone)]
 pub struct WorkflowBenchmarkService {
-    pool: SqlitePool,
+    repository: Arc<dyn WorkflowBenchmarkRepository>,
     definition_repository: Arc<dyn GenerationDefinitionRepository>,
     preset_repository: Arc<dyn PresetRepository>,
     production_queue_service: Arc<ProductionQueueService>,
@@ -320,14 +322,14 @@ pub struct WorkflowBenchmarkService {
 
 impl WorkflowBenchmarkService {
     pub fn new(
-        pool: SqlitePool,
+        repository: Arc<dyn WorkflowBenchmarkRepository>,
         definition_repository: Arc<dyn GenerationDefinitionRepository>,
         preset_repository: Arc<dyn PresetRepository>,
         production_queue_service: Arc<ProductionQueueService>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            pool,
+            repository,
             definition_repository,
             preset_repository,
             production_queue_service,
@@ -483,23 +485,7 @@ impl WorkflowBenchmarkService {
     ) -> Result<Vec<WorkflowBenchmarkSummaryView>, WorkflowBenchmarkError> {
         validate_project_id(project_id)?;
         let limit = i64::from(limit.clamp(1, 50));
-        let rows = sqlx::query_as::<_, BenchmarkExperimentRow>(
-            "SELECT id, project_id, name, media_type, status, base_values_json,
-                    asset_ids_json, winner_candidate_id, production_batch_id,
-                    seed_strategy, fixed_seed, repeat_count, recommendation_type,
-                    created_at, updated_at
-             FROM benchmark_experiments
-             WHERE project_id = ?
-             ORDER BY created_at DESC, id ASC
-             LIMIT ?",
-        )
-        .bind(project_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| {
-            WorkflowBenchmarkError::Repository(RepositoryError::database(error.to_string()))
-        })?;
+        let rows = self.repository.list_experiments(project_id, limit).await?;
 
         let mut summaries = Vec::with_capacity(rows.len());
         for row in rows {
@@ -514,11 +500,13 @@ impl WorkflowBenchmarkService {
         experiment_id: &str,
     ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
         validate_project_id(project_id)?;
-        let row = self
-            .load_experiment(project_id, experiment_id)
+        let snapshot = self
+            .repository
+            .load_experiment_snapshot(project_id, experiment_id, &self.clock.now().to_rfc3339())
             .await?
             .ok_or_else(|| WorkflowBenchmarkError::NotFound(experiment_id.to_owned()))?;
-        let candidates = self.load_candidates(&row).await?;
+        let candidates = build_candidate_views(&snapshot)?;
+        let row = &snapshot.experiment;
         let status =
             derive_experiment_status(&row.status, row.production_batch_id.as_deref(), &candidates);
         if status != row.status {
@@ -527,17 +515,17 @@ impl WorkflowBenchmarkService {
         let summary = summary_from_candidates(&row, status.clone(), &candidates);
         let comparison = build_comparison(&row, &candidates);
         Ok(WorkflowBenchmarkView {
-            id: row.id,
-            project_id: row.project_id,
-            name: row.name,
-            media_type: row.media_type,
+            id: row.id.clone(),
+            project_id: row.project_id.clone(),
+            name: row.name.clone(),
+            media_type: row.media_type.clone(),
             status,
             base_values: parse_json_value(&row.base_values_json)?,
             asset_ids: parse_string_array(&row.asset_ids_json)?,
-            winner_candidate_id: row.winner_candidate_id,
-            production_batch_id: row.production_batch_id,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
+            winner_candidate_id: row.winner_candidate_id.clone(),
+            production_batch_id: row.production_batch_id.clone(),
+            created_at: row.created_at.clone(),
+            updated_at: row.updated_at.clone(),
             candidates,
             summary,
             comparison,
@@ -552,39 +540,26 @@ impl WorkflowBenchmarkService {
     ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
         validate_project_id(project_id)?;
         if let Some(candidate_id) = candidate_id {
-            let exists = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM benchmark_candidates c
-                 INNER JOIN benchmark_experiments e ON e.id = c.experiment_id
-                 WHERE c.id = ? AND e.id = ? AND e.project_id = ?",
-            )
-            .bind(candidate_id)
-            .bind(experiment_id)
-            .bind(project_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| {
-                WorkflowBenchmarkError::Repository(RepositoryError::database(error.to_string()))
-            })?;
-            if exists == 0 {
+            if !self
+                .repository
+                .candidate_belongs_to_experiment(project_id, experiment_id, candidate_id)
+                .await?
+            {
                 return Err(WorkflowBenchmarkError::InvalidInput(
                     "最佳候选不属于当前实验。".to_owned(),
                 ));
             }
         }
-        let result = sqlx::query(
-            "UPDATE benchmark_experiments SET winner_candidate_id = ?, updated_at = ?
-             WHERE id = ? AND project_id = ?",
-        )
-        .bind(candidate_id)
-        .bind(self.clock.now().to_rfc3339())
-        .bind(experiment_id)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|error| {
-            WorkflowBenchmarkError::Repository(RepositoryError::database(error.to_string()))
-        })?;
-        if result.rows_affected() == 0 {
+        if !self
+            .repository
+            .set_winner(
+                project_id,
+                experiment_id,
+                candidate_id,
+                &self.clock.now().to_rfc3339(),
+            )
+            .await?
+        {
             return Err(WorkflowBenchmarkError::NotFound(experiment_id.to_owned()));
         }
         self.get(project_id, experiment_id).await
@@ -607,18 +582,16 @@ impl WorkflowBenchmarkService {
                 ));
             }
         }
-        let result = sqlx::query(
-            "UPDATE benchmark_experiments SET recommendation_type = ?, updated_at = ?
-             WHERE id = ? AND project_id = ?",
-        )
-        .bind(recommendation_type)
-        .bind(self.clock.now().to_rfc3339())
-        .bind(experiment_id)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
-        if result.rows_affected() == 0 {
+        if !self
+            .repository
+            .set_recommendation(
+                project_id,
+                experiment_id,
+                recommendation_type,
+                &self.clock.now().to_rfc3339(),
+            )
+            .await?
+        {
             return Err(WorkflowBenchmarkError::NotFound(experiment_id.to_owned()));
         }
         self.get(project_id, experiment_id).await
@@ -656,50 +629,28 @@ impl WorkflowBenchmarkService {
                 "质量评分备注不能超过 2000 个字符。".to_owned(),
             ));
         }
-        let belongs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM benchmark_candidates c
-             INNER JOIN benchmark_experiments e ON e.id = c.experiment_id
-             WHERE c.id = ? AND e.id = ? AND e.project_id = ?",
-        )
-        .bind(candidate_id)
-        .bind(experiment_id)
-        .bind(project_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(db_error)?;
-        if belongs == 0 {
+        if !self
+            .repository
+            .candidate_belongs_to_experiment(project_id, experiment_id, candidate_id)
+            .await?
+        {
             return Err(WorkflowBenchmarkError::InvalidInput(
                 "质量评分候选不属于当前实验。".to_owned(),
             ));
         }
         let now = self.clock.now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO benchmark_quality_scores
-             (id, candidate_id, prompt_adherence, visual_quality, motion_quality,
-              reference_consistency, overall, note, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(candidate_id) DO UPDATE SET
-                prompt_adherence = excluded.prompt_adherence,
-                visual_quality = excluded.visual_quality,
-                motion_quality = excluded.motion_quality,
-                reference_consistency = excluded.reference_consistency,
-                overall = excluded.overall,
-                note = excluded.note,
-                updated_at = excluded.updated_at",
-        )
-        .bind(format!("bqs_{}", Uuid::new_v4().simple()))
-        .bind(candidate_id)
-        .bind(request.prompt_adherence)
-        .bind(request.visual_quality)
-        .bind(request.motion_quality)
-        .bind(request.reference_consistency)
-        .bind(request.overall)
-        .bind(request.note)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
+        self.repository
+            .save_quality(
+                candidate_id,
+                request.prompt_adherence,
+                request.visual_quality,
+                request.motion_quality,
+                request.reference_consistency,
+                request.overall,
+                request.note.as_deref(),
+                &now,
+            )
+            .await?;
         self.get(project_id, experiment_id).await
     }
 
@@ -710,11 +661,6 @@ impl WorkflowBenchmarkService {
         name: Option<String>,
     ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
         validate_project_id(project_id)?;
-        let row = self
-            .load_experiment(project_id, experiment_id)
-            .await?
-            .ok_or_else(|| WorkflowBenchmarkError::NotFound(experiment_id.to_owned()))?;
-        let candidates = self.load_candidate_rows(&row.id).await?;
         let new_id = format!("bmk_{}", Uuid::new_v4().simple());
         let next_name = name
             .as_deref()
@@ -727,78 +673,15 @@ impl WorkflowBenchmarkService {
             ));
         }
         let now = self.clock.now().to_rfc3339();
-        let repeat_count = u32::try_from(row.repeat_count).unwrap_or(3).clamp(1, 10);
-        let mut transaction = self.pool.begin().await.map_err(db_error)?;
-        sqlx::query(
-            "INSERT INTO benchmark_experiments
-             (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
-              winner_candidate_id, production_batch_id, seed_strategy, fixed_seed,
-              repeat_count, recommendation_type, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, NULL, NULL, ?, ?, ?, NULL, ?, ?)",
-        )
-        .bind(&new_id)
-        .bind(project_id)
-        .bind(next_name)
-        .bind(&row.media_type)
-        .bind(&row.base_values_json)
-        .bind(&row.asset_ids_json)
-        .bind(&row.seed_strategy)
-        .bind(&row.fixed_seed)
-        .bind(i64::from(repeat_count))
-        .bind(&now)
-        .bind(&now)
-        .execute(&mut *transaction)
-        .await
-        .map_err(db_error)?;
-        for candidate in candidates {
-            let id = format!("bmc_{}", Uuid::new_v4().simple());
-            sqlx::query(
-                "INSERT INTO benchmark_candidates
-                 (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
-                  preset_name, label, values_json, asset_ids_json, production_batch_item_id,
-                  task_id, workflow_id, workflow_version, workflow_sha256, recipe_version,
-                  recipe_sha256, runtime_package, runtime_profile, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&id)
-            .bind(&new_id)
-            .bind(candidate.position)
-            .bind(&candidate.workflow_version_id)
-            .bind(&candidate.recipe_id)
-            .bind(&candidate.preset_id)
-            .bind(&candidate.preset_name)
-            .bind(&candidate.label)
-            .bind(&candidate.values_json)
-            .bind(&candidate.asset_ids_json)
-            .bind(&candidate.workflow_id)
-            .bind(&candidate.workflow_version)
-            .bind(&candidate.workflow_sha256)
-            .bind(&candidate.recipe_version)
-            .bind(&candidate.recipe_sha256)
-            .bind(&candidate.runtime_package)
-            .bind(&candidate.runtime_profile)
-            .bind(&now)
-            .execute(&mut *transaction)
+        self.repository
+            .clone_experiment_atomic(project_id, experiment_id, &new_id, next_name, &now)
             .await
-            .map_err(db_error)?;
-            for run_number in 1..=repeat_count {
-                sqlx::query(
-                    "INSERT INTO benchmark_runs
-                     (id, experiment_id, candidate_id, run_number, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(format!("bmr_{}", Uuid::new_v4().simple()))
-                .bind(&new_id)
-                .bind(&id)
-                .bind(i64::from(run_number))
-                .bind(&now)
-                .bind(&now)
-                .execute(&mut *transaction)
-                .await
-                .map_err(db_error)?;
-            }
-        }
-        transaction.commit().await.map_err(db_error)?;
+            .map_err(|error| match error {
+                RepositoryError::NotFound { .. } => {
+                    WorkflowBenchmarkError::NotFound(experiment_id.to_owned())
+                }
+                error => error.into(),
+            })?;
         self.get(project_id, &new_id).await
     }
 
@@ -809,10 +692,12 @@ impl WorkflowBenchmarkService {
         auto_start: bool,
     ) -> Result<WorkflowBenchmarkView, WorkflowBenchmarkError> {
         validate_project_id(project_id)?;
-        let row = self
-            .load_experiment(project_id, experiment_id)
+        let snapshot = self
+            .repository
+            .load_experiment_snapshot(project_id, experiment_id, &self.clock.now().to_rfc3339())
             .await?
             .ok_or_else(|| WorkflowBenchmarkError::NotFound(experiment_id.to_owned()))?;
+        let row = snapshot.experiment;
         if row.status != "DRAFT" || row.production_batch_id.is_some() {
             return Err(WorkflowBenchmarkError::InvalidInput(
                 "只有尚未创建生产批次的 DRAFT Benchmark 才能运行。".to_owned(),
@@ -820,7 +705,7 @@ impl WorkflowBenchmarkService {
         }
 
         let available = self.definition_repository.list_available().await?;
-        let candidate_rows = self.load_candidate_rows(experiment_id).await?;
+        let candidate_rows = snapshot.candidates;
         if candidate_rows.len() < 2 || candidate_rows.len() > MAX_BENCHMARK_CANDIDATES {
             return Err(WorkflowBenchmarkError::InvalidInput(
                 "Benchmark 候选数量不在允许范围内。".to_owned(),
@@ -917,19 +802,13 @@ impl WorkflowBenchmarkService {
         experiment_id: &str,
     ) -> Result<WorkflowBenchmarkDeleteView, WorkflowBenchmarkError> {
         validate_project_id(project_id)?;
-        let mut transaction = self.pool.begin().await.map_err(db_error)?;
-        let result =
-            sqlx::query("DELETE FROM benchmark_experiments WHERE id = ? AND project_id = ?")
-                .bind(experiment_id)
-                .bind(project_id)
-                .execute(&mut *transaction)
-                .await
-                .map_err(db_error)?;
-        if result.rows_affected() == 0 {
-            transaction.rollback().await.map_err(db_error)?;
+        if !self
+            .repository
+            .delete_atomic(project_id, experiment_id)
+            .await?
+        {
             return Err(WorkflowBenchmarkError::NotFound(experiment_id.to_owned()));
         }
-        transaction.commit().await.map_err(db_error)?;
         Ok(WorkflowBenchmarkDeleteView {
             deleted: true,
             experiment_id: experiment_id.to_owned(),
@@ -1072,79 +951,56 @@ impl WorkflowBenchmarkService {
         now: &str,
         drafts: &[CandidateDraft],
     ) -> Result<(), WorkflowBenchmarkError> {
-        let mut transaction = self.pool.begin().await.map_err(db_error)?;
-        sqlx::query(
-            "INSERT INTO benchmark_experiments
-             (id, project_id, name, media_type, status, base_values_json, asset_ids_json,
-              winner_candidate_id, production_batch_id, seed_strategy, fixed_seed,
-              repeat_count, recommendation_type, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, ?, ?)",
-        )
-        .bind(experiment_id)
-        .bind(&request.project_id)
-        .bind(request.name.trim())
-        .bind(&request.media_type)
-        .bind(base_values_json.to_string())
-        .bind(asset_ids_json)
-        .bind(seed_strategy)
-        .bind(request.fixed_seed.map(|seed| seed.to_string()))
-        .bind(i64::from(request.repeat_count))
-        .bind(now)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await
-        .map_err(db_error)?;
-        for draft in drafts {
-            sqlx::query(
-                "INSERT INTO benchmark_candidates
-                (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
-                  preset_name, label, values_json, asset_ids_json, production_batch_item_id,
-                  task_id, workflow_id, workflow_version, workflow_sha256, recipe_version,
-                  recipe_sha256, runtime_package, runtime_profile, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&draft.id)
-            .bind(experiment_id)
-            .bind(draft.position)
-            .bind(&draft.workflow_version_id)
-            .bind(&draft.recipe_id)
-            .bind(&draft.preset_id)
-            .bind(&draft.preset_name)
-            .bind(&draft.label)
-            .bind(draft.values_json.to_string())
-            .bind(
-                serde_json::to_string(&draft.asset_ids)
-                    .map_err(|error| WorkflowBenchmarkError::Serialization(error.to_string()))?,
-            )
-            .bind(&draft.workflow_id)
-            .bind(&draft.workflow_version)
-            .bind(&draft.workflow_sha256)
-            .bind(&draft.recipe_version)
-            .bind(&draft.recipe_sha256)
-            .bind(&draft.runtime_package)
-            .bind(&draft.runtime_profile)
-            .bind(now)
-            .execute(&mut *transaction)
-            .await
-            .map_err(db_error)?;
-            for run_number in 1..=request.repeat_count {
-                sqlx::query(
-                    "INSERT INTO benchmark_runs
-                     (id, experiment_id, candidate_id, run_number, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(format!("bmr_{}", Uuid::new_v4().simple()))
-                .bind(experiment_id)
-                .bind(&draft.id)
-                .bind(i64::from(run_number))
-                .bind(now)
-                .bind(now)
-                .execute(&mut *transaction)
-                .await
-                .map_err(db_error)?;
-            }
-        }
-        transaction.commit().await.map_err(db_error)
+        let candidates = drafts
+            .iter()
+            .map(|draft| {
+                Ok::<_, WorkflowBenchmarkError>(WorkflowBenchmarkCandidateRecord {
+                    id: draft.id.clone(),
+                    position: i64::from(draft.position),
+                    workflow_version_id: draft.workflow_version_id.clone(),
+                    recipe_id: draft.recipe_id.clone(),
+                    preset_id: draft.preset_id.clone(),
+                    preset_name: draft.preset_name.clone(),
+                    label: draft.label.clone(),
+                    values_json: draft.values_json.to_string(),
+                    asset_ids_json: serde_json::to_string(&draft.asset_ids).map_err(|error| {
+                        WorkflowBenchmarkError::Serialization(error.to_string())
+                    })?,
+                    production_batch_item_id: None,
+                    task_id: None,
+                    workflow_id: Some(draft.workflow_id.clone()),
+                    workflow_version: Some(draft.workflow_version.clone()),
+                    workflow_sha256: Some(draft.workflow_sha256.clone()),
+                    recipe_version: Some(draft.recipe_version.clone()),
+                    recipe_sha256: Some(draft.recipe_sha256.clone()),
+                    runtime_package: draft.runtime_package.clone(),
+                    runtime_profile: Some(draft.runtime_profile.clone()),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let draft = WorkflowBenchmarkDraft {
+            experiment: WorkflowBenchmarkExperimentRecord {
+                id: experiment_id.to_owned(),
+                project_id: request.project_id.clone(),
+                name: request.name.trim().to_owned(),
+                media_type: request.media_type.clone(),
+                status: "DRAFT".to_owned(),
+                base_values_json: base_values_json.to_string(),
+                asset_ids_json: asset_ids_json.to_owned(),
+                winner_candidate_id: None,
+                production_batch_id: None,
+                seed_strategy: seed_strategy.to_owned(),
+                fixed_seed: request.fixed_seed.map(|seed| seed.to_string()),
+                repeat_count: i64::from(request.repeat_count),
+                recommendation_type: None,
+                created_at: now.to_owned(),
+                updated_at: now.to_owned(),
+            },
+            candidates,
+            repeat_count: request.repeat_count,
+        };
+        self.repository.create_draft_atomic(&draft).await?;
+        Ok(())
     }
 
     async fn link_queue(
@@ -1154,52 +1010,30 @@ impl WorkflowBenchmarkService {
         items: &[crate::domain::ProductionBatchItem],
         repeat_count: u32,
     ) -> Result<(), WorkflowBenchmarkError> {
-        let mut transaction = self.pool.begin().await.map_err(db_error)?;
-        sqlx::query(
-            "UPDATE benchmark_experiments SET production_batch_id = ?, status = 'QUEUED', updated_at = ? WHERE id = ?",
-        )
-        .bind(batch_id)
-        .bind(self.clock.now().to_rfc3339())
-        .bind(experiment_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(db_error)?;
+        let repeat_count = usize::try_from(repeat_count)
+            .map_err(|_| WorkflowBenchmarkError::InvalidInput("运行次数溢出。".to_owned()))?;
+        let mut links = Vec::with_capacity(items.len());
         for (index, item) in items.iter().enumerate() {
-            let candidate_position = i64::try_from(index / repeat_count as usize)
+            let candidate_position = u32::try_from(index / repeat_count)
                 .map_err(|_| WorkflowBenchmarkError::InvalidInput("候选序号溢出。".to_owned()))?;
-            let run_number = i64::try_from(index % repeat_count as usize + 1)
+            let run_number = u32::try_from(index % repeat_count + 1)
                 .map_err(|_| WorkflowBenchmarkError::InvalidInput("运行序号溢出。".to_owned()))?;
-            sqlx::query(
-                "UPDATE benchmark_candidates
-                 SET production_batch_item_id = ?, values_json = ?
-                 WHERE experiment_id = ? AND position = ?",
-            )
-            .bind(item.id.as_str())
-            .bind(item.values_json.to_string())
-            .bind(experiment_id)
-            .bind(candidate_position)
-            .execute(&mut *transaction)
-            .await
-            .map_err(db_error)?;
-            sqlx::query(
-                "UPDATE benchmark_runs
-                 SET production_batch_item_id = ?, task_id = NULL, updated_at = ?
-                 WHERE experiment_id = ? AND candidate_id = (
-                    SELECT id FROM benchmark_candidates
-                    WHERE experiment_id = ? AND position = ?
-                 ) AND run_number = ?",
-            )
-            .bind(item.id.as_str())
-            .bind(self.clock.now().to_rfc3339())
-            .bind(experiment_id)
-            .bind(experiment_id)
-            .bind(candidate_position)
-            .bind(run_number)
-            .execute(&mut *transaction)
-            .await
-            .map_err(db_error)?;
+            links.push(WorkflowBenchmarkQueueLink {
+                production_batch_item_id: item.id.as_str().to_owned(),
+                candidate_position,
+                run_number,
+                values_json: item.values_json.to_string(),
+            });
         }
-        transaction.commit().await.map_err(db_error)
+        self.repository
+            .link_queue_atomic(
+                experiment_id,
+                batch_id,
+                &links,
+                &self.clock.now().to_rfc3339(),
+            )
+            .await?;
+        Ok(())
     }
 
     async fn mark_queue_link_failed(
@@ -1207,17 +1041,9 @@ impl WorkflowBenchmarkService {
         experiment_id: &str,
         batch_id: &str,
     ) -> Result<(), WorkflowBenchmarkError> {
-        sqlx::query(
-            "UPDATE benchmark_experiments
-             SET production_batch_id = ?, status = 'FAILED_TO_QUEUE', updated_at = ?
-             WHERE id = ?",
-        )
-        .bind(batch_id)
-        .bind(self.clock.now().to_rfc3339())
-        .bind(experiment_id)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
+        self.repository
+            .mark_queue_link_failed(experiment_id, batch_id, &self.clock.now().to_rfc3339())
+            .await?;
         Ok(())
     }
 
@@ -1231,22 +1057,15 @@ impl WorkflowBenchmarkService {
         asset_ids.extend(collect_asset_ids(values));
         asset_ids.sort();
         asset_ids.dedup();
-        for asset_id in asset_ids {
-            let exists = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM assets WHERE id = ? AND project_id = ?",
-            )
-            .bind(&asset_id)
-            .bind(project_id)
-            .fetch_one(&self.pool)
+        self.repository
+            .verify_frozen_assets(project_id, &asset_ids)
             .await
-            .map_err(db_error)?;
-            if exists == 0 {
-                return Err(WorkflowBenchmarkError::InvalidInput(format!(
-                    "Benchmark 冻结素材不存在或不属于当前项目：{asset_id}"
-                )));
-            }
-        }
-        Ok(())
+            .map_err(|error| match error {
+                RepositoryError::Integrity { message } => {
+                    WorkflowBenchmarkError::InvalidInput(message)
+                }
+                error => error.into(),
+            })
     }
 
     async fn set_experiment_status(
@@ -1254,244 +1073,149 @@ impl WorkflowBenchmarkService {
         experiment_id: &str,
         status: &str,
     ) -> Result<(), WorkflowBenchmarkError> {
-        sqlx::query("UPDATE benchmark_experiments SET status = ?, updated_at = ? WHERE id = ?")
-            .bind(status)
-            .bind(self.clock.now().to_rfc3339())
-            .bind(experiment_id)
-            .execute(&self.pool)
-            .await
-            .map_err(db_error)?;
+        self.repository
+            .set_status(experiment_id, status, &self.clock.now().to_rfc3339())
+            .await?;
         Ok(())
-    }
-
-    async fn load_experiment(
-        &self,
-        project_id: &str,
-        experiment_id: &str,
-    ) -> Result<Option<BenchmarkExperimentRow>, WorkflowBenchmarkError> {
-        sqlx::query_as::<_, BenchmarkExperimentRow>(
-            "SELECT id, project_id, name, media_type, status, base_values_json,
-                    asset_ids_json, winner_candidate_id, production_batch_id,
-                    seed_strategy, fixed_seed, repeat_count, recommendation_type,
-                    created_at, updated_at
-             FROM benchmark_experiments WHERE project_id = ? AND id = ?",
-        )
-        .bind(project_id)
-        .bind(experiment_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_error)
-    }
-
-    async fn load_candidate_rows(
-        &self,
-        experiment_id: &str,
-    ) -> Result<Vec<BenchmarkCandidateRow>, WorkflowBenchmarkError> {
-        sqlx::query_as::<_, BenchmarkCandidateRow>(
-            "SELECT id, position, workflow_version_id, recipe_id,
-                    preset_id, preset_name, label, values_json, asset_ids_json,
-                    production_batch_item_id, task_id, workflow_id, workflow_version,
-                    workflow_sha256, recipe_version, recipe_sha256, runtime_package,
-                    runtime_profile
-             FROM benchmark_candidates
-             WHERE experiment_id = ? ORDER BY position ASC",
-        )
-        .bind(experiment_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db_error)
-    }
-
-    async fn load_candidates(
-        &self,
-        experiment: &BenchmarkExperimentRow,
-    ) -> Result<Vec<WorkflowBenchmarkCandidateView>, WorkflowBenchmarkError> {
-        let rows = self.load_candidate_rows(&experiment.id).await?;
-        sqlx::query(
-            "UPDATE benchmark_runs AS r
-             SET task_id = COALESCE((SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id), r.task_id),
-                 snapshot_id = COALESCE((SELECT s.id FROM generation_snapshots s WHERE s.task_id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.snapshot_id),
-                 output_asset_id = COALESCE((SELECT MIN(oa.asset_id) FROM task_output_assets oa WHERE oa.task_id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.output_asset_id),
-                 generation_execution_id = COALESCE((SELECT t.generation_execution_id FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.generation_execution_id),
-                 compiled_workflow_sha256 = COALESCE((SELECT t.compiled_workflow_sha256 FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.compiled_workflow_sha256),
-                 runtime_profile = COALESCE((SELECT t.runtime_profile FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.runtime_profile),
-                 concurrency_class = COALESCE((SELECT t.concurrency_class FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), r.concurrency_class),
-                 queue_wait_ms = COALESCE((SELECT CAST((julianday(t.execution_started_at) - julianday(t.queued_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.queued_at IS NOT NULL AND t.execution_started_at IS NOT NULL), r.queue_wait_ms),
-                 prepare_ms = COALESCE((SELECT CAST((julianday(t.prepared_at) - julianday(t.prepare_started_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.prepare_started_at IS NOT NULL AND t.prepared_at IS NOT NULL), r.prepare_ms),
-                 submit_ms = COALESCE((SELECT CAST((julianday(t.submitted_at) - julianday(t.prepared_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.prepared_at IS NOT NULL AND t.submitted_at IS NOT NULL), r.submit_ms),
-                 comfy_execution_ms = COALESCE((SELECT CAST((julianday(t.execution_finished_at) - julianday(t.execution_started_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.execution_started_at IS NOT NULL AND t.execution_finished_at IS NOT NULL), r.comfy_execution_ms),
-                 collect_ms = COALESCE((SELECT CAST((julianday(t.collection_finished_at) - julianday(t.execution_finished_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.execution_finished_at IS NOT NULL AND t.collection_finished_at IS NOT NULL), r.collect_ms),
-                 total_ms = COALESCE((SELECT CAST((julianday(t.collection_finished_at) - julianday(t.created_at)) * 86400000 AS INTEGER) FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)) AND t.created_at IS NOT NULL AND t.collection_finished_at IS NOT NULL), r.total_ms),
-                 status = COALESCE((SELECT t.status FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), (SELECT i.status FROM production_batch_items i WHERE i.id = r.production_batch_item_id), r.status),
-                 error_code = COALESCE((SELECT t.error_code FROM tasks t WHERE t.id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id))), (SELECT i.error_code FROM production_batch_items i WHERE i.id = r.production_batch_item_id), r.error_code),
-                 output_file_size = COALESCE(r.output_file_size, (SELECT MAX(a.file_size) FROM task_output_assets oa INNER JOIN assets a ON a.id = oa.asset_id WHERE oa.task_id = COALESCE(r.task_id, (SELECT i.task_id FROM production_batch_items i WHERE i.id = r.production_batch_item_id)))),
-                 updated_at = ?
-             WHERE r.experiment_id = ?",
-        )
-        .bind(self.clock.now().to_rfc3339())
-        .bind(&experiment.id)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
-        let run_rows = sqlx::query_as::<_, BenchmarkRunRow>(
-            "SELECT r.id, r.candidate_id, r.run_number, r.production_batch_item_id,
-                    COALESCE(r.task_id, i.task_id) AS task_id,
-                    COALESCE(r.snapshot_id, s.id) AS snapshot_id,
-                    COALESCE(r.output_asset_id, (
-                        SELECT MIN(oa.asset_id) FROM task_output_assets oa
-                        WHERE oa.task_id = COALESCE(r.task_id, i.task_id)
-                    )) AS output_asset_id,
-                    COALESCE(r.generation_execution_id, t.generation_execution_id) AS generation_execution_id,
-                    COALESCE(r.compiled_workflow_sha256, t.compiled_workflow_sha256) AS compiled_workflow_sha256,
-                    COALESCE(r.runtime_profile, t.runtime_profile) AS runtime_profile,
-                    COALESCE(r.concurrency_class, t.concurrency_class) AS concurrency_class,
-                    COALESCE(r.queue_wait_ms,
-                        CASE WHEN t.queued_at IS NOT NULL AND t.execution_started_at IS NOT NULL
-                             THEN CAST((julianday(t.execution_started_at) - julianday(t.queued_at)) * 86400000 AS INTEGER)
-                        END) AS queue_wait_ms,
-                    COALESCE(r.prepare_ms,
-                        CASE WHEN t.prepare_started_at IS NOT NULL AND t.prepared_at IS NOT NULL
-                             THEN CAST((julianday(t.prepared_at) - julianday(t.prepare_started_at)) * 86400000 AS INTEGER)
-                        END) AS prepare_ms,
-                    COALESCE(r.submit_ms,
-                        CASE WHEN t.prepared_at IS NOT NULL AND t.submitted_at IS NOT NULL
-                             THEN CAST((julianday(t.submitted_at) - julianday(t.prepared_at)) * 86400000 AS INTEGER)
-                        END) AS submit_ms,
-                    COALESCE(r.comfy_execution_ms,
-                        CASE WHEN t.execution_started_at IS NOT NULL AND t.execution_finished_at IS NOT NULL
-                             THEN CAST((julianday(t.execution_finished_at) - julianday(t.execution_started_at)) * 86400000 AS INTEGER)
-                        END) AS comfy_execution_ms,
-                    COALESCE(r.collect_ms,
-                        CASE WHEN t.execution_finished_at IS NOT NULL AND t.collection_finished_at IS NOT NULL
-                             THEN CAST((julianday(t.collection_finished_at) - julianday(t.execution_finished_at)) * 86400000 AS INTEGER)
-                        END) AS collect_ms,
-                    COALESCE(r.total_ms,
-                        CASE WHEN t.created_at IS NOT NULL AND t.collection_finished_at IS NOT NULL
-                             THEN CAST((julianday(t.collection_finished_at) - julianday(t.created_at)) * 86400000 AS INTEGER)
-                        END) AS total_ms,
-                    COALESCE(t.status, i.status, r.status) AS status,
-                    COALESCE(r.error_code, t.error_code, i.error_code) AS error_code,
-                    COALESCE(r.output_file_size, (
-                        SELECT MAX(a.file_size) FROM task_output_assets oa
-                        INNER JOIN assets a ON a.id = oa.asset_id
-                        WHERE oa.task_id = COALESCE(r.task_id, i.task_id)
-                    )) AS output_file_size
-             FROM benchmark_runs r
-             LEFT JOIN production_batch_items i ON i.id = r.production_batch_item_id
-             LEFT JOIN tasks t ON t.id = COALESCE(r.task_id, i.task_id)
-             LEFT JOIN generation_snapshots s ON s.task_id = COALESCE(r.task_id, i.task_id)
-             WHERE r.experiment_id = ?
-             ORDER BY r.candidate_id ASC, r.run_number ASC",
-        )
-        .bind(&experiment.id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db_error)?;
-        let mut runs_by_candidate: BTreeMap<String, Vec<WorkflowBenchmarkRunView>> =
-            BTreeMap::new();
-        for run in run_rows {
-            let status = effective_candidate_status(run.status.as_deref(), None);
-            runs_by_candidate
-                .entry(run.candidate_id.clone())
-                .or_default()
-                .push(run.into_view(status));
-        }
-        let quality_rows = sqlx::query_as::<_, BenchmarkQualityRow>(
-            "SELECT q.candidate_id, q.prompt_adherence, q.visual_quality,
-                    q.motion_quality, q.reference_consistency, q.overall, q.note
-             FROM benchmark_quality_scores q
-             INNER JOIN benchmark_candidates c ON c.id = q.candidate_id
-             WHERE c.experiment_id = ?",
-        )
-        .bind(&experiment.id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db_error)?;
-        let mut quality_by_candidate = quality_rows
-            .into_iter()
-            .map(|row| (row.candidate_id.clone(), row.into_view()))
-            .collect::<BTreeMap<_, _>>();
-        let mut views = Vec::with_capacity(rows.len());
-        for row in rows {
-            let candidate_id = row.id.clone();
-            let values = parse_json_value(&row.values_json)?;
-            let asset_ids = parse_string_array(&row.asset_ids_json)?;
-            let runs = runs_by_candidate.remove(&row.id).unwrap_or_default();
-            let first_run = runs.first();
-            let task_id = first_run
-                .and_then(|run| run.task_id.clone())
-                .or(row.task_id.clone());
-            let output_asset_ids = runs
-                .iter()
-                .filter_map(|run| run.output_asset_id.clone())
-                .collect::<Vec<_>>();
-            let review = if let Some(item_id) = row.production_batch_item_id.as_deref() {
-                sqlx::query_as::<_, BenchmarkReviewRow>(
-                    "SELECT review_status, review_note FROM production_item_reviews
-                     WHERE production_batch_item_id = ? ORDER BY version DESC LIMIT 1",
-                )
-                .bind(item_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(db_error)?
-            } else {
-                None
-            };
-            let task_status = candidate_status_from_runs(&runs, row.task_id.as_deref());
-            let task_created_at = None;
-            let task_started_at = None;
-            let task_finished_at = None;
-            let aggregate = aggregate_runs(&runs);
-            let telemetry = runs.first().and_then(telemetry_from_run);
-            views.push(WorkflowBenchmarkCandidateView {
-                id: row.id,
-                position: u32::try_from(row.position).unwrap_or_default(),
-                workflow_version_id: row.workflow_version_id,
-                recipe_id: row.recipe_id,
-                preset_id: row.preset_id,
-                preset_name: row.preset_name,
-                label: row.label,
-                compatibility: "COMPATIBLE".to_owned(),
-                compatibility_reasons: Vec::new(),
-                frozen_values: values,
-                asset_ids,
-                workflow_id: row.workflow_id,
-                workflow_version: row.workflow_version,
-                workflow_sha256: row.workflow_sha256,
-                recipe_version: row.recipe_version,
-                recipe_sha256: row.recipe_sha256,
-                runtime_package: row.runtime_package,
-                runtime_profile: row.runtime_profile,
-                production_batch_item_id: row.production_batch_item_id,
-                task_id,
-                task_status,
-                task_created_at,
-                task_started_at,
-                task_finished_at,
-                execution_duration_ms: aggregate.total_ms.median,
-                telemetry,
-                runs,
-                aggregate,
-                quality: quality_by_candidate.remove(&candidate_id),
-                output_asset_ids,
-                review_status: review.as_ref().map(|review| review.review_status.clone()),
-                review_note: review.map(|review| review.review_note),
-            });
-        }
-        Ok(views)
     }
 
     async fn summary_for_row(
         &self,
-        row: BenchmarkExperimentRow,
+        row: WorkflowBenchmarkExperimentRecord,
     ) -> Result<WorkflowBenchmarkSummaryView, WorkflowBenchmarkError> {
-        let candidates = self.load_candidates(&row).await?;
+        let snapshot = self
+            .repository
+            .load_experiment_snapshot(&row.project_id, &row.id, &self.clock.now().to_rfc3339())
+            .await?
+            .ok_or_else(|| WorkflowBenchmarkError::NotFound(row.id.clone()))?;
+        let candidates = build_candidate_views(&snapshot)?;
         let status =
             derive_experiment_status(&row.status, row.production_batch_id.as_deref(), &candidates);
         if status != row.status {
             self.set_experiment_status(&row.id, &status).await?;
         }
         Ok(summary_from_candidates(&row, status, &candidates))
+    }
+}
+
+fn build_candidate_views(
+    snapshot: &WorkflowBenchmarkSnapshot,
+) -> Result<Vec<WorkflowBenchmarkCandidateView>, WorkflowBenchmarkError> {
+    let mut runs_by_candidate: BTreeMap<String, Vec<WorkflowBenchmarkRunView>> = BTreeMap::new();
+    for run in &snapshot.runs {
+        let status = effective_candidate_status(run.status.as_deref(), None);
+        runs_by_candidate
+            .entry(run.candidate_id.clone())
+            .or_default()
+            .push(run_to_view(run, status));
+    }
+
+    let mut quality_by_candidate = snapshot
+        .quality
+        .iter()
+        .map(|quality| {
+            (
+                quality.candidate_id.clone(),
+                WorkflowBenchmarkQualityView {
+                    prompt_adherence: quality.prompt_adherence,
+                    visual_quality: quality.visual_quality,
+                    motion_quality: quality.motion_quality,
+                    reference_consistency: quality.reference_consistency,
+                    overall: quality.overall,
+                    note: quality.note.clone(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let reviews_by_item = snapshot
+        .reviews
+        .iter()
+        .map(|review| (review.production_batch_item_id.as_str(), review))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut views = Vec::with_capacity(snapshot.candidates.len());
+    for row in &snapshot.candidates {
+        let values = parse_json_value(&row.values_json)?;
+        let asset_ids = parse_string_array(&row.asset_ids_json)?;
+        let runs = runs_by_candidate.remove(&row.id).unwrap_or_default();
+        let first_run = runs.first();
+        let task_id = first_run
+            .and_then(|run| run.task_id.clone())
+            .or(row.task_id.clone());
+        let output_asset_ids = runs
+            .iter()
+            .filter_map(|run| run.output_asset_id.clone())
+            .collect::<Vec<_>>();
+        let review = row
+            .production_batch_item_id
+            .as_deref()
+            .and_then(|item_id| reviews_by_item.get(item_id).copied());
+        let task_status = candidate_status_from_runs(&runs, row.task_id.as_deref());
+        let aggregate = aggregate_runs(&runs);
+        let telemetry = runs.first().and_then(telemetry_from_run);
+        views.push(WorkflowBenchmarkCandidateView {
+            id: row.id.clone(),
+            position: u32::try_from(row.position).unwrap_or_default(),
+            workflow_version_id: row.workflow_version_id.clone(),
+            recipe_id: row.recipe_id.clone(),
+            preset_id: row.preset_id.clone(),
+            preset_name: row.preset_name.clone(),
+            label: row.label.clone(),
+            compatibility: "COMPATIBLE".to_owned(),
+            compatibility_reasons: Vec::new(),
+            frozen_values: values,
+            asset_ids,
+            workflow_id: row.workflow_id.clone(),
+            workflow_version: row.workflow_version.clone(),
+            workflow_sha256: row.workflow_sha256.clone(),
+            recipe_version: row.recipe_version.clone(),
+            recipe_sha256: row.recipe_sha256.clone(),
+            runtime_package: row.runtime_package.clone(),
+            runtime_profile: row.runtime_profile.clone(),
+            production_batch_item_id: row.production_batch_item_id.clone(),
+            task_id,
+            task_status,
+            task_created_at: None,
+            task_started_at: None,
+            task_finished_at: None,
+            execution_duration_ms: aggregate.total_ms.median,
+            telemetry,
+            runs,
+            aggregate,
+            quality: quality_by_candidate.remove(&row.id),
+            output_asset_ids,
+            review_status: review.map(|review| review.review_status.clone()),
+            review_note: review.map(|review| review.review_note.clone()),
+        });
+    }
+    Ok(views)
+}
+
+fn run_to_view(
+    run: &WorkflowBenchmarkRunRecord,
+    status: Option<String>,
+) -> WorkflowBenchmarkRunView {
+    WorkflowBenchmarkRunView {
+        id: run.id.clone(),
+        candidate_id: run.candidate_id.clone(),
+        run_number: u32::try_from(run.run_number).unwrap_or(1),
+        production_batch_item_id: run.production_batch_item_id.clone(),
+        task_id: run.task_id.clone(),
+        snapshot_id: run.snapshot_id.clone(),
+        output_asset_id: run.output_asset_id.clone(),
+        generation_execution_id: run.generation_execution_id.clone(),
+        compiled_workflow_sha256: run.compiled_workflow_sha256.clone(),
+        runtime_profile: run.runtime_profile.clone(),
+        concurrency_class: run.concurrency_class.clone(),
+        queue_wait_ms: run.queue_wait_ms,
+        prepare_ms: run.prepare_ms,
+        submit_ms: run.submit_ms,
+        comfy_execution_ms: run.comfy_execution_ms,
+        collect_ms: run.collect_ms,
+        total_ms: run.total_ms,
+        status,
+        error_code: run.error_code.clone(),
+        output_file_size: run.output_file_size,
     }
 }
 
@@ -1518,147 +1242,6 @@ impl CandidateDraft {
             runtime_profile: Some(self.runtime_profile),
         }
     }
-}
-
-#[derive(Debug, FromRow)]
-struct BenchmarkExperimentRow {
-    id: String,
-    project_id: String,
-    name: String,
-    media_type: String,
-    status: String,
-    base_values_json: String,
-    asset_ids_json: String,
-    winner_candidate_id: Option<String>,
-    production_batch_id: Option<String>,
-    seed_strategy: String,
-    fixed_seed: Option<String>,
-    repeat_count: i64,
-    recommendation_type: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, FromRow)]
-struct BenchmarkCandidateRow {
-    id: String,
-    position: i64,
-    workflow_version_id: String,
-    recipe_id: String,
-    preset_id: Option<String>,
-    preset_name: Option<String>,
-    label: String,
-    values_json: String,
-    asset_ids_json: String,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    workflow_id: Option<String>,
-    workflow_version: Option<String>,
-    workflow_sha256: Option<String>,
-    recipe_version: Option<String>,
-    recipe_sha256: Option<String>,
-    runtime_package: Option<String>,
-    runtime_profile: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct BenchmarkItemRuntimeRow {
-    task_id: Option<String>,
-    item_status: String,
-    task_status: Option<String>,
-    task_created_at: Option<String>,
-    task_queued_at: Option<String>,
-    task_started_at: Option<String>,
-    task_finished_at: Option<String>,
-    compiled_workflow_sha256: Option<String>,
-    runtime_profile: Option<String>,
-    prepare_started_at: Option<String>,
-    prepared_at: Option<String>,
-    submitted_at: Option<String>,
-    execution_started_at: Option<String>,
-    execution_finished_at: Option<String>,
-    collection_finished_at: Option<String>,
-}
-
-#[derive(Debug, FromRow)]
-struct BenchmarkRunRow {
-    id: String,
-    candidate_id: String,
-    run_number: i64,
-    production_batch_item_id: Option<String>,
-    task_id: Option<String>,
-    snapshot_id: Option<String>,
-    output_asset_id: Option<String>,
-    generation_execution_id: Option<String>,
-    compiled_workflow_sha256: Option<String>,
-    runtime_profile: Option<String>,
-    concurrency_class: Option<String>,
-    queue_wait_ms: Option<i64>,
-    prepare_ms: Option<i64>,
-    submit_ms: Option<i64>,
-    comfy_execution_ms: Option<i64>,
-    collect_ms: Option<i64>,
-    total_ms: Option<i64>,
-    status: Option<String>,
-    error_code: Option<String>,
-    output_file_size: Option<i64>,
-}
-
-impl BenchmarkRunRow {
-    fn into_view(self, status: Option<String>) -> WorkflowBenchmarkRunView {
-        WorkflowBenchmarkRunView {
-            id: self.id,
-            candidate_id: self.candidate_id,
-            run_number: u32::try_from(self.run_number).unwrap_or(1),
-            production_batch_item_id: self.production_batch_item_id,
-            task_id: self.task_id,
-            snapshot_id: self.snapshot_id,
-            output_asset_id: self.output_asset_id,
-            generation_execution_id: self.generation_execution_id,
-            compiled_workflow_sha256: self.compiled_workflow_sha256,
-            runtime_profile: self.runtime_profile,
-            concurrency_class: self.concurrency_class,
-            queue_wait_ms: self.queue_wait_ms,
-            prepare_ms: self.prepare_ms,
-            submit_ms: self.submit_ms,
-            comfy_execution_ms: self.comfy_execution_ms,
-            collect_ms: self.collect_ms,
-            total_ms: self.total_ms,
-            status,
-            error_code: self.error_code,
-            output_file_size: self.output_file_size,
-        }
-    }
-}
-
-#[derive(Debug, FromRow)]
-struct BenchmarkQualityRow {
-    candidate_id: String,
-    prompt_adherence: Option<i64>,
-    visual_quality: Option<i64>,
-    motion_quality: Option<i64>,
-    reference_consistency: Option<i64>,
-    overall: Option<i64>,
-    note: Option<String>,
-}
-
-impl BenchmarkQualityRow {
-    fn into_view(self) -> WorkflowBenchmarkQualityView {
-        WorkflowBenchmarkQualityView {
-            prompt_adherence: self.prompt_adherence,
-            visual_quality: self.visual_quality,
-            motion_quality: self.motion_quality,
-            reference_consistency: self.reference_consistency,
-            overall: self.overall,
-            note: self.note,
-        }
-    }
-}
-
-#[derive(Debug, FromRow)]
-struct BenchmarkReviewRow {
-    review_status: String,
-    review_note: String,
 }
 
 fn validate_request_shape(
@@ -2057,7 +1640,7 @@ fn effective_candidate_status(
 }
 
 fn summary_from_candidates(
-    row: &BenchmarkExperimentRow,
+    row: &WorkflowBenchmarkExperimentRecord,
     status: String,
     candidates: &[WorkflowBenchmarkCandidateView],
 ) -> WorkflowBenchmarkSummaryView {
@@ -2193,7 +1776,7 @@ fn telemetry_from_run(run: &WorkflowBenchmarkRunView) -> Option<WorkflowBenchmar
 }
 
 fn build_comparison(
-    experiment: &BenchmarkExperimentRow,
+    experiment: &WorkflowBenchmarkExperimentRecord,
     candidates: &[WorkflowBenchmarkCandidateView],
 ) -> WorkflowBenchmarkComparisonView {
     if candidates.len() < 2 {
@@ -2350,8 +1933,23 @@ fn execution_duration_ms(
     (duration >= 0).then_some(duration)
 }
 
+#[cfg(test)]
+struct BenchmarkTelemetryInput {
+    compiled_workflow_sha256: Option<String>,
+    runtime_profile: Option<String>,
+    task_created_at: Option<String>,
+    task_queued_at: Option<String>,
+    prepare_started_at: Option<String>,
+    prepared_at: Option<String>,
+    submitted_at: Option<String>,
+    execution_started_at: Option<String>,
+    execution_finished_at: Option<String>,
+    collection_finished_at: Option<String>,
+}
+
+#[cfg(test)]
 fn benchmark_telemetry(
-    runtime: &BenchmarkItemRuntimeRow,
+    runtime: &BenchmarkTelemetryInput,
 ) -> Option<WorkflowBenchmarkTelemetryView> {
     let has_metadata = runtime.compiled_workflow_sha256.is_some()
         || runtime.runtime_profile.is_some()
@@ -2387,15 +1985,12 @@ fn benchmark_telemetry(
     })
 }
 
+#[cfg(test)]
 fn duration_between(start: Option<&str>, finish: Option<&str>) -> Option<i64> {
     let start = DateTime::parse_from_rfc3339(start?).ok()?;
     let finish = DateTime::parse_from_rfc3339(finish?).ok()?;
     let duration = finish.signed_duration_since(start).num_milliseconds();
     (duration >= 0).then_some(duration)
-}
-
-fn db_error(error: sqlx::Error) -> WorkflowBenchmarkError {
-    WorkflowBenchmarkError::Repository(RepositoryError::database(error.to_string()))
 }
 
 impl From<ProductionQueueError> for WorkflowBenchmarkError {
@@ -2409,7 +2004,7 @@ mod tests {
     use super::{
         aggregate_runs, benchmark_telemetry, collect_asset_ids, derive_experiment_status,
         effective_candidate_status, is_benchmark_controlled_key, merge_candidate_values,
-        output_matches_media, BenchmarkItemRuntimeRow, WorkflowBenchmarkRunView,
+        output_matches_media, BenchmarkTelemetryInput, WorkflowBenchmarkRunView,
     };
     use crate::application::generation_input_preparer::GenerationInputValue;
     use crate::domain::{InputDefinition, Recipe, SeedDefault, SeedValue, WorkflowRef};
@@ -2635,14 +2230,9 @@ mod tests {
 
     #[test]
     fn benchmark_telemetry_hook_reads_compiled_sha_profile_and_timings() {
-        let runtime = BenchmarkItemRuntimeRow {
-            task_id: Some("tsk_benchmark".to_owned()),
-            item_status: "SUCCEEDED".to_owned(),
-            task_status: Some("SUCCEEDED".to_owned()),
+        let runtime = BenchmarkTelemetryInput {
             task_created_at: Some("2026-01-01T00:00:00Z".to_owned()),
             task_queued_at: Some("2026-01-01T00:00:05Z".to_owned()),
-            task_started_at: Some("2026-01-01T00:00:07Z".to_owned()),
-            task_finished_at: Some("2026-01-01T00:00:19Z".to_owned()),
             compiled_workflow_sha256: Some("compiled-sha".to_owned()),
             runtime_profile: Some("H3_FAST".to_owned()),
             prepare_started_at: Some("2026-01-01T00:00:01Z".to_owned()),
