@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand as invoke } from "./ipc";
 import type { AppStatus } from "../types/app";
 import type { CapabilitySummary, ComfyMemoryReleaseResult, ComfyStatus } from "../types/comfy";
 import type {

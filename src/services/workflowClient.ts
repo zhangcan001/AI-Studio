@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand as invoke } from "./ipc";
 import * as transport from "./tauriClient";
 import type { WorkflowProductionWorkspaceResponse } from "../types/workflowOnboarding";
 import type {

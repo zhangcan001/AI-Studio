@@ -159,7 +159,7 @@ function errorCode(error: unknown, raw: string): string | undefined {
   }
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && code && code !== "INVALID_INPUT") return code;
+    if (typeof code === "string" && code) return code;
   }
   const embeddedRuntimeCode = raw.match(/\bRUNTIME_ADMISSION_[A-Z0-9_]+\b/)?.[0];
   if (embeddedRuntimeCode && RUNTIME_ADMISSION_CODES.has(embeddedRuntimeCode)) return embeddedRuntimeCode;

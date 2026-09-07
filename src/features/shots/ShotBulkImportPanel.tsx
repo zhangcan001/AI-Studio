@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { invokeCommand as invoke } from "../../services/ipc";
 
 export type ShotBulkImportFormat = "tsv" | "json";
 

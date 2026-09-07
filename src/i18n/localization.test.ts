@@ -73,6 +73,16 @@ describe("用户可见错误信息", () => {
     })).toContain("缺少节点");
   });
 
+  it("prefers a structured IPC code over a code embedded in the message", () => {
+    const formatted = formatUiError({
+      code: "INVALID_INPUT",
+      message: "RUNTIME_ADMISSION_MISSING_NODES: legacy technical text",
+    });
+
+    expect(formatted.code).toBe("INVALID_INPUT");
+    expect(formatted.message).toBe("输入内容无效，请检查后重试。");
+  });
+
   it("does not expose unknown raw errors in the primary message", () => {
     const formatted = formatUiError(new Error("SECRET_RAW_ERROR from backend"));
     expect(formatted.message).toBe("操作失败，请查看技术详情。");

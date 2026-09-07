@@ -274,3 +274,52 @@ impl From<sqlx::Error> for AppError {
         Self::database(error.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::AppError;
+    use serde_json::json;
+
+    #[test]
+    fn serializes_invalid_input_without_optional_details() {
+        let value = serde_json::to_value(AppError::invalid_input("bad request")).unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "code": "INVALID_INPUT",
+                "message": "bad request",
+            })
+        );
+    }
+
+    #[test]
+    fn preserves_production_queue_details() {
+        let value = serde_json::to_value(AppError::production_queue_busy(
+            "queue is busy",
+            json!({ "batchId": "batch-1" }),
+        ))
+        .unwrap();
+
+        assert_eq!(value["code"], "PRODUCTION_QUEUE_BUSY");
+        assert_eq!(value["message"], "queue is busy");
+        assert_eq!(value["details"]["batchId"], "batch-1");
+    }
+
+    #[test]
+    fn preserves_package_error_code_inside_details() {
+        let value = serde_json::to_value(AppError::production_package(
+            "PACKAGE_RECIPE_INCOMPATIBLE",
+            "package rejected",
+            json!({ "workflowId": "workflow-1" }),
+        ))
+        .unwrap();
+
+        assert_eq!(value["code"], "PRODUCTION_PACKAGE_ERROR");
+        assert_eq!(
+            value["details"]["packageErrorCode"],
+            "PACKAGE_RECIPE_INCOMPATIBLE"
+        );
+        assert_eq!(value["details"]["workflowId"], "workflow-1");
+    }
+}
