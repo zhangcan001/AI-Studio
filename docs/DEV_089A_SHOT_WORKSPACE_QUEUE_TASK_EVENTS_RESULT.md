@@ -1,8 +1,8 @@
 # DEV-089A ShotWorkspace Queue & Task-Event Controller Extraction 验收结果
 
-日期：2026-09-08  
-基线：`f167a1d`  
-实现提交：`a0f378c`  
+日期：2026-09-08
+基线：`f167a1d`
+实现提交：`a0f378c`
 Source-only CI：`34156278961`（frontend 与 Rust 均 success）
 
 ## 结论
