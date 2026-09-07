@@ -101,6 +101,12 @@ import type {
 import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
 import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
+import {
+  buildShotProductionReadModel,
+  type ShotProductionContext,
+  type ShotProductionStepId,
+} from "./shotProductionState";
+import { useShotWorkspaceSelection } from "./hooks/useShotWorkspaceSelection";
 import { ScopeConsistencyWorkspace, type ScopeConsistencyWorkspaceProps } from "./ScopeConsistencyWorkspace";
 import type { ConsistencyScopeOption, ConsistencyScopeRef } from "../../types/consistencyBindings";
 import type { ShotInspectorTab } from "./ShotInspector";
@@ -530,7 +536,13 @@ export function buildLocalDeliveryManifest(
 
 export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
-  const [selectedShotId, setSelectedShotId] = useState<string | undefined>(initialSelectedShotId);
+  const {
+    selectedShotId,
+    workspaceSelection,
+    selectWorkspaceSelection,
+    selectShot,
+    reconcileSelectedShot,
+  } = useShotWorkspaceSelection({ projectId, initialSelectedShotId, onShotSelected });
   const [stage, setStage] = useState<ShotStage>("image");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
@@ -575,9 +587,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState("");
-  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>(() => initialSelectedShotId
-    ? { type: "shot", shotId: initialSelectedShotId }
-    : { type: "project", projectId });
   const [shotWorkspaceTab, setShotWorkspaceTab] = useState<ShotCreationWorkspaceTab>("generate");
   const [inspectorTab, setInspectorTab] = useState<ShotInspectorTab>("parameters");
   const [previewAssetId, setPreviewAssetId] = useState<string>();
@@ -709,6 +718,48 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     ),
     [currentProjectDefault, currentStageConfig, productCatalog, stage],
   );
+  const productionReadModel = useMemo(() => {
+    if (!selectedShot) return undefined;
+
+    const stageContext = (nextStage: ShotStage): ShotProductionContext[ShotStage] => {
+      const stageConfig = selectedShot.stageConfigs.find((config) => config.stage === nextStage);
+      const projectDefault = projectDefaultForStage(projectWorkflowConfig, nextStage);
+      const resolution = resolveShotStageRecipe(
+        productCatalog,
+        nextStage,
+        stageConfig,
+        projectDefault,
+        preferredStageRecipe(productCatalog, nextStage),
+      );
+      const recipe = resolution.recipe;
+      const compatibility = recipe ? shotStageRecipeCompatibility(recipe, nextStage) : undefined;
+      const referenceField = recipe?.fields.find(
+        (field): field is Extract<RecipeField, { type: "image" | "images" }> => field.type === "image" || field.type === "images",
+      );
+      const referenceCount = orderedShotReferences(selectedShot, nextStage).length;
+      const available = Boolean(projectWorkflowConfig && recipe && !resolution.blocked);
+      const configured = Boolean(stageConfig || projectDefault);
+      return {
+        available,
+        configured,
+        referenceRequired: nextStage === "video"
+          ? compatibility?.videoInputMode === "REFERENCE_IMAGES"
+          : Boolean(referenceField?.required),
+        referenceMinimum: referenceField?.type === "images"
+          ? Math.max(isRef2vaRecipe(recipe) ? 2 : 1, referenceField.minItems)
+          : referenceField?.type === "image"
+            ? 1
+            : undefined,
+        referenceCount,
+        videoInputMode: nextStage === "video" ? compatibility?.videoInputMode : undefined,
+      };
+    };
+
+    return buildShotProductionReadModel(selectedShot, {
+      image: stageContext("image"),
+      video: stageContext("video"),
+    });
+  }, [productCatalog, projectWorkflowConfig, selectedShot]);
   const currentReferences = references[stage] ?? [];
   const selectedAnchor = referenceAnchors.find((anchor) => anchor.id === selectedAnchorId);
   const ref2vaMode = stage === "video" && isRef2vaRecipe(currentRecipe);
@@ -723,6 +774,28 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const imageAssets = assets.filter(isImageAsset);
   const videoAssets = assets.filter(isVideoAsset);
 
+  const navigateProductionStep = useCallback((stepId: ShotProductionStepId) => {
+    if (stepId === "prompt") {
+      setShotWorkspaceTab("generate");
+      setInspectorTab("prompt");
+      return;
+    }
+    if (stepId === "references") {
+      setShotWorkspaceTab("references");
+      setInspectorTab("references");
+      return;
+    }
+    if (stepId === "image" || stepId === "image-review") {
+      setStage("image");
+      setShotWorkspaceTab("generate");
+      return;
+    }
+    if (stepId === "video" || stepId === "video-review") {
+      setStage("video");
+      setShotWorkspaceTab("generate");
+    }
+  }, []);
+
   useEffect(() => {
     setPreviewAssetId(undefined);
   }, [selectedShotId, stage]);
@@ -734,9 +807,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         : [...current, next];
       return replaced.sort((left, right) => left.ordinal - right.ordinal);
     });
-    setSelectedShotId(next.id);
-    setWorkspaceSelection({ type: "shot", shotId: next.id });
-  }, []);
+    selectShot(next.id);
+  }, [selectShot]);
 
   const reload = useCallback(async () => {
     const generation = ++reloadGeneration.current;
@@ -760,22 +832,14 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       setProductionBatchRunbook(nextRunbook);
       setBatchWorkflowPresets(nextPresets);
       setPromptEntries(promptPage.items);
-      setSelectedShotId((current) => {
-        const nextSelected = current && nextShots.some((shot) => shot.id === current)
-          ? current
-          : initialSelectedShotId && nextShots.some((shot) => shot.id === initialSelectedShotId)
-            ? initialSelectedShotId
-            : nextShots[0]?.id;
-        if (nextSelected !== current) onShotSelected?.(nextSelected);
-        return nextSelected;
-      });
+      reconcileSelectedShot(nextShots.map((shot) => shot.id));
     } catch (loadError: unknown) {
       if (generation !== reloadGeneration.current) return;
       setError(toUserMessage(loadError));
     } finally {
       if (generation === reloadGeneration.current) setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, reconcileSelectedShot]);
 
   const reloadProductionQueues = useCallback(async (throwOnError = false): Promise<ProductionQueueSnapshot | undefined> => {
     try {
@@ -1410,12 +1474,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
       await deleteShot(projectId, selectedShot.id);
       const remaining = shots.filter((shot) => shot.id !== selectedShot.id);
       setShots(remaining);
-      const nextSelectedShotId = remaining[0]?.id;
-      setSelectedShotId(nextSelectedShotId);
-      setWorkspaceSelection(nextSelectedShotId
-        ? { type: "shot", shotId: nextSelectedShotId }
-        : { type: "project", projectId });
-      onShotSelected?.(nextSelectedShotId);
+      reconcileSelectedShot(remaining.map((shot) => shot.id));
     } catch (deleteError: unknown) { setError(toUserMessage(deleteError)); }
     finally { setBusy(false); }
   }
@@ -1701,16 +1760,9 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     });
   }
 
-  function selectWorkspaceSelection(selection: WorkspaceSelection) {
-    setWorkspaceSelection(selection);
-    if (selection.type !== "shot") return;
-    setSelectedShotId(selection.shotId);
-    onShotSelected?.(selection.shotId);
-  }
-
   function openStructureManagement(context: WorkspaceSelection) {
     setStructureManagementOpen(true);
-    setWorkspaceSelection(context);
+    selectWorkspaceSelection(context);
     setNotice("已打开结构管理；系列 / 集 / 场景的新增、重命名、排序和归档仍由原有管理面板执行。");
   }
 
@@ -2227,6 +2279,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onCopyPrompt={(prompt) => void navigator.clipboard?.writeText(prompt).then(() => setNotice("提示词已复制。"))}
               workspaceTab={shotWorkspaceTab}
               onWorkspaceTabChange={setShotWorkspaceTab}
+              production={productionReadModel}
+              onProductionNavigate={navigateProductionStep}
               consistency={consistencyWorkspace && selectedShot ? {
                 ...consistencyWorkspace,
                 projectId,

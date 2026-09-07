@@ -5,6 +5,8 @@ import type { AssetView } from "../../types/asset";
 import type { ShotGenerationLink, ShotStage, ShotView } from "../../types/shot";
 import { statusLabel } from "./shotDomain";
 import { ShotInspector, type ShotInspectorProps, type ShotInspectorTab } from "./ShotInspector";
+import { ShotProductionProgress } from "./ShotProductionProgress";
+import { buildShotProductionReadModel, type ShotProductionReadModel, type ShotProductionStepId } from "./shotProductionState";
 import { ZoomableImagePreview } from "./ZoomableImagePreview";
 import { ScopeConsistencyWorkspace, type ShotConsistencyPanelProps } from "./ScopeConsistencyWorkspace";
 import "./ShotCreationWorkspace.css";
@@ -47,6 +49,8 @@ export interface ShotCreationWorkspaceProps extends Omit<ShotInspectorProps, "pr
   consistency?: ShotConsistencyPanelProps;
   inspectorTab?: ShotInspectorTab;
   onInspectorTabChange?: (tab: ShotInspectorTab) => void;
+  production?: ShotProductionReadModel;
+  onProductionNavigate?: (stepId: ShotProductionStepId) => void;
   notice?: string;
   error?: string;
 }
@@ -99,6 +103,8 @@ export function ShotCreationWorkspace({
   consistency,
   inspectorTab,
   onInspectorTabChange,
+  production,
+  onProductionNavigate,
   notice,
   error,
   ...inspectorProps
@@ -111,6 +117,7 @@ export function ShotCreationWorkspace({
   const stageHistory = history ?? shot?.generationLinks.filter((link) => link.stage === stage) ?? [];
   const promptText = inspectorProps.promptText ?? shot?.promptText ?? "";
   const orderedReferences = inspectorProps.references ?? [];
+  const productionReadModel = shot ? production ?? buildShotProductionReadModel(shot) : undefined;
 
   function selectWorkspaceTab(tab: ShotCreationWorkspaceTab) {
     if (workspaceTab === undefined) setUncontrolledWorkspaceTab(tab);
@@ -143,6 +150,8 @@ export function ShotCreationWorkspace({
           <button type="button" aria-pressed={stage === "video"} className={stage === "video" ? "shot-stage-switch-active" : ""} onClick={() => onStageChange("video")} disabled={inspectorProps.busy}>视频</button>
         </div>
       </header>
+
+      {productionReadModel && <ShotProductionProgress model={productionReadModel} onNavigate={onProductionNavigate ?? (() => undefined)} />}
 
       <nav className="shot-creation-tabs" role="tablist" aria-label="镜头工作区">
         {workspaceTabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={selectedWorkspaceTab === tab.id} className={selectedWorkspaceTab === tab.id ? "shot-creation-tab shot-creation-tab-active" : "shot-creation-tab"} onClick={() => selectWorkspaceTab(tab.id)}>{tab.label}</button>)}
