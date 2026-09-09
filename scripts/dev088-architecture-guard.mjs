@@ -63,6 +63,17 @@ if (["multiPackageRunId", "multiPackageRefreshInFlight", "multiPackageRefreshPen
   throw new Error("SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER failed: ShotWorkspace must not own multi-package lifecycle refs");
 }
 
+const assetVideoBatchWorkspaceSource = readFileSync(join(root, "src/features/assets/AssetVideoBatchWorkspace.tsx"), "utf8");
+if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoWorkflowController")) {
+  throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must delegate workflow resolution ownership to useAssetVideoWorkflowController");
+}
+const assetVideoWorkflowStateLines = assetVideoBatchWorkspaceSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && ["manualVideoSelection", "projectWorkflowConfig", "projectWorkflowStrategy", "projectManualOverrides"].some((marker) => line.includes(marker)));
+if (assetVideoWorkflowStateLines.length) {
+  throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must not own workflow resolution state");
+}
+
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
 console.log(`RPC_PARITY=PASS (${frontendCommands.size} frontend commands checked)`);
@@ -70,3 +81,4 @@ console.log(`SHOT_WORKSPACE_DIRECT_TASK_SUBSCRIPTION=PASS`);
 console.log(`SHOT_WORKSPACE_QUEUE_CONTROLLER=PASS`);
 console.log(`SHOT_WORKSPACE_MONITOR_CONTROLLER=PASS`);
 console.log(`SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER=PASS`);
+console.log(`ASSET_VIDEO_WORKFLOW_CONTROLLER=PASS`);
