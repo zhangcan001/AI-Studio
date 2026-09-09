@@ -3,8 +3,6 @@ import {
   createShot,
   bulkAssignShotPrompt,
   bulkSetShotStageConfig,
-  createProductionPackageBatches,
-  discoverProductionPackages,
   deleteShot,
   exportProjectManifest,
   generateShot,
@@ -15,9 +13,7 @@ import {
   getProjectWorkflowConfig,
   getProductionQueue,
   getSeriesProductionPlan,
-  inspectProductionPackage,
   listPromptLibrary,
-  listProductionPackageBindings,
   listProductionStructure,
   listReferenceAnchors,
   listBatchWorkflowPresets,
@@ -44,14 +40,6 @@ import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
 import type {
-  ProductionBatchDetail,
-} from "../../types/productionQueue";
-import type {
-  ProductionPackageBatchBinding,
-  ProductionPackageDiscoveryPackage,
-  ProductionPackageInspectionResult,
-} from "../../types/productionPackage";
-import type {
   SeriesPromptBulkRequest,
   SeriesPresetApplyRequest,
 } from "../../types/seriesProduction";
@@ -73,8 +61,6 @@ import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunboo
 import { ProductionPackageWorkspace } from "../production/ProductionPackageWorkspace";
 import {
   MultiPackageProductionBoard,
-  type MultiPackageBoardInspectProgress,
-  type MultiPackageBoardPackage,
 } from "../production/MultiPackageProductionBoard";
 import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
 import { ProductionMonitor as ProductionMonitorComponent } from "../production/ProductionMonitor";
@@ -90,6 +76,7 @@ import {
 import { useShotWorkspaceSelection } from "./hooks/useShotWorkspaceSelection";
 import { useShotQueueController, type ProductionQueueSnapshot } from "./hooks/useShotQueueController";
 import { useShotProductionMonitor } from "./hooks/useShotProductionMonitor";
+import { useShotMultiPackageController } from "./hooks/useShotMultiPackageController";
 import { useShotTaskEvents } from "./hooks/useShotTaskEvents";
 import {
   buildLocalDeliveryManifest,
@@ -275,14 +262,6 @@ const emptyStageDrafts: Partial<Record<ShotStage, StageDraft>> = {};
 
 const ProductionMonitor = ProductionMonitorComponent;
 
-function multiPackageBatchOpenPriority(batch?: ProductionBatchDetail): number {
-  if (!batch) return 3;
-  if (batch.status === "RUNNING" || batch.running > 0) return 0;
-  if (batch.failed > 0) return 1;
-  if (batch.status === "READY" || batch.status === "PAUSED" || batch.pending > 0) return 2;
-  return 3;
-}
-
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
 export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
@@ -307,20 +286,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [productionPackageFolderPath, setProductionPackageFolderPath] = useState<string | null>(null);
   const [productionPackageWorkspaceKey, setProductionPackageWorkspaceKey] = useState(0);
   const [productionModeTab, setProductionModeTab] = useState<ProductionModeTab>("package");
-  const [multiPackageRootPath, setMultiPackageRootPath] = useState<string | null>(null);
-  const [multiPackagePackages, setMultiPackagePackages] = useState<ProductionPackageDiscoveryPackage[]>([]);
-  const [multiPackageInspections, setMultiPackageInspections] = useState<Record<string, ProductionPackageInspectionResult>>({});
-  const [multiPackageInspectionErrors, setMultiPackageInspectionErrors] = useState<Record<string, string>>({});
-  const [multiPackageCreateMessages, setMultiPackageCreateMessages] = useState<Record<string, { status: "CREATE_FAILED" | "NOT_CREATED"; message: string }>>({});
-  const [multiPackageBindings, setMultiPackageBindings] = useState<ProductionPackageBatchBinding[]>([]);
-  const [multiPackageBatchDetails, setMultiPackageBatchDetails] = useState<Record<string, ProductionBatchDetail>>({});
-  const [multiPackageDiscovering, setMultiPackageDiscovering] = useState(false);
-  const [multiPackageCreating, setMultiPackageCreating] = useState(false);
-  const [multiPackageProgress, setMultiPackageProgress] = useState<MultiPackageBoardInspectProgress>();
-  const multiPackageRunId = useRef(0);
-  const multiPackageRefreshInFlight = useRef(false);
-  const multiPackageRefreshPending = useRef(false);
-  const multiPackageMounted = useRef(true);
   const [batchWorkflowPresets, setBatchWorkflowPresets] = useState<BatchWorkflowPreset[]>([]);
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [promptEntries, setPromptEntries] = useState<PromptEntryView[]>([]);
@@ -342,15 +307,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const reloadGeneration = useRef(0);
   const monitorRefreshRef = useRef<((batchId: string) => Promise<void>) | undefined>(undefined);
   const monitorFocusRef = useRef<((batchId: string) => void) | undefined>(undefined);
-
-  useEffect(() => {
-    multiPackageMounted.current = true;
-    return () => {
-      multiPackageMounted.current = false;
-      multiPackageRunId.current += 1;
-      multiPackageRefreshPending.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -548,215 +504,26 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     [],
   );
 
-  const refreshMultiPackageBoard = useCallback(async () => {
-    if (!multiPackageMounted.current) return;
-    if (multiPackageRefreshInFlight.current) {
-      multiPackageRefreshPending.current = true;
-      return;
-    }
-    multiPackageRefreshInFlight.current = true;
-    try {
-      const bindings = await listProductionPackageBindings(projectId);
-      if (!multiPackageMounted.current) return;
-      const nextDetails: Record<string, ProductionBatchDetail> = {};
-      const batchIds = [...new Set(bindings.map((binding) => binding.batchId))];
-      let detailError: unknown;
-      for (const batchId of batchIds) {
-        if (!multiPackageMounted.current) return;
-        try {
-          nextDetails[batchId] = await getProductionQueue(projectId, batchId);
-          if (!multiPackageMounted.current) return;
-        } catch (error: unknown) {
-          detailError = error;
-        }
-      }
-      if (!multiPackageMounted.current) return;
-      setMultiPackageBindings(bindings);
-      setMultiPackageBatchDetails(nextDetails);
-      await reloadProductionQueues();
-      if (detailError) setError(`多生产包看板刷新失败：${toUserMessage(detailError)}`);
-    } catch (error: unknown) {
-      if (multiPackageMounted.current) setError(`多生产包看板刷新失败：${toUserMessage(error)}`);
-    } finally {
-      multiPackageRefreshInFlight.current = false;
-      if (multiPackageMounted.current && multiPackageRefreshPending.current) {
-        multiPackageRefreshPending.current = false;
-        void refreshMultiPackageBoard();
-      }
-    }
-  }, [projectId, reloadProductionQueues]);
-
-  const chooseMultiPackageRoot = useCallback(async () => {
-    if (multiPackageDiscovering || multiPackageCreating) return;
-    let runId: number | undefined;
-    try {
-      const pickedRoot = await pickProductionPackageRoot();
-      if (!pickedRoot || !multiPackageMounted.current) return;
-      runId = ++multiPackageRunId.current;
-      setMultiPackageRootPath(pickedRoot);
-      setMultiPackagePackages([]);
-      setMultiPackageInspections({});
-      setMultiPackageInspectionErrors({});
-      setMultiPackageCreateMessages({});
-      setMultiPackageProgress({ current: 0, total: 0 });
-      setMultiPackageDiscovering(true);
-      setError(undefined);
-      const discovery = await discoverProductionPackages(pickedRoot);
-      if (!multiPackageMounted.current || runId !== multiPackageRunId.current) return;
-      setMultiPackageRootPath(discovery.rootPath);
-      setMultiPackageProgress({ current: 0, total: discovery.packages.length });
-      let readyCount = 0;
-      let warningCount = 0;
-      let blockedCount = 0;
-      for (const [index, discoveredPackage] of discovery.packages.entries()) {
-        if (!multiPackageMounted.current || runId !== multiPackageRunId.current) return;
-        setMultiPackageProgress({
-          current: index,
-          total: discovery.packages.length,
-          currentPackage: discoveredPackage.relativePath || discoveredPackage.packageRoot,
-          readyCount,
-          warningCount,
-          blockedCount,
-        });
-        const packageKey = discoveredPackage.packageKey;
-        try {
-          const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
-          if (!multiPackageMounted.current || runId !== multiPackageRunId.current) return;
-          if (inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
-            throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
-          }
-          setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
-          setMultiPackagePackages((current) => [...current, discoveredPackage]);
-          readyCount += inspection.readyCount;
-          warningCount += inspection.warningCount;
-          blockedCount += inspection.blockedCount;
-        } catch (inspectionError: unknown) {
-          if (!multiPackageMounted.current || runId !== multiPackageRunId.current) return;
-          setMultiPackageInspectionErrors((current) => ({
-            ...current,
-            [packageKey]: toUserMessage(inspectionError),
-          }));
-          setMultiPackagePackages((current) => [...current, discoveredPackage]);
-          blockedCount += 1;
-        }
-        if (!multiPackageMounted.current || runId !== multiPackageRunId.current) return;
-        setMultiPackageProgress({
-          current: index + 1,
-          total: discovery.packages.length,
-          readyCount,
-          warningCount,
-          blockedCount,
-        });
-      }
-      if (multiPackageMounted.current && runId === multiPackageRunId.current) await refreshMultiPackageBoard();
-    } catch (discoveryError: unknown) {
-      if (multiPackageMounted.current && (runId === undefined || runId === multiPackageRunId.current)) {
-        setMultiPackagePackages([]);
-        setMultiPackageProgress(undefined);
-        setError(`发现生产包失败：${toUserMessage(discoveryError)}`);
-      }
-    } finally {
-      if (multiPackageMounted.current && runId !== undefined && runId === multiPackageRunId.current) {
-        setMultiPackageDiscovering(false);
-        setMultiPackageProgress((current) => current ? { ...current, currentPackage: undefined } : current);
-      }
-    }
-  }, [discoverProductionPackages, inspectProductionPackage, multiPackageCreating, multiPackageDiscovering, projectId, refreshMultiPackageBoard]);
-
-  const createMultiPackageBatches = useCallback(async (packageKeys: string[]) => {
-    if (multiPackageCreating || !multiPackageMounted.current) return;
-    setMultiPackageCreating(true);
-    setError(undefined);
-    try {
-      for (let index = 0; index < packageKeys.length; index += 1) {
-        if (!multiPackageMounted.current) return;
-        const packageKey = packageKeys[index];
-        const discoveredPackage = multiPackagePackages.find((item) => item.packageKey === packageKey);
-        try {
-          if (!discoveredPackage) {
-            throw new Error("该生产包尚未完成检查，请先重新检查。");
-          }
-          const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
-          if (!multiPackageMounted.current) return;
-          if (inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
-            throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
-          }
-          setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
-          const safetyError = multiPackageInspectionSafetyError(inspection);
-          if (safetyError) throw new Error(safetyError);
-          setMultiPackageCreateMessages((current) => {
-            const next = { ...current };
-            delete next[packageKey];
-            return next;
-          });
-          const boundItemIds = new Set(
-            multiPackageBindings
-              .filter((binding) => binding.packageKey === discoveredPackage.packageKey)
-              .flatMap((binding) => binding.packageItemIds),
-          );
-          const selectedItemIds = inspection.items
-            .filter((item) => item.status === "READY" && !boundItemIds.has(item.id))
-            .map((item) => item.id);
-          if (!selectedItemIds.length) continue;
-          const result = await createProductionPackageBatches(inspection.inspectionId, selectedItemIds);
-          if (!multiPackageMounted.current) return;
-          await refreshMultiPackageBoard();
-          if (!multiPackageMounted.current) return;
-          if (result.status === "PARTIAL" || result.remainingCount > 0) {
-            setNotice(`「${inspection.packageName}」已部分创建；请从剩余项目继续。`);
-            setMultiPackageCreateMessages((current) => {
-              const next = { ...current };
-              for (const deferredKey of packageKeys.slice(index + 1)) {
-                next[deferredKey] = {
-                  status: "NOT_CREATED",
-                  message: "未执行：前一个生产包仅部分创建；请先处理剩余项后再继续。",
-                };
-              }
-              return next;
-            });
-            break;
-          }
-        } catch (packageError: unknown) {
-          if (!multiPackageMounted.current) return;
-          const message = packageError instanceof Error ? packageError.message : toUserMessage(packageError);
-          setMultiPackageCreateMessages((current) => {
-            const next = {
-              ...current,
-              [packageKey]: { status: "CREATE_FAILED" as const, message },
-            };
-            for (const deferredKey of packageKeys.slice(index + 1)) {
-              next[deferredKey] = {
-                status: "NOT_CREATED",
-                message: "未执行：前一个生产包创建失败；可继续创建未创建或剩余项。",
-              };
-            }
-            return next;
-          });
-          throw new Error(`「${discoveredPackage?.packageRoot ?? packageKey}」创建失败：${message}`);
-        }
-      }
-    } finally {
-      if (multiPackageMounted.current) {
-        setMultiPackageCreating(false);
-        await refreshMultiPackageBoard();
-      }
-    }
-  }, [inspectProductionPackage, multiPackageBindings, multiPackageCreating, multiPackagePackages, projectId, refreshMultiPackageBoard]);
-
-  const multiPackageBoardPackages = useMemo(
-    () => multiPackagePackages.map((discoveredPackage) => {
-      const packageKey = discoveredPackage.packageKey;
-      return buildMultiPackageBoardPackage({
-        discoveredPackage,
-        inspection: multiPackageInspections[packageKey],
-        inspectionError: multiPackageInspectionErrors[packageKey],
-        bindings: multiPackageBindings,
-        batchDetails: multiPackageBatchDetails,
-        createMessage: multiPackageCreateMessages[packageKey],
-      });
-    }),
-    [multiPackageBatchDetails, multiPackageBindings, multiPackageCreateMessages, multiPackageInspectionErrors, multiPackageInspections, multiPackagePackages],
-  );
+  const multiPackageController = useShotMultiPackageController({
+    projectId,
+    enabled: mode === "production",
+    reloadProductionQueues,
+    onError: setError,
+    onNotice: setNotice,
+  });
+  const {
+    rootPath: multiPackageRootPath,
+    boardPackages: multiPackageBoardPackages,
+    isDiscovering: multiPackageDiscovering,
+    isCreating: multiPackageCreating,
+    inspectProgress: multiPackageProgress,
+    refresh: refreshMultiPackageBoard,
+    chooseRoot: chooseMultiPackageRoot,
+    createSelected: createMultiPackageBatches,
+    reinspect: reinspectMultiPackage,
+    findDiscoveredPackage,
+    bestBatchIdForPackage,
+  } = multiPackageController;
 
   const refreshMonitorBridge = useCallback((batchId: string) => {
     return monitorRefreshRef.current?.(batchId) ?? Promise.resolve();
@@ -1416,60 +1183,21 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     }
   }, []);
   const openBoardPackage = useCallback((packageKey: string) => {
-    const discoveredPackage = multiPackagePackages.find((item) => multiPackageIdentity(item) === packageKey);
+    const discoveredPackage = findDiscoveredPackage(packageKey);
     if (!discoveredPackage) return;
     setProductionPackageFolderPath(discoveredPackage.packageRoot);
     setProductionPackageWorkspaceKey((current) => current + 1);
     setProductionModeTab("package");
     setNotice(`已打开「${discoveredPackage.relativePath || discoveredPackage.packageRoot}」单生产包工作区；不会自动创建或开始批次。`);
-  }, [multiPackagePackages]);
-  const reinspectMultiPackage = useCallback(async (packageKey: string) => {
-    if (multiPackageDiscovering || multiPackageCreating || !multiPackageMounted.current) return;
-    const discoveredPackage = multiPackagePackages.find((item) => item.packageKey === packageKey);
-    if (!discoveredPackage) {
-      setError("该生产包尚未完成发现，请重新选择根目录。");
-      return;
-    }
-    setError(undefined);
-    try {
-      const inspection = await inspectProductionPackage(projectId, discoveredPackage.packageRoot);
-      if (!multiPackageMounted.current) return;
-      if (inspection.manifestSha256 !== discoveredPackage.manifestSha256) {
-        throw new Error("production-package.json 在发现后发生变化，请重新选择根目录。");
-      }
-      setMultiPackageInspections((current) => ({ ...current, [packageKey]: inspection }));
-      setMultiPackageInspectionErrors((current) => {
-        const next = { ...current };
-        delete next[packageKey];
-        return next;
-      });
-      setMultiPackageCreateMessages((current) => {
-        const next = { ...current };
-        delete next[packageKey];
-        return next;
-      });
-      await refreshMultiPackageBoard();
-    } catch (inspectionError: unknown) {
-      if (!multiPackageMounted.current) return;
-      const message = toUserMessage(inspectionError);
-      setMultiPackageInspectionErrors((current) => ({ ...current, [packageKey]: message }));
-      setError("重新检查生产包失败：" + message);
-    }
-  }, [inspectProductionPackage, multiPackageCreating, multiPackageDiscovering, multiPackagePackages, projectId, refreshMultiPackageBoard]);
+  }, [findDiscoveredPackage]);
   const openMultiPackageBatch = useCallback((_packageKey: string, batchIds: string[]) => {
-    const batchId = batchIds.reduce<string | undefined>((selected, candidate) => {
-      if (!selected) return candidate;
-      return multiPackageBatchOpenPriority(multiPackageBatchDetails[candidate])
-        < multiPackageBatchOpenPriority(multiPackageBatchDetails[selected])
-        ? candidate
-        : selected;
-    }, undefined);
+    const batchId = bestBatchIdForPackage(_packageKey, batchIds);
     if (!batchId) return;
     focusProductionQueueBatch(batchId);
     void openProductionQueue()
       .then(() => openProductionMonitorBatch(batchId))
       .catch((openError: unknown) => setError(`打开生产批次失败：${toUserMessage(openError)}`));
-  }, [focusProductionQueueBatch, multiPackageBatchDetails, openProductionMonitorBatch, openProductionQueue]);
+  }, [bestBatchIdForPackage, focusProductionQueueBatch, openProductionMonitorBatch, openProductionQueue]);
   const multiPackageBoardPollingEnabled = productionModeTab === "multi-package"
     && multiPackageBoardPackages.some((item) => item.status === "CREATED" || item.status === "RUNNING");
   const monitorProps: ProductionMonitorProps = {
@@ -2046,160 +1774,6 @@ function preferredStageRecipe(catalog: RecipeViewModel[], stage: ShotStage): Rec
 
 function emptyRunbook(projectId: string): ProductionBatchRunbookView {
   return { projectId, rows: [] };
-}
-
-function multiPackageIdentity(discoveredPackage: ProductionPackageDiscoveryPackage): string {
-  return discoveredPackage.packageKey;
-}
-
-function multiPackageInspectionSafetyError(inspection: ProductionPackageInspectionResult): string | undefined {
-  const hasWarning = inspection.status === "WARNING"
-    || inspection.warningCount > 0
-    || inspection.items.some((item) => item.status === "WARNING")
-    || Boolean(inspection.warnings?.length);
-  if (hasWarning) return "该生产包包含需要人工确认的警告镜头，请先在单生产包中处理。";
-
-  const hasBlocked = inspection.status === "BLOCKED"
-    || inspection.blockedCount > 0
-    || inspection.items.some((item) => item.status === "BLOCKED")
-    || Boolean(inspection.errors?.length);
-  if (hasBlocked) return "该生产包包含阻塞项目，不能批量创建。";
-
-  const hasUnsupportedStatus = inspection.status !== undefined && inspection.status !== "READY";
-  const hasUnsupportedItem = inspection.items.some((item) => item.status !== "READY");
-  if (hasUnsupportedStatus || hasUnsupportedItem) return "该生产包当前检查状态不是 READY，不能批量创建。";
-  return undefined;
-}
-
-function buildMultiPackageBoardPackage(input: {
-  discoveredPackage: ProductionPackageDiscoveryPackage;
-  inspection?: ProductionPackageInspectionResult;
-  inspectionError?: string;
-  bindings: ProductionPackageBatchBinding[];
-  batchDetails: Record<string, ProductionBatchDetail>;
-  createMessage?: { status: "CREATE_FAILED" | "NOT_CREATED"; message: string };
-}): MultiPackageBoardPackage {
-  const { discoveredPackage, inspection, inspectionError, bindings, batchDetails, createMessage } = input;
-  const packageBindings = bindings.filter(
-    (binding) => binding.packageKey === discoveredPackage.packageKey,
-  );
-  const packageBatchIds = [...new Set(packageBindings.map((binding) => binding.batchId))];
-  const details = packageBatchIds
-    .map((batchId) => batchDetails[batchId])
-    .filter((detail): detail is ProductionBatchDetail => Boolean(detail));
-  const stats = details.reduce((current, detail) => ({
-    pending: current.pending + detail.pending,
-    running: current.running + detail.running,
-    succeeded: current.succeeded + detail.succeeded,
-    failed: current.failed + detail.failed,
-  }), { pending: 0, running: 0, succeeded: 0, failed: 0 });
-  const currentItems = inspection?.items ?? [];
-  const currentItemIds = new Set(currentItems.map((item) => item.id));
-  const boundItemIds = new Set(
-    packageBindings
-      .flatMap((binding) => binding.packageItemIds)
-      .filter((itemId) => currentItemIds.has(itemId)),
-  );
-  const itemCount = inspection?.itemCount ?? currentItems.length;
-  const remainingItems = currentItems.filter((item) => !boundItemIds.has(item.id));
-  const boundItemCount = boundItemIds.size;
-  const remainingCount = remainingItems.length;
-  const remainingReadyCount = remainingItems.filter((item) => item.status === "READY").length;
-  const remainingWarningCount = remainingItems.filter((item) => item.status === "WARNING").length;
-  const remainingBlockedCount = remainingItems.filter((item) => item.status === "BLOCKED").length;
-  const hasActiveBatch = details.some((detail) => detail.status === "RUNNING" || detail.running > 0);
-  const allBatchDetailsAvailable = details.length === packageBatchIds.length;
-  const allBatchesTerminal = packageBatchIds.length > 0 && allBatchDetailsAvailable && details.every((detail) => (
-    detail.status === "COMPLETED"
-      || detail.succeeded + detail.failed + detail.cancelled + detail.skipped >= detail.total
-  ));
-  const allItemsBound = itemCount > 0 && currentItems.length === itemCount && remainingCount === 0;
-  const hasInspectionWarnings = Boolean(
-    inspection?.status === "WARNING"
-      || (inspection?.warnings?.length ?? 0) > 0
-      || (inspection?.warningCount ?? 0) > 0
-      || currentItems.some((item) => item.status === "WARNING"),
-  );
-  const hasInspectionBlocked = Boolean(
-    inspection?.status === "BLOCKED"
-      || (inspection?.errors?.length ?? 0) > 0
-      || (inspection?.blockedCount ?? 0) > 0
-      || currentItems.some((item) => item.status === "BLOCKED"),
-  );
-  let status: MultiPackageBoardPackage["status"];
-  if (createMessage) status = createMessage.status;
-  else if (inspectionError || !inspection) status = "BLOCKED";
-  else if (!packageBindings.length) status = hasInspectionBlocked
-    ? "BLOCKED"
-    : hasInspectionWarnings ? "WARNING" : "READY";
-  else if (hasActiveBatch) status = "RUNNING";
-  else if (allItemsBound && allBatchesTerminal && stats.failed > 0) status = "COMPLETED_WITH_FAILURE";
-  else if (allItemsBound && allBatchesTerminal) status = "COMPLETED";
-  else if (allItemsBound) status = "CREATED";
-  else status = "PARTIAL";
-
-  const canCreate = !createMessage
-    ? (status === "READY" || status === "PARTIAL")
-      && remainingCount > 0
-      && remainingReadyCount === remainingCount
-      && remainingWarningCount === 0
-      && remainingBlockedCount === 0
-    : createMessage.status === "NOT_CREATED"
-      && remainingCount > 0
-      && remainingReadyCount === remainingCount
-      && remainingWarningCount === 0
-      && remainingBlockedCount === 0;
-  const inspectionWarningCount = inspection?.warningCount ?? 0;
-  const inspectionBlockedCount = inspection?.blockedCount ?? 0;
-
-  const issueSummary = createMessage?.message
-    ?? inspectionError
-    ?? (inspection?.errors?.length ? inspection.errors.map(packageDiagnosticText).join("；") : undefined)
-    ?? (inspection && (hasInspectionWarnings || inspectionWarningCount > 0 || inspectionBlockedCount > 0)
-      ? `READY ${inspection.readyCount} · WARNING ${inspectionWarningCount} · BLOCKED ${inspectionBlockedCount}`
-      : undefined);
-  const firstError = createMessage?.message
-    ?? details.flatMap((detail) => detail.items)
-      .map((item) => item.errorMessage || item.errorCode)
-      .find((value): value is string => Boolean(value));
-  return {
-    packageKey: multiPackageIdentity(discoveredPackage),
-    packageRoot: discoveredPackage.packageRoot,
-    relativePath: discoveredPackage.relativePath,
-    packageName: inspection?.packageName ?? displayMultiPackageName(discoveredPackage),
-    itemCount,
-    status,
-    readyCount: inspection?.readyCount ?? 0,
-    warningCount: inspection?.warningCount ?? 0,
-    blockedCount: inspection?.blockedCount ?? 0,
-    boundItemCount,
-    remainingCount,
-    remainingReadyCount,
-    remainingWarningCount,
-    remainingBlockedCount,
-    canCreate,
-    batchIds: packageBatchIds,
-    pending: stats.pending + remainingCount,
-    running: stats.running,
-    succeeded: stats.succeeded,
-    failed: stats.failed,
-    firstError,
-    issueSummary,
-  };
-}
-
-function packageDiagnosticText(issue: unknown): string {
-  if (typeof issue === "string") return issue;
-  if (issue && typeof issue === "object") {
-    const value = issue as { code?: unknown; message?: unknown; detail?: unknown };
-    return [value.code, value.message, value.detail].filter((item): item is string => typeof item === "string" && item.length > 0).join("：");
-  }
-  return "未知问题";
-}
-
-function displayMultiPackageName(discoveredPackage: ProductionPackageDiscoveryPackage): string {
-  const source = discoveredPackage.relativePath || discoveredPackage.packageRoot;
-  return source.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || source;
 }
 
 function consistencyScopeForSelection(

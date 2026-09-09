@@ -56,6 +56,12 @@ if (!shotWorkspaceSource.includes("useShotProductionMonitor")) {
 if (["productionMonitorRequest", "productionMonitorPendingBatch", "productionMonitorMounted", "productionMonitorBatchRef", "window.setInterval(refreshIfVisible, 3000)", "visibilitychange"].some((marker) => shotWorkspaceSource.includes(marker))) {
   throw new Error("SHOT_WORKSPACE_MONITOR_CONTROLLER failed: ShotWorkspace must not own monitor polling or request refs");
 }
+if (!shotWorkspaceSource.includes("useShotMultiPackageController")) {
+  throw new Error("SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER failed: ShotWorkspace must delegate multi-package ownership to useShotMultiPackageController");
+}
+if (["multiPackageRunId", "multiPackageRefreshInFlight", "multiPackageRefreshPending", "multiPackageMounted"].some((marker) => shotWorkspaceSource.includes(marker))) {
+  throw new Error("SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER failed: ShotWorkspace must not own multi-package lifecycle refs");
+}
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
@@ -63,3 +69,4 @@ console.log(`RPC_PARITY=PASS (${frontendCommands.size} frontend commands checked
 console.log(`SHOT_WORKSPACE_DIRECT_TASK_SUBSCRIPTION=PASS`);
 console.log(`SHOT_WORKSPACE_QUEUE_CONTROLLER=PASS`);
 console.log(`SHOT_WORKSPACE_MONITOR_CONTROLLER=PASS`);
+console.log(`SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER=PASS`);
