@@ -73,6 +73,12 @@ const assetVideoWorkflowStateLines = assetVideoBatchWorkspaceSource
 if (assetVideoWorkflowStateLines.length) {
   throw new Error("ASSET_VIDEO_WORKFLOW_CONTROLLER failed: AssetVideoBatchWorkspace must not own workflow resolution state");
 }
+if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLibraryController")) {
+  throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must delegate asset library query ownership to useAssetVideoLibraryController");
+}
+if (assetVideoBatchWorkspaceSource.includes("assetLibraryRequestVersion") || assetVideoBatchWorkspaceSource.includes("assetLibraryPage(")) {
+  throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must not own asset library request lifecycle or call assetLibraryPage directly");
+}
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
@@ -82,3 +88,4 @@ console.log(`SHOT_WORKSPACE_QUEUE_CONTROLLER=PASS`);
 console.log(`SHOT_WORKSPACE_MONITOR_CONTROLLER=PASS`);
 console.log(`SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_WORKFLOW_CONTROLLER=PASS`);
+console.log(`ASSET_VIDEO_LIBRARY_CONTROLLER=PASS`);

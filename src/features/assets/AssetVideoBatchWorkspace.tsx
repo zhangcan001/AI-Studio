@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  assetLibraryPage,
   commitH3LocalImport,
   createPreset,
   createGeneration,
@@ -19,7 +18,7 @@ import {
   updatePreset,
   updateH3ProjectSegmentDraft,
 } from "../../services/tauriClient";
-import type { AssetMediaTypeFilter, AssetView, PageCursor } from "../../types/asset";
+import type { AssetMediaTypeFilter, AssetView } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
 import type { GenerationValues } from "../../types/generation";
 import type { PresetView } from "../../types/preset";
@@ -73,6 +72,7 @@ import {
   useAssetVideoWorkflowController,
   videoWorkflowCandidatesForMode,
 } from "./hooks/useAssetVideoWorkflowController";
+import { useAssetVideoLibraryController } from "./hooks/useAssetVideoLibraryController";
 
 interface Props {
   projectId: string;
@@ -614,13 +614,6 @@ export function AssetVideoBatchWorkspace({
   const [batchPrompt, setBatchPrompt] = useState("");
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
   const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
-  const [availableAssets, setAvailableAssets] = useState<AssetView[]>(initialAssets);
-  const [assetLibraryKeywordInput, setAssetLibraryKeywordInput] = useState("");
-  const [assetLibraryKeyword, setAssetLibraryKeyword] = useState("");
-  const [assetLibraryMediaType, setAssetLibraryMediaType] = useState<AssetMediaTypeFilter>("ALL");
-  const [assetLibraryCursor, setAssetLibraryCursor] = useState<PageCursor>();
-  const [assetLibraryLoading, setAssetLibraryLoading] = useState(false);
-  const [assetLibraryError, setAssetLibraryError] = useState<string>();
   const projectModes = useMemo(
     () => [...new Set((localInspection?.projectFolder?.segments ?? []).map((segment) => segment.generationMode))] as H3CompatibleMode[],
     [localInspection?.projectFolder?.segments],
@@ -662,22 +655,36 @@ export function AssetVideoBatchWorkspace({
   const [createdBatchStarted, setCreatedBatchStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
-  const assetLibraryRequestVersion = useRef(0);
   const loadedPromptIds = useRef<Set<string>>(new Set());
-  const selectedIdsRef = useRef(selectedIds);
 
-  useEffect(() => {
-    selectedIdsRef.current = selectedIds;
-  }, [selectedIds]);
+  const onAuthoritativeAssetIds = useCallback((pageIds: string[]) => {
+    const pageIdSet = new Set(pageIds);
+    setSelectedIds((current) => new Set([...current].filter((assetId) => pageIdSet.has(assetId))));
+    setFirstFrameAssetId((current) => current && pageIdSet.has(current) ? current : undefined);
+    setLastFrameAssetId((current) => current && pageIdSet.has(current) ? current : undefined);
+  }, []);
+
+  const {
+    availableAssets,
+    keywordInput: assetLibraryKeywordInput,
+    setKeywordInput: setAssetLibraryKeywordInput,
+    mediaType: assetLibraryMediaType,
+    setMediaType: setAssetLibraryMediaType,
+    cursor: assetLibraryCursor,
+    loading: assetLibraryLoading,
+    error: assetLibraryError,
+    loadMore: loadMoreAssetLibrary,
+    refresh: refreshAssetLibrary,
+  } = useAssetVideoLibraryController({
+    projectId,
+    enabled: sourceMode === "ASSET_LIBRARY",
+    initialAssets,
+    selectedAssetIds: selectedIds,
+    onAuthoritativeAssetIds,
+  });
 
   useEffect(() => {
     const initialIds = new Set(initialAssets.map((asset) => asset.id));
-    setAvailableAssets((current) => {
-      if ([...initialIds].every((assetId) => current.some((asset) => asset.id === assetId))) return current;
-      const byId = new Map(initialAssets.map((asset) => [asset.id, asset]));
-      current.forEach((asset) => byId.set(asset.id, asset));
-      return [...byId.values()];
-    });
     setSelectedIds((current) => {
       if ([...initialIds].every((assetId) => current.has(assetId))) return current;
       const next = new Set(current);
@@ -690,75 +697,14 @@ export function AssetVideoBatchWorkspace({
   }, [initialAssets]);
 
   useEffect(() => {
-    setAvailableAssets(initialAssets);
     setSelectedIds(new Set(initialAssets.map((asset) => asset.id)));
     setFirstFrameAssetId(initialAssets.length === 1 && isImageAssetForVideo(initialAssets[0]) ? initialAssets[0].id : undefined);
     setLastFrameAssetId(undefined);
     setGenerationMode(h3InitialGenerationMode(initialAssets));
-    setAssetLibraryCursor(undefined);
-    setAssetLibraryError(undefined);
-    setAssetLibraryKeywordInput("");
-    setAssetLibraryKeyword("");
-    setAssetLibraryMediaType("ALL");
     setPrompts({});
     setSavedIds(new Set());
     loadedPromptIds.current = new Set();
   }, [projectId]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setAssetLibraryKeyword(assetLibraryKeywordInput.trim()), 300);
-    return () => window.clearTimeout(timer);
-  }, [assetLibraryKeywordInput]);
-
-  const requestAssetPage = useCallback(async (requestedCursor: PageCursor | undefined, reset: boolean) => {
-    const version = ++assetLibraryRequestVersion.current;
-    setAssetLibraryLoading(true);
-    setAssetLibraryError(undefined);
-    try {
-      const page = await assetLibraryPage({
-        projectId,
-        category: "ALL",
-        keyword: assetLibraryKeyword || undefined,
-        mediaType: assetLibraryMediaType,
-        sourceKind: "ALL",
-        createdOrder: "NEWEST",
-        cursor: requestedCursor,
-        limit: 30,
-      });
-      if (assetLibraryRequestVersion.current !== version) return;
-      setAvailableAssets((current) => {
-        const base = reset
-          ? [...initialAssets, ...current.filter((asset) => selectedIdsRef.current.has(asset.id))]
-          : current;
-        const byId = new Map(base.map((asset) => [asset.id, asset]));
-        page.items.forEach((asset) => byId.set(asset.id, asset));
-        const merged = [...byId.values()];
-        return !assetLibraryKeyword && assetLibraryMediaType === "ALL" && !page.nextCursor
-          ? page.items
-          : merged;
-      });
-      setAssetLibraryCursor(page.nextCursor);
-      if (!page.nextCursor && !assetLibraryKeyword && assetLibraryMediaType === "ALL") {
-        const pageIds = new Set(page.items.map((asset) => asset.id));
-        setSelectedIds((current) => new Set([...current].filter((assetId) => pageIds.has(assetId))));
-        setFirstFrameAssetId((current) => current && pageIds.has(current) ? current : undefined);
-        setLastFrameAssetId((current) => current && pageIds.has(current) ? current : undefined);
-      }
-    } catch (error: unknown) {
-      if (assetLibraryRequestVersion.current === version) setAssetLibraryError(toUserMessage(error));
-    } finally {
-      if (assetLibraryRequestVersion.current === version) setAssetLibraryLoading(false);
-    }
-  }, [assetLibraryKeyword, assetLibraryMediaType, initialAssets, projectId]);
-
-  useEffect(() => {
-    if (sourceMode !== "ASSET_LIBRARY") return () => undefined;
-    setAssetLibraryCursor(undefined);
-    void requestAssetPage(undefined, true);
-    return () => {
-      assetLibraryRequestVersion.current += 1;
-    };
-  }, [requestAssetPage, sourceMode]);
 
   useEffect(() => {
     const imageIds = availableAssets.filter(isImageAssetForVideo).map((asset) => asset.id);
@@ -1603,8 +1549,8 @@ export function AssetVideoBatchWorkspace({
             busy={busy}
             onKeywordChange={setAssetLibraryKeywordInput}
             onMediaTypeChange={setAssetLibraryMediaType}
-            onRefresh={() => void requestAssetPage(undefined, true)}
-            onLoadMore={() => void requestAssetPage(assetLibraryCursor, false)}
+            onRefresh={refreshAssetLibrary}
+            onLoadMore={loadMoreAssetLibrary}
             onToggleAsset={toggleAsset}
             onSetFirstFrame={setFirstFrame}
             onSetLastFrame={setLastFrame}
