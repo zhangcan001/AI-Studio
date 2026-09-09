@@ -9,7 +9,6 @@ import {
   exportProjectManifest,
   generateShot,
   getAsset,
-  getAssetMediaUrl,
   getShot,
   getProductionBatchRunbook,
   getProductionBatchReviewProductivity,
@@ -53,9 +52,6 @@ import type {
   ProductionPackageInspectionResult,
 } from "../../types/productionPackage";
 import type {
-  ProductionBatchReviewProductivity,
-} from "../../services/tauriClient";
-import type {
   SeriesPromptBulkRequest,
   SeriesPresetApplyRequest,
 } from "../../types/seriesProduction";
@@ -82,11 +78,7 @@ import {
 } from "../production/MultiPackageProductionBoard";
 import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
 import { ProductionMonitor as ProductionMonitorComponent } from "../production/ProductionMonitor";
-import type {
-  ProductionMonitorBatchReadModel,
-  ProductionMonitorItemReadModel,
-  ProductionMonitorProps,
-} from "../production/ProductionMonitor";
+import type { ProductionMonitorProps } from "../production/ProductionMonitor";
 import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
 import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
@@ -97,8 +89,15 @@ import {
 } from "./shotProductionState";
 import { useShotWorkspaceSelection } from "./hooks/useShotWorkspaceSelection";
 import { useShotQueueController, type ProductionQueueSnapshot } from "./hooks/useShotQueueController";
+import { useShotProductionMonitor } from "./hooks/useShotProductionMonitor";
 import { useShotTaskEvents } from "./hooks/useShotTaskEvents";
-import { isTerminalProductionBatch } from "./shotQueueState";
+import {
+  buildLocalDeliveryManifest,
+  firstFinishedMonitorAsset,
+  monitorCandidateFor,
+  monitorReadModelFor,
+  safeManifestPart,
+} from "./shotProductionMonitorModel";
 import { ScopeConsistencyWorkspace, type ScopeConsistencyWorkspaceProps } from "./ScopeConsistencyWorkspace";
 import type { ConsistencyScopeOption, ConsistencyScopeRef } from "../../types/consistencyBindings";
 import type { ShotInspectorTab } from "./ShotInspector";
@@ -284,161 +283,7 @@ function multiPackageBatchOpenPriority(batch?: ProductionBatchDetail): number {
   return 3;
 }
 
-function monitorReadModelFor(
-  batch: ProductionBatchDetail | undefined,
-  review: ProductionBatchReviewProductivity | undefined,
-  projectId: string,
-): ProductionMonitorBatchReadModel | undefined {
-  const source = batch ?? review?.batch;
-  if (!source) return undefined;
-  const reviewItems = new Map((review?.items ?? []).map((item) => [item.itemId, item]));
-  const sourceItems = source.items.length
-    ? source.items
-    : (review?.items ?? []).map((item) => ({
-      id: item.itemId,
-      ordinal: item.ordinal,
-      workflowVersionId: item.workflowVersionId,
-      recipeId: item.recipeId,
-      status: item.productionItemStatus as ProductionBatchDetail["items"][number]["status"],
-      taskId: item.taskId,
-      errorCode: undefined,
-      errorMessage: undefined,
-    }));
-  const items: ProductionMonitorItemReadModel[] = sourceItems.map((item) => {
-    const reviewItem = reviewItems.get(item.id);
-    const outputAssets = reviewItem?.outputAssets ?? [];
-    const candidates = reviewItem?.candidateAssets ?? [];
-    const explicitlySelectedAsset = outputAssets.find((asset) => asset.id === reviewItem?.selectedAssetId);
-    const selectedAsset = (explicitlySelectedAsset && isVideoAsset(explicitlySelectedAsset))
-      ? explicitlySelectedAsset
-      : outputAssets.find(isVideoAsset) ?? explicitlySelectedAsset ?? outputAssets[0];
-    const candidateOutputs = candidates.map((candidate) => ({
-      assetId: candidate.assetId,
-      assetType: candidate.assetType,
-      name: candidate.name,
-      mimeType: candidate.mimeType,
-      localPath: candidate.localPath,
-      width: candidate.width,
-      height: candidate.height,
-      thumbnailAvailable: candidate.thumbnailAvailable,
-      selected: candidate.selected,
-      reviewResult: candidate.reviewResult,
-      asset: outputAssets.find((asset) => asset.id === candidate.assetId),
-    }));
-    const candidateWithLocation = candidates.find((candidate) => candidate.assetId === selectedAsset?.id && candidate.localPath);
-    const assetOutput = selectedAsset ? {
-      ...selectedAsset,
-      candidates: candidateOutputs,
-    } : candidates.length ? { candidates: candidateOutputs } : undefined;
-    return {
-      id: item.id,
-      ordinal: item.ordinal,
-      status: item.status,
-      name: reviewItem?.shotId ?? reviewItem?.promptText ?? item.id,
-      promptText: reviewItem?.promptText ?? ("promptText" in item ? item.promptText : undefined),
-      errorCode: item.errorCode,
-      errorMessage: item.errorMessage,
-      assetId: selectedAsset?.id ?? candidates[0]?.assetId,
-      videoUrl: selectedAsset && (selectedAsset.assetType === "video" || selectedAsset.category === "generated_video")
-        ? getAssetMediaUrl(projectId, selectedAsset.id, "video")
-        : undefined,
-      localPath: candidateWithLocation?.localPath,
-      output: assetOutput,
-      media: assetOutput,
-      recordAvailable: Boolean(selectedAsset || candidates.length),
-    };
-  });
-  return {
-    id: source.id,
-    name: source.name,
-    status: source.status,
-    total: source.total,
-    pending: source.pending,
-    running: source.running,
-    succeeded: source.succeeded,
-    failed: source.failed,
-    cancelled: source.cancelled,
-    skipped: source.skipped,
-    items,
-  };
-}
-
-type MonitorReviewItem = ProductionBatchReviewProductivity["items"][number];
-
-function monitorCandidateFor(item: MonitorReviewItem, videoOnly = false) {
-  const candidates = item.candidateAssets;
-  return candidates.find((candidate) => candidate.assetId === item.selectedAssetId && (!videoOnly || isVideoCandidate(candidate)))
-    ?? candidates.find((candidate) => !videoOnly || isVideoCandidate(candidate));
-}
-
-function isVideoCandidate(candidate: { assetType?: string; mimeType?: string }): boolean {
-  return `${candidate.assetType ?? ""} ${candidate.mimeType ?? ""}`.toLowerCase().includes("video");
-}
-
-function firstFinishedMonitorAsset(review?: ProductionBatchReviewProductivity): { itemId: string; assetId: string; localPath?: string } | undefined {
-  for (const item of review?.items ?? []) {
-    if (item.productionItemStatus !== "SUCCEEDED") continue;
-    const candidate = monitorCandidateFor(item, true);
-    if (candidate) return { itemId: item.itemId, assetId: candidate.assetId, localPath: candidate.localPath };
-  }
-  return undefined;
-}
-
-function safeManifestPart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+|\.+$/g, "") || "batch";
-}
-
-export function buildLocalDeliveryManifest(
-  batch: ProductionMonitorBatchReadModel,
-  review: ProductionBatchReviewProductivity,
-  expectedBatchId: string,
-) {
-  const batchId = String(batch.id ?? batch.batchId ?? "");
-  const reviewBatchId = String(review.batch.id ?? "");
-  const batchItems = batch.items ?? [];
-  const reviewItems = review.items ?? [];
-  const batchItemIds = new Set(batchItems.map((item) => String(item.id ?? item.itemId ?? "")));
-  const reviewItemIds = new Set(reviewItems.map((item) => item.itemId));
-  const itemsMatch = batchItems.length === reviewItems.length
-    && batchItemIds.size === batchItems.length
-    && reviewItemIds.size === reviewItems.length
-    && [...batchItemIds].every((itemId) => reviewItemIds.has(itemId));
-
-  if (
-    !expectedBatchId
-    || batchId !== expectedBatchId
-    || reviewBatchId !== expectedBatchId
-    || (batch.total !== undefined && review.total !== undefined && batch.total !== review.total)
-    || !itemsMatch
-  ) {
-    return undefined;
-  }
-
-  const items = [...reviewItems]
-    .sort((left, right) => left.ordinal - right.ordinal || left.itemId.localeCompare(right.itemId))
-    .map((item) => {
-      const candidate = monitorCandidateFor(item, true);
-      return {
-        externalId: item.shotId ?? item.itemId,
-        itemId: item.itemId,
-        status: item.productionItemStatus,
-        videoAssetId: candidate?.assetId,
-        videoPath: candidate?.localPath,
-      };
-    });
-
-  return {
-    manifestType: "LOCAL_DELIVERY_MANIFEST" as const,
-    manifestVersion: 1 as const,
-    batchId,
-    batchName: batch.name ?? batch.batchName ?? review.batch.name,
-    generatedAt: new Date().toISOString(),
-    total: batch.total ?? review.total ?? items.length,
-    succeeded: batch.succeeded ?? review.successCount,
-    failed: batch.failed ?? review.failedCount,
-    items,
-  };
-}
+export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
 export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
@@ -459,11 +304,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [projectWorkflowConfigError, setProjectWorkflowConfigError] = useState<string>();
   const [productionStructure, setProductionStructure] = useState<ProductionStructureTree>(() => EMPTY_PRODUCTION_STRUCTURE(projectId));
   const [productionBatchRunbook, setProductionBatchRunbook] = useState<ProductionBatchRunbookView>(() => emptyRunbook(projectId));
-  const [productionMonitorBatch, setProductionMonitorBatch] = useState<ProductionBatchDetail>();
-  const [productionMonitorReview, setProductionMonitorReview] = useState<ProductionBatchReviewProductivity>();
-  const [productionMonitorLoading, setProductionMonitorLoading] = useState(false);
-  const [productionMonitorError, setProductionMonitorError] = useState<string>();
-  const [monitorPreviewAsset, setMonitorPreviewAsset] = useState<AssetView>();
   const [productionPackageFolderPath, setProductionPackageFolderPath] = useState<string | null>(null);
   const [productionPackageWorkspaceKey, setProductionPackageWorkspaceKey] = useState(0);
   const [productionModeTab, setProductionModeTab] = useState<ProductionModeTab>("package");
@@ -500,10 +340,8 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [shotListControls, setShotListControls] = useState<ShotListControls>(defaultShotListControls);
   const reloadGeneration = useRef(0);
-  const productionMonitorRequest = useRef(false);
-  const productionMonitorPendingBatch = useRef<string | undefined>(undefined);
-  const productionMonitorMounted = useRef(true);
-  const productionMonitorBatchRef = useRef<string | undefined>(undefined);
+  const monitorRefreshRef = useRef<((batchId: string) => Promise<void>) | undefined>(undefined);
+  const monitorFocusRef = useRef<((batchId: string) => void) | undefined>(undefined);
 
   useEffect(() => {
     multiPackageMounted.current = true;
@@ -920,40 +758,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     [multiPackageBatchDetails, multiPackageBindings, multiPackageCreateMessages, multiPackageInspectionErrors, multiPackageInspections, multiPackagePackages],
   );
 
-  const refreshProductionMonitor = useCallback(async (batchId: string) => {
-    if (!productionMonitorMounted.current) return;
-    if (productionMonitorRequest.current) {
-      productionMonitorPendingBatch.current = batchId;
-      return;
-    }
-    productionMonitorRequest.current = true;
-    setProductionMonitorLoading(true);
-    setProductionMonitorError(undefined);
-    try {
-      const [nextBatch, nextReview] = await Promise.all([
-        getProductionQueue(projectId, batchId),
-        getProductionBatchReviewProductivity(projectId, batchId),
-      ]);
-      if (!productionMonitorMounted.current || productionMonitorBatchRef.current !== batchId) return;
-      setProductionMonitorBatch(nextBatch);
-      setProductionMonitorReview(nextReview);
-    } catch (monitorError: unknown) {
-      if (productionMonitorMounted.current && productionMonitorBatchRef.current === batchId) {
-        setProductionMonitorError(toUserMessage(monitorError));
-      }
-    } finally {
-      productionMonitorRequest.current = false;
-      if (productionMonitorMounted.current) setProductionMonitorLoading(false);
-      const pendingBatchId = productionMonitorPendingBatch.current;
-      productionMonitorPendingBatch.current = undefined;
-      if (pendingBatchId && pendingBatchId !== batchId && productionMonitorBatchRef.current === pendingBatchId) {
-        void refreshProductionMonitor(pendingBatchId);
-      }
-    }
-  }, [projectId]);
-
-  const setMonitorBatchRef = useCallback((batchId: string) => {
-    productionMonitorBatchRef.current = batchId;
+  const refreshMonitorBridge = useCallback((batchId: string) => {
+    return monitorRefreshRef.current?.(batchId) ?? Promise.resolve();
+  }, []);
+  const focusMonitorBridge = useCallback((batchId: string) => {
+    monitorFocusRef.current?.(batchId);
   }, []);
   const refreshQueuesForTaskEvents = useCallback(async () => {
     await reloadProductionQueues();
@@ -961,12 +770,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const queueController = useShotQueueController({
     projectId,
     enabled: mode === "production",
-    productionMonitorBatch,
     reloadWorkspace: reload,
-    refreshProductionMonitor,
+    refreshProductionMonitor: refreshMonitorBridge,
     onError: setError,
     onNotice: setNotice,
-    onFocusBatch: setMonitorBatchRef,
+    onFocusBatch: focusMonitorBridge,
     onOpenProductionQueue,
   });
   reloadProductionQueuesRef.current = queueController.reloadProductionQueues;
@@ -985,11 +793,36 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     cancelQueuedStart: cancelQueuedSequentialBatch,
     cancelSequentialStart: cancelSequentialBatchStart,
     resumeSequentialStart: resumeSequentialBatchStart,
+    onMonitorBatchChanged,
     pauseBatch: pauseProductionBatch,
     requeueItem: requeueProductionMonitorItemFromQueue,
   } = queueController;
 
-  const getMonitorBatchId = useCallback(() => productionMonitorBatchRef.current, []);
+  const monitorController = useShotProductionMonitor({
+    projectId,
+    enabled: mode === "production",
+    selectedBatchId: selectedProductionBatchId,
+  });
+  monitorRefreshRef.current = monitorController.refresh;
+  monitorFocusRef.current = monitorController.focusBatch;
+  const {
+    batch: productionMonitorBatch,
+    review: productionMonitorReview,
+    loading: productionMonitorLoading,
+    error: productionMonitorError,
+    previewAsset: monitorPreviewAsset,
+    setPreviewAsset: setMonitorPreviewAsset,
+    clearError: clearProductionMonitorError,
+    setError: setProductionMonitorError,
+    refresh: refreshProductionMonitor,
+    getCurrentBatchId: getMonitorBatchId,
+  } = monitorController;
+
+  useEffect(() => {
+    if (mode !== "production") return;
+    onMonitorBatchChanged();
+  }, [mode, onMonitorBatchChanged, productionMonitorBatch]);
+
   useShotTaskEvents({
     enabled: mode === "production",
     projectId,
@@ -1001,39 +834,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   });
 
   useEffect(() => { void reload(); }, [reload]);
-
-  useEffect(() => {
-    productionMonitorMounted.current = true;
-    return () => { productionMonitorMounted.current = false; };
-  }, []);
-
-  useEffect(() => {
-    productionMonitorBatchRef.current = selectedProductionBatchId;
-    setProductionMonitorBatch(undefined);
-    setProductionMonitorReview(undefined);
-    setProductionMonitorError(undefined);
-    setMonitorPreviewAsset(undefined);
-    if (mode !== "production" || !selectedProductionBatchId) return;
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-    void refreshProductionMonitor(selectedProductionBatchId);
-  }, [mode, refreshProductionMonitor, selectedProductionBatchId]);
-
-  useEffect(() => {
-    if (mode !== "production" || !selectedProductionBatchId || isTerminalProductionBatch(productionMonitorBatch)) return;
-    const refreshIfVisible = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      void refreshProductionMonitor(selectedProductionBatchId);
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") refreshIfVisible();
-    };
-    const intervalId = window.setInterval(refreshIfVisible, 3000);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [mode, productionMonitorBatch, refreshProductionMonitor, selectedProductionBatchId]);
 
   useEffect(() => {
     if (mode !== "production" || productionModeTab !== "multi-package") return;
@@ -1515,7 +1315,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   }, [focusProductionQueueBatch, refreshProductionMonitor]);
 
   const requeueProductionMonitorItem = useCallback(async (itemId: string) => {
-    setProductionMonitorError(undefined);
+    clearProductionMonitorError();
     try {
       await requeueProductionMonitorItemFromQueue(itemId);
     } catch (requeueError: unknown) {
@@ -1580,7 +1380,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
         getProductionQueue(projectId, batchId),
         getProductionBatchReviewProductivity(projectId, batchId),
       ]);
-      if (productionMonitorBatchRef.current !== batchId || selectedProductionBatchId !== batchId) {
+      if (getMonitorBatchId() !== batchId || selectedProductionBatchId !== batchId) {
         setProductionMonitorError("当前监控批次已切换，请重新打开当前批次后再导出成品清单。");
         return;
       }
@@ -1603,7 +1403,7 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     } catch (exportError: unknown) {
       setProductionMonitorError(toUserMessage(exportError));
     }
-  }, [projectId, selectedProductionBatchId]);
+  }, [getMonitorBatchId, projectId, selectedProductionBatchId]);
   const selectNextProductionPackage = useCallback(async () => {
     try {
       const nextPath = await pickProductionPackageRoot();

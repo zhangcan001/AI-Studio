@@ -36,7 +36,6 @@ export interface ProductionQueueSnapshot {
 export interface UseShotQueueControllerOptions {
   projectId: string;
   enabled: boolean;
-  productionMonitorBatch?: ProductionBatchDetail;
   reloadWorkspace: () => Promise<void>;
   refreshProductionMonitor: (batchId: string) => Promise<void>;
   onError: (message: string) => void;
@@ -48,7 +47,6 @@ export interface UseShotQueueControllerOptions {
 export function useShotQueueController({
   projectId,
   enabled,
-  productionMonitorBatch,
   reloadWorkspace,
   refreshProductionMonitor,
   onError,
@@ -225,7 +223,7 @@ export function useShotQueueController({
   useEffect(() => {
     if (!enabled) return;
     void maybeAdvanceSequentialBatchStart();
-  }, [enabled, maybeAdvanceSequentialBatchStart, queues, productionMonitorBatch]);
+  }, [enabled, maybeAdvanceSequentialBatchStart, queues]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -330,6 +328,10 @@ export function useShotQueueController({
     void maybeAdvanceSequentialBatchStart();
   }, [applySequentialAction, maybeAdvanceSequentialBatchStart]);
 
+  const onMonitorBatchChanged = useCallback(() => {
+    if (enabled) void maybeAdvanceSequentialBatchStart();
+  }, [enabled, maybeAdvanceSequentialBatchStart]);
+
   const pauseBatch = useCallback(async (batchId: string) => {
     await pauseProductionQueue(projectId, batchId);
     await reloadProductionQueues();
@@ -366,6 +368,7 @@ export function useShotQueueController({
     cancelQueuedStart,
     cancelSequentialStart,
     resumeSequentialStart,
+    onMonitorBatchChanged,
     pauseBatch,
     requeueItem,
   };

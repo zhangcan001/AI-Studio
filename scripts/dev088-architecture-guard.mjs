@@ -50,9 +50,16 @@ if (shotWorkspaceSource.includes("subscribeTaskUpdates")) {
 if (!shotWorkspaceSource.includes("useShotQueueController")) {
   throw new Error("SHOT_WORKSPACE_QUEUE_CONTROLLER failed: ShotWorkspace must delegate queue ownership to useShotQueueController");
 }
+if (!shotWorkspaceSource.includes("useShotProductionMonitor")) {
+  throw new Error("SHOT_WORKSPACE_MONITOR_CONTROLLER failed: ShotWorkspace must delegate monitor ownership to useShotProductionMonitor");
+}
+if (["productionMonitorRequest", "productionMonitorPendingBatch", "productionMonitorMounted", "productionMonitorBatchRef", "window.setInterval(refreshIfVisible, 3000)", "visibilitychange"].some((marker) => shotWorkspaceSource.includes(marker))) {
+  throw new Error("SHOT_WORKSPACE_MONITOR_CONTROLLER failed: ShotWorkspace must not own monitor polling or request refs");
+}
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
 console.log(`RPC_PARITY=PASS (${frontendCommands.size} frontend commands checked)`);
 console.log(`SHOT_WORKSPACE_DIRECT_TASK_SUBSCRIPTION=PASS`);
 console.log(`SHOT_WORKSPACE_QUEUE_CONTROLLER=PASS`);
+console.log(`SHOT_WORKSPACE_MONITOR_CONTROLLER=PASS`);
