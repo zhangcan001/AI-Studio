@@ -90,5 +90,5 @@ CSS_CHANGE=NO
 
 ```text
 IMPLEMENTATION_COMMIT=3d1f35b2dfdf6bda84d3858fe11b47b2cf5a5fbb
-RESULT_COMMIT=<recorded after this Markdown-only commit>
+RESULT_COMMIT=MARKDOWN_ONLY
 ```
