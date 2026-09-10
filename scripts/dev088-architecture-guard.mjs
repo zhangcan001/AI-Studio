@@ -118,7 +118,31 @@ if (smartImportFunctionMarkers.some((marker) => workflowWorkspaceSource.includes
   throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must delegate Smart Import actions");
 }
 
+if (!workflowWorkspaceSource.includes("useWorkflowParameterExposureController")) {
+  throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure ownership to useWorkflowParameterExposureController");
+}
+const parameterExposureStateMarkers = ["parameterDraft", "parameterItem", "parameterOriginalKeys", "parameterLoading"];
+const parameterExposureStateLines = workflowWorkspaceSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && parameterExposureStateMarkers.some((marker) => line.includes(marker)));
+if (parameterExposureStateLines.length) {
+  throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must not own Parameter Exposure session state");
+}
+const parameterExposureFunctionMarkers = [
+  "function openParameterExposure(",
+  "function closeParameterExposure(",
+  "function refreshParameterCapability(",
+  "function exposeParameter(",
+  "function saveParameterMapping(",
+  "function removeParameterMapping(",
+  "function publishParameterRecipe(",
+];
+if (parameterExposureFunctionMarkers.some((marker) => workflowWorkspaceSource.includes(marker))) {
+  throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure actions");
+}
+
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
+console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
