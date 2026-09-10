@@ -156,8 +156,10 @@ describe("useAssetVideoWorkflowController", () => {
   it("reports stale project bindings without repairing them", async () => {
     mocks.getProjectWorkflowConfig.mockResolvedValueOnce(config("project-a", [], binding(recipeRef(t2v), T2V_MODE, false)));
     render(<Harness />);
-    await waitFor(() => expectText("stale-project", "true"));
-    expectText("notice", "项目工作流绑定已失效");
+    await waitFor(() => {
+      expectText("stale-project", "true");
+      expectText("notice", "项目工作流绑定已失效");
+    });
   });
 
   it("ignores manual project overrides in AUTO and honors exact overrides in MANUAL", async () => {
