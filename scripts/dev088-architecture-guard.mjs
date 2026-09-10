@@ -141,8 +141,34 @@ if (parameterExposureFunctionMarkers.some((marker) => workflowWorkspaceSource.in
   throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure actions");
 }
 
+if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
+  throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
+}
+const advancedOnboardingStateMarkers = ["mappingDrafts", "outputDraft", "metadataDraft", "published", "showAdvanced"];
+const advancedOnboardingStateLines = workflowWorkspaceSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && advancedOnboardingStateMarkers.some((marker) => line.includes(marker)));
+if (advancedOnboardingStateLines.length) {
+  throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must not own Advanced Onboarding state");
+}
+const advancedOnboardingFunctionMarkers = [
+  "function runDraftAction(",
+  "function saveMetadata(",
+  "function validateDraft(",
+  "function publishDraft(",
+  "function bindInput(",
+  "function removeInput(",
+  "function addOutput(",
+  "function checkCapability(",
+  "function discardDraft(",
+];
+if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.includes(marker))) {
+  throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding actions");
+}
+
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
+console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

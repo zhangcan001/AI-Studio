@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createGeneration, getProjectWorkflowConfig, listRuntimeProfiles } from "../../services/tauriClient";
 import {
-  checkOnboardingCapability,
   cleanWorkflowStaging,
-  commitWorkflowImport,
   compareWorkflowVersions,
   discardOnboarding,
   deleteWorkflow,
   deleteWorkflowVersion,
   duplicateWorkflowRecipe,
   exportWorkflowPackage,
-  getOnboardingDraft,
   importWorkflowPackageBackup,
   inspectWorkflowDeletion,
   inspectWorkflowPurge,
@@ -20,16 +17,11 @@ import {
   recheckAllWorkflowCapabilities,
   removeWorkflow,
   renameWorkflow,
-  removeOnboardingInputMapping,
   restoreWorkflowVersion,
   restoreWorkflow,
   purgeWorkflow,
   setWorkflowCurrentVersion,
   setWorkflowEnabled,
-  setOnboardingInputMapping,
-  setOnboardingMetadata,
-  setOnboardingOutputMapping,
-  validateOnboarding,
   queryWorkflowWorkspace,
 } from "../../services/workflowClient";
 import { useWorkflowOnboardingStore, type WorkflowOnboardingStep } from "../../stores/workflowOnboardingStore";
@@ -39,8 +31,6 @@ import type {
   WorkflowInputView,
   WorkflowNodeView,
   WorkflowOnboardingDraftView,
-  WorkflowOnboardingInputMappingRequest,
-  WorkflowOnboardingOutputMappingRequest,
   WorkflowProductionWorkspaceView,
   WorkflowPurgeInspection,
   WorkflowPurgeResult,
@@ -55,6 +45,11 @@ import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { WorkflowImportController } from "./WorkflowImportController";
 import { useWorkflowSmartImportController } from "./hooks/useWorkflowSmartImportController";
+import {
+  useWorkflowAdvancedOnboardingController,
+  type MetadataDraft,
+  type OutputDraft,
+} from "./hooks/useWorkflowAdvancedOnboardingController";
 import { useWorkflowParameterExposureController } from "./hooks/useWorkflowParameterExposureController";
 import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
 import {
@@ -67,14 +62,11 @@ import { WorkflowCenterOverview } from "./WorkflowCenterOverview";
 import { buildProductionProfiles, buildWorkflowCenterSummary } from "./workflowCenterModel";
 import {
   defaultMapping,
-  emptyMapping,
   isDangerousParameterName,
   isExposableWorkflowInput,
   localizeWorkflowIssue,
   mappingKey,
   mappingToDraft,
-  optionalNumber,
-  optionalText,
   parameterFieldTypes,
   supportedParameterFieldType,
   type MappingDraft,
@@ -105,32 +97,7 @@ const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
   { value: "publish", label: "发布" },
 ];
 
-interface OutputDraft {
-  outputId: string;
-  label: string;
-  type: "image" | "video";
-  nodeId: string;
-  required: boolean;
-}
-
-export function createDefaultOutputDraft(): OutputDraft {
-  return {
-    outputId: "output_1",
-    label: "输出结果",
-    type: "image",
-    nodeId: "",
-    required: true,
-  };
-}
-
-interface MetadataDraft {
-  workflowId: string;
-  name: string;
-  workflowVersion: string;
-  recipeVersion: string;
-  category: string;
-  mode: string;
-}
+export { createDefaultOutputDraft } from "./hooks/useWorkflowAdvancedOnboardingController";
 
 interface WorkflowDeletionTarget {
   item: WorkflowWorkspaceItem;
@@ -149,11 +116,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [workspaceError, setWorkspaceError] = useState<string>();
   const [checkingAll, setCheckingAll] = useState(false);
   const [quickTestingId, setQuickTestingId] = useState<string>();
-  const [mappingDrafts, setMappingDrafts] = useState<Record<string, MappingDraft>>({});
-  const [outputDraft, setOutputDraft] = useState<OutputDraft>(createDefaultOutputDraft);
-  const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
-  const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<WorkflowDeletionTarget>();
   const [renameTarget, setRenameTarget] = useState<WorkflowWorkspaceItem>();
   const [renameValue, setRenameValue] = useState("");
@@ -169,14 +131,13 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const loading = useWorkflowOnboardingStore((state) => state.loading);
   const error = useWorkflowOnboardingStore((state) => state.error);
   const notice = useWorkflowOnboardingStore((state) => state.notice);
-  const setDraft = useWorkflowOnboardingStore((state) => state.setDraft);
-  const updateDraft = useWorkflowOnboardingStore((state) => state.updateDraft);
   const setStep = useWorkflowOnboardingStore((state) => state.setStep);
   const setLoading = useWorkflowOnboardingStore((state) => state.setLoading);
   const setError = useWorkflowOnboardingStore((state) => state.setError);
   const setNotice = useWorkflowOnboardingStore((state) => state.setNotice);
   const reset = useWorkflowOnboardingStore((state) => state.reset);
   const importBusyRef = useRef(false);
+  const advancedControllerRef = useRef<ReturnType<typeof useWorkflowAdvancedOnboardingController> | undefined>(undefined);
 
   const loadWorkspace = useCallback(async (mode: "fast" | "refresh" = "fast") => {
     setWorkspaceLoading(true);
@@ -256,46 +217,28 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     onCatalogChanged,
     onDiscardReplacedDraft: discardReplacedDraft,
     onResetImportView: () => {
-      setPublished(undefined);
-      setShowAdvanced(false);
+      advancedControllerRef.current?.resetSession();
     },
-    onCloseAdvanced: () => setShowAdvanced(false),
-    onAdvancedRequested: (nextDraft) => {
-      if (nextDraft) setDraft(nextDraft);
-      setShowAdvanced(true);
-    },
-    onPublished: setPublished,
+    onCloseAdvanced: () => advancedControllerRef.current?.hideAdvanced(),
+    onAdvancedRequested: (nextDraft) => advancedControllerRef.current?.openAdvanced(nextDraft),
+    onPublished: (nextPublished) => advancedControllerRef.current?.setPublished(nextPublished),
     onOpenStudio,
   });
+
+  const advancedController = useWorkflowAdvancedOnboardingController({
+    onLoadWorkspace: loadWorkspace,
+    onCatalogChanged,
+    onResetSmartImport: () => smartImportController.resetSession(),
+  });
+  advancedControllerRef.current = advancedController;
 
   const parameterExposureController = useWorkflowParameterExposureController({
     onError: setWorkspaceError,
     onNotice: setNotice,
     onWorkspaceRefresh: refreshWorkspace,
     onCatalogChanged,
-    onBeforeOpen: () => setShowAdvanced(false),
+    onBeforeOpen: advancedController.hideAdvanced,
   });
-
-  useEffect(() => {
-    if (!draft) {
-      setMetadataDraft(undefined);
-      return;
-    }
-    setMetadataDraft({
-      workflowId: draft.manifest.workflowId,
-      name: draft.manifest.name,
-      workflowVersion: draft.manifest.workflowVersion,
-      recipeVersion: draft.manifest.recipeVersion,
-      category: draft.manifest.category,
-      mode: draft.manifest.mode,
-    });
-    const firstOutputNode = draft.nodes.find((node) => node.isOutputNode) ?? draft.nodes[0];
-    setOutputDraft((current) => ({
-      ...current,
-      nodeId: firstOutputNode?.nodeId ?? "",
-    }));
-    setPublished(undefined);
-  }, [draft?.draftId]);
 
   function resetImportViewForNewWorkflow() {
     reset();
@@ -330,8 +273,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       if (imported) {
         await discardReplacedDraft(previousDraftId, imported.draftId);
         resetImportViewForNewWorkflow();
-        setShowAdvanced(true);
-        setDraft(imported);
+        advancedController.openAdvanced(imported);
         const validation = imported.validation;
         const failedChecks = [
           !validation.apiFormat && "API 格式",
@@ -612,8 +554,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     try {
       const duplicated = await duplicateWorkflowRecipe(item.workflowVersionId, item.recipes[item.recipes.length - 1]?.recipeId);
       smartImportController.resetSession();
-      setShowAdvanced(true);
-      setDraft(duplicated);
+      advancedController.openAdvanced(duplicated);
       setStep("inputs");
       setNotice("配方已复制，请检查映射并发布新的配方版本。");
     } catch (actionError: unknown) {
@@ -673,118 +614,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     setSelectedVersions((current) => current.includes(item.workflowVersionId!)
       ? current.filter((id) => id !== item.workflowVersionId)
       : current.length < 2 ? [...current, item.workflowVersionId!] : [current[1], item.workflowVersionId!]);
-  }
-
-  async function checkCapability() {
-    if (!draft) return;
-    await runDraftAction(async () => {
-      await checkOnboardingCapability(draft.draftId);
-      updateDraft(await getOnboardingDraft(draft.draftId));
-      setStep("compatibility");
-    });
-  }
-
-  async function validateDraft() {
-    if (!draft) return;
-    await runDraftAction(async () => {
-      const validation = await validateOnboarding(draft.draftId);
-      updateDraft({ ...draft, validation });
-      setStep("validate");
-    });
-  }
-
-  async function publishDraft() {
-    if (!draft || !draft.validation.readyToPublish) return;
-    await runDraftAction(async () => {
-      const result = await commitWorkflowImport({
-        draftId: draft.draftId,
-        action: "NEW_WORKFLOW",
-        setCurrent: false,
-      });
-      setPublished({ workflowId: result.workflowId, recipeId: result.recipeId });
-      setNotice(`已发布 ${result.packageName}，运行目录已刷新。`);
-      await loadWorkspace("refresh");
-      await onCatalogChanged();
-      setStep("publish");
-    });
-  }
-
-  async function discardDraft() {
-    if (!draft) return;
-    await runDraftAction(async () => {
-      await discardOnboarding(draft.draftId);
-      reset();
-      smartImportController.resetSession();
-      setShowAdvanced(false);
-      setNotice("草稿已丢弃。");
-    });
-  }
-
-  async function runDraftAction(action: () => Promise<void>) {
-    setLoading(true);
-    setError(undefined);
-    try {
-      await action();
-    } catch (actionError: unknown) {
-      setError(toUserMessage(actionError));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function saveMetadata() {
-    if (!draft || !metadataDraft) return;
-    await runDraftAction(async () => {
-      const nextDraft = await setOnboardingMetadata(draft.draftId, metadataDraft);
-      updateDraft(nextDraft);
-      setNotice("基本信息已保存，请重新校验后再发布。");
-    });
-  }
-
-  async function bindInput(nodeId: string, input: WorkflowInputView) {
-    if (!draft || (!input.bindable && (!input.isLinked || !isExposableWorkflowInput(input)))) return;
-    const mapping = mappingDrafts[mappingKey(nodeId, input.name)] ?? defaultMapping(nodeId, input);
-    const request: WorkflowOnboardingInputMappingRequest = {
-      semanticKey: mapping.semanticKey,
-      fieldType: mapping.fieldType,
-      label: mapping.label,
-      required: mapping.required,
-      defaultValue: optionalText(mapping.defaultValue),
-      minValue: optionalText(mapping.minValue),
-      maxValue: optionalText(mapping.maxValue),
-      step: optionalText(mapping.step),
-      minItems: optionalNumber(mapping.minItems),
-      maxItems: optionalNumber(mapping.maxItems),
-      itemIndex: optionalNumber(mapping.itemIndex),
-      targetNode: nodeId,
-      targetInput: input.name,
-    };
-    await runDraftAction(async () => {
-      const nextDraft = await setOnboardingInputMapping(draft.draftId, request);
-      updateDraft(nextDraft);
-      setNotice(`${mapping.label} 已绑定到 ${nodeId}.${input.name}。`);
-    });
-  }
-
-  async function removeInput(mapping: WorkflowOnboardingDraftView["inputMappings"][number]) {
-    if (!draft) return;
-    await runDraftAction(async () => {
-      const nextDraft = await removeOnboardingInputMapping(draft.draftId, {
-        semanticKey: mapping.semanticKey,
-        itemIndex: mapping.itemIndex,
-      });
-      updateDraft(nextDraft);
-    });
-  }
-
-  async function addOutput() {
-    if (!draft || !outputDraft.nodeId) return;
-    const request: WorkflowOnboardingOutputMappingRequest = outputDraft;
-    await runDraftAction(async () => {
-      const nextDraft = await setOnboardingOutputMapping(draft.draftId, request);
-      updateDraft(nextDraft);
-      setNotice(`${outputDraft.label} 已设置为${outputDraft.type === "video" ? "视频" : "图片"}输出。`);
-    });
   }
 
   const outputCandidates = useMemo(
@@ -922,7 +751,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         />
       )}
 
-      {showAdvanced && draft && (
+      {advancedController.showAdvanced && draft && (
         <div className="workflow-onboarding-panel">
           <div className="workflow-onboarding-heading">
             <div>
@@ -931,8 +760,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
               <p className="section-description">{draft.originalFilename} · {draft.nodeCount} 个节点 · {draft.uniqueClassCount} 种节点类型</p>
             </div>
             <div className="workflow-smart-actions">
-              <button type="button" className="quiet-button" onClick={() => setShowAdvanced(false)}>返回智能导入</button>
-              <button type="button" className="quiet-button" onClick={() => void discardDraft()} disabled={loading}>丢弃草稿</button>
+              <button type="button" className="quiet-button" onClick={advancedController.hideAdvanced}>返回智能导入</button>
+              <button type="button" className="quiet-button" onClick={() => void advancedController.discardDraft()} disabled={loading}>丢弃草稿</button>
             </div>
           </div>
           <div className="workflow-step-tabs" role="tablist" aria-label="工作流导入步骤">
@@ -952,15 +781,15 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
 
           {step === "inspect" && <InspectPane draft={draft} onContinue={() => setStep("compatibility")} />}
           {step === "compatibility" && (
-            <CompatibilityPane draft={draft} loading={loading} onCheck={() => void checkCapability()} onContinue={() => setStep("inputs")} />
+            <CompatibilityPane draft={draft} loading={loading} onCheck={() => void advancedController.checkCapability()} onContinue={() => setStep("inputs")} />
           )}
           {step === "inputs" && (
             <InputsPane
               draft={draft}
-              mappingDrafts={mappingDrafts}
-              onPatch={(key, patch) => setMappingDrafts((current) => ({ ...current, [key]: { ...(current[key] ?? emptyMapping()), ...patch } }))}
-              onBind={(nodeId, input) => void bindInput(nodeId, input)}
-              onRemove={(mapping) => void removeInput(mapping)}
+              mappingDrafts={advancedController.mappingDrafts}
+              onPatch={advancedController.patchMapping}
+              onBind={(nodeId, input) => void advancedController.bindInput(nodeId, input)}
+              onRemove={(mapping) => void advancedController.removeInput(mapping)}
               onContinue={() => setStep("outputs")}
             />
           )}
@@ -968,25 +797,25 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
             <OutputsPane
               draft={draft}
               candidates={outputCandidates.length ? outputCandidates : draft.nodes}
-              outputDraft={outputDraft}
-              onChange={setOutputDraft}
-              onAdd={() => void addOutput()}
+              outputDraft={advancedController.outputDraft}
+              onChange={advancedController.setOutputDraft}
+              onAdd={() => void advancedController.addOutput()}
               onContinue={() => setStep("metadata")}
             />
           )}
-          {step === "metadata" && metadataDraft && (
-            <MetadataPane draft={metadataDraft} onChange={setMetadataDraft} onSave={() => void saveMetadata()} onContinue={() => setStep("validate")} />
+          {step === "metadata" && advancedController.metadataDraft && (
+            <MetadataPane draft={advancedController.metadataDraft} onChange={advancedController.setMetadataDraft} onSave={() => void advancedController.saveMetadata()} onContinue={() => setStep("validate")} />
           )}
           {step === "validate" && (
-            <ValidatePane draft={draft} loading={loading} onValidate={() => void validateDraft()} onPublish={() => setStep("publish")} />
+            <ValidatePane draft={draft} loading={loading} onValidate={() => void advancedController.validateDraft()} onPublish={() => setStep("publish")} />
           )}
           {step === "publish" && (
             <PublishPane
               draft={draft}
-              published={published}
+              published={advancedController.published}
               loading={loading}
-              onPublish={() => void publishDraft()}
-              onOpenStudio={published ? () => void onOpenStudio(published.workflowId, published.recipeId) : undefined}
+              onPublish={() => void advancedController.publishDraft()}
+              onOpenStudio={advancedController.published ? () => void onOpenStudio(advancedController.published!.workflowId, advancedController.published!.recipeId) : undefined}
             />
           )}
         </div>
