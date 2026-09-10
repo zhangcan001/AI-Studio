@@ -55,6 +55,7 @@ import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { WorkflowImportController } from "./WorkflowImportController";
 import { useWorkflowSmartImportController } from "./hooks/useWorkflowSmartImportController";
+import { useWorkflowParameterExposureController } from "./hooks/useWorkflowParameterExposureController";
 import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
 import {
   normalizeWorkspaceItems,
@@ -64,8 +65,24 @@ import { WorkflowRegistryActions } from "./WorkflowRegistryActions";
 import { WorkflowWorkspaceList } from "./WorkflowWorkspaceList";
 import { WorkflowCenterOverview } from "./WorkflowCenterOverview";
 import { buildProductionProfiles, buildWorkflowCenterSummary } from "./workflowCenterModel";
+import {
+  defaultMapping,
+  emptyMapping,
+  isDangerousParameterName,
+  isExposableWorkflowInput,
+  localizeWorkflowIssue,
+  mappingKey,
+  mappingToDraft,
+  optionalNumber,
+  optionalText,
+  parameterFieldTypes,
+  supportedParameterFieldType,
+  type MappingDraft,
+  type ParameterMappingEdit,
+} from "./workflowParameterExposureModel";
 
 export { latestCatalogRecipeForWorkflowItem } from "./workflowWorkspaceAdapters";
+export { isExposableWorkflowInput } from "./workflowParameterExposureModel";
 
 interface Props {
   projectId?: string;
@@ -87,38 +104,6 @@ const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
   { value: "validate", label: "校验" },
   { value: "publish", label: "发布" },
 ];
-
-const fieldTypes: WorkflowFieldType[] = [
-  "textarea",
-  "integer",
-  "number",
-  "seed",
-  "image",
-  "images",
-  "video",
-  "videos",
-  "audio",
-  "audios",
-];
-
-interface MappingDraft {
-  semanticKey: string;
-  fieldType: WorkflowFieldType;
-  label: string;
-  required: boolean;
-  defaultValue: string;
-  minValue: string;
-  maxValue: string;
-  minItems: string;
-  maxItems: string;
-  itemIndex: string;
-  step: string;
-}
-
-type ParameterMappingEdit = {
-  mapping: WorkflowOnboardingDraftView["inputMappings"][number];
-  draft: MappingDraft;
-};
 
 interface OutputDraft {
   outputId: string;
@@ -169,10 +154,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [parameterDraft, setParameterDraft] = useState<WorkflowOnboardingDraftView>();
-  const [parameterItem, setParameterItem] = useState<WorkflowProductionWorkspaceView>();
-  const [parameterOriginalKeys, setParameterOriginalKeys] = useState<string[]>([]);
-  const [parameterLoading, setParameterLoading] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<WorkflowDeletionTarget>();
   const [renameTarget, setRenameTarget] = useState<WorkflowWorkspaceItem>();
   const [renameValue, setRenameValue] = useState("");
@@ -211,6 +192,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       setWorkspaceLoading(false);
     }
   }, []);
+
+  const refreshWorkspace = useCallback(() => loadWorkspace("refresh"), [loadWorkspace]);
 
   useEffect(() => {
     void loadWorkspace("fast");
@@ -283,6 +266,14 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     },
     onPublished: setPublished,
     onOpenStudio,
+  });
+
+  const parameterExposureController = useWorkflowParameterExposureController({
+    onError: setWorkspaceError,
+    onNotice: setNotice,
+    onWorkspaceRefresh: refreshWorkspace,
+    onCatalogChanged,
+    onBeforeOpen: () => setShowAdvanced(false),
   });
 
   useEffect(() => {
@@ -630,186 +621,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
   }
 
-  async function openParameterExposure(item: WorkflowProductionWorkspaceView) {
-    if (!item.workflowVersionId || item.archived) return;
-    setParameterLoading(true);
-    setWorkspaceError(undefined);
-    setShowAdvanced(false);
-    try {
-      const sourceRecipe = item.recipes[item.recipes.length - 1];
-      const duplicated = await duplicateWorkflowRecipe(item.workflowVersionId, sourceRecipe?.recipeId);
-      setParameterItem(item);
-      setParameterDraft(duplicated);
-      setParameterOriginalKeys(duplicated.inputMappings.map((mapping) => mapping.semanticKey));
-      try {
-        await checkOnboardingCapability(duplicated.draftId);
-        setParameterDraft(await getOnboardingDraft(duplicated.draftId));
-      } catch (capabilityError: unknown) {
-        setWorkspaceError(`参数节点已加载，但暂时无法读取 ComfyUI /object_info：${toUserMessage(capabilityError)}`);
-      }
-    } catch (actionError: unknown) {
-      setWorkspaceError(toUserMessage(actionError));
-    } finally {
-      setParameterLoading(false);
-    }
-  }
-
-  async function closeParameterExposure() {
-    if (parameterDraft) {
-      try {
-        await discardOnboarding(parameterDraft.draftId);
-      } catch {
-        // The draft may already have been consumed by publish; closing remains safe.
-      }
-    }
-    setParameterDraft(undefined);
-    setParameterItem(undefined);
-    setParameterOriginalKeys([]);
-  }
-
-  async function refreshParameterCapability() {
-    if (!parameterDraft) return;
-    setParameterLoading(true);
-    setWorkspaceError(undefined);
-    try {
-      await checkOnboardingCapability(parameterDraft.draftId);
-      setParameterDraft(await getOnboardingDraft(parameterDraft.draftId));
-      setNotice("已刷新参数建议与 ComfyUI 输入范围。");
-    } catch (actionError: unknown) {
-      setWorkspaceError(toUserMessage(actionError));
-    } finally {
-      setParameterLoading(false);
-    }
-  }
-
-  async function exposeParameter(nodeId: string, input: WorkflowInputView) {
-    if (!parameterDraft || !isExposableWorkflowInput(input)) return;
-    const fieldType = supportedParameterFieldType(input);
-    if (!fieldType) return;
-    const mapping = defaultMapping(nodeId, input);
-    setParameterLoading(true);
-    setWorkspaceError(undefined);
-    try {
-      setParameterDraft(await setOnboardingInputMapping(parameterDraft.draftId, {
-        semanticKey: mapping.semanticKey,
-        fieldType,
-        label: mapping.label,
-        required: mapping.required,
-        defaultValue: optionalText(mapping.defaultValue),
-        minValue: optionalText(mapping.minValue),
-        maxValue: optionalText(mapping.maxValue),
-        step: optionalText(input.numericStep ?? ""),
-        minItems: fieldType.endsWith("s") ? 0 : undefined,
-        maxItems: fieldType.endsWith("s") ? 8 : undefined,
-        targetNode: nodeId,
-        targetInput: input.name,
-      }));
-      setNotice(`${mapping.label} 已加入新配方草稿。`);
-    } catch (actionError: unknown) {
-      setWorkspaceError(toUserMessage(actionError));
-    } finally {
-      setParameterLoading(false);
-    }
-  }
-
-  async function saveParameterMapping(mapping: MappingDraft, targetNode: string, targetInput: string) {
-    if (!parameterDraft) return;
-    setParameterLoading(true);
-    setWorkspaceError(undefined);
-    try {
-      setParameterDraft(await setOnboardingInputMapping(parameterDraft.draftId, {
-        semanticKey: mapping.semanticKey,
-        fieldType: mapping.fieldType,
-        label: mapping.label,
-        required: mapping.required,
-        defaultValue: optionalText(mapping.defaultValue),
-        minValue: optionalText(mapping.minValue),
-        maxValue: optionalText(mapping.maxValue),
-        step: optionalText(mapping.step ?? ""),
-        minItems: optionalNumber(mapping.minItems),
-        maxItems: optionalNumber(mapping.maxItems),
-        itemIndex: optionalNumber(mapping.itemIndex),
-        targetNode,
-        targetInput,
-      }));
-      setNotice("生产参数字段已保存到新配方草稿。");
-    } catch (actionError: unknown) {
-      setWorkspaceError(toUserMessage(actionError));
-    } finally {
-      setParameterLoading(false);
-    }
-  }
-
-  async function removeParameterMapping(mapping: WorkflowOnboardingDraftView["inputMappings"][number]) {
-    if (!parameterDraft) return;
-    setParameterLoading(true);
-    try {
-      setParameterDraft(await removeOnboardingInputMapping(parameterDraft.draftId, {
-        semanticKey: mapping.semanticKey,
-        itemIndex: mapping.itemIndex,
-      }));
-    } catch (actionError: unknown) {
-      setWorkspaceError(toUserMessage(actionError));
-    } finally {
-      setParameterLoading(false);
-    }
-  }
-
-  async function publishParameterRecipe(edits: ParameterMappingEdit[] = []) {
-    if (!parameterDraft) return;
-    setParameterLoading(true);
-    setWorkspaceError(undefined);
-    try {
-      let currentDraft = parameterDraft;
-      for (const edit of edits) {
-        currentDraft = await setOnboardingInputMapping(currentDraft.draftId, {
-          semanticKey: edit.draft.semanticKey,
-          fieldType: edit.draft.fieldType,
-          label: edit.draft.label,
-          required: edit.draft.required,
-          defaultValue: optionalText(edit.draft.defaultValue),
-          minValue: optionalText(edit.draft.minValue),
-          maxValue: optionalText(edit.draft.maxValue),
-          step: optionalText(edit.draft.step),
-          minItems: optionalNumber(edit.draft.minItems),
-          maxItems: optionalNumber(edit.draft.maxItems),
-          itemIndex: optionalNumber(edit.draft.itemIndex),
-          targetNode: edit.mapping.targetNode,
-          targetInput: edit.mapping.targetInput,
-        });
-      }
-      setParameterDraft(currentDraft);
-      const validation = await validateOnboarding(currentDraft.draftId);
-      setParameterDraft((current) => current ? { ...current, validation } : current);
-      if (!validation.readyToPublish) {
-        setWorkspaceError(validation.issues.map(localizeWorkflowIssue).join("；"));
-        return;
-      }
-      const result = await commitWorkflowImport({
-        draftId: currentDraft.draftId,
-        action: "NEW_RECIPE",
-        workflowId: currentDraft.manifest.workflowId,
-        setCurrent: false,
-      });
-      const publishedDraftId = currentDraft.draftId;
-      try {
-        await discardOnboarding(publishedDraftId);
-      } catch {
-        // Publishing has already committed the immutable package.
-      }
-      setParameterDraft(undefined);
-      setParameterItem(undefined);
-      setParameterOriginalKeys([]);
-      await loadWorkspace("refresh");
-      await onCatalogChanged();
-      setNotice(`已保存为配方 ${result.recipeId}；工作流版本保持不变。`);
-    } catch (actionError: unknown) {
-      setWorkspaceError(toUserMessage(actionError));
-    } finally {
-      setParameterLoading(false);
-    }
-  }
-
   async function quickTest(item: WorkflowProductionWorkspaceView) {
     if (!projectId || !item.workflowVersionId) return;
     const latestRecipeId = item.recipes[item.recipes.length - 1]?.recipeId;
@@ -1086,7 +897,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onReidentify={(item) => void smartImportController.reidentify(item)}
         onRecheck={(item) => void recheckVersion(item)}
         onDuplicateRecipe={(item) => void duplicateRecipe(item)}
-        onOpenParameters={(item) => void openParameterExposure(item)}
+        onOpenParameters={(item) => void parameterExposureController.open(item)}
         onExport={(item) => { if (item.currentVersionId) void exportWorkflowPackage(item.currentVersionId); }}
         onToggle={(item) => void toggleVersion(item)}
         onPurge={(item) => void inspectForPurge(item)}
@@ -1096,18 +907,18 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       />
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
 
-      {parameterDraft && parameterItem && (
+      {parameterExposureController.draft && parameterExposureController.item && (
         <ParameterExposurePane
-          draft={parameterDraft}
-          workflow={parameterItem}
-          originalKeys={parameterOriginalKeys}
-          loading={parameterLoading}
-          onClose={() => void closeParameterExposure()}
-          onRefresh={() => void refreshParameterCapability()}
-          onExpose={(nodeId, input) => void exposeParameter(nodeId, input)}
-          onSaveMapping={(mapping, nodeId, inputName) => void saveParameterMapping(mapping, nodeId, inputName)}
-          onRemove={(mapping) => void removeParameterMapping(mapping)}
-          onSave={(edits) => void publishParameterRecipe(edits)}
+          draft={parameterExposureController.draft}
+          workflow={parameterExposureController.item}
+          originalKeys={parameterExposureController.originalKeys}
+          loading={parameterExposureController.loading}
+          onClose={() => void parameterExposureController.close()}
+          onRefresh={() => void parameterExposureController.refreshCapability()}
+          onExpose={(nodeId, input) => void parameterExposureController.exposeParameter(nodeId, input)}
+          onSaveMapping={(mapping, nodeId, inputName) => void parameterExposureController.saveMapping(mapping, nodeId, inputName)}
+          onRemove={(mapping) => void parameterExposureController.removeMapping(mapping)}
+          onSave={(edits) => void parameterExposureController.publish(edits)}
         />
       )}
 
@@ -1319,7 +1130,7 @@ function ParameterExposurePane({
               <div className="workflow-parameter-form">
                 <label>显示名称<input value={edit.label} onChange={(event) => patchMapping(mapping, { label: event.target.value })} /></label>
                 <label>语义键<input value={edit.semanticKey} onChange={(event) => patchMapping(mapping, { semanticKey: event.target.value })} /></label>
-                <label>类型<select value={edit.fieldType} onChange={(event) => patchMapping(mapping, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
+                <label>类型<select value={edit.fieldType} onChange={(event) => patchMapping(mapping, { fieldType: event.target.value as WorkflowFieldType })}>{parameterFieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
                 <label className="checkbox-label"><input type="checkbox" checked={edit.required} onChange={(event) => patchMapping(mapping, { required: event.target.checked })} /> 必填</label>
                 {(edit.fieldType === "textarea" || edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <label>默认值<input value={edit.defaultValue} onChange={(event) => patchMapping(mapping, { defaultValue: event.target.value })} inputMode={edit.fieldType === "number" ? "decimal" : undefined} /></label>}
                 {(edit.fieldType === "integer" || edit.fieldType === "number" || edit.fieldType === "seed") && <>
@@ -1351,22 +1162,6 @@ function ParameterExposurePane({
       </details>
     </section>
   );
-}
-
-function mappingToDraft(mapping: WorkflowOnboardingDraftView["inputMappings"][number]): MappingDraft {
-  return {
-    semanticKey: mapping.semanticKey,
-    fieldType: mapping.fieldType,
-    label: mapping.label,
-    required: mapping.required,
-    defaultValue: mapping.defaultValue ?? "",
-    minValue: mapping.minValue ?? "",
-    maxValue: mapping.maxValue ?? "",
-    minItems: mapping.minItems?.toString() ?? "",
-    maxItems: mapping.maxItems?.toString() ?? "",
-    itemIndex: mapping.itemIndex?.toString() ?? "",
-    step: mapping.step ?? "",
-  };
 }
 
 function InspectPane({ draft, onContinue }: { draft: WorkflowOnboardingDraftView; onContinue: () => void }) {
@@ -1439,7 +1234,7 @@ function InputsPane({
               {(input.bindable || (input.isLinked && isExposableWorkflowInput(input))) ? (
                 <div className="workflow-mapping-form">
                   <label>语义键<input value={mapping.semanticKey} onChange={(event) => onPatch(key, { semanticKey: event.target.value })} /></label>
-                  <label>字段类型<select value={mapping.fieldType} onChange={(event) => onPatch(key, { fieldType: event.target.value as WorkflowFieldType })}>{fieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
+                  <label>字段类型<select value={mapping.fieldType} onChange={(event) => onPatch(key, { fieldType: event.target.value as WorkflowFieldType })}>{parameterFieldTypes.map((type) => <option key={type} value={type}>{fieldTypeLabel(type)}</option>)}</select></label>
                   <label>显示名称<input value={mapping.label} onChange={(event) => onPatch(key, { label: event.target.value })} /></label>
                   <label className="checkbox-label"><input type="checkbox" checked={mapping.required} onChange={(event) => onPatch(key, { required: event.target.checked })} /> 必填</label>
                   {mapping.fieldType === "integer" || mapping.fieldType === "number" || mapping.fieldType === "seed" ? <>
@@ -1559,78 +1354,6 @@ function IssueList({ issues }: { issues: WorkflowOnboardingDraftView["capability
   return <ul className="workflow-issue-list">{issues.map((issue) => <li key={`${issue.code}:${issue.nodeId ?? ""}:${issue.inputName ?? ""}`}>{toUserMessage({ code: issue.code, message: issue.message })}</li>)}</ul>;
 }
 
-function defaultMapping(nodeId: string, input: WorkflowInputView): MappingDraft {
-  const safeName = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "value";
-  const fieldType = supportedParameterFieldType(input) ?? "textarea";
-  return {
-    semanticKey: input.suggestedSemanticKey ?? `input_${nodeId}_${safeName}`,
-    fieldType,
-    label: fieldLabel(input.name),
-    required: true,
-    defaultValue: !input.isLinked && (fieldType === "textarea" || fieldType === "integer" || fieldType === "number" || fieldType === "seed")
-      ? input.currentValueSummary === "random" ? "" : input.currentValueSummary
-      : "",
-    minValue: input.numericMin ?? "",
-    maxValue: input.numericMax ?? "",
-    minItems: "",
-    maxItems: "",
-    itemIndex: "",
-    step: input.numericStep ?? "",
-  };
-}
-
-function emptyMapping(): MappingDraft {
-  return { semanticKey: "input_value", fieldType: "textarea", label: "值", required: true, defaultValue: "", minValue: "", maxValue: "", minItems: "", maxItems: "", itemIndex: "", step: "" };
-}
-
-function fieldLabel(value: string): string {
-  return value
-    .split(/[_-]+/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function supportedParameterFieldType(input: WorkflowInputView): WorkflowFieldType | undefined {
-  if (input.suggestedType && fieldTypes.includes(input.suggestedType as WorkflowFieldType)) {
-    return input.suggestedType as WorkflowFieldType;
-  }
-  return undefined;
-}
-
-export function isExposableWorkflowInput(input: WorkflowInputView): boolean {
-  const linkedSemantic = input.suggestedSemanticKey?.toLowerCase();
-  const graphSemantic = [
-    "prompt", "negative_prompt", "width", "height", "duration_seconds", "seed",
-    "reference_image", "reference_video", "reference_audio",
-  ].includes(linkedSemantic ?? "");
-  return (input.bindable || (input.isLinked && graphSemantic))
-    && Boolean(supportedParameterFieldType(input))
-    && !isDangerousParameterName(input.name);
-}
-
-function isDangerousParameterName(name: string): boolean {
-  const lower = name.toLowerCase();
-  return [
-    "model_path", "filename_prefix", "output_directory", "output_dir", "filesystem_path", "file_path",
-    "custom_python", "python_path", "backend_endpoint", "endpoint", "filename", "directory", "folder",
-    "path", "prefix", "python", "device", "provider", "checkpoint", "ckpt", "unet", "vae", "clip", "lora", "model",
-  ].some((token) => lower === token || lower.includes(token));
-}
-
-function mappingKey(nodeId: string, inputName: string): string {
-  return `${nodeId}:${inputName}`;
-}
-
-function optionalText(value: string): string | undefined {
-  return value.trim() || undefined;
-}
-
-function optionalNumber(value: string): number | undefined {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
 function quickTestValues(recipe: RecipeViewModel): GenerationValues | undefined {
   const values: GenerationValues = {};
   for (const field of recipe.fields) {
@@ -1689,16 +1412,4 @@ function fieldTypeLabel(value: WorkflowFieldType): string {
     audio: "音频",
     audios: "多个音频",
   }[value];
-}
-
-function localizeWorkflowIssue(value: string): string {
-  const normalized = value.toLowerCase();
-  if (normalized.includes("api") && normalized.includes("format")) return "该文件不是 ComfyUI API 格式工作流。";
-  if (normalized.includes("recipe")) return "配方校验未通过，请检查输入映射和输出映射。";
-  if (normalized.includes("binding")) return "输入绑定校验未通过，请检查每个输入映射。";
-  if (normalized.includes("output")) return "输出校验未通过，请至少配置一个有效输出。";
-  if (normalized.includes("manifest")) return "工作流基本信息校验未通过。";
-  if (normalized.includes("capability")) return "ComfyUI 兼容性校验未通过。";
-  if (normalized.includes("dry run")) return "工作流试运行未通过。";
-  return "工作流校验未通过，请查看技术详情。";
 }
