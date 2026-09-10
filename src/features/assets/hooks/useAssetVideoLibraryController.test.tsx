@@ -163,7 +163,7 @@ describe("useAssetVideoLibraryController", () => {
 
     rerender(options({ enabled: true }));
     await waitFor(() => expect(mocks.assetLibraryPage).toHaveBeenCalledTimes(1));
-    expect(result.current.loading).toBe(false);
+    await waitFor(() => expect(result.current.loading).toBe(false));
   });
 
   it("resets project query state and ignores the previous project's completion", async () => {
