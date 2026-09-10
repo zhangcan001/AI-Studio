@@ -181,6 +181,31 @@ if (generationSubmissionFunctionMarkers.some((marker) => generationStudioSource.
   throw new Error("GENERATION_SUBMISSION_CONTROLLER failed: GenerationStudio must delegate submission actions");
 }
 
+if (!generationStudioSource.includes("useGenerationBatchController")) {
+  throw new Error("GENERATION_BATCH_CONTROLLER failed: GenerationStudio must delegate batch lifecycle ownership to useGenerationBatchController");
+}
+const generationBatchStateMarkers = ["batchItems", "batchSubmitting", "batchNotice", "batchPasteText"];
+const generationBatchStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && generationBatchStateMarkers.some((marker) => line.includes(marker)));
+if (generationBatchStateLines.length) {
+  throw new Error("GENERATION_BATCH_CONTROLLER failed: GenerationStudio must not own batch lifecycle state");
+}
+const generationBatchFunctionMarkers = [
+  "function addCurrentToBatch(",
+  "function addBlankPromptCard(",
+  "function updateBatchPrompt(",
+  "function copyBatchItem(",
+  "function moveBatchItem(",
+  "function splitPastedPrompts(",
+  "function removeBatchItem(",
+  "function importBatchTaskList(",
+  "function submitBatch(",
+];
+if (generationBatchFunctionMarkers.some((marker) => generationStudioSource.includes(marker))) {
+  throw new Error("GENERATION_BATCH_CONTROLLER failed: GenerationStudio must delegate batch lifecycle actions");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -211,6 +236,7 @@ console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);
+console.log(`GENERATION_BATCH_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

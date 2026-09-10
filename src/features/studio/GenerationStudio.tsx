@@ -18,12 +18,7 @@ import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
 import {
   cloneGenerationValues,
-  copyBatchDraftItem,
-  moveBatchDraftItem,
-  removeBatchDraftItem,
-  type BatchDraftItem,
 } from "./batchDraft";
-import { parseBatchTaskList } from "./batchImport";
 import { ProductionQueuePanel } from "./ProductionQueuePanel";
 import { productionInteractionPolicy } from "./productionQueuePolicy";
 import { CreationResultPanel } from "./CreationResultPanel";
@@ -47,10 +42,10 @@ import type { RecentWorkflowRecord } from "../production/productionUx";
 import { KERA2_WORKFLOW_ID, kera2RecipeContract } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
 import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
-import { splitPromptBlocks } from "../assets/assetVideoBatch";
 import { WorkflowSelector } from "../runtime/WorkflowSelector";
 import { useGenerationPresetController } from "./hooks/useGenerationPresetController";
 import { useGenerationSubmissionController } from "./hooks/useGenerationSubmissionController";
+import { useGenerationBatchController } from "./hooks/useGenerationBatchController";
 import {
   filterImageRecipes,
   findRecipe,
@@ -155,10 +150,6 @@ export function GenerationStudio({
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
-  const [batchItems, setBatchItems] = useState<BatchDraftItem[]>([]);
-  const [batchSubmitting, setBatchSubmitting] = useState(false);
-  const [batchNotice, setBatchNotice] = useState<string>();
-  const [batchPasteText, setBatchPasteText] = useState("");
   const [studioMode, setStudioMode] = useState<StudioMode>("batch");
   const [experimentFocusBatchId, setExperimentFocusBatchId] = useState<string>();
   const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
@@ -196,10 +187,6 @@ export function GenerationStudio({
     // not cleared when the studio is mounted after navigation.
     setMissingAssetFields(new Set());
     setNotice(null);
-    setBatchItems([]);
-    setBatchSubmitting(false);
-    setBatchNotice(undefined);
-    setBatchPasteText("");
     setStudioMode("batch");
     setExperimentFocusBatchId(undefined);
     setExperimentContexts({});
@@ -365,6 +352,23 @@ export function GenerationStudio({
     onNotice: setNotice,
   });
 
+  const batchController = useGenerationBatchController({
+    projectId,
+    productCatalog,
+    selectedWorkflow,
+    values,
+    configurationError: krea2ConfigError,
+    genericImageNotice,
+    hasUnsupportedField,
+    missingAsset: missingAssetFields.size > 0,
+    canSubmitLocalBatch: productionPolicy.canSubmitLocalBatch,
+    comfyConnected,
+    taskEventsReady,
+    onValidationErrors: setValidationErrors,
+    onBatchCreated: setExperimentFocusBatchId,
+    onProductionAdmissionChanged,
+  });
+
   async function refreshWorkflows() {
     setRefreshing(true);
     setNotice(null);
@@ -378,215 +382,11 @@ export function GenerationStudio({
     }
   }
 
-  function addCurrentToBatch() {
-    if (!selectedWorkflow || !imageCapability?.batchPromptCompatible || !imagePrompt) {
-      setBatchNotice(krea2ConfigError ?? genericImageNotice ?? "当前工作流没有可识别的标准提示词输入，暂时无法添加到图片批次。");
-      return;
-    }
-    const nextErrors = validateRecipeValues(selectedWorkflow, values);
-    setValidationErrors(nextErrors);
-    if (Object.keys(nextErrors).length || hasUnsupportedField || missingAssetFields.size > 0) {
-      setBatchNotice("当前输入还未准备好，暂时无法添加到批量任务。");
-      return;
-    }
-    if (batchItems.length >= 100) {
-      setBatchNotice("已达到批量任务上限，最多支持 100 项。");
-      return;
-    }
-
-    setBatchItems((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        values: cloneGenerationValues(values),
-      },
-    ]);
-    setBatchNotice(undefined);
-  }
-
   function updateKrea2Resolution(next: { width?: number; height?: number }) {
     if (next.width === undefined) removeValue("width");
     else setValue("width", { type: "integer", value: next.width });
     if (next.height === undefined) removeValue("height");
     else setValue("height", { type: "integer", value: next.height });
-  }
-
-  function promptFieldForRecipe(recipe?: RecipeViewModel) {
-    return recipe ? imageRecipeCapability(recipe).promptField : undefined;
-  }
-
-  function setBatchPrompt(valuesToUpdate: BatchDraftItem["values"], promptText: string, recipe = selectedWorkflow) {
-    const promptField = promptFieldForRecipe(recipe);
-    if (!promptField) return valuesToUpdate;
-    return {
-      ...valuesToUpdate,
-      [promptField.key]: { type: "string" as const, value: promptText },
-    };
-  }
-
-  function batchPrompt(item: BatchDraftItem) {
-    const recipe = productCatalog.find((candidate) => (
-      candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId
-    ));
-    const promptField = promptFieldForRecipe(recipe);
-    if (!promptField) return "";
-    const value = item.values[promptField.key];
-    return value?.type === "string" ? value.value : "";
-  }
-
-  function addBlankPromptCard() {
-    if (!selectedWorkflow || !imageCapability?.batchPromptCompatible) {
-      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准提示词输入，不能创建提示词列表批次。");
-      return;
-    }
-    if (batchItems.length >= 100) {
-      setBatchNotice("已达到图片批次上限，最多支持 100 项。");
-      return;
-    }
-    setBatchItems((current) => [...current, {
-      id: crypto.randomUUID(),
-      workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
-      workflowVersionId: selectedWorkflow.workflowVersionId,
-      recipeId: selectedWorkflow.recipeId,
-      values: setBatchPrompt(cloneGenerationValues(values), "", selectedWorkflow),
-    }]);
-    setBatchNotice("已添加空白提示词卡片，请填写后再创建图片批次。");
-  }
-
-  function updateBatchPrompt(id: string, promptText: string) {
-    setBatchItems((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      const recipe = productCatalog.find((candidate) => (
-        candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId
-      ));
-      return { ...item, values: setBatchPrompt(cloneGenerationValues(item.values), promptText, recipe) };
-    }));
-  }
-
-  function copyBatchItem(id: string) {
-    if (batchItems.length >= 100) {
-      setBatchNotice("已达到图片批次上限，最多支持 100 项。");
-      return;
-    }
-    setBatchItems((current) => copyBatchDraftItem(current, id, crypto.randomUUID()));
-    setBatchNotice(undefined);
-  }
-
-  function moveBatchItem(id: string, direction: -1 | 1) {
-    setBatchItems((current) => moveBatchDraftItem(current, id, direction));
-  }
-
-  function splitPastedPrompts() {
-    if (!selectedWorkflow || !imageCapability?.batchPromptCompatible) {
-      setBatchNotice(genericImageNotice ?? "当前工作流没有可识别的标准提示词输入，不能拆分提示词列表。");
-      return;
-    }
-    const parsed = splitPromptBlocks(batchPasteText);
-    if (!parsed.length) {
-      setBatchNotice("请先粘贴提示词；多个提示词之间使用空行分隔。");
-      return;
-    }
-    if (batchItems.length + parsed.length > 100) {
-      setBatchNotice(`拆分后将超过 100 项上限，还可添加 ${100 - batchItems.length} 项。`);
-      return;
-    }
-    setBatchItems((current) => [
-      ...current,
-      ...parsed.map((promptText) => ({
-        id: crypto.randomUUID(),
-        workflowName: workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name),
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        values: setBatchPrompt(cloneGenerationValues(values), promptText, selectedWorkflow),
-      })),
-    ]);
-    setBatchPasteText("");
-    setBatchNotice(`已按空行拆分 ${parsed.length} 张提示词卡片。`);
-  }
-
-  function removeBatchItem(id: string) {
-    setBatchItems((current) => removeBatchDraftItem(current, id));
-    setBatchNotice(undefined);
-  }
-
-  async function importBatchTaskList(file?: File) {
-    if (!file) return;
-    try {
-      const imported = parseBatchTaskList(await file.text(), productCatalog);
-      if (batchItems.length + imported.length > 100) {
-        setBatchNotice("导入后将超过 100 项批量任务上限。");
-        return;
-      }
-      setBatchItems((current) => [
-        ...current,
-        ...imported.map((item) => ({ ...item, id: crypto.randomUUID() })),
-      ]);
-      setBatchNotice(`已从 JSON 导入 ${imported.length} 个任务。`);
-    } catch (importError: unknown) {
-      setBatchNotice(toUserMessage(importError));
-    }
-  }
-
-  async function submitBatch() {
-    if (!batchItems.length) return;
-    if (!selectedWorkflow) {
-      setBatchNotice("当前没有可用的图片工作流。");
-      return;
-    }
-    if (!productionPolicy.canSubmitLocalBatch) {
-      setBatchNotice("当前有生产队列正在运行，请等待完成或暂停后再提交批量任务。");
-      return;
-    }
-    if (!comfyConnected || !taskEventsReady) {
-      setBatchNotice("请先连接 ComfyUI 并恢复任务事件通道，再提交批量任务。");
-      return;
-    }
-
-    setBatchSubmitting(true);
-    setBatchNotice(undefined);
-    try {
-      const invalidIndexes = batchItems.flatMap((item, index) => {
-        const recipe = productCatalog.find(
-          (candidate) => candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === item.recipeId,
-        );
-        if (!recipe || !imageRecipeCapability(recipe).batchPromptCompatible || Object.keys(validateRecipeValues(recipe, item.values)).length > 0) return [index];
-        return [];
-      });
-      if (invalidIndexes.length) {
-        setBatchNotice(`第 ${invalidIndexes.map((index) => index + 1).join("、")} 项还未填写完整，请补齐提示词和必需输入。`);
-        return;
-      }
-      const created = await createProductionQueue({
-        projectId,
-        name: `批量图片 · ${formatDateTime(new Date().toISOString())}`,
-        continueOnFailure: true,
-        items: batchItems.map((item) => ({
-          workflowVersionId: item.workflowVersionId,
-          recipeId: item.recipeId,
-          values: cloneGenerationValues(item.values),
-        })),
-      });
-      setExperimentFocusBatchId(created.id);
-      setBatchItems([]);
-      try {
-        await onProductionAdmissionChanged();
-      } catch {
-        // The queue is persisted even if the status refresh is temporarily unavailable.
-      }
-      try {
-        await startProductionQueue(projectId, created.id);
-        setBatchNotice(`图片批次已创建并开始执行，共 ${created.total} 项；提示词和参数已冻结，队列严格串行。`);
-      } catch (startError: unknown) {
-        setBatchNotice(`图片批次已创建，共 ${created.total} 项；开始执行失败：${toUserMessage(startError)}。可在队列中手动开始。`);
-      }
-    } catch (batchError: unknown) {
-      setBatchNotice(toUserMessage(batchError));
-    } finally {
-      setBatchSubmitting(false);
-    }
   }
 
   async function submitExperimentPlan(plan: ExperimentPlan) {
@@ -928,7 +728,7 @@ export function GenerationStudio({
                 width={values.width?.type === "integer" ? values.width.value : undefined}
                 height={values.height?.type === "integer" ? values.height.value : undefined}
                 presets={krea2ResolutionPresets}
-                disabled={generationController.creating || batchSubmitting}
+                disabled={generationController.creating || batchController.batchSubmitting}
                 onChange={updateKrea2Resolution}
               />
             )}
@@ -977,9 +777,9 @@ export function GenerationStudio({
                 canGenerate={canGenerate}
                 canAddToBatch={canAddToBatch}
                 blockedReason={blockedReason}
-                batchCount={batchItems.length}
+                batchCount={batchController.batchItems.length}
                 onGenerate={() => void generationController.generate()}
-                onAddToBatch={addCurrentToBatch}
+                onAddToBatch={batchController.addCurrentToBatch}
               />
             )}
             {studioMode === "batch" && <section className="batch-production-view" aria-label="批量生产">
@@ -990,10 +790,10 @@ export function GenerationStudio({
                   <p>{imageCapability?.batchPromptCompatible ? "每张提示词卡片都会创建一个图片任务；创建批次后工作流版本和参数会冻结。" : "当前工作流没有标准提示词输入，提示词列表批量生成不可用；请使用上方通用参数模式单次生成。"}</p>
                   </div>
                 <div className="batch-actions">
-                  <button type="button" className="quiet-button" onClick={addCurrentToBatch} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible}>
+                  <button type="button" className="quiet-button" onClick={batchController.addCurrentToBatch} disabled={batchController.batchSubmitting || !imageCapability?.batchPromptCompatible}>
                     添加当前提示词
                   </button>
-                  <button type="button" className="quiet-button" onClick={addBlankPromptCard} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible}>
+                  <button type="button" className="quiet-button" onClick={batchController.addBlankPromptCard} disabled={batchController.batchSubmitting || !imageCapability?.batchPromptCompatible}>
                     添加提示词
                   </button>
                   <label className="quiet-button batch-file-button">
@@ -1001,22 +801,19 @@ export function GenerationStudio({
                     <input
                       type="file"
                       accept="application/json,.json"
-                      disabled={batchSubmitting}
+                      disabled={batchController.batchSubmitting}
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         event.currentTarget.value = "";
-                        void importBatchTaskList(file);
+                        void batchController.importBatchTaskList(file);
                       }}
                     />
                   </label>
                   <button
                     type="button"
                     className="quiet-button"
-                    onClick={() => {
-                      setBatchItems([]);
-                      setBatchNotice(undefined);
-                    }}
-                    disabled={batchSubmitting || !batchItems.length}
+                    onClick={batchController.clearBatch}
+                    disabled={batchController.batchSubmitting || !batchController.batchItems.length}
                   >
                     清空
                   </button>
@@ -1047,19 +844,19 @@ export function GenerationStudio({
                   <span>直接粘贴提示词</span>
                   <textarea
                     rows={4}
-                    value={batchPasteText}
-                    onChange={(event) => setBatchPasteText(event.target.value)}
+                    value={batchController.batchPasteText}
+                    onChange={(event) => batchController.setBatchPasteText(event.target.value)}
                     placeholder="每张提示词之间留一个空行……"
-                    disabled={batchSubmitting}
+                    disabled={batchController.batchSubmitting}
                   />
                 </label>
-                  <button type="button" onClick={splitPastedPrompts} disabled={batchSubmitting || !imageCapability?.batchPromptCompatible || !batchPasteText.trim()}>
+                  <button type="button" onClick={batchController.splitPastedPrompts} disabled={batchController.batchSubmitting || !imageCapability?.batchPromptCompatible || !batchController.batchPasteText.trim()}>
                   按空行拆分
                 </button>
               </div>
-              {batchItems.length ? (
+              {batchController.batchItems.length ? (
                 <ol className="batch-list">
-                  {batchItems.map((item, index) => (
+                  {batchController.batchItems.map((item, index) => (
                     <li key={item.id} className="batch-prompt-card">
                       <div className="batch-prompt-card-header">
                         <strong>提示词 #{index + 1}</strong>
@@ -1069,17 +866,17 @@ export function GenerationStudio({
                         <span>提示词内容</span>
                         <textarea
                           rows={4}
-                          value={batchPrompt(item)}
-                          onChange={(event) => updateBatchPrompt(item.id, event.target.value)}
-                          disabled={batchSubmitting}
+                          value={batchController.batchPrompt(item)}
+                          onChange={(event) => batchController.updateBatchPrompt(item.id, event.target.value)}
+                          disabled={batchController.batchSubmitting}
                           placeholder="输入这张图片的生成提示词……"
                         />
                       </label>
                       <div className="batch-prompt-card-actions">
-                        <button type="button" className="quiet-button" onClick={() => copyBatchItem(item.id)} disabled={batchSubmitting}>复制</button>
-                        <button type="button" className="quiet-button" onClick={() => moveBatchItem(item.id, -1)} disabled={batchSubmitting || index === 0}>上移</button>
-                        <button type="button" className="quiet-button" onClick={() => moveBatchItem(item.id, 1)} disabled={batchSubmitting || index === batchItems.length - 1}>下移</button>
-                        <button type="button" className="quiet-button danger-button" onClick={() => removeBatchItem(item.id)} disabled={batchSubmitting}>删除</button>
+                        <button type="button" className="quiet-button" onClick={() => batchController.copyBatchItem(item.id)} disabled={batchController.batchSubmitting}>复制</button>
+                        <button type="button" className="quiet-button" onClick={() => batchController.moveBatchItem(item.id, -1)} disabled={batchController.batchSubmitting || index === 0}>上移</button>
+                        <button type="button" className="quiet-button" onClick={() => batchController.moveBatchItem(item.id, 1)} disabled={batchController.batchSubmitting || index === batchController.batchItems.length - 1}>下移</button>
+                        <button type="button" className="quiet-button danger-button" onClick={() => batchController.removeBatchItem(item.id)} disabled={batchController.batchSubmitting}>删除</button>
                       </div>
                     </li>
                   ))}
@@ -1089,23 +886,23 @@ export function GenerationStudio({
               )}
               <button
                 type="button"
-                onClick={() => void submitBatch()}
+                onClick={() => void batchController.submitBatch()}
                 disabled={
-                  !batchItems.length ||
+                  !batchController.batchItems.length ||
                   !imageCapability?.batchPromptCompatible ||
-                  batchSubmitting ||
+                  batchController.batchSubmitting ||
                   !comfyConnected ||
                   !taskEventsReady ||
                   !productionPolicy.canSubmitLocalBatch
                 }
               >
-                {batchSubmitting ? "正在创建..." : `创建图片批次（${batchItems.length}）`}
+                {batchController.batchSubmitting ? "正在创建..." : `创建图片批次（${batchController.batchItems.length}）`}
               </button>
-              {batchNotice && <p className="disabled-note">{batchNotice}</p>}
+              {batchController.batchNotice && <p className="disabled-note">{batchController.batchNotice}</p>}
               </section>
               <ProductionQueuePanel
                 projectId={projectId}
-                batchItems={batchItems}
+                batchItems={batchController.batchItems}
                 comfyConnected={comfyConnected}
                 variant="inline"
                 hideCreate
