@@ -79,6 +79,19 @@ if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLibraryController")) 
 if (assetVideoBatchWorkspaceSource.includes("assetLibraryRequestVersion") || assetVideoBatchWorkspaceSource.includes("assetLibraryPage(")) {
   throw new Error("ASSET_VIDEO_LIBRARY_CONTROLLER failed: AssetVideoBatchWorkspace must not own asset library request lifecycle or call assetLibraryPage directly");
 }
+if (!assetVideoBatchWorkspaceSource.includes("useAssetVideoLocalImportController")) {
+  throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import session ownership to useAssetVideoLocalImportController");
+}
+const localImportStateMarkers = ["localInspection", "projectSegmentForms", "localBatchName", "localAutoStart", "expandedLocalOrdinal"];
+const localImportStateLines = assetVideoBatchWorkspaceSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && localImportStateMarkers.some((marker) => line.includes(marker)));
+if (localImportStateLines.length) {
+  throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must not own local import session state");
+}
+if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegmentDraft("].some((marker) => assetVideoBatchWorkspaceSource.includes(marker))) {
+  throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import commands");
+}
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
@@ -89,3 +102,4 @@ console.log(`SHOT_WORKSPACE_MONITOR_CONTROLLER=PASS`);
 console.log(`SHOT_WORKSPACE_MULTI_PACKAGE_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_WORKFLOW_CONTROLLER=PASS`);
 console.log(`ASSET_VIDEO_LIBRARY_CONTROLLER=PASS`);
+console.log(`ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER=PASS`);

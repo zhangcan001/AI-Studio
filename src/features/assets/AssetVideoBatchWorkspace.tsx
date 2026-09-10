@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  commitH3LocalImport,
   createPreset,
   createGeneration,
   createProductionQueue,
@@ -10,20 +9,16 @@ import {
   readAssetImage,
   readAssetThumbnail,
   listAssetVideoPrompts,
-  pickH3LocalImportDirectory,
-  rescanH3LocalImport,
   setAssetVideoPrompt,
   setPreferredPreset,
   startProductionQueue,
   updatePreset,
-  updateH3ProjectSegmentDraft,
 } from "../../services/tauriClient";
 import type { AssetMediaTypeFilter, AssetView } from "../../types/asset";
 import type { RecipeViewModel } from "../../types/generation";
 import type { GenerationValues } from "../../types/generation";
 import type { PresetView } from "../../types/preset";
 import type {
-  H3LocalImportInspection,
   H3ProjectSegment,
   H3ProjectGenerationMode,
   H3ProjectFolderInspection,
@@ -33,8 +28,6 @@ import { toUserMessage } from "../../i18n/errorMessages";
 import {
   H3_QUALITY_PROFILE,
   h3RecipeForMode,
-  MINIMAX_H3_FL2VA_WORKFLOW_ID,
-  MINIMAX_H3_WORKFLOW_ID,
   type H3QualityProfile,
 } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
@@ -68,11 +61,13 @@ import {
   type H3CompatibleMode,
   type SelectedRecipeRef,
 } from "../runtime/workflowCapabilities";
+import { projectSegmentForm, type ProjectSegmentForm } from "./assetVideoLocalImportModel";
 import {
   useAssetVideoWorkflowController,
   videoWorkflowCandidatesForMode,
 } from "./hooks/useAssetVideoWorkflowController";
 import { useAssetVideoLibraryController } from "./hooks/useAssetVideoLibraryController";
+import { useAssetVideoLocalImportController } from "./hooks/useAssetVideoLocalImportController";
 
 interface Props {
   projectId: string;
@@ -279,19 +274,6 @@ function H3AssetLibraryPicker({
   );
 }
 
-interface ProjectSegmentForm {
-  mode: H3ProjectGenerationMode;
-  prompt: string;
-  durationSeconds: number;
-  width: number;
-  height: number;
-  referenceImageIds: string[];
-  referenceAudioIds: string[];
-  referenceVideoIds: string[];
-  firstFrameId?: string;
-  lastFrameId?: string;
-}
-
 interface ProjectFolderImportControlsProps {
   busy: boolean;
   hasInspection: boolean;
@@ -421,21 +403,6 @@ export function projectParameterSourceLabel(source: string): string {
     case "RECIPE_DEFAULT": return "默认值";
     default: return source;
   }
-}
-
-function projectSegmentForm(segment: H3ProjectSegment): ProjectSegmentForm {
-  return {
-    mode: segment.generationMode,
-    prompt: segment.prompt ?? "",
-    durationSeconds: segment.durationSeconds,
-    width: segment.width,
-    height: segment.height,
-    referenceImageIds: segment.referenceImages.map((media) => media.id),
-    referenceAudioIds: segment.referenceAudios.map((media) => media.id),
-    referenceVideoIds: segment.referenceVideos.map((media) => media.id),
-    firstFrameId: segment.firstFrame?.id,
-    lastFrameId: segment.lastFrame?.id,
-  };
 }
 
 interface ProjectFolderSegmentEditorProps {
@@ -604,16 +571,48 @@ export function AssetVideoBatchWorkspace({
   onOpenWorkflows,
 }: Props) {
   const [sourceMode, setSourceMode] = useState<"ASSET_LIBRARY" | "LOCAL_FOLDER">("ASSET_LIBRARY");
-  const [localInspection, setLocalInspection] = useState<H3LocalImportInspection>();
-  const [projectSegmentForms, setProjectSegmentForms] = useState<Record<string, ProjectSegmentForm>>({});
-  const [localBatchName, setLocalBatchName] = useState("");
-  const [localAutoStart, setLocalAutoStart] = useState(true);
-  const [expandedLocalOrdinal, setExpandedLocalOrdinal] = useState<number>();
   const [generationMode, setGenerationMode] = useState<H3GenerationMode>(() => h3InitialGenerationMode(initialAssets));
   const [qualityProfile, setQualityProfile] = useState<H3QualityProfile>(H3_QUALITY_PROFILE);
   const [batchPrompt, setBatchPrompt] = useState("");
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<string>();
   const [lastFrameAssetId, setLastFrameAssetId] = useState<string>();
+  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initialAssets.map((asset) => asset.id)));
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [durationSeconds, setDurationSeconds] = useState<number>();
+  const [width, setWidth] = useState<number>();
+  const [height, setHeight] = useState<number>();
+  const [createdBatchId, setCreatedBatchId] = useState<string>();
+  const [createdBatchStarted, setCreatedBatchStarted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string>();
+  const loadedPromptIds = useRef<Set<string>>(new Set());
+  const onLocalBatchCreated = useCallback(({ batchId, autoStarted }: { batchId: string; autoStarted: boolean }) => {
+    setCreatedBatchId(batchId);
+    setCreatedBatchStarted(autoStarted);
+  }, []);
+  const localFolderController = useAssetVideoLocalImportController({
+    projectId,
+    onBusyChange: setBusy,
+    onNoticeChange: setNotice,
+    onAdmissionChanged,
+    onCommittedBatch: onLocalBatchCreated,
+  });
+  const {
+    inspection: localInspection,
+    segmentForms: projectSegmentForms,
+    batchName: localBatchName,
+    setBatchName: setLocalBatchName,
+    autoStart: localAutoStart,
+    setAutoStart: setLocalAutoStart,
+    expandedOrdinal: expandedLocalOrdinal,
+    setExpandedOrdinal: setExpandedLocalOrdinal,
+    updateSegmentForm: updateProjectSegmentForm,
+    chooseDirectory: chooseLocalDirectory,
+    rescan: rescanLocalDirectory,
+    saveSegment: saveProjectSegment,
+    resetSegment: resetProjectSegment,
+  } = localFolderController;
   const projectModes = useMemo(
     () => [...new Set((localInspection?.projectFolder?.segments ?? []).map((segment) => segment.generationMode))] as H3CompatibleMode[],
     [localInspection?.projectFolder?.segments],
@@ -645,17 +644,6 @@ export function AssetVideoBatchWorkspace({
       : { ok: false as const, reason: "运行目录中没有精确的 H3 配方。" },
     [recipe],
   );
-  const [prompts, setPrompts] = useState<Record<string, string>>({});
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initialAssets.map((asset) => asset.id)));
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [durationSeconds, setDurationSeconds] = useState<number>();
-  const [width, setWidth] = useState<number>();
-  const [height, setHeight] = useState<number>();
-  const [createdBatchId, setCreatedBatchId] = useState<string>();
-  const [createdBatchStarted, setCreatedBatchStarted] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string>();
-  const loadedPromptIds = useRef<Set<string>>(new Set());
 
   const onAuthoritativeAssetIds = useCallback((pageIds: string[]) => {
     const pageIdSet = new Set(pageIds);
@@ -812,6 +800,21 @@ export function AssetVideoBatchWorkspace({
       : runtimeReady,
     productionAdmission.busy,
   );
+  const commitLocalBatch = useCallback(() => {
+    if (!recipe) return Promise.resolve();
+    return localFolderController.commit({
+      catalog,
+      recipe,
+      contract,
+      generationMode,
+      qualityProfile,
+      durationSeconds,
+      width,
+      height,
+      resolvedProjectRecipes,
+      canCommit: localCanCreate,
+    });
+  }, [catalog, contract, durationSeconds, generationMode, height, localCanCreate, localFolderController, qualityProfile, recipe, resolvedProjectRecipes, width]);
   const batchDraft = useMemo(
     () => buildH3BatchDraft({
       recipe,
@@ -997,151 +1000,6 @@ export function AssetVideoBatchWorkspace({
       await onAdmissionChanged();
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function syncProjectSegmentForms(inspection: H3LocalImportInspection) {
-    const segments = inspection.projectFolder?.segments ?? [];
-    setProjectSegmentForms(Object.fromEntries(segments.map((segment) => [segment.segmentId, projectSegmentForm(segment)])));
-  }
-
-  function applyLocalInspection(inspection: H3LocalImportInspection) {
-    setLocalInspection(inspection);
-    syncProjectSegmentForms(inspection);
-  }
-
-  function updateProjectSegmentForm(segmentId: string, patch: Partial<ProjectSegmentForm>) {
-    setProjectSegmentForms((current) => {
-      const existing = current[segmentId];
-      if (!existing) return current;
-      return { ...current, [segmentId]: { ...existing, ...patch } };
-    });
-  }
-
-  async function saveProjectSegment(segment: H3ProjectSegment) {
-    if (!localInspection?.projectFolder) return;
-    const form = projectSegmentForms[segment.segmentId] ?? projectSegmentForm(segment);
-    setBusy(true); setNotice(undefined);
-    try {
-      const inspection = await updateH3ProjectSegmentDraft({
-        sessionId: localInspection.sessionId,
-        segmentId: segment.segmentId,
-        mode: form.mode,
-        prompt: form.prompt,
-        durationSeconds: form.durationSeconds,
-        width: form.width,
-        height: form.height,
-        referenceImageIds: form.referenceImageIds,
-        referenceAudioIds: form.referenceAudioIds,
-        referenceVideoIds: form.referenceVideoIds,
-        firstFrameId: form.firstFrameId,
-        lastFrameId: form.lastFrameId,
-      });
-      applyLocalInspection(inspection);
-      setNotice(`已保存第 ${segment.ordinal} 段编辑，提交时将冻结本段参数。`);
-    } catch (error: unknown) {
-      setNotice(toUserMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function resetProjectSegment(segment: H3ProjectSegment) {
-    if (!localInspection?.projectFolder) return;
-    setBusy(true); setNotice(undefined);
-    try {
-      const inspection = await updateH3ProjectSegmentDraft({
-        sessionId: localInspection.sessionId,
-        segmentId: segment.segmentId,
-        resetAutoDetection: true,
-      });
-      applyLocalInspection(inspection);
-      setNotice(`第 ${segment.ordinal} 段已恢复自动识别。`);
-    } catch (error: unknown) {
-      setNotice(toUserMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function chooseLocalDirectory() {
-    setBusy(true); setNotice(undefined);
-    try {
-      const inspection = await pickH3LocalImportDirectory(projectId, "PROJECT_FOLDER");
-      if (!inspection) return;
-      applyLocalInspection(inspection);
-      setExpandedLocalOrdinal(undefined);
-      setNotice(`已读取「${inspection.displayRootName}」，可生成 ${inspection.readyCount} 项。`);
-    } catch (error: unknown) {
-      setNotice(toUserMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function rescanLocalDirectory() {
-    if (!localInspection) return;
-    setBusy(true); setNotice(undefined);
-    try {
-      const inspection = await rescanH3LocalImport(localInspection.sessionId, "PROJECT_FOLDER");
-      applyLocalInspection(inspection);
-      setExpandedLocalOrdinal(undefined);
-      setNotice(`已重新扫描，当前可生成 ${inspection.readyCount} 项。`);
-    } catch (error: unknown) {
-      setLocalInspection(undefined);
-      setProjectSegmentForms({});
-      setExpandedLocalOrdinal(undefined);
-      setNotice(toUserMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function commitLocalBatch() {
-    if (!recipe || !contract.ok || !localInspection || !localCanCreate) return;
-    const selectedDuration = durationSeconds ?? contract.contract.durationField.default;
-    const selectedWidth = width ?? contract.contract.widthField.default;
-    const selectedHeight = height ?? contract.contract.heightField.default;
-    if (selectedDuration === undefined || selectedWidth === undefined || selectedHeight === undefined) return;
-    setBusy(true); setNotice(undefined);
-    try {
-      const qualityRecipes = resolvedProjectRecipes
-        .flatMap((resolved) => resolved.recipe
-          ? [{ mode: resolved.mode, workflowVersionId: resolved.recipe.workflowVersionId, recipeId: resolved.recipe.recipeId }]
-          : [])
-      const result = await commitH3LocalImport({
-        sessionId: localInspection.sessionId,
-        batchName: localBatchName.trim() || undefined,
-        workflowVersionId: recipe.workflowVersionId,
-        recipeId: recipe.recipeId,
-        width: selectedWidth,
-        height: selectedHeight,
-        durationSeconds: selectedDuration,
-        autoStart: localAutoStart,
-        generationMode,
-        fl2vaWorkflowVersionId: catalog.find((item) => item.workflowId === MINIMAX_H3_FL2VA_WORKFLOW_ID && item.outputTypes?.includes("video"))?.workflowVersionId,
-        fl2vaRecipeId: catalog.find((item) => item.workflowId === MINIMAX_H3_FL2VA_WORKFLOW_ID && item.outputTypes?.includes("video"))?.recipeId,
-        ref2vaWorkflowVersionId: catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video"))?.workflowVersionId,
-        ref2vaRecipeId: catalog.find((item) => item.workflowId === MINIMAX_H3_WORKFLOW_ID && item.outputTypes?.includes("video"))?.recipeId,
-        qualityProfile,
-        qualityRecipes,
-      });
-      setCreatedBatchId(result.batchId);
-      setCreatedBatchStarted(result.autoStarted);
-      setLocalInspection(undefined);
-      setProjectSegmentForms({});
-      setExpandedLocalOrdinal(undefined);
-      await onAdmissionChanged();
-      setNotice(
-        `本地任务已导入，共${result.itemCount}项。${result.autoStarted ? "已开始生成；" : "已创建批次；"}素材已进入资产库。${result.warnings.length ? ` ${result.warnings.join("；")}` : ""}`,
-      );
-    } catch (error: unknown) {
-      setLocalInspection(undefined);
-      setProjectSegmentForms({});
-      setExpandedLocalOrdinal(undefined);
-      setNotice(`导入未完成，请重新选择项目文件夹。${toUserMessage(error)}`);
     } finally {
       setBusy(false);
     }
