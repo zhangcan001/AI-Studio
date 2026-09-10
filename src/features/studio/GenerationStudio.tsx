@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  cancelTask,
-  createGeneration,
   createProductionQueue,
   createProjectTemplate,
   getPromptLibraryEntry,
@@ -52,6 +50,7 @@ import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime
 import { splitPromptBlocks } from "../assets/assetVideoBatch";
 import { WorkflowSelector } from "../runtime/WorkflowSelector";
 import { useGenerationPresetController } from "./hooks/useGenerationPresetController";
+import { useGenerationSubmissionController } from "./hooks/useGenerationSubmissionController";
 import {
   filterImageRecipes,
   findRecipe,
@@ -153,10 +152,6 @@ export function GenerationStudio({
   const removeValue = useStudioStore((state) => state.removeValue);
   const setValidationErrors = useStudioStore((state) => state.setValidationErrors);
   const currentTask = useTaskStore((state) => state.currentTask);
-  const adoptCreatedTask = useTaskStore((state) => state.adoptCreatedTask);
-  const [creating, setCreating] = useState(false);
-  const generationRequestIdRef = useRef<string | undefined>(undefined);
-  const [cancelling, setCancelling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
@@ -355,6 +350,20 @@ export function GenerationStudio({
     validationError: Object.keys(errors).length > 0,
     unsupportedField: hasUnsupportedField,
   });
+  const generationController = useGenerationSubmissionController({
+    projectId,
+    selectedWorkflow,
+    values,
+    configurationError: krea2ConfigError,
+    productionAdmission,
+    comfyConnected,
+    taskEventsReady,
+    taskEventError,
+    missingAsset: missingAssetFields.size > 0,
+    unsupportedField: hasUnsupportedField,
+    onValidationErrors: setValidationErrors,
+    onNotice: setNotice,
+  });
 
   async function refreshWorkflows() {
     setRefreshing(true);
@@ -366,50 +375,6 @@ export function GenerationStudio({
       setNotice(toUserMessage(error));
     } finally {
       setRefreshing(false);
-    }
-  }
-
-  async function generate() {
-    if (!selectedWorkflow) return;
-    if (krea2ConfigError) {
-      setNotice(krea2ConfigError);
-      return;
-    }
-    const nextErrors = validateRecipeValues(selectedWorkflow, values);
-    setValidationErrors(nextErrors);
-    const reason = generationBlockedReason({
-      productionBusy: productionAdmission.busy,
-      comfyConnected,
-      taskEventsReady,
-      taskEventError,
-      missingAsset: missingAssetFields.size > 0,
-      validationError: Object.keys(nextErrors).length > 0,
-      unsupportedField: hasUnsupportedField,
-    });
-    if (reason) {
-      setNotice(reason);
-      return;
-    }
-
-    const submissionIdempotencyKey = generationRequestIdRef.current ??= crypto.randomUUID();
-    setCreating(true);
-    setNotice(null);
-    try {
-      const task = await createGeneration({
-        projectId,
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        values,
-        submissionIdempotencyKey,
-      });
-      adoptCreatedTask(task);
-    } catch (error: unknown) {
-      setNotice(toUserMessage(error));
-    } finally {
-      setCreating(false);
-      if (generationRequestIdRef.current === submissionIdempotencyKey) {
-        generationRequestIdRef.current = undefined;
-      }
     }
   }
 
@@ -698,20 +663,6 @@ export function GenerationStudio({
     );
   }
 
-  async function cancelCurrentTask() {
-    if (!currentTask) return;
-    setCancelling(true);
-    setNotice(null);
-    try {
-      const task = await cancelTask(projectId, currentTask.id);
-      useTaskStore.getState().upsertTask(task);
-    } catch (error: unknown) {
-      setNotice(toUserMessage(error));
-    } finally {
-      setCancelling(false);
-    }
-  }
-
   function applyRuntimeProfile(nextValues: typeof values) {
     if (!selectedWorkflow) return;
     useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
@@ -963,7 +914,7 @@ export function GenerationStudio({
               validationErrors={validationErrors}
               hiddenFieldKeys={krea2Contract?.ok ? ["width", "height"] : []}
               onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
-              onGenerate={() => void generate()}
+              onGenerate={() => void generationController.generate()}
               projectId={projectId}
               onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
             />
@@ -977,7 +928,7 @@ export function GenerationStudio({
                 width={values.width?.type === "integer" ? values.width.value : undefined}
                 height={values.height?.type === "integer" ? values.height.value : undefined}
                 presets={krea2ResolutionPresets}
-                disabled={creating || batchSubmitting}
+                disabled={generationController.creating || batchSubmitting}
                 onChange={updateKrea2Resolution}
               />
             )}
@@ -1022,12 +973,12 @@ export function GenerationStudio({
             )}
             {studioMode !== "batch" && (
               <GenerationActionBar
-                creating={creating}
+                creating={generationController.creating}
                 canGenerate={canGenerate}
                 canAddToBatch={canAddToBatch}
                 blockedReason={blockedReason}
                 batchCount={batchItems.length}
-                onGenerate={() => void generate()}
+                onGenerate={() => void generationController.generate()}
                 onAddToBatch={addCurrentToBatch}
               />
             )}
@@ -1086,7 +1037,7 @@ export function GenerationStudio({
                   validationErrors={validationErrors}
                   hiddenFieldKeys={krea2Contract?.ok ? [imagePrompt?.key ?? "prompt", "width", "height"] : [imagePrompt?.key ?? "prompt"]}
                   onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
-                  onGenerate={() => void generate()}
+                  onGenerate={() => void generationController.generate()}
                   projectId={projectId}
                   onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
                 />
@@ -1178,8 +1129,8 @@ export function GenerationStudio({
       {studioMode !== "batch" && <CreationResultPanel
         projectId={projectId}
         task={currentTask}
-        cancelling={cancelling}
-        onCancel={() => void cancelCurrentTask()}
+        cancelling={generationController.cancelling}
+        onCancel={() => void generationController.cancelCurrentTask()}
         onOpenTask={currentTask ? () => onOpenTask(currentTask.id) : undefined}
       />}
     </>

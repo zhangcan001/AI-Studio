@@ -163,6 +163,24 @@ if (generationPresetFunctionMarkers.some((marker) => generationStudioSource.incl
   throw new Error("GENERATION_PRESET_CONTROLLER failed: GenerationStudio must delegate preset lifecycle actions");
 }
 
+if (!generationStudioSource.includes("useGenerationSubmissionController")) {
+  throw new Error("GENERATION_SUBMISSION_CONTROLLER failed: GenerationStudio must delegate submission ownership to useGenerationSubmissionController");
+}
+const generationSubmissionStateMarkers = ["creating", "cancelling"];
+const generationSubmissionStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && generationSubmissionStateMarkers.some((marker) => line.includes(marker)));
+if (generationSubmissionStateLines.length || generationStudioSource.includes("generationRequestIdRef")) {
+  throw new Error("GENERATION_SUBMISSION_CONTROLLER failed: GenerationStudio must not own submission state or idempotency refs");
+}
+const generationSubmissionFunctionMarkers = [
+  "function generate(",
+  "function cancelCurrentTask(",
+];
+if (generationSubmissionFunctionMarkers.some((marker) => generationStudioSource.includes(marker))) {
+  throw new Error("GENERATION_SUBMISSION_CONTROLLER failed: GenerationStudio must delegate submission actions");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -192,6 +210,7 @@ console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
+console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
