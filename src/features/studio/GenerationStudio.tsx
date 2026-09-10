@@ -1,25 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelTask,
-  createPreset,
   createGeneration,
   createProductionQueue,
   createProjectTemplate,
-  deletePreset,
-  getPreferredPreset,
   getPromptLibraryEntry,
   getProjectWorkflowConfig,
-  listPresets,
   refreshWorkflowLibrary,
   startProductionQueue,
-  updatePreset,
-  setPreferredPreset,
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ReusableGenerationDraft } from "../../types/history";
-import type { PresetView } from "../../types/preset";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -58,6 +51,7 @@ import { ResolutionControl } from "../runtime/ResolutionControl";
 import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
 import { splitPromptBlocks } from "../assets/assetVideoBatch";
 import { WorkflowSelector } from "../runtime/WorkflowSelector";
+import { useGenerationPresetController } from "./hooks/useGenerationPresetController";
 import {
   filterImageRecipes,
   findRecipe,
@@ -166,12 +160,6 @@ export function GenerationStudio({
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
-  const [presets, setPresets] = useState<PresetView[]>([]);
-  const [selectedPresetId, setSelectedPresetId] = useState("");
-  const [preferredPresetId, setPreferredPresetId] = useState<string | null>(null);
-  const [presetName, setPresetName] = useState("");
-  const [presetLoading, setPresetLoading] = useState(false);
-  const [presetError, setPresetError] = useState<string>();
   const [batchItems, setBatchItems] = useState<BatchDraftItem[]>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchNotice, setBatchNotice] = useState<string>();
@@ -181,7 +169,6 @@ export function GenerationStudio({
   const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
   const [promptExperimentDimensions, setPromptExperimentDimensions] = useState<ExperimentDimension[]>([]);
   const [dashboardPromptTargetFieldKey, setDashboardPromptTargetFieldKey] = useState("");
-  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -201,6 +188,12 @@ export function GenerationStudio({
       return next;
     });
   }, []);
+  const presetController = useGenerationPresetController({
+    projectId,
+    selectedWorkflow,
+    onPresetApplied: () => setMissingAssetFields(new Set()),
+    onNotice: setNotice,
+  });
 
   useEffect(() => {
     // Project switches are reset by App.openProject before the new workspace
@@ -208,10 +201,6 @@ export function GenerationStudio({
     // not cleared when the studio is mounted after navigation.
     setMissingAssetFields(new Set());
     setNotice(null);
-    setPresets([]);
-    setSelectedPresetId("");
-    setPresetName("");
-    setPresetError(undefined);
     setBatchItems([]);
     setBatchSubmitting(false);
     setBatchNotice(undefined);
@@ -221,7 +210,6 @@ export function GenerationStudio({
     setExperimentContexts({});
     setPromptExperimentDimensions([]);
     setDashboardPromptTargetFieldKey("");
-    setPresetEditorOpen(false);
     setTemplateEditorOpen(false);
     setManualSelection(undefined);
     setProjectWorkflowConfig(undefined);
@@ -367,143 +355,6 @@ export function GenerationStudio({
     validationError: Object.keys(errors).length > 0,
     unsupportedField: hasUnsupportedField,
   });
-
-  useEffect(() => {
-    if (!selectedWorkflow) return;
-    let active = true;
-    setPresetLoading(true);
-    setPresetError(undefined);
-    setSelectedPresetId("");
-    setPresetName("");
-    void Promise.all([
-      listPresets(projectId, selectedWorkflow.workflowVersionId, selectedWorkflow.recipeId),
-      getPreferredPreset(projectId, selectedWorkflow.workflowVersionId, selectedWorkflow.recipeId),
-    ])
-      .then(([nextPresets, nextPreferredId]) => {
-        if (!active) return;
-        setPresets(nextPresets);
-        setPreferredPresetId(nextPreferredId);
-        const preferred = nextPreferredId
-          ? nextPresets.find((preset) => preset.id === nextPreferredId)
-          : undefined;
-        if (preferred && !useStudioStore.getState().draftDirty) {
-          useStudioStore.getState().loadDraft(selectedWorkflow, preferred.values);
-          setSelectedPresetId(preferred.id);
-          setPresetName(preferred.name);
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (active) setPresetError(toUserMessage(loadError));
-      })
-      .finally(() => {
-        if (active) setPresetLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [projectId, selectedWorkflow]);
-
-  function applyPreset(preset: PresetView) {
-    if (!selectedWorkflow) return;
-    useStudioStore.getState().loadDraft(selectedWorkflow, preset.values);
-    setSelectedPresetId(preset.id);
-    setPresetName(preset.name);
-    setPresetEditorOpen(false);
-    setMissingAssetFields(new Set());
-    setPresetError(undefined);
-  }
-
-  async function savePreset() {
-    if (!selectedWorkflow) return;
-    if (!presetName.trim()) {
-      setPresetError("请输入预设名称后再保存。");
-      return;
-    }
-    setPresetLoading(true);
-    setPresetError(undefined);
-    try {
-      const preset = await createPreset({
-        projectId,
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        name: presetName,
-        values,
-      });
-      setPresets((current) => [preset, ...current.filter((item) => item.id !== preset.id)]);
-      applyPreset(preset);
-      setPresetEditorOpen(false);
-    } catch (saveError: unknown) {
-      setPresetError(toUserMessage(saveError));
-    } finally {
-      setPresetLoading(false);
-    }
-  }
-
-  async function savePresetChanges() {
-    if (!selectedPresetId) return savePreset();
-    if (!presetName.trim()) {
-      setPresetError("请输入预设名称后再保存。");
-      return;
-    }
-    setPresetLoading(true);
-    setPresetError(undefined);
-    try {
-      const preset = await updatePreset({ projectId, presetId: selectedPresetId, name: presetName, values });
-      setPresets((current) => current.map((item) => (item.id === preset.id ? preset : item)));
-      applyPreset(preset);
-      setPresetEditorOpen(false);
-    } catch (updateError: unknown) {
-      setPresetError(toUserMessage(updateError));
-    } finally {
-      setPresetLoading(false);
-    }
-  }
-
-  async function removePreset() {
-    if (!selectedPresetId) return;
-    if (!window.confirm("确定删除这个预设吗？")) return;
-    setPresetLoading(true);
-    setPresetError(undefined);
-    try {
-      if (preferredPresetId === selectedPresetId) {
-        await setPreferredPreset({
-          projectId,
-          workflowVersionId: selectedWorkflow?.workflowVersionId ?? "",
-          recipeId: selectedWorkflow?.recipeId ?? "",
-        });
-        setPreferredPresetId(null);
-      }
-      await deletePreset(projectId, selectedPresetId);
-      setPresets((current) => current.filter((preset) => preset.id !== selectedPresetId));
-      setSelectedPresetId("");
-      setPresetName("");
-    } catch (deleteError: unknown) {
-      setPresetError(toUserMessage(deleteError));
-    } finally {
-      setPresetLoading(false);
-    }
-  }
-
-  async function togglePreferredPreset() {
-    if (!selectedWorkflow || !selectedPresetId) return;
-    setPresetLoading(true);
-    setPresetError(undefined);
-    try {
-      const nextPreferredId = preferredPresetId === selectedPresetId ? undefined : selectedPresetId;
-      await setPreferredPreset({
-        projectId,
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        presetId: nextPreferredId,
-      });
-      setPreferredPresetId(nextPreferredId ?? null);
-      setNotice(nextPreferredId ? "已设为当前工作流默认预设。" : "已取消当前工作流默认预设。");
-    } catch (preferredError: unknown) {
-      setPresetError(toUserMessage(preferredError));
-    } finally {
-      setPresetLoading(false);
-    }
-  }
 
   async function refreshWorkflows() {
     setRefreshing(true);
@@ -887,7 +738,7 @@ export function GenerationStudio({
     }
     setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
-    setPresetEditorOpen(false);
+    presetController.setPresetEditorOpen(false);
     setPromptExperimentDimensions([]);
     setDashboardPromptTargetFieldKey("");
   }
@@ -906,7 +757,7 @@ export function GenerationStudio({
     }
     setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
-    setPresetEditorOpen(false);
+    presetController.setPresetEditorOpen(false);
     setPromptExperimentDimensions([]);
     setDashboardPromptTargetFieldKey("");
   }
@@ -1050,43 +901,39 @@ export function GenerationStudio({
                 <span>预设</span>
                 <select
                   aria-label="已保存预设"
-                  value={selectedPresetId}
+                  value={presetController.selectedPresetId}
                   onChange={(event) => {
-                    const preset = presets.find((item) => item.id === event.target.value);
-                    if (preset) applyPreset(preset);
-                    else {
-                      setSelectedPresetId("");
-                      setPresetName("");
-                      setPresetEditorOpen(false);
-                    }
+                    const preset = presetController.presets.find((item) => item.id === event.target.value);
+                    if (preset) presetController.applyPreset(preset);
+                    else presetController.clearSelection();
                   }}
-                  disabled={presetLoading}
+                  disabled={presetController.presetLoading}
                 >
                   <option value="">选择已保存的预设</option>
-                  {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                  {presetController.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
                 </select>
               </label>
               <div className="preset-actions">
-                <button type="button" onClick={() => { setPresetName(""); setPresetError(undefined); setPresetEditorOpen(true); }} disabled={presetLoading}>{selectedPresetId ? "另存为" : "保存当前"}</button>
-                <button type="button" onClick={() => void savePresetChanges()} disabled={presetLoading || !selectedPresetId}>更新预设</button>
-                <button type="button" className="quiet-button" onClick={() => void togglePreferredPreset()} disabled={presetLoading || !selectedPresetId}>
-                  {preferredPresetId === selectedPresetId ? "取消默认" : "设为默认"}
+                <button type="button" onClick={presetController.openEditor} disabled={presetController.presetLoading}>{presetController.selectedPresetId ? "另存为" : "保存当前"}</button>
+                <button type="button" onClick={() => void presetController.savePresetChanges()} disabled={presetController.presetLoading || !presetController.selectedPresetId}>更新预设</button>
+                <button type="button" className="quiet-button" onClick={() => void presetController.togglePreferredPreset()} disabled={presetController.presetLoading || !presetController.selectedPresetId}>
+                  {presetController.preferredPresetId === presetController.selectedPresetId ? "取消默认" : "设为默认"}
                 </button>
-                <button type="button" className="quiet-button" onClick={() => void removePreset()} disabled={presetLoading || !selectedPresetId}>删除预设</button>
+                <button type="button" className="quiet-button" onClick={() => void presetController.removePreset()} disabled={presetController.presetLoading || !presetController.selectedPresetId}>删除预设</button>
               </div>
             </div>
-            {preferredPresetId && <p className="preset-default-note" role="status">当前工作流会优先加载默认预设。</p>}
-            {presetEditorOpen && (
+            {presetController.preferredPresetId && <p className="preset-default-note" role="status">当前工作流会优先加载默认预设。</p>}
+            {presetController.presetEditorOpen && (
               <div className="preset-inline-editor" aria-label="保存预设">
                 <label>
                   <span>预设名称</span>
-                  <input aria-label="预设名称" autoFocus value={presetName} maxLength={80} onChange={(event) => setPresetName(event.target.value)} placeholder="例如：柔光人像" />
+                  <input aria-label="预设名称" autoFocus value={presetController.presetName} maxLength={80} onChange={(event) => presetController.setPresetName(event.target.value)} placeholder="例如：柔光人像" />
                 </label>
-                <button type="button" onClick={() => void savePreset()} disabled={presetLoading}>保存</button>
-                <button type="button" className="quiet-button" onClick={() => setPresetEditorOpen(false)} disabled={presetLoading}>取消</button>
+                <button type="button" onClick={() => void presetController.savePreset()} disabled={presetController.presetLoading}>保存</button>
+                <button type="button" className="quiet-button" onClick={() => presetController.setPresetEditorOpen(false)} disabled={presetController.presetLoading}>取消</button>
               </div>
             )}
-            {presetError && <p className="error-message">预设：{presetError}</p>}
+            {presetController.presetError && <p className="error-message">预设：{presetController.presetError}</p>}
             <div className="project-template-toolbar">
               <button type="button" className="quiet-button" onClick={() => { setTemplateError(undefined); setTemplateEditorOpen(true); }}>保存为项目模板</button>
               <small>保存当前文字、数字和种子；不保存图片、视频或音频素材。</small>

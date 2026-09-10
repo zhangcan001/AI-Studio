@@ -141,6 +141,28 @@ if (parameterExposureFunctionMarkers.some((marker) => workflowWorkspaceSource.in
   throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure actions");
 }
 
+const generationStudioSource = readFileSync(join(root, "src/features/studio/GenerationStudio.tsx"), "utf8");
+if (!generationStudioSource.includes("useGenerationPresetController")) {
+  throw new Error("GENERATION_PRESET_CONTROLLER failed: GenerationStudio must delegate preset lifecycle ownership to useGenerationPresetController");
+}
+const generationPresetStateMarkers = ["presets", "selectedPresetId", "preferredPresetId", "presetName", "presetLoading", "presetError", "presetEditorOpen"];
+const generationPresetStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && generationPresetStateMarkers.some((marker) => line.includes(marker)));
+if (generationPresetStateLines.length) {
+  throw new Error("GENERATION_PRESET_CONTROLLER failed: GenerationStudio must not own preset lifecycle state");
+}
+const generationPresetFunctionMarkers = [
+  "function applyPreset(",
+  "function savePreset(",
+  "function savePresetChanges(",
+  "function removePreset(",
+  "function togglePreferredPreset(",
+];
+if (generationPresetFunctionMarkers.some((marker) => generationStudioSource.includes(marker))) {
+  throw new Error("GENERATION_PRESET_CONTROLLER failed: GenerationStudio must delegate preset lifecycle actions");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -169,6 +191,7 @@ if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.i
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
+console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
