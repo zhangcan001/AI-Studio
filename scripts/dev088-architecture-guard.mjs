@@ -206,6 +206,24 @@ if (generationBatchFunctionMarkers.some((marker) => generationStudioSource.inclu
   throw new Error("GENERATION_BATCH_CONTROLLER failed: GenerationStudio must delegate batch lifecycle actions");
 }
 
+if (!generationStudioSource.includes("useGenerationExperimentController")) {
+  throw new Error("GENERATION_EXPERIMENT_CONTROLLER failed: GenerationStudio must delegate experiment lifecycle ownership to useGenerationExperimentController");
+}
+const generationExperimentStateMarkers = ["experimentFocusBatchId", "experimentContexts", "promptExperimentDimensions"];
+const generationExperimentStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && generationExperimentStateMarkers.some((marker) => line.includes(marker)));
+if (generationExperimentStateLines.length) {
+  throw new Error("GENERATION_EXPERIMENT_CONTROLLER failed: GenerationStudio must not own experiment lifecycle state");
+}
+const generationExperimentFunctionMarkers = [
+  "function submitExperimentPlan(",
+  "function promoteExperimentWinner(",
+];
+if (generationExperimentFunctionMarkers.some((marker) => generationStudioSource.includes(marker))) {
+  throw new Error("GENERATION_EXPERIMENT_CONTROLLER failed: GenerationStudio must delegate experiment lifecycle actions");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -237,6 +255,7 @@ console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);
 console.log(`GENERATION_BATCH_CONTROLLER=PASS`);
+console.log(`GENERATION_EXPERIMENT_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

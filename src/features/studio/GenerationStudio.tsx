@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  createProductionQueue,
   createProjectTemplate,
   getPromptLibraryEntry,
   getProjectWorkflowConfig,
   refreshWorkflowLibrary,
-  startProductionQueue,
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeField, RecipeViewModel } from "../../types/generation";
-import type { ReusableGenerationDraft } from "../../types/history";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
-import {
-  cloneGenerationValues,
-} from "./batchDraft";
 import { ProductionQueuePanel } from "./ProductionQueuePanel";
 import { productionInteractionPolicy } from "./productionQueuePolicy";
 import { CreationResultPanel } from "./CreationResultPanel";
@@ -32,9 +26,7 @@ import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfile
 import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
 import { WorkflowBenchmarkPanel } from "../experiments/WorkflowBenchmarkPanel";
 import { ProductionRunPanel } from "../production/ProductionRunPanel";
-import { type ExperimentContext, type ExperimentDimension, type ExperimentPlan } from "../experiments/experimentPlanner";
 import { PromptLibraryPanel } from "../prompts/PromptLibraryPanel";
-import type { PromptVersionView } from "../../types/prompt";
 import type { PromptEntryView } from "../../types/prompt";
 import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
 import { CreationDashboard } from "../production/CreationDashboard";
@@ -46,6 +38,7 @@ import { WorkflowSelector } from "../runtime/WorkflowSelector";
 import { useGenerationPresetController } from "./hooks/useGenerationPresetController";
 import { useGenerationSubmissionController } from "./hooks/useGenerationSubmissionController";
 import { useGenerationBatchController } from "./hooks/useGenerationBatchController";
+import { useGenerationExperimentController } from "./hooks/useGenerationExperimentController";
 import {
   filterImageRecipes,
   findRecipe,
@@ -151,9 +144,6 @@ export function GenerationStudio({
   const [notice, setNotice] = useState<string | null>(null);
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
   const [studioMode, setStudioMode] = useState<StudioMode>("batch");
-  const [experimentFocusBatchId, setExperimentFocusBatchId] = useState<string>();
-  const [experimentContexts, setExperimentContexts] = useState<Record<string, ExperimentContext>>({});
-  const [promptExperimentDimensions, setPromptExperimentDimensions] = useState<ExperimentDimension[]>([]);
   const [dashboardPromptTargetFieldKey, setDashboardPromptTargetFieldKey] = useState("");
   const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
@@ -188,9 +178,6 @@ export function GenerationStudio({
     setMissingAssetFields(new Set());
     setNotice(null);
     setStudioMode("batch");
-    setExperimentFocusBatchId(undefined);
-    setExperimentContexts({});
-    setPromptExperimentDimensions([]);
     setDashboardPromptTargetFieldKey("");
     setTemplateEditorOpen(false);
     setManualSelection(undefined);
@@ -352,6 +339,18 @@ export function GenerationStudio({
     onNotice: setNotice,
   });
 
+  const experimentController = useGenerationExperimentController({
+    projectId,
+    selectedWorkflow,
+    productCatalog,
+    canExperimentBase,
+    blockedReason,
+    onNotice: setNotice,
+    onProductionAdmissionChanged,
+    onStudioModeChange: setStudioMode,
+    onClearMissingAssetFields: () => setMissingAssetFields(new Set()),
+  });
+
   const batchController = useGenerationBatchController({
     projectId,
     productCatalog,
@@ -365,7 +364,7 @@ export function GenerationStudio({
     comfyConnected,
     taskEventsReady,
     onValidationErrors: setValidationErrors,
-    onBatchCreated: setExperimentFocusBatchId,
+    onBatchCreated: experimentController.focusBatch,
     onProductionAdmissionChanged,
   });
 
@@ -389,92 +388,10 @@ export function GenerationStudio({
     else setValue("height", { type: "integer", value: next.height });
   }
 
-  async function submitExperimentPlan(plan: ExperimentPlan) {
-    if (!selectedWorkflow) return;
-    if (!canExperimentBase) {
-      setNotice(blockedReason ?? "当前基础草稿尚未满足实验队列提交条件。");
-      return;
-    }
-    setNotice(null);
-    try {
-      const created = await createProductionQueue({
-        projectId,
-        name: `实验 · ${workflowDisplayName(selectedWorkflow.workflowId, selectedWorkflow.name)} · ${formatDateTime(new Date().toISOString())}`,
-        continueOnFailure: true,
-        items: plan.items.map((item) => ({
-          workflowVersionId: plan.workflowVersionId,
-          recipeId: plan.recipeId,
-          values: cloneGenerationValues(item.values),
-        })),
-      });
-      setExperimentContexts((current) => ({
-        ...current,
-        [created.id]: {
-          recipe: selectedWorkflow,
-          baseValues: cloneGenerationValues(plan.baseValues),
-        },
-      }));
-      setExperimentFocusBatchId(created.id);
-      setStudioMode("batch");
-      try {
-        await onProductionAdmissionChanged();
-      } catch {
-        // The queue is already persisted; a status refresh failure must not
-        // prevent the normal queue runner from being started.
-      }
-      try {
-        await startProductionQueue(projectId, created.id);
-        setNotice(`实验队列已加入并开始执行，共 ${created.total} 项；任务将严格按顺序运行。`);
-      } catch (startError: unknown) {
-        setNotice(`实验队列已保存，共 ${created.total} 项；开始执行失败：${toUserMessage(startError)}。可在生产队列中手动开始。`);
-      }
-    } catch (error: unknown) {
-      setNotice(toUserMessage(error));
-    }
-  }
-
-  async function promoteExperimentWinner(
-    draft: ReusableGenerationDraft,
-    source: { batchName: string; taskId: string },
-  ) {
-    if (draft.projectId !== projectId) {
-      setNotice("生产结果属于其他项目，无法加载到当前创作。");
-      return;
-    }
-    const workflow = productCatalog.find(
-      (recipe) => recipe.workflowVersionId === draft.workflowVersionId && recipe.recipeId === draft.recipeId,
-    );
-    if (!workflow) {
-      setNotice("生产结果对应的工作流版本已不在运行目录中，请先刷新工作流列表。");
-      return;
-    }
-    useStudioStore.getState().loadDraft(workflow, cloneGenerationValues(draft.values));
-    useStudioStore.getState().setReuseProvenance({
-      workflowName: draft.workflowName,
-      createdAt: draft.createdAt,
-      sourceBatchName: source.batchName,
-      sourceTaskId: source.taskId,
-    });
-    setMissingAssetFields(new Set());
-    setStudioMode("single");
-    setNotice(draft.missingAssetIds.length
-      ? "已将生产结果加载到 Studio，但部分素材缺失，请替换后再生成；未自动提交任务。"
-      : "已将生产结果作为下一轮起点加载到 Studio，未自动提交生成任务。",
-    );
-  }
-
   function applyRuntimeProfile(nextValues: typeof values) {
     if (!selectedWorkflow) return;
     useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
     setMissingAssetFields(new Set());
-  }
-
-  function usePromptVersionsForExperiment(fieldKey: string, versions: PromptVersionView[]) {
-    setPromptExperimentDimensions([{
-      fieldKey,
-      values: versions.map((version) => ({ type: "string", value: version.text })),
-    }]);
-    setStudioMode("experiment");
   }
 
   function selectWorkflowFromUx(workflow: RecipeViewModel) {
@@ -490,7 +407,7 @@ export function GenerationStudio({
     setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
     presetController.setPresetEditorOpen(false);
-    setPromptExperimentDimensions([]);
+    experimentController.clearPromptExperimentDimensions();
     setDashboardPromptTargetFieldKey("");
   }
 
@@ -509,7 +426,7 @@ export function GenerationStudio({
     setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
     presetController.setPresetEditorOpen(false);
-    setPromptExperimentDimensions([]);
+    experimentController.clearPromptExperimentDimensions();
     setDashboardPromptTargetFieldKey("");
   }
 
@@ -609,7 +526,7 @@ export function GenerationStudio({
               onPromptTargetFieldChange={setDashboardPromptTargetFieldKey}
               onUsePrompt={(entry, fieldKey) => void useRecentPrompt(entry, fieldKey)}
               onContinueWorkflow={continueRecentWorkflow}
-              onFocusQueue={(batchId) => { setStudioMode("batch"); setExperimentFocusBatchId(batchId); }}
+              onFocusQueue={(batchId) => { setStudioMode("batch"); experimentController.focusBatch(batchId); }}
               onAdmissionChanged={onProductionAdmissionChanged}
             />
             {reuseProvenance && (
@@ -706,7 +623,7 @@ export function GenerationStudio({
                 useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
                 setMissingAssetFields(new Set());
               }}
-              onUseForExperiment={usePromptVersionsForExperiment}
+              onUseForExperiment={experimentController.usePromptVersionsForExperiment}
             />
             <DynamicFormRenderer
               recipe={selectedWorkflow}
@@ -753,10 +670,7 @@ export function GenerationStudio({
                   blockedReason={blockedReason}
                   onOpenTask={onOpenTask}
                   onAdmissionChanged={onProductionAdmissionChanged}
-                  onCreated={(created) => {
-                    setExperimentFocusBatchId(created.productionBatchId);
-                    setNotice(`基准实验已保存：${created.candidates.length} 个候选已进入普通生产队列。`);
-                  }}
+                  onCreated={experimentController.handleBenchmarkCreated}
                 />
                 <details className="legacy-experiment-planner">
                   <summary>参数变体草稿（兼容旧实验计划）</summary>
@@ -765,8 +679,8 @@ export function GenerationStudio({
                     baseValues={values}
                     baseReady={canExperimentBase}
                     blockedReason={blockedReason}
-                    initialDimensions={promptExperimentDimensions}
-                    onSubmit={submitExperimentPlan}
+                    initialDimensions={experimentController.promptExperimentDimensions}
+                    onSubmit={experimentController.submitExperimentPlan}
                   />
                 </details>
               </>
@@ -906,17 +820,17 @@ export function GenerationStudio({
                 comfyConnected={comfyConnected}
                 variant="inline"
                 hideCreate
-                focusBatchId={experimentFocusBatchId
+                focusBatchId={experimentController.experimentFocusBatchId
                   ?? focusProductionBatchId
                   ?? (productionAdmission.projectId === projectId ? productionAdmission.batchId : undefined)}
                 onAdmissionChanged={onProductionAdmissionChanged}
                 onFocusedBatchOpened={() => {
-                  setExperimentFocusBatchId(undefined);
+                  experimentController.clearFocusBatch();
                   onProductionBatchFocused();
                 }}
                 onOpenTask={onOpenTask}
-                experimentContexts={experimentContexts}
-                onPromoteWinner={promoteExperimentWinner}
+                experimentContexts={experimentController.experimentContexts}
+                onPromoteWinner={experimentController.promoteExperimentWinner}
               />
             </section>}
           </>
