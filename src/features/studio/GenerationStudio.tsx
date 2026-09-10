@@ -19,7 +19,6 @@ import { GenerationActionBar } from "./GenerationActionBar";
 import { generationBlockedReason } from "./generationBlockedReason";
 import { StudioModeTabs, type StudioMode } from "./StudioModeTabs";
 import { NoWorkflowGuide } from "./NoWorkflowGuide";
-import { assignAssetToField, compatibleAssetFields } from "./assetIntent";
 import { CreationModeHint } from "../runtime/CreationModeHint";
 import { RuntimeParameterProfilePanel } from "../runtime/RuntimeParameterProfilePanel";
 import { ExperimentPlannerPanel } from "../experiments/ExperimentPlannerPanel";
@@ -39,6 +38,7 @@ import { useGenerationSubmissionController } from "./hooks/useGenerationSubmissi
 import { useGenerationBatchController } from "./hooks/useGenerationBatchController";
 import { useGenerationExperimentController } from "./hooks/useGenerationExperimentController";
 import { useGenerationProjectTemplateController } from "./hooks/useGenerationProjectTemplateController";
+import { useGenerationAssetIntentController } from "./hooks/useGenerationAssetIntentController";
 import {
   filterImageRecipes,
   findRecipe,
@@ -133,7 +133,6 @@ export function GenerationStudio({
   const values = useStudioStore((state) => state.values);
   const draftDirty = useStudioStore((state) => state.draftDirty);
   const validationErrors = useStudioStore((state) => state.validationErrors);
-  const pendingAssetIntent = useStudioStore((state) => state.pendingAssetIntent);
   const reuseProvenance = useStudioStore((state) => state.reuseProvenance);
   const setSelectedWorkflow = useStudioStore((state) => state.setSelectedWorkflow);
   const setValue = useStudioStore((state) => state.setValue);
@@ -145,7 +144,6 @@ export function GenerationStudio({
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
   const [studioMode, setStudioMode] = useState<StudioMode>("batch");
   const [dashboardPromptTargetFieldKey, setDashboardPromptTargetFieldKey] = useState("");
-  const [assetIntentTargets, setAssetIntentTargets] = useState<RecipeField[]>([]);
   const handleAssetAvailabilityChange = useCallback((key: string, available: boolean) => {
     setMissingAssetFields((current) => {
       const next = new Set(current);
@@ -159,11 +157,25 @@ export function GenerationStudio({
       return next;
     });
   }, []);
+  const handleAssetFieldResolved = useCallback((key: string) => {
+    setMissingAssetFields((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
   const presetController = useGenerationPresetController({
     projectId,
     selectedWorkflow,
     onPresetApplied: () => setMissingAssetFields(new Set()),
     onNotice: setNotice,
+  });
+  const assetIntentController = useGenerationAssetIntentController({
+    projectId,
+    selectedWorkflow,
+    onNotice: setNotice,
+    onAssetFieldResolved: handleAssetFieldResolved,
   });
 
   useEffect(() => {
@@ -203,56 +215,6 @@ export function GenerationStudio({
     setManualSelection(undefined);
     setNotice("本次手动选择的工作流当前不可用，已切换到项目默认或推荐工作流。");
   }, [manualSelection, manualWorkflow, productCatalog.length]);
-
-  function applyPendingAsset(field: RecipeField, replaceSingle: boolean) {
-    if (!selectedWorkflow || !pendingAssetIntent) return;
-    const result = assignAssetToField(field, useStudioStore.getState().values, pendingAssetIntent.assetId, replaceSingle);
-    if (result.kind === "requires_confirmation") {
-      if (window.confirm("当前输入已有素材，是否替换当前素材？")) {
-        applyPendingAsset(field, true);
-      }
-      return;
-    }
-    setAssetIntentTargets([]);
-    useStudioStore.getState().clearPendingAssetIntent();
-    if (result.kind === "max_items") {
-      setNotice(`“${field.label}”已达到素材数量上限。`);
-      return;
-    }
-    if (result.kind !== "applied") {
-      setNotice("当前工作流没有可使用此素材的输入项。");
-      return;
-    }
-    useStudioStore.getState().loadDraft(selectedWorkflow, result.values);
-    setMissingAssetFields((current) => {
-      const next = new Set(current);
-      next.delete(field.key);
-      return next;
-    });
-    setNotice("已将素材加入创作。");
-  }
-
-  useEffect(() => {
-    if (!pendingAssetIntent || !selectedWorkflow) return;
-    if (pendingAssetIntent.projectId !== projectId) {
-      useStudioStore.getState().clearPendingAssetIntent();
-      setAssetIntentTargets([]);
-      setNotice("素材属于其他项目，已取消使用。");
-      return;
-    }
-    const targets = compatibleAssetFields(selectedWorkflow, pendingAssetIntent.assetType);
-    if (!targets.length) {
-      useStudioStore.getState().clearPendingAssetIntent();
-      setAssetIntentTargets([]);
-      setNotice("当前工作流没有可使用此素材的输入项。");
-      return;
-    }
-    if (targets.length > 1) {
-      setAssetIntentTargets(targets);
-      return;
-    }
-    applyPendingAsset(targets[0], false);
-  }, [pendingAssetIntent, projectId, selectedWorkflow]);
 
   const hasUnsupportedField = useMemo(
     () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "number", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
@@ -395,7 +357,6 @@ export function GenerationStudio({
     } else {
       setSelectedWorkflow(workflow);
     }
-    setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
     presetController.setPresetEditorOpen(false);
     experimentController.clearPromptExperimentDimensions();
@@ -414,7 +375,6 @@ export function GenerationStudio({
     } else {
       setSelectedWorkflow(fallbackWorkflow);
     }
-    setAssetIntentTargets([]);
     setMissingAssetFields(new Set());
     presetController.setPresetEditorOpen(false);
     experimentController.clearPromptExperimentDimensions();
@@ -530,25 +490,22 @@ export function GenerationStudio({
                 </span>
               </div>
             )}
-            {assetIntentTargets.length > 1 && pendingAssetIntent && (
+            {assetIntentController.assetIntentTargets.length > 1 && assetIntentController.pendingAssetIntent && (
               <section className="asset-intent-targets" aria-label="选择素材用途">
                 <div>
                   <strong>选择素材用途</strong>
                   <p>请选择要填入的输入项，当前素材不会自动提交生成。</p>
                 </div>
                 <div className="asset-intent-target-list">
-                  {assetIntentTargets.map((field) => (
-                    <button key={field.key} type="button" onClick={() => applyPendingAsset(field, false)}>
+                  {assetIntentController.assetIntentTargets.map((field) => (
+                    <button key={field.key} type="button" onClick={() => assetIntentController.applyToTarget(field)}>
                       {field.label} · {fieldTypeLabel(field.type)}
                     </button>
                   ))}
                   <button
                     type="button"
                     className="quiet-button"
-                    onClick={() => {
-                      useStudioStore.getState().clearPendingAssetIntent();
-                      setAssetIntentTargets([]);
-                    }}
+                    onClick={assetIntentController.cancel}
                   >
                     取消
                   </button>

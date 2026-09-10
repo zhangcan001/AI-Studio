@@ -238,6 +238,23 @@ if (generationStudioSource.includes("function saveProjectTemplate(") || generati
   throw new Error("GENERATION_PROJECT_TEMPLATE_CONTROLLER failed: GenerationStudio must delegate project template persistence");
 }
 
+if (!generationStudioSource.includes("useGenerationAssetIntentController")) {
+  throw new Error("GENERATION_ASSET_INTENT_CONTROLLER failed: GenerationStudio must delegate Asset Intent lifecycle ownership to useGenerationAssetIntentController");
+}
+const generationAssetIntentStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && line.includes("assetIntentTargets"));
+if (generationAssetIntentStateLines.length) {
+  throw new Error("GENERATION_ASSET_INTENT_CONTROLLER failed: GenerationStudio must not own Asset Intent target state");
+}
+if (generationStudioSource.includes("function applyPendingAsset(") || generationStudioSource.includes("clearPendingAssetIntent(")) {
+  throw new Error("GENERATION_ASSET_INTENT_CONTROLLER failed: GenerationStudio must delegate Asset Intent lifecycle actions");
+}
+const assetIntentControllerSource = readFileSync(join(root, "src/features/studio/hooks/useGenerationAssetIntentController.ts"), "utf8");
+if (/useState\s*<[^>]*PendingStudioAssetIntent|\[\s*pendingAssetIntent\s*,/.test(assetIntentControllerSource)) {
+  throw new Error("GENERATION_ASSET_INTENT_CONTROLLER failed: controller must keep pendingAssetIntent authority in useStudioStore");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -271,6 +288,7 @@ console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);
 console.log(`GENERATION_BATCH_CONTROLLER=PASS`);
 console.log(`GENERATION_EXPERIMENT_CONTROLLER=PASS`);
 console.log(`GENERATION_PROJECT_TEMPLATE_CONTROLLER=PASS`);
+console.log(`GENERATION_ASSET_INTENT_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
