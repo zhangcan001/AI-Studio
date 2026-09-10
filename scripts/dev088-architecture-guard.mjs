@@ -94,6 +94,7 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
 }
 
 const workflowWorkspaceSource = readFileSync(join(root, "src/features/workflows/WorkflowWorkspace.tsx"), "utf8");
+const workflowWorkspaceAdaptersSource = readFileSync(join(root, "src/features/workflows/workflowWorkspaceAdapters.ts"), "utf8");
 if (!workflowWorkspaceSource.includes("useWorkflowSmartImportController")) {
   throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must delegate Smart Import session ownership to useWorkflowSmartImportController");
 }
@@ -154,6 +155,12 @@ const generationStudioPromotionOwnership = generationStudioPromotionMarkers
   .filter((marker) => generationStudioSource.includes(marker));
 if (generationStudioPromotionOwnership.length) {
   throw new Error("WORKFLOW_RECIPE_PROMOTION failed: GenerationStudio must not own recipe promotion");
+}
+if (!workflowWorkspaceSource.includes("resolveImplicitWorkflowRecipe")
+  || !workflowWorkspaceAdaptersSource.includes("export function resolveImplicitWorkflowRecipe(")
+  || generationStudioSource.includes("resolveImplicitWorkflowRecipe")
+  || generationStudioSource.includes("isPromoted")) {
+  throw new Error("WORKFLOW_RECIPE_PROMOTION_CONSUMPTION failed: promotion must be consumed once by the Workflow Workspace resolution boundary");
 }
 
 if (!generationStudioSource.includes("useGenerationPresetController")) {
@@ -322,6 +329,7 @@ if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.i
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`WORKFLOW_RECIPE_PROMOTION=PASS`);
+console.log(`WORKFLOW_RECIPE_PROMOTION_CONSUMPTION=PASS`);
 console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);

@@ -9,7 +9,7 @@ import type {
 import { formatDateTime, stagingStatusLabel, workflowDisplayName } from "../../i18n/statusLabels";
 import { toUserMessage } from "../../i18n/errorMessages";
 import {
-  latestCatalogRecipeForWorkflowItem,
+  resolveImplicitWorkflowRecipe,
   type WorkflowWorkspaceItem,
 } from "./workflowWorkspaceAdapters";
 import { WorkflowRegistryRowActions } from "./WorkflowRegistryActions";
@@ -119,7 +119,7 @@ export function WorkflowWorkspaceList({
           const currentRecipe = item.currentRecipe;
           const versionsForDisplay = item.versions;
           const recipesForDisplay = item.registryRecipes;
-          const projectRecipe = latestCatalogRecipeForWorkflowItem(item, catalog);
+          const projectRecipe = resolveImplicitWorkflowRecipe(item, catalog);
           return (
             <article className="workflow-catalog-row" key={item.workflowId}>
               <input type="checkbox" aria-label={`比较 ${workflowDisplayName(item.workflowId, item.name ?? item.packageName)}`} checked={currentVersionId ? selectedVersions.includes(currentVersionId) : false} onChange={() => onToggleSelected(item)} disabled={!currentVersionId} />

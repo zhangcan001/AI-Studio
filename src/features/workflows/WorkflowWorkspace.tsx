@@ -56,6 +56,7 @@ import { useWorkflowParameterExposureController } from "./hooks/useWorkflowParam
 import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
 import {
   normalizeWorkspaceItems,
+  resolveImplicitWorkflowRecipe,
   type WorkflowWorkspaceItem,
 } from "./workflowWorkspaceAdapters";
 import { WorkflowRegistryActions } from "./WorkflowRegistryActions";
@@ -75,7 +76,11 @@ import {
   type ParameterMappingEdit,
 } from "./workflowParameterExposureModel";
 
-export { latestCatalogRecipeForWorkflowItem } from "./workflowWorkspaceAdapters";
+export {
+  latestCatalogRecipeForWorkflowItem,
+  normalizeWorkspaceItem,
+  resolveImplicitWorkflowRecipe,
+} from "./workflowWorkspaceAdapters";
 export { isExposableWorkflowInput } from "./workflowParameterExposureModel";
 
 interface Props {
@@ -577,12 +582,9 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
   }
 
-  async function quickTest(item: WorkflowProductionWorkspaceView) {
+  async function quickTest(item: WorkflowWorkspaceItem) {
     if (!projectId || !item.workflowVersionId) return;
-    const latestRecipeId = item.recipes[item.recipes.length - 1]?.recipeId;
-    const recipe = catalog.find((candidate) =>
-      candidate.workflowVersionId === item.workflowVersionId && candidate.recipeId === latestRecipeId,
-    );
+    const recipe = resolveImplicitWorkflowRecipe(item, catalog);
     if (!recipe) {
       setWorkspaceError("当前配方尚未进入创作目录，请先刷新工作流。");
       return;

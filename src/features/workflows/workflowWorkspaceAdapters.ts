@@ -149,6 +149,28 @@ export function latestCatalogRecipeForWorkflowItem(
     .map((entry) => entry.candidate)[0];
 }
 
+/**
+ * Resolve an implicit recipe after the Registry has already selected the
+ * current workflow version. Explicit references never enter this fallback.
+ */
+export function resolveImplicitWorkflowRecipe(
+  item: Pick<WorkflowWorkspaceItem, "workflowVersionId" | "recipes" | "currentRecipe">
+    & Partial<Pick<WorkflowWorkspaceItem, "archived" | "libraryState">>,
+  catalog: RecipeViewModel[],
+): RecipeViewModel | undefined {
+  if (!item.workflowVersionId || item.archived || item.libraryState === "REMOVED") return undefined;
+
+  const promotedRecipe = item.currentRecipe?.isPromoted
+    && item.currentRecipe.workflowVersionId === item.workflowVersionId
+    ? catalog.find((candidate) => (
+      candidate.workflowVersionId === item.workflowVersionId
+        && candidate.recipeId === item.currentRecipe?.recipeId
+        && item.recipes.some((recipe) => recipe.recipeId === candidate.recipeId)
+    ))
+    : undefined;
+  return promotedRecipe ?? latestCatalogRecipeForWorkflowItem(item, catalog);
+}
+
 function exactRuntime(
   item: WorkflowWorkspaceQueryItem,
   workflowVersionId: string | undefined,
