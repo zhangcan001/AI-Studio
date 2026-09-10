@@ -93,6 +93,33 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
   throw new Error("ASSET_VIDEO_LOCAL_IMPORT_CONTROLLER failed: AssetVideoBatchWorkspace must delegate local import commands");
 }
 
+const workflowWorkspaceSource = readFileSync(join(root, "src/features/workflows/WorkflowWorkspace.tsx"), "utf8");
+if (!workflowWorkspaceSource.includes("useWorkflowSmartImportController")) {
+  throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must delegate Smart Import session ownership to useWorkflowSmartImportController");
+}
+const smartImportStateMarkers = ["autoPlan", "autoImportError"];
+const smartImportStateLines = workflowWorkspaceSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && smartImportStateMarkers.some((marker) => line.includes(marker)));
+if (smartImportStateLines.length) {
+  throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must not own Smart Import session state");
+}
+const smartImportFunctionMarkers = [
+  "function smartImportWorkflow(",
+  "function resumeAutoImport(",
+  "function regenerateExistingRecipe(",
+  "function resolveAutoIssue(",
+  "function commitAnalyzedImport(",
+  "function openAdvancedImport(",
+  "function openExistingWorkflow(",
+  "function openStructuralVariantAsVersion(",
+];
+if (smartImportFunctionMarkers.some((marker) => workflowWorkspaceSource.includes(marker))) {
+  throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must delegate Smart Import actions");
+}
+
+console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
+
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
 console.log(`RPC_PARITY=PASS (${frontendCommands.size} frontend commands checked)`);

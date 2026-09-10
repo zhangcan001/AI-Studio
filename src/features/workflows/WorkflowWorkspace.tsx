@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createGeneration, getProjectWorkflowConfig, listRuntimeProfiles } from "../../services/tauriClient";
 import {
-  analyzeWorkflowImport,
   checkOnboardingCapability,
   cleanWorkflowStaging,
   commitWorkflowImport,
@@ -21,7 +20,6 @@ import {
   recheckAllWorkflowCapabilities,
   removeWorkflow,
   renameWorkflow,
-  rerecognizeWorkflow,
   removeOnboardingInputMapping,
   restoreWorkflowVersion,
   restoreWorkflow,
@@ -37,11 +35,7 @@ import {
 import { useWorkflowOnboardingStore, type WorkflowOnboardingStep } from "../../stores/workflowOnboardingStore";
 import type {
   WorkflowFieldType,
-  WorkflowAutoIssueCandidateView,
-  WorkflowAutoIssueView,
-  WorkflowAutoOnboardingPlanView,
   WorkflowDeletionInspection,
-  WorkflowImportCommitAction,
   WorkflowInputView,
   WorkflowNodeView,
   WorkflowOnboardingDraftView,
@@ -57,11 +51,10 @@ import type {
 import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import type { RuntimeParameterProfile } from "../../types/settings";
-import { formatUiError, toUserMessage } from "../../i18n/errorMessages";
+import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { WorkflowImportController } from "./WorkflowImportController";
-import { workflowImportFormat } from "./WorkflowSmartImport";
-import type { WorkflowImportErrorView } from "./WorkflowImportIssues";
+import { useWorkflowSmartImportController } from "./hooks/useWorkflowSmartImportController";
 import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
 import {
   normalizeWorkspaceItems,
@@ -83,12 +76,6 @@ interface Props {
   onUseInProject: (workflowId: string, recipeId: string) => Promise<void>;
   onOpenProjectSettings?: () => void;
   onOpenTask?: (taskId: string) => void;
-}
-
-function nextWorkflowVersion(value: string): string {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
-  if (!match) return "1.0.1";
-  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
 }
 
 const steps: Array<{ value: WorkflowOnboardingStep; label: string }> = [
@@ -166,30 +153,6 @@ interface WorkflowDeletionTarget {
   mode: WorkflowDeletionMode;
 }
 
-
-function workflowImportErrorView(error: unknown): WorkflowImportErrorView {
-  const formatted = formatUiError(error);
-  const haystack = `${formatted.code ?? ""} ${formatted.technicalMessage}`.toUpperCase();
-  if (/INVALID[_\s-]*JSON|JSON[_\s-]*(PARSE|INVALID)|MALFORMED[_\s-]*JSON/.test(haystack)) {
-    return { kind: "INVALID_JSON", message: "无法读取这个文件，它不是有效的 JSON。" };
-  }
-  if (/UI[_\s-]*(FORMAT|WORKFLOW)|WORKFLOW[_\s-]*UI|UNSUPPORTED[_\s-]*UI/.test(haystack)) {
-    return { kind: "UI_FORMAT", message: "检测到 ComfyUI 普通工作流 JSON，但这个格式不能安全地直接添加。" };
-  }
-  if (/\bUNKNOWN\b|UNRECOGNIZED|WORKFLOW_NOT_API_FORMAT/.test(haystack)) {
-    return { kind: "UNKNOWN_FORMAT", message: "这个 JSON 不是可识别的 ComfyUI 工作流。" };
-  }
-  return {
-    kind: "IMPORT_FAILED",
-    message: formatted.message === "操作失败，请查看技术详情。"
-      ? "工作流导入未完成，请查看详细原因后重试。"
-      : formatted.message,
-    code: formatted.code,
-    technicalMessage: formatted.technicalMessage,
-  };
-}
-
-
 export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalogChanged, onOpenStudio, onUseInProject, onOpenProjectSettings, onOpenTask }: Props) {
   const [items, setItems] = useState<WorkflowWorkspaceItem[]>([]);
   const [staging, setStaging] = useState<{ stagingId: string; status: string; inUse: boolean }[]>([]);
@@ -205,8 +168,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [outputDraft, setOutputDraft] = useState<OutputDraft>(createDefaultOutputDraft);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
   const [published, setPublished] = useState<{ workflowId: string; recipeId: string }>();
-  const [autoPlan, setAutoPlan] = useState<WorkflowAutoOnboardingPlanView>();
-  const [autoImportError, setAutoImportError] = useState<WorkflowImportErrorView>();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [parameterDraft, setParameterDraft] = useState<WorkflowOnboardingDraftView>();
   const [parameterItem, setParameterItem] = useState<WorkflowProductionWorkspaceView>();
@@ -296,6 +257,34 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     return () => { active = false; };
   }, []);
 
+  const discardReplacedDraft = async (previousDraftId: string | undefined, nextDraftId?: string) => {
+    if (!previousDraftId || previousDraftId === nextDraftId) return;
+    try {
+      await discardOnboarding(previousDraftId);
+    } catch {
+      // A published or already discarded draft is safe to replace locally.
+    }
+  };
+
+  const smartImportController = useWorkflowSmartImportController({
+    workspaceItems: items,
+    importBusyRef,
+    onLoadWorkspace: loadWorkspace,
+    onCatalogChanged,
+    onDiscardReplacedDraft: discardReplacedDraft,
+    onResetImportView: () => {
+      setPublished(undefined);
+      setShowAdvanced(false);
+    },
+    onCloseAdvanced: () => setShowAdvanced(false),
+    onAdvancedRequested: (nextDraft) => {
+      if (nextDraft) setDraft(nextDraft);
+      setShowAdvanced(true);
+    },
+    onPublished: setPublished,
+    onOpenStudio,
+  });
+
   useEffect(() => {
     if (!draft) {
       setMetadataDraft(undefined);
@@ -317,22 +306,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     setPublished(undefined);
   }, [draft?.draftId]);
 
-  async function discardReplacedDraft(previousDraftId: string | undefined, nextDraftId?: string) {
-    if (!previousDraftId || previousDraftId === nextDraftId) return;
-    try {
-      await discardOnboarding(previousDraftId);
-    } catch {
-      // A published or already discarded draft is safe to replace locally.
-    }
-  }
-
   function resetImportViewForNewWorkflow() {
     reset();
     setLoading(true);
-    setAutoPlan(undefined);
-    setAutoImportError(undefined);
-    setShowAdvanced(false);
-    setPublished(undefined);
+    smartImportController.resetSession();
   }
 
   async function returnToWorkflowList() {
@@ -349,10 +326,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       }
     }
     reset();
-    setAutoPlan(undefined);
-    setAutoImportError(undefined);
-    setShowAdvanced(false);
-    setPublished(undefined);
+    smartImportController.resetSession();
   }
 
   async function importWorkflow(existingWorkflowId?: string) {
@@ -365,8 +339,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       if (imported) {
         await discardReplacedDraft(previousDraftId, imported.draftId);
         resetImportViewForNewWorkflow();
-        setAutoPlan(undefined);
-        setAutoImportError(undefined);
         setShowAdvanced(true);
         setDraft(imported);
         const validation = imported.validation;
@@ -388,64 +360,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     } catch (importError: unknown) {
       await discardReplacedDraft(previousDraftId);
       reset();
-      setPublished(undefined);
-      setAutoPlan(undefined);
-      setAutoImportError(undefined);
-      setShowAdvanced(false);
+      smartImportController.resetSession();
       setError(toUserMessage(importError));
-    } finally {
-      setLoading(false);
-      importBusyRef.current = false;
-    }
-  }
-
-  async function smartImportWorkflow(existingWorkflowId?: string) {
-    if (loading || importBusyRef.current) return;
-    const previousDraftId = draft?.draftId;
-    importBusyRef.current = true;
-    setLoading(true);
-    try {
-      const plan = await analyzeWorkflowImport(existingWorkflowId);
-      if (plan) {
-        await discardReplacedDraft(previousDraftId, plan.draftId);
-        resetImportViewForNewWorkflow();
-        // Analysis is read-only. A publish result is never accepted from the
-        // formal analyze endpoint; only commitAnalyzedImport may publish.
-        const analyzedPlan = plan.published || plan.state === "AUTO_PUBLISHED"
-          ? {
-              ...plan,
-              state: "NEEDS_REVIEW" as const,
-              commitRequired: true,
-              published: undefined,
-              message: "识别已完成，请明确点击添加工作流后写入。",
-            }
-          : plan;
-        setAutoPlan(analyzedPlan);
-        setShowAdvanced(false);
-        const detectedFormat = workflowImportFormat(analyzedPlan);
-        if (analyzedPlan.draftId && (!detectedFormat || detectedFormat === "API")) {
-          try {
-            const importedDraft = await getOnboardingDraft(analyzedPlan.draftId);
-            setDraft(importedDraft);
-          } catch (draftError) {
-            throw draftError;
-          }
-        } else if (analyzedPlan.draftId && detectedFormat && detectedFormat !== "API") {
-          await discardOnboarding(analyzedPlan.draftId).catch(() => undefined);
-        }
-        setNotice(undefined);
-      } else {
-        await discardReplacedDraft(previousDraftId);
-        resetImportViewForNewWorkflow();
-      }
-    } catch (importError: unknown) {
-      await discardReplacedDraft(previousDraftId);
-      reset();
-      setPublished(undefined);
-      setAutoPlan(undefined);
-      setShowAdvanced(false);
-      setError(undefined);
-      setAutoImportError(workflowImportErrorView(importError));
     } finally {
       setLoading(false);
       importBusyRef.current = false;
@@ -620,11 +536,11 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   }
 
   async function restoreExistingArchivedWorkflow() {
-    if (!autoPlan?.existingWorkflowId) return;
+    if (!smartImportController.plan?.existingWorkflowId) return;
     const existing = items.find((item) =>
       item.archived
-      && item.workflowId === autoPlan.existingWorkflowId
-      && (!autoPlan.existingWorkflowVersion || item.workflowVersion === autoPlan.existingWorkflowVersion),
+      && item.workflowId === smartImportController.plan?.existingWorkflowId
+      && (!smartImportController.plan?.existingWorkflowVersion || item.workflowVersion === smartImportController.plan?.existingWorkflowVersion),
     );
     if (existing) {
       await restoreArchivedWorkflow(existing);
@@ -675,18 +591,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
   }
 
-  async function reidentifyWorkflow(item: WorkflowProductionWorkspaceView) {
-    if (!item.workflowId || !item.workflowVersion || item.archived) return;
-    await runDraftAction(async () => {
-      const nextPlan = await rerecognizeWorkflow(item.workflowId!);
-      setAutoPlan(nextPlan);
-      setAutoImportError(undefined);
-      setShowAdvanced(false);
-      setDraft(await getOnboardingDraft(nextPlan.draftId));
-      setNotice(nextPlan.message || "已重新识别当前版本；请明确选择添加新 Recipe 后再写入。");
-    });
-  }
-
   async function repairBuiltinPackage(item: WorkflowProductionWorkspaceView) {
     if (!item.builtin || !item.diagnostics.some((diagnostic) => diagnostic.code === "BUILTIN_PACKAGE_HASH_MISMATCH")) return;
     try {
@@ -716,7 +620,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     if (!item.workflowVersionId) return;
     try {
       const duplicated = await duplicateWorkflowRecipe(item.workflowVersionId, item.recipes[item.recipes.length - 1]?.recipeId);
-      setAutoPlan(undefined);
+      smartImportController.resetSession();
       setShowAdvanced(true);
       setDraft(duplicated);
       setStep("inputs");
@@ -999,7 +903,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     await runDraftAction(async () => {
       await discardOnboarding(draft.draftId);
       reset();
-      setAutoPlan(undefined);
+      smartImportController.resetSession();
       setShowAdvanced(false);
       setNotice("草稿已丢弃。");
     });
@@ -1072,166 +976,6 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     });
   }
 
-  async function resumeAutoImport() {
-    if (!autoPlan) return;
-    await runDraftAction(async () => {
-      const nextPlan = await analyzeWorkflowImport(autoPlan.existingWorkflowId);
-      if (!nextPlan) return;
-      setAutoPlan(nextPlan);
-      if (nextPlan.draftId) setDraft(await getOnboardingDraft(nextPlan.draftId));
-      setNotice(nextPlan.message || "识别已刷新，请确认后再添加。");
-    });
-  }
-
-  async function regenerateExistingRecipe() {
-    if (!autoPlan?.existingWorkflowId || !autoPlan.existingWorkflowVersion) return;
-    await runDraftAction(async () => {
-      const nextPlan = autoPlan.draftId
-        ? autoPlan
-        : await rerecognizeWorkflow(autoPlan.existingWorkflowId!);
-      if (nextPlan.draftId !== autoPlan.draftId) {
-        setAutoPlan(nextPlan);
-      }
-      const result = await commitWorkflowImport({
-        draftId: nextPlan.draftId,
-        action: "NEW_RECIPE",
-        workflowId: nextPlan.existingWorkflowId,
-        setCurrent: false,
-      });
-      const workflowId = result.workflowId ?? nextPlan.existingWorkflowId!;
-      const recipeId = result.recipeId ?? nextPlan.metadata.recipeId;
-      setPublished({ workflowId, recipeId });
-      setAutoPlan({
-        ...nextPlan,
-        state: "AUTO_PUBLISHED",
-        commitRequired: false,
-        published: result,
-      });
-      setNotice(`已为现有工作流新增 Recipe ${result.recipeVersion ?? ""}。原工作流版本和旧 Recipe 保持不变。`);
-      await loadWorkspace("refresh");
-      await onCatalogChanged();
-    });
-  }
-
-  async function resolveAutoIssue(issue: WorkflowAutoIssueView, candidate: WorkflowAutoIssueCandidateView) {
-    if (!autoPlan || !draft) return;
-    await runDraftAction(async () => {
-      if (issue.code === "AMBIGUOUS_OUTPUT" && candidate.nodeId && candidate.outputType) {
-        await setOnboardingOutputMapping(autoPlan.draftId, {
-          outputId: candidate.outputId ?? "output_1",
-          label: candidate.label,
-          type: candidate.outputType as "image" | "video",
-          nodeId: candidate.nodeId,
-          required: true,
-        });
-      } else if (candidate.nodeId && candidate.inputName) {
-        const node = draft.nodes.find((item) => item.nodeId === candidate.nodeId);
-        const input = node?.inputs.find((item) => item.name === candidate.inputName);
-        if (!input) return;
-        const base = defaultMapping(candidate.nodeId, input);
-        const fieldType = candidate.fieldType && fieldTypes.includes(candidate.fieldType as WorkflowFieldType)
-          ? candidate.fieldType as WorkflowFieldType
-          : base.fieldType;
-        await setOnboardingInputMapping(autoPlan.draftId, {
-          semanticKey: issue.field ?? base.semanticKey,
-          fieldType,
-          label: base.label,
-          required: base.required,
-          defaultValue: optionalText(base.defaultValue),
-          minValue: optionalText(base.minValue),
-          maxValue: optionalText(base.maxValue),
-          step: input.numericStep,
-          minItems: optionalNumber(base.minItems),
-          maxItems: optionalNumber(base.maxItems),
-          itemIndex: optionalNumber(base.itemIndex),
-          targetNode: candidate.nodeId,
-          targetInput: candidate.inputName,
-        });
-      }
-      setNotice("已记录这项选择，请重新分析工作流后再添加。");
-    });
-  }
-
-  async function commitAnalyzedImport(action: WorkflowImportCommitAction = "NEW_WORKFLOW") {
-    if (!autoPlan || !autoPlan.draftId) return;
-    await runDraftAction(async () => {
-      const result = await commitWorkflowImport({
-        draftId: autoPlan.draftId,
-        action,
-        workflowId: action === "NEW_VERSION" || action === "NEW_RECIPE" ? autoPlan.existingWorkflowId : undefined,
-        setCurrent: action === "NEW_VERSION",
-      });
-      const publishedResult = result as typeof result & { workflowId?: string; recipeId?: string };
-      const workflowId = publishedResult.workflowId ?? autoPlan.existingWorkflowId ?? autoPlan.metadata.workflowId;
-      const recipeId = publishedResult.recipeId ?? autoPlan.metadata.recipeId;
-      setPublished({ workflowId, recipeId });
-      setAutoPlan({
-        ...autoPlan,
-        state: "AUTO_PUBLISHED",
-        commitRequired: false,
-        published: {
-          ...result,
-          workflowId,
-          recipeId,
-          workflowVersion: result.workflowVersion ?? autoPlan.metadata.workflowVersion,
-          packageName: result.packageName ?? autoPlan.metadata.name,
-          workflowSha256: result.workflowSha256 ?? autoPlan.workflowSha256,
-          refreshed: result.refreshed ?? { packagesFound: 0, valid: 0, invalid: 0, inserted: 0, reused: 0, errors: [] },
-        },
-      });
-      setNotice(action === "NEW_VERSION" ? "已添加为新版本；已有项目绑定保持不变。" : "工作流已添加到工作流库。只有明确点击添加后才会写入。" );
-      await loadWorkspace("refresh");
-      await onCatalogChanged();
-    });
-  }
-
-  async function openAdvancedImport() {
-    if (autoPlan) {
-      try {
-        setDraft(await getOnboardingDraft(autoPlan.draftId));
-      } catch (actionError: unknown) {
-        setError(toUserMessage(actionError));
-      }
-    }
-    setShowAdvanced(true);
-  }
-
-  async function openStructuralVariantAsVersion() {
-    if (!autoPlan?.existingWorkflowId || !autoPlan.existingWorkflowVersion) return;
-    await runDraftAction(async () => {
-      const currentDraft = draft ?? await getOnboardingDraft(autoPlan.draftId);
-      const nextDraft = await setOnboardingMetadata(autoPlan.draftId, {
-        workflowId: autoPlan.existingWorkflowId,
-        name: currentDraft.manifest.name,
-        workflowVersion: nextWorkflowVersion(autoPlan.existingWorkflowVersion!),
-        recipeVersion: "1.0.0",
-        category: currentDraft.manifest.category,
-        mode: currentDraft.manifest.mode,
-      });
-      setDraft(nextDraft);
-      setShowAdvanced(true);
-      setNotice("已选择添加为现有工作流的新版本。请在高级编辑中确认映射后发布；旧版本不会被覆盖。");
-    });
-  }
-
-  async function openExistingWorkflow() {
-    if (!autoPlan?.existingWorkflowId) return;
-    const existing = items.find((item) =>
-      item.workflowId === autoPlan.existingWorkflowId
-      && (!autoPlan.existingWorkflowVersion || item.workflowVersion === autoPlan.existingWorkflowVersion),
-    );
-    const currentVersion = existing?.versions.find((version) => version.workflowVersionId === existing.currentVersionId)
-      ?? existing?.versions[0];
-    const recipe = existing?.currentRecipe
-      ?? currentVersion?.recipes?.[currentVersion.recipes.length - 1]
-      ?? existing?.recipes[existing.recipes.length - 1];
-    if (!recipe) {
-      setNotice("该工作流已经导入，请在工作流列表中查看现有版本。");
-      return;
-    }
-    await onOpenStudio(autoPlan.existingWorkflowId, recipe.recipeId);
-  }
-
   const outputCandidates = useMemo(
     () => draft?.nodes.filter((node) => node.isOutputNode) ?? [],
     [draft],
@@ -1261,7 +1005,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           checkingAll={checkingAll}
           importBusy={importBusyRef.current}
           onRefresh={() => void loadWorkspace("refresh")}
-          onAdd={() => void smartImportWorkflow()}
+          onAdd={() => void smartImportController.smartImport()}
           onCheckAll={() => void recheckAllVersions()}
           onManualImport={() => void importWorkflow()}
           onImportBackup={() => void importBackup()}
@@ -1300,22 +1044,22 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
 
       <WorkflowImportController
-        plan={autoPlan}
-        importError={autoImportError}
+        plan={smartImportController.plan}
+        importError={smartImportController.importError}
         draft={draft}
         projectId={projectId}
         loading={loading}
-        onResolve={(issue, candidate) => void resolveAutoIssue(issue, candidate)}
-        onResume={() => void resumeAutoImport()}
-        onOpenAdvanced={() => void openAdvancedImport()}
-        onOpenExisting={() => void openExistingWorkflow()}
-        onOpenExistingVersion={() => void openStructuralVariantAsVersion()}
+        onResolve={(issue, candidate) => void smartImportController.resolveIssue(issue, candidate)}
+        onResume={() => void smartImportController.resume()}
+        onOpenAdvanced={() => void smartImportController.openAdvanced()}
+        onOpenExisting={() => void smartImportController.openExisting()}
+        onOpenExistingVersion={() => void smartImportController.openExistingVersion()}
         onUseInProject={(workflowId, recipeId) => void onUseInProject(workflowId, recipeId)}
-        onRegenerateRecipe={() => void regenerateExistingRecipe()}
+        onRegenerateRecipe={() => void smartImportController.regenerateRecipe()}
         onRestoreExisting={() => void restoreExistingArchivedWorkflow()}
-        onCommitImport={(action) => void commitAnalyzedImport(action)}
+        onCommitImport={(action) => void smartImportController.commit(action)}
         onOpenStudio={(workflowId, recipeId) => void onOpenStudio(workflowId, recipeId)}
-        onRetry={() => void smartImportWorkflow()}
+        onRetry={() => void smartImportController.smartImport()}
         onReturnToList={() => void returnToWorkflowList()}
       />
 
@@ -1339,7 +1083,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onInspectForDeletion={(item) => void inspectForDeletion(item)}
         onRestore={(item) => void restoreArchivedWorkflow(item)}
         onRename={openRename}
-        onReidentify={(item) => void reidentifyWorkflow(item)}
+        onReidentify={(item) => void smartImportController.reidentify(item)}
         onRecheck={(item) => void recheckVersion(item)}
         onDuplicateRecipe={(item) => void duplicateRecipe(item)}
         onOpenParameters={(item) => void openParameterExposure(item)}
