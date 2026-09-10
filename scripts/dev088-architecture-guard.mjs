@@ -224,6 +224,20 @@ if (generationExperimentFunctionMarkers.some((marker) => generationStudioSource.
   throw new Error("GENERATION_EXPERIMENT_CONTROLLER failed: GenerationStudio must delegate experiment lifecycle actions");
 }
 
+if (!generationStudioSource.includes("useGenerationProjectTemplateController")) {
+  throw new Error("GENERATION_PROJECT_TEMPLATE_CONTROLLER failed: GenerationStudio must delegate project template lifecycle ownership to useGenerationProjectTemplateController");
+}
+const generationProjectTemplateStateMarkers = ["templateEditorOpen", "templateName", "templateDescription", "templateSaving", "templateError"];
+const generationProjectTemplateStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && generationProjectTemplateStateMarkers.some((marker) => line.includes(marker)));
+if (generationProjectTemplateStateLines.length) {
+  throw new Error("GENERATION_PROJECT_TEMPLATE_CONTROLLER failed: GenerationStudio must not own project template lifecycle state");
+}
+if (generationStudioSource.includes("function saveProjectTemplate(") || generationStudioSource.includes("createProjectTemplate(")) {
+  throw new Error("GENERATION_PROJECT_TEMPLATE_CONTROLLER failed: GenerationStudio must delegate project template persistence");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -256,6 +270,7 @@ console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);
 console.log(`GENERATION_BATCH_CONTROLLER=PASS`);
 console.log(`GENERATION_EXPERIMENT_CONTROLLER=PASS`);
+console.log(`GENERATION_PROJECT_TEMPLATE_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
