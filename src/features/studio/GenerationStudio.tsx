@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getPromptLibraryEntry,
-  getProjectWorkflowConfig,
   refreshWorkflowLibrary,
 } from "../../services/tauriClient";
 import { useStudioStore } from "../../stores/studioStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ProductionAdmissionStatus } from "../../types/productionQueue";
-import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, workflowDisplayName } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "./DynamicFormRenderer";
@@ -28,7 +26,6 @@ import { PromptLibraryPanel } from "../prompts/PromptLibraryPanel";
 import type { PromptEntryView } from "../../types/prompt";
 import { applyPromptSnippetToStudio, applyPromptVersionToStudio } from "../prompts/promptLibrary";
 import { CreationDashboard } from "../production/CreationDashboard";
-import type { RecentWorkflowRecord } from "../production/productionUx";
 import { KERA2_WORKFLOW_ID, kera2RecipeContract } from "../runtime/productRuntimeScope";
 import { ResolutionControl } from "../runtime/ResolutionControl";
 import { KREA2_RESOLUTION_PRESETS, resolutionPresetsForRecipe } from "../runtime/resolutionPresets";
@@ -39,14 +36,10 @@ import { useGenerationBatchController } from "./hooks/useGenerationBatchControll
 import { useGenerationExperimentController } from "./hooks/useGenerationExperimentController";
 import { useGenerationProjectTemplateController } from "./hooks/useGenerationProjectTemplateController";
 import { useGenerationAssetIntentController } from "./hooks/useGenerationAssetIntentController";
+import { useGenerationWorkflowSelectionController } from "./hooks/useGenerationWorkflowSelectionController";
 import {
   filterImageRecipes,
-  findRecipe,
   imageRecipeCapability,
-  migrateGenerationValues,
-  recipeRef,
-  sameRecipeRef,
-  type SelectedRecipeRef,
 } from "../runtime/workflowCapabilities";
 
 function fieldTypeLabel(type: RecipeField["type"]): string {
@@ -107,34 +100,10 @@ export function GenerationStudio({
     () => filterImageRecipes(catalog),
     [catalog],
   );
-  const [manualSelection, setManualSelection] = useState<SelectedRecipeRef | undefined>(
-    undefined,
-  );
-  const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
-  const recommendedWorkflow = useMemo(
-    () => productCatalog.find((recipe) => recipe.workflowId === KERA2_WORKFLOW_ID && kera2RecipeContract(recipe).ok)
-      ?? productCatalog[0],
-    [productCatalog],
-  );
-  const manualWorkflow = useMemo(
-    () => findRecipe(productCatalog, manualSelection),
-    [manualSelection, productCatalog],
-  );
-  const projectDefaultWorkflow = useMemo(
-    () => projectWorkflowConfig?.imageDefault?.available
-      ? findRecipe(productCatalog, projectWorkflowConfig.imageDefault)
-      : undefined,
-    [productCatalog, projectWorkflowConfig],
-  );
-  const staleProjectDefault = Boolean(
-    projectWorkflowConfig?.imageDefault
-      && (!projectWorkflowConfig.imageDefault.available || !projectDefaultWorkflow),
-  );
   const values = useStudioStore((state) => state.values);
   const draftDirty = useStudioStore((state) => state.draftDirty);
   const validationErrors = useStudioStore((state) => state.validationErrors);
   const reuseProvenance = useStudioStore((state) => state.reuseProvenance);
-  const setSelectedWorkflow = useStudioStore((state) => state.setSelectedWorkflow);
   const setValue = useStudioStore((state) => state.setValue);
   const removeValue = useStudioStore((state) => state.removeValue);
   const setValidationErrors = useStudioStore((state) => state.setValidationErrors);
@@ -186,35 +155,7 @@ export function GenerationStudio({
     setNotice(null);
     setStudioMode("batch");
     setDashboardPromptTargetFieldKey("");
-    setManualSelection(undefined);
-    setProjectWorkflowConfig(undefined);
-    void getProjectWorkflowConfig(projectId)
-      .then(setProjectWorkflowConfig)
-      .catch(() => setProjectWorkflowConfig({ projectId, videoModeOverrides: [] }));
   }, [projectId]);
-
-  useEffect(() => {
-    const explicitDraft = selectedWorkflow
-      ? productCatalog.find((recipe) => (
-        recipe.workflowVersionId === selectedWorkflow.workflowVersionId
-        && recipe.recipeId === selectedWorkflow.recipeId
-      ))
-      : undefined;
-    const next = explicitDraft ?? manualWorkflow ?? projectDefaultWorkflow ?? recommendedWorkflow;
-    if (
-      next?.workflowVersionId !== selectedWorkflow?.workflowVersionId ||
-      next?.recipeId !== selectedWorkflow?.recipeId
-    ) {
-      setSelectedWorkflow(next);
-      setMissingAssetFields(new Set());
-    }
-  }, [manualWorkflow, productCatalog, projectDefaultWorkflow, recommendedWorkflow, selectedWorkflow, setSelectedWorkflow]);
-
-  useEffect(() => {
-    if (!manualSelection || manualWorkflow || !productCatalog.length) return;
-    setManualSelection(undefined);
-    setNotice("本次手动选择的工作流当前不可用，已切换到项目默认或推荐工作流。");
-  }, [manualSelection, manualWorkflow, productCatalog.length]);
 
   const hasUnsupportedField = useMemo(
     () => selectedWorkflow?.fields.some((field) => !["textarea", "integer", "number", "seed", "image", "images", "video", "audio", "videos", "audios"].includes(field.type)) ?? false,
@@ -297,6 +238,22 @@ export function GenerationStudio({
     onClearMissingAssetFields: () => setMissingAssetFields(new Set()),
   });
 
+  const resetAfterWorkflowChange = () => {
+    setMissingAssetFields(new Set());
+    presetController.setPresetEditorOpen(false);
+    experimentController.clearPromptExperimentDimensions();
+    setDashboardPromptTargetFieldKey("");
+  };
+
+  const workflowSelectionController = useGenerationWorkflowSelectionController({
+    projectId,
+    productCatalog,
+    selectedWorkflow,
+    draftDirty,
+    onNotice: setNotice,
+    onWorkflowChanged: resetAfterWorkflowChange,
+  });
+
   const projectTemplateController = useGenerationProjectTemplateController({
     projectId,
     selectedWorkflow,
@@ -345,48 +302,6 @@ export function GenerationStudio({
     if (!selectedWorkflow) return;
     useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
     setMissingAssetFields(new Set());
-  }
-
-  function selectWorkflowFromUx(workflow: RecipeViewModel) {
-    if (workflow.workflowVersionId === selectedWorkflow?.workflowVersionId && workflow.recipeId === selectedWorkflow.recipeId) return;
-    if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认切换工作流吗？")) return;
-    setManualSelection(recipeRef(workflow));
-    const currentState = useStudioStore.getState();
-    if (currentState.selectedWorkflow) {
-      currentState.loadDraft(workflow, migrateGenerationValues(currentState.selectedWorkflow, workflow, currentState.values));
-    } else {
-      setSelectedWorkflow(workflow);
-    }
-    setMissingAssetFields(new Set());
-    presetController.setPresetEditorOpen(false);
-    experimentController.clearPromptExperimentDimensions();
-    setDashboardPromptTargetFieldKey("");
-  }
-
-  function restoreRecommendedWorkflow() {
-    if (!recommendedWorkflow) return;
-    if (draftDirty && !window.confirm("当前 Studio 草稿有未保存修改，确认恢复推荐工作流吗？")) return;
-    setManualSelection(undefined);
-    const fallbackWorkflow = projectDefaultWorkflow ?? recommendedWorkflow;
-    if (!fallbackWorkflow) return;
-    const currentState = useStudioStore.getState();
-    if (currentState.selectedWorkflow) {
-      currentState.loadDraft(fallbackWorkflow, migrateGenerationValues(currentState.selectedWorkflow, fallbackWorkflow, currentState.values));
-    } else {
-      setSelectedWorkflow(fallbackWorkflow);
-    }
-    setMissingAssetFields(new Set());
-    presetController.setPresetEditorOpen(false);
-    experimentController.clearPromptExperimentDimensions();
-    setDashboardPromptTargetFieldKey("");
-  }
-
-  function continueRecentWorkflow(_record: RecentWorkflowRecord, recipe?: RecipeViewModel) {
-    if (!recipe) {
-      setNotice("历史工作流当前不可用，无法创建新的创作入口。");
-      return;
-    }
-    selectWorkflowFromUx(recipe);
   }
 
   async function useRecentPrompt(entry: PromptEntryView, fieldKey: string) {
@@ -451,13 +366,13 @@ export function GenerationStudio({
           stage="image"
           candidates={productCatalog}
           selected={selectedWorkflow}
-          recommended={projectDefaultWorkflow ?? recommendedWorkflow}
-          selectionSource={selectedWorkflow && manualSelection && sameRecipeRef(selectedWorkflow, manualSelection) ? "manual" : selectedWorkflow && projectDefaultWorkflow && sameRecipeRef(selectedWorkflow, projectDefaultWorkflow) ? "project_default" : selectedWorkflow && recommendedWorkflow && sameRecipeRef(selectedWorkflow, recommendedWorkflow) ? "recommended" : "compatible"}
-          onSelect={selectWorkflowFromUx}
-          onRestoreRecommendation={restoreRecommendedWorkflow}
+          recommended={workflowSelectionController.projectDefaultWorkflow ?? workflowSelectionController.recommendedWorkflow}
+          selectionSource={workflowSelectionController.selectionSource}
+          onSelect={workflowSelectionController.selectWorkflow}
+          onRestoreRecommendation={workflowSelectionController.restoreRecommendedWorkflow}
           onOpenWorkflows={onOpenWorkflows ? () => onOpenWorkflows() : undefined}
         />
-        {staleProjectDefault && <p className="settings-warning" role="alert">项目图片默认工作流已失效，当前仅临时使用兼容/推荐工作流；请在项目设置中重新选择或清除绑定。</p>}
+        {workflowSelectionController.staleProjectDefault && <p className="settings-warning" role="alert">项目图片默认工作流已失效，当前仅临时使用兼容/推荐工作流；请在项目设置中重新选择或清除绑定。</p>}
         {selectedWorkflow && (
           <>
             {studioMode !== "batch" && <>
@@ -476,7 +391,7 @@ export function GenerationStudio({
               promptTargetFieldKey={dashboardPromptTargetFieldKey}
               onPromptTargetFieldChange={setDashboardPromptTargetFieldKey}
               onUsePrompt={(entry, fieldKey) => void useRecentPrompt(entry, fieldKey)}
-              onContinueWorkflow={continueRecentWorkflow}
+              onContinueWorkflow={workflowSelectionController.continueRecentWorkflow}
               onFocusQueue={(batchId) => { setStudioMode("batch"); experimentController.focusBatch(batchId); }}
               onAdmissionChanged={onProductionAdmissionChanged}
             />

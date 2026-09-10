@@ -255,6 +255,31 @@ if (/useState\s*<[^>]*PendingStudioAssetIntent|\[\s*pendingAssetIntent\s*,/.test
   throw new Error("GENERATION_ASSET_INTENT_CONTROLLER failed: controller must keep pendingAssetIntent authority in useStudioStore");
 }
 
+if (!generationStudioSource.includes("useGenerationWorkflowSelectionController")) {
+  throw new Error("GENERATION_WORKFLOW_SELECTION_CONTROLLER failed: GenerationStudio must delegate workflow selection ownership to useGenerationWorkflowSelectionController");
+}
+const generationWorkflowSelectionStateMarkers = ["manualSelection", "projectWorkflowConfig"];
+const generationWorkflowSelectionStateLines = generationStudioSource
+  .split(/\r?\n/)
+  .filter((line) => line.includes("useState") && generationWorkflowSelectionStateMarkers.some((marker) => line.includes(marker)));
+if (generationWorkflowSelectionStateLines.length) {
+  throw new Error("GENERATION_WORKFLOW_SELECTION_CONTROLLER failed: GenerationStudio must not own workflow selection state");
+}
+const generationWorkflowSelectionFunctionMarkers = [
+  "function selectWorkflowFromUx(",
+  "function restoreRecommendedWorkflow(",
+];
+if (generationWorkflowSelectionFunctionMarkers.some((marker) => generationStudioSource.includes(marker))) {
+  throw new Error("GENERATION_WORKFLOW_SELECTION_CONTROLLER failed: GenerationStudio must delegate workflow selection actions");
+}
+if (generationStudioSource.includes("getProjectWorkflowConfig(")) {
+  throw new Error("GENERATION_WORKFLOW_SELECTION_CONTROLLER failed: GenerationStudio must not load project workflow config directly");
+}
+const workflowSelectionControllerSource = readFileSync(join(root, "src/features/studio/hooks/useGenerationWorkflowSelectionController.ts"), "utf8");
+if (/useState\s*<[^>]*RecipeViewModel|\[\s*selectedWorkflow\s*,/.test(workflowSelectionControllerSource)) {
+  throw new Error("GENERATION_WORKFLOW_SELECTION_CONTROLLER failed: controller must keep selectedWorkflow authority in useStudioStore");
+}
+
 if (!workflowWorkspaceSource.includes("useWorkflowAdvancedOnboardingController")) {
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding ownership to useWorkflowAdvancedOnboardingController");
 }
@@ -289,6 +314,7 @@ console.log(`GENERATION_BATCH_CONTROLLER=PASS`);
 console.log(`GENERATION_EXPERIMENT_CONTROLLER=PASS`);
 console.log(`GENERATION_PROJECT_TEMPLATE_CONTROLLER=PASS`);
 console.log(`GENERATION_ASSET_INTENT_CONTROLLER=PASS`);
+console.log(`GENERATION_WORKFLOW_SELECTION_CONTROLLER=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);
