@@ -579,6 +579,10 @@ export function setWorkflowCurrentVersion(workflowId: string, workflowVersionId:
   return invoke<WorkflowRegistryMutationResult>("workflow_set_current_version", { workflowId, workflowVersionId });
 }
 
+export function promoteWorkflowRecipe(workflowVersionId: string, recipeId: string): Promise<WorkflowRegistryView> {
+  return invoke<WorkflowRegistryView>("workflow_promote_recipe", { workflowVersionId, recipeId });
+}
+
 export function removeWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
   return invoke<WorkflowRegistryMutationResult>("workflow_remove", { workflowId });
 }

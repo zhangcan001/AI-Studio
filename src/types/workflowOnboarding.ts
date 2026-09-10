@@ -369,6 +369,7 @@ export interface WorkflowRegistryRecipeView {
   version?: string;
   recipeVersion?: string;
   packageName?: string;
+  isPromoted?: boolean;
   packageStatus?: string;
   workflowSha256?: string;
   recipeSha256?: string;

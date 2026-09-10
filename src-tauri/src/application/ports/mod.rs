@@ -44,6 +44,7 @@ pub mod workflow_benchmark_repository;
 pub mod workflow_library_repository;
 pub mod workflow_library_source;
 pub mod workflow_package_store;
+pub mod workflow_recipe_promotion_repository;
 pub mod workflow_registry_repository;
 pub mod workflow_run_repository;
 pub mod workflow_runtime_artifact_repository;
@@ -150,6 +151,9 @@ pub use workflow_library_source::{
 pub use workflow_package_store::{
     WorkflowPackageBytes, WorkflowPackageQuarantineResult, WorkflowPackageStore,
     WorkflowPackageStoreError, WorkflowPurgeOperationEntry, WorkflowPurgeOperationRecord,
+};
+pub use workflow_recipe_promotion_repository::{
+    WorkflowRecipePromotionRecord, WorkflowRecipePromotionRepository,
 };
 pub use workflow_registry_repository::{
     WorkflowPurgeReferenceCounts, WorkflowRegistryRecord, WorkflowRegistryRepository,

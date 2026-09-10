@@ -141,7 +141,21 @@ if (parameterExposureFunctionMarkers.some((marker) => workflowWorkspaceSource.in
   throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure actions");
 }
 
+const workflowClientSource = readFileSync(join(root, "src/services/workflowClient.ts"), "utf8");
+const tauriClientSource = readFileSync(join(root, "src/services/tauriClient.ts"), "utf8");
 const generationStudioSource = readFileSync(join(root, "src/features/studio/GenerationStudio.tsx"), "utf8");
+if (!workflowWorkspaceSource.includes("promoteWorkflowRecipe(")
+  || !workflowClientSource.includes("promoteWorkflowRecipe")
+  || !tauriClientSource.includes('"workflow_promote_recipe"')) {
+  throw new Error("WORKFLOW_RECIPE_PROMOTION failed: promotion must be owned by WorkflowWorkspace through the typed workflow client");
+}
+const generationStudioPromotionMarkers = ["promoteWorkflowRecipe", "workflow_promote_recipe", "setPromotedRecipe"];
+const generationStudioPromotionOwnership = generationStudioPromotionMarkers
+  .filter((marker) => generationStudioSource.includes(marker));
+if (generationStudioPromotionOwnership.length) {
+  throw new Error("WORKFLOW_RECIPE_PROMOTION failed: GenerationStudio must not own recipe promotion");
+}
+
 if (!generationStudioSource.includes("useGenerationPresetController")) {
   throw new Error("GENERATION_PRESET_CONTROLLER failed: GenerationStudio must delegate preset lifecycle ownership to useGenerationPresetController");
 }
@@ -307,6 +321,7 @@ if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.i
 
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
+console.log(`WORKFLOW_RECIPE_PROMOTION=PASS`);
 console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);

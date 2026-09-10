@@ -140,6 +140,19 @@ pub async fn workflow_set_current_version(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_promote_recipe(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+    recipe_id: String,
+) -> Result<WorkflowRegistryView, AppError> {
+    state
+        .workflow_registry_service
+        .promote_recipe(&workflow_version_id, &recipe_id)
+        .await
+        .map_err(map_registry_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn workflow_remove(
     state: State<'_, AppState>,
     workflow_id: String,

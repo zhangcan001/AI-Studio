@@ -80,7 +80,7 @@ mod tests {
                'consistency_scope_reference_set_bindings', 'production_preparation_snapshots',
                'script_sources', 'script_import_drafts',
                'production_package_batch_bindings', 'project_workflow_bindings',
-               'workflow_runtime_artifacts')",
+               'workflow_runtime_artifacts', 'workflow_recipe_promotions')",
         )
         .fetch_one(pool)
         .await
@@ -96,13 +96,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 57);
+        assert_eq!(table_count(&pool).await, 58);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            29
+            30
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -136,6 +136,13 @@ mod tests {
         .await
         .expect("workflow version metadata should be readable");
         assert_eq!(workflow_version_columns, vec!["package_name"]);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_recipe_promotions",)
+                .fetch_one(&pool)
+                .await
+                .expect("promotion table should be readable"),
+            0
+        );
         let project_workflow_binding_columns = sqlx::query_scalar::<_, String>(
             "SELECT name FROM pragma_table_info('project_workflow_bindings') ORDER BY cid",
         )
@@ -262,7 +269,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 57);
+        assert_eq!(table_count(&second_pool).await, 58);
         second_pool.close().await;
     }
 

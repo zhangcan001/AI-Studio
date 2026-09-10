@@ -1,7 +1,8 @@
 use ai_studio_lib::application::{
     ports::{
-        WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
-        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+        WorkflowRecipePromotionRepository, WorkflowRuntimeArtifactRecord,
+        WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository,
+        WorkflowRuntimeStateRepository,
     },
     workflow_analysis_service::WorkflowAnalysisService,
     workflow_registry_service::WorkflowRegistryService,
@@ -9,7 +10,8 @@ use ai_studio_lib::application::{
 use ai_studio_lib::domain::WorkflowDocument;
 use ai_studio_lib::infrastructure::{
     database::{
-        initialize, SqliteProjectWorkflowBindingRepository, SqliteWorkflowRegistryRepository,
+        initialize, SqliteProjectWorkflowBindingRepository,
+        SqliteWorkflowRecipePromotionRepository, SqliteWorkflowRegistryRepository,
         SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
         SqliteWorkflowRuntimeStateRepository,
     },
@@ -236,7 +238,12 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
     let bindings: Arc<dyn ai_studio_lib::application::ports::ProjectWorkflowBindingRepository> =
         Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone()));
     let registry = WorkflowRegistryService::new(runtime, states, bindings, Arc::new(SystemClock))
-        .with_registry_repository(Arc::new(SqliteWorkflowRegistryRepository::new(pool)))
+        .with_registry_repository(Arc::new(SqliteWorkflowRegistryRepository::new(
+            pool.clone(),
+        )))
+        .with_recipe_promotion_repository(Arc::new(SqliteWorkflowRecipePromotionRepository::new(
+            pool.clone(),
+        )))
         .with_runtime_artifact_repository(Arc::new(artifacts));
 
     let views = registry.list().await.expect("registry list should succeed");
@@ -267,5 +274,65 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
             .package_name
             .as_deref(),
         Some("package-b")
+    );
+
+    let promotion_repository = SqliteWorkflowRecipePromotionRepository::new(pool);
+    promotion_repository
+        .promote("wfv_dev083_1", "rcp_dev083_1", Utc::now())
+        .await
+        .expect("historical recipe promotion should persist");
+    let views = registry
+        .list()
+        .await
+        .expect("promoted registry list should succeed");
+    assert_eq!(views[0].current_version_id.as_deref(), Some("wfv_dev083_2"));
+    assert_eq!(
+        views[0]
+            .current_recipe
+            .as_ref()
+            .map(|recipe| recipe.recipe_id.as_str()),
+        Some("rcp_dev083_3")
+    );
+    assert!(views[0]
+        .recipes
+        .iter()
+        .any(|recipe| recipe.recipe_id == "rcp_dev083_1" && recipe.is_promoted));
+
+    registry
+        .set_current_version("wfl_dev083", "wfv_dev083_1")
+        .await
+        .expect("current version switch should succeed");
+    let views = registry
+        .list()
+        .await
+        .expect("switched registry list should succeed");
+    assert_eq!(views[0].current_version_id.as_deref(), Some("wfv_dev083_1"));
+    assert_eq!(
+        views[0]
+            .current_recipe
+            .as_ref()
+            .map(|recipe| recipe.recipe_id.as_str()),
+        Some("rcp_dev083_1")
+    );
+
+    registry
+        .set_current_version("wfl_dev083", "wfv_dev083_2")
+        .await
+        .expect("current version restore should succeed");
+
+    promotion_repository
+        .promote("wfv_dev083_2", "rcp_dev083_3", Utc::now())
+        .await
+        .expect("current version recipe promotion should persist");
+    let views = registry
+        .list()
+        .await
+        .expect("current promotion should succeed");
+    assert_eq!(
+        views[0]
+            .current_recipe
+            .as_ref()
+            .map(|recipe| recipe.recipe_id.as_str()),
+        Some("rcp_dev083_3")
     );
 }

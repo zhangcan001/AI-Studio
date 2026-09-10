@@ -4,9 +4,9 @@ use crate::application::{
         Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RepositoryError,
         RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
         WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowPurgeOperationEntry,
-        WorkflowPurgeOperationRecord, WorkflowRegistryRepository,
-        WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository, WorkflowRuntimeState,
-        WorkflowRuntimeStateRepository,
+        WorkflowPurgeOperationRecord, WorkflowRecipePromotionRepository,
+        WorkflowRegistryRepository, WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository,
+        WorkflowRuntimeState, WorkflowRuntimeStateRepository,
     },
     workflow_manifest::WorkflowManifest,
 };
@@ -71,6 +71,7 @@ pub struct WorkflowRegistryRecipeView {
     pub recipe_yaml: String,
     pub recipe_sha256: String,
     pub package_name: Option<String>,
+    pub is_promoted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -196,6 +197,7 @@ pub struct WorkflowRegistryService {
     binding_repository: Arc<dyn ProjectWorkflowBindingRepository>,
     clock: Arc<dyn Clock>,
     registry_repository: Option<Arc<dyn WorkflowRegistryRepository>>,
+    recipe_promotion_repository: Option<Arc<dyn WorkflowRecipePromotionRepository>>,
     runtime_artifact_repository: Option<Arc<dyn WorkflowRuntimeArtifactRepository>>,
     package_store: Option<Arc<dyn WorkflowPackageStore>>,
     lifecycle_gate: Arc<Mutex<()>>,
@@ -214,6 +216,7 @@ impl WorkflowRegistryService {
             binding_repository,
             clock,
             registry_repository: None,
+            recipe_promotion_repository: None,
             runtime_artifact_repository: None,
             package_store: None,
             lifecycle_gate: Arc::new(Mutex::new(())),
@@ -228,6 +231,14 @@ impl WorkflowRegistryService {
         repository: Arc<dyn WorkflowRegistryRepository>,
     ) -> Self {
         self.registry_repository = Some(repository);
+        self
+    }
+
+    pub fn with_recipe_promotion_repository(
+        mut self,
+        repository: Arc<dyn WorkflowRecipePromotionRepository>,
+    ) -> Self {
+        self.recipe_promotion_repository = Some(repository);
         self
     }
 
@@ -470,6 +481,15 @@ impl WorkflowRegistryService {
     /// Workflow row.
     pub async fn list(&self) -> Result<Vec<WorkflowRegistryView>, WorkflowRegistryServiceError> {
         let (versions, states) = self.load_runtime().await?;
+        let promotions = match &self.recipe_promotion_repository {
+            Some(repository) => repository
+                .list()
+                .await?
+                .into_iter()
+                .map(|promotion| (promotion.workflow_version_id, promotion.recipe_id))
+                .collect::<HashMap<_, _>>(),
+            None => HashMap::new(),
+        };
         let mut grouped = BTreeMap::<String, Vec<RuntimeWorkflowVersionRecord>>::new();
         for version in versions {
             grouped
@@ -487,14 +507,20 @@ impl WorkflowRegistryService {
                     continue;
                 }
                 views.push(
-                    self.build_view(&workflow_id, workflow_versions, &states, Some(&record))
-                        .await?,
+                    self.build_view(
+                        &workflow_id,
+                        workflow_versions,
+                        &states,
+                        &promotions,
+                        Some(&record),
+                    )
+                    .await?,
                 );
             }
         }
         for (workflow_id, versions) in grouped {
             views.push(
-                self.build_view(&workflow_id, versions, &states, None)
+                self.build_view(&workflow_id, versions, &states, &promotions, None)
                     .await?,
             );
         }
@@ -732,6 +758,53 @@ impl WorkflowRegistryService {
             .set_current_version(workflow_id, workflow_version_id, self.clock.now())
             .await?;
         self.get(workflow_id).await
+    }
+
+    pub async fn promote_recipe(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        let Some(repository) = &self.recipe_promotion_repository else {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::database("workflow recipe promotion repository is not configured"),
+            ));
+        };
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        if !version
+            .recipes
+            .iter()
+            .any(|recipe| recipe.recipe_id == recipe_id)
+        {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::not_found(
+                    "recipe for workflow version",
+                    format!("{workflow_version_id}:{recipe_id}"),
+                ),
+            ));
+        }
+        if self
+            .state_repository
+            .find_state(workflow_version_id)
+            .await?
+            .is_some_and(|state| state.archived)
+        {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::integrity(
+                    "cannot promote a recipe in an archived workflow version",
+                ),
+            ));
+        }
+        repository
+            .promote(workflow_version_id, recipe_id, self.clock.now())
+            .await?;
+        self.get(&version.workflow_id).await
     }
 
     /// Resolve availability from the exact frozen pair. `current_version` is
@@ -1530,6 +1603,7 @@ impl WorkflowRegistryService {
         workflow_id: &str,
         mut versions: Vec<RuntimeWorkflowVersionRecord>,
         states: &HashMap<String, WorkflowRuntimeState>,
+        promotions: &HashMap<String, String>,
         record: Option<&crate::application::ports::WorkflowRegistryRecord>,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
         versions.sort_by(|left, right| {
@@ -1538,7 +1612,7 @@ impl WorkflowRegistryService {
         });
         let mut version_views = versions
             .iter()
-            .map(|version| version_view(version, states))
+            .map(|version| version_view(version, states, promotions))
             .collect::<Vec<_>>();
         if let Some(repository) = &self.runtime_artifact_repository {
             for version in &mut version_views {
@@ -1572,7 +1646,13 @@ impl WorkflowRegistryService {
             version
                 .recipes
                 .iter()
-                .max_by(|left, right| compare_versions(&left.version, &right.version))
+                .find(|recipe| recipe.is_promoted)
+                .or_else(|| {
+                    version
+                        .recipes
+                        .iter()
+                        .max_by(|left, right| compare_versions(&left.version, &right.version))
+                })
                 .cloned()
         });
         let library_state = record
@@ -1789,6 +1869,7 @@ impl Default for VersionState {
 fn version_view(
     version: &RuntimeWorkflowVersionRecord,
     states: &HashMap<String, WorkflowRuntimeState>,
+    promotions: &HashMap<String, String>,
 ) -> WorkflowRegistryVersionView {
     let state = state_for(states, &version.workflow_version_id);
     WorkflowRegistryVersionView {
@@ -1803,6 +1884,12 @@ fn version_view(
             .recipes
             .iter()
             .map(|recipe| recipe_view(&version.workflow_version_id, recipe))
+            .map(|mut recipe| {
+                recipe.is_promoted = promotions
+                    .get(&version.workflow_version_id)
+                    .is_some_and(|recipe_id| recipe_id == &recipe.recipe_id);
+                recipe
+            })
             .collect(),
     }
 }
@@ -1819,6 +1906,7 @@ fn recipe_view(
         recipe_yaml: recipe.recipe_yaml.clone(),
         recipe_sha256: recipe.recipe_sha256.clone(),
         package_name: None,
+        is_promoted: false,
     }
 }
 

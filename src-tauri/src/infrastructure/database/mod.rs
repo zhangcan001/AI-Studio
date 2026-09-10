@@ -20,7 +20,8 @@ pub use repositories::{
     SqliteReferenceAnchorRepository, SqliteReferenceSetRepository, SqliteScriptDraftRepository,
     SqliteScriptSourceRepository, SqliteShotConsistencyRepository, SqliteShotRepository,
     SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteWorkflowBenchmarkRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRecipePromotionRepository,
+    SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
     SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
     SqliteWorkflowRuntimeStateRepository,
 };

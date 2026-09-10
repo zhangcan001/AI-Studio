@@ -143,6 +143,7 @@ export {
   restoreWorkflowVersion,
   restoreWorkflow,
   purgeWorkflow,
+  promoteWorkflowRecipe,
   setWorkflowCurrentVersion,
   setWorkflowEnabled,
   setOnboardingInputMapping,

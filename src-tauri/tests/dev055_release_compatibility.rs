@@ -836,6 +836,14 @@ fn migration_versions() -> Vec<u64> {
 }
 
 async fn remove_migration_028_schema(pool: &SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS workflow_recipe_promotions")
+        .execute(pool)
+        .await
+        .expect("030 recipe promotion table should be removable from the isolated fixture");
+    sqlx::query("DROP INDEX IF EXISTS idx_recipes_workflow_version_id_id")
+        .execute(pool)
+        .await
+        .expect("030 recipe promotion index should be removable from the isolated fixture");
     sqlx::query("DROP TABLE IF EXISTS workflow_runtime_artifacts")
         .execute(pool)
         .await
@@ -935,8 +943,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 29);
-    assert_eq!(migration_marker_count(pool, 29).await, 1);
+    assert_eq!(max_migration(pool).await, 30);
+    assert_eq!(migration_marker_count(pool, 30).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1098,13 +1106,13 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_029() {
+async fn dev055_migration_matrix_reaches_030() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(29));
+    assert_eq!(versions.last().copied(), Some(30));
     assert!(
-        versions.contains(&29),
-        "repository must contain migration 029"
+        versions.contains(&30),
+        "repository must contain migration 030"
     );
 
     let (_fresh_directory, fresh_pool) = database().await;

@@ -363,6 +363,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             > = Arc::new(infrastructure::database::SqliteWorkflowRegistryRepository::new(
                 database_pool.clone(),
             ));
+            let workflow_recipe_promotion_repository: Arc<
+                dyn application::ports::WorkflowRecipePromotionRepository,
+            > = Arc::new(
+                infrastructure::database::SqliteWorkflowRecipePromotionRepository::new(
+                    database_pool.clone(),
+                ),
+            );
             let workflow_library_source: Arc<dyn WorkflowLibrarySource> = Arc::new(
                 FileSystemWorkflowLibrarySource::new(data_dirs.workflow_library.clone()),
             );
@@ -406,6 +413,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     clock.clone(),
                 )
                 .with_registry_repository(workflow_registry_repository)
+                .with_recipe_promotion_repository(workflow_recipe_promotion_repository)
                 .with_runtime_artifact_repository(runtime_artifact_repository.clone())
                 .with_package_store(package_store.clone()),
             );
@@ -1106,6 +1114,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_get_registry,
             commands::workflow_registry::workflow_rename,
             commands::workflow_registry::workflow_set_current_version,
+            commands::workflow_registry::workflow_promote_recipe,
             commands::workflow_registry::workflow_remove,
             commands::workflow_registry::workflow_restore,
             commands::workflow_registry::workflow_inspect_purge,
