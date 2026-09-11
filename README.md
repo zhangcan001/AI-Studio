@@ -2,8 +2,8 @@
 
 AI Studio is a Windows desktop foundation for a local AI image/video production workbench. M0 contains the Tauri 2 + React shell, Rust layering, SQLite migration, application data directory initialization, ComfyUI capability detection, and a pure local Recipe/Workflow compiler.
 
-Released: `1.0.0` (AI Studio 1.0.0 published; see `docs/DEV_074_RELEASE_1.0.0.md`).
-Development: `1.1.0 readiness` (post-1.0 development; manifest remains `1.0.0` until a release candidate).
+Released: `1.1.0` (AI Studio 1.1.0 published; see `docs/DEV_098_RELEASE_1.1.0_PUBLICATION.md`).
+Development: `post-1.1` (AI Studio 1.1.0 is published; the next development task is not started).
 The historical 0.3.0 product defined Krea2 as independent batch image generation
 and MiniMax H3 as independent asset + prompt batch video generation. There is
 no automatic Krea2→H3 pipeline; live validation is `DEFERRED BY PRODUCT OWNER`.
