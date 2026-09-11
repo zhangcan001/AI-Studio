@@ -427,6 +427,11 @@ if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.i
   throw new Error("WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER failed: WorkflowWorkspace must delegate Advanced Onboarding actions");
 }
 
+const projectCommandCenterServiceSource = readFileSync(join(root, "src-tauri/src/application/project_command_center_service.rs"), "utf8");
+if (!["pub fn recommend_next_project_action", "first_completed_asset_id", "fn action_with_targets"].every((marker) => projectCommandCenterServiceSource.includes(marker))) {
+  throw new Error("PROJECT_CONTINUITY_DERIVED failed: Project Command Center must derive exact continuation targets from existing facts");
+}
+
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`RECIPE_HISTORY_QUERY_AUTHORITY=PASS`);
@@ -451,6 +456,7 @@ console.log(`GENERATION_EXPERIMENT_CONTROLLER=PASS`);
 console.log(`GENERATION_PROJECT_TEMPLATE_CONTROLLER=PASS`);
 console.log(`GENERATION_ASSET_INTENT_CONTROLLER=PASS`);
 console.log(`GENERATION_WORKFLOW_SELECTION_CONTROLLER=PASS`);
+console.log(`PROJECT_CONTINUITY_DERIVED=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

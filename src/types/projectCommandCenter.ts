@@ -56,10 +56,13 @@ export interface ProjectCommandCenterAggregate {
     configured: number;
     missingConfig: number;
     firstGeneratingShotId?: string | null;
+    firstGeneratingTaskId?: string | null;
     firstImageReviewShotId?: string | null;
     firstVideoReviewShotId?: string | null;
     firstMissingConfigShotId?: string | null;
     firstReadyShotId?: string | null;
+    firstCompletedShotId?: string | null;
+    firstCompletedAssetId?: string | null;
   };
   queue: {
     totalQueues: number;
@@ -77,8 +80,14 @@ export interface ProjectCommandCenterAggregate {
     autoResumableItems: number;
     reviewRequiredItems: number;
     firstActiveBatchId?: string | null;
+    firstActiveShotId?: string | null;
+    firstActiveTaskId?: string | null;
     firstAutoResumableBatchId?: string | null;
+    firstAutoResumableShotId?: string | null;
+    firstAutoResumableTaskId?: string | null;
     firstReviewRequiredBatchId?: string | null;
+    firstReviewRequiredShotId?: string | null;
+    firstReviewRequiredTaskId?: string | null;
   };
   tasksAssets: {
     taskCount: number;
@@ -102,7 +111,7 @@ export interface ProjectCommandCenterAggregate {
   issues: Array<{ id: string; severity: string; title: string; detail: string; source: string }>;
   audit: ProductionAuditSummary;
   recentActivity: ProductionAuditActivity[];
-  recommendedAction: { kind: string; priority: number; reasonCode: string; reason: string; shotId?: string | null; batchId?: string | null };
+  recommendedAction: { kind: string; priority: number; reasonCode: string; reason: string; shotId?: string | null; batchId?: string | null; taskId?: string | null; assetId?: string | null };
   quickActions: Array<{ id: string; label: string; destination: string }>;
   checkedAt: string;
 }

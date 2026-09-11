@@ -103,6 +103,8 @@ export interface ResolvedProjectCommandCenterNavigation {
   section: StudioSection;
   shotId?: string;
   batchId?: string;
+  taskId?: string;
+  assetId?: string;
 }
 
 export function resolveProjectCommandCenterNavigation(
@@ -110,16 +112,18 @@ export function resolveProjectCommandCenterNavigation(
 ): ResolvedProjectCommandCenterNavigation {
   if (request.section) {
     const route = studioRouteForSection(request.section);
-    return { workspace: route.workspace, section: route.section, shotId: request.shotId, batchId: request.batchId };
+    return { workspace: route.workspace, section: route.section, shotId: request.shotId, batchId: request.batchId, ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
   }
   if (request.destination === "studio" || request.destination === "shots") {
-    return { workspace: "shots", section: "creation", shotId: request.shotId, batchId: request.batchId };
+    return { workspace: "shots", section: "creation", shotId: request.shotId, batchId: request.batchId, ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
   }
   return {
     workspace: request.destination,
     section: defaultStudioSectionForWorkspace(request.destination),
     shotId: request.shotId,
     batchId: request.batchId,
+    ...(request.taskId ? { taskId: request.taskId } : {}),
+    ...(request.assetId ? { assetId: request.assetId } : {}),
   };
 }
 
@@ -179,6 +183,7 @@ function App() {
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
+  const [focusedAssetId, setFocusedAssetId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupAttempt, setStartupAttempt] = useState(0);
@@ -475,6 +480,8 @@ function App() {
     useStudioStore.getState().resetDraft();
     useStudioStore.getState().clearPendingAssetIntent();
     if (!preserveProductionBatch) setFocusedProductionBatchId(undefined);
+    setFocusedTaskId(undefined);
+    setFocusedAssetId(undefined);
     setVideoBatchAssets([]);
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
@@ -712,6 +719,8 @@ function App() {
   function navigateFromCommandCenter(request: ProjectCommandCenterNavigationRequest) {
     const navigation = resolveProjectCommandCenterNavigation(request);
     setFocusedProductionBatchId(navigation.batchId);
+    setFocusedTaskId(navigation.taskId);
+    setFocusedAssetId(navigation.assetId);
     if (navigation.shotId) {
       setResumeShotId(navigation.shotId);
       void recordShotChange(navigation.shotId);
@@ -883,6 +892,7 @@ function App() {
       {activeProject && workspace === "assets" && (
         <AssetWorkspace
           projectId={activeProject.id}
+          initialAssetId={focusedAssetId}
           onUseInStudio={useAssetInStudio}
           onOpenVideoBatch={openVideoBatch}
           onOpenTask={(taskId) => {

@@ -152,6 +152,18 @@
   overflow-wrap: anywhere;
 }
 
+.project-command-next-target,
+.project-command-next-reason {
+  color: #d7e4ff;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.project-command-next-reason {
+  color: #ffe3a3;
+}
+
 .project-command-project-next button {
   width: 100%;
   margin-top: 6px;

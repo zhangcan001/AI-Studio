@@ -47,6 +47,8 @@ export interface ProjectCommandCenterNavigationRequest {
   section?: ProjectCommandCenterNavigationSection;
   shotId?: string;
   batchId?: string;
+  taskId?: string;
+  assetId?: string;
   actionKind?: string;
 }
 
@@ -108,6 +110,8 @@ export interface RecommendedAction {
   section?: ProjectCommandCenterNavigationSection;
   shotId?: string;
   batchId?: string;
+  taskId?: string;
+  assetId?: string;
   actionKind?: string;
 }
 
@@ -332,6 +336,8 @@ export function ProjectCommandCenterView({
             <span className="section-label">继续工作</span>
             <strong>推荐下一步：{action.label}</strong>
             <p>{action.detail}</p>
+            <small className="project-command-next-target">{continuityTargetLabel(action)}</small>
+            {nextActionReason(action, derived.issues) && <small className="project-command-next-reason">原因：{nextActionReason(action, derived.issues)}</small>}
             <button type="button" className="primary-action" onClick={() => onNavigate?.(navigationRequestFromAction(action))} disabled={!onNavigate || busyNow} aria-label="继续工作">
               继续工作
             </button>
@@ -392,6 +398,8 @@ export function ProjectCommandCenterView({
                 <span className="section-label">继续工作</span>
                 <h3 id="project-command-recommendation-title">推荐下一步：{action.label}</h3>
                 <p>{action.detail}</p>
+                <small className="project-command-next-target">{continuityTargetLabel(action)}</small>
+                {nextActionReason(action, derived.issues) && <small className="project-command-next-reason">原因：{nextActionReason(action, derived.issues)}</small>}
               </div>
               <button type="button" className="primary-action" onClick={() => onNavigate?.(navigationRequestFromAction(action))} disabled={!onNavigate || busyNow} aria-label="继续工作">
                 继续工作
@@ -560,15 +568,28 @@ function recommendedActionFromAggregate(
     ?? (action.kind === "IMAGE_REVIEW" ? aggregate.shots.firstImageReviewShotId : undefined)
     ?? (action.kind === "VIDEO_REVIEW" ? aggregate.shots.firstVideoReviewShotId : undefined)
     ?? (action.kind === "MISSING_CONFIG" ? aggregate.shots.firstMissingConfigShotId : undefined)
-    ?? (action.kind === "READY" ? aggregate.shots.firstReadyShotId : undefined);
+    ?? (action.kind === "READY" ? aggregate.shots.firstReadyShotId : undefined)
+    ?? (action.kind === "COMPLETE" ? aggregate.shots.firstCompletedShotId : undefined);
   const batchId = action.batchId
     ?? (action.kind === "ACTIVE_PRODUCTION" ? aggregate.queue.firstActiveBatchId : undefined)
     ?? (action.kind === "AUTO_RESUMABLE" ? aggregate.queue.firstAutoResumableBatchId : undefined)
     ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.queue.firstReviewRequiredBatchId : undefined);
+  const taskId = action.taskId
+    ?? (action.kind === "ACTIVE_PRODUCTION" ? aggregate.queue.firstActiveTaskId : undefined)
+    ?? (action.kind === "AUTO_RESUMABLE" ? aggregate.queue.firstAutoResumableTaskId : undefined)
+    ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.queue.firstReviewRequiredTaskId : undefined);
+  const assetId = action.assetId
+    ?? (action.kind === "COMPLETE" ? aggregate.shots.firstCompletedAssetId : undefined);
+  const resolvedShotId = shotId
+    ?? (action.kind === "ACTIVE_PRODUCTION" ? aggregate.queue.firstActiveShotId : undefined)
+    ?? (action.kind === "AUTO_RESUMABLE" ? aggregate.queue.firstAutoResumableShotId : undefined)
+    ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.queue.firstReviewRequiredShotId : undefined);
   const target = {
     actionKind: action.kind,
-    shotId: shotId ?? undefined,
+    shotId: resolvedShotId ?? undefined,
     batchId: batchId ?? undefined,
+    taskId: taskId ?? undefined,
+    assetId: assetId ?? undefined,
   };
   if (consistencyAction) return { ...consistencyAction, ...target };
   const actions: Record<string, Omit<RecommendedAction, "actionKind" | "shotId" | "batchId">> = {
@@ -583,7 +604,7 @@ function recommendedActionFromAggregate(
     UNASSIGNED: { label: "整理项目结构", detail: "还有镜头尚未分配到场景。", destination: "shots", section: "creation" },
     NO_SHOTS: { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots", section: "creation" },
     READY: { label: "继续创作", detail: "项目已经准备好进入下一步生产。", destination: "shots", section: "production" },
-    COMPLETE: { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio", section: "creation" },
+    COMPLETE: { label: "查看交付结果", detail: "已有完成结果，打开现有交付素材继续检查或使用。", destination: "assets", section: "assets" },
   };
   return { ...(actions[action.kind] ?? { label: "继续工作", detail: action.reason, destination: "shots", section: "creation" }), ...target };
 }
@@ -711,7 +732,7 @@ export function recommendedAction(summary: ProjectCommandCenterSummary): Recomme
   if (summary.runtime.activeTaskCount > 0 || summary.production.active > 0) return { label: "查看运行进度", detail: "项目仍有任务或生产批次活动中，先确认当前进度。", destination: "shots", section: "production", actionKind: "ACTIVE_PRODUCTION" };
   if (summary.progress.total === 0) return { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots", section: "creation", actionKind: "NO_SHOTS" };
   if (summary.progress.pendingVideoReview > 0) return { label: "完成视频复核", detail: "有视频候选等待人工确认，完成选择后再进入下一步。", destination: "shots", section: "review", actionKind: "VIDEO_REVIEW" };
-  if (summary.progress.completed === summary.progress.total) return { label: "开始新一轮创作", detail: "当前镜头已完成，可以回到创作工作台开始新的内容。", destination: "studio", section: "creation", actionKind: "COMPLETE" };
+  if (summary.progress.completed === summary.progress.total) return { label: "查看交付结果", detail: "已有完成结果，打开现有交付素材继续检查或使用。", destination: "assets", section: "assets", actionKind: "COMPLETE" };
   if (summary.progress.pendingKeyframes > 0) return { label: "生成关键帧", detail: "还有镜头等待关键帧生成，继续完成项目的图像阶段。", destination: "shots", section: "creation", actionKind: "READY" };
   return { label: "继续创作", detail: "回到创作工作台继续使用当前项目。", destination: "studio", section: "creation", actionKind: "READY" };
 }
@@ -722,8 +743,25 @@ function navigationRequestFromAction(action: RecommendedAction): ProjectCommandC
     ...(action.section ? { section: action.section } : {}),
     ...(action.shotId ? { shotId: action.shotId } : {}),
     ...(action.batchId ? { batchId: action.batchId } : {}),
+    ...(action.taskId ? { taskId: action.taskId } : {}),
+    ...(action.assetId ? { assetId: action.assetId } : {}),
     ...(action.actionKind ? { actionKind: action.actionKind } : {}),
   };
+}
+
+function continuityTargetLabel(action: RecommendedAction): string {
+  if (action.assetId) return "定位：交付素材";
+  if (action.batchId) return "定位：生产队列";
+  if (action.shotId) return "定位：目标镜头";
+  if (action.taskId) return "定位：任务详情";
+  if (action.destination === "settings") return "定位：运行环境设置";
+  return "定位：对应工作区";
+}
+
+function nextActionReason(action: RecommendedAction, issues: ProjectCommandCenterIssue[]): string | undefined {
+  if (!issues.length) return undefined;
+  if (!["STRUCTURAL_BLOCKED", "COMFY_BLOCKED", "REVIEW_REQUIRED", "AUTO_RESUMABLE", "ACTIVE_PRODUCTION"].includes(action.actionKind ?? "")) return undefined;
+  return issues.find((issue) => issue.severity !== "INFO")?.detail;
 }
 
 function auditIssue(issue: ProductionAuditIssue): ProjectCommandCenterIssue {

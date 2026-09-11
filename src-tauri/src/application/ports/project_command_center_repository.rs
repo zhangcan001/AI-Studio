@@ -66,6 +66,7 @@ pub struct ProjectCommandCenterShotConfigRecord {
 pub struct ProjectCommandCenterShotLinkRecord {
     pub shot_id: String,
     pub stage: String,
+    pub task_id: Option<String>,
     pub task_status: Option<String>,
 }
 
@@ -81,6 +82,8 @@ pub struct ProjectCommandCenterQueueItemRecord {
     pub id: String,
     pub batch_id: String,
     pub ordinal: i64,
+    pub shot_id: Option<String>,
+    pub task_id: Option<String>,
     pub status: String,
     pub retry_of_item_id: Option<String>,
     pub error_code: Option<String>,

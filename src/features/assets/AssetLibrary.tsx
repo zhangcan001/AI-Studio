@@ -33,12 +33,13 @@ const categories: Array<{ value: AssetCategoryFilter; label: string }> = [
 
 interface Props {
   projectId: string;
+  initialAssetId?: string;
   onUseInStudio: (asset: AssetView) => void;
   onOpenVideoBatch: (assets: AssetView[]) => void;
   onOpenTask: (taskId: string) => void;
 }
 
-export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpenTask }: Props) {
+export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenVideoBatch, onOpenTask }: Props) {
   const [category, setCategory] = useState<AssetCategoryFilter>("ALL");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -119,6 +120,21 @@ export function AssetLibrary({ projectId, onUseInStudio, onOpenVideoBatch, onOpe
       requestVersion.current += 1;
     };
   }, [requestPage]);
+
+  useEffect(() => {
+    if (!initialAssetId) return;
+    let active = true;
+    void getAsset(projectId, initialAssetId)
+      .then((asset) => {
+        if (active) setSelectedAsset(asset);
+      })
+      .catch((loadError: unknown) => {
+        if (active) setError(toUserMessage(loadError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialAssetId, projectId]);
 
   useEffect(() => {
     setCompareMode(false);

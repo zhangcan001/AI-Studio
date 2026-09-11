@@ -160,9 +160,9 @@ describe("ProjectCommandCenter", () => {
     const derived = deriveProjectCommandCenterSummary(props.summary, props.integrity, props.preflight, props.shots, props.structure);
     const html = renderToStaticMarkup(<ProjectCommandCenterView {...props} />);
     expect(derived.progress.percent).toBe(100);
-    expect(recommendedAction(derived).destination).toBe("studio");
+    expect(recommendedAction(derived).destination).toBe("assets");
     expect(html).toContain("100%");
-    expect(html).toContain("开始新一轮创作");
+    expect(html).toContain("查看交付结果");
   });
 
   it("shows project and runtime issues without dropping long details", () => {
@@ -298,6 +298,71 @@ describe("ProjectCommandCenter", () => {
     await user.click(screen.getByRole("button", { name: "继续工作" }));
 
     expect(onNavigate).toHaveBeenCalledWith({ destination: "shots", section: "production", batchId: "batch-first", actionKind: "ACTIVE_PRODUCTION" });
+  });
+
+  it("carries exact running shot and task targets from the derived queue facts", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      shots: { ...aggregate().shots, generating: 1, firstGeneratingShotId: "shot-running" },
+      queue: { ...aggregate().queue, activeItems: 1, firstActiveBatchId: "batch-running", firstActiveShotId: "shot-running", firstActiveTaskId: "task-running" },
+      recommendedAction: { ...aggregate().recommendedAction, kind: "ACTIVE_PRODUCTION", shotId: null, batchId: null, taskId: null, assetId: null },
+    })} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "继续工作" }));
+
+    expect(onNavigate).toHaveBeenCalledWith({
+      destination: "shots",
+      section: "production",
+      shotId: "shot-running",
+      batchId: "batch-running",
+      taskId: "task-running",
+      actionKind: "ACTIVE_PRODUCTION",
+    });
+  });
+
+  it("opens the exact selected deliverable for completed projects", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      shots: { ...aggregate().shots, videoReview: 0, completed: 2, firstCompletedShotId: "shot-complete", firstCompletedAssetId: "asset-complete" },
+      recommendedAction: { ...aggregate().recommendedAction, kind: "COMPLETE", shotId: null, batchId: null, taskId: null, assetId: null },
+    })} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "继续工作" }));
+
+    expect(onNavigate).toHaveBeenCalledWith({
+      destination: "assets",
+      section: "assets",
+      shotId: "shot-complete",
+      assetId: "asset-complete",
+      actionKind: "COMPLETE",
+    });
+  });
+
+  it("surfaces the authoritative blocked reason beside the continuation target", () => {
+    const html = renderToStaticMarkup(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      issues: [{ id: "runtime:offline", severity: "ERROR", title: "运行环境离线", detail: "请连接 ComfyUI 后重新预检。", source: "runtime" }],
+      recommendedAction: { ...aggregate().recommendedAction, kind: "COMFY_BLOCKED", shotId: null, batchId: null, taskId: null, assetId: null },
+    })} onNavigate={vi.fn()} />);
+
+    expect(html).toContain("定位：运行环境设置");
+    expect(html).toContain("原因：请连接 ComfyUI 后重新预检。");
+  });
+
+  it("recomputes continuation from refreshed facts instead of retaining UI state", () => {
+    const { rerender } = render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      recommendedAction: { ...aggregate().recommendedAction, kind: "ACTIVE_PRODUCTION", shotId: "shot-running", batchId: "batch-running", taskId: "task-running" },
+    })} onNavigate={vi.fn()} />);
+    expect(screen.getByText("定位：生产队列")).toBeTruthy();
+
+    rerender(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      shots: { ...aggregate().shots, videoReview: 0, completed: 2, firstCompletedShotId: "shot-complete", firstCompletedAssetId: "asset-complete" },
+      recommendedAction: { ...aggregate().recommendedAction, kind: "COMPLETE", shotId: null, batchId: null, taskId: null, assetId: null },
+    })} onNavigate={vi.fn()} />);
+
+    expect(screen.getByText("定位：交付素材")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "继续工作" })).toBeTruthy();
   });
 
   it("recommends binding configuration only for consistency projects with profiles but no bindings", () => {

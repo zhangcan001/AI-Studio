@@ -127,7 +127,7 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
         .map(Into::into)
         .collect();
         let shot_links = sqlx::query_as::<_, DbShotLink>(
-            "SELECT l.shot_id, l.stage, t.status AS task_status
+            "SELECT l.shot_id, l.stage, l.task_id, t.status AS task_status
              FROM shot_generation_links l
              JOIN shots sh ON sh.id = l.shot_id
              LEFT JOIN tasks t ON t.id = l.task_id
@@ -153,7 +153,10 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
         .map(Into::into)
         .collect();
         let queue_items = sqlx::query_as::<_, DbQueueItem>(
-            "SELECT i.id, i.batch_id, i.ordinal, i.status, i.retry_of_item_id, i.error_code
+            "SELECT i.id, i.batch_id, i.ordinal,
+                    (SELECT MIN(l.shot_id) FROM shot_generation_links l
+                     WHERE l.production_batch_item_id = i.id) AS shot_id,
+                    i.task_id, i.status, i.retry_of_item_id, i.error_code
              FROM production_batch_items i JOIN production_batches b ON b.id = i.batch_id
              WHERE b.project_id = ? ORDER BY i.batch_id ASC, i.ordinal ASC, i.id ASC",
         )
@@ -315,13 +318,13 @@ db_record!(DbShotConfig => ProjectCommandCenterShotConfigRecord {
     shot_id: String, stage: String
 });
 db_record!(DbShotLink => ProjectCommandCenterShotLinkRecord {
-    shot_id: String, stage: String, task_status: Option<String>
+    shot_id: String, stage: String, task_id: Option<String>, task_status: Option<String>
 });
 db_record!(DbQueueBatch => ProjectCommandCenterQueueBatchRecord {
     id: String, status: String, archived_at: Option<String>
 });
 db_record!(DbQueueItem => ProjectCommandCenterQueueItemRecord {
-    id: String, batch_id: String, ordinal: i64, status: String,
+    id: String, batch_id: String, ordinal: i64, shot_id: Option<String>, task_id: Option<String>, status: String,
     retry_of_item_id: Option<String>, error_code: Option<String>
 });
 db_record!(DbCount => ProjectCommandCenterCountRecord { status: String, count: i64 });

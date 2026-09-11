@@ -301,6 +301,18 @@ async fn command_center_distinguishes_legacy_and_consistency_projects() {
         .quick_actions
         .iter()
         .any(|action| action.id == "preparation" && action.destination == "shots"));
+    assert!(legacy
+        .recommended_action
+        .shot_id
+        .as_deref()
+        .map(|id| id != "shot-054")
+        .unwrap_or(true));
+    assert!(legacy
+        .recommended_action
+        .task_id
+        .as_deref()
+        .map(|id| id != "task-054")
+        .unwrap_or(true));
 }
 
 #[tokio::test]

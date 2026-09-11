@@ -27,4 +27,20 @@ describe("project workflow navigation", () => {
       actionKind: "ACTIVE_PRODUCTION",
     })).toEqual({ workspace: "shots", section: "production", shotId: undefined, batchId: "batch-8" });
   });
+
+  it("preserves exact task and deliverable targets across existing routes", () => {
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "tasks",
+      taskId: "task-9",
+      shotId: "shot-9",
+      actionKind: "ACTIVE_PRODUCTION",
+    })).toEqual({ workspace: "tasks", section: "review", shotId: "shot-9", batchId: undefined, taskId: "task-9" });
+
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "assets",
+      section: "assets",
+      assetId: "asset-9",
+      actionKind: "COMPLETE",
+    })).toEqual({ workspace: "assets", section: "assets", shotId: undefined, batchId: undefined, assetId: "asset-9" });
+  });
 });

@@ -90,10 +90,13 @@ pub struct ProjectCommandCenterShotView {
     pub configured: usize,
     pub missing_config: usize,
     pub first_generating_shot_id: Option<String>,
+    pub first_generating_task_id: Option<String>,
     pub first_image_review_shot_id: Option<String>,
     pub first_video_review_shot_id: Option<String>,
     pub first_missing_config_shot_id: Option<String>,
     pub first_ready_shot_id: Option<String>,
+    pub first_completed_shot_id: Option<String>,
+    pub first_completed_asset_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
@@ -114,8 +117,14 @@ pub struct ProjectCommandCenterQueueView {
     pub auto_resumable_items: usize,
     pub review_required_items: usize,
     pub first_active_batch_id: Option<String>,
+    pub first_active_shot_id: Option<String>,
+    pub first_active_task_id: Option<String>,
     pub first_auto_resumable_batch_id: Option<String>,
+    pub first_auto_resumable_shot_id: Option<String>,
+    pub first_auto_resumable_task_id: Option<String>,
     pub first_review_required_batch_id: Option<String>,
+    pub first_review_required_shot_id: Option<String>,
+    pub first_review_required_task_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
@@ -267,6 +276,8 @@ pub struct ProjectCommandCenterNextAction {
     pub reason: String,
     pub shot_id: Option<String>,
     pub batch_id: Option<String>,
+    pub task_id: Option<String>,
+    pub asset_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -460,6 +471,8 @@ impl ProjectCommandCenterService {
                 reason: "readiness is being evaluated".to_owned(),
                 shot_id: None,
                 batch_id: None,
+                task_id: None,
+                asset_id: None,
             },
             quick_actions: default_quick_actions(),
             checked_at,
@@ -530,33 +543,45 @@ pub fn recommend_next_project_action(
     }
 
     if view.queue.review_required_items > 0 {
-        return action(
+        return action_with_targets(
             ProjectCommandCenterActionKind::ReviewRequired,
             PROJECT_ACTION_PRIORITY_REVIEW_REQUIRED,
             "REVIEW_REQUIRED",
             "review failed or non-resumable production items",
-            None,
+            view.queue.first_review_required_shot_id.clone(),
             view.queue.first_review_required_batch_id.clone(),
+            view.queue.first_review_required_task_id.clone(),
+            None,
         );
     }
     if view.queue.auto_resumable_items > 0 {
-        return action(
+        return action_with_targets(
             ProjectCommandCenterActionKind::AutoResumable,
             PROJECT_ACTION_PRIORITY_AUTO_RESUMABLE,
             "AUTO_RESUMABLE",
             "resume transiently failed production items",
-            None,
+            view.queue.first_auto_resumable_shot_id.clone(),
             view.queue.first_auto_resumable_batch_id.clone(),
+            view.queue.first_auto_resumable_task_id.clone(),
+            None,
         );
     }
     if view.queue.active_items > 0 || view.queue.running_queues > 0 || view.audit.active_runs > 0 {
-        return action(
+        return action_with_targets(
             ProjectCommandCenterActionKind::ActiveProduction,
             PROJECT_ACTION_PRIORITY_ACTIVE_PRODUCTION,
             "ACTIVE_PRODUCTION",
             "production is currently active",
-            None,
+            view.queue
+                .first_active_shot_id
+                .clone()
+                .or_else(|| view.shots.first_generating_shot_id.clone()),
             view.queue.first_active_batch_id.clone(),
+            view.queue
+                .first_active_task_id
+                .clone()
+                .or_else(|| view.shots.first_generating_task_id.clone()),
+            None,
         );
     }
     if view.shots.image_review > 0 {
@@ -600,13 +625,15 @@ pub fn recommend_next_project_action(
         );
     }
     if view.shots.completed == view.shots.total {
-        return action(
+        return action_with_targets(
             ProjectCommandCenterActionKind::Complete,
             PROJECT_ACTION_PRIORITY_COMPLETE,
             "COMPLETE",
             "all shots have completed production",
+            view.shots.first_completed_shot_id.clone(),
             None,
             None,
+            view.shots.first_completed_asset_id.clone(),
         );
     }
     if view.shots.ready > 0 || view.shots.configured > view.shots.completed {
@@ -652,6 +679,30 @@ fn action(
         reason: reason.to_owned(),
         shot_id,
         batch_id,
+        task_id: None,
+        asset_id: None,
+    }
+}
+
+fn action_with_targets(
+    kind: ProjectCommandCenterActionKind,
+    priority: u8,
+    reason_code: &str,
+    reason: &str,
+    shot_id: Option<String>,
+    batch_id: Option<String>,
+    task_id: Option<String>,
+    asset_id: Option<String>,
+) -> ProjectCommandCenterNextAction {
+    ProjectCommandCenterNextAction {
+        kind,
+        priority,
+        reason_code: reason_code.to_owned(),
+        reason: reason.to_owned(),
+        shot_id,
+        batch_id,
+        task_id,
+        asset_id,
     }
 }
 
@@ -702,11 +753,14 @@ fn load_shots(
         configured.insert((row.shot_id.clone(), row.stage.clone()));
     }
     let mut latest_status = HashMap::<(String, String), String>::new();
+    let mut latest_task_id = HashMap::<(String, String), Option<String>>::new();
     for row in &data.shot_links {
         if let Some(status) = row.task_status.as_deref() {
-            latest_status
-                .entry((row.shot_id.clone(), row.stage.clone()))
-                .or_insert_with(|| status.to_owned());
+            let key = (row.shot_id.clone(), row.stage.clone());
+            if !latest_status.contains_key(&key) {
+                latest_status.insert(key.clone(), status.to_owned());
+                latest_task_id.insert(key, row.task_id.clone());
+            }
         }
     }
     let mut view = ProjectCommandCenterShotView {
@@ -739,6 +793,17 @@ fn load_shots(
             "GENERATING_IMAGE" | "GENERATING_VIDEO" => {
                 view.generating += 1;
                 set_first(&mut view.first_generating_shot_id, &shot.id);
+                let generating_stage = if image_status == "GENERATING_IMAGE" {
+                    "image"
+                } else {
+                    "video"
+                };
+                let task_id = latest_task_id
+                    .get(&(shot.id.clone(), generating_stage.to_owned()))
+                    .and_then(Clone::clone);
+                if view.first_generating_task_id.is_none() {
+                    view.first_generating_task_id = task_id;
+                }
             }
             "IMAGE_REVIEW" => {
                 view.image_review += 1;
@@ -749,7 +814,16 @@ fn load_shots(
                 view.video_review += 1;
                 set_first(&mut view.first_video_review_shot_id, &shot.id);
             }
-            "COMPLETED" => view.completed += 1,
+            "COMPLETED" => {
+                view.completed += 1;
+                set_first(&mut view.first_completed_shot_id, &shot.id);
+                if view.first_completed_asset_id.is_none() {
+                    view.first_completed_asset_id = shot
+                        .selected_video_asset_id
+                        .clone()
+                        .or_else(|| shot.selected_image_asset_id.clone());
+                }
+            }
             "FAILED" => view.failed += 1,
             _ => {}
         }
@@ -893,11 +967,23 @@ fn load_queue(
                 .or_default()
                 .push(item);
             view.total_items += 1;
+            if active_batch_ids.contains(&item.batch_id) {
+                set_first_queue_target(
+                    &mut view.first_active_shot_id,
+                    &mut view.first_active_task_id,
+                    item,
+                );
+            }
             match item.status.as_str() {
                 "PENDING" => view.pending_items += 1,
                 "DISPATCHING" | "DISPATCHED" => {
                     view.active_items += 1;
                     set_first(&mut view.first_active_batch_id, &item.batch_id);
+                    set_first_queue_target(
+                        &mut view.first_active_shot_id,
+                        &mut view.first_active_task_id,
+                        item,
+                    );
                 }
                 "SUCCEEDED" => view.succeeded_items += 1,
                 "FAILED" => view.failed_items += 1,
@@ -943,13 +1029,22 @@ fn load_queue(
             if is_auto_resumable(leaf.status.as_str(), leaf.error_code.as_deref()) {
                 view.auto_resumable_items += 1;
                 set_first(&mut view.first_auto_resumable_batch_id, &batch_id);
+                set_first_queue_target(
+                    &mut view.first_auto_resumable_shot_id,
+                    &mut view.first_auto_resumable_task_id,
+                    leaf,
+                );
             } else if matches!(leaf.status.as_str(), "FAILED" | "CANCELLED" | "SKIPPED") {
                 view.review_required_items += 1;
                 set_first(&mut view.first_review_required_batch_id, &batch_id);
+                set_first_queue_target(
+                    &mut view.first_review_required_shot_id,
+                    &mut view.first_review_required_task_id,
+                    leaf,
+                );
             }
         }
     }
-    let _ = active_batch_ids;
     Ok(view)
 }
 
@@ -969,6 +1064,19 @@ fn is_auto_resumable(status: &str, error_code: Option<&str>) -> bool {
                 )
             )
         )
+}
+
+fn set_first_queue_target(
+    shot_id: &mut Option<String>,
+    task_id: &mut Option<String>,
+    item: &QueueItemRow,
+) {
+    if shot_id.is_none() {
+        *shot_id = item.shot_id.clone();
+    }
+    if task_id.is_none() {
+        *task_id = item.task_id.clone();
+    }
 }
 
 fn load_tasks_assets(
@@ -1344,10 +1452,17 @@ mod tests {
         view.shots.total = 1;
         view.shots.generating = 1;
         view.queue.active_items = 1;
+        view.queue.first_active_batch_id = Some("batch-active".to_owned());
+        view.queue.first_active_shot_id = Some("shot-active".to_owned());
+        view.queue.first_active_task_id = Some("task-active".to_owned());
+        let active = recommend_next_project_action(&view);
         assert_eq!(
-            kind(&view),
+            active.kind,
             ProjectCommandCenterActionKind::ActiveProduction
         );
+        assert_eq!(active.shot_id.as_deref(), Some("shot-active"));
+        assert_eq!(active.batch_id.as_deref(), Some("batch-active"));
+        assert_eq!(active.task_id.as_deref(), Some("task-active"));
 
         view.queue.active_items = 0;
         view.shots.generating = 0;
@@ -1373,7 +1488,12 @@ mod tests {
 
         view.structure.unassigned_shot_count = 0;
         view.shots.completed = 1;
-        assert_eq!(kind(&view), ProjectCommandCenterActionKind::Complete);
+        view.shots.first_completed_shot_id = Some("shot-complete".to_owned());
+        view.shots.first_completed_asset_id = Some("asset-complete".to_owned());
+        let complete = recommend_next_project_action(&view);
+        assert_eq!(complete.kind, ProjectCommandCenterActionKind::Complete);
+        assert_eq!(complete.shot_id.as_deref(), Some("shot-complete"));
+        assert_eq!(complete.asset_id.as_deref(), Some("asset-complete"));
     }
 
     #[test]
