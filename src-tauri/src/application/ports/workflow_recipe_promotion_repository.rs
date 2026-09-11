@@ -21,4 +21,10 @@ pub trait WorkflowRecipePromotionRepository: Send + Sync {
         recipe_id: &str,
         promoted_at: DateTime<Utc>,
     ) -> Result<(), RepositoryError>;
+
+    async fn clear(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<(), RepositoryError>;
 }

@@ -50,6 +50,62 @@ impl WorkflowRecipePromotionRepository for SqliteWorkflowRecipePromotionReposito
         .await?;
         transaction.commit().await.map_err(map_sqlx_error)
     }
+
+    async fn clear(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<(), RepositoryError> {
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        clear_in_transaction(&mut transaction, workflow_version_id, recipe_id).await?;
+        transaction.commit().await.map_err(map_sqlx_error)
+    }
+}
+
+async fn clear_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workflow_version_id: &str,
+    recipe_id: &str,
+) -> Result<(), RepositoryError> {
+    let version_exists =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_versions WHERE id = ?")
+            .bind(workflow_version_id)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+    if version_exists == 0 {
+        return Err(RepositoryError::not_found(
+            "workflow version",
+            workflow_version_id,
+        ));
+    }
+
+    let recipe_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM recipes
+         WHERE id = ? AND workflow_version_id = ?",
+    )
+    .bind(recipe_id)
+    .bind(workflow_version_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    if recipe_exists == 0 {
+        return Err(RepositoryError::not_found(
+            "recipe for workflow version",
+            format!("{workflow_version_id}:{recipe_id}"),
+        ));
+    }
+
+    sqlx::query(
+        "DELETE FROM workflow_recipe_promotions
+         WHERE workflow_version_id = ? AND recipe_id = ?",
+    )
+    .bind(workflow_version_id)
+    .bind(recipe_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
 }
 
 async fn promote_in_transaction(
@@ -213,6 +269,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn clear_is_exact_and_idempotent() {
+        let (_pool, repository) = setup().await;
+        let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
+        repository
+            .promote("promotion-version", "recipe-a", at)
+            .await
+            .unwrap();
+        repository
+            .clear("promotion-version", "recipe-a")
+            .await
+            .unwrap();
+        repository
+            .clear("promotion-version", "recipe-a")
+            .await
+            .unwrap();
+        assert!(repository.list().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn stale_clear_preserves_newer_promotion() {
+        let (_pool, repository) = setup().await;
+        let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
+        repository
+            .promote("promotion-version", "recipe-a", at)
+            .await
+            .unwrap();
+        repository
+            .promote("promotion-version", "recipe-b", at)
+            .await
+            .unwrap();
+        repository
+            .clear("promotion-version", "recipe-a")
+            .await
+            .unwrap();
+        let rows = repository.list().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].recipe_id, "recipe-b");
+    }
+
+    #[tokio::test]
+    async fn clear_rejects_unknown_version_and_recipe_from_another_version() {
+        let (pool, repository) = setup().await;
+        let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
+        let error = repository
+            .clear("missing-version", "recipe-a")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("workflow version"));
+
+        sqlx::query(
+            "INSERT INTO workflow_versions (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('other-version', 'promotion-workflow', '3.0.0', '{}', 'other-workflow-sha', ?)",
+        )
+        .bind(at.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO recipes (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('other-recipe', 'other-version', '3.0.0', 1, 'schema_version: 1', 'other-recipe-sha', ?)",
+        )
+        .bind(at.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = repository
+            .clear("promotion-version", "other-recipe")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("recipe for workflow version"));
+    }
+
+    #[tokio::test]
     async fn rejects_unknown_recipe_and_archived_version() {
         let (pool, repository) = setup().await;
         let at = Utc.with_ymd_and_hms(2026, 9, 10, 0, 0, 0).unwrap();
@@ -221,6 +350,10 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("recipe for workflow version"));
+        repository
+            .promote("promotion-version", "recipe-a", at)
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO workflow_runtime_states (workflow_version_id, enabled, updated_at, archived, archived_at)
              VALUES ('promotion-version', 0, ?, 1, ?)",
@@ -235,6 +368,12 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("archived workflow version"));
+
+        repository
+            .clear("promotion-version", "recipe-a")
+            .await
+            .unwrap();
+        assert!(repository.list().await.unwrap().is_empty());
     }
 
     #[tokio::test]

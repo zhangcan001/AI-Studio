@@ -807,6 +807,39 @@ impl WorkflowRegistryService {
         self.get(&version.workflow_id).await
     }
 
+    pub async fn clear_recipe_promotion(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        let Some(repository) = &self.recipe_promotion_repository else {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::database("workflow recipe promotion repository is not configured"),
+            ));
+        };
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        if !version
+            .recipes
+            .iter()
+            .any(|recipe| recipe.recipe_id == recipe_id)
+        {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::not_found(
+                    "recipe for workflow version",
+                    format!("{workflow_version_id}:{recipe_id}"),
+                ),
+            ));
+        }
+        repository.clear(workflow_version_id, recipe_id).await?;
+        self.get(&version.workflow_id).await
+    }
+
     /// Resolve availability from the exact frozen pair. `current_version` is
     /// intentionally not part of this predicate.
     pub async fn is_available(

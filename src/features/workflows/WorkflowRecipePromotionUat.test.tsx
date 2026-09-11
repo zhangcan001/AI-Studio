@@ -11,6 +11,7 @@ import { WorkflowWorkspace } from "./WorkflowWorkspace";
 const workflowMocks = vi.hoisted(() => ({
   queryWorkflowWorkspace: vi.fn(),
   promoteWorkflowRecipe: vi.fn(),
+  clearWorkflowRecipePromotion: vi.fn(),
 }));
 
 vi.mock("../../services/workflowClient", async () => {
@@ -124,6 +125,7 @@ beforeEach(() => {
   useWorkflowWorkspaceStore.getState().reset();
   useWorkflowOnboardingStore.getState().reset();
   workflowMocks.promoteWorkflowRecipe.mockResolvedValue({});
+  workflowMocks.clearWorkflowRecipePromotion.mockResolvedValue({});
 });
 
 afterEach(() => cleanup());
@@ -162,8 +164,34 @@ describe("DEV-090 recipe promotion workspace behavior", () => {
     expect(row.getByText(/已推广/)).toBeTruthy();
   });
 
+  it("clears the exact promoted recipe, refreshes workspace/catalog, and reflects the authoritative response", async () => {
+    const onCatalogChanged = renderWorkspace([workspaceResponse("R_B"), workspaceResponse()]);
+    const row = await openDetails();
+
+    await userEvent.setup().click(row.getByRole("button", { name: "取消推广" }));
+
+    await waitFor(() => expect(workflowMocks.clearWorkflowRecipePromotion).toHaveBeenCalledWith("WV_PROMOTION", "R_B"));
+    expect(workflowMocks.queryWorkflowWorkspace).toHaveBeenLastCalledWith("REFRESH");
+    expect(onCatalogChanged).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("已取消配方 2.0.0 的推广状态。")).toBeTruthy();
+    expect(row.queryByText(/已推广/)).toBeNull();
+  });
+
+  it("surfaces clear failures without optimistic state changes", async () => {
+    workflowMocks.clearWorkflowRecipePromotion.mockRejectedValue(new Error("clear failed"));
+    const onCatalogChanged = renderWorkspace([workspaceResponse("R_B")]);
+    const row = await openDetails();
+
+    await userEvent.setup().click(row.getByRole("button", { name: "取消推广" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBeTruthy();
+    expect(workflowMocks.queryWorkflowWorkspace).toHaveBeenCalledTimes(1);
+    expect(onCatalogChanged).not.toHaveBeenCalled();
+    expect(row.getByText(/已推广/)).toBeTruthy();
+  });
+
   it("does not expose promotion controls for archived versions", async () => {
-    const response = workspaceResponse();
+    const response = workspaceResponse("R_B");
     response.items[0].registry.currentVersion!.archived = true;
     response.items[0].registry.versions[0].archived = true;
     response.items[0].runtime[0].archived = true;
@@ -173,5 +201,6 @@ describe("DEV-090 recipe promotion workspace behavior", () => {
     const row = await openDetails("archived");
 
     expect(row.queryByRole("button", { name: "设为推广配方" })).toBeNull();
+    expect(row.getByRole("button", { name: "取消推广" })).toBeTruthy();
   });
 });

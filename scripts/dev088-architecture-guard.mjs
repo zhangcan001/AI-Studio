@@ -95,6 +95,10 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
 
 const workflowWorkspaceSource = readFileSync(join(root, "src/features/workflows/WorkflowWorkspace.tsx"), "utf8");
 const workflowWorkspaceAdaptersSource = readFileSync(join(root, "src/features/workflows/workflowWorkspaceAdapters.ts"), "utf8");
+const workflowPromotionRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/workflow_recipe_promotion.rs"), "utf8");
+const workflowPromotionPortSource = readFileSync(join(root, "src-tauri/src/application/ports/workflow_recipe_promotion_repository.rs"), "utf8");
+const workflowRegistryServiceSource = readFileSync(join(root, "src-tauri/src/application/workflow_registry_service.rs"), "utf8");
+const workflowRegistryCommandSource = readFileSync(join(root, "src-tauri/src/commands/workflow_registry.rs"), "utf8");
 if (!workflowWorkspaceSource.includes("useWorkflowSmartImportController")) {
   throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must delegate Smart Import session ownership to useWorkflowSmartImportController");
 }
@@ -161,6 +165,22 @@ if (!workflowWorkspaceSource.includes("resolveImplicitWorkflowRecipe")
   || generationStudioSource.includes("resolveImplicitWorkflowRecipe")
   || generationStudioSource.includes("isPromoted")) {
   throw new Error("WORKFLOW_RECIPE_PROMOTION_CONSUMPTION failed: promotion must be consumed once by the Workflow Workspace resolution boundary");
+}
+const generationStudioClearPromotionMarkers = ["clearWorkflowRecipePromotion", "workflow_clear_recipe_promotion", "clearRecipePromotion"];
+if (!workflowWorkspaceSource.includes("clearWorkflowRecipePromotion(")
+  || !workflowClientSource.includes("clearWorkflowRecipePromotion")
+  || !tauriClientSource.includes('"workflow_clear_recipe_promotion"')
+  || !libSource.includes("workflow_clear_recipe_promotion")
+  || generationStudioClearPromotionMarkers.some((marker) => generationStudioSource.includes(marker))) {
+  throw new Error("WORKFLOW_RECIPE_PROMOTION_CLEAR failed: clear must have one typed Workflow Workspace path and no GenerationStudio ownership");
+}
+if ((workflowPromotionRepositorySource.match(/impl WorkflowRecipePromotionRepository for /g) ?? []).length !== 1
+  || !workflowPromotionPortSource.includes("async fn clear(")
+  || !workflowPromotionRepositorySource.includes("async fn clear(")
+  || !workflowPromotionRepositorySource.includes("DELETE FROM workflow_recipe_promotions")
+  || !workflowRegistryServiceSource.includes("pub async fn clear_recipe_promotion(")
+  || !workflowRegistryCommandSource.includes("pub async fn workflow_clear_recipe_promotion(")) {
+  throw new Error("WORKFLOW_RECIPE_PROMOTION_CLEAR failed: clear must remain owned by the existing repository/service/command authority");
 }
 
 if (!generationStudioSource.includes("useGenerationPresetController")) {
@@ -330,6 +350,7 @@ console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`WORKFLOW_RECIPE_PROMOTION=PASS`);
 console.log(`WORKFLOW_RECIPE_PROMOTION_CONSUMPTION=PASS`);
+console.log(`WORKFLOW_RECIPE_PROMOTION_CLEAR=PASS`);
 console.log(`WORKFLOW_ADVANCED_ONBOARDING_CONTROLLER=PASS`);
 console.log(`GENERATION_PRESET_CONTROLLER=PASS`);
 console.log(`GENERATION_SUBMISSION_CONTROLLER=PASS`);

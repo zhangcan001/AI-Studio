@@ -1115,6 +1115,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_rename,
             commands::workflow_registry::workflow_set_current_version,
             commands::workflow_registry::workflow_promote_recipe,
+            commands::workflow_registry::workflow_clear_recipe_promotion,
             commands::workflow_registry::workflow_remove,
             commands::workflow_registry::workflow_restore,
             commands::workflow_registry::workflow_inspect_purge,

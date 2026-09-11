@@ -24,6 +24,7 @@ import {
   setWorkflowEnabled,
   queryWorkflowWorkspace,
   promoteWorkflowRecipe,
+  clearWorkflowRecipePromotion,
 } from "../../services/workflowClient";
 import { useWorkflowOnboardingStore, type WorkflowOnboardingStep } from "../../stores/workflowOnboardingStore";
 import type {
@@ -533,6 +534,19 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
   }
 
+  async function clearRecipePromotion(item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) {
+    const workflowVersionId = recipe.workflowVersionId ?? item.currentVersionId;
+    if (!item.registryBacked || !workflowVersionId || !recipe.isPromoted) return;
+    try {
+      await clearWorkflowRecipePromotion(workflowVersionId, recipe.recipeId);
+      await loadWorkspace("refresh");
+      await onCatalogChanged();
+      setNotice(`已取消配方 ${recipe.version ?? recipe.recipeVersion ?? "—"} 的推广状态。`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
   async function recheckVersion(item: WorkflowProductionWorkspaceView) {
     if (!item.workflowVersionId) return;
     try {
@@ -750,6 +764,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onRepairBuiltinPackage={(item) => void repairBuiltinPackage(item)}
         onSetCurrentVersion={(item, version) => void setCurrentVersion(item, version)}
         onPromoteRecipe={(item, recipe) => void promoteRecipe(item, recipe)}
+        onClearPromotion={(item, recipe) => void clearRecipePromotion(item, recipe)}
         onCleanStaging={(stagingId) => void cleanWorkflowStaging(stagingId)}
       />
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}
