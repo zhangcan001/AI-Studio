@@ -21,9 +21,9 @@ pub use repositories::{
     SqliteScriptSourceRepository, SqliteShotConsistencyRepository, SqliteShotRepository,
     SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteWorkflowBenchmarkRepository,
     SqliteWorkflowLibraryRepository, SqliteWorkflowRecipePromotionRepository,
-    SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
-    SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
-    SqliteWorkflowRuntimeStateRepository,
+    SqliteWorkflowRecipeRuntimeStateRepository, SqliteWorkflowRegistryRepository,
+    SqliteWorkflowRunRepository, SqliteWorkflowRuntimeArtifactRepository,
+    SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
 };
 
 #[cfg(test)]

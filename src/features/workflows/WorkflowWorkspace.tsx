@@ -25,6 +25,8 @@ import {
   queryWorkflowWorkspace,
   promoteWorkflowRecipe,
   clearWorkflowRecipePromotion,
+  archiveWorkflowRecipe,
+  restoreWorkflowRecipe,
 } from "../../services/workflowClient";
 import { useWorkflowOnboardingStore, type WorkflowOnboardingStep } from "../../stores/workflowOnboardingStore";
 import type {
@@ -547,6 +549,32 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
     }
   }
 
+  async function archiveRecipe(item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) {
+    const workflowVersionId = recipe.workflowVersionId ?? item.currentVersionId;
+    if (!item.registryBacked || !workflowVersionId || recipe.archived) return;
+    try {
+      await archiveWorkflowRecipe(workflowVersionId, recipe.recipeId);
+      await loadWorkspace("refresh");
+      await onCatalogChanged();
+      setNotice(`已归档配方 ${recipe.version ?? recipe.recipeVersion ?? "—"}；历史引用保持不变。`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
+  async function restoreRecipe(item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) {
+    const workflowVersionId = recipe.workflowVersionId ?? item.currentVersionId;
+    if (!item.registryBacked || !workflowVersionId || !recipe.archived) return;
+    try {
+      await restoreWorkflowRecipe(workflowVersionId, recipe.recipeId);
+      await loadWorkspace("refresh");
+      await onCatalogChanged();
+      setNotice(`已恢复配方 ${recipe.version ?? recipe.recipeVersion ?? "—"}；未自动推广。`);
+    } catch (actionError: unknown) {
+      setWorkspaceError(toUserMessage(actionError));
+    }
+  }
+
   async function recheckVersion(item: WorkflowProductionWorkspaceView) {
     if (!item.workflowVersionId) return;
     try {
@@ -765,6 +793,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onSetCurrentVersion={(item, version) => void setCurrentVersion(item, version)}
         onPromoteRecipe={(item, recipe) => void promoteRecipe(item, recipe)}
         onClearPromotion={(item, recipe) => void clearRecipePromotion(item, recipe)}
+        onArchiveRecipe={(item, recipe) => void archiveRecipe(item, recipe)}
+        onRestoreRecipe={(item, recipe) => void restoreRecipe(item, recipe)}
         onCleanStaging={(stagingId) => void cleanWorkflowStaging(stagingId)}
       />
       {diff && <VersionDiffPane diff={diff} onClose={() => setDiff(undefined)} />}

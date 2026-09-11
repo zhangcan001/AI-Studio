@@ -3,9 +3,9 @@ use crate::application::{
     ports::{
         Clock, ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RuntimeRecipeRecord,
         RuntimeWorkflowVersionRecord, WorkflowLibrarySource, WorkflowPackageBytes,
-        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRuntimeArtifactRecord,
-        WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository, WorkflowRuntimeState,
-        WorkflowRuntimeStateRepository,
+        WorkflowPackageLoad, WorkflowPackageStore, WorkflowRecipeRuntimeStateRepository,
+        WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
+        WorkflowRuntimeRepository, WorkflowRuntimeState, WorkflowRuntimeStateRepository,
     },
     workflow_library_service::WorkflowLibraryService,
     workflow_manifest::WorkflowManifest,
@@ -81,6 +81,7 @@ pub struct WorkflowRecipeRuntimeInspection {
     pub recipe_version: String,
     pub enabled: bool,
     pub archived: bool,
+    pub recipe_archived: bool,
     pub package_name: String,
     pub package_status: String,
     pub diagnostics: Vec<WorkflowDiagnosticView>,
@@ -269,6 +270,7 @@ pub struct WorkflowLifecycleService {
     onboarding_service: Arc<WorkflowOnboardingService>,
     runtime_repository: Arc<dyn WorkflowRuntimeRepository>,
     state_repository: Arc<dyn WorkflowRuntimeStateRepository>,
+    recipe_state_repository: Option<Arc<dyn WorkflowRecipeRuntimeStateRepository>>,
     package_store: Arc<dyn WorkflowPackageStore>,
     project_workflow_binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
     runtime_artifact_repository: Option<Arc<dyn WorkflowRuntimeArtifactRepository>>,
@@ -294,6 +296,7 @@ impl WorkflowLifecycleService {
             onboarding_service,
             runtime_repository,
             state_repository,
+            recipe_state_repository: None,
             package_store,
             project_workflow_binding_repository: None,
             runtime_artifact_repository: None,
@@ -308,6 +311,14 @@ impl WorkflowLifecycleService {
         repository: Arc<dyn ProjectWorkflowBindingRepository>,
     ) -> Self {
         self.project_workflow_binding_repository = Some(repository);
+        self
+    }
+
+    pub fn with_recipe_runtime_state_repository(
+        mut self,
+        repository: Arc<dyn WorkflowRecipeRuntimeStateRepository>,
+    ) -> Self {
+        self.recipe_state_repository = Some(repository);
         self
     }
 
@@ -1239,6 +1250,14 @@ impl WorkflowLifecycleService {
             .map_err(db_error)?;
         let enabled = state.as_ref().map_or(true, |state| state.enabled);
         let archived = state.as_ref().is_some_and(|state| state.archived);
+        let recipe_archived = match &self.recipe_state_repository {
+            Some(repository) => repository
+                .find_state(workflow_version_id, recipe_id)
+                .await
+                .map_err(db_error)?
+                .is_some_and(|state| state.archived),
+            None => false,
+        };
         let invalid = |package_name: String, diagnostics: Vec<WorkflowDiagnosticView>| {
             WorkflowRecipeRuntimeInspection {
                 workflow_id: version.workflow_id.clone(),
@@ -1247,6 +1266,7 @@ impl WorkflowLifecycleService {
                 recipe_version: recipe.version.clone(),
                 enabled,
                 archived,
+                recipe_archived,
                 package_name,
                 package_status: "INVALID".to_owned(),
                 diagnostics,
@@ -1353,6 +1373,7 @@ impl WorkflowLifecycleService {
             recipe_version: recipe.version.clone(),
             enabled,
             archived,
+            recipe_archived,
             package_name: package.package_name,
             package_status: "VALID".to_owned(),
             diagnostics,

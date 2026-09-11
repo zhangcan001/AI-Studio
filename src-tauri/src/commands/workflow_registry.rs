@@ -17,11 +17,37 @@ use tauri::{AppHandle, State};
 
 pub(super) fn map_registry_error(error: WorkflowRegistryServiceError) -> AppError {
     let code = error.code();
+    let technical_message = error.to_string();
     match error {
         WorkflowRegistryServiceError::WorkflowNotFound(message)
         | WorkflowRegistryServiceError::VersionNotFound {
             workflow_version_id: message,
         } => AppError::invalid_input(format!("{code}: {message}")),
+        WorkflowRegistryServiceError::RecipeNotFound {
+            workflow_version_id,
+            recipe_id,
+        }
+        | WorkflowRegistryServiceError::RecipeArchived {
+            workflow_version_id,
+            recipe_id,
+        }
+        | WorkflowRegistryServiceError::RecipeAlreadyArchived {
+            workflow_version_id,
+            recipe_id,
+        }
+        | WorkflowRegistryServiceError::RecipePromotionGuard {
+            workflow_version_id,
+            recipe_id,
+        }
+        | WorkflowRegistryServiceError::LastActiveRecipeGuard {
+            workflow_version_id,
+            recipe_id,
+        } => AppError::workflow_recipe_lifecycle(
+            code,
+            technical_message,
+            &workflow_version_id,
+            &recipe_id,
+        ),
         WorkflowRegistryServiceError::Blocked(message)
         | WorkflowRegistryServiceError::NotRemoved(message)
         | WorkflowRegistryServiceError::PurgeBlocked(message)
@@ -161,6 +187,32 @@ pub async fn workflow_clear_recipe_promotion(
     state
         .workflow_registry_service
         .clear_recipe_promotion(&workflow_version_id, &recipe_id)
+        .await
+        .map_err(map_registry_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_archive_recipe(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+    recipe_id: String,
+) -> Result<WorkflowRegistryView, AppError> {
+    state
+        .workflow_registry_service
+        .archive_recipe(&workflow_version_id, &recipe_id)
+        .await
+        .map_err(map_registry_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_restore_recipe(
+    state: State<'_, AppState>,
+    workflow_version_id: String,
+    recipe_id: String,
+) -> Result<WorkflowRegistryView, AppError> {
+    state
+        .workflow_registry_service
+        .restore_recipe(&workflow_version_id, &recipe_id)
         .await
         .map_err(map_registry_error)
 }

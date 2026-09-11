@@ -45,6 +45,7 @@ export interface WorkflowWorkspaceRuntimeView {
   enabled: boolean;
   archived: boolean;
   archivedAt?: string | null;
+  recipeArchived?: boolean;
   capability: string;
   capabilityIssues: WorkflowProductionWorkspaceView["capabilityIssues"];
   readiness: string;
@@ -133,11 +134,13 @@ function registryRecipeSummary(recipe: WorkflowRegistryRecipeView, workflowVersi
 
 /** Pick the newest recipe that is explicitly present in the production catalog. */
 export function latestCatalogRecipeForWorkflowItem(
-  item: Pick<WorkflowWorkspaceItem, "workflowVersionId" | "recipes">,
+  item: Pick<WorkflowWorkspaceItem, "workflowVersionId" | "recipes"> & Partial<Pick<WorkflowWorkspaceItem, "registryRecipes">>,
   catalog: RecipeViewModel[],
 ): RecipeViewModel | undefined {
   if (!item.workflowVersionId) return undefined;
-  const itemRecipes = new Map(item.recipes.map((recipe) => [recipe.recipeId, recipe.version]));
+  const itemRecipes = new Map(item.recipes
+    .filter((recipe) => !item.registryRecipes?.find((registered) => registered.recipeId === recipe.recipeId)?.archived)
+    .map((recipe) => [recipe.recipeId, recipe.version]));
   return catalog
     .filter((candidate) => candidate.workflowVersionId === item.workflowVersionId && itemRecipes.has(candidate.recipeId))
     .map((candidate) => ({
@@ -155,17 +158,19 @@ export function latestCatalogRecipeForWorkflowItem(
  */
 export function resolveImplicitWorkflowRecipe(
   item: Pick<WorkflowWorkspaceItem, "workflowVersionId" | "recipes" | "currentRecipe">
-    & Partial<Pick<WorkflowWorkspaceItem, "archived" | "libraryState">>,
+    & Partial<Pick<WorkflowWorkspaceItem, "archived" | "libraryState" | "registryRecipes">>,
   catalog: RecipeViewModel[],
 ): RecipeViewModel | undefined {
   if (!item.workflowVersionId || item.archived || item.libraryState === "REMOVED") return undefined;
 
   const promotedRecipe = item.currentRecipe?.isPromoted
+    && !item.currentRecipe.archived
     && item.currentRecipe.workflowVersionId === item.workflowVersionId
     ? catalog.find((candidate) => (
       candidate.workflowVersionId === item.workflowVersionId
         && candidate.recipeId === item.currentRecipe?.recipeId
         && item.recipes.some((recipe) => recipe.recipeId === candidate.recipeId)
+        && !item.registryRecipes?.find((recipe) => recipe.recipeId === candidate.recipeId)?.archived
     ))
     : undefined;
   return promotedRecipe ?? latestCatalogRecipeForWorkflowItem(item, catalog);

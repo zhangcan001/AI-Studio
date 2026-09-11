@@ -297,6 +297,10 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 }
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS workflow_recipe_runtime_states")
+        .execute(pool)
+        .await
+        .expect("031 recipe archive table should be removable in isolated fixture");
     sqlx::query("DROP TABLE IF EXISTS workflow_recipe_promotions")
         .execute(pool)
         .await
@@ -539,7 +543,7 @@ fn reference_binding(
 }
 
 #[tokio::test]
-async fn dev048_fresh_migration_001_to_030_creates_only_the_frozen_tables() {
+async fn dev048_fresh_migration_001_to_031_creates_only_the_frozen_tables() {
     let directory = tempdir().unwrap();
     let pool = initialize(&directory.path().join("fresh.db"))
         .await
@@ -549,7 +553,7 @@ async fn dev048_fresh_migration_001_to_030_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        30
+        31
     );
     let required_tables = [
         "profile_revisions",
@@ -567,6 +571,7 @@ async fn dev048_fresh_migration_001_to_030_creates_only_the_frozen_tables() {
         "script_import_drafts",
         "production_package_batch_bindings",
         "project_workflow_bindings",
+        "workflow_recipe_runtime_states",
     ];
     for table in required_tables {
         assert_eq!(
@@ -593,7 +598,7 @@ async fn dev048_fresh_migration_001_to_030_creates_only_the_frozen_tables() {
 }
 
 #[tokio::test]
-async fn dev048_021_to_030_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
+async fn dev048_021_to_031_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
     let (directory, pool) = setup().await;
     insert_legacy_sentinels(&pool).await;
     let before = legacy_counts(&pool).await;
@@ -608,7 +613,7 @@ async fn dev048_021_to_030_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        30
+        31
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -643,6 +648,7 @@ async fn dev048_021_to_030_preserves_all_legacy_sentinels_and_leaves_new_tables_
         "script_import_drafts",
         "production_package_batch_bindings",
         "project_workflow_bindings",
+        "workflow_recipe_runtime_states",
     ] {
         assert_eq!(
             sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
@@ -656,7 +662,7 @@ async fn dev048_021_to_030_preserves_all_legacy_sentinels_and_leaves_new_tables_
 }
 
 #[tokio::test]
-async fn dev052_existing_023_to_030_creates_preparation_snapshot_table() {
+async fn dev052_existing_023_to_031_creates_preparation_snapshot_table() {
     let (directory, pool) = setup().await;
     remove_024_for_upgrade_fixture(&pool).await;
     pool.close().await;
@@ -669,7 +675,7 @@ async fn dev052_existing_023_to_030_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        30
+        31
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1475,7 +1481,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 30)
+            .is_some_and(|version| version <= 31)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"1.0.0\""));

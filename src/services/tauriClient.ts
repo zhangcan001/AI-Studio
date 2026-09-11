@@ -587,6 +587,14 @@ export function clearWorkflowRecipePromotion(workflowVersionId: string, recipeId
   return invoke<WorkflowRegistryView>("workflow_clear_recipe_promotion", { workflowVersionId, recipeId });
 }
 
+export function archiveWorkflowRecipe(workflowVersionId: string, recipeId: string): Promise<WorkflowRegistryView> {
+  return invoke<WorkflowRegistryView>("workflow_archive_recipe", { workflowVersionId, recipeId });
+}
+
+export function restoreWorkflowRecipe(workflowVersionId: string, recipeId: string): Promise<WorkflowRegistryView> {
+  return invoke<WorkflowRegistryView>("workflow_restore_recipe", { workflowVersionId, recipeId });
+}
+
 export function removeWorkflow(workflowId: string): Promise<WorkflowRegistryMutationResult> {
   return invoke<WorkflowRegistryMutationResult>("workflow_remove", { workflowId });
 }

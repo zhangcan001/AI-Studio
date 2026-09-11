@@ -12,8 +12,8 @@ pub use application::ports::{
     GenerationSnapshotRepository, ProductionItemReviewRepository, ProductionQueueRepository,
     ProjectBackupRepository, ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
     ProjectWorkflowBindingRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
-    WorkflowLibraryRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
-    WorkflowRuntimeStateRepository,
+    WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository,
+    WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
 };
 pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
@@ -370,6 +370,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 ),
             );
+            let workflow_recipe_runtime_state_repository: Arc<
+                dyn application::ports::WorkflowRecipeRuntimeStateRepository,
+            > = Arc::new(
+                infrastructure::database::SqliteWorkflowRecipeRuntimeStateRepository::new(
+                    database_pool.clone(),
+                ),
+            );
             let workflow_library_source: Arc<dyn WorkflowLibrarySource> = Arc::new(
                 FileSystemWorkflowLibrarySource::new(data_dirs.workflow_library.clone()),
             );
@@ -414,6 +421,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 )
                 .with_registry_repository(workflow_registry_repository)
                 .with_recipe_promotion_repository(workflow_recipe_promotion_repository)
+                .with_recipe_runtime_state_repository(
+                    workflow_recipe_runtime_state_repository.clone(),
+                )
                 .with_runtime_artifact_repository(runtime_artifact_repository.clone())
                 .with_package_store(package_store.clone()),
             );
@@ -515,6 +525,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             )
             .with_project_workflow_binding_repository(
                 project_workflow_binding_repository.clone(),
+            )
+            .with_recipe_runtime_state_repository(
+                workflow_recipe_runtime_state_repository.clone(),
             )
             .with_runtime_artifact_repository(runtime_artifact_repository.clone()));
             let workflow_lifecycle_coordinator = Arc::new(WorkflowLifecycleCoordinator::new(
@@ -639,7 +652,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 shot_batch_repository.clone(),
                 task_recovery_service.clone(),
                 clock.clone(),
-            ));
+            ).with_new_generation_admission(workflow_registry_service.clone()));
             let production_start_admission_service = Arc::new(ProductionStartAdmissionService::new(
                 production_queue_service.clone(),
                 comfy_service.clone(),
@@ -1116,6 +1129,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_set_current_version,
             commands::workflow_registry::workflow_promote_recipe,
             commands::workflow_registry::workflow_clear_recipe_promotion,
+            commands::workflow_registry::workflow_archive_recipe,
+            commands::workflow_registry::workflow_restore_recipe,
             commands::workflow_registry::workflow_remove,
             commands::workflow_registry::workflow_restore,
             commands::workflow_registry::workflow_inspect_purge,

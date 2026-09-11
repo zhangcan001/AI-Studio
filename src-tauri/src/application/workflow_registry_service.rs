@@ -5,6 +5,7 @@ use crate::application::{
         RuntimeRecipeRecord, RuntimeWorkflowVersionRecord, WorkflowDeletionCounts,
         WorkflowPackageQuarantineResult, WorkflowPackageStore, WorkflowPurgeOperationEntry,
         WorkflowPurgeOperationRecord, WorkflowRecipePromotionRepository,
+        WorkflowRecipeRuntimeState, WorkflowRecipeRuntimeStateRepository,
         WorkflowRegistryRepository, WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository,
         WorkflowRuntimeState, WorkflowRuntimeStateRepository,
     },
@@ -72,6 +73,8 @@ pub struct WorkflowRegistryRecipeView {
     pub recipe_sha256: String,
     pub package_name: Option<String>,
     pub is_promoted: bool,
+    pub archived: bool,
+    pub archived_at: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -198,6 +201,7 @@ pub struct WorkflowRegistryService {
     clock: Arc<dyn Clock>,
     registry_repository: Option<Arc<dyn WorkflowRegistryRepository>>,
     recipe_promotion_repository: Option<Arc<dyn WorkflowRecipePromotionRepository>>,
+    recipe_runtime_state_repository: Option<Arc<dyn WorkflowRecipeRuntimeStateRepository>>,
     runtime_artifact_repository: Option<Arc<dyn WorkflowRuntimeArtifactRepository>>,
     package_store: Option<Arc<dyn WorkflowPackageStore>>,
     lifecycle_gate: Arc<Mutex<()>>,
@@ -217,6 +221,7 @@ impl WorkflowRegistryService {
             clock,
             registry_repository: None,
             recipe_promotion_repository: None,
+            recipe_runtime_state_repository: None,
             runtime_artifact_repository: None,
             package_store: None,
             lifecycle_gate: Arc::new(Mutex::new(())),
@@ -239,6 +244,14 @@ impl WorkflowRegistryService {
         repository: Arc<dyn WorkflowRecipePromotionRepository>,
     ) -> Self {
         self.recipe_promotion_repository = Some(repository);
+        self
+    }
+
+    pub fn with_recipe_runtime_state_repository(
+        mut self,
+        repository: Arc<dyn WorkflowRecipeRuntimeStateRepository>,
+    ) -> Self {
+        self.recipe_runtime_state_repository = Some(repository);
         self
     }
 
@@ -481,6 +494,7 @@ impl WorkflowRegistryService {
     /// Workflow row.
     pub async fn list(&self) -> Result<Vec<WorkflowRegistryView>, WorkflowRegistryServiceError> {
         let (versions, states) = self.load_runtime().await?;
+        let recipe_states = self.recipe_runtime_states().await?;
         let promotions = match &self.recipe_promotion_repository {
             Some(repository) => repository
                 .list()
@@ -511,6 +525,7 @@ impl WorkflowRegistryService {
                         &workflow_id,
                         workflow_versions,
                         &states,
+                        &recipe_states,
                         &promotions,
                         Some(&record),
                     )
@@ -520,8 +535,15 @@ impl WorkflowRegistryService {
         }
         for (workflow_id, versions) in grouped {
             views.push(
-                self.build_view(&workflow_id, versions, &states, &promotions, None)
-                    .await?,
+                self.build_view(
+                    &workflow_id,
+                    versions,
+                    &states,
+                    &recipe_states,
+                    &promotions,
+                    None,
+                )
+                .await?,
             );
         }
         views.sort_by(|left, right| {
@@ -765,6 +787,7 @@ impl WorkflowRegistryService {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
         let Some(repository) = &self.recipe_promotion_repository else {
             return Err(WorkflowRegistryServiceError::Repository(
                 RepositoryError::database("workflow recipe promotion repository is not configured"),
@@ -790,6 +813,15 @@ impl WorkflowRegistryService {
             ));
         }
         if self
+            .recipe_is_archived(workflow_version_id, recipe_id)
+            .await?
+        {
+            return Err(WorkflowRegistryServiceError::RecipeArchived {
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
+            });
+        }
+        if self
             .state_repository
             .find_state(workflow_version_id)
             .await?
@@ -812,6 +844,7 @@ impl WorkflowRegistryService {
         workflow_version_id: &str,
         recipe_id: &str,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
         let Some(repository) = &self.recipe_promotion_repository else {
             return Err(WorkflowRegistryServiceError::Repository(
                 RepositoryError::database("workflow recipe promotion repository is not configured"),
@@ -840,6 +873,152 @@ impl WorkflowRegistryService {
         self.get(&version.workflow_id).await
     }
 
+    pub async fn archive_recipe(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
+        let version = self
+            .exact_version_recipe(workflow_version_id, recipe_id)
+            .await?;
+        if self
+            .recipe_is_archived(workflow_version_id, recipe_id)
+            .await?
+        {
+            return Err(WorkflowRegistryServiceError::RecipeAlreadyArchived {
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
+            });
+        }
+        if let Some(repository) = &self.recipe_promotion_repository {
+            let promoted = repository.list().await?.into_iter().any(|promotion| {
+                promotion.workflow_version_id == workflow_version_id
+                    && promotion.recipe_id == recipe_id
+            });
+            if promoted {
+                return Err(WorkflowRegistryServiceError::RecipePromotionGuard {
+                    workflow_version_id: workflow_version_id.to_owned(),
+                    recipe_id: recipe_id.to_owned(),
+                });
+            }
+        }
+        let version_state = self
+            .state_repository
+            .find_state(workflow_version_id)
+            .await?;
+        let version_is_active = !version_state.as_ref().is_some_and(|state| state.archived)
+            && version_state.as_ref().map_or(true, |state| state.enabled);
+        if version_is_active {
+            let states = match &self.recipe_runtime_state_repository {
+                Some(repository) => repository.list_states().await?,
+                None => Vec::new(),
+            };
+            let archived_ids = states
+                .into_iter()
+                .filter(|state| state.workflow_version_id == workflow_version_id && state.archived)
+                .map(|state| state.recipe_id)
+                .collect::<BTreeSet<_>>();
+            let active_count = version
+                .recipes
+                .iter()
+                .filter(|recipe| {
+                    recipe.recipe_id != recipe_id && !archived_ids.contains(&recipe.recipe_id)
+                })
+                .count();
+            if active_count == 0 {
+                return Err(WorkflowRegistryServiceError::LastActiveRecipeGuard {
+                    workflow_version_id: workflow_version_id.to_owned(),
+                    recipe_id: recipe_id.to_owned(),
+                });
+            }
+        }
+        let Some(repository) = &self.recipe_runtime_state_repository else {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::database(
+                    "workflow recipe runtime state repository is not configured",
+                ),
+            ));
+        };
+        repository
+            .set_archived(
+                workflow_version_id,
+                recipe_id,
+                true,
+                Some(self.clock.now()),
+                self.clock.now(),
+            )
+            .await?;
+        self.get(&version.workflow_id).await
+    }
+
+    pub async fn restore_recipe(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
+        let _guard = self.lifecycle_gate.lock().await;
+        let version = self
+            .exact_version_recipe(workflow_version_id, recipe_id)
+            .await?;
+        let Some(repository) = &self.recipe_runtime_state_repository else {
+            return Err(WorkflowRegistryServiceError::Repository(
+                RepositoryError::database(
+                    "workflow recipe runtime state repository is not configured",
+                ),
+            ));
+        };
+        repository
+            .set_archived(
+                workflow_version_id,
+                recipe_id,
+                false,
+                None,
+                self.clock.now(),
+            )
+            .await?;
+        self.get(&version.workflow_id).await
+    }
+
+    async fn exact_version_recipe(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<RuntimeWorkflowVersionRecord, WorkflowRegistryServiceError> {
+        let version = self
+            .runtime_repository
+            .find_version(workflow_version_id)
+            .await?
+            .ok_or_else(|| WorkflowRegistryServiceError::VersionNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+            })?;
+        if !version
+            .recipes
+            .iter()
+            .any(|recipe| recipe.recipe_id == recipe_id)
+        {
+            return Err(WorkflowRegistryServiceError::RecipeNotFound {
+                workflow_version_id: workflow_version_id.to_owned(),
+                recipe_id: recipe_id.to_owned(),
+            });
+        }
+        Ok(version)
+    }
+
+    async fn recipe_is_archived(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<bool, WorkflowRegistryServiceError> {
+        match &self.recipe_runtime_state_repository {
+            Some(repository) => Ok(repository
+                .find_state(workflow_version_id, recipe_id)
+                .await?
+                .is_some_and(|state| state.archived)),
+            None => Ok(false),
+        }
+    }
+
     /// Resolve availability from the exact frozen pair. `current_version` is
     /// intentionally not part of this predicate.
     pub async fn is_available(
@@ -858,6 +1037,12 @@ impl WorkflowRegistryService {
             .recipes
             .iter()
             .any(|recipe| recipe.recipe_id == recipe_id)
+        {
+            return Ok(false);
+        }
+        if self
+            .recipe_is_archived(workflow_version_id, recipe_id)
+            .await?
         {
             return Ok(false);
         }
@@ -964,7 +1149,15 @@ impl WorkflowRegistryService {
         else {
             return Ok(None);
         };
-        let mut view = recipe_view(workflow_version_id, recipe);
+        let recipe_state = match &self.recipe_runtime_state_repository {
+            Some(repository) => {
+                repository
+                    .find_state(workflow_version_id, recipe_id)
+                    .await?
+            }
+            None => None,
+        };
+        let mut view = recipe_view(workflow_version_id, recipe, recipe_state.as_ref());
         if let Some(repository) = &self.runtime_artifact_repository {
             let artifacts = repository
                 .list_for_recipe(workflow_version_id, recipe_id)
@@ -1631,11 +1824,31 @@ impl WorkflowRegistryService {
         Ok((versions, states))
     }
 
+    async fn recipe_runtime_states(
+        &self,
+    ) -> Result<HashMap<(String, String), WorkflowRecipeRuntimeState>, WorkflowRegistryServiceError>
+    {
+        let states = match &self.recipe_runtime_state_repository {
+            Some(repository) => repository.list_states().await?,
+            None => Vec::new(),
+        };
+        Ok(states
+            .into_iter()
+            .map(|state| {
+                (
+                    (state.workflow_version_id.clone(), state.recipe_id.clone()),
+                    state,
+                )
+            })
+            .collect())
+    }
+
     async fn build_view(
         &self,
         workflow_id: &str,
         mut versions: Vec<RuntimeWorkflowVersionRecord>,
         states: &HashMap<String, WorkflowRuntimeState>,
+        recipe_states: &HashMap<(String, String), WorkflowRecipeRuntimeState>,
         promotions: &HashMap<String, String>,
         record: Option<&crate::application::ports::WorkflowRegistryRecord>,
     ) -> Result<WorkflowRegistryView, WorkflowRegistryServiceError> {
@@ -1645,7 +1858,7 @@ impl WorkflowRegistryService {
         });
         let mut version_views = versions
             .iter()
-            .map(|version| version_view(version, states, promotions))
+            .map(|version| version_view(version, states, recipe_states, promotions))
             .collect::<Vec<_>>();
         if let Some(repository) = &self.runtime_artifact_repository {
             for version in &mut version_views {
@@ -1679,11 +1892,12 @@ impl WorkflowRegistryService {
             version
                 .recipes
                 .iter()
-                .find(|recipe| recipe.is_promoted)
+                .find(|recipe| recipe.is_promoted && !recipe.archived)
                 .or_else(|| {
                     version
                         .recipes
                         .iter()
+                        .filter(|recipe| !recipe.archived)
                         .max_by(|left, right| compare_versions(&left.version, &right.version))
                 })
                 .cloned()
@@ -1902,6 +2116,7 @@ impl Default for VersionState {
 fn version_view(
     version: &RuntimeWorkflowVersionRecord,
     states: &HashMap<String, WorkflowRuntimeState>,
+    recipe_states: &HashMap<(String, String), WorkflowRecipeRuntimeState>,
     promotions: &HashMap<String, String>,
 ) -> WorkflowRegistryVersionView {
     let state = state_for(states, &version.workflow_version_id);
@@ -1916,7 +2131,16 @@ fn version_view(
         recipes: version
             .recipes
             .iter()
-            .map(|recipe| recipe_view(&version.workflow_version_id, recipe))
+            .map(|recipe| {
+                recipe_view(
+                    &version.workflow_version_id,
+                    recipe,
+                    recipe_states.get(&(
+                        version.workflow_version_id.clone(),
+                        recipe.recipe_id.clone(),
+                    )),
+                )
+            })
             .map(|mut recipe| {
                 recipe.is_promoted = promotions
                     .get(&version.workflow_version_id)
@@ -1930,6 +2154,7 @@ fn version_view(
 fn recipe_view(
     workflow_version_id: &str,
     recipe: &RuntimeRecipeRecord,
+    state: Option<&WorkflowRecipeRuntimeState>,
 ) -> WorkflowRegistryRecipeView {
     WorkflowRegistryRecipeView {
         workflow_version_id: workflow_version_id.to_owned(),
@@ -1940,6 +2165,10 @@ fn recipe_view(
         recipe_sha256: recipe.recipe_sha256.clone(),
         package_name: None,
         is_promoted: false,
+        archived: state.is_some_and(|state| state.archived),
+        archived_at: state
+            .and_then(|state| state.archived_at)
+            .map(|value| value.to_rfc3339()),
     }
 }
 
@@ -2021,6 +2250,26 @@ pub enum WorkflowRegistryServiceError {
     VersionNotFound {
         workflow_version_id: String,
     },
+    RecipeNotFound {
+        workflow_version_id: String,
+        recipe_id: String,
+    },
+    RecipeArchived {
+        workflow_version_id: String,
+        recipe_id: String,
+    },
+    RecipeAlreadyArchived {
+        workflow_version_id: String,
+        recipe_id: String,
+    },
+    RecipePromotionGuard {
+        workflow_version_id: String,
+        recipe_id: String,
+    },
+    LastActiveRecipeGuard {
+        workflow_version_id: String,
+        recipe_id: String,
+    },
     Blocked(String),
     NotRemoved(String),
     PurgeBlocked(String),
@@ -2047,6 +2296,11 @@ impl WorkflowRegistryServiceError {
             Self::Repository(_) => "WORKFLOW_REGISTRY_REPOSITORY_ERROR",
             Self::WorkflowNotFound(_) => "WORKFLOW_NOT_FOUND",
             Self::VersionNotFound { .. } => "WORKFLOW_VERSION_NOT_FOUND",
+            Self::RecipeNotFound { .. } => "WORKFLOW_RECIPE_NOT_FOUND",
+            Self::RecipeArchived { .. } => "WORKFLOW_RECIPE_ARCHIVED",
+            Self::RecipeAlreadyArchived { .. } => "WORKFLOW_RECIPE_ALREADY_ARCHIVED",
+            Self::RecipePromotionGuard { .. } => "WORKFLOW_RECIPE_PROMOTION_GUARD",
+            Self::LastActiveRecipeGuard { .. } => "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD",
             Self::Blocked(_) => "WORKFLOW_DELETE_BLOCKED_ACTIVE_TASKS",
             Self::NotRemoved(_) => "WORKFLOW_NOT_REMOVED",
             Self::PurgeBlocked(_) => "WORKFLOW_PURGE_BLOCKED",
@@ -2070,6 +2324,41 @@ impl fmt::Display for WorkflowRegistryServiceError {
             } => write!(
                 formatter,
                 "WORKFLOW_VERSION_NOT_FOUND: workflow version {workflow_version_id} was not found"
+            ),
+            Self::RecipeNotFound {
+                workflow_version_id,
+                recipe_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_RECIPE_NOT_FOUND: recipe {recipe_id} does not belong to workflow version {workflow_version_id}"
+            ),
+            Self::RecipeArchived {
+                workflow_version_id,
+                recipe_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_RECIPE_ARCHIVED: recipe {recipe_id} in workflow version {workflow_version_id} is archived"
+            ),
+            Self::RecipeAlreadyArchived {
+                workflow_version_id,
+                recipe_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_RECIPE_ALREADY_ARCHIVED: recipe {recipe_id} in workflow version {workflow_version_id} is already archived"
+            ),
+            Self::RecipePromotionGuard {
+                workflow_version_id,
+                recipe_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_RECIPE_PROMOTION_GUARD: recipe {recipe_id} in workflow version {workflow_version_id} must be explicitly unpromoted before archiving"
+            ),
+            Self::LastActiveRecipeGuard {
+                workflow_version_id,
+                recipe_id,
+            } => write!(
+                formatter,
+                "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD: recipe {recipe_id} is the last active recipe in workflow version {workflow_version_id}"
             ),
             Self::Blocked(message) => write!(formatter, "WORKFLOW_DELETE_BLOCKED: {message}"),
             Self::NotRemoved(workflow_id) => write!(

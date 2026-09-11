@@ -93,6 +93,12 @@ const ERROR_MESSAGES: Record<string, string> = {
   WORKFLOW_VALIDATION_FAILED: "工作流校验未通过，请检查输入和输出映射。",
   REFERENCE_MAPPING_INCOMPLETE: "参考图绑定不完整，请补齐结构化素材绑定后再生成。",
   WORKFLOW_ONBOARDING_ERROR: "工作流导入失败，请检查文件和映射配置。",
+  WORKFLOW_RECIPE_LIFECYCLE_ERROR: "工作流配方生命周期操作失败，请查看技术详情。",
+  WORKFLOW_RECIPE_NOT_FOUND: "请求的配方不属于该工作流版本。",
+  WORKFLOW_RECIPE_ARCHIVED: "该配方已归档，无法用于新的操作。",
+  WORKFLOW_RECIPE_ALREADY_ARCHIVED: "该配方已经归档。",
+  WORKFLOW_RECIPE_PROMOTION_GUARD: "请先取消该配方的当前推广状态，再归档。",
+  WORKFLOW_RECIPE_LAST_ACTIVE_GUARD: "该配方是此工作流版本最后一个可用配方，不能归档。",
   MISSING_NODE: "当前 ComfyUI 缺少该工作流需要的节点。",
   INPUT_OPTION_UNAVAILABLE: "当前 ComfyUI 中缺少工作流所需的模型或选项。",
   INPUT_REQUIRED: "请先填写必填输入项。",
@@ -155,6 +161,10 @@ function errorCode(error: unknown, raw: string): string | undefined {
     if (details && typeof details === "object" && !Array.isArray(details) && "packageErrorCode" in details) {
       const packageErrorCode = (details as { packageErrorCode?: unknown }).packageErrorCode;
       if (typeof packageErrorCode === "string" && packageErrorCode) return packageErrorCode;
+    }
+    if (details && typeof details === "object" && !Array.isArray(details) && "workflowRecipeErrorCode" in details) {
+      const workflowRecipeErrorCode = (details as { workflowRecipeErrorCode?: unknown }).workflowRecipeErrorCode;
+      if (typeof workflowRecipeErrorCode === "string" && workflowRecipeErrorCode) return workflowRecipeErrorCode;
     }
   }
   if (error && typeof error === "object" && "code" in error) {

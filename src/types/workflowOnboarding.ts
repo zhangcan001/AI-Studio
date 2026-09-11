@@ -375,6 +375,7 @@ export interface WorkflowRegistryRecipeView {
   recipeSha256?: string;
   enabled?: boolean;
   archived?: boolean;
+  archivedAt?: string;
   capability?: string;
   readiness?: string;
   inputCount?: number;

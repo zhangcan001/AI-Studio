@@ -1,6 +1,7 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::generation_service::{
-    CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
+    CreateGenerationRequest, GenerationService, GenerationServiceError, NewGenerationAdmission,
+    ReferenceManifest,
 };
 use crate::application::ordered_reference_binding::{
     ref2va_image_bounds, reference_manifest, validate_ordered_reference_ids,
@@ -136,6 +137,7 @@ pub struct ProductionQueueService {
     running_batches: Arc<Mutex<HashSet<String>>>,
     admission_gate: Arc<AsyncMutex<()>>,
     recovery_tasks: Arc<Mutex<HashSet<String>>>,
+    new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
 }
 
 impl ProductionQueueService {
@@ -159,7 +161,16 @@ impl ProductionQueueService {
             running_batches: Arc::new(Mutex::new(HashSet::new())),
             admission_gate: Arc::new(AsyncMutex::new(())),
             recovery_tasks: Arc::new(Mutex::new(HashSet::new())),
+            new_generation_admission: None,
         }
+    }
+
+    pub fn with_new_generation_admission(
+        mut self,
+        admission: Arc<dyn NewGenerationAdmission>,
+    ) -> Self {
+        self.new_generation_admission = Some(admission);
+        self
     }
 
     pub async fn create(
@@ -203,6 +214,18 @@ impl ProductionQueueService {
         let mut recipes = HashMap::<(String, String), Recipe>::new();
         let mut items = Vec::with_capacity(request.items.len());
         for (index, item) in request.items.into_iter().enumerate() {
+            if let Some(admission) = &self.new_generation_admission {
+                let available = admission
+                    .is_available_for_new_generation(&item.workflow_version_id, &item.recipe_id)
+                    .await
+                    .map_err(ProductionQueueError::Repository)?;
+                if !available {
+                    return Err(ProductionQueueError::InvalidInput(format!(
+                        "WORKFLOW_RECIPE_ARCHIVED: generation Recipe is unavailable for workflow version {} and Recipe {}",
+                        item.workflow_version_id, item.recipe_id
+                    )));
+                }
+            }
             let definition_key = (item.workflow_version_id.clone(), item.recipe_id.clone());
             let recipe = if let Some(recipe) = recipes.get(&definition_key) {
                 recipe.clone()

@@ -83,6 +83,21 @@ describe("用户可见错误信息", () => {
     expect(formatted.message).toBe("输入内容无效，请检查后重试。");
   });
 
+  it("uses the structured workflow recipe lifecycle code without parsing the message", () => {
+    const formatted = formatUiError({
+      code: "WORKFLOW_RECIPE_LIFECYCLE_ERROR",
+      message: "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD: technical text",
+      details: {
+        workflowRecipeErrorCode: "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD",
+        workflowVersionId: "wfv-1",
+        recipeId: "recipe-1",
+      },
+    });
+
+    expect(formatted.code).toBe("WORKFLOW_RECIPE_LAST_ACTIVE_GUARD");
+    expect(formatted.message).toContain("最后一个可用配方");
+  });
+
   it("does not expose unknown raw errors in the primary message", () => {
     const formatted = formatUiError(new Error("SECRET_RAW_ERROR from backend"));
     expect(formatted.message).toBe("操作失败，请查看技术详情。");

@@ -19,6 +19,7 @@ pub const RUNTIME_ADMISSION_WORKFLOW_NOT_FOUND: &str = "RUNTIME_ADMISSION_WORKFL
 pub const RUNTIME_ADMISSION_RECIPE_NOT_FOUND: &str = "RUNTIME_ADMISSION_RECIPE_NOT_FOUND";
 pub const RUNTIME_ADMISSION_WORKFLOW_DISABLED: &str = "RUNTIME_ADMISSION_WORKFLOW_DISABLED";
 pub const RUNTIME_ADMISSION_WORKFLOW_ARCHIVED: &str = "RUNTIME_ADMISSION_WORKFLOW_ARCHIVED";
+pub const RUNTIME_ADMISSION_RECIPE_ARCHIVED: &str = "RUNTIME_ADMISSION_RECIPE_ARCHIVED";
 pub const RUNTIME_ADMISSION_PACKAGE_INVALID: &str = "RUNTIME_ADMISSION_PACKAGE_INVALID";
 pub const RUNTIME_ADMISSION_MISSING_NODES: &str = "RUNTIME_ADMISSION_MISSING_NODES";
 pub const RUNTIME_ADMISSION_CAPABILITY_INCOMPATIBLE: &str =
@@ -265,6 +266,15 @@ pub(crate) fn evaluate_recipe_runtime_inspection(
             Vec::new(),
         ));
     }
+    if inspection.recipe_archived {
+        return Err(runtime_failure_for_pair(
+            &inspection.workflow_version_id,
+            &inspection.recipe_id,
+            RUNTIME_ADMISSION_RECIPE_ARCHIVED,
+            "recipe is archived",
+            Vec::new(),
+        ));
+    }
     if !inspection.enabled {
         return Err(runtime_failure_for_pair(
             &inspection.workflow_version_id,
@@ -459,6 +469,7 @@ mod tests {
             recipe_version: "1.0.0".to_owned(),
             enabled: true,
             archived: false,
+            recipe_archived: false,
             package_name: "runtime-package".to_owned(),
             package_status: "VALID".to_owned(),
             diagnostics: Vec::new(),
@@ -532,6 +543,21 @@ mod tests {
         ));
 
         assert_eq!(failure.code, RUNTIME_ADMISSION_WORKFLOW_ARCHIVED);
+    }
+
+    #[test]
+    fn a4b_archived_recipe_is_rejected_without_rewriting_identity() {
+        let mut archived = inspection("wv-a", "recipe-a", "READY");
+        archived.recipe_archived = true;
+        let failure = failure(evaluate_runtime_admission(
+            &[item("wv-a", "recipe-a", ProductionBatchItemStatus::Pending)],
+            ComfyConnectionStatus::Connected,
+            &[archived],
+        ));
+
+        assert_eq!(failure.code, RUNTIME_ADMISSION_RECIPE_ARCHIVED);
+        assert_eq!(failure.workflow_version_id, "wv-a");
+        assert_eq!(failure.recipe_id, "recipe-a");
     }
 
     #[test]

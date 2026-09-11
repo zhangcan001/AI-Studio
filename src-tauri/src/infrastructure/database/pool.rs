@@ -80,7 +80,8 @@ mod tests {
                'consistency_scope_reference_set_bindings', 'production_preparation_snapshots',
                'script_sources', 'script_import_drafts',
                'production_package_batch_bindings', 'project_workflow_bindings',
-               'workflow_runtime_artifacts', 'workflow_recipe_promotions')",
+               'workflow_runtime_artifacts', 'workflow_recipe_promotions',
+               'workflow_recipe_runtime_states')",
         )
         .fetch_one(pool)
         .await
@@ -96,13 +97,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 58);
+        assert_eq!(table_count(&pool).await, 59);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            30
+            31
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -141,6 +142,13 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .expect("promotion table should be readable"),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_recipe_runtime_states",)
+                .fetch_one(&pool)
+                .await
+                .expect("recipe runtime state table should be readable"),
             0
         );
         let project_workflow_binding_columns = sqlx::query_scalar::<_, String>(
@@ -269,7 +277,7 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 58);
+        assert_eq!(table_count(&second_pool).await, 59);
         second_pool.close().await;
     }
 

@@ -212,6 +212,20 @@ describe("DEV-091 推广配方消费策略", () => {
     )).toBeUndefined();
   });
 
+  it("归档 Recipe 不参与隐式推广或最新配方回退", () => {
+    const item = implicitRecipeItem({
+      registryRecipes: [
+        { workflowVersionId: "WV1", recipeId: "R_LEGACY", version: "1.0.0", archived: false },
+        { workflowVersionId: "WV1", recipeId: "R_PROMOTED", version: "2.0.0", archived: true, isPromoted: true },
+      ],
+      currentRecipe: { workflowVersionId: "WV1", recipeId: "R_PROMOTED", isPromoted: true, archived: true },
+    });
+    expect(resolveImplicitWorkflowRecipe(item, catalogRecipes(
+      ["WV1", "R_LEGACY", "1.0.0"],
+      ["WV1", "R_PROMOTED", "2.0.0"],
+    ))?.recipeId).toBe("R_LEGACY");
+  });
+
   it("推广配方缺失时安全回退且不崩溃", () => {
     expect(resolveImplicitWorkflowRecipe(
       implicitRecipeItem({ currentRecipe: { workflowVersionId: "WV1", recipeId: "R_MISSING", isPromoted: true } }),

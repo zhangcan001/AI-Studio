@@ -1,8 +1,8 @@
 use ai_studio_lib::application::{
     ports::{
-        WorkflowRecipePromotionRepository, WorkflowRuntimeArtifactRecord,
-        WorkflowRuntimeArtifactRepository, WorkflowRuntimeRepository,
-        WorkflowRuntimeStateRepository,
+        WorkflowRecipePromotionRepository, WorkflowRecipeRuntimeStateRepository,
+        WorkflowRuntimeArtifactRecord, WorkflowRuntimeArtifactRepository,
+        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
     },
     workflow_analysis_service::WorkflowAnalysisService,
     workflow_registry_service::WorkflowRegistryService,
@@ -11,9 +11,9 @@ use ai_studio_lib::domain::WorkflowDocument;
 use ai_studio_lib::infrastructure::{
     database::{
         initialize, SqliteProjectWorkflowBindingRepository,
-        SqliteWorkflowRecipePromotionRepository, SqliteWorkflowRegistryRepository,
-        SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
-        SqliteWorkflowRuntimeStateRepository,
+        SqliteWorkflowRecipePromotionRepository, SqliteWorkflowRecipeRuntimeStateRepository,
+        SqliteWorkflowRegistryRepository, SqliteWorkflowRuntimeArtifactRepository,
+        SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
     },
     time::SystemClock,
 };
@@ -235,6 +235,9 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
         Arc::new(SqliteWorkflowRuntimeRepository::new(pool.clone()));
     let states: Arc<dyn WorkflowRuntimeStateRepository> =
         Arc::new(SqliteWorkflowRuntimeStateRepository::new(pool.clone()));
+    let recipe_states: Arc<dyn WorkflowRecipeRuntimeStateRepository> = Arc::new(
+        SqliteWorkflowRecipeRuntimeStateRepository::new(pool.clone()),
+    );
     let bindings: Arc<dyn ai_studio_lib::application::ports::ProjectWorkflowBindingRepository> =
         Arc::new(SqliteProjectWorkflowBindingRepository::new(pool.clone()));
     let registry = WorkflowRegistryService::new(runtime, states, bindings, Arc::new(SystemClock))
@@ -244,6 +247,7 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
         .with_recipe_promotion_repository(Arc::new(SqliteWorkflowRecipePromotionRepository::new(
             pool.clone(),
         )))
+        .with_recipe_runtime_state_repository(recipe_states)
         .with_runtime_artifact_repository(Arc::new(artifacts));
 
     let views = registry.list().await.expect("registry list should succeed");
@@ -276,7 +280,7 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
         Some("package-b")
     );
 
-    let promotion_repository = SqliteWorkflowRecipePromotionRepository::new(pool);
+    let promotion_repository = SqliteWorkflowRecipePromotionRepository::new(pool.clone());
     promotion_repository
         .promote("wfv_dev083_1", "rcp_dev083_1", Utc::now())
         .await
@@ -335,4 +339,104 @@ async fn dev083_registry_groups_versions_and_resolves_each_recipe_artifact() {
             .map(|recipe| recipe.recipe_id.as_str()),
         Some("rcp_dev083_3")
     );
+
+    let archive_error = registry
+        .archive_recipe("wfv_dev083_2", "rcp_dev083_3")
+        .await
+        .expect_err("promoted recipe archive must be rejected");
+    assert_eq!(archive_error.code(), "WORKFLOW_RECIPE_PROMOTION_GUARD");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_recipe_runtime_states",)
+            .fetch_one(&pool)
+            .await
+            .expect("archive state count should be readable"),
+        0
+    );
+
+    registry
+        .clear_recipe_promotion("wfv_dev083_2", "rcp_dev083_3")
+        .await
+        .expect("explicit promotion clear should succeed");
+    let last_active_error = registry
+        .archive_recipe("wfv_dev083_2", "rcp_dev083_3")
+        .await
+        .expect_err("last active recipe archive must be rejected");
+    assert_eq!(
+        last_active_error.code(),
+        "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_recipe_runtime_states",)
+            .fetch_one(&pool)
+            .await
+            .expect("archive state count should remain readable"),
+        0
+    );
+
+    registry
+        .clear_recipe_promotion("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect("historical promotion clear should succeed");
+    registry
+        .archive_recipe("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect("one of two active recipes should be archivable");
+    let archived = registry.list().await.expect("archived list should succeed");
+    let archived_recipe = archived[0]
+        .recipes
+        .iter()
+        .find(|recipe| recipe.recipe_id == "rcp_dev083_1")
+        .expect("archived recipe should remain in history");
+    assert!(archived_recipe.archived);
+    assert!(archived[0]
+        .current_recipe
+        .as_ref()
+        .is_none_or(|recipe| !recipe.archived));
+    assert!(!registry
+        .is_available("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect("archived availability should be readable"));
+
+    registry
+        .set_current_version("wfl_dev083", "wfv_dev083_1")
+        .await
+        .expect("version switch should remain independent from recipe archive");
+    let active_fallback = registry.list().await.expect("fallback list should succeed");
+    assert_eq!(
+        active_fallback[0]
+            .current_recipe
+            .as_ref()
+            .map(|recipe| recipe.recipe_id.as_str()),
+        Some("rcp_dev083_2")
+    );
+
+    registry
+        .restore_recipe("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect("explicit recipe restore should succeed");
+    assert!(registry
+        .is_available("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect("restored availability should use normal registry checks"));
+    let restored = registry.list().await.expect("restored list should succeed");
+    assert!(restored[0]
+        .recipes
+        .iter()
+        .find(|recipe| recipe.recipe_id == "rcp_dev083_1")
+        .is_some_and(|recipe| !recipe.archived && !recipe.is_promoted));
+
+    registry
+        .archive_recipe("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect("restored recipe should be archivable again");
+    let promote_archived_error = registry
+        .promote_recipe("wfv_dev083_1", "rcp_dev083_1")
+        .await
+        .expect_err("archived recipe promotion must be rejected");
+    assert_eq!(promote_archived_error.code(), "WORKFLOW_RECIPE_ARCHIVED");
+    let wrong_membership = registry
+        .archive_recipe("wfv_dev083_1", "rcp_dev083_3")
+        .await
+        .expect_err("cross-version recipe identity must be rejected");
+    assert_eq!(wrong_membership.code(), "WORKFLOW_RECIPE_NOT_FOUND");
 }

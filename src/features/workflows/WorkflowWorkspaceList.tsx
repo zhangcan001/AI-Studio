@@ -45,6 +45,8 @@ export interface WorkflowWorkspaceListProps {
   onSetCurrentVersion: (item: WorkflowWorkspaceItem, version: WorkflowRegistryVersionView) => void;
   onPromoteRecipe: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
   onClearPromotion: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
+  onArchiveRecipe: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
+  onRestoreRecipe: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
   onCleanStaging: (stagingId: string) => void;
 }
 
@@ -79,6 +81,8 @@ export function WorkflowWorkspaceList({
   onSetCurrentVersion,
   onPromoteRecipe,
   onClearPromotion,
+  onArchiveRecipe,
+  onRestoreRecipe,
   onCleanStaging,
 }: WorkflowWorkspaceListProps) {
   const visibleItems = useMemo(() => items.filter((item) => {
@@ -192,14 +196,19 @@ export function WorkflowWorkspaceList({
                     {recipesForDisplay.map((recipe) => {
                       const workflowVersionId = recipe.workflowVersionId ?? currentVersionId;
                       const version = versionsForDisplay.find((candidate) => candidate.workflowVersionId === workflowVersionId);
-                      const canPromote = item.registryBacked && !removed && Boolean(workflowVersionId) && !version?.archived;
+                      const canPromote = item.registryBacked && !removed && Boolean(workflowVersionId) && !version?.archived && !recipe.archived;
                       const canClearPromotion = item.registryBacked && Boolean(workflowVersionId) && Boolean(recipe.isPromoted);
+                      const canArchive = item.registryBacked && !removed && Boolean(workflowVersionId) && !version?.archived && !recipe.archived;
+                      const canRestore = item.registryBacked && Boolean(workflowVersionId) && !version?.archived && Boolean(recipe.archived);
                       return (
                         <span key={`${workflowVersionId ?? "version"}:${recipe.recipeId}`}>
                           配方 {recipe.version ?? recipe.recipeVersion ?? "—"} · {recipe.inputCount ?? 0} 个输入 · {recipe.outputCount ?? 0} 个输出
                           {recipe.isPromoted ? " · 已推广" : ""}
                           {canPromote && !recipe.isPromoted && <button type="button" className="quiet-button" onClick={() => onPromoteRecipe(item, recipe)}>设为推广配方</button>}
                           {canClearPromotion && <button type="button" className="quiet-button" onClick={() => onClearPromotion(item, recipe)}>取消推广</button>}
+                          {canArchive && <button type="button" className="quiet-button danger-button" onClick={() => onArchiveRecipe(item, recipe)}>归档 Recipe</button>}
+                          {canRestore && <button type="button" className="quiet-button" onClick={() => onRestoreRecipe(item, recipe)}>恢复 Recipe</button>}
+                          {recipe.archived && <small> · 已归档</small>}
                         </span>
                       );
                     })}

@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{error::Error, fmt};
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,6 +24,7 @@ pub enum AppErrorCode {
     AssetReadFailed,
     ReusableDraftUnavailable,
     WorkflowOnboardingError,
+    WorkflowRecipeLifecycleError,
     ProductionPackageError,
     ProductionQueueBusy,
     ProductionStartAdmissionBlocked,
@@ -124,6 +125,21 @@ impl AppError {
 
     pub fn workflow_onboarding(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::WorkflowOnboardingError, message)
+    }
+
+    pub fn workflow_recipe_lifecycle(
+        error_code: &str,
+        message: impl Into<String>,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Self {
+        let mut error = Self::new(AppErrorCode::WorkflowRecipeLifecycleError, message);
+        error.details = Some(json!({
+            "workflowRecipeErrorCode": error_code,
+            "workflowVersionId": workflow_version_id,
+            "recipeId": recipe_id,
+        }));
+        error
     }
 
     pub fn production_package(
@@ -228,6 +244,7 @@ impl AppError {
             AppErrorCode::AssetReadFailed => "ASSET_READ_FAILED",
             AppErrorCode::ReusableDraftUnavailable => "REUSABLE_DRAFT_UNAVAILABLE",
             AppErrorCode::WorkflowOnboardingError => "WORKFLOW_ONBOARDING_ERROR",
+            AppErrorCode::WorkflowRecipeLifecycleError => "WORKFLOW_RECIPE_LIFECYCLE_ERROR",
             AppErrorCode::ProductionPackageError => "PRODUCTION_PACKAGE_ERROR",
             AppErrorCode::ProductionQueueBusy => "PRODUCTION_QUEUE_BUSY",
             AppErrorCode::ProductionStartAdmissionBlocked => "PRODUCTION_START_ADMISSION_BLOCKED",
@@ -321,5 +338,24 @@ mod tests {
             "PACKAGE_RECIPE_INCOMPATIBLE"
         );
         assert_eq!(value["details"]["workflowId"], "workflow-1");
+    }
+
+    #[test]
+    fn preserves_structured_workflow_recipe_lifecycle_error() {
+        let value = serde_json::to_value(AppError::workflow_recipe_lifecycle(
+            "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD",
+            "technical recipe lifecycle failure",
+            "wfv-1",
+            "recipe-1",
+        ))
+        .unwrap();
+
+        assert_eq!(value["code"], "WORKFLOW_RECIPE_LIFECYCLE_ERROR");
+        assert_eq!(
+            value["details"]["workflowRecipeErrorCode"],
+            "WORKFLOW_RECIPE_LAST_ACTIVE_GUARD"
+        );
+        assert_eq!(value["details"]["workflowVersionId"], "wfv-1");
+        assert_eq!(value["details"]["recipeId"], "recipe-1");
     }
 }

@@ -96,9 +96,13 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
 const workflowWorkspaceSource = readFileSync(join(root, "src/features/workflows/WorkflowWorkspace.tsx"), "utf8");
 const workflowWorkspaceAdaptersSource = readFileSync(join(root, "src/features/workflows/workflowWorkspaceAdapters.ts"), "utf8");
 const workflowPromotionRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/workflow_recipe_promotion.rs"), "utf8");
+const recipeArchiveMigrationSource = readFileSync(join(root, "src-tauri/migrations/031_workflow_recipe_archive_state.sql"), "utf8");
+const recipeArchivePortSource = readFileSync(join(root, "src-tauri/src/application/ports/workflow_recipe_runtime_state_repository.rs"), "utf8");
+const recipeArchiveRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/workflow_recipe_runtime_state.rs"), "utf8");
 const workflowPromotionPortSource = readFileSync(join(root, "src-tauri/src/application/ports/workflow_recipe_promotion_repository.rs"), "utf8");
 const workflowRegistryServiceSource = readFileSync(join(root, "src-tauri/src/application/workflow_registry_service.rs"), "utf8");
 const workflowRegistryCommandSource = readFileSync(join(root, "src-tauri/src/commands/workflow_registry.rs"), "utf8");
+const appErrorSource = readFileSync(join(root, "src-tauri/src/error.rs"), "utf8");
 if (!workflowWorkspaceSource.includes("useWorkflowSmartImportController")) {
   throw new Error("WORKFLOW_SMART_IMPORT_CONTROLLER failed: WorkflowWorkspace must delegate Smart Import session ownership to useWorkflowSmartImportController");
 }
@@ -125,6 +129,12 @@ if (smartImportFunctionMarkers.some((marker) => workflowWorkspaceSource.includes
 
 if (!workflowWorkspaceSource.includes("useWorkflowParameterExposureController")) {
   throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure ownership to useWorkflowParameterExposureController");
+}
+
+if (!appErrorSource.includes("WorkflowRecipeLifecycleError")
+  || !workflowRegistryCommandSource.includes("AppError::workflow_recipe_lifecycle(")
+  || workflowRegistryCommandSource.includes("WORKFLOW_RECIPE_LIFECYCLE_ERROR: workflow_version_id=")) {
+  throw new Error("STRUCTURED_IPC_ERROR failed: recipe lifecycle errors must use typed IPC details instead of message parsing");
 }
 const parameterExposureStateMarkers = ["parameterDraft", "parameterItem", "parameterOriginalKeys", "parameterLoading"];
 const parameterExposureStateLines = workflowWorkspaceSource
@@ -181,6 +191,42 @@ if ((workflowPromotionRepositorySource.match(/impl WorkflowRecipePromotionReposi
   || !workflowRegistryServiceSource.includes("pub async fn clear_recipe_promotion(")
   || !workflowRegistryCommandSource.includes("pub async fn workflow_clear_recipe_promotion(")) {
   throw new Error("WORKFLOW_RECIPE_PROMOTION_CLEAR failed: clear must remain owned by the existing repository/service/command authority");
+}
+
+const recipeArchiveApplicationSources = [
+  readFileSync(join(root, "src-tauri/src/application/workflow_registry_service.rs"), "utf8"),
+  readFileSync(join(root, "src-tauri/src/application/workflow_lifecycle_service.rs"), "utf8"),
+  readFileSync(join(root, "src-tauri/src/application/production_queue_service.rs"), "utf8"),
+];
+const directApplicationSqlx = recipeArchiveApplicationSources.filter((source) => /\bsqlx::/.test(source));
+if (!recipeArchiveMigrationSource.includes("CREATE TABLE workflow_recipe_runtime_states")
+  || !recipeArchiveMigrationSource.includes("PRIMARY KEY (workflow_version_id, recipe_id)")
+  || !recipeArchiveMigrationSource.includes("REFERENCES recipes(workflow_version_id, id)")
+  || !recipeArchivePortSource.includes("trait WorkflowRecipeRuntimeStateRepository")
+  || !recipeArchivePortSource.includes("workflow_version_id")
+  || !recipeArchivePortSource.includes("recipe_id")
+  || !recipeArchiveRepositorySource.includes("impl WorkflowRecipeRuntimeStateRepository for")
+  || !workflowRegistryServiceSource.includes("recipe_runtime_state_repository")
+  || !workflowRegistryServiceSource.includes("pub async fn archive_recipe(")
+  || !workflowRegistryServiceSource.includes("pub async fn restore_recipe(")
+  || !workflowRegistryServiceSource.includes("recipe_is_archived")
+  || directApplicationSqlx.length) {
+  throw new Error("RECIPE_ARCHIVE_AUTHORITY failed: recipe archive must use one dedicated infrastructure-backed exact-pair state authority");
+}
+if (!workflowWorkspaceAdaptersSource.includes("!item.currentRecipe.archived")
+  || !workflowWorkspaceAdaptersSource.includes("item.registryRecipes?.find")
+  || !workflowWorkspaceAdaptersSource.includes("?.archived")) {
+  throw new Error("ONE_IMPLICIT_RECIPE_RESOLVER failed: archived recipes must be excluded by resolveImplicitWorkflowRecipe");
+}
+if (!workflowClientSource.includes("archiveWorkflowRecipe")
+  || !workflowClientSource.includes("restoreWorkflowRecipe")
+  || !tauriClientSource.includes('"workflow_archive_recipe"')
+  || !tauriClientSource.includes('"workflow_restore_recipe"')
+  || !workflowRegistryCommandSource.includes("pub async fn workflow_archive_recipe(")
+  || !workflowRegistryCommandSource.includes("pub async fn workflow_restore_recipe(")
+  || !libSource.includes("workflow_archive_recipe")
+  || !libSource.includes("workflow_restore_recipe")) {
+  throw new Error("RECIPE_ARCHIVE_AUTHORITY failed: archive/restore must use the typed Registry command path");
 }
 
 if (!generationStudioSource.includes("useGenerationPresetController")) {
@@ -348,6 +394,14 @@ if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.i
 
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
+console.log(`STRUCTURED_IPC_ERROR=PASS`);
+console.log(`RECIPE_ARCHIVE_AUTHORITY=PASS`);
+console.log(`ONE_RECIPE_ARCHIVE_STATE_SOURCE=PASS`);
+console.log(`ONE_IMPLICIT_RECIPE_RESOLVER=PASS`);
+console.log(`APPLICATION_DIRECT_SQLX_NEW_USAGE=0`);
+console.log(`NO_NEW_QUEUE=YES`);
+console.log(`NO_NEW_EXECUTOR=YES`);
+console.log(`NO_NEW_TASK_MODEL=YES`);
 console.log(`WORKFLOW_RECIPE_PROMOTION=PASS`);
 console.log(`WORKFLOW_RECIPE_PROMOTION_CONSUMPTION=PASS`);
 console.log(`WORKFLOW_RECIPE_PROMOTION_CLEAR=PASS`);

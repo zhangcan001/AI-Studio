@@ -115,6 +115,7 @@ pub struct WorkflowWorkspaceRuntimeView {
     pub enabled: bool,
     pub archived: bool,
     pub archived_at: Option<String>,
+    pub recipe_archived: bool,
     pub capability: String,
     pub capability_issues: Vec<CapabilityIssueView>,
     pub readiness: String,
@@ -410,7 +411,7 @@ impl WorkflowWorkspaceQueryService {
                     .get(&pair)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
-                let runtime = match mode {
+                let mut runtime = match mode {
                     WorkflowWorkspaceQueryMode::Fast => self.fast_runtime(
                         version,
                         recipe,
@@ -434,6 +435,19 @@ impl WorkflowWorkspaceQueryService {
                         .await?
                     }
                 };
+                runtime.recipe_archived = registry
+                    .get(&version.workflow_id)
+                    .and_then(|view| {
+                        view.recipes.iter().find(|candidate| {
+                            candidate.workflow_version_id == version.workflow_version_id
+                                && candidate.recipe_id == recipe.recipe_id
+                        })
+                    })
+                    .is_some_and(|recipe| recipe.archived);
+                let artifact_status = runtime.artifact_status.clone();
+                let package_status = runtime.package_status.clone();
+                let diagnostics = runtime.diagnostics.clone();
+                runtime = finalize_runtime(runtime, &artifact_status, &package_status, diagnostics);
                 runtime_by_workflow
                     .entry(version.workflow_id.clone())
                     .or_default()
@@ -880,6 +894,7 @@ fn base_runtime(
         enabled,
         archived,
         archived_at: archived_at.map(|value| value.to_rfc3339()),
+        recipe_archived: false,
         capability: "NOT_CHECKED".to_owned(),
         capability_issues: Vec::new(),
         readiness: "DEGRADED".to_owned(),
@@ -945,6 +960,9 @@ fn finalize_runtime(
     if view.archived {
         reasons.push("workflow version is archived".to_owned());
     }
+    if view.recipe_archived {
+        reasons.push("recipe is archived".to_owned());
+    }
     if view.library_state != "ACTIVE" {
         reasons.push("workflow is not active in the Registry".to_owned());
     }
@@ -979,6 +997,7 @@ fn finalize_runtime(
         reasons.push("no successful generation has been recorded".to_owned());
     }
     let blocked = view.archived
+        || view.recipe_archived
         || view.library_state != "ACTIVE"
         || !view.enabled
         || matches!(
