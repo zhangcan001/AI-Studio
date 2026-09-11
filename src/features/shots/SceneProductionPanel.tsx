@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  applyPromptTemplate,
   bulkSetShotStageConfig,
   createBatchWorkflowPreset,
   deleteBatchWorkflowPreset,
   getSceneProductionPlan,
   listBatchWorkflowPresets,
   prepareSceneProduction,
-  previewPromptTemplateBulk,
   startProductionQueue,
   updateBatchWorkflowPreset,
 } from "../../services/tauriClient";
@@ -28,10 +26,9 @@ import {
   sceneProductionStagePreset,
 } from "../../types/sceneProduction";
 import type { ShotInputValues } from "../../types/shot";
-import { analyzePromptTemplateText, customPromptVariableNames } from "../prompts/promptTemplateState";
 import "./SceneProductionPanel.css";
 
-type BusyAction = "load" | "preset-save" | "preset-rename" | "preset-delete" | "preset-apply" | "prompt-preview" | "prompt-apply" | "plan" | "prepare" | "start";
+type BusyAction = "load" | "preset-save" | "preset-rename" | "preset-delete" | "preset-apply" | "plan" | "prepare" | "start";
 
 interface PanelError {
   code: string;
@@ -75,8 +72,6 @@ function LegacySceneProductionPanel({
   sceneOptions,
   currentSceneId,
   currentShot,
-  promptEntries = [],
-  referenceAnchors = [],
   initialPresets = [],
   initialPlan,
   onRefresh,
@@ -94,23 +89,11 @@ function LegacySceneProductionPanel({
   const [presetName, setPresetName] = useState("");
   const [presetDescription, setPresetDescription] = useState("");
   const [presetStages, setPresetStages] = useState<Set<SceneProductionStage>>(new Set(STAGES));
-  const [promptEntryId, setPromptEntryId] = useState("");
-  const [promptVersionId, setPromptVersionId] = useState("");
-  const [anchorIds, setAnchorIds] = useState<string[]>([]);
-  const [customValues, setCustomValues] = useState<Record<string, string>>({});
-  const [promptPreview, setPromptPreview] = useState<{ total: number; valid: number; invalid: number }>();
   const [allowPartial, setAllowPartial] = useState(false);
   const [preparedBatchId, setPreparedBatchId] = useState<string>();
 
   const selectedPreset = presets.find((preset) => preset.id === selectedPresetId);
   const selectedStagePreset = sceneProductionStagePreset(selectedPreset, stage);
-  const selectedPromptEntry = promptEntries.find((entry) => entry.id === promptEntryId);
-  const selectedPromptVersion = selectedPromptEntry?.versions.find((version) => version.id === promptVersionId)
-    ?? selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
-  const promptCustomNames = useMemo(
-    () => selectedPromptVersion ? customPromptVariableNames(analyzePromptTemplateText(selectedPromptVersion.text).customVariables) : [],
-    [selectedPromptVersion],
-  );
   const planShotIds = useMemo(() => plan.rows.map((row) => row.shotId), [plan.rows]);
   const isBusy = sceneProductionActionDisabled(busyAction);
   const canPrepare = plan.canPrepare && plan.eligible > 0;
@@ -149,25 +132,12 @@ function LegacySceneProductionPanel({
   }, [projectId, sceneId, stage]);
 
   useEffect(() => {
-    const entry = promptEntries[0];
-    setPromptEntryId((current) => current && promptEntries.some((item) => item.id === current) ? current : entry?.id ?? "");
-  }, [promptEntries]);
-
-  useEffect(() => {
     if (!selectedPreset) return;
     setPresetName(selectedPreset.name);
     setPresetDescription(selectedPreset.description);
   }, [selectedPresetId]);
 
-  useEffect(() => {
-    const latest = selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
-    setPromptVersionId((current) => current && selectedPromptEntry?.versions.some((version) => version.id === current) ? current : latest?.id ?? "");
-  }, [selectedPromptEntry]);
 
-  useEffect(() => {
-    setCustomValues((current) => Object.fromEntries(promptCustomNames.map((name) => [name, current[name] ?? ""])));
-    setPromptPreview(undefined);
-  }, [promptCustomNames]);
 
   function clearFeedback() {
     setError(undefined);
@@ -281,41 +251,6 @@ function LegacySceneProductionPanel({
     });
   }
 
-  async function previewPrompt() {
-    if (!selectedPromptEntry || !selectedPromptVersion || !planShotIds.length) return;
-    await runAction("prompt-preview", async () => {
-      const preview = await previewPromptTemplateBulk({
-        projectId,
-        promptEntryId: selectedPromptEntry.id,
-        promptVersionId: selectedPromptVersion.id,
-        shotIds: planShotIds,
-        contextAnchorIds: anchorIds,
-        customValues,
-        previewLimit: 12,
-      });
-      setPromptPreview({ total: preview.total, valid: preview.valid, invalid: preview.invalid });
-    });
-  }
-
-  async function applyPrompt() {
-    if (!selectedPromptEntry || !selectedPromptVersion || !planShotIds.length || !promptPreview || promptPreview.invalid > 0) return;
-    await runAction("prompt-apply", async () => {
-      await applyPromptTemplate({
-        projectId,
-        promptEntryId: selectedPromptEntry.id,
-        promptVersionId: selectedPromptVersion.id,
-        stage,
-        shotIds: planShotIds,
-        contextAnchorIds: anchorIds,
-        customValues,
-      });
-      setNotice(`已将提示词模板应用到 ${planShotIds.length} 个镜头；最终提示词已按阶段快照冻结。`);
-      setPromptPreview(undefined);
-      await reloadPlan();
-      await onRefresh?.();
-    });
-  }
-
   async function prepare(allowPartialValue: boolean) {
     const canPrepareRequest = allowPartialValue ? partialCanPrepare : canPrepare;
     if (!sceneId || !planShotIds.length || !canPrepareRequest) return;
@@ -352,7 +287,6 @@ function LegacySceneProductionPanel({
   function selectStage(nextStage: SceneProductionStage) {
     setStage(nextStage);
     setPreparedBatchId(undefined);
-    setPromptPreview(undefined);
   }
 
   if (!sceneOptions.length) {
@@ -384,15 +318,6 @@ function LegacySceneProductionPanel({
           <small className="scene-production-hint">应用会覆盖阶段配置，但不会覆盖有序参考图、已确认图片或已确认视频。</small>
         </section>
 
-        <section className="scene-production-card" aria-label="提示词模板批量应用">
-          <div className="scene-production-card-heading"><div><span className="section-label">提示词</span><h4>提示词模板</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div>
-          <label><span>提示词条目</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
-          <label><span>版本</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>
-          {referenceAnchors.length > 0 && <div className="scene-production-anchor-list"><span>上下文锚点（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}
-          {promptCustomNames.length > 0 && <div className="scene-production-custom-values">{promptCustomNames.map((name) => <label key={name}><span>{name}</span><input value={customValues[name] ?? ""} maxLength={4096} onChange={(event) => setCustomValues((current) => ({ ...current, [name]: event.target.value }))} disabled={isBusy} /></label>)}</div>}
-          <div className="scene-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !planShotIds.length}>{busyAction === "prompt-preview" ? "预览中…" : "预览场景提示词"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !promptPreview || promptPreview.invalid > 0}>{busyAction === "prompt-apply" ? "应用中…" : `应用${sceneProductionStageLabel(stage)}提示词`}</button></div>
-          {promptPreview && <p className={promptPreview.invalid ? "scene-production-inline-error" : "scene-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。应用后会冻结最终阶段提示词。</p>}
-        </section>
       </div>
 
       <section className="scene-production-card scene-production-plan" aria-label="生产计划">

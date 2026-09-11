@@ -910,7 +910,6 @@ function App() {
           <ShotWorkspace
             projectId={activeProject.id}
             projectName={activeProject.name}
-            projectDescription={activeProject.description}
             catalog={catalog}
             initialSelectedShotId={resumeShotId}
             mode={shotWorkspaceModeForSection(activeStudioSection)}

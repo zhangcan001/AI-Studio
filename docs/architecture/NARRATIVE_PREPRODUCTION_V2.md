@@ -1,5 +1,9 @@
 # Narrative Preproduction V2
 
+> STATUS=RETIRED
+> RETIRED_BY=DEV-100
+> REPLACED_BY=External Agent → AI Studio Production Handoff
+
 状态：DEV-057 Data Foundation 已落地；DEV-058 Script Import Parser 已实现；Match/Storyboard/Review/Promote 尚未实现。
 
 DEV-057 仅落地 Script/Draft 的领域 contract、Migration 025、不可变 revision、校验和 Backup 15；产品版本继续为 0.7.0，Manifest 继续为 2。本文下游的正式生产链和后续交付边界保持不变。

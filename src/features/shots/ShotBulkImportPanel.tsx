@@ -1,47 +1,22 @@
 import { useState } from "react";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { invokeCommand as invoke } from "../../services/ipc";
+import {
+  commitShotBulkImport,
+  previewShotBulkImport,
+  type ShotBulkImportPreview,
+  type ShotBulkImportRequest,
+  type ShotBulkImportRowPreview,
+} from "../../services/tauriClient";
 
-export type ShotBulkImportFormat = "tsv" | "json";
+export type { ShotBulkImportPreview, ShotBulkImportRequest, ShotBulkImportRowPreview };
+export { commitShotBulkImport, previewShotBulkImport };
 
-type ShotBulkImportIssue = string | { message: string };
-
-export interface ShotBulkImportRowPreview {
-  rowNumber: number;
-  name: string;
-  description: string;
-  imagePrompt: string;
-  videoPrompt: string;
-  errors: ShotBulkImportIssue[];
-  warnings: ShotBulkImportIssue[];
-}
-
-export interface ShotBulkImportPreview {
-  total: number;
-  valid: number;
-  invalid: number;
-  warnings: number;
-  rows: ShotBulkImportRowPreview[];
-}
-
-export interface ShotBulkImportRequest {
-  projectId: string;
-  format: ShotBulkImportFormat;
-  content: string;
-}
+export type ShotBulkImportFormat = ShotBulkImportRequest["format"];
 
 export interface ShotBulkImportPanelProps {
   projectId: string;
   onImported?: () => void | Promise<void>;
   onCancel?: () => void;
-}
-
-export function previewShotBulkImport(request: ShotBulkImportRequest): Promise<ShotBulkImportPreview> {
-  return invoke<ShotBulkImportPreview>("preview_shot_bulk_import", { request });
-}
-
-export function commitShotBulkImport(request: ShotBulkImportRequest): Promise<unknown> {
-  return invoke("commit_shot_bulk_import", { request });
 }
 
 export function shotBulkImportRowClassName(row: ShotBulkImportRowPreview): string {
@@ -204,6 +179,6 @@ export function ShotBulkImportPanel({ projectId, onImported, onCancel }: ShotBul
   );
 }
 
-function issueMessage(issue: ShotBulkImportIssue): string {
-  return typeof issue === "string" ? issue : issue.message;
+function issueMessage(issue: ShotBulkImportRowPreview["errors"][number]): string {
+  return issue.message;
 }

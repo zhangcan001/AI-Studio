@@ -14,17 +14,13 @@ pub mod production_queue;
 pub mod production_run;
 pub mod production_structure;
 pub mod project_id;
-pub mod prompt_template;
 pub mod recipe;
 pub mod reference_anchor;
-pub mod script_draft;
 pub mod shot;
 pub mod shot_context;
 pub mod shot_readiness;
 pub mod task;
 pub mod workflow;
-
-pub use script_draft::*;
 
 pub use asset::{
     Asset, AssetDomainError, AssetId, AssetType, GENERATED_IMAGE_CATEGORY,
@@ -63,11 +59,6 @@ pub use production_structure::{
     ProductionSeriesId, ProductionStructureDomainError, ShotSceneAssignment,
 };
 pub use project_id::{validate_project_id, ProjectIdValidationError};
-pub use prompt_template::{
-    ParsedPromptTemplate, PromptAnchor, PromptAnchorContext, PromptAnchorKind,
-    PromptProjectContext, PromptShotContext, PromptStructureContext, PromptTemplateAnalysis,
-    PromptTemplateContext, PromptTemplateSegment,
-};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,
     OutputType, Recipe, RecipeError, ResolvedInputValue, SeedDefault, SeedValue, WorkflowRef,

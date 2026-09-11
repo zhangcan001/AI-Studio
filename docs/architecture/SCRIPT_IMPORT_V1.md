@@ -1,5 +1,9 @@
 # Script Import V1
 
+> STATUS=RETIRED
+> RETIRED_BY=DEV-100
+> REPLACED_BY=External Agent → AI Studio Production Handoff
+
 状态：DEV-057 Data Foundation 已落地；DEV-058 deterministic parser 已实现。
 
 DEV-057 已冻结并持久化 `ScriptDocument`/`DraftStructureV1` 的数据 contract：Migration 025 使用 `script_sources` 与不可变的 `script_import_drafts`，Backup 升至 15；Manifest 仍为 2 且故意排除 Script/Draft 工作数据。本文的解析管线、Match、Storyboard、Review 和 Promote 仍属于后续 DEV。

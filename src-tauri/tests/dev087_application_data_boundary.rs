@@ -29,7 +29,6 @@ const EXISTING_APPLICATION_SQLX_ALLOWLIST: &[&str] = &[
     "project_backup_service.rs",
     "project_template_service.rs",
     "prompt_library_service.rs",
-    "prompt_template_bulk_service.rs",
     "reference_anchor_service.rs",
     "shot_batch_service.rs",
     "shot_bulk_service.rs",

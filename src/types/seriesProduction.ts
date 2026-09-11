@@ -1,6 +1,4 @@
 import type { GenerationValues } from "./generation";
-import type { PromptEntryView } from "./prompt";
-import type { ReferenceAnchorView } from "./referenceAnchor";
 import type { BatchWorkflowPreset } from "./sceneProduction";
 import type { ShotStage, ShotView } from "./shot";
 import type { ProductionStructureTree } from "./productionStructure";
@@ -99,46 +97,20 @@ export interface SeriesPresetApplyRequest {
   values: GenerationValues;
 }
 
-export interface SeriesPromptBulkRequest {
-  projectId: string;
-  seriesId: string;
-  stage: SeriesProductionStage;
-  episodeIds: string[];
-  sceneIds: string[];
-  shotIds: string[];
-  promptEntryId: string;
-  promptVersionId: string;
-  contextAnchorIds: string[];
-  customValues: Record<string, string>;
-}
-
-export interface SeriesPromptPreview {
-  total: number;
-  valid: number;
-  invalid: number;
-  samples?: Array<{ shotId: string; text: string; valid: boolean; error?: string }>;
-}
-
 export type SeriesProductionBusyAction =
   | "plan"
   | "preset-apply"
-  | "prompt-preview"
-  | "prompt-apply"
   | "prepare";
 
 export interface SeriesProductionPanelProps {
   projectId: string;
   tree: ProductionStructureTree;
   shots: ShotView[];
-  promptEntries?: PromptEntryView[];
-  referenceAnchors?: ReferenceAnchorView[];
   initialPresets?: BatchWorkflowPreset[];
   initialPlan?: SeriesProductionPlan;
   onPlan?: (request: SeriesProductionPlanRequest) => Promise<SeriesProductionPlan>;
   onPrepare?: (request: SeriesProductionPrepareRequest) => Promise<SeriesProductionPrepareResult>;
   onApplyPreset?: (request: SeriesPresetApplyRequest) => Promise<void>;
-  onPreviewPrompt?: (request: SeriesPromptBulkRequest) => Promise<SeriesPromptPreview>;
-  onApplyPrompt?: (request: SeriesPromptBulkRequest) => Promise<void>;
   onRefresh?: () => Promise<void>;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;

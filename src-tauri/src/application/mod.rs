@@ -18,8 +18,6 @@ pub mod consistency_scope_binding_service;
 mod dev027_e2e;
 #[cfg(test)]
 mod dev031_e2e;
-#[cfg(test)]
-mod dev036_compatibility;
 pub mod diagnostics_service;
 pub mod episode_production_service;
 pub mod generation_catalog_service;
@@ -58,16 +56,11 @@ pub mod project_template_service;
 pub mod project_workflow_binding_service;
 pub mod prompt_context_builder;
 pub mod prompt_library_service;
-pub mod prompt_template_bulk_service;
-pub mod prompt_template_service;
 pub mod recipe_history_query_service;
 pub mod reference_anchor_service;
 pub mod reference_set_service;
 pub mod scene_production_service;
 pub mod scheduler;
-pub mod script_draft_service;
-pub mod script_import_parser;
-pub mod script_import_service;
 pub mod series_production_service;
 pub mod settings_service;
 pub mod shot_batch_service;

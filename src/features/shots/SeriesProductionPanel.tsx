@@ -9,7 +9,6 @@ import type {
   SeriesProductionPrepareResult,
   SeriesProductionPrepareStatus,
   SeriesProductionStage,
-  SeriesPromptPreview,
 } from "../../types/seriesProduction";
 import { orderedEpisodes, orderedScenes, orderedSeries } from "./productionStructureState";
 import { sceneProductionStageLabel } from "../../types/sceneProduction";
@@ -24,15 +23,11 @@ export function SeriesProductionPanel({
   projectId,
   tree,
   shots,
-  promptEntries = [],
-  referenceAnchors = [],
   initialPresets = [],
   initialPlan,
   onPlan,
   onPrepare,
   onApplyPreset,
-  onPreviewPrompt,
-  onApplyPrompt,
   onRefresh,
   onNotice,
   onError,
@@ -53,11 +48,6 @@ export function SeriesProductionPanel({
   const [result, setResult] = useState<SeriesProductionPrepareResult>();
   const [presets, setPresets] = useState<BatchWorkflowPreset[]>(initialPresets);
   const [selectedPresetId, setSelectedPresetId] = useState(initialPresets[0]?.id ?? "");
-  const [promptEntryId, setPromptEntryId] = useState(promptEntries[0]?.id ?? "");
-  const [promptVersionId, setPromptVersionId] = useState("");
-  const [anchorIds, setAnchorIds] = useState<string[]>([]);
-  const [customValues, setCustomValues] = useState<Record<string, string>>({});
-  const [promptPreview, setPromptPreview] = useState<SeriesPromptPreview>();
 
   const isBusy = Boolean(busyAction);
   const selectedEpisodePlans = useMemo(
@@ -77,9 +67,6 @@ export function SeriesProductionPanel({
     [filter, plan],
   );
   const selectedPreset = presets.find((preset) => preset.id === selectedPresetId);
-  const selectedPromptEntry = promptEntries.find((entry) => entry.id === promptEntryId);
-  const selectedPromptVersion = selectedPromptEntry?.versions.find((version) => version.id === promptVersionId)
-    ?? selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
 
   useEffect(() => {
     if (seriesId && seriesOptions.some((option) => option.value === seriesId)) return;
@@ -107,15 +94,6 @@ export function SeriesProductionPanel({
     if (initialPresets.length) return;
     setPresets([]);
   }, [initialPresets.length]);
-
-  useEffect(() => {
-    setPromptEntryId((current) => current && promptEntries.some((entry) => entry.id === current) ? current : promptEntries[0]?.id ?? "");
-  }, [promptEntries]);
-
-  useEffect(() => {
-    const latest = selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
-    setPromptVersionId((current) => current && selectedPromptEntry?.versions.some((version) => version.id === current) ? current : latest?.id ?? "");
-  }, [selectedPromptEntry]);
 
   function clearFeedback() {
     setError(undefined);
@@ -170,39 +148,6 @@ export function SeriesProductionPanel({
     });
   }
 
-  function promptRequest() {
-    if (!selectedPromptEntry || !selectedPromptVersion) return undefined;
-    return {
-      projectId,
-      seriesId,
-      stage,
-      episodeIds: selectedEpisodeIds,
-      sceneIds: selectedSceneIds,
-      shotIds: selectedShotIds,
-      promptEntryId: selectedPromptEntry.id,
-      promptVersionId: selectedPromptVersion.id,
-      contextAnchorIds: anchorIds,
-      customValues,
-    };
-  }
-
-  async function previewPrompt() {
-    const request = promptRequest();
-    if (!request || !onPreviewPrompt || !selectedShotIds.length) return;
-    await runAction("prompt-preview", async () => setPromptPreview(await onPreviewPrompt(request)));
-  }
-
-  async function applyPrompt() {
-    const request = promptRequest();
-    if (!request || !onApplyPrompt || !promptPreview || promptPreview.invalid > 0 || !selectedShotIds.length) return;
-    await runAction("prompt-apply", async () => {
-      await onApplyPrompt(request);
-      setPromptPreview(undefined);
-      setNotice(`已将提示词应用到 ${selectedEpisodePlans.length} 集、${selectedShotIds.length} 个镜头；每个镜头保留自己的系列 / 集 / 场景上下文。`);
-      await refreshAfterMutation();
-    });
-  }
-
   async function prepare() {
     if (!plan || !selectedEpisodeIds.length || !onPrepare) return;
     const strictBlockers = selectedEpisodePlans.filter((episode) => episode.classification === "BLOCKED" || episode.classification === "PARTIAL");
@@ -251,7 +196,6 @@ export function SeriesProductionPanel({
     setPlan(undefined);
     setSelectedEpisodeIds([]);
     setResult(undefined);
-    setPromptPreview(undefined);
   }
 
   if (!seriesOptions.length) {
@@ -287,7 +231,6 @@ export function SeriesProductionPanel({
         <div className="series-production-grid">
           <section className="series-production-card" aria-label="系列批量预设"><div className="series-production-card-heading"><div><span className="section-label">预设</span><h4>应用到所选集</h4></div><span>{presets.length} / 30</span></div><label><span>批量工作流预设</span><select value={selectedPresetId} onChange={(event) => setSelectedPresetId(event.target.value)} disabled={isBusy}><option value="">选择预设</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}{!preset.available ? " · 不可用" : ""}</option>)}</select></label><div className="series-production-actions"><button type="button" onClick={() => { setStage("image"); void applyPreset("image"); }} disabled={isBusy || !selectedPreset?.image || !selectedEpisodeIds.length || !onApplyPreset}>{busyAction === "preset-apply" ? "应用中…" : "应用图片预设到所选集"}</button><button type="button" className="quiet-button" onClick={() => { setStage("video"); void applyPreset("video"); }} disabled={isBusy || !selectedPreset?.video || !selectedEpisodeIds.length || !onApplyPreset}>应用视频预设到所选集</button></div><small className="series-production-hint">按项目全局镜头序号去重；不会改变参考素材、已确认图片、已确认视频、锚点、场景归属或镜头序号。</small></section>
 
-          <section className="series-production-card" aria-label="系列提示词批量应用"><div className="series-production-card-heading"><div><span className="section-label">提示词</span><h4>应用到所选集</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div><label><span>提示词条目</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label><label><span>版本</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}><option value="">选择版本</option>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>{referenceAnchors.length > 0 && <div className="series-production-anchor-list"><span>上下文锚点（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}<label><span>自定义值（按镜头上下文解析）</span><input value={customValues.context ?? ""} onChange={(event) => setCustomValues((current) => ({ ...current, context: event.target.value }))} disabled={isBusy} placeholder="可选，具体变量由提示词模板决定" /></label><div className="series-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !selectedShotIds.length || !onPreviewPrompt}>{busyAction === "prompt-preview" ? "预览中…" : "预览所选集提示词"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !selectedShotIds.length || !promptPreview || promptPreview.invalid > 0 || !onApplyPrompt}>应用所选集提示词</button></div>{promptPreview && <div className={promptPreview.invalid ? "series-production-inline-error" : "series-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。系列 / 集 / 场景 / 镜头上下文按镜头分别解析。{promptPreview.samples?.slice(0, 3).map((sample) => <small key={sample.shotId}>{sample.shotId}：{sample.valid ? sample.text : sample.error ?? "无效"}</small>)}</div>}</section>
         </div>
 
         <section className="series-production-card series-production-prepare" aria-label="系列准备"><div className="series-production-card-heading"><div><span className="section-label">准备</span><h4>准备所选集</h4></div><span>预计 {selectedSceneIds.length} 个场景 · 最多 {selectedSceneIds.length} 个就绪批次</span></div><label className="series-production-partial-toggle"><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={isBusy} /> 跳过阻塞内容，仅准备当前可生产场景</label><p className="series-production-hint">默认严格模式；严格模式遇到阻塞或部分完成时保持 0 次变更。不会自动启动 GPU，也不会自动启动下一批。</p><button type="button" className="series-production-primary-action" onClick={() => void prepare()} disabled={isBusy || !selectedEpisodeIds.length || !onPrepare}>{busyAction === "prepare" ? "准备中…" : "准备所选集"}</button></section>

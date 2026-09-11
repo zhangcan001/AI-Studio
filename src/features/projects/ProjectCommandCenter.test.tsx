@@ -97,7 +97,7 @@ function aggregate(overrides: Partial<ProjectCommandCenterAggregate> = {}): Proj
     queue: { totalQueues: 1, runningQueues: 0, pausedQueues: 0, completedQueues: 1, archivedQueues: 0, totalItems: 2, pendingItems: 0, activeItems: 0, succeededItems: 2, failedItems: 0, cancelledItems: 0, skippedItems: 0, autoResumableItems: 0, reviewRequiredItems: 0, firstActiveBatchId: null, firstAutoResumableBatchId: null, firstReviewRequiredBatchId: null },
     tasksAssets: { taskCount: 2, activeTaskCount: 0, succeededTaskCount: 2, failedTaskCount: 0, assetCount: 4, imageAssetCount: 2, videoAssetCount: 2, audioAssetCount: 0, otherAssetCount: 0 },
     referenceAnchors: { total: 0, usable: 0, character: 0, scene: 0, prop: 0, style: 0 },
-    promptTemplates: { total: 0, versions: 0, items: [] },
+    promptLibrary: { total: 0, versions: 0, items: [] },
     comfy: { status: null, preflight },
     readiness: { status: "READY", connection: "CONNECTED", workflowReady: 1, workflowTotal: 1, runtimeBusy: false, activeTaskCount: 0, productionBusy: false },
     content: { shots: 2, prompts: 2, assets: 4, scenes: 1, configuredShots: 2 },

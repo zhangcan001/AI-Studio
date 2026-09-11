@@ -1,5 +1,9 @@
 # Storyboard Draft V1
 
+> STATUS=RETIRED
+> RETIRED_BY=DEV-100
+> REPLACED_BY=External Agent → AI Studio Production Handoff
+
 状态：DEV-056 架构规划，未实现。
 
 Storyboard Draft V1 是 Script Import 产生的“镜头建议层”。它帮助用户把 Episode/Scene/Shot 候选看清楚、改准确、批量确认；它不是生产执行计划，不是最终 Prompt，也不是正式 Shot。

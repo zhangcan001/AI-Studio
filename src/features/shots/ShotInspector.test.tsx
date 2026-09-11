@@ -88,7 +88,7 @@ describe("ShotInspector", () => {
     expect(html).toContain("关键帧");
   });
 
-  it("keeps prompt preview, template slot, and apply as callback-only UI", () => {
+  it("keeps prompt preview and apply as callback-only UI", () => {
     const html = renderToStaticMarkup(
       <ShotInspector
         projectId="project-1"
@@ -97,7 +97,6 @@ describe("ShotInspector", () => {
         activeTab="prompt"
         promptText="wide establishing shot"
         promptPreview="wide establishing shot, frozen"
-        promptTemplate={<div>提示词模板插槽</div>}
         promptLibrary={[{ id: "prompt-1", name: "Cinematic", versionCount: 3 }]}
         selectedPromptId="prompt-1"
         onPromptSelect={vi.fn()}
@@ -109,7 +108,6 @@ describe("ShotInspector", () => {
 
     expect(html).toContain("提示词预览");
     expect(html).toContain("wide establishing shot, frozen");
-    expect(html).toContain("提示词模板插槽");
     expect(html).toContain("应用提示词");
   });
 });

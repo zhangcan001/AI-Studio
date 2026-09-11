@@ -32,8 +32,6 @@ use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
 use crate::application::project_workflow_binding_service::ProjectWorkflowBindingService;
 use crate::application::prompt_library_service::PromptLibraryService;
-use crate::application::prompt_template_bulk_service::PromptTemplateBulkService;
-use crate::application::prompt_template_service::PromptTemplateService;
 use crate::application::recipe_history_query_service::RecipeHistoryQueryService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
 use crate::application::reference_set_service::ReferenceSetService;
@@ -102,8 +100,6 @@ pub struct AppState {
     pub project_workflow_binding_service: Arc<ProjectWorkflowBindingService>,
     pub preset_service: Arc<PresetService>,
     pub prompt_library_service: Arc<PromptLibraryService>,
-    pub prompt_template_service: Arc<PromptTemplateService>,
-    pub prompt_template_bulk_service: Arc<PromptTemplateBulkService>,
     pub shot_service: Arc<ShotService>,
     pub shot_batch_service: Arc<ShotBatchService>,
     pub shot_bulk_service: Arc<ShotBulkService>,
@@ -167,8 +163,6 @@ impl AppState {
         project_workflow_binding_service: Arc<ProjectWorkflowBindingService>,
         preset_service: Arc<PresetService>,
         prompt_library_service: Arc<PromptLibraryService>,
-        prompt_template_service: Arc<PromptTemplateService>,
-        prompt_template_bulk_service: Arc<PromptTemplateBulkService>,
         shot_service: Arc<ShotService>,
         shot_batch_service: Arc<ShotBatchService>,
         shot_bulk_service: Arc<ShotBulkService>,
@@ -230,8 +224,6 @@ impl AppState {
             project_workflow_binding_service,
             preset_service,
             prompt_library_service,
-            prompt_template_service,
-            prompt_template_bulk_service,
             shot_service,
             shot_batch_service,
             shot_bulk_service,

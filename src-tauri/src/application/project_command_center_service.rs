@@ -179,7 +179,7 @@ pub struct ProjectCommandCenterReferenceAnchorView {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectCommandCenterPromptTemplateView {
+pub struct ProjectCommandCenterPromptLibraryEntryView {
     pub id: String,
     pub name: String,
     pub version_count: usize,
@@ -188,10 +188,10 @@ pub struct ProjectCommandCenterPromptTemplateView {
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectCommandCenterPromptTemplateSummary {
+pub struct ProjectCommandCenterPromptLibrarySummary {
     pub total: usize,
     pub versions: usize,
-    pub items: Vec<ProjectCommandCenterPromptTemplateView>,
+    pub items: Vec<ProjectCommandCenterPromptLibraryEntryView>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -291,7 +291,7 @@ pub struct ProjectCommandCenterView {
     pub consistency: ProjectCommandCenterConsistencyView,
     pub preparation: ProjectCommandCenterPreparationView,
     pub reference_anchors: ProjectCommandCenterReferenceAnchorView,
-    pub prompt_templates: ProjectCommandCenterPromptTemplateSummary,
+    pub prompt_library: ProjectCommandCenterPromptLibrarySummary,
     pub comfy: ProjectCommandCenterComfyView,
     pub readiness: ProjectCommandCenterReadinessView,
     pub content: ProjectCommandCenterContentView,
@@ -402,7 +402,7 @@ impl ProjectCommandCenterService {
         let consistency = load_consistency(&data)?;
         let preparation = load_preparation(&data)?;
         let reference_anchors = load_reference_anchors(&data)?;
-        let prompt_templates = load_prompt_templates(&data)?;
+        let prompt_library = load_prompt_library(&data)?;
         let audit = self
             .audit_service
             .project_summary(project_id)
@@ -427,7 +427,7 @@ impl ProjectCommandCenterService {
         let readiness = readiness_view(&comfy);
         let content = ProjectCommandCenterContentView {
             shots: shots.total,
-            prompts: prompt_templates.total,
+            prompts: prompt_library.total,
             assets: tasks_assets.asset_count,
             scenes: structure.scene_count,
             configured_shots: shots.configured,
@@ -456,7 +456,7 @@ impl ProjectCommandCenterService {
             consistency,
             preparation,
             reference_anchors,
-            prompt_templates,
+            prompt_library,
             comfy,
             readiness,
             content,
@@ -1173,21 +1173,21 @@ fn load_reference_anchors(
     Ok(view)
 }
 
-fn load_prompt_templates(
+fn load_prompt_library(
     data: &ProjectCommandCenterData,
-) -> Result<ProjectCommandCenterPromptTemplateSummary, ProjectCommandCenterError> {
+) -> Result<ProjectCommandCenterPromptLibrarySummary, ProjectCommandCenterError> {
     let versions = data
-        .prompt_templates
+        .prompt_entries
         .iter()
         .map(|row| count(row.version_count))
         .sum();
-    Ok(ProjectCommandCenterPromptTemplateSummary {
-        total: data.prompt_templates.len(),
+    Ok(ProjectCommandCenterPromptLibrarySummary {
+        total: data.prompt_entries.len(),
         versions,
         items: data
-            .prompt_templates
+            .prompt_entries
             .iter()
-            .map(|row| ProjectCommandCenterPromptTemplateView {
+            .map(|row| ProjectCommandCenterPromptLibraryEntryView {
                 id: row.id.clone(),
                 name: row.name.clone(),
                 version_count: count(row.version_count),
@@ -1355,7 +1355,7 @@ mod tests {
             consistency: ProjectCommandCenterConsistencyView::default(),
             preparation: ProjectCommandCenterPreparationView::default(),
             reference_anchors: ProjectCommandCenterReferenceAnchorView::default(),
-            prompt_templates: ProjectCommandCenterPromptTemplateSummary::default(),
+            prompt_library: ProjectCommandCenterPromptLibrarySummary::default(),
             comfy: ProjectCommandCenterComfyView::default(),
             readiness: ProjectCommandCenterReadinessView {
                 status: None,

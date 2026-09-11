@@ -105,8 +105,4 @@ describe("用户可见错误信息", () => {
     expect(formatted.technicalMessage).toContain("SECRET_RAW_ERROR");
   });
 
-  it("maps prompt template failures to actionable Chinese messages", () => {
-    expect(errorMessageForCode("PROMPT_TEMPLATE_CONTEXT_MISSING")).toContain("结构上下文");
-    expect(errorMessageForCode("PROMPT_TEMPLATE_CUSTOM_VALUE_MISSING")).toContain("自定义变量");
-  });
 });

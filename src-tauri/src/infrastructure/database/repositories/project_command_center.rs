@@ -3,7 +3,7 @@ use crate::application::ports::{
     ProjectCommandCenterAssetCountRecord, ProjectCommandCenterConsistencyRecord,
     ProjectCommandCenterCountRecord, ProjectCommandCenterData,
     ProjectCommandCenterPreparationRecord, ProjectCommandCenterProjectRecord,
-    ProjectCommandCenterPromptTemplateRecord, ProjectCommandCenterQueueBatchRecord,
+    ProjectCommandCenterPromptLibraryRecord, ProjectCommandCenterQueueBatchRecord,
     ProjectCommandCenterQueueItemRecord, ProjectCommandCenterReferenceAnchorRecord,
     ProjectCommandCenterRepository, ProjectCommandCenterSceneRecord,
     ProjectCommandCenterShotConfigRecord, ProjectCommandCenterShotLinkRecord,
@@ -255,12 +255,11 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
         .into_iter()
         .map(Into::into)
         .collect();
-        let prompt_templates = sqlx::query_as::<_, DbPromptTemplate>(
+        let prompt_entries = sqlx::query_as::<_, DbPromptLibraryEntry>(
             "SELECT e.id, e.name, COUNT(v.id) AS version_count, e.updated_at
              FROM prompt_entries e
              JOIN prompt_versions v ON v.prompt_id = e.id
-             WHERE e.project_id = ? AND e.kind = 'prompt'
-               AND instr(v.text, '{{') > 0
+             WHERE e.project_id = ?
              GROUP BY e.id, e.name, e.updated_at
              ORDER BY e.updated_at DESC, e.id DESC",
         )
@@ -286,7 +285,7 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
             consistency,
             preparation,
             reference_anchors,
-            prompt_templates,
+            prompt_entries,
         })
     }
 }
@@ -341,6 +340,6 @@ db_record!(DbPreparation => ProjectCommandCenterPreparationRecord {
 db_record!(DbReferenceAnchor => ProjectCommandCenterReferenceAnchorRecord {
     kind: String, asset_count: i64
 });
-db_record!(DbPromptTemplate => ProjectCommandCenterPromptTemplateRecord {
+db_record!(DbPromptLibraryEntry => ProjectCommandCenterPromptLibraryRecord {
     id: String, name: String, version_count: i64, updated_at: String
 });

@@ -6,7 +6,7 @@ RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
 ROADMAP_STATUS=FROZEN
 NEXT_VERSION_RECOMMENDATION=1.2.0
-SELECTED_FIRST_DELIVERY_THEME=Production Continuity
+SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
 ```
 
 ## Product baseline
@@ -50,11 +50,14 @@ AUTO_RETRY=NO
 AUTO_REBIND=NO
 ```
 
-### P1 — Narrative → Production Continuity
+### P1 — External Agent → AI Studio Production Handoff
 
-Make the existing Script Import / Draft / formal structure boundary visible and
-handed off without creating a second Shot model, screenplay DSL, or automatic
-production path. This needs its own source/draft/formal UX and contract audit.
+Freeze a provider-neutral, project-scoped handoff contract for structured
+production inputs supplied by an external agent. AI Studio must preview and
+explicitly confirm formal production input without becoming a Script, Draft,
+Storyboard, or Prompt authoring product. The full hierarchy importer is
+blocked by the current schema and must not add a migration, second Shot model,
+queue, executor, or Task model.
 
 ### P1 — Asset / Reference Continuity
 
@@ -76,7 +79,7 @@ cross-workspace breadcrumbs where they do not change domain authority.
 ### Deferred
 
 - Workflow/Recipe lifecycle backend changes after the DEV-090–095 closed phase.
-- New narrative editor architecture or automatic AI screenplay generation.
+- Internal narrative, Script, Storyboard, or Prompt authoring architecture.
 - New scheduler, retry engine, executor, or queue semantics.
 - New persisted Project Issue or Next Action state.
 
@@ -96,12 +99,13 @@ facts. It connects capabilities users already have instead of adding a new
 domain model. It also gives the product a clear new ability suitable for a
 future `1.2.0` release while leaving the published `1.1.0` line immutable.
 
-Narrative continuity is deferred because the current Script Import and
-Storyboard Draft documents describe a boundary whose formal handoff is not yet
-a complete current UI. Asset continuity is deferred as an independent theme
-because the first train only needs exact deliverable navigation. Broad
-explainability is deferred as a separate theme because P0 includes only the
-reason text required to make the selected continuation actionable.
+The external-agent handoff is frozen as a contract, but full hierarchy
+implementation is deferred because the current schema has no handoff identity,
+provenance, idempotency, or single-transaction boundary. Asset continuity is
+deferred as an independent theme because the first train only needs exact
+deliverable navigation. Broad explainability is deferred as a separate theme
+because P0 includes only the reason text required to make the selected
+continuation actionable.
 
 ## Frozen implementation boundary
 

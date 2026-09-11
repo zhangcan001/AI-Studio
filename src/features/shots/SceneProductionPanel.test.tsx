@@ -56,17 +56,6 @@ describe("SceneProductionPanel", () => {
         currentSceneId="scene-1"
         initialPresets={[preset]}
         initialPlan={plan}
-        promptEntries={[{
-          id: "prompt-1",
-          projectId: "project-1",
-          kind: "prompt",
-          name: "电影提示词",
-          tags: [],
-          createdAt: "",
-          updatedAt: "",
-          versionCount: 1,
-          versions: [{ id: "prompt-version-1", promptId: "prompt-1", version: 1, text: "{{shot.name}}", createdAt: "" }],
-        }]}
       />,
     );
 

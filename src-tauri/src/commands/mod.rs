@@ -24,7 +24,6 @@ pub mod production_structure;
 pub mod project;
 pub mod project_command_center;
 pub mod prompt_library;
-pub mod prompt_template;
 pub mod recipe_history;
 pub mod reference_anchor;
 pub mod scene_production;

@@ -1,6 +1,4 @@
 import type { DraftValue, GenerationValues } from "./generation";
-import type { PromptEntryView } from "./prompt";
-import type { ReferenceAnchorView } from "./referenceAnchor";
 import type { ProductionBatchDetail } from "./productionQueue";
 import type { ShotStage, ShotView } from "./shot";
 
@@ -104,8 +102,6 @@ export interface SceneProductionPanelProps {
   sceneOptions: SceneProductionSceneOption[];
   currentSceneId?: string;
   currentShot?: SceneProductionCurrentShot;
-  promptEntries?: PromptEntryView[];
-  referenceAnchors?: ReferenceAnchorView[];
   initialPresets?: BatchWorkflowPreset[];
   initialPlan?: SceneProductionPlan;
   onRefresh?: () => Promise<void>;

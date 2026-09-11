@@ -16,7 +16,7 @@ pub struct ProjectCommandCenterData {
     pub consistency: ProjectCommandCenterConsistencyRecord,
     pub preparation: ProjectCommandCenterPreparationRecord,
     pub reference_anchors: Vec<ProjectCommandCenterReferenceAnchorRecord>,
-    pub prompt_templates: Vec<ProjectCommandCenterPromptTemplateRecord>,
+    pub prompt_entries: Vec<ProjectCommandCenterPromptLibraryRecord>,
 }
 
 #[derive(Clone, Debug)]
@@ -130,7 +130,7 @@ pub struct ProjectCommandCenterReferenceAnchorRecord {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProjectCommandCenterPromptTemplateRecord {
+pub struct ProjectCommandCenterPromptLibraryRecord {
     pub id: String,
     pub name: String,
     pub version_count: i64,

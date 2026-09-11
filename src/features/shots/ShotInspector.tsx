@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { getAssetMediaUrl, readAssetImage, readAssetThumbnail } from "../../services/tauriClient";
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
@@ -70,7 +70,6 @@ export interface ShotInspectorProps {
   onLoadPrompt?: () => void | Promise<void>;
   promptProvenance?: { entryId: string; versionId: string };
   promptPreview?: string;
-  promptTemplate?: ReactNode;
   onPreviewPrompt?: () => void | Promise<void>;
   onApplyPrompt?: () => void | Promise<void>;
   activeTab?: ShotInspectorTab;
@@ -111,7 +110,6 @@ export function ShotInspector({
   onLoadPrompt,
   promptProvenance,
   promptPreview,
-  promptTemplate,
   onPreviewPrompt,
   onApplyPrompt,
   activeTab,
@@ -214,7 +212,6 @@ export function ShotInspector({
           onLoadPrompt={onLoadPrompt}
           promptProvenance={promptProvenance}
           promptPreview={promptPreview}
-          promptTemplate={promptTemplate}
           onPreviewPrompt={onPreviewPrompt}
           onApplyPrompt={onApplyPrompt}
           busy={busy}
@@ -318,7 +315,7 @@ function ReferenceInspector({ projectId, stage, references, availableReferences,
   );
 }
 
-function PromptInspector({ promptText, onPromptChange, promptLibrary, selectedPromptId, onPromptSelect, onLoadPrompt, promptProvenance, promptPreview, promptTemplate, onPreviewPrompt, onApplyPrompt, busy }: {
+function PromptInspector({ promptText, onPromptChange, promptLibrary, selectedPromptId, onPromptSelect, onLoadPrompt, promptProvenance, promptPreview, onPreviewPrompt, onApplyPrompt, busy }: {
   promptText: string;
   onPromptChange?: (text: string) => void;
   promptLibrary: ShotPromptLibraryOption[];
@@ -327,7 +324,6 @@ function PromptInspector({ promptText, onPromptChange, promptLibrary, selectedPr
   onLoadPrompt?: () => void | Promise<void>;
   promptProvenance?: { entryId: string; versionId: string };
   promptPreview?: string;
-  promptTemplate?: ReactNode;
   onPreviewPrompt?: () => void | Promise<void>;
   onApplyPrompt?: () => void | Promise<void>;
   busy: boolean;
@@ -345,7 +341,6 @@ function PromptInspector({ promptText, onPromptChange, promptLibrary, selectedPr
           <div className="shot-inspector-prompt-loader"><select value={selectedPromptId} onChange={(event) => onPromptSelect?.(event.target.value)} disabled={busy || !onPromptSelect}><option value="">选择提示词</option>{promptLibrary.map((prompt) => <option key={prompt.id} value={prompt.id}>{prompt.name}{prompt.versionCount ? ` · ${prompt.versionCount} 版` : ""}</option>)}</select><button type="button" className="quiet-button" onClick={() => void onLoadPrompt?.()} disabled={busy || !selectedPromptId || !onLoadPrompt}>载入快照</button></div>
         </section>
       )}
-      {promptTemplate && <section className="shot-inspector-section shot-inspector-template-slot"><span className="shot-inspector-label">模板</span>{promptTemplate}</section>}
       <section className="shot-inspector-section">
         <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">预览</span><h3>提示词预览</h3></div></div>
         <pre className="shot-inspector-prompt-preview">{promptPreview || promptText || "尚无提示词预览。"}</pre>

@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  applyPromptTemplate,
   bulkSetShotStageConfig,
   getEpisodeProductionPlan,
   listBatchWorkflowPresets,
   prepareEpisodeProduction,
-  previewPromptTemplateBulk,
 } from "../../services/tauriClient";
 import { formatUiError } from "../../i18n/errorMessages";
 import type {
@@ -19,11 +17,10 @@ import type {
 } from "../../types/episodeProduction";
 import type { BatchWorkflowPreset } from "../../types/sceneProduction";
 import { sceneProductionStageLabel, sceneProductionStagePreset } from "../../types/sceneProduction";
-import { analyzePromptTemplateText, customPromptVariableNames } from "../prompts/promptTemplateState";
 import { orderedEpisodes, orderedScenes, orderedSeries } from "./productionStructureState";
 import "./EpisodeProductionPanel.css";
 
-type BusyAction = "plan" | "preset-apply" | "prompt-preview" | "prompt-apply" | "prepare";
+type BusyAction = "plan" | "preset-apply" | "prepare";
 type EpisodeError = { code: string; message: string; technicalMessage?: string };
 
 const STAGES: EpisodeProductionStage[] = ["image", "video"];
@@ -33,8 +30,6 @@ export function EpisodeProductionPanel({
   projectId,
   tree,
   shots,
-  promptEntries = [],
-  referenceAnchors = [],
   initialPresets = [],
   initialPlan,
   onRefresh,
@@ -56,20 +51,7 @@ export function EpisodeProductionPanel({
   const [result, setResult] = useState<EpisodeProductionPrepareResult>();
   const [presets, setPresets] = useState<BatchWorkflowPreset[]>(initialPresets);
   const [selectedPresetId, setSelectedPresetId] = useState(initialPresets[0]?.id ?? "");
-  const [promptEntryId, setPromptEntryId] = useState("");
-  const [promptVersionId, setPromptVersionId] = useState("");
-  const [anchorIds, setAnchorIds] = useState<string[]>([]);
-  const [customValues, setCustomValues] = useState<Record<string, string>>({});
-  const [promptPreview, setPromptPreview] = useState<{ total: number; valid: number; invalid: number }>();
-
   const selectedPreset = presets.find((item) => item.id === selectedPresetId);
-  const selectedPromptEntry = promptEntries.find((item) => item.id === promptEntryId);
-  const selectedPromptVersion = selectedPromptEntry?.versions.find((item) => item.id === promptVersionId)
-    ?? selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
-  const promptCustomNames = useMemo(
-    () => selectedPromptVersion ? customPromptVariableNames(analyzePromptTemplateText(selectedPromptVersion.text).customVariables) : [],
-    [selectedPromptVersion],
-  );
   const isBusy = episodeProductionActionDisabled(busyAction);
   const scenePlans = plan?.scenes ?? [];
   const selectedPlans = scenePlans.filter((scene) => selectedSceneIds.includes(scene.sceneId));
@@ -116,21 +98,6 @@ export function EpisodeProductionPanel({
       .catch((value: unknown) => { if (active) setError(toEpisodeError(value, "BATCH_WORKFLOW_PRESETS_LOAD_FAILED")); });
     return () => { active = false; };
   }, [initialPresets.length]);
-
-  useEffect(() => {
-    const entry = promptEntries[0];
-    setPromptEntryId((current) => current && promptEntries.some((item) => item.id === current) ? current : entry?.id ?? "");
-  }, [promptEntries]);
-
-  useEffect(() => {
-    const latest = selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
-    setPromptVersionId((current) => current && selectedPromptEntry?.versions.some((item) => item.id === current) ? current : latest?.id ?? "");
-  }, [selectedPromptEntry]);
-
-  useEffect(() => {
-    setCustomValues((current) => Object.fromEntries(promptCustomNames.map((name) => [name, current[name] ?? ""])));
-    setPromptPreview(undefined);
-  }, [promptCustomNames]);
 
   function clearFeedback() {
     setError(undefined);
@@ -180,40 +147,6 @@ export function EpisodeProductionPanel({
       });
       setNotice(`已将“${selectedPreset.name}”应用到所选 ${selectedPlans.length} 个场景、${selectedShotIds.length} 个镜头。引用素材和已选媒体未改变。`);
       onNotice?.("集场景预设已应用。");
-      await refreshAfterMutation();
-    });
-  }
-
-  async function previewPrompt() {
-    if (!selectedPromptEntry || !selectedPromptVersion || !selectedShotIds.length) return;
-    await runAction("prompt-preview", async () => {
-      const preview = await previewPromptTemplateBulk({
-        projectId,
-        promptEntryId: selectedPromptEntry.id,
-        promptVersionId: selectedPromptVersion.id,
-        shotIds: selectedShotIds,
-        contextAnchorIds: anchorIds,
-        customValues,
-        previewLimit: 20,
-      });
-      setPromptPreview({ total: preview.total, valid: preview.valid, invalid: preview.invalid });
-    });
-  }
-
-  async function applyPrompt() {
-    if (!selectedPromptEntry || !selectedPromptVersion || !selectedShotIds.length || !promptPreview || promptPreview.invalid > 0) return;
-    await runAction("prompt-apply", async () => {
-      await applyPromptTemplate({
-        projectId,
-        promptEntryId: selectedPromptEntry.id,
-        promptVersionId: selectedPromptVersion.id,
-        stage,
-        shotIds: selectedShotIds,
-        contextAnchorIds: anchorIds,
-        customValues,
-      });
-      setPromptPreview(undefined);
-      setNotice(`已将提示词模板应用到所选 ${selectedPlans.length} 个场景、${selectedShotIds.length} 个镜头；每个镜头保留自己的场景上下文。`);
       await refreshAfterMutation();
     });
   }
@@ -277,7 +210,6 @@ export function EpisodeProductionPanel({
   function selectStage(nextStage: EpisodeProductionStage) {
     setStage(nextStage);
     setResult(undefined);
-    setPromptPreview(undefined);
   }
 
   if (!episodeOptions.length) {
@@ -324,15 +256,6 @@ export function EpisodeProductionPanel({
             <small className="episode-production-hint">最多一次应用 500 个镜头；不会改变参考素材、已确认图片、已确认视频、锚点或场景归属。</small>
           </section>
 
-          <section className="episode-production-card" aria-label="集提示词批量应用">
-            <div className="episode-production-card-heading"><div><span className="section-label">提示词</span><h4>批量应用提示词</h4></div><span>{selectedPromptVersion ? `v${selectedPromptVersion.version}` : "未选择"}</span></div>
-            <label><span>提示词条目</span><select value={promptEntryId} onChange={(event) => setPromptEntryId(event.target.value)} disabled={isBusy || !promptEntries.length}><option value="">选择模板</option>{promptEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
-            <label><span>版本</span><select value={selectedPromptVersion?.id ?? ""} onChange={(event) => setPromptVersionId(event.target.value)} disabled={isBusy || !selectedPromptEntry}>{selectedPromptEntry?.versions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.text.slice(0, 48)}</option>)}</select></label>
-            {referenceAnchors.length > 0 && <div className="episode-production-anchor-list"><span>上下文锚点（不改变素材关系）</span>{referenceAnchors.slice(0, 20).map((anchor) => <label key={anchor.id}><input type="checkbox" checked={anchorIds.includes(anchor.id)} onChange={() => setAnchorIds((current) => current.includes(anchor.id) ? current.filter((id) => id !== anchor.id) : [...current, anchor.id])} disabled={isBusy} />{anchor.name}</label>)}</div>}
-            {promptCustomNames.length > 0 && <div className="episode-production-custom-values">{promptCustomNames.map((name) => <label key={name}><span>{name}</span><input value={customValues[name] ?? ""} onChange={(event) => setCustomValues((current) => ({ ...current, [name]: event.target.value }))} disabled={isBusy} /></label>)}</div>}
-            <div className="episode-production-actions"><button type="button" onClick={() => void previewPrompt()} disabled={isBusy || !selectedPromptVersion || !selectedShotIds.length}>{busyAction === "prompt-preview" ? "预览中…" : "预览所选场景提示词"}</button><button type="button" className="quiet-button" onClick={() => void applyPrompt()} disabled={isBusy || !selectedPromptVersion || !promptPreview || promptPreview.invalid > 0}>应用所选场景提示词</button></div>
-            {promptPreview && <p className={promptPreview.invalid ? "episode-production-inline-error" : "episode-production-inline-success"}>预览：{promptPreview.valid}/{promptPreview.total} 可用{promptPreview.invalid ? `，${promptPreview.invalid} 个阻塞` : ""}。每个镜头使用自己的场景上下文。</p>}
-          </section>
         </div>
 
         <section className="episode-production-card episode-production-prepare" aria-label="集准备">

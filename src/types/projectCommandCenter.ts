@@ -101,7 +101,7 @@ export interface ProjectCommandCenterAggregate {
     otherAssetCount: number;
   };
   referenceAnchors: { total: number; usable: number; character: number; scene: number; prop: number; style: number };
-  promptTemplates: { total: number; versions: number; items: Array<{ id: string; name: string; versionCount: number; updatedAt: string }> };
+  promptLibrary: { total: number; versions: number; items: Array<{ id: string; name: string; versionCount: number; updatedAt: string }> };
   comfy: { status?: ComfyStatus | null; preflight?: ComfyPreflightReport | null };
   readiness: { status?: string | null; connection?: string | null; workflowReady: number; workflowTotal: number; runtimeBusy: boolean; activeTaskCount: number; productionBusy: boolean };
   content: { shots: number; prompts: number; assets: number; scenes: number; configuredShots: number };

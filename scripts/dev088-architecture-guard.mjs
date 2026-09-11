@@ -1,10 +1,53 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(import.meta.url), "..", "..");
 const ipcTransportPath = resolve(root, "src/services/ipc.ts");
 const productionFrontendFiles = [];
+
+const retiredAuthoringPaths = [
+  "src-tauri/src/application/prompt_template_service.rs",
+  "src-tauri/src/application/prompt_template_bulk_service.rs",
+  "src-tauri/src/application/script_draft_service.rs",
+  "src-tauri/src/application/script_import_service.rs",
+  "src-tauri/src/application/script_import_parser",
+  "src-tauri/src/commands/prompt_template.rs",
+  "src-tauri/src/domain/prompt_template.rs",
+  "src-tauri/src/domain/script_draft",
+  "src/features/shots/PromptTemplatePanel.tsx",
+  "src/features/prompts/PromptTemplateVariableHelper.tsx",
+  "src/features/prompts/promptTemplateState.ts",
+];
+if (retiredAuthoringPaths.some((path) => existsSync(join(root, path)))) {
+  throw new Error("INTERNAL_AUTHORING_RETIREMENT failed: retired authoring path still exists");
+}
+
+const activeAuthoringSources = [
+  "src-tauri/src/application/mod.rs",
+  "src-tauri/src/commands/mod.rs",
+  "src-tauri/src/domain/mod.rs",
+  "src-tauri/src/infrastructure/database/repositories/mod.rs",
+  "src-tauri/src/lib.rs",
+  "src/services/tauriClient.ts",
+].map((path) => readFileSync(join(root, path), "utf8"));
+if (activeAuthoringSources.some((source) => /(?:prompt_template_|ScriptImportService|ScriptDraftService|script_import_parser|pub mod script_draft)/.test(source))) {
+  throw new Error("INTERNAL_AUTHORING_RETIREMENT failed: active runtime still references retired authoring symbols");
+}
+
+const retiredArchitectureDocs = [
+  "docs/architecture/NARRATIVE_PREPRODUCTION_V2.md",
+  "docs/architecture/SCRIPT_IMPORT_V1.md",
+  "docs/architecture/STORYBOARD_DRAFT_V1.md",
+].map((path) => readFileSync(join(root, path), "utf8"));
+if (retiredArchitectureDocs.some((source) => !source.includes("STATUS=RETIRED") || !source.includes("RETIRED_BY=DEV-100"))) {
+  throw new Error("INTERNAL_STORYBOARD_AUTHORING_RETIRED failed: historical authoring docs must be explicitly retired");
+}
+
+const handoffArchitectureSource = readFileSync(join(root, "docs/DEV_100_EXTERNAL_AGENT_HANDOFF_ARCHITECTURE.md"), "utf8");
+if (!["IMPORT_AUTO_QUEUE=NO", "IMPORT_AUTO_TASK=NO", "IMPORT_AUTO_GENERATION=NO", "HANDOFF_IMPLEMENTATION_BLOCKED_BY_SCHEMA=YES"].every((marker) => handoffArchitectureSource.includes(marker))) {
+  throw new Error("EXTERNAL_HANDOFF_NO_AUTO_PRODUCTION failed: handoff must remain explicit and schema-blocked");
+}
 
 function collectSourceFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -457,6 +500,10 @@ console.log(`GENERATION_PROJECT_TEMPLATE_CONTROLLER=PASS`);
 console.log(`GENERATION_ASSET_INTENT_CONTROLLER=PASS`);
 console.log(`GENERATION_WORKFLOW_SELECTION_CONTROLLER=PASS`);
 console.log(`PROJECT_CONTINUITY_DERIVED=PASS`);
+console.log(`INTERNAL_SCRIPT_AUTHORING_RETIRED=PASS`);
+console.log(`INTERNAL_STORYBOARD_AUTHORING_RETIRED=PASS`);
+console.log(`INTERNAL_PROMPT_AUTHORING_RETIRED=PASS`);
+console.log(`EXTERNAL_HANDOFF_NO_AUTO_PRODUCTION=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

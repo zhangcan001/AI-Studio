@@ -8,6 +8,12 @@ AUDIT_DATE=2026-09-11
 AUDIT_RESULT=PASS
 ```
 
+DEV-100 rebaselines the product boundary: internal Script, Draft, Storyboard,
+and Prompt authoring are out of scope and removed from the active runtime.
+Structured production input may be supplied by an external agent or entered
+manually, then remains subject to the existing project-scoped validation,
+snapshot, Queue, Task, and ComfyUI authorities.
+
 ## Audit method and authorities
 
 The audit used the current `master` source, current schema/migrations, current
@@ -25,10 +31,10 @@ records were cross-checked but were not treated as implementation truth:
   publication baseline.
 - PX-01, PX-02, and PX-04 describe the Project Cockpit, Shot Production
   Workspace, and Workflow Center surfaces that were verified against source.
-- The narrative, script import, storyboard, context, preparation, and
-  consistency architecture documents remain boundary references. Current
-  source shows that Script Import and Storyboard Draft are not yet a complete
-  user-facing path, while Context/Preparation/Queue/Review remain owned by the
+- The historical narrative, Script Import, and Storyboard architecture
+  documents are retired evidence under DEV-100. External-agent handoff is a
+  frozen contract only; the current schema blocks a safe hierarchy-wide
+  implementation. Context/Preparation/Queue/Review remain owned by the
   existing production services.
 
 ## Capability matrix
@@ -36,8 +42,8 @@ records were cross-checked but were not treated as implementation truth:
 | Domain | Existing capability | User-visible completeness | Missing continuity | Risk |
 | --- | --- | --- | --- | --- |
 | Project | Project Workspace and Project Command Center aggregate project, progress, issues, runtime, preparation, and recommendations | PARTIAL | The cockpit has a derived recommendation but not every recommendation has a deep target; blocked reasons are not consistently tied to the exact repair surface | Medium |
-| Narrative | Project import dry-run and production structure exist; Script/Draft contracts are preserved in Rust and backup boundaries | PARTIAL / HIDDEN | No current end-to-end Script Import → formal structure → Shot handoff is visible as one path | Medium-high |
-| Storyboard | Shot creation, structure tree, prompt/reference editing, and current Shot Production Pipeline exist | PARTIAL / STALE DESIGN | The historical Storyboard Draft document is architecture-only; users still enter through formal Shot/Creation surfaces | Medium |
+| Narrative | External-agent/manual structured production input and formal production structure remain; internal Script/Draft authoring is out of scope | OUT OF SCOPE / RETIRED | A hierarchy-wide external handoff needs schema identity, provenance, idempotency, and one transaction | High / explicitly blocked |
+| Storyboard | Formal Shot/Scene/Production surfaces remain; internal Storyboard Draft authoring is retired | OUT OF SCOPE / RETIRED | No internal storyboard editor or automatic conversion is part of the product boundary | Low |
 | Shot | Shot Workspace supports exact shot selection, references, workflow/recipe configuration, readiness, preparation, queue admission, generation, review, and resume selection | PARTIAL | A project recommendation can reach a shot or batch, but Queue/Task/Deliverable return paths are not uniformly exposed from the same continuity model | Medium |
 | Asset | Asset Library, generated/source asset preview, usage, tags, references, profiles, and exact project scope exist | PARTIAL | Completed production can be counted by the cockpit but does not directly open the exact existing deliverable asset | Medium |
 | Workflow | Workflow Center, registry, runtime package diagnostics, project bindings, profiles, and exact-pair presentation exist | COMPLETE for 1.1 scope | Mostly presentation-level handoff from production surfaces; no lifecycle backend gap found | Low |
@@ -77,10 +83,10 @@ The path is not a dead product. The main continuity gaps are:
 4. A completed project was sent to a new creative round. That is a reasonable
    fallback but not the requested continuity endpoint when an existing
    selected output asset is already the deliverable authority.
-5. Script Import and Storyboard Draft remain legitimate future continuity
-   gaps, but current source does not expose a complete formal handoff to
-   production. Implementing that now would require a larger second theme and
-   would exceed the low-risk post-1.1 tranche.
+5. A provider-neutral external-agent handoff is now the documented boundary,
+   but current source does not expose a complete hierarchy-wide importer.
+   Implementing it now would require a new persistence contract and migration,
+   so DEV-100 records the schema blocker rather than approximating it.
 
 No duplicate queue, executor, task model, issue table, or persisted Next Action
 state was found or is warranted. Project isolation is enforced by the existing
@@ -96,7 +102,7 @@ higher score means lower risk.
 | 1 | Project → exact Shot/Queue/Task/Review/Deliverable continuation | 5 | 5 | 5 | 5 | 5 | 4 | 29 |
 | 2 | Daily production explainability as a broad project surface | 4 | 5 | 4 | 4 | 3 | 3 | 23 |
 | 3 | Asset/Reference → Shot and deliverable usage continuity | 4 | 4 | 4 | 4 | 3 | 3 | 22 |
-| 4 | Narrative → formal production handoff | 5 | 3 | 4 | 3 | 2 | 2 | 19 |
+| 4 | External Agent → formal production handoff | 5 | 3 | 4 | 3 | 1 | 2 | 18 |
 
 The first row is the highest-value implementable slice. Asset and explainability
 work is included only where it is necessary to make the selected continuity
@@ -106,7 +112,7 @@ not part of this train.
 ## Theme decision
 
 ```text
-SELECTED_THEME=Production Continuity
+SELECTED_THEME=External Agent → AI Studio Production Handoff
 SELECTED_THEME_CODE=A
 NEXT_VERSION_RECOMMENDATION=1.2.0
 ```
@@ -131,8 +137,9 @@ Center read projection and navigation surfaces:
 
 ## Deferred and excluded candidates
 
-- Narrative → Production Continuity is `P1` for a later train because its
-  missing formal handoff needs a larger source/draft/formal UX boundary.
+- Full External Agent → Production Handoff implementation is `P1` for a later
+  train because its missing hierarchy identity/provenance boundary needs a
+  schema-backed contract. Internal authoring remains out of scope.
 - Asset / Reference Continuity is `P1` when it is a direct read/navigation
   improvement, but no second asset store or implicit copy is planned.
 - Broad Daily Production Explainability is `P1`; the selected train only adds

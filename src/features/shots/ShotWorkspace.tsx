@@ -26,8 +26,6 @@ import {
   replaceShotReferences,
   selectShotResult,
   prepareSeriesProduction,
-  previewPromptTemplateBulk,
-  applyPromptTemplate,
   setShotStageConfig,
   startProductionQueue,
   updateShot,
@@ -39,10 +37,7 @@ import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
-import type {
-  SeriesPromptBulkRequest,
-  SeriesPresetApplyRequest,
-} from "../../types/seriesProduction";
+import type { SeriesPresetApplyRequest } from "../../types/seriesProduction";
 import type { BatchWorkflowPreset } from "../../types/sceneProduction";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
 import type { WorkspaceSelection } from "../../types/workspaceSelection";
@@ -53,7 +48,6 @@ import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
 import { ProductionStructurePanel } from "./ProductionStructurePanel";
-import { PromptTemplatePanel } from "./PromptTemplatePanel";
 import { SceneProductionPanel } from "./SceneProductionPanel";
 import { EpisodeProductionPanel } from "./EpisodeProductionPanel";
 import { SeriesProductionPanel } from "./SeriesProductionPanel";
@@ -99,7 +93,6 @@ import {
   type ShotListControls,
 } from "./shotListQuery";
 import { EMPTY_PRODUCTION_STRUCTURE, findProductionSceneParent, orderedEpisodes, orderedSeries, productionSceneOptions, shotSceneIndex } from "./productionStructureState";
-import { isPromptTemplateText } from "../prompts/promptTemplateState";
 import {
   h3FamilyForWorkflowId,
   h3QualityProfileForWorkflowId,
@@ -237,7 +230,6 @@ export function ProductionModeTabs({ packagePanel, projectProductionPanel, multi
 interface Props {
   projectId: string;
   projectName?: string;
-  projectDescription?: string | null;
   catalog: RecipeViewModel[];
   initialSelectedShotId?: string;
   mode?: ShotWorkspaceMode;
@@ -264,7 +256,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, projectDescription, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -332,20 +324,11 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
   const selectedShot = shots.find((shot) => shot.id === selectedShotId);
   const shotSceneIds = useMemo(() => shotSceneIndex(productionStructure), [productionStructure]);
   const sceneFilterOptions = useMemo(() => productionSceneOptions(productionStructure), [productionStructure]);
-  const selectedPromptEntry = promptEntries.find((entry) => entry.id === selectedPromptId);
-  const selectedPromptVersion = selectedPromptEntry?.versions.find((version) => version.id === selectedShot?.promptVersionId)
-    ?? selectedPromptEntry?.versions[selectedPromptEntry.versions.length - 1];
-  const selectedSceneContext = selectedShot?.id && shotSceneIds[selectedShot.id]
-    ? findProductionSceneParent(productionStructure, shotSceneIds[selectedShot.id])
-    : undefined;
   const workspaceSceneId = workspaceSelection.type === "scene"
     ? workspaceSelection.sceneId
     : workspaceSelection.type === "shot"
       ? shotSceneIds[workspaceSelection.shotId]
       : undefined;
-  const workspaceSceneContext = workspaceSceneId
-    ? findProductionSceneParent(productionStructure, workspaceSceneId)
-    : selectedSceneContext;
   const contextPath = useMemo(
     () => buildShotContextPath(productionStructure, workspaceSelection, shots),
     [productionStructure, shots, workspaceSelection],
@@ -924,10 +907,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
     const entry = promptEntries.find((item) => item.id === selectedPromptId);
     const version = entry?.versions[entry.versions.length - 1];
     if (!entry || !version) return;
-    if (entry.kind === "prompt" && isPromptTemplateText(version.text)) {
-      setNotice("这是提示词模板，请在下方预览并确认后应用；不会把 {{variable}} 原样保存到镜头。");
-      return;
-    }
     setPromptText(version.text);
     setPromptProvenance({ entryId: entry.id, versionId: version.id });
     setNotice(`已载入提示词库「${entry.name}」的 v${version.version}；之后编辑会清除来源标记。`);
@@ -1424,19 +1403,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               onLoadPrompt={loadPrompt}
               promptProvenance={promptProvenance}
               promptPreview={promptText}
-              promptTemplate={selectedPromptEntry?.kind === "prompt" && selectedPromptVersion && isPromptTemplateText(selectedPromptVersion.text) ? <PromptTemplatePanel
-                projectId={projectId}
-                projectName={projectName}
-                projectDescription={projectDescription}
-                stage={stage}
-                entry={selectedPromptEntry}
-                version={selectedPromptVersion}
-                shot={selectedShot!}
-                structureContext={workspaceSceneContext}
-                referenceAnchors={referenceAnchors}
-                onApplied={() => void reload()}
-                disabled={busy}
-              /> : undefined}
               onPreviewPrompt={() => setNotice("提示词预览使用当前编辑框内容；保存镜头后才会写入快照。")}
               onApplyPrompt={() => setNotice("当前提示词预览已应用到编辑框；点击保存镜头写入快照。")}
               notice={notice}
@@ -1464,8 +1430,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               projectId={projectId}
               tree={productionStructure}
               shots={shots}
-              promptEntries={promptEntries}
-              referenceAnchors={referenceAnchors}
               initialPresets={batchWorkflowPresets}
               onRefresh={reload}
               onNotice={(message) => setNotice(message)}
@@ -1485,43 +1449,12 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
                 });
                 await reload();
               }}
-              onPreviewPrompt={async (request: SeriesPromptBulkRequest) => {
-                const preview = await previewPromptTemplateBulk({
-                  projectId: request.projectId,
-                  promptEntryId: request.promptEntryId,
-                  promptVersionId: request.promptVersionId,
-                  shotIds: request.shotIds,
-                  contextAnchorIds: request.contextAnchorIds,
-                  customValues: request.customValues,
-                  previewLimit: 20,
-                });
-                return {
-                  total: preview.total,
-                  valid: preview.valid,
-                  invalid: preview.invalid,
-                  samples: preview.previewEntries.map((entry) => ({ shotId: entry.shotId, text: entry.renderedText, valid: true })),
-                };
-              }}
-              onApplyPrompt={async (request: SeriesPromptBulkRequest) => {
-                await applyPromptTemplate({
-                  projectId: request.projectId,
-                  promptEntryId: request.promptEntryId,
-                  promptVersionId: request.promptVersionId,
-                  stage: request.stage,
-                  shotIds: request.shotIds,
-                  contextAnchorIds: request.contextAnchorIds,
-                  customValues: request.customValues,
-                });
-                await reload();
-              }}
             />
           ) : contextSurface === "episode" ? (
             <EpisodeProductionPanel
               projectId={projectId}
               tree={productionStructure}
               shots={shots}
-              promptEntries={promptEntries}
-              referenceAnchors={referenceAnchors}
               initialPresets={batchWorkflowPresets}
               onRefresh={reload}
               onNotice={(message) => setNotice(message)}
@@ -1535,8 +1468,6 @@ export function ShotWorkspace({ projectId, projectName, projectDescription, cata
               sceneOptions={sceneFilterOptions.filter((option) => option.value !== "ALL" && option.value !== "UNASSIGNED")}
               currentSceneId={workspaceSceneId}
               currentShot={selectedShot}
-              promptEntries={promptEntries}
-              referenceAnchors={referenceAnchors}
               initialPresets={batchWorkflowPresets}
               onRefresh={reload}
               onNotice={(message) => setNotice(message)}

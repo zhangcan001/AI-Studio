@@ -1,5 +1,3 @@
-import type { PromptEntryView } from "./prompt";
-import type { ReferenceAnchorView } from "./referenceAnchor";
 import type { BatchWorkflowPreset } from "./sceneProduction";
 import type { ShotStage, ShotView } from "./shot";
 import type { ProductionStructureTree } from "./productionStructure";
@@ -87,8 +85,6 @@ export interface EpisodeProductionPanelProps {
   projectId: string;
   tree: ProductionStructureTree;
   shots: ShotView[];
-  promptEntries?: PromptEntryView[];
-  referenceAnchors?: ReferenceAnchorView[];
   initialPresets?: BatchWorkflowPreset[];
   initialPlan?: EpisodeProductionPlan;
   onRefresh?: () => Promise<void>;

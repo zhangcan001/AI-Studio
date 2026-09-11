@@ -102,8 +102,7 @@
 .shot-inspector-advanced summary small { color: var(--ux-muted); font-weight: 400; }
 .shot-inspector-advanced-fields { padding-top: 2px; }
 
-.shot-inspector-anchor-picker,
-.shot-inspector-template-slot { display: grid; gap: 9px; }
+.shot-inspector-anchor-picker { display: grid; gap: 9px; }
 .shot-inspector-inline-actions { flex-wrap: wrap; }
 .shot-inspector-inline-actions > * { flex: 1 1 auto; }
 .shot-inspector-keyframe { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--ux-border-strong); border-radius: 8px; background: var(--ux-surface-2); }
