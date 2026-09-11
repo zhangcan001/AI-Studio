@@ -3,7 +3,7 @@
 ```text
 DEV_100=PASS
 BASELINE=3caf7944d8ab57bc8af7160e71c9201686672417
-FINAL_MASTER=IMPLEMENTATION_COMMIT
+FINAL_MASTER=c08ca89e7812081078d8a271a839b3e5cebc4480
 SCRIPT_AUTHORING=REMOVED
 STORYBOARD_AUTHORING=REMOVED
 PROMPT_AUTHORING=REMOVED
@@ -30,9 +30,9 @@ FRONTEND_TEST=PASS (791 tests)
 RUST_TEST=PASS (742 passed, 1 ignored; integration gates PASS)
 TAURI_BUILD=PASS
 ARCHITECTURE_GUARD=PASS
-REMOTE_CI_RUN=PENDING
-REMOTE_CI=PENDING
-RESULT_SHA=IMPLEMENTATION_COMMIT
+REMOTE_CI_RUN=34610441569
+REMOTE_CI=PASS
+RESULT_SHA=c08ca89e7812081078d8a271a839b3e5cebc4480
 DEV_101=NOT_STARTED
 STOP=YES
 ```
@@ -58,6 +58,6 @@ transaction guarantee, so DEV-100 does not implement a new importer.
 
 ## Verification record
 
-The `PENDING` values above are filled only after the final local gates, commit,
-push, and Source-only CI verification. This document intentionally records no
-version bump, tag, release, or installer publication.
+The values above were filled after the final local gates, implementation commit,
+push, and Source-only CI verification run `34610441569`. This document
+intentionally records no version bump, tag, release, or installer publication.
