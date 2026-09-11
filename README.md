@@ -202,8 +202,9 @@ Workflow Parameter Exposure duplicates only the Recipe definition: publishing a
 new exposed parameter set keeps the original Workflow JSON bytes and Workflow
 SHA unchanged, reuses the same Workflow Version, and registers a new Recipe
 version. Presets and preferred presets remain scoped to the selected Recipe.
-The remaining lifecycle debt is explicit Recipe promotion/archival/history
-management, not basic Recipe selection.
+Workflow / Recipe promotion, archival, restore, and history are complete and
+remain governed by the exact `workflowVersionId + recipeId` pair; lifecycle
+resolution does not guess by workflow or Recipe name.
 
 ## 0.3.0 Post-Benchmark Code Gate
 
