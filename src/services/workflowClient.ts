@@ -10,6 +10,7 @@ import type {
 
 /** The formal workspace is the single registry + runtime read model. */
 export type { WorkflowWorkspaceQueryMode, WorkflowWorkspaceQueryResponse } from "../features/workflows/workflowWorkspaceAdapters";
+export type { WorkflowHistoryCursor, WorkflowRecipeHistoryView } from "../types/workflowHistory";
 
 export function queryWorkflowWorkspace(mode: WorkflowWorkspaceQueryMode): Promise<WorkflowWorkspaceQueryResponse> {
   return invoke<WorkflowWorkspaceQueryResponse>("workflow_workspace_query", { mode }).catch(async (error: unknown) => {
@@ -154,4 +155,5 @@ export {
   setOnboardingMetadata,
   setOnboardingOutputMapping,
   validateOnboarding,
+  getWorkflowRecipeHistory,
 } from "./tauriClient";

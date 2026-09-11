@@ -34,6 +34,7 @@ use crate::application::project_workflow_binding_service::ProjectWorkflowBinding
 use crate::application::prompt_library_service::PromptLibraryService;
 use crate::application::prompt_template_bulk_service::PromptTemplateBulkService;
 use crate::application::prompt_template_service::PromptTemplateService;
+use crate::application::recipe_history_query_service::RecipeHistoryQueryService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
 use crate::application::reference_set_service::ReferenceSetService;
 use crate::application::scene_production_service::SceneProductionService;
@@ -68,6 +69,7 @@ pub struct AppState {
     pub workflow_library_service: Arc<WorkflowLibraryService>,
     pub workflow_registry_service: Arc<WorkflowRegistryService>,
     pub workflow_workspace_query_service: Arc<WorkflowWorkspaceQueryService>,
+    pub recipe_history_query_service: Arc<RecipeHistoryQueryService>,
     pub workflow_onboarding_service: Arc<WorkflowOnboardingService>,
     pub workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
     pub workflow_lifecycle_coordinator: Arc<WorkflowLifecycleCoordinator>,
@@ -132,6 +134,7 @@ impl AppState {
         workflow_library_service: Arc<WorkflowLibraryService>,
         workflow_registry_service: Arc<WorkflowRegistryService>,
         workflow_workspace_query_service: Arc<WorkflowWorkspaceQueryService>,
+        recipe_history_query_service: Arc<RecipeHistoryQueryService>,
         workflow_onboarding_service: Arc<WorkflowOnboardingService>,
         workflow_lifecycle_service: Arc<WorkflowLifecycleService>,
         workflow_lifecycle_coordinator: Arc<WorkflowLifecycleCoordinator>,
@@ -194,6 +197,7 @@ impl AppState {
             workflow_library_service,
             workflow_registry_service,
             workflow_workspace_query_service,
+            recipe_history_query_service,
             workflow_onboarding_service,
             workflow_lifecycle_service,
             workflow_lifecycle_coordinator,

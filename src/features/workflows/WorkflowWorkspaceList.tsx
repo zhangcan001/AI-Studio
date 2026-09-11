@@ -38,6 +38,7 @@ export interface WorkflowWorkspaceListProps {
   onRecheck: (item: WorkflowWorkspaceItem) => void;
   onDuplicateRecipe: (item: WorkflowWorkspaceItem) => void;
   onOpenParameters: (item: WorkflowWorkspaceItem) => void;
+  onViewHistory: (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => void;
   onExport: (item: WorkflowWorkspaceItem) => void;
   onToggle: (item: WorkflowWorkspaceItem) => void;
   onPurge: (item: WorkflowWorkspaceItem) => void;
@@ -74,6 +75,7 @@ export function WorkflowWorkspaceList({
   onRecheck,
   onDuplicateRecipe,
   onOpenParameters,
+  onViewHistory,
   onExport,
   onToggle,
   onPurge,
@@ -203,6 +205,7 @@ export function WorkflowWorkspaceList({
                       return (
                         <span key={`${workflowVersionId ?? "version"}:${recipe.recipeId}`}>
                           配方 {recipe.version ?? recipe.recipeVersion ?? "—"} · {recipe.inputCount ?? 0} 个输入 · {recipe.outputCount ?? 0} 个输出
+                          {workflowVersionId && <button type="button" className="quiet-button" onClick={() => onViewHistory(item, recipe)}>查看历史</button>}
                           {recipe.isPromoted ? " · 已推广" : ""}
                           {canPromote && !recipe.isPromoted && <button type="button" className="quiet-button" onClick={() => onPromoteRecipe(item, recipe)}>设为推广配方</button>}
                           {canClearPromotion && <button type="button" className="quiet-button" onClick={() => onClearPromotion(item, recipe)}>取消推广</button>}

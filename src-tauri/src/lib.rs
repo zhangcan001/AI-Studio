@@ -11,9 +11,10 @@ pub use application::ports::{
     AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ProductionItemReviewRepository, ProductionQueueRepository,
     ProjectBackupRepository, ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
-    ProjectWorkflowBindingRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
-    WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository,
-    WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+    ProjectWorkflowBindingRepository, RecipeHistoryQueryRepository, RepositoryError,
+    TaskOutputAssetMapping, TaskRepository, WorkflowLibraryRepository,
+    WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
+    WorkflowRuntimeStateRepository,
 };
 pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
@@ -68,6 +69,7 @@ use application::{
     prompt_library_service::PromptLibraryService,
     prompt_template_bulk_service::PromptTemplateBulkService,
     prompt_template_service::PromptTemplateService,
+    recipe_history_query_service::RecipeHistoryQueryService,
     reference_anchor_service::ReferenceAnchorService,
     reference_set_service::ReferenceSetService,
     scene_production_service::SceneProductionService,
@@ -543,6 +545,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_onboarding_service.clone(),
                 clock.clone(),
             ));
+            let recipe_history_repository: Arc<dyn application::ports::RecipeHistoryQueryRepository> =
+                Arc::new(infrastructure::database::SqliteRecipeHistoryQueryRepository::new(
+                    database_pool.clone(),
+                ));
+            let recipe_history_query_service = Arc::new(RecipeHistoryQueryService::new(
+                recipe_history_repository,
+            ));
             let task_update_sink: Arc<dyn application::ports::TaskUpdateSink> =
                 Arc::new(TauriTaskUpdateSink::new(app.handle().clone()));
             let execution_registry = TaskExecutionRegistry::default();
@@ -906,6 +915,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 workflow_library_service,
                 workflow_registry_service,
                 workflow_workspace_query_service,
+                recipe_history_query_service,
                 workflow_onboarding_service,
                 workflow_lifecycle_service,
                 workflow_lifecycle_coordinator,
@@ -1137,6 +1147,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::workflow_registry::workflow_purge,
             commands::workflow_registry::workflow_rerecognize,
             commands::workflow_workspace::workflow_workspace_query,
+            commands::recipe_history::workflow_recipe_history_get,
             commands::workflow_lifecycle::workflow_runtime_workspace_list,
             commands::workflow_lifecycle::workflow_runtime_workspace_refresh,
             commands::workflow_lifecycle::workflow_runtime_diagnostics,

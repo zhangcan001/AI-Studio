@@ -8,7 +8,7 @@ pub struct PageCursor {
     pub id: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageResult<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<PageCursor>,

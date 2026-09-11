@@ -60,6 +60,7 @@ pub mod prompt_context_builder;
 pub mod prompt_library_service;
 pub mod prompt_template_bulk_service;
 pub mod prompt_template_service;
+pub mod recipe_history_query_service;
 pub mod reference_anchor_service;
 pub mod reference_set_service;
 pub mod scene_production_service;

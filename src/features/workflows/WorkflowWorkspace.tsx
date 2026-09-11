@@ -56,6 +56,9 @@ import {
   type OutputDraft,
 } from "./hooks/useWorkflowAdvancedOnboardingController";
 import { useWorkflowParameterExposureController } from "./hooks/useWorkflowParameterExposureController";
+import { getWorkflowRecipeHistory } from "../../services/workflowClient";
+import type { WorkflowRecipeHistoryView } from "../../types/workflowHistory";
+import { RecipeHistoryPane } from "./RecipeHistoryPane";
 import { WorkflowDeleteDialog, type WorkflowDeletionMode } from "./WorkflowDeleteDialog";
 import {
   normalizeWorkspaceItems,
@@ -136,6 +139,11 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [runtimeProfiles, setRuntimeProfiles] = useState<RuntimeParameterProfile[]>([]);
   const [runtimeProfilesLoading, setRuntimeProfilesLoading] = useState(false);
   const [runtimeProfilesError, setRuntimeProfilesError] = useState<string>();
+  const [recipeHistory, setRecipeHistory] = useState<WorkflowRecipeHistoryView>();
+  const [recipeHistoryTarget, setRecipeHistoryTarget] = useState<{ workflowVersionId: string; recipeId: string }>();
+  const [recipeHistoryLoading, setRecipeHistoryLoading] = useState(false);
+  const [recipeHistoryError, setRecipeHistoryError] = useState<string>();
+  const recipeHistoryRequestRef = useRef(0);
   const draft = useWorkflowOnboardingStore((state) => state.draft);
   const step = useWorkflowOnboardingStore((state) => state.step);
   const loading = useWorkflowOnboardingStore((state) => state.loading);
@@ -165,6 +173,55 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   }, []);
 
   const refreshWorkspace = useCallback(() => loadWorkspace("refresh"), [loadWorkspace]);
+
+  const openRecipeHistory = useCallback(async (item: WorkflowWorkspaceItem, recipe: WorkflowRegistryRecipeView) => {
+    const workflowVersionId = recipe.workflowVersionId ?? item.currentVersionId;
+    if (!workflowVersionId) return;
+    const requestId = ++recipeHistoryRequestRef.current;
+    setRecipeHistoryTarget({ workflowVersionId, recipeId: recipe.recipeId });
+    setRecipeHistory(undefined);
+    setRecipeHistoryLoading(true);
+    setRecipeHistoryError(undefined);
+    try {
+      const result = await getWorkflowRecipeHistory(workflowVersionId, recipe.recipeId);
+      if (recipeHistoryRequestRef.current === requestId) setRecipeHistory(result);
+    } catch (error: unknown) {
+      if (recipeHistoryRequestRef.current === requestId) setRecipeHistoryError(toUserMessage(error));
+    } finally {
+      if (recipeHistoryRequestRef.current === requestId) setRecipeHistoryLoading(false);
+    }
+  }, []);
+
+  const loadMoreRecipeHistory = useCallback(async () => {
+    if (!recipeHistoryTarget || !recipeHistory?.taskPage.nextCursor || recipeHistoryLoading) return;
+    const requestId = ++recipeHistoryRequestRef.current;
+    setRecipeHistoryLoading(true);
+    try {
+      const next = await getWorkflowRecipeHistory(
+        recipeHistoryTarget.workflowVersionId,
+        recipeHistoryTarget.recipeId,
+        recipeHistory.taskPage.nextCursor,
+      );
+      if (recipeHistoryRequestRef.current === requestId) {
+        setRecipeHistory((current) => current ? {
+          ...next,
+          taskPage: { ...next.taskPage, items: [...current.taskPage.items, ...next.taskPage.items] },
+        } : next);
+      }
+    } catch (error: unknown) {
+      if (recipeHistoryRequestRef.current === requestId) setRecipeHistoryError(toUserMessage(error));
+    } finally {
+      if (recipeHistoryRequestRef.current === requestId) setRecipeHistoryLoading(false);
+    }
+  }, [recipeHistory, recipeHistoryLoading, recipeHistoryTarget]);
+
+  const closeRecipeHistory = useCallback(() => {
+    recipeHistoryRequestRef.current += 1;
+    setRecipeHistoryTarget(undefined);
+    setRecipeHistory(undefined);
+    setRecipeHistoryError(undefined);
+    setRecipeHistoryLoading(false);
+  }, []);
 
   useEffect(() => {
     void loadWorkspace("fast");
@@ -786,6 +843,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         onRecheck={(item) => void recheckVersion(item)}
         onDuplicateRecipe={(item) => void duplicateRecipe(item)}
         onOpenParameters={(item) => void parameterExposureController.open(item)}
+        onViewHistory={(item, recipe) => void openRecipeHistory(item, recipe)}
         onExport={(item) => { if (item.currentVersionId) void exportWorkflowPackage(item.currentVersionId); }}
         onToggle={(item) => void toggleVersion(item)}
         onPurge={(item) => void inspectForPurge(item)}
@@ -813,6 +871,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
           onSave={(edits) => void parameterExposureController.publish(edits)}
         />
       )}
+
+      {recipeHistoryLoading && !recipeHistory && <p className="loading-state" role="status">正在读取 Recipe 历史…</p>}
+      {recipeHistoryError && <p className="error-message" role="alert">{recipeHistoryError}</p>}
+      {recipeHistory && <RecipeHistoryPane history={recipeHistory} loading={recipeHistoryLoading} onClose={closeRecipeHistory} onLoadMore={() => void loadMoreRecipeHistory()} onOpenTask={onOpenTask} />}
 
       {advancedController.showAdvanced && draft && (
         <div className="workflow-onboarding-panel">

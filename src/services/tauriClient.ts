@@ -113,6 +113,7 @@ import type {
   RuntimeParameterProfile,
 } from "../types/settings";
 import type { WorkspaceResume } from "../types/workspaceResume";
+import type { WorkflowHistoryCursor, WorkflowRecipeHistoryView } from "../types/workflowHistory";
 import type { ProjectCommandCenterAggregate } from "../types/projectCommandCenter";
 import type { ReferenceAnchorRequest, ReferenceAnchorUpdateRequest, ReferenceAnchorView } from "../types/referenceAnchor";
 import type {
@@ -1599,6 +1600,20 @@ export function taskHistoryPage(
   query: TaskHistoryQuery,
 ): Promise<TaskHistoryPage> {
   return invoke<TaskHistoryPage>("task_history_page", { query });
+}
+
+export function getWorkflowRecipeHistory(
+  workflowVersionId: string,
+  recipeId: string,
+  taskCursor?: WorkflowHistoryCursor,
+  taskLimit?: number,
+): Promise<WorkflowRecipeHistoryView> {
+  return invoke<WorkflowRecipeHistoryView>("workflow_recipe_history_get", {
+    workflowVersionId,
+    recipeId,
+    taskCursor,
+    taskLimit,
+  });
 }
 
 export function getTaskDetail(projectId: string, taskId: string): Promise<TaskDetail> {

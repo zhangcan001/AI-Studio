@@ -95,6 +95,11 @@ if (["pickH3LocalImportDirectory(", "rescanH3LocalImport(", "updateH3ProjectSegm
 
 const workflowWorkspaceSource = readFileSync(join(root, "src/features/workflows/WorkflowWorkspace.tsx"), "utf8");
 const workflowWorkspaceAdaptersSource = readFileSync(join(root, "src/features/workflows/workflowWorkspaceAdapters.ts"), "utf8");
+const recipeHistoryServiceSource = readFileSync(join(root, "src-tauri/src/application/recipe_history_query_service.rs"), "utf8");
+const recipeHistoryPortSource = readFileSync(join(root, "src-tauri/src/application/ports/recipe_history_query_repository.rs"), "utf8");
+const recipeHistoryRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/recipe_history_query.rs"), "utf8");
+const recipeHistoryCommandSource = readFileSync(join(root, "src-tauri/src/commands/recipe_history.rs"), "utf8");
+const recipeHistoryClientSource = readFileSync(join(root, "src/services/tauriClient.ts"), "utf8");
 const workflowPromotionRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/workflow_recipe_promotion.rs"), "utf8");
 const recipeArchiveMigrationSource = readFileSync(join(root, "src-tauri/migrations/031_workflow_recipe_archive_state.sql"), "utf8");
 const recipeArchivePortSource = readFileSync(join(root, "src-tauri/src/application/ports/workflow_recipe_runtime_state_repository.rs"), "utf8");
@@ -154,6 +159,36 @@ const parameterExposureFunctionMarkers = [
 ];
 if (parameterExposureFunctionMarkers.some((marker) => workflowWorkspaceSource.includes(marker))) {
   throw new Error("WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER failed: WorkflowWorkspace must delegate Parameter Exposure actions");
+}
+
+const recipeHistoryMutationMarkers = [
+  "archive_recipe", "restore_recipe", "promote_recipe", "clear_recipe_promotion", "requeue_task", "retry_task", "cancel_task",
+];
+if (!recipeHistoryServiceSource.includes("pub struct RecipeHistoryQueryService")
+  || !recipeHistoryServiceSource.includes("pub async fn get_exact_pair(")
+  || !recipeHistoryPortSource.includes("trait RecipeHistoryQueryRepository")
+  || !recipeHistoryRepositorySource.includes("impl RecipeHistoryQueryRepository for SqliteRecipeHistoryQueryRepository")
+  || !recipeHistoryCommandSource.includes("pub async fn workflow_recipe_history_get(")
+  || !recipeHistoryClientSource.includes('"workflow_recipe_history_get"')) {
+  throw new Error("RECIPE_HISTORY_QUERY_AUTHORITY failed: exact-pair service, repository, command, and typed client are required");
+}
+if (recipeHistoryMutationMarkers.some((marker) => recipeHistoryServiceSource.includes(marker) || recipeHistoryCommandSource.includes(marker))
+  || recipeHistoryServiceSource.includes("sqlx::")
+  || recipeHistoryPortSource.includes("&mut")
+  || recipeHistoryPortSource.includes("fn archive")
+  || recipeHistoryPortSource.includes("fn restore")) {
+  throw new Error("RECIPE_HISTORY_READ_ONLY failed: history query must not expose mutation authority or application SQLx");
+}
+const migrationFiles = readdirSync(join(root, "src-tauri/migrations"));
+if (migrationFiles.some((file) => /recipe.?history/i.test(file))
+  || migrationFiles.some((file) => /\.sql$/.test(file) && /CREATE\s+TABLE\s+recipe_history/i.test(readFileSync(join(root, "src-tauri/migrations", file), "utf8")))) {
+  throw new Error("RECIPE_HISTORY_READ_ONLY failed: a new recipe history table or migration was added");
+}
+if (!workflowWorkspaceSource.includes("openRecipeHistory")
+  || !workflowWorkspaceSource.includes("getWorkflowRecipeHistory(")
+  || !workflowWorkspaceSource.includes("onViewHistory")
+  || /useEffect\([\s\S]{0,600}getWorkflowRecipeHistory\(/.test(workflowWorkspaceSource)) {
+  throw new Error("RECIPE_HISTORY_ON_DEMAND failed: history must load only from the existing recipe detail action");
 }
 
 const workflowClientSource = readFileSync(join(root, "src/services/workflowClient.ts"), "utf8");
@@ -394,6 +429,9 @@ if (advancedOnboardingFunctionMarkers.some((marker) => workflowWorkspaceSource.i
 
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
+console.log(`RECIPE_HISTORY_QUERY_AUTHORITY=PASS`);
+console.log(`RECIPE_HISTORY_READ_ONLY=PASS`);
+console.log(`RECIPE_HISTORY_ON_DEMAND=PASS`);
 console.log(`STRUCTURED_IPC_ERROR=PASS`);
 console.log(`RECIPE_ARCHIVE_AUTHORITY=PASS`);
 console.log(`ONE_RECIPE_ARCHIVE_STATE_SOURCE=PASS`);
