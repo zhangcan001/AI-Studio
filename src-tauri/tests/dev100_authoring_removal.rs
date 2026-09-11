@@ -25,7 +25,7 @@ fn legacy_script_schema_and_backup_v17_remain_compatibility_boundaries() {
     let backup = source("src/application/project_backup_service.rs");
     assert!(migration.contains("script_sources"));
     assert!(migration.contains("script_import_drafts"));
-    assert!(backup.contains("BACKUP_VERSION: u32 = 17"));
+    assert!(backup.contains("BACKUP_VERSION: u32 = 18"));
     assert!(backup.contains("BackupScriptSource"));
     assert!(backup.contains("BackupScriptDraftRevision"));
 }

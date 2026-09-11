@@ -6,6 +6,7 @@ pub mod consistency_assets;
 pub mod consistency_bindings;
 pub mod diagnostics;
 pub mod episode_production;
+pub mod external_production_handoff;
 pub mod generation;
 pub mod h3_local_import;
 pub mod organization;

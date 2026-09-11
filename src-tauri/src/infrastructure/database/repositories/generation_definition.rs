@@ -62,6 +62,57 @@ impl GenerationDefinitionRepository for SqliteGenerationDefinitionRepository {
         row.map(DefinitionRow::try_into_domain).transpose()
     }
 
+    async fn find_active(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<Option<GenerationDefinition>, RepositoryError> {
+        let available = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM workflow_versions wv
+             INNER JOIN workflows w ON w.id = wv.workflow_id
+             INNER JOIN recipes r ON r.workflow_version_id = wv.id AND r.id = ?
+             LEFT JOIN workflow_runtime_states wvs
+               ON wvs.workflow_version_id = wv.id
+             LEFT JOIN workflow_recipe_runtime_states wrs
+               ON wrs.workflow_version_id = wv.id AND wrs.recipe_id = r.id
+             WHERE wv.id = ? AND w.library_state = 'ACTIVE'
+               AND COALESCE(wvs.enabled, 1) = 1
+               AND COALESCE(wvs.archived, 0) = 0
+               AND COALESCE(wrs.archived, 0) = 0",
+        )
+        .bind(recipe_id)
+        .bind(workflow_version_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        if available == 0 {
+            return Ok(None);
+        }
+        self.find(workflow_version_id, recipe_id).await
+    }
+
+    async fn workflow_version_is_active(
+        &self,
+        workflow_version_id: &str,
+    ) -> Result<bool, RepositoryError> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM workflow_versions wv
+             INNER JOIN workflows w ON w.id = wv.workflow_id
+             LEFT JOIN workflow_runtime_states wvs
+               ON wvs.workflow_version_id = wv.id
+             WHERE wv.id = ? AND w.library_state = 'ACTIVE'
+               AND COALESCE(wvs.enabled, 1) = 1
+               AND COALESCE(wvs.archived, 0) = 0",
+        )
+        .bind(workflow_version_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(count > 0)
+    }
+
     async fn find_many(
         &self,
         pairs: &[(String, String)],

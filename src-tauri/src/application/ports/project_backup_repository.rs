@@ -56,6 +56,7 @@ pub struct ProjectBackupRestorePlan {
     pub(crate) tag_ids: HashMap<String, String>,
     pub(crate) reference_anchor_ids: HashMap<String, String>,
     pub(crate) production_structure_ids: ProductionStructureIds,
+    pub(crate) handoff_ids: HashMap<String, String>,
     pub(crate) script_source_ids: HashMap<String, String>,
     pub(crate) script_draft_ids: HashMap<String, String>,
     pub(crate) script_revision_ids: HashMap<String, String>,

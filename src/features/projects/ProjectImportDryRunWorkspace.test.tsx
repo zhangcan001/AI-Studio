@@ -12,6 +12,10 @@ import { ProjectImportDryRunWorkspace } from "./ProjectImportDryRunWorkspace";
 vi.mock("../../services/tauriClient", () => ({
   commitShotBulkImport: vi.fn(),
   previewShotBulkImport: vi.fn(),
+  confirmExternalProductionHandoff: vi.fn(),
+  getExternalProductionHandoffMappings: vi.fn(),
+  listExternalProductionHandoffs: vi.fn().mockResolvedValue([]),
+  previewExternalProductionHandoff: vi.fn(),
 }));
 
 const preview = (overrides: Record<string, unknown> = {}) => ({

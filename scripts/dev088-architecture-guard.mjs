@@ -49,6 +49,51 @@ if (!["IMPORT_AUTO_QUEUE=NO", "IMPORT_AUTO_TASK=NO", "IMPORT_AUTO_GENERATION=NO"
   throw new Error("EXTERNAL_HANDOFF_NO_AUTO_PRODUCTION failed: handoff must remain explicit and schema-blocked");
 }
 
+const handoffContractSource = readFileSync(join(root, "docs/EXTERNAL_AGENT_PRODUCTION_HANDOFF_V1.md"), "utf8");
+const handoffServiceSource = readFileSync(join(root, "src-tauri/src/application/external_production_handoff_service.rs"), "utf8");
+const handoffPortSource = readFileSync(join(root, "src-tauri/src/application/ports/external_production_handoff_repository.rs"), "utf8");
+const handoffRepositorySource = readFileSync(join(root, "src-tauri/src/infrastructure/database/repositories/external_production_handoff.rs"), "utf8");
+const handoffCommandSource = readFileSync(join(root, "src-tauri/src/commands/external_production_handoff.rs"), "utf8");
+const handoffMigrationSource = readFileSync(join(root, "src-tauri/migrations/032_external_production_handoffs.sql"), "utf8");
+const handoffClientSource = readFileSync(join(root, "src/services/tauriClient.ts"), "utf8");
+const handoffPanelSource = readFileSync(join(root, "src/features/projects/ExternalAgentHandoffPanel.tsx"), "utf8");
+if (!handoffContractSource.includes("STATUS=IMPLEMENTED")
+  || !handoffContractSource.includes("IMPLEMENTATION=SERVER_ATOMIC")
+  || !handoffContractSource.includes("MIGRATION=032")) {
+  throw new Error("EXTERNAL_HANDOFF_CONTRACT_IMPLEMENTED failed: V1 contract must describe the shipped implementation");
+}
+if (!handoffServiceSource.includes("pub async fn preview(")
+  || !handoffServiceSource.includes("pub async fn confirm(")
+  || !handoffPortSource.includes("trait ExternalProductionHandoffRepository")
+  || !handoffRepositorySource.includes("async fn import_atomic(")
+  || !handoffRepositorySource.includes("self.pool.begin()")) {
+  throw new Error("EXTERNAL_HANDOFF_AUTHORITY failed: service/port/repository transaction authority is incomplete");
+}
+if (!handoffServiceSource.includes("repository.import_atomic")
+  || !handoffServiceSource.includes("find_by_document_hash")
+  || !handoffPanelSource.includes("previewExternalProductionHandoff")
+  || !handoffPanelSource.includes("confirmExternalProductionHandoff")) {
+  throw new Error("EXTERNAL_HANDOFF_PREVIEW_READ_ONLY failed: preview and explicit confirmation boundaries are required");
+}
+if (!["external_production_handoffs", "external_production_handoff_entities", "UNIQUE (project_id, document_sha256)"].every((marker) => handoffMigrationSource.includes(marker))) {
+  throw new Error("EXTERNAL_HANDOFF_SINGLE_TRANSACTION failed: durable handoff identity/provenance migration is missing");
+}
+if (["create_task", "enqueue", "start_comfy", "ComfyUI", "production_queue"].some((marker) => handoffServiceSource.includes(marker) || handoffRepositorySource.includes(marker))) {
+  throw new Error("EXTERNAL_HANDOFF_NO_AUTO_PRODUCTION failed: handoff must not own queue, task, or executor side effects");
+}
+if (!handoffServiceSource.includes("find_active")
+  || !handoffRepositorySource.includes("workflow_version_id")
+  || !handoffRepositorySource.includes("recipe_id")
+  || !handoffRepositorySource.includes("archived")) {
+  throw new Error("EXTERNAL_HANDOFF_EXACT_WORKFLOW_RECIPE failed: exact active workflowVersionId+recipeId validation is required");
+}
+if (/[\s\S]*sqlx::/.test(handoffServiceSource) || /[\s\S]*sqlx::/.test(handoffPortSource)) {
+  throw new Error("APPLICATION_DIRECT_SQLX_NEW_USAGE failed: handoff application layer must use repository ports");
+}
+if (!["previewExternalProductionHandoff", "confirmExternalProductionHandoff", "external_production_handoff_preview", "external_production_handoff_confirm"].every((marker) => handoffClientSource.includes(marker) || handoffCommandSource.includes(marker))) {
+  throw new Error("EXTERNAL_HANDOFF_TYPED_IPC failed: typed client and command parity is required");
+}
+
 function collectSourceFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
@@ -504,6 +549,11 @@ console.log(`INTERNAL_SCRIPT_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_STORYBOARD_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_PROMPT_AUTHORING_RETIRED=PASS`);
 console.log(`EXTERNAL_HANDOFF_NO_AUTO_PRODUCTION=PASS`);
+console.log(`EXTERNAL_HANDOFF_AUTHORITY=PASS`);
+console.log(`EXTERNAL_HANDOFF_PREVIEW_READ_ONLY=PASS`);
+console.log(`EXTERNAL_HANDOFF_SINGLE_TRANSACTION=PASS`);
+console.log(`EXTERNAL_HANDOFF_EXACT_WORKFLOW_RECIPE=PASS`);
+console.log(`EXTERNAL_HANDOFF_TYPED_IPC=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

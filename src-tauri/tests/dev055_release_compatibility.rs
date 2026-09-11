@@ -836,6 +836,14 @@ fn migration_versions() -> Vec<u64> {
 }
 
 async fn remove_migration_028_schema(pool: &SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS external_production_handoff_entities")
+        .execute(pool)
+        .await
+        .expect("032 handoff entity table should be removable from the isolated fixture");
+    sqlx::query("DROP TABLE IF EXISTS external_production_handoffs")
+        .execute(pool)
+        .await
+        .expect("032 handoff table should be removable from the isolated fixture");
     sqlx::query("DROP TABLE IF EXISTS workflow_recipe_runtime_states")
         .execute(pool)
         .await
@@ -1172,8 +1180,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 31);
-    assert_eq!(migration_marker_count(pool, 31).await, 1);
+    assert_eq!(max_migration(pool).await, 32);
+    assert_eq!(migration_marker_count(pool, 32).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1335,13 +1343,13 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_031() {
+async fn dev055_migration_matrix_reaches_032() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(31));
+    assert_eq!(versions.last().copied(), Some(32));
     assert!(
-        versions.contains(&31),
-        "repository must contain migration 031"
+        versions.contains(&32),
+        "repository must contain migration 032"
     );
 
     let (_fresh_directory, fresh_pool) = database().await;
@@ -1448,7 +1456,7 @@ async fn dev055_migration_matrix_reaches_031() {
 }
 
 #[tokio::test]
-async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_031() {
+async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_032() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-0-project")).await;
     insert_published_1_0_post_legacy_rows(&pool).await;
@@ -1458,7 +1466,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_031() {
     pool.close().await;
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.0 database should upgrade through migration 031");
+        .expect("reconstructed 1.0 database should upgrade through migration 032");
     assert_current_migration_gate(&upgraded).await;
 
     assert_eq!(
@@ -1689,15 +1697,15 @@ async fn dev055_backup_12_inspect_restore_and_backup_13_restore_use_real_export(
         directory.path().join("restored-projects"),
         directory.path().join("cache"),
     );
-    let v17_archive = directory.path().join("legacy-v17.zip");
+    let v18_archive = directory.path().join("legacy-v18.zip");
     service
-        .export(LEGACY_PROJECT_ID, v17_archive.clone())
+        .export(LEGACY_PROJECT_ID, v18_archive.clone())
         .await
-        .expect("real legacy project export should produce a Backup 17 archive");
+        .expect("real legacy project export should produce a Backup 18 archive");
     let v12_archive = directory.path().join("legacy-v12.zip");
     let v13_archive = directory.path().join("legacy-v13.zip");
-    rewrite_backup_version(&v17_archive, &v12_archive, 12);
-    rewrite_backup_version(&v17_archive, &v13_archive, 13);
+    rewrite_backup_version(&v18_archive, &v12_archive, 12);
+    rewrite_backup_version(&v18_archive, &v13_archive, 13);
 
     let v12_manifest = read_zip_json(&v12_archive, "manifest.json");
     assert_eq!(v12_manifest["version"], 12);
@@ -1759,7 +1767,7 @@ async fn dev055_backup_12_inspect_restore_and_backup_13_restore_use_real_export(
 }
 
 #[tokio::test]
-async fn dev055_backup_17_roundtrip_preserves_consistency_and_preparation_snapshot() {
+async fn dev055_backup_18_roundtrip_preserves_consistency_and_preparation_snapshot() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("consistency-project")).await;
     let service = ProjectBackupService::new(
@@ -1767,14 +1775,14 @@ async fn dev055_backup_17_roundtrip_preserves_consistency_and_preparation_snapsh
         directory.path().join("restored-projects"),
         directory.path().join("cache"),
     );
-    let archive_path = directory.path().join("consistency-v17.zip");
+    let archive_path = directory.path().join("consistency-v18.zip");
     let exported = service
         .export(CONSISTENCY_PROJECT_ID, archive_path.clone())
         .await
-        .expect("real consistency project export should produce Backup 17");
+        .expect("real consistency project export should produce Backup 18");
     assert!(exported.entries >= 6);
     let archive_manifest = read_zip_json(&archive_path, "manifest.json");
-    assert_eq!(archive_manifest["version"], 17);
+    assert_eq!(archive_manifest["version"], 18);
     let archive_document = read_zip_json(&archive_path, "project.json");
     for (field, expected) in [
         ("characterProfiles", 1),
@@ -1793,20 +1801,20 @@ async fn dev055_backup_17_roundtrip_preserves_consistency_and_preparation_snapsh
         assert_eq!(
             archive_document[field].as_array().map(Vec::len),
             Some(expected),
-            "Backup 17 must carry {field}"
+            "Backup 18 must carry {field}"
         );
     }
 
     let preview = service
         .inspect(archive_path)
         .await
-        .expect("Backup 17 should inspect");
+        .expect("Backup 18 should inspect");
     assert_eq!(preview.shots, 1);
     assert_eq!(preview.image_count, 5);
     let restored = service
         .restore(&preview.inspection_id)
         .await
-        .expect("Backup 17 should restore");
+        .expect("Backup 18 should restore");
     assert_ne!(restored.id, CONSISTENCY_PROJECT_ID);
 
     let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(

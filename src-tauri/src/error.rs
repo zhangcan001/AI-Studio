@@ -40,6 +40,7 @@ pub enum AppErrorCode {
     FilesystemBoundaryError,
     ComfyMemoryBusy,
     ComfyMemoryReleaseFailed,
+    ExternalProductionHandoffError,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -223,6 +224,12 @@ impl AppError {
         Self::new(AppErrorCode::ComfyMemoryReleaseFailed, message)
     }
 
+    pub fn external_production_handoff(error_code: &str, message: impl Into<String>) -> Self {
+        let mut error = Self::new(AppErrorCode::ExternalProductionHandoffError, message);
+        error.details = Some(json!({ "handoffErrorCode": error_code }));
+        error
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -260,6 +267,7 @@ impl AppError {
             AppErrorCode::FilesystemBoundaryError => "FILESYSTEM_BOUNDARY_ERROR",
             AppErrorCode::ComfyMemoryBusy => "COMFY_MEMORY_BUSY",
             AppErrorCode::ComfyMemoryReleaseFailed => "COMFY_MEMORY_RELEASE_FAILED",
+            AppErrorCode::ExternalProductionHandoffError => "EXTERNAL_PRODUCTION_HANDOFF_ERROR",
         }
     }
 

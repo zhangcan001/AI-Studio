@@ -25,10 +25,10 @@ pub async fn initialize(database_path: &Path) -> Result<SqlitePool, AppError> {
     configure_pragmas(&pool).await?;
     tracing::info!("database connected");
 
-    MIGRATOR
-        .run(&pool)
-        .await
-        .map_err(|_| AppError::database("database migration failed"))?;
+    MIGRATOR.run(&pool).await.map_err(|error| {
+        tracing::error!(?error, "database migration failed");
+        AppError::database("database migration failed")
+    })?;
     tracing::info!("database migration completed");
 
     Ok(pool)
@@ -103,7 +103,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            31
+            32
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")

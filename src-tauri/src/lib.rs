@@ -19,12 +19,12 @@ pub use application::ports::{
 pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
     initialize, SqliteAssetDeletionRepository, SqliteAssetRepository,
-    SqliteAssetVideoPromptRepository, SqliteGenerationDefinitionRepository,
-    SqliteGenerationSnapshotRepository, SqliteOrganizationRepository, SqlitePresetRepository,
-    SqliteProductionItemReviewRepository, SqliteProductionQueueRepository,
-    SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
-    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRunRepository,
+    SqliteAssetVideoPromptRepository, SqliteExternalProductionHandoffRepository,
+    SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
+    SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionItemReviewRepository,
+    SqliteProductionQueueRepository, SqliteProjectBackupRepository, SqliteProjectRepository,
+    SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository, SqliteTaskRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -42,6 +42,7 @@ use application::{
     consistency_scope_binding_service::ConsistencyScopeBindingService,
     diagnostics_service::DiagnosticsService,
     episode_production_service::EpisodeProductionService,
+    external_production_handoff_service::ExternalProductionHandoffService,
     generation_catalog_service::GenerationCatalogService,
     generation_service::GenerationService,
     h3_local_import_service::H3LocalImportService,
@@ -252,6 +253,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 ));
             let production_structure_repository: Arc<dyn application::ports::ProductionStructureRepository> =
                 Arc::new(infrastructure::database::SqliteProductionStructureRepository::new(
+                    database_pool.clone(),
+                ));
+            let external_production_handoff_repository: Arc<dyn application::ports::ExternalProductionHandoffRepository> =
+                Arc::new(infrastructure::database::SqliteExternalProductionHandoffRepository::new(
                     database_pool.clone(),
                 ));
             let consistency_scope_repository: Arc<dyn application::ports::ConsistencyScopeRepository> =
@@ -834,6 +839,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 prompt_library_repository.clone(),
                 clock.clone(),
             ));
+            let external_production_handoff_service = Arc::new(ExternalProductionHandoffService::new(
+                external_production_handoff_repository,
+                project_repository.clone(),
+                asset_repository.clone(),
+                definition_repository.clone(),
+                clock.clone(),
+            ));
             let shot_service = Arc::new(ShotService::new(
                 shot_repository.clone(),
                 task_repository.clone(),
@@ -953,6 +965,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 batch_workflow_preset_service,
                 scene_production_service,
                 episode_production_service,
+                external_production_handoff_service,
                 series_production_service,
                 production_batch_runbook_service,
             ));
@@ -1280,6 +1293,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_structure::production_scene_assign_shots,
             commands::production_structure::production_scene_unassign_shots,
             commands::production_structure::production_scene_reorder_shots,
+            commands::external_production_handoff::external_production_handoff_preview,
+            commands::external_production_handoff::external_production_handoff_confirm,
+            commands::external_production_handoff::external_production_handoff_list,
+            commands::external_production_handoff::external_production_handoff_mappings,
             commands::shot::shot_list,
             commands::shot::shot_get,
             commands::shot::shot_create,

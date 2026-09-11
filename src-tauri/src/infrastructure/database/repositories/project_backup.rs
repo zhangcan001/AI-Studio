@@ -221,6 +221,10 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
         .map_err(|error| RepositoryError::database(error.to_string()))?;
         let (production_series, production_episodes, production_scenes, shot_scene_assignments) =
             query_production_structure(&mut transaction, project_id).await?;
+        let external_production_handoffs =
+            query_external_production_handoffs(&mut transaction, project_id).await?;
+        let external_production_handoff_entities =
+            query_external_production_handoff_entities(&mut transaction, project_id).await?;
         let script_sources = query_script_sources(&mut transaction, project_id).await?;
         let script_draft_revisions =
             query_script_draft_revisions(&mut transaction, project_id).await?;
@@ -425,6 +429,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             benchmark_runs,
             benchmark_quality_scores,
             shots,
+            external_production_handoffs,
+            external_production_handoff_entities,
             shot_stage_configs,
             shot_stage_prompts,
             shot_reference_assets,
@@ -534,6 +540,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             &plan.tag_ids,
             &plan.reference_anchor_ids,
             &plan.production_structure_ids,
+            &plan.handoff_ids,
             &plan.script_source_ids,
             &plan.script_draft_ids,
             &plan.script_revision_ids,
@@ -746,6 +753,25 @@ struct DbShotSceneAssignment {
     ordinal: i64,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(FromRow)]
+struct DbExternalProductionHandoff {
+    id: String,
+    project_id: String,
+    schema_version: i64,
+    source_agent: String,
+    source_revision: Option<String>,
+    document_sha256: String,
+    imported_at: String,
+}
+
+#[derive(FromRow)]
+struct DbExternalProductionHandoffEntity {
+    handoff_id: String,
+    entity_kind: String,
+    external_id: String,
+    formal_entity_id: String,
 }
 
 #[derive(FromRow)]
@@ -1389,6 +1415,61 @@ async fn query_production_structure(
     })
     .collect();
     Ok((series, episodes, scenes, assignments))
+}
+
+async fn query_external_production_handoffs(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupExternalProductionHandoff>, RepositoryError> {
+    sqlx::query_as::<_, DbExternalProductionHandoff>(
+        "SELECT id, project_id, schema_version, source_agent, source_revision,
+                document_sha256, imported_at
+         FROM external_production_handoffs
+         WHERE project_id = ? ORDER BY imported_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| RepositoryError::database(error.to_string()))?
+    .into_iter()
+    .map(|row| {
+        Ok(BackupExternalProductionHandoff {
+            id: row.id,
+            project_id: row.project_id,
+            schema_version: row.schema_version,
+            source_agent: row.source_agent,
+            source_revision: row.source_revision,
+            document_sha256: row.document_sha256,
+            imported_at: row.imported_at,
+        })
+    })
+    .collect()
+}
+
+async fn query_external_production_handoff_entities(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupExternalProductionHandoffEntity>, RepositoryError> {
+    sqlx::query_as::<_, DbExternalProductionHandoffEntity>(
+        "SELECT e.handoff_id, e.entity_kind, e.external_id, e.formal_entity_id
+         FROM external_production_handoff_entities e
+         JOIN external_production_handoffs h ON h.id = e.handoff_id
+         WHERE h.project_id = ? ORDER BY e.handoff_id, e.entity_kind, e.external_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| RepositoryError::database(error.to_string()))?
+    .into_iter()
+    .map(|row| {
+        Ok(BackupExternalProductionHandoffEntity {
+            handoff_id: row.handoff_id,
+            entity_kind: row.entity_kind,
+            external_id: row.external_id,
+            formal_entity_id: row.formal_entity_id,
+        })
+    })
+    .collect()
 }
 
 async fn query_project(
@@ -2648,6 +2729,7 @@ async fn restore_rows_in_transaction(
     tag_ids: &HashMap<String, String>,
     reference_anchor_ids: &HashMap<String, String>,
     production_structure_ids: &ProductionStructureIds,
+    handoff_ids: &HashMap<String, String>,
     script_source_ids: &HashMap<String, String>,
     script_draft_ids: &HashMap<String, String>,
     script_revision_ids: &HashMap<String, String>,
@@ -4286,6 +4368,67 @@ async fn restore_rows_in_transaction(
         .bind(task_id)
         .bind(item_id)
         .bind(&link.created_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+    }
+    for handoff in &document.external_production_handoffs {
+        if handoff.project_id != document.project.id || handoff.schema_version != 1 {
+            return Err(RepositoryError::integrity(
+                "External Production Handoff 项目或 Schema 版本无效",
+            ));
+        }
+        let handoff_id = handoff_ids
+            .get(&handoff.id)
+            .ok_or_else(|| RepositoryError::integrity("External Production Handoff ID 映射缺失"))?;
+        sqlx::query(
+            "INSERT INTO external_production_handoffs
+             (id, project_id, schema_version, source_agent, source_revision,
+              document_sha256, imported_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(handoff_id)
+        .bind(&project.id)
+        .bind(handoff.schema_version)
+        .bind(&handoff.source_agent)
+        .bind(&handoff.source_revision)
+        .bind(&handoff.document_sha256)
+        .bind(&handoff.imported_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+    }
+    for entity in &document.external_production_handoff_entities {
+        let handoff_id = handoff_ids.get(&entity.handoff_id).ok_or_else(|| {
+            RepositoryError::integrity("External Production Handoff Entity 缺少 Handoff 映射")
+        })?;
+        let formal_entity_id = match entity.entity_kind.as_str() {
+            "series" => production_structure_ids
+                .series
+                .get(&entity.formal_entity_id),
+            "episode" => production_structure_ids
+                .episodes
+                .get(&entity.formal_entity_id),
+            "scene" => production_structure_ids
+                .scenes
+                .get(&entity.formal_entity_id),
+            "shot" => shot_ids.get(&entity.formal_entity_id),
+            _ => None,
+        }
+        .ok_or_else(|| {
+            RepositoryError::integrity(
+                "External Production Handoff Entity 的正式实体映射缺失或类型无效",
+            )
+        })?;
+        sqlx::query(
+            "INSERT INTO external_production_handoff_entities
+             (handoff_id, entity_kind, external_id, formal_entity_id)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(handoff_id)
+        .bind(&entity.entity_kind)
+        .bind(&entity.external_id)
+        .bind(formal_entity_id)
         .execute(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;

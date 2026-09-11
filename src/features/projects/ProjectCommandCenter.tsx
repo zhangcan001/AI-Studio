@@ -261,6 +261,10 @@ export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCent
           projectId={projectId}
           onClose={() => setImportOpen(false)}
           onImported={() => loadSnapshot()}
+          onOpenStructure={() => {
+            setImportOpen(false);
+            onNavigate?.({ destination: "shots", section: "creation" });
+          }}
         />
       )}
     </>

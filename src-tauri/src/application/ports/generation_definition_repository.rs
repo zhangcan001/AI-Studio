@@ -37,6 +37,25 @@ pub trait GenerationDefinitionRepository: Send + Sync {
         recipe_id: &str,
     ) -> Result<Option<GenerationDefinition>, RepositoryError>;
 
+    /// Exact tuple lookup for new production-input boundaries. Implementations
+    /// with lifecycle state should reject archived or removed definitions.
+    async fn find_active(
+        &self,
+        workflow_version_id: &str,
+        recipe_id: &str,
+    ) -> Result<Option<GenerationDefinition>, RepositoryError> {
+        self.find(workflow_version_id, recipe_id).await
+    }
+
+    /// Distinguishes an unavailable workflow version from an unavailable
+    /// recipe pair for strict external production-input validation.
+    async fn workflow_version_is_active(
+        &self,
+        _workflow_version_id: &str,
+    ) -> Result<bool, RepositoryError> {
+        Ok(false)
+    }
+
     /// Loads the requested workflow-version/recipe pairs in bulk.
     ///
     /// The default keeps existing fakes and adapters source-compatible. SQL

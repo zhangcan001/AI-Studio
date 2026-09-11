@@ -22,7 +22,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 17;
+const BACKUP_VERSION: u32 = 18;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -371,6 +371,10 @@ impl ProjectBackupService {
         for scene in &document.production_scenes {
             production_scene_ids.insert(scene.id.clone(), format!("scn_{}", Uuid::new_v4()));
         }
+        let mut handoff_ids = HashMap::new();
+        for handoff in &document.external_production_handoffs {
+            handoff_ids.insert(handoff.id.clone(), format!("hnd_{}", Uuid::new_v4()));
+        }
         let mut script_source_ids = HashMap::new();
         for source in &document.script_sources {
             script_source_ids.insert(source.id.clone(), format!("scr_{}", Uuid::new_v4()));
@@ -486,6 +490,7 @@ impl ProjectBackupService {
                     episodes: production_episode_ids,
                     scenes: production_scene_ids,
                 },
+                handoff_ids,
                 script_source_ids,
                 script_draft_ids,
                 script_revision_ids,
@@ -654,6 +659,7 @@ impl ProjectBackupService {
         tag_ids: &HashMap<String, String>,
         reference_anchor_ids: &HashMap<String, String>,
         production_structure_ids: &ProductionStructureIds,
+        handoff_ids: &HashMap<String, String>,
         script_source_ids: &HashMap<String, String>,
         script_draft_ids: &HashMap<String, String>,
         script_revision_ids: &HashMap<String, String>,
@@ -691,6 +697,7 @@ impl ProjectBackupService {
                     episodes: production_structure_ids.episodes.clone(),
                     scenes: production_structure_ids.scenes.clone(),
                 },
+                handoff_ids: handoff_ids.clone(),
                 script_source_ids: script_source_ids.clone(),
                 script_draft_ids: script_draft_ids.clone(),
                 script_revision_ids: script_revision_ids.clone(),
@@ -802,6 +809,10 @@ pub struct BackupDocument {
     pub(crate) benchmark_quality_scores: Vec<BackupBenchmarkQualityScore>,
     #[serde(default)]
     pub(crate) shots: Vec<BackupShot>,
+    #[serde(default)]
+    pub(crate) external_production_handoffs: Vec<BackupExternalProductionHandoff>,
+    #[serde(default)]
+    pub(crate) external_production_handoff_entities: Vec<BackupExternalProductionHandoffEntity>,
 
     #[serde(default)]
     pub(crate) shot_stage_configs: Vec<BackupShotStageConfig>,
@@ -839,7 +850,7 @@ pub struct BackupDocument {
 
 /// Registry metadata is part of a project backup because bindings and history
 /// refer to global immutable workflow IDs. The optional field keeps Backup16
-/// documents readable; Backup17 always writes it.
+/// documents readable; current backups always write it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BackupWorkflowRegistry {
@@ -1730,6 +1741,27 @@ pub(crate) struct BackupShotGenerationLink {
     pub(crate) created_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupExternalProductionHandoff {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) schema_version: i64,
+    pub(crate) source_agent: String,
+    pub(crate) source_revision: Option<String>,
+    pub(crate) document_sha256: String,
+    pub(crate) imported_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackupExternalProductionHandoffEntity {
+    pub(crate) handoff_id: String,
+    pub(crate) entity_kind: String,
+    pub(crate) external_id: String,
+    pub(crate) formal_entity_id: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkflowReference {
@@ -2078,7 +2110,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -2130,6 +2162,7 @@ fn validate_document_entries(
     validate_reference_anchor_document(document)?;
     validate_consistency_document(document, version)?;
     validate_production_structure_document(document, version)?;
+    validate_external_production_handoff_document(document, version)?;
     validate_production_preparation_snapshot_document(document, version)?;
     validate_prompt_document(document)?;
     validate_benchmark_document(document)?;
@@ -4058,6 +4091,117 @@ fn validate_production_structure_document(
     Ok(())
 }
 
+fn validate_external_production_handoff_document(
+    document: &BackupDocument,
+    version: u32,
+) -> Result<(), AppError> {
+    if version < 18
+        && (!document.external_production_handoffs.is_empty()
+            || !document.external_production_handoff_entities.is_empty())
+    {
+        return Err(AppError::backup_invalid(
+            "External Production Handoff 数据需要 Backup v18",
+        ));
+    }
+    if document.external_production_handoffs.is_empty()
+        && !document.external_production_handoff_entities.is_empty()
+    {
+        return Err(AppError::backup_invalid(
+            "External Production Handoff Entity 缺少 Handoff",
+        ));
+    }
+
+    let handoff_ids = document
+        .external_production_handoffs
+        .iter()
+        .map(|handoff| handoff.id.as_str())
+        .collect::<HashSet<_>>();
+    let series_ids = document
+        .production_series
+        .iter()
+        .map(|series| series.id.as_str())
+        .collect::<HashSet<_>>();
+    let episode_ids = document
+        .production_episodes
+        .iter()
+        .map(|episode| episode.id.as_str())
+        .collect::<HashSet<_>>();
+    let scene_ids = document
+        .production_scenes
+        .iter()
+        .map(|scene| scene.id.as_str())
+        .collect::<HashSet<_>>();
+    let shot_ids = document
+        .shots
+        .iter()
+        .map(|shot| shot.id.as_str())
+        .collect::<HashSet<_>>();
+
+    for handoff in &document.external_production_handoffs {
+        let valid_sha = handoff.document_sha256.len() == 64
+            && handoff
+                .document_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit());
+        if handoff.project_id != document.project.id
+            || handoff.id.trim().is_empty()
+            || handoff.schema_version != 1
+            || handoff.source_agent.trim().is_empty()
+            || handoff.source_agent.chars().count() > 200
+            || handoff.source_revision.as_deref().is_some_and(|revision| {
+                revision.trim().is_empty() || revision.chars().count() > 200
+            })
+            || handoff.imported_at.trim().is_empty()
+            || !valid_sha
+        {
+            return Err(AppError::backup_invalid(
+                "External Production Handoff 数据无效",
+            ));
+        }
+    }
+    if handoff_ids.len() != document.external_production_handoffs.len() {
+        return Err(AppError::backup_invalid(
+            "External Production Handoff ID 重复",
+        ));
+    }
+
+    let mut external_keys = HashSet::new();
+    let mut formal_keys = HashSet::new();
+    for entity in &document.external_production_handoff_entities {
+        let formal_exists = match entity.entity_kind.as_str() {
+            "series" => series_ids.contains(entity.formal_entity_id.as_str()),
+            "episode" => episode_ids.contains(entity.formal_entity_id.as_str()),
+            "scene" => scene_ids.contains(entity.formal_entity_id.as_str()),
+            "shot" => shot_ids.contains(entity.formal_entity_id.as_str()),
+            _ => false,
+        };
+        if !handoff_ids.contains(entity.handoff_id.as_str())
+            || !matches!(
+                entity.entity_kind.as_str(),
+                "series" | "episode" | "scene" | "shot"
+            )
+            || entity.external_id.trim().is_empty()
+            || entity.formal_entity_id.trim().is_empty()
+            || !formal_exists
+            || !external_keys.insert((
+                entity.handoff_id.as_str(),
+                entity.entity_kind.as_str(),
+                entity.external_id.as_str(),
+            ))
+            || !formal_keys.insert((
+                entity.handoff_id.as_str(),
+                entity.entity_kind.as_str(),
+                entity.formal_entity_id.as_str(),
+            ))
+        {
+            return Err(AppError::backup_invalid(
+                "External Production Handoff Entity 数据无效",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn valid_structure_name(value: &str) -> bool {
     let trimmed = value.trim();
     !trimmed.is_empty()
@@ -4545,6 +4689,8 @@ mod tests {
             benchmark_runs: Vec::new(),
             benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
+            external_production_handoffs: Vec::new(),
+            external_production_handoff_entities: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -5524,7 +5670,7 @@ mod tests {
         assert!(exported.entries >= 6);
         let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 17);
+        assert_eq!(manifest.version, 18);
         assert_eq!(document.project_workflow_bindings.len(), 2);
         assert_eq!(document.project_workflow_bindings[0].stage, "IMAGE");
         assert_eq!(
@@ -6148,7 +6294,7 @@ mod tests {
         let pool = initialize(&data_dirs.database).await.unwrap();
         let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
 
-        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32, 12_u32, 13_u32] {
+        for version in [5_u32, 6_u32, 7_u32, 8_u32, 9_u32, 12_u32, 13_u32, 17_u32] {
             let project_id = format!("legacy-v{version}-project");
             let project_name = format!("旧项目 v{version}");
             let archive_path = directory.path().join(format!("legacy-v{version}.zip"));
@@ -6390,6 +6536,8 @@ mod tests {
             benchmark_runs: Vec::new(),
             benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
+            external_production_handoffs: Vec::new(),
+            external_production_handoff_entities: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),
@@ -6449,6 +6597,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &ProductionStructureIds::default(),
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -6564,6 +6713,8 @@ mod tests {
             benchmark_runs: Vec::new(),
             benchmark_quality_scores: Vec::new(),
             shots: Vec::new(),
+            external_production_handoffs: Vec::new(),
+            external_production_handoff_entities: Vec::new(),
             shot_stage_configs: Vec::new(),
             shot_stage_prompts: Vec::new(),
             shot_reference_assets: Vec::new(),

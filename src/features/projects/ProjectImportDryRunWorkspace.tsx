@@ -16,6 +16,7 @@ import {
   normalizeImportContent,
 } from "../../types/projectImport";
 import { UiErrorNotice } from "../../i18n/UiErrorNotice";
+import { ExternalAgentHandoffPanel } from "./ExternalAgentHandoffPanel";
 import "./ProjectImportDryRunWorkspace.css";
 
 type ImportStage = "idle" | "parsing" | "parsed" | "validating" | "validated" | "ready" | "executing" | "completed" | "failed";
@@ -24,9 +25,10 @@ interface Props {
   projectId: string;
   onClose: () => void;
   onImported?: () => void | Promise<void>;
+  onOpenStructure?: () => void;
 }
 
-export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported }: Props) {
+export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported, onOpenStructure }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const readRequestRef = useRef(0);
   const [stage, setStage] = useState<ImportStage>("idle");
@@ -36,6 +38,7 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported }:
   const [result, setResult] = useState<ImportDryRunResult>();
   const [executionResult, setExecutionResult] = useState<Awaited<ReturnType<typeof commitShotBulkImport>>>();
   const [error, setError] = useState<unknown>();
+  const [mode, setMode] = useState<"flat" | "handoff">("flat");
 
   const busy = stage === "parsing" || stage === "validating" || stage === "executing";
   const hasFormalImportApi = typeof commitShotBulkImport === "function";
@@ -144,6 +147,10 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported }:
     if (clearInput && fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  if (mode === "handoff") {
+    return <ExternalAgentHandoffPanel projectId={projectId} onBack={() => setMode("flat")} onImported={onImported} onOpenStructure={onOpenStructure} />;
+  }
+
   return (
     <section className="workspace-panel project-import-workspace" aria-busy={busy} aria-label="批量导入预检工作区">
       <div className="section-heading workspace-heading">
@@ -152,7 +159,10 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported }:
           <h2>批量导入 / 导入预检</h2>
           <p className="section-description">先读取、检查并预览镜头文件；选择文件不会修改项目数据。</p>
         </div>
-        <button type="button" className="quiet-button" onClick={onClose} disabled={busy}>返回项目指挥中心</button>
+        <div className="project-import-mode-actions">
+          <button type="button" className="quiet-button" onClick={() => setMode("handoff")} disabled={busy}>External Agent Handoff</button>
+          <button type="button" className="quiet-button" onClick={onClose} disabled={busy}>返回项目指挥中心</button>
+        </div>
       </div>
 
       <section className="project-import-file-card" aria-labelledby="project-import-file-title">

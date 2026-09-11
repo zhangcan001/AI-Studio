@@ -11,6 +11,7 @@ pub mod comfy_adapter;
 pub mod consistency_profile_repository;
 pub mod consistency_scope_repository;
 pub mod database_health_probe;
+pub mod external_production_handoff_repository;
 pub mod generation_definition_repository;
 pub mod generation_snapshot_repository;
 pub mod organization_repository;
@@ -79,6 +80,15 @@ pub use comfy_adapter::{
 pub use consistency_profile_repository::ConsistencyProfileRepository;
 pub use consistency_scope_repository::ConsistencyScopeRepository;
 pub use database_health_probe::DatabaseHealthProbe;
+pub use external_production_handoff_repository::{
+    ExternalProductionHandoffAssetReference, ExternalProductionHandoffEntityMapping,
+    ExternalProductionHandoffEpisode, ExternalProductionHandoffImportPlan,
+    ExternalProductionHandoffImportResult, ExternalProductionHandoffPrompt,
+    ExternalProductionHandoffRecord, ExternalProductionHandoffRepository,
+    ExternalProductionHandoffScene, ExternalProductionHandoffSceneAssignment,
+    ExternalProductionHandoffSeries, ExternalProductionHandoffShot,
+    ExternalProductionHandoffStageConfig,
+};
 pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
 };

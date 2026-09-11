@@ -11,6 +11,7 @@ use crate::application::consistency_profile_service::ConsistencyProfileService;
 use crate::application::consistency_scope_binding_service::ConsistencyScopeBindingService;
 use crate::application::diagnostics_service::DiagnosticsService;
 use crate::application::episode_production_service::EpisodeProductionService;
+use crate::application::external_production_handoff_service::ExternalProductionHandoffService;
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
 use crate::application::h3_local_import_service::H3LocalImportService;
@@ -117,6 +118,7 @@ pub struct AppState {
     pub batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
     pub scene_production_service: Arc<SceneProductionService>,
     pub episode_production_service: Arc<EpisodeProductionService>,
+    pub external_production_handoff_service: Arc<ExternalProductionHandoffService>,
     pub series_production_service: Arc<SeriesProductionService>,
     pub production_batch_runbook_service: Arc<ProductionBatchRunbookService>,
 }
@@ -180,6 +182,7 @@ impl AppState {
         batch_workflow_preset_service: Arc<BatchWorkflowPresetService>,
         scene_production_service: Arc<SceneProductionService>,
         episode_production_service: Arc<EpisodeProductionService>,
+        external_production_handoff_service: Arc<ExternalProductionHandoffService>,
         series_production_service: Arc<SeriesProductionService>,
         production_batch_runbook_service: Arc<ProductionBatchRunbookService>,
     ) -> Self {
@@ -241,6 +244,7 @@ impl AppState {
             batch_workflow_preset_service,
             scene_production_service,
             episode_production_service,
+            external_production_handoff_service,
             series_production_service,
             production_batch_runbook_service,
         }

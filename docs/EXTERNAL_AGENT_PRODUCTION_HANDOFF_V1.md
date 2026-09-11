@@ -3,7 +3,10 @@
 ```text
 CONTRACT=EXTERNAL_AGENT_PRODUCTION_HANDOFF
 VERSION=1
-STATUS=FROZEN_NOT_IMPLEMENTED
+STATUS=IMPLEMENTED
+IMPLEMENTATION=SERVER_ATOMIC
+MIGRATION=032
+BACKUP=18
 PROVIDER_NEUTRAL=YES
 AI_STUDIO_AUTHORING=NO
 PREVIEW_REQUIRED=YES
@@ -15,11 +18,10 @@ AUTO_GENERATION=NO
 
 ## Purpose and scope
 
-This document freezes the target exchange shape for an external narrative or
-creative agent to hand structured production inputs to AI Studio. It is a
-provider-neutral data contract, not a claim that the hierarchical importer is
-available in the current binary. DEV-100 deliberately records
-`HANDOFF_IMPLEMENTATION_BLOCKED_BY_SCHEMA=YES`.
+This document defines the shipped provider-neutral exchange shape for an
+external narrative or creative agent to hand structured production inputs to
+AI Studio. The hierarchical importer is available in the current binary through
+typed preview and explicit-confirmation commands.
 
 The external agent owns story, screenplay, storyboard, and prompt-generation
 decisions. AI Studio owns project-scoped validation, formal production records,
@@ -74,14 +76,14 @@ remain owned by the existing workflow/recipe configuration path; this handoff
 must not smuggle a second parameter model into the document.
 
 `assetRefs[].assetId` values must be exact assets already owned by the target
-project. A future implementation must validate every reference before any
-write. Workflow identity is always the exact pair
+project; the server validates every reference before any write. Workflow
+identity is always the exact pair
 `workflowVersionId` + `recipeId`; a display name, latest record, or provider
 name is not sufficient.
 
 ## Validation and transaction rules
 
-The future importer must:
+The shipped importer must:
 
 1. reject unknown fields rather than silently dropping them;
 2. reject duplicate `externalId` values at every sibling collection and
@@ -102,10 +104,11 @@ references, and the write plan. Confirm is a separate explicit action. Neither
 preview nor confirm may enqueue a batch, create a Task, start ComfyUI, retry,
 or silently mutate an existing project outside the confirmed transaction.
 
-The current schema has no handoff identity/provenance table or transaction
-contract covering this entire hierarchy. Consequently idempotency and the
-single-transaction promise are intentionally **blocked**, not approximated by
-client-side names or a partial write sequence.
+Migration 032 provides durable handoff identity and provenance mappings. The
+server stores the canonical document SHA-256 per project and preserves source
+agent/revision, so exact replay is returned without creating duplicate formal
+records. A changed document with the same source agent and revision is rejected
+with `HANDOFF_SOURCE_REVISION_CONFLICT`.
 
 ## Example source metadata
 
@@ -117,20 +120,43 @@ client-side names or a partial write sequence.
     "agent": "external-story-agent",
     "revision": "story-42"
   },
-  "series": []
+  "series": [{
+    "externalId": "series-001",
+    "name": "Opening",
+    "description": "Opening sequence",
+    "ordinal": 1,
+    "episodes": [{
+      "externalId": "episode-001",
+      "name": "Arrival",
+      "description": "Arrival episode",
+      "ordinal": 1,
+      "scenes": [{
+        "externalId": "scene-001",
+        "name": "Gate",
+        "description": "The gate scene",
+        "ordinal": 1,
+        "shots": [{
+          "externalId": "shot-001",
+          "name": "The gate opens",
+          "ordinal": 1,
+          "description": "A gate opens in the rain."
+        }]
+      }]
+    }]
+  }]
 }
 ```
 
-The example is contract-only. It is not accepted by the current hierarchical
-import path because that path is not implemented.
+The example is accepted by the current hierarchical import path when
+`projectId` matches the target project.
 
 ## Existing implementation boundary
 
-The current `ShotBulkService` accepts only its existing flat JSON/TSV contract:
-it is a formal Shot import with preview and atomic commit. It does not accept
-this document, create the hierarchy, establish handoff provenance, or provide
-idempotent external-agent replay. It remains supported and is not a second
-production executor.
+The current `ShotBulkService` continues to accept its existing flat JSON/TSV
+contract: it is a formal Shot import with preview and atomic commit. The
+hierarchical handoff path is a separate input boundary that reuses the same
+formal production tables and remains a single import authority; neither path
+creates a second production executor.
 
 ## Out of scope
 

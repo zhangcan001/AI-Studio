@@ -106,6 +106,12 @@ import type {
 import type { WorkspaceResume } from "../types/workspaceResume";
 import type { WorkflowHistoryCursor, WorkflowRecipeHistoryView } from "../types/workflowHistory";
 import type { ProjectCommandCenterAggregate } from "../types/projectCommandCenter";
+import type {
+  ExternalProductionHandoffConfirmResult,
+  ExternalProductionHandoffHistoryItem,
+  ExternalProductionHandoffMapping,
+  ExternalProductionHandoffPreview,
+} from "../types/externalProductionHandoff";
 import type { ReferenceAnchorRequest, ReferenceAnchorUpdateRequest, ReferenceAnchorView } from "../types/referenceAnchor";
 import type {
   AssetUsageSummary,
@@ -1137,6 +1143,35 @@ export function previewShotBulkImport(request: ShotBulkImportRequest): Promise<S
 
 export function commitShotBulkImport(request: ShotBulkImportRequest): Promise<{ projectId: string; created: Array<{ shotId: string; ordinal: number; name: string }> }> {
   return invoke("commit_shot_bulk_import", { request });
+}
+
+export function previewExternalProductionHandoff(request: {
+  projectId: string;
+  content: string;
+}): Promise<ExternalProductionHandoffPreview> {
+  return invoke<ExternalProductionHandoffPreview>("external_production_handoff_preview", { request });
+}
+
+export function confirmExternalProductionHandoff(request: {
+  projectId: string;
+  content: string;
+  expectedDocumentSha256: string;
+}): Promise<ExternalProductionHandoffConfirmResult> {
+  return invoke<ExternalProductionHandoffConfirmResult>("external_production_handoff_confirm", { request });
+}
+
+export function listExternalProductionHandoffs(projectId: string): Promise<ExternalProductionHandoffHistoryItem[]> {
+  return invoke<ExternalProductionHandoffHistoryItem[]>("external_production_handoff_list", { projectId });
+}
+
+export function getExternalProductionHandoffMappings(
+  projectId: string,
+  handoffId: string,
+): Promise<ExternalProductionHandoffMapping[]> {
+  return invoke<ExternalProductionHandoffMapping[]>("external_production_handoff_mappings", {
+    projectId,
+    handoffId,
+  });
 }
 
 export type BulkPromptSource =

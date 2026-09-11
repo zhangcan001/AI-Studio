@@ -1,4 +1,5 @@
 .project-import-workspace { display: grid; gap: 16px; min-width: 0; }
+.project-import-mode-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .project-import-file-card, .project-import-summary, .project-import-rows, .project-import-issues, .project-import-dry-run-card, .project-import-success { display: grid; gap: 12px; min-width: 0; padding: 18px; border: 1px solid var(--ux-border, #31425d); border-radius: var(--ux-radius-md, 12px); background: rgb(9 20 35 / 78%); }
 .project-import-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 .project-import-card-heading h3 { margin: 4px 0 0; }
@@ -6,6 +7,8 @@
 .project-import-file-picker span { font-weight: 700; }
 .project-import-file-picker input { min-width: 0; color: var(--ux-muted, #a9b6ca); }
 .project-import-help, .project-import-dry-run-card p, .project-import-success p, .project-import-no-issues { margin: 0; color: var(--ux-muted, #a9b6ca); }
+.external-handoff-editor-label { color: var(--ux-muted, #a9b6ca); font-size: 0.82rem; font-weight: 700; }
+.external-handoff-editor { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--ux-border, #31425d); border-radius: 8px; padding: 12px; color: var(--ux-text, #e7edf8); background: rgb(5 14 26 / 82%); font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .project-import-file-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .project-import-file-meta div { min-width: 0; padding: 10px; border-radius: 8px; background: rgb(20 33 55 / 64%); }
 .project-import-file-meta dt { color: var(--ux-muted, #a9b6ca); font-size: 0.75rem; }
