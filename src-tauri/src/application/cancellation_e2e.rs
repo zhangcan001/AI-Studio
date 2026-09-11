@@ -588,6 +588,16 @@ async fn wait_for_action(adapter: &ControlledAdapter, action: &str) {
     panic!("adapter action {action} was not observed");
 }
 
+async fn wait_for_registry_absent(registry: &TaskExecutionRegistry, task_id: &TaskId) {
+    for _ in 0..2_000 {
+        if !registry.contains(task_id) {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("task execution registry entry was not removed");
+}
+
 #[tokio::test]
 async fn cancel_before_post_never_submits_prompt() {
     let harness = Harness::new(
@@ -622,6 +632,7 @@ async fn cancel_before_post_never_submits_prompt() {
     let finished = wait_for_status(&harness.task_repository, &task.id, TaskStatus::Cancelled).await;
     assert_eq!(finished.status, TaskStatus::Cancelled);
     assert_eq!(harness.adapter.action_count("submit_workflow"), 0);
+    wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
 
@@ -656,6 +667,7 @@ async fn cancel_after_upload_stops_before_snapshot_and_post() {
     assert_eq!(finished.status, TaskStatus::Cancelled);
     assert_eq!(harness.adapter.action_count("upload_image"), 1);
     assert_eq!(harness.adapter.action_count("submit_workflow"), 0);
+    wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
 
@@ -697,6 +709,7 @@ async fn cancel_queued_task_becomes_cancelled_without_interrupting_unknown_work(
     assert_eq!(finished.status, TaskStatus::Cancelled);
     assert_eq!(harness.adapter.action_count("cancel_prompt"), 1);
     assert_eq!(harness.adapter.action_count("submit_workflow"), 1);
+    wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
 
@@ -746,6 +759,7 @@ async fn cancel_running_waits_for_execution_interrupted_then_cancels() {
     let finished = wait_for_status(&harness.task_repository, &task.id, TaskStatus::Cancelled).await;
     assert_eq!(finished.status, TaskStatus::Cancelled);
     assert_eq!(harness.adapter.action_count("cancel_prompt"), 1);
+    wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
 
@@ -795,5 +809,6 @@ async fn cancellation_racing_success_preserves_result_and_records_not_effective(
         .iter()
         .any(|event| { event.event_type == crate::domain::TaskEventType::TaskCancelNotEffective }));
     assert!(harness.adapter.action_count("download_output") > 0);
+    wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
