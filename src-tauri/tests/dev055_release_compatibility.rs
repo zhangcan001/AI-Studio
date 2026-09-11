@@ -918,6 +918,231 @@ async fn remove_migrations_after_021(pool: &SqlitePool) {
         .expect("022-024 migration markers should be removable");
 }
 
+async fn remove_migrations_after_026(pool: &SqlitePool) {
+    remove_migration_028_schema(pool).await;
+    sqlx::query("DROP TABLE IF EXISTS project_workflow_bindings")
+        .execute(pool)
+        .await
+        .expect("027 project workflow table should be removable from the isolated fixture");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 27")
+        .execute(pool)
+        .await
+        .expect("027 migration marker should be removable from the isolated fixture");
+}
+
+async fn insert_published_1_0_post_legacy_rows(pool: &SqlitePool) {
+    sqlx::query("UPDATE workflows SET current_version_id = ? WHERE id = ?")
+        .bind(WORKFLOW_VERSION_ID)
+        .bind(WORKFLOW_ID)
+        .execute(pool)
+        .await
+        .expect("published 1.0 workflow metadata should update");
+    sqlx::query(
+        "UPDATE workflow_versions
+         SET package_name = 'dev096_legacy_package',
+             package_source_path = 'C:/dev096/legacy-package'
+         WHERE id = ?",
+    )
+    .bind(WORKFLOW_VERSION_ID)
+    .execute(pool)
+    .await
+    .expect("published 1.0 workflow package metadata should update");
+
+    sqlx::query(
+        "INSERT INTO tasks
+         (id, project_id, workflow_id, workflow_version_id, recipe_id, status, created_at)
+         VALUES ('dev096-task', ?, ?, ?, ?, 'SUCCEEDED', ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind(WORKFLOW_ID)
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 task should insert");
+    sqlx::query(
+        "INSERT INTO task_events
+         (id, task_id, sequence, event_type, payload_json, created_at)
+         VALUES ('dev096-task-event', 'dev096-task', 0, 'SUCCEEDED', '{}', ?)",
+    )
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 task event should insert");
+    sqlx::query(
+        "INSERT INTO generation_snapshots
+         (id, task_id, workflow_json, recipe_yaml, user_inputs_json,
+          resolved_inputs_json, created_at)
+         VALUES ('dev096-snapshot', 'dev096-task', '{}', 'schema_version: 1', '{}', '{}', ?)",
+    )
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 generation snapshot should insert");
+    sqlx::query(
+        "INSERT INTO presets
+         (id, project_id, workflow_version_id, recipe_id, name, values_json,
+          created_at, updated_at)
+         VALUES ('dev096-preset', ?, ?, ?, 'Published 1.0 Preset', '{}', ?, ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 preset should insert");
+    sqlx::query(
+        "INSERT INTO project_templates
+         (id, name, normalized_name, description, workflow_version_id, recipe_id,
+          values_json, created_at, updated_at)
+         VALUES ('dev096-template', 'Published 1.0 Template',
+                 'published-1-0-template', 'compatibility fixture', ?, ?, '{}', ?, ?)",
+    )
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 project template should insert");
+
+    sqlx::query(
+        "INSERT INTO production_package_batch_bindings
+         (project_id, package_key, package_root, manifest_sha256, package_id,
+          package_name, batch_id, chunk_index, chunk_count, package_item_ids_json,
+          created_at)
+         VALUES (?, ?, 'C:/dev096/legacy-package', ?, 'dev096-package',
+                 'Published 1.0 Package', ?, 0, 1, ?, ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    .bind("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    .bind(BATCH_ID)
+    .bind(format!("[\"{BATCH_ITEM_ID}\"]"))
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 package binding should insert");
+
+    sqlx::query(
+        "INSERT INTO benchmark_experiments
+         (id, project_id, name, media_type, status, base_values_json,
+          asset_ids_json, winner_candidate_id, production_batch_id, created_at, updated_at)
+         VALUES ('dev096-experiment', ?, 'Published 1.0 Benchmark', 'IMAGE',
+                 'COMPLETED', '{}', '[]', NULL, ?, ?, ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind(BATCH_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 benchmark experiment should insert");
+    sqlx::query(
+        "INSERT INTO benchmark_candidates
+         (id, experiment_id, position, workflow_version_id, recipe_id, preset_id,
+          preset_name, label, values_json, asset_ids_json, production_batch_item_id,
+          task_id, created_at)
+         VALUES ('dev096-candidate', 'dev096-experiment', 0, ?, ?, 'dev096-preset',
+                 'Published 1.0 Preset', 'Candidate 1', '{}', '[]', ?, 'dev096-task', ?)",
+    )
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(BATCH_ITEM_ID)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 benchmark candidate should insert");
+    sqlx::query(
+        "INSERT INTO benchmark_runs
+         (id, experiment_id, candidate_id, run_number, production_batch_item_id,
+          task_id, snapshot_id, output_asset_id, status, created_at, updated_at)
+         VALUES ('dev096-benchmark-run', 'dev096-experiment', 'dev096-candidate',
+                 1, ?, 'dev096-task', 'dev096-snapshot', 'dev055-shot-asset',
+                 'SUCCEEDED', ?, ?)",
+    )
+    .bind(BATCH_ITEM_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 benchmark run should insert");
+    sqlx::query(
+        "INSERT INTO benchmark_quality_scores
+         (id, candidate_id, overall, note, created_at, updated_at)
+         VALUES ('dev096-quality', 'dev096-candidate', 5, 'stable', ?, ?)",
+    )
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 benchmark score should insert");
+
+    sqlx::query(
+        "INSERT INTO production_run_templates
+         (id, project_id, name, krea2_workflow_version_id, krea2_recipe_id,
+          krea2_preset_id, default_image_count, h3_workflow_version_id,
+          h3_recipe_id, h3_profile, default_duration_seconds, default_width,
+          default_height, created_at, updated_at)
+         VALUES ('dev096-run-template', ?, 'Published 1.0 Run Template', ?, ?,
+                 'dev096-preset', 1, ?, ?, 'H3_FAST', 5, 864, 480, ?, ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 production run template should insert");
+    sqlx::query(
+        "INSERT INTO production_runs
+         (id, project_id, name, status, current_stage_ordinal, template_id,
+          created_at, updated_at)
+         VALUES ('dev096-run', ?, 'Published 1.0 Run', 'SUCCEEDED', 0,
+                 'dev096-run-template', ?, ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 production run should insert");
+    sqlx::query(
+        "INSERT INTO production_stages
+         (id, run_id, ordinal, stage_type, status, workflow_version_id, recipe_id,
+          production_batch_id, frozen_config_json, prompt, created_at, updated_at)
+         VALUES ('dev096-stage', 'dev096-run', 0, 'KREA2_IMAGE_GENERATION',
+                 'SUCCEEDED', ?, ?, ?, '{}', 'legacy prompt', ?, ?)",
+    )
+    .bind(WORKFLOW_VERSION_ID)
+    .bind(RECIPE_ID)
+    .bind(BATCH_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 production stage should insert");
+    sqlx::query(
+        "INSERT INTO production_stage_items
+         (id, stage_id, ordinal, status, production_batch_item_id, task_id,
+          asset_id, attempt, frozen_values_json, created_at, updated_at)
+         VALUES ('dev096-stage-item', 'dev096-stage', 0, 'SUCCEEDED', ?,
+                 'dev096-task', 'dev055-shot-asset', 1, '{}', ?, ?)",
+    )
+    .bind(BATCH_ITEM_ID)
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(pool)
+    .await
+    .expect("published 1.0 production stage item should insert");
+}
+
 async fn remove_migration_024(pool: &SqlitePool) {
     remove_migration_028_schema(pool).await;
     sqlx::query("DROP TABLE IF EXISTS project_workflow_bindings")
@@ -1220,6 +1445,137 @@ async fn dev055_migration_matrix_reaches_031() {
             .expect("024 table should be readable after upgrade"),
         0
     );
+}
+
+#[tokio::test]
+async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_031() {
+    let (directory, pool) = database().await;
+    insert_consistency_project(&pool, &directory.path().join("published-1-0-project")).await;
+    insert_published_1_0_post_legacy_rows(&pool).await;
+    remove_migrations_after_026(&pool).await;
+    assert_eq!(max_migration(&pool).await, 26);
+
+    pool.close().await;
+    let upgraded = initialize(&directory.path().join("app.db"))
+        .await
+        .expect("reconstructed 1.0 database should upgrade through migration 031");
+    assert_current_migration_gate(&upgraded).await;
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM production_package_batch_bindings
+             WHERE project_id = ? AND batch_id = ? AND package_id = 'dev096-package'",
+        )
+        .bind(CONSISTENCY_PROJECT_ID)
+        .bind(BATCH_ID)
+        .fetch_one(&upgraded)
+        .await
+        .expect("published 1.0 package binding should remain readable"),
+        1
+    );
+
+    for (table, id) in [
+        ("projects", CONSISTENCY_PROJECT_ID),
+        ("shots", CONSISTENCY_SHOT_ID),
+        ("tasks", "dev096-task"),
+        ("task_events", "dev096-task-event"),
+        ("generation_snapshots", "dev096-snapshot"),
+        ("presets", "dev096-preset"),
+        ("production_batches", BATCH_ID),
+        ("production_batch_items", BATCH_ITEM_ID),
+        ("project_templates", "dev096-template"),
+        ("benchmark_experiments", "dev096-experiment"),
+        ("benchmark_candidates", "dev096-candidate"),
+        ("benchmark_runs", "dev096-benchmark-run"),
+        ("benchmark_quality_scores", "dev096-quality"),
+        ("production_run_templates", "dev096-run-template"),
+        ("production_runs", "dev096-run"),
+        ("production_stages", "dev096-stage"),
+        ("production_stage_items", "dev096-stage-item"),
+    ] {
+        let count =
+            sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table} WHERE id = ?"))
+                .bind(id)
+                .fetch_one(&upgraded)
+                .await
+                .unwrap_or_else(|error| panic!("{table} should preserve {id}: {error}"));
+        assert_eq!(count, 1, "{table} should preserve {id}");
+    }
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM assets WHERE id = 'dev055-shot-asset' AND project_id = ?",
+        )
+        .bind(CONSISTENCY_PROJECT_ID)
+        .fetch_one(&upgraded)
+        .await
+        .expect("published 1.0 asset should remain readable"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM workflows WHERE id = ? AND current_version_id = ?",
+        )
+        .bind(WORKFLOW_ID)
+        .bind(WORKFLOW_VERSION_ID)
+        .fetch_one(&upgraded)
+        .await
+        .expect("published 1.0 workflow identity should remain exact"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM workflow_versions
+             WHERE id = ? AND workflow_sha256 = 'workflow-sha-dev055'
+               AND package_name = 'dev096_legacy_package'",
+        )
+        .bind(WORKFLOW_VERSION_ID)
+        .fetch_one(&upgraded)
+        .await
+        .expect("published 1.0 workflow SHA should remain stable"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM recipes
+             WHERE id = ? AND workflow_version_id = ?
+               AND recipe_sha256 = 'recipe-sha-dev055'",
+        )
+        .bind(RECIPE_ID)
+        .bind(WORKFLOW_VERSION_ID)
+        .fetch_one(&upgraded)
+        .await
+        .expect("published 1.0 recipe SHA should remain stable"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM workflow_runtime_artifacts
+             WHERE workflow_version_id = ? AND recipe_id = ?",
+        )
+        .bind(WORKFLOW_VERSION_ID)
+        .bind(RECIPE_ID)
+        .fetch_one(&upgraded)
+        .await
+        .expect("migration 029 runtime artifact state should be readable"),
+        0,
+        "migration 029 must not invent a runtime artifact for a legacy package-only row"
+    );
+
+    for table in [
+        "project_workflow_bindings",
+        "workflow_recipe_promotions",
+        "workflow_recipe_runtime_states",
+    ] {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&upgraded)
+                .await
+                .unwrap_or_else(|error| panic!("{table} should be readable: {error}")),
+            0,
+            "new {table} state must not be invented for a published 1.0 fixture"
+        );
+    }
 }
 
 #[tokio::test]
