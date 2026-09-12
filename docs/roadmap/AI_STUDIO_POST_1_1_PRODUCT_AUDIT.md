@@ -42,10 +42,11 @@ records were cross-checked but were not treated as implementation truth:
 - PX-01, PX-02, and PX-04 describe the Project Cockpit, Shot Production
   Workspace, and Workflow Center surfaces that were verified against source.
 - The historical narrative, Script Import, and Storyboard architecture
-  documents are retired evidence under DEV-100. External-agent handoff is a
-  frozen contract only; the current schema blocks a safe hierarchy-wide
-  implementation. Context/Preparation/Queue/Review remain owned by the
-  existing production services.
+  documents are retired evidence under DEV-100. At this DEV-099 audit,
+  external-agent handoff was a frozen contract only; the then-current schema
+  blocked a safe hierarchy-wide implementation. Context/Preparation/Queue/Review
+  remained owned by the existing production services. DEV-101 later removed
+  that schema blocker with migration 032.
 
 ## Capability matrix
 

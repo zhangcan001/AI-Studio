@@ -4,22 +4,26 @@
 TASK=DEV-099
 RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
-ROADMAP_STATUS=DEV_106_READINESS_GATE_IN_PROGRESS
+ROADMAP_STATUS=CLOSED_BY_DEV_106
+POST_1_1_PRODUCT_PHASE=CLOSED
+AI_STUDIO_1_2_READINESS=PASS
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
-NEXT_MAIN_THEME=Product Polish / Agent Handoff Tooling / 1.2 Readiness
+NEXT_MAIN_THEME=AI Studio 1.2 Release Train
+DEV_107=READY
+DEV_107_STARTED=NO
 ```
 
-## Product baseline
+## Historical DEV-099 product baseline
 
 AI Studio 1.1.0 is the published, frozen baseline. DEV-099 does not bump the
 manifest, create a tag, publish a release, replace assets, or rewrite release
 history. The manifest remains `1.1.0` until a future release-candidate task.
 
-The current source already has strong project, shot, preparation, queue,
+At DEV-099, the source already had strong project, shot, preparation, queue,
 review, workflow, recipe, asset, backup, and diagnostics authorities. The
-first post-1.1 product gap is the continuity between those authorities from the
-project entry point.
+first post-1.1 gap was continuity between those authorities from the project
+entry point; DEV-099–106 have since closed the scheduled product phase.
 
 ## Priority roadmap
 
@@ -100,10 +104,20 @@ Command Center now has a bounded, read-only Review Inbox projection with
 exact Batch/item/task/Shot/Asset navigation, while Shot selected output
 authority and existing review mutations remain canonical.
 
-DEV-106 is the Product Polish / Agent Handoff Tooling / 1.2 Readiness gate.
-Its final verdict and next main theme are recorded after required remote CI.
+### P1 — Product Polish / Agent Handoff Tooling / 1.2 Readiness — CLOSED (DEV-106)
 
-### P2 — Product polish and operational clarity
+DEV-106 added provider-neutral handoff schema/example/instructions, field-path
+error clarity, business-language production navigation, selected-result
+visibility, 500-Shot and migration/backup regressions, and an isolated
+development-binary launch check. Full local gates and Source-only CI run
+`34679501578` passed on exact readiness code head `5308f3c`.
+[Readiness evidence](../DEV_106_AI_STUDIO_1_2_READINESS.md) records the gate.
+
+The post-1.1 product phase is closed and the 1.2 feature scope is frozen.
+DEV-107 is ready to run the **release train** but has not started; DEV-106
+does not bump the manifest, tag, publish installers, or create a release.
+
+### P2 — Further product polish and operational clarity (deferred)
 
 Improve copy, empty states, stale-fact refresh affordances, and bounded
 cross-workspace breadcrumbs where they do not change domain authority.
