@@ -250,6 +250,50 @@ describe("ProjectCommandCenter", () => {
     expect(onNavigate.mock.calls).toEqual([[{ destination: "assets" }], [{ destination: "shots" }]]);
   });
 
+  it("renders the derived daily production board and preserves exact repair targets", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const emptyBucket = { totalCount: 0, items: [], hasMore: false };
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      dailyProduction: {
+        needsAttention: {
+          totalCount: 1,
+          hasMore: false,
+          items: [{
+            id: "queue:item-1",
+            label: "Shot 1",
+            reasonCode: "QUEUE_FAILED",
+            reason: "生产队列项失败，需要人工检查。",
+            severity: "ERROR",
+            destination: "tasks",
+            stage: "video",
+            shotId: "shot-1",
+            batchId: "batch-1",
+            taskId: "task-1",
+            workflowVersionId: "workflow-version-1",
+            recipeId: "recipe-1",
+          }],
+        },
+        ready: emptyBucket,
+        running: emptyBucket,
+        review: emptyBucket,
+        completed: emptyBucket,
+        topAction: null,
+      },
+    })} onNavigate={onNavigate} />);
+
+    expect(screen.getByRole("region", { name: "生产行动板" }).textContent).toContain("每日生产");
+    await user.click(screen.getByRole("button", { name: /Shot 1.*生产队列项失败/ }));
+    expect(onNavigate).toHaveBeenCalledWith({
+      destination: "tasks",
+      section: "production",
+      actionKind: "QUEUE_FAILED",
+      shotId: "shot-1",
+      batchId: "batch-1",
+      taskId: "task-1",
+    });
+  });
+
   it("offers the project-level bulk import dry-run entry without changing navigation", async () => {
     const user = userEvent.setup();
     const onOpenImport = vi.fn();

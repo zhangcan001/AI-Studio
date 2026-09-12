@@ -104,7 +104,9 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
         .map(Into::into)
         .collect();
         let shots = sqlx::query_as::<_, DbShot>(
-            "SELECT id, selected_image_asset_id, selected_video_asset_id
+            "SELECT id, name,
+                    EXISTS (SELECT 1 FROM shot_scene_assignments a WHERE a.shot_id = shots.id) AS assigned,
+                    selected_image_asset_id, selected_video_asset_id
              FROM shots WHERE project_id = ? ORDER BY ordinal ASC, id ASC",
         )
         .bind(project_id)
@@ -115,7 +117,7 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
         .map(Into::into)
         .collect();
         let shot_configs = sqlx::query_as::<_, DbShotConfig>(
-            "SELECT c.shot_id, c.stage
+            "SELECT c.shot_id, c.stage, c.workflow_version_id, c.recipe_id
              FROM shot_stage_configs c JOIN shots sh ON sh.id = c.shot_id
              WHERE sh.project_id = ? ORDER BY c.shot_id, c.stage",
         )
@@ -156,7 +158,8 @@ impl ProjectCommandCenterRepository for SqliteProjectCommandCenterRepository {
             "SELECT i.id, i.batch_id, i.ordinal,
                     (SELECT MIN(l.shot_id) FROM shot_generation_links l
                      WHERE l.production_batch_item_id = i.id) AS shot_id,
-                    i.task_id, i.status, i.retry_of_item_id, i.error_code
+                    i.task_id, i.workflow_version_id, i.recipe_id, i.status,
+                    i.retry_of_item_id, i.error_code
              FROM production_batch_items i JOIN production_batches b ON b.id = i.batch_id
              WHERE b.project_id = ? ORDER BY i.batch_id ASC, i.ordinal ASC, i.id ASC",
         )
@@ -311,10 +314,11 @@ db_record!(DbScene => ProjectCommandCenterSceneRecord {
     id: String, name: String, series_name: String, episode_name: String, total: i64, completed: i64
 });
 db_record!(DbShot => ProjectCommandCenterShotRecord {
-    id: String, selected_image_asset_id: Option<String>, selected_video_asset_id: Option<String>
+    id: String, name: String, assigned: i64,
+    selected_image_asset_id: Option<String>, selected_video_asset_id: Option<String>
 });
 db_record!(DbShotConfig => ProjectCommandCenterShotConfigRecord {
-    shot_id: String, stage: String
+    shot_id: String, stage: String, workflow_version_id: String, recipe_id: String
 });
 db_record!(DbShotLink => ProjectCommandCenterShotLinkRecord {
     shot_id: String, stage: String, task_id: Option<String>, task_status: Option<String>
@@ -323,7 +327,8 @@ db_record!(DbQueueBatch => ProjectCommandCenterQueueBatchRecord {
     id: String, status: String, archived_at: Option<String>
 });
 db_record!(DbQueueItem => ProjectCommandCenterQueueItemRecord {
-    id: String, batch_id: String, ordinal: i64, shot_id: Option<String>, task_id: Option<String>, status: String,
+    id: String, batch_id: String, ordinal: i64, shot_id: Option<String>, task_id: Option<String>,
+    workflow_version_id: String, recipe_id: String, status: String,
     retry_of_item_id: Option<String>, error_code: Option<String>
 });
 db_record!(DbCount => ProjectCommandCenterCountRecord { status: String, count: i64 });

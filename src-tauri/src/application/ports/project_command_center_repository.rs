@@ -52,6 +52,8 @@ pub struct ProjectCommandCenterSceneRecord {
 #[derive(Clone, Debug)]
 pub struct ProjectCommandCenterShotRecord {
     pub id: String,
+    pub name: String,
+    pub assigned: i64,
     pub selected_image_asset_id: Option<String>,
     pub selected_video_asset_id: Option<String>,
 }
@@ -60,6 +62,8 @@ pub struct ProjectCommandCenterShotRecord {
 pub struct ProjectCommandCenterShotConfigRecord {
     pub shot_id: String,
     pub stage: String,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +88,8 @@ pub struct ProjectCommandCenterQueueItemRecord {
     pub ordinal: i64,
     pub shot_id: Option<String>,
     pub task_id: Option<String>,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
     pub status: String,
     pub retry_of_item_id: Option<String>,
     pub error_code: Option<String>,

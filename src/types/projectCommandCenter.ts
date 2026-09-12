@@ -31,6 +31,37 @@ export interface ProjectCommandCenterPreparationView {
   latestPreparedAt?: string | null;
 }
 
+export interface ProjectCommandCenterDailyProductionItem {
+  id: string;
+  label: string;
+  reasonCode: string;
+  reason: string;
+  severity: string;
+  destination: string;
+  stage?: string | null;
+  shotId?: string | null;
+  batchId?: string | null;
+  taskId?: string | null;
+  assetId?: string | null;
+  workflowVersionId?: string | null;
+  recipeId?: string | null;
+}
+
+export interface ProjectCommandCenterDailyProductionBucket {
+  totalCount: number;
+  items: ProjectCommandCenterDailyProductionItem[];
+  hasMore: boolean;
+}
+
+export interface ProjectCommandCenterDailyProductionView {
+  needsAttention: ProjectCommandCenterDailyProductionBucket;
+  ready: ProjectCommandCenterDailyProductionBucket;
+  running: ProjectCommandCenterDailyProductionBucket;
+  review: ProjectCommandCenterDailyProductionBucket;
+  completed: ProjectCommandCenterDailyProductionBucket;
+  topAction?: ProjectCommandCenterDailyProductionItem | null;
+}
+
 export interface ProjectCommandCenterAggregate {
   project: { id: string; name: string; description?: string | null; createdAt: string; updatedAt: string };
   structure: {
@@ -57,6 +88,8 @@ export interface ProjectCommandCenterAggregate {
     missingConfig: number;
     firstGeneratingShotId?: string | null;
     firstGeneratingTaskId?: string | null;
+    firstFailedShotId?: string | null;
+    firstFailedTaskId?: string | null;
     firstImageReviewShotId?: string | null;
     firstVideoReviewShotId?: string | null;
     firstMissingConfigShotId?: string | null;
@@ -106,6 +139,7 @@ export interface ProjectCommandCenterAggregate {
   readiness: { status?: string | null; connection?: string | null; workflowReady: number; workflowTotal: number; runtimeBusy: boolean; activeTaskCount: number; productionBusy: boolean };
   content: { shots: number; prompts: number; assets: number; scenes: number; configuredShots: number };
   production: { active: number; completed: number; failed: number; reviewRequired: number };
+  dailyProduction?: ProjectCommandCenterDailyProductionView;
   consistency?: ProjectCommandCenterConsistencyView;
   preparation?: ProjectCommandCenterPreparationView;
   issues: Array<{ id: string; severity: string; title: string; detail: string; source: string }>;

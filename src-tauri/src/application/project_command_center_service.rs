@@ -3,6 +3,7 @@
 //! The command center is deliberately a view over existing tables and
 //! services. It does not persist state, submit work to ComfyUI, or introduce
 //! another queue, task history, audit stream, or workflow engine.
+// The existing Production Queue remains the sole execution authority.
 
 use crate::application::comfy_preflight_service::{
     ComfyPreflightReport, ComfyPreflightService, ComfyPreflightStatus,
@@ -41,6 +42,7 @@ const PROJECT_ACTION_PRIORITY_UNASSIGNED: u8 = 9;
 const PROJECT_ACTION_PRIORITY_NO_SHOTS: u8 = 10;
 const PROJECT_ACTION_PRIORITY_READY: u8 = 11;
 const PROJECT_ACTION_PRIORITY_COMPLETE: u8 = 12;
+const DAILY_PRODUCTION_ITEM_LIMIT: usize = 20;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +93,8 @@ pub struct ProjectCommandCenterShotView {
     pub missing_config: usize,
     pub first_generating_shot_id: Option<String>,
     pub first_generating_task_id: Option<String>,
+    pub first_failed_shot_id: Option<String>,
+    pub first_failed_task_id: Option<String>,
     pub first_image_review_shot_id: Option<String>,
     pub first_video_review_shot_id: Option<String>,
     pub first_missing_config_shot_id: Option<String>,
@@ -227,6 +231,43 @@ pub struct ProjectCommandCenterProductionView {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectCommandCenterDailyProductionItem {
+    pub id: String,
+    pub label: String,
+    pub reason_code: String,
+    pub reason: String,
+    pub severity: String,
+    pub destination: String,
+    pub stage: Option<String>,
+    pub shot_id: Option<String>,
+    pub batch_id: Option<String>,
+    pub task_id: Option<String>,
+    pub asset_id: Option<String>,
+    pub workflow_version_id: Option<String>,
+    pub recipe_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCommandCenterDailyProductionBucket {
+    pub total_count: usize,
+    pub items: Vec<ProjectCommandCenterDailyProductionItem>,
+    pub has_more: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCommandCenterDailyProductionView {
+    pub needs_attention: ProjectCommandCenterDailyProductionBucket,
+    pub ready: ProjectCommandCenterDailyProductionBucket,
+    pub running: ProjectCommandCenterDailyProductionBucket,
+    pub review: ProjectCommandCenterDailyProductionBucket,
+    pub completed: ProjectCommandCenterDailyProductionBucket,
+    pub top_action: Option<ProjectCommandCenterDailyProductionItem>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectCommandCenterIssueView {
     pub id: String,
     pub severity: String,
@@ -296,6 +337,7 @@ pub struct ProjectCommandCenterView {
     pub readiness: ProjectCommandCenterReadinessView,
     pub content: ProjectCommandCenterContentView,
     pub production: ProjectCommandCenterProductionView,
+    pub daily_production: ProjectCommandCenterDailyProductionView,
     pub issues: Vec<ProjectCommandCenterIssueView>,
     pub audit: ProductionAuditSummary,
     pub recent_activity: Vec<ProductionAuditActivity>,
@@ -444,6 +486,7 @@ impl ProjectCommandCenterService {
                 + count_u64(audit.failed_tasks),
             review_required: queue.review_required_items + shots.image_review + shots.video_review,
         };
+        let daily_production = load_daily_production(&data, &structure, &shots, &audit, &comfy);
         let issues = issue_views(&audit.issues, comfy.preflight.as_ref(), structure.blocked);
         let checked_at = audit.checked_at.clone();
 
@@ -461,6 +504,7 @@ impl ProjectCommandCenterService {
             readiness,
             content,
             production,
+            daily_production,
             issues,
             audit,
             recent_activity,
@@ -478,6 +522,8 @@ impl ProjectCommandCenterService {
             checked_at,
         };
         view.recommended_action = recommend_next_project_action(&view);
+        view.daily_production.top_action =
+            daily_production_top_action(&view.recommended_action, &view.daily_production);
         Ok(view)
     }
 }
@@ -563,6 +609,18 @@ pub fn recommend_next_project_action(
             view.queue.first_auto_resumable_shot_id.clone(),
             view.queue.first_auto_resumable_batch_id.clone(),
             view.queue.first_auto_resumable_task_id.clone(),
+            None,
+        );
+    }
+    if view.shots.failed > 0 {
+        return action_with_targets(
+            ProjectCommandCenterActionKind::ReviewRequired,
+            PROJECT_ACTION_PRIORITY_REVIEW_REQUIRED,
+            "SHOT_FAILED",
+            "failed shot production items need review",
+            view.shots.first_failed_shot_id.clone(),
+            None,
+            view.shots.first_failed_task_id.clone(),
             None,
         );
     }
@@ -824,7 +882,20 @@ fn load_shots(
                         .or_else(|| shot.selected_image_asset_id.clone());
                 }
             }
-            "FAILED" => view.failed += 1,
+            "FAILED" => {
+                view.failed += 1;
+                set_first(&mut view.first_failed_shot_id, &shot.id);
+                let failed_stage = if image_status == "FAILED" {
+                    "image"
+                } else {
+                    "video"
+                };
+                if view.first_failed_task_id.is_none() {
+                    view.first_failed_task_id = latest_task_id
+                        .get(&(shot.id.clone(), failed_stage.to_owned()))
+                        .and_then(Clone::clone);
+                }
+            }
             _ => {}
         }
         if image_configured || video_configured {
@@ -914,6 +985,577 @@ fn overall_status<'a>(image: &'a str, video: &'a str, has_video_stage: bool) -> 
         _ if image == "READY" || video == "READY" => "READY",
         _ => "DRAFT",
     }
+}
+
+#[derive(Clone, Copy)]
+enum DailyProductionBucket {
+    NeedsAttention,
+    Ready,
+    Running,
+    Review,
+    Completed,
+}
+
+fn load_daily_production(
+    data: &ProjectCommandCenterData,
+    structure: &ProjectCommandCenterStructureView,
+    shots_view: &ProjectCommandCenterShotView,
+    audit: &ProductionAuditSummary,
+    comfy: &ProjectCommandCenterComfyView,
+) -> ProjectCommandCenterDailyProductionView {
+    let mut buckets = DailyProductionBuckets::default();
+    let active_batch_ids = data
+        .queue_batches
+        .iter()
+        .filter(|batch| batch.archived_at.is_none())
+        .map(|batch| batch.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut configs = HashMap::<(String, String), (&str, &str)>::new();
+    for config in &data.shot_configs {
+        configs.insert(
+            (config.shot_id.clone(), config.stage.clone()),
+            (&config.workflow_version_id, &config.recipe_id),
+        );
+    }
+    let mut links = HashMap::<(String, String), (&str, Option<&str>)>::new();
+    for link in &data.shot_links {
+        if let Some(status) = link.task_status.as_deref() {
+            links
+                .entry((link.shot_id.clone(), link.stage.clone()))
+                .or_insert((status, link.task_id.as_deref()));
+        }
+    }
+    let mut queue_by_shot = HashMap::<String, Vec<&QueueItemRow>>::new();
+    for item in &data.queue_items {
+        if active_batch_ids.contains(item.batch_id.as_str()) {
+            if let Some(shot_id) = item.shot_id.as_ref() {
+                queue_by_shot.entry(shot_id.clone()).or_default().push(item);
+            }
+        }
+    }
+    let issue_by_entity = audit
+        .issues
+        .iter()
+        .map(|issue| {
+            (
+                (issue.entity_type.as_str(), issue.entity_id.as_str()),
+                issue,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    if structure.blocked {
+        buckets.push(
+            DailyProductionBucket::NeedsAttention,
+            daily_item(
+                "structure:blocked",
+                "项目结构",
+                "STRUCTURE_BLOCKED",
+                "项目结构或生产链路存在断链，需要先修复。",
+                "ERROR",
+                "shots",
+                None,
+                structure.first_unassigned_shot_id.clone(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        );
+    }
+
+    for shot in &data.shots {
+        let image_config = configs.get(&(shot.id.clone(), "image".to_owned()));
+        let video_config = configs.get(&(shot.id.clone(), "video".to_owned()));
+        let image_status = stage_status(
+            "image",
+            image_config.is_some(),
+            shot.selected_image_asset_id.is_some(),
+            links
+                .get(&(shot.id.clone(), "image".to_owned()))
+                .map(|(status, _)| *status),
+        );
+        let video_status = stage_status(
+            "video",
+            video_config.is_some(),
+            shot.selected_video_asset_id.is_some(),
+            links
+                .get(&(shot.id.clone(), "video".to_owned()))
+                .map(|(status, _)| *status),
+        );
+        let overall = overall_status(image_status, video_status, video_config.is_some());
+        let latest_task_id = ["image", "video"].iter().find_map(|stage| {
+            links
+                .get(&(shot.id.clone(), (*stage).to_owned()))
+                .and_then(|(_, task_id)| *task_id)
+        });
+        let queue_item = queue_by_shot
+            .get(&shot.id)
+            .and_then(|items| current_queue_item(items, latest_task_id));
+        let issue = issue_by_entity
+            .get(&("SHOT", shot.id.as_str()))
+            .copied()
+            .or_else(|| issue_by_entity.get(&("shot", shot.id.as_str())).copied());
+        let (batch_id, task_id, workflow_version_id, recipe_id) = queue_item
+            .map(|item| {
+                (
+                    Some(item.batch_id.clone()),
+                    item.task_id.clone(),
+                    Some(item.workflow_version_id.clone()),
+                    Some(item.recipe_id.clone()),
+                )
+            })
+            .unwrap_or_else(|| {
+                let task_id = links
+                    .get(&(shot.id.clone(), current_stage(overall).to_owned()))
+                    .and_then(|(_, task_id)| task_id.map(str::to_owned));
+                let config = if current_stage(overall) == "video" {
+                    video_config.or(image_config)
+                } else {
+                    image_config.or(video_config)
+                };
+                (
+                    None,
+                    task_id,
+                    config.map(|pair| pair.0.to_owned()),
+                    config.map(|pair| pair.1.to_owned()),
+                )
+            });
+        let asset_id = shot
+            .selected_video_asset_id
+            .clone()
+            .or_else(|| shot.selected_image_asset_id.clone());
+        let label = shot.name.clone();
+
+        if shot.assigned == 0 {
+            buckets.push(
+                DailyProductionBucket::NeedsAttention,
+                daily_item(
+                    &format!("shot:{}:unassigned", shot.id),
+                    &label,
+                    "UNASSIGNED_SHOT",
+                    "镜头尚未分配到项目结构。",
+                    "ERROR",
+                    "shots",
+                    None,
+                    Some(shot.id.clone()),
+                    batch_id.clone(),
+                    task_id.clone(),
+                    asset_id.clone(),
+                    workflow_version_id.clone(),
+                    recipe_id.clone(),
+                ),
+            );
+            continue;
+        }
+        if let Some(issue) = issue {
+            let severity = format!("{:?}", issue.severity).to_uppercase();
+            buckets.push(
+                DailyProductionBucket::NeedsAttention,
+                daily_item(
+                    &format!("audit:{}:{}", issue.entity_type, issue.entity_id),
+                    &label,
+                    &format!("AUDIT_{}", issue.code),
+                    &issue.message,
+                    &severity,
+                    issue_destination(&issue.entity_type),
+                    None,
+                    Some(shot.id.clone()),
+                    batch_id.clone(),
+                    task_id.clone(),
+                    asset_id.clone(),
+                    workflow_version_id.clone(),
+                    recipe_id.clone(),
+                ),
+            );
+            continue;
+        }
+
+        if let Some(item) = queue_item {
+            let item_bucket = match item.status.as_str() {
+                "PENDING" | "DISPATCHING" | "DISPATCHED" => Some(DailyProductionBucket::Running),
+                "FAILED" | "CANCELLED" | "SKIPPED" => {
+                    if is_auto_resumable(item.status.as_str(), item.error_code.as_deref()) {
+                        Some(DailyProductionBucket::NeedsAttention)
+                    } else {
+                        Some(DailyProductionBucket::Review)
+                    }
+                }
+                _ => None,
+            };
+            if let Some(bucket) = item_bucket {
+                let (reason_code, reason, severity) = if item.status == "PENDING" {
+                    ("QUEUE_PENDING", "生产项已进入队列，等待执行。", "INFO")
+                } else if is_auto_resumable(item.status.as_str(), item.error_code.as_deref()) {
+                    (
+                        "AUTO_RESUMABLE",
+                        "生产项可从现有队列事实继续恢复。",
+                        "WARNING",
+                    )
+                } else if item.status == "FAILED" {
+                    ("QUEUE_FAILED", "生产队列项失败，需要人工检查。", "ERROR")
+                } else {
+                    (
+                        "QUEUE_REVIEW_REQUIRED",
+                        "生产队列项需要人工复核。",
+                        "WARNING",
+                    )
+                };
+                buckets.push(
+                    bucket,
+                    daily_item(
+                        &format!("queue:{}", item.id),
+                        &label,
+                        reason_code,
+                        reason,
+                        severity,
+                        "tasks",
+                        Some(current_stage(overall).to_owned()),
+                        Some(shot.id.clone()),
+                        Some(item.batch_id.clone()),
+                        item.task_id.clone(),
+                        asset_id.clone(),
+                        Some(item.workflow_version_id.clone()),
+                        Some(item.recipe_id.clone()),
+                    ),
+                );
+                continue;
+            }
+        }
+
+        let (bucket, reason_code, reason, severity, destination, stage) = match overall {
+            "GENERATING_IMAGE" | "GENERATING_VIDEO" => (
+                DailyProductionBucket::Running,
+                "PRODUCTION_RUNNING",
+                "镜头正在生产中。",
+                "INFO",
+                "tasks",
+                Some(current_stage(overall).to_owned()),
+            ),
+            "IMAGE_REVIEW" => (
+                DailyProductionBucket::Review,
+                "IMAGE_REVIEW",
+                "图片结果等待人工复核。",
+                "WARNING",
+                "shots",
+                Some("image".to_owned()),
+            ),
+            "VIDEO_REVIEW" => (
+                DailyProductionBucket::Review,
+                "VIDEO_REVIEW",
+                "视频结果等待人工复核。",
+                "WARNING",
+                "shots",
+                Some("video".to_owned()),
+            ),
+            "FAILED" => (
+                DailyProductionBucket::Review,
+                "TASK_FAILED",
+                "镜头生产失败，需要人工检查。",
+                "ERROR",
+                "tasks",
+                Some(current_stage(overall).to_owned()),
+            ),
+            "COMPLETED" => (
+                DailyProductionBucket::Completed,
+                "COMPLETED",
+                "镜头已有已选交付结果。",
+                "INFO",
+                "assets",
+                None,
+            ),
+            "READY" => (
+                DailyProductionBucket::Ready,
+                "READY",
+                "镜头配置完整，可以进入现有生产队列。",
+                "INFO",
+                "shots",
+                None,
+            ),
+            _ => (
+                DailyProductionBucket::NeedsAttention,
+                "MISSING_CONFIG",
+                "镜头缺少工作流或配方配置。",
+                "WARNING",
+                "shots",
+                Some(current_stage(overall).to_owned()),
+            ),
+        };
+        buckets.push(
+            bucket,
+            daily_item(
+                &format!("shot:{}:{}", shot.id, reason_code),
+                &label,
+                reason_code,
+                reason,
+                severity,
+                destination,
+                stage,
+                Some(shot.id.clone()),
+                batch_id,
+                task_id,
+                asset_id,
+                workflow_version_id,
+                recipe_id,
+            ),
+        );
+    }
+
+    let known_shots = data
+        .shots
+        .iter()
+        .map(|shot| shot.id.as_str())
+        .collect::<HashSet<_>>();
+    for item in &data.queue_items {
+        if !active_batch_ids.contains(item.batch_id.as_str())
+            || item
+                .shot_id
+                .as_deref()
+                .is_some_and(|id| known_shots.contains(id))
+            || item.shot_id.is_some()
+        {
+            continue;
+        }
+        let (bucket, reason_code, reason, severity) = match item.status.as_str() {
+            "PENDING" | "DISPATCHING" | "DISPATCHED" => (
+                DailyProductionBucket::Running,
+                "QUEUE_PENDING",
+                "没有关联镜头的队列项正在等待执行。",
+                "WARNING",
+            ),
+            "FAILED" => (
+                DailyProductionBucket::Review,
+                "QUEUE_FAILED",
+                "没有关联镜头的生产队列项失败，需要人工检查。",
+                "ERROR",
+            ),
+            "SUCCEEDED" => (
+                DailyProductionBucket::Completed,
+                "COMPLETED",
+                "生产队列项已有完成记录。",
+                "INFO",
+            ),
+            _ => (
+                DailyProductionBucket::Review,
+                "QUEUE_REVIEW_REQUIRED",
+                "生产队列项需要人工复核。",
+                "WARNING",
+            ),
+        };
+        buckets.push(
+            bucket,
+            daily_item(
+                &format!("queue:{}", item.id),
+                "生产队列项",
+                reason_code,
+                reason,
+                severity,
+                "tasks",
+                None,
+                None,
+                Some(item.batch_id.clone()),
+                item.task_id.clone(),
+                None,
+                Some(item.workflow_version_id.clone()),
+                Some(item.recipe_id.clone()),
+            ),
+        );
+    }
+
+    let continuing = shots_view.total > 0 && shots_view.completed < shots_view.total;
+    let comfy_blocked = comfy
+        .preflight
+        .as_ref()
+        .is_some_and(|report| report.status == ComfyPreflightStatus::Blocked)
+        || comfy.status.as_ref().is_some_and(|status| {
+            matches!(
+                status.status,
+                ComfyConnectionStatus::Offline | ComfyConnectionStatus::Incompatible
+            )
+        });
+    if continuing && comfy_blocked {
+        buckets.push(
+            DailyProductionBucket::NeedsAttention,
+            daily_item(
+                "runtime:comfy",
+                "运行环境",
+                "COMFY_BLOCKED",
+                "缓存的 ComfyUI 状态或预检阻止继续生产。",
+                "ERROR",
+                "settings",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        );
+    }
+
+    buckets.finish()
+}
+
+#[derive(Default)]
+struct DailyProductionBuckets {
+    needs_attention: Vec<ProjectCommandCenterDailyProductionItem>,
+    ready: Vec<ProjectCommandCenterDailyProductionItem>,
+    running: Vec<ProjectCommandCenterDailyProductionItem>,
+    review: Vec<ProjectCommandCenterDailyProductionItem>,
+    completed: Vec<ProjectCommandCenterDailyProductionItem>,
+}
+
+impl DailyProductionBuckets {
+    fn push(
+        &mut self,
+        bucket: DailyProductionBucket,
+        item: ProjectCommandCenterDailyProductionItem,
+    ) {
+        match bucket {
+            DailyProductionBucket::NeedsAttention => self.needs_attention.push(item),
+            DailyProductionBucket::Ready => self.ready.push(item),
+            DailyProductionBucket::Running => self.running.push(item),
+            DailyProductionBucket::Review => self.review.push(item),
+            DailyProductionBucket::Completed => self.completed.push(item),
+        }
+    }
+
+    fn finish(self) -> ProjectCommandCenterDailyProductionView {
+        ProjectCommandCenterDailyProductionView {
+            needs_attention: bounded_bucket(self.needs_attention),
+            ready: bounded_bucket(self.ready),
+            running: bounded_bucket(self.running),
+            review: bounded_bucket(self.review),
+            completed: bounded_bucket(self.completed),
+            top_action: None,
+        }
+    }
+}
+
+fn bounded_bucket(
+    items: Vec<ProjectCommandCenterDailyProductionItem>,
+) -> ProjectCommandCenterDailyProductionBucket {
+    let total_count = items.len();
+    let items = items
+        .into_iter()
+        .take(DAILY_PRODUCTION_ITEM_LIMIT)
+        .collect::<Vec<_>>();
+    ProjectCommandCenterDailyProductionBucket {
+        total_count,
+        has_more: total_count > items.len(),
+        items,
+    }
+}
+
+fn daily_item(
+    id: &str,
+    label: &str,
+    reason_code: &str,
+    reason: &str,
+    severity: &str,
+    destination: &str,
+    stage: Option<String>,
+    shot_id: Option<String>,
+    batch_id: Option<String>,
+    task_id: Option<String>,
+    asset_id: Option<String>,
+    workflow_version_id: Option<String>,
+    recipe_id: Option<String>,
+) -> ProjectCommandCenterDailyProductionItem {
+    ProjectCommandCenterDailyProductionItem {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        reason_code: reason_code.to_owned(),
+        reason: reason.to_owned(),
+        severity: severity.to_owned(),
+        destination: destination.to_owned(),
+        stage,
+        shot_id,
+        batch_id,
+        task_id,
+        asset_id,
+        workflow_version_id,
+        recipe_id,
+    }
+}
+
+fn current_queue_item<'a>(
+    items: &'a [&'a QueueItemRow],
+    latest_task_id: Option<&str>,
+) -> Option<&'a QueueItemRow> {
+    latest_task_id
+        .and_then(|task_id| {
+            items
+                .iter()
+                .find(|item| item.task_id.as_deref() == Some(task_id))
+                .copied()
+        })
+        .or_else(|| {
+            items
+                .iter()
+                .max_by_key(|item| (&item.batch_id, item.ordinal, &item.id))
+                .copied()
+        })
+}
+
+fn current_stage(overall: &str) -> &str {
+    if overall.contains("VIDEO") {
+        "video"
+    } else {
+        "image"
+    }
+}
+
+fn issue_destination(entity_type: &str) -> &'static str {
+    match entity_type {
+        "TASK" | "task" | "PRODUCTION_TASK" => "tasks",
+        "ASSET" | "asset" => "assets",
+        "WORKFLOW" | "workflow" | "RECIPE" | "recipe" => "workflows",
+        _ => "shots",
+    }
+}
+
+fn daily_production_top_action(
+    action: &ProjectCommandCenterNextAction,
+    board: &ProjectCommandCenterDailyProductionView,
+) -> Option<ProjectCommandCenterDailyProductionItem> {
+    board
+        .needs_attention
+        .items
+        .iter()
+        .chain(board.review.items.iter())
+        .chain(board.running.items.iter())
+        .chain(board.ready.items.iter())
+        .chain(board.completed.items.iter())
+        .find(|item| {
+            item.reason_code == action.reason_code
+                || action
+                    .shot_id
+                    .as_deref()
+                    .is_some_and(|id| item.shot_id.as_deref() == Some(id))
+                || action
+                    .batch_id
+                    .as_deref()
+                    .is_some_and(|id| item.batch_id.as_deref() == Some(id))
+                || action
+                    .task_id
+                    .as_deref()
+                    .is_some_and(|id| item.task_id.as_deref() == Some(id))
+                || action
+                    .asset_id
+                    .as_deref()
+                    .is_some_and(|id| item.asset_id.as_deref() == Some(id))
+        })
+        .cloned()
+        .or_else(|| match action.kind {
+            ProjectCommandCenterActionKind::StructuralBlocked
+            | ProjectCommandCenterActionKind::ComfyBlocked => {
+                board.needs_attention.items.first().cloned()
+            }
+            _ => None,
+        })
 }
 
 fn set_first(slot: &mut Option<String>, id: &str) {
@@ -1368,6 +2010,7 @@ mod tests {
             },
             content: ProjectCommandCenterContentView::default(),
             production: ProjectCommandCenterProductionView::default(),
+            daily_production: ProjectCommandCenterDailyProductionView::default(),
             issues: Vec::new(),
             audit: ProductionAuditSummary {
                 project_id: PROJECT.to_owned(),
@@ -1497,6 +2140,47 @@ mod tests {
     }
 
     #[test]
+    fn daily_top_action_keeps_exact_repair_targets_and_stable_reason_code() {
+        let item = daily_item(
+            "queue:item-1",
+            "Shot 1",
+            "QUEUE_FAILED",
+            "生产队列项失败，需要人工检查。",
+            "ERROR",
+            "tasks",
+            Some("video".to_owned()),
+            Some("shot-1".to_owned()),
+            Some("batch-1".to_owned()),
+            Some("task-1".to_owned()),
+            None,
+            Some("workflow-version-1".to_owned()),
+            Some("recipe-1".to_owned()),
+        );
+        let mut board = ProjectCommandCenterDailyProductionView::default();
+        board.review = bounded_bucket(vec![item]);
+        let action = action_with_targets(
+            ProjectCommandCenterActionKind::ReviewRequired,
+            PROJECT_ACTION_PRIORITY_REVIEW_REQUIRED,
+            "QUEUE_REVIEW_REQUIRED",
+            "review queue item",
+            Some("shot-1".to_owned()),
+            Some("batch-1".to_owned()),
+            Some("task-1".to_owned()),
+            None,
+        );
+
+        let top = daily_production_top_action(&action, &board).expect("target should be present");
+        assert_eq!(top.shot_id.as_deref(), Some("shot-1"));
+        assert_eq!(top.batch_id.as_deref(), Some("batch-1"));
+        assert_eq!(top.task_id.as_deref(), Some("task-1"));
+        assert_eq!(
+            top.workflow_version_id.as_deref(),
+            Some("workflow-version-1")
+        );
+        assert_eq!(top.recipe_id.as_deref(), Some("recipe-1"));
+    }
+
+    #[test]
     fn comfy_block_is_only_reported_while_continuing_production() {
         let mut view = base_view();
         view.shots.total = 1;
@@ -1617,5 +2301,14 @@ mod tests {
         assert_eq!(view.shots.total, 500);
         assert_eq!(view.structure.unassigned_shot_count, 500);
         assert_eq!(view.tasks_assets.task_count, 0);
+        assert_eq!(view.daily_production.needs_attention.total_count, 500);
+        assert_eq!(view.daily_production.needs_attention.items.len(), 20);
+        assert!(view.daily_production.needs_attention.has_more);
+        assert!(view
+            .daily_production
+            .needs_attention
+            .items
+            .iter()
+            .all(|item| item.shot_id.is_some()));
     }
 }

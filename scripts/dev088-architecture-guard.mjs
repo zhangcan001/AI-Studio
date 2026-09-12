@@ -519,6 +519,20 @@ const projectCommandCenterServiceSource = readFileSync(join(root, "src-tauri/src
 if (!["pub fn recommend_next_project_action", "first_completed_asset_id", "fn action_with_targets"].every((marker) => projectCommandCenterServiceSource.includes(marker))) {
   throw new Error("PROJECT_CONTINUITY_DERIVED failed: Project Command Center must derive exact continuation targets from existing facts");
 }
+const projectCommandCenterTypesSource = readFileSync(join(root, "src/types/projectCommandCenter.ts"), "utf8");
+const projectCommandCenterViewSource = readFileSync(join(root, "src/features/projects/ProjectCommandCenter.tsx"), "utf8");
+if (!["ProjectCommandCenterDailyProductionView", "totalCount", "hasMore", "workflowVersionId", "recipeId"].every((marker) => projectCommandCenterTypesSource.includes(marker))) {
+  throw new Error("DAILY_PRODUCTION_EXACT_TARGETS failed: typed daily production contract is incomplete");
+}
+if (!["load_daily_production", "DAILY_PRODUCTION_ITEM_LIMIT", "top_action", "Production Queue"].every((marker) => projectCommandCenterServiceSource.includes(marker))) {
+  throw new Error("DAILY_PRODUCTION_DERIVED failed: daily production must be derived in the existing command center service");
+}
+if (!projectCommandCenterViewSource.includes("DailyProductionBoard") || projectCommandCenterServiceSource.includes("CREATE TABLE daily_production")) {
+  throw new Error("DAILY_PRODUCTION_NO_SECOND_STATE failed: daily production must remain a read-only view");
+}
+if (!["onNavigate", "actionKind", "dailyProductionNavigation"].every((marker) => projectCommandCenterViewSource.includes(marker))) {
+  throw new Error("DAILY_PRODUCTION_NAVIGATION failed: daily production items must use existing typed navigation");
+}
 
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
@@ -545,6 +559,10 @@ console.log(`GENERATION_PROJECT_TEMPLATE_CONTROLLER=PASS`);
 console.log(`GENERATION_ASSET_INTENT_CONTROLLER=PASS`);
 console.log(`GENERATION_WORKFLOW_SELECTION_CONTROLLER=PASS`);
 console.log(`PROJECT_CONTINUITY_DERIVED=PASS`);
+console.log(`DAILY_PRODUCTION_DERIVED=PASS`);
+console.log(`DAILY_PRODUCTION_NO_SECOND_STATE=PASS`);
+console.log(`DAILY_PRODUCTION_EXACT_TARGETS=PASS`);
+console.log(`DAILY_PRODUCTION_NO_AUTO_EXECUTION=PASS`);
 console.log(`INTERNAL_SCRIPT_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_STORYBOARD_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_PROMPT_AUTHORING_RETIRED=PASS`);

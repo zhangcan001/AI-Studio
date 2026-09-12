@@ -11,6 +11,8 @@ import type { ShotView } from "../../types/shot";
 import type {
   ProjectCommandCenterAggregate,
   ProjectCommandCenterConsistencyView,
+  ProjectCommandCenterDailyProductionBucket,
+  ProjectCommandCenterDailyProductionItem,
   ProjectCommandCenterPreparationView,
 } from "../../types/projectCommandCenter";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -396,6 +398,10 @@ export function ProjectCommandCenterView({
             preparation={aggregate?.preparation}
           />
 
+          {aggregate?.dailyProduction && (
+            <DailyProductionBoard board={aggregate.dailyProduction} onNavigate={onNavigate} disabled={busyNow} />
+          )}
+
           {!project && (
             <section className="project-command-recommendation" aria-labelledby="project-command-recommendation-title">
               <div>
@@ -572,6 +578,7 @@ function recommendedActionFromAggregate(
     ?? (action.kind === "IMAGE_REVIEW" ? aggregate.shots.firstImageReviewShotId : undefined)
     ?? (action.kind === "VIDEO_REVIEW" ? aggregate.shots.firstVideoReviewShotId : undefined)
     ?? (action.kind === "MISSING_CONFIG" ? aggregate.shots.firstMissingConfigShotId : undefined)
+    ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.shots.firstFailedShotId : undefined)
     ?? (action.kind === "READY" ? aggregate.shots.firstReadyShotId : undefined)
     ?? (action.kind === "COMPLETE" ? aggregate.shots.firstCompletedShotId : undefined);
   const batchId = action.batchId
@@ -582,6 +589,8 @@ function recommendedActionFromAggregate(
     ?? (action.kind === "ACTIVE_PRODUCTION" ? aggregate.queue.firstActiveTaskId : undefined)
     ?? (action.kind === "AUTO_RESUMABLE" ? aggregate.queue.firstAutoResumableTaskId : undefined)
     ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.queue.firstReviewRequiredTaskId : undefined);
+  const resolvedTaskId = taskId
+    ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.shots.firstFailedTaskId : undefined);
   const assetId = action.assetId
     ?? (action.kind === "COMPLETE" ? aggregate.shots.firstCompletedAssetId : undefined);
   const resolvedShotId = shotId
@@ -592,7 +601,7 @@ function recommendedActionFromAggregate(
     actionKind: action.kind,
     shotId: resolvedShotId ?? undefined,
     batchId: batchId ?? undefined,
-    taskId: taskId ?? undefined,
+    taskId: resolvedTaskId ?? undefined,
     assetId: assetId ?? undefined,
   };
   if (consistencyAction) return { ...consistencyAction, ...target };
@@ -681,6 +690,131 @@ function ProjectCommandCenterIntegrationSummary({
       </section>
     </div>
   );
+}
+
+const DAILY_PRODUCTION_BUCKETS: ReadonlyArray<{
+  key: "needsAttention" | "ready" | "running" | "review" | "completed";
+  label: string;
+  tone: string;
+}> = [
+  { key: "needsAttention", label: "需要处理", tone: "attention" },
+  { key: "ready", label: "已就绪", tone: "ready" },
+  { key: "running", label: "生产中", tone: "running" },
+  { key: "review", label: "待复核", tone: "review" },
+  { key: "completed", label: "已完成", tone: "completed" },
+];
+
+function DailyProductionBoard({
+  board,
+  onNavigate,
+  disabled,
+}: {
+  board: NonNullable<ProjectCommandCenterAggregate["dailyProduction"]>;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
+  disabled: boolean;
+}) {
+  const totalItems = DAILY_PRODUCTION_BUCKETS.reduce((sum, bucket) => sum + board[bucket.key].totalCount, 0);
+  return (
+    <section className="project-command-card project-command-daily" aria-labelledby="project-command-daily-title">
+      <div className="project-command-card-heading">
+        <div>
+          <span className="section-label">每日生产</span>
+          <h3 id="project-command-daily-title">生产行动板</h3>
+        </div>
+        <small className="project-command-muted">只读派生 · 刷新后以当前事实为准</small>
+      </div>
+      {board.topAction && <p className="project-command-daily-top">推荐：{board.topAction.reason} · {board.topAction.label}</p>}
+      {totalItems === 0 ? (
+        <p className="project-command-daily-empty">还没有生产镜头。创建镜头或使用批量导入预检后，这里会显示生产状态。</p>
+      ) : (
+        <div className="project-command-daily-grid">
+          {DAILY_PRODUCTION_BUCKETS.map((bucket) => (
+            <DailyProductionBucketView
+              key={bucket.key}
+              bucket={board[bucket.key]}
+              label={bucket.label}
+              tone={bucket.tone}
+              onNavigate={onNavigate}
+              disabled={disabled}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DailyProductionBucketView({
+  bucket,
+  label,
+  tone,
+  onNavigate,
+  disabled,
+}: {
+  bucket: ProjectCommandCenterDailyProductionBucket;
+  label: string;
+  tone: string;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
+  disabled: boolean;
+}) {
+  return (
+    <section className={`project-command-daily-bucket project-command-daily-${tone}`} aria-label={label}>
+      <div className="project-command-daily-bucket-heading"><strong>{label}</strong><span>{bucket.totalCount}</span></div>
+      {bucket.items.length ? (
+        <div className="project-command-daily-items">
+          {bucket.items.map((item) => (
+            <button
+              type="button"
+              className="project-command-daily-item"
+              key={item.id}
+              onClick={() => onNavigate?.(dailyProductionNavigation(item, label))}
+              disabled={!onNavigate || disabled}
+            >
+              <span className="project-command-daily-item-title">{item.label}</span>
+              <span className="project-command-daily-item-reason">{item.reason}</span>
+              <small>{dailyProductionTargetLabel(item)}</small>
+              {item.workflowVersionId && item.recipeId && <small>精确配置 {item.workflowVersionId} / {item.recipeId}</small>}
+            </button>
+          ))}
+        </div>
+      ) : <p className="project-command-muted">暂无</p>}
+      {bucket.hasMore && <small className="project-command-daily-more">显示前 {bucket.items.length} 项，共 {bucket.totalCount} 项</small>}
+    </section>
+  );
+}
+
+function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem, bucketLabel: string): ProjectCommandCenterNavigationRequest {
+  const destination = (item.destination === "assets" || item.destination === "tasks" || item.destination === "workflows" || item.destination === "settings" || item.destination === "shots")
+    ? item.destination
+    : "shots";
+  const section: ProjectCommandCenterNavigationSection = destination === "settings"
+    ? "settings"
+    : destination === "workflows"
+      ? "workflows"
+      : destination === "assets"
+        ? "assets"
+        : bucketLabel === "待复核"
+          ? "review"
+          : destination === "tasks"
+            ? "production"
+            : "creation";
+  return {
+    destination,
+    section,
+    actionKind: item.reasonCode,
+    ...(item.shotId ? { shotId: item.shotId } : {}),
+    ...(item.batchId ? { batchId: item.batchId } : {}),
+    ...(item.taskId ? { taskId: item.taskId } : {}),
+    ...(item.assetId ? { assetId: item.assetId } : {}),
+  };
+}
+
+function dailyProductionTargetLabel(item: ProjectCommandCenterDailyProductionItem): string {
+  if (item.assetId) return `定位素材 ${item.assetId}`;
+  if (item.taskId) return `定位任务 ${item.taskId}`;
+  if (item.batchId) return `定位批次 ${item.batchId}`;
+  if (item.shotId) return `定位镜头 ${item.shotId}`;
+  return `打开${item.destination === "settings" ? "运行环境设置" : "对应工作区"}`;
 }
 
 export function buildSceneProgress(structure: ProductionStructureTree | undefined, shots: ShotView[]): ProjectCommandCenterSceneProgress[] {

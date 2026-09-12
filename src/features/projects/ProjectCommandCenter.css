@@ -228,6 +228,100 @@
   line-height: 1.4;
 }
 
+.project-command-daily {
+  background: linear-gradient(145deg, rgb(23 42 70 / 90%), rgb(15 29 49 / 94%));
+}
+
+.project-command-daily-top {
+  margin: 0;
+  padding: 9px 11px;
+  color: #d9e7ff;
+  border-left: 3px solid #6f9dff;
+  background: rgb(42 71 116 / 36%);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.project-command-daily-empty {
+  margin: 0;
+  padding: 16px;
+  color: #9aabc4;
+  border: 1px dashed #405a83;
+  border-radius: 9px;
+  line-height: 1.5;
+}
+
+.project-command-daily-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-command-daily-bucket {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #334865;
+  border-top: 3px solid #5576a9;
+  border-radius: 10px;
+  background: #182941;
+}
+
+.project-command-daily-attention { border-top-color: #d65b64; }
+.project-command-daily-ready { border-top-color: #7de0ac; }
+.project-command-daily-running { border-top-color: #6f9dff; }
+.project-command-daily-review { border-top-color: #c89b45; }
+.project-command-daily-completed { border-top-color: #7399c6; }
+
+.project-command-daily-bucket-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #eef4ff;
+}
+
+.project-command-daily-bucket-heading span {
+  color: #a9c7ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.project-command-daily-items {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-command-daily-item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  color: #eaf1ff;
+  border: 1px solid #334865;
+  border-radius: 8px;
+  background: #1c2f4b;
+  text-align: left;
+}
+
+.project-command-daily-item:hover:not(:disabled) {
+  border-color: #6d96d3;
+  background: #203656;
+}
+
+.project-command-daily-item-title,
+.project-command-daily-item-reason,
+.project-command-daily-item small {
+  overflow-wrap: anywhere;
+}
+
+.project-command-daily-item-title { font-weight: 650; }
+.project-command-daily-item-reason { color: #b8c8dc; font-size: .72rem; line-height: 1.35; }
+.project-command-daily-item small { color: #91a6c2; font-size: .68rem; }
+.project-command-daily-more { color: #d5b870; font-size: .7rem; line-height: 1.35; }
+
 @media (max-width: 1100px) {
   .project-command-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -235,6 +329,10 @@
 
   .project-command-project {
     grid-template-columns: minmax(0, 1fr) minmax(240px, 0.48fr);
+  }
+
+  .project-command-daily-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .project-command-workspace {
@@ -249,6 +347,10 @@
   }
 
   .project-command-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-command-daily-grid {
     grid-template-columns: 1fr;
   }
 
