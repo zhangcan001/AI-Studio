@@ -51,6 +51,12 @@ import type {
 } from "../types/benchmark";
 import type { ShotBatchPlan, ShotInputValues, ShotStage, ShotView } from "../types/shot";
 import type {
+  ProjectPreparationView,
+  ProjectProductionAdmissionResult,
+  ProjectProductionAdmissionRequest,
+  ProjectProductionPreflightRequest,
+} from "../types/productionPreparation";
+import type {
   ConsistencyBindingPack,
   ConsistencyBindingReplaceInput,
   ConsistencyContextPreview,
@@ -317,6 +323,14 @@ export function getShotProductionPlanDetail(request: ShotProductionPlanDetailReq
 
 export function admitSceneProduction(request: SceneProductionAdmissionRequest): Promise<SceneProductionAdmissionResult> {
   return invoke<SceneProductionAdmissionResult>("scene_production_admit", { request });
+}
+
+export function getProjectProductionPreflight(request: ProjectProductionPreflightRequest): Promise<ProjectPreparationView> {
+  return invoke<ProjectPreparationView>("project_production_preflight", { request });
+}
+
+export function admitProjectProduction(request: ProjectProductionAdmissionRequest): Promise<ProjectProductionAdmissionResult> {
+  return invoke<ProjectProductionAdmissionResult>("project_production_admit", { request });
 }
 
 export function getEpisodeProductionPlan(request: EpisodeProductionPlanRequest): Promise<EpisodeProductionPlan> {

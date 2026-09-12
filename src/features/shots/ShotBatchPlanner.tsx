@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   createShotBatch,
   planShotBatch,
-  startProductionQueue,
 } from "../../services/tauriClient";
 import type { ShotBatchPlan, ShotStage, ShotView } from "../../types/shot";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -65,18 +64,13 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
     setSelectedIds(allEligibleSelected ? new Set() : new Set(eligibleIds.slice(0, plan?.maxItems ?? 100)));
   }
 
-  async function createAndStart() {
+  async function prepareBatch() {
     if (!selectedIds.size) return;
     setCreating(true);
     onError(undefined);
     try {
       const detail = await createShotBatch({ projectId, stage, shotIds: [...selectedIds] });
-      try {
-        await startProductionQueue(projectId, detail.id);
-        onNotice(`${stageLabel(stage)}批次已创建并开始严格串行执行；结果仍需逐个手动确认。`);
-      } catch (startError: unknown) {
-        onNotice(`批次已创建为待启动状态（${detail.name}）。${toUserMessage(startError)} 可在生产队列中继续。`);
-      }
+      onNotice(`${stageLabel(stage)}已准备为待启动批次（${detail.name}）。请在生产队列中明确启动；不会自动启动 GPU。`);
       setSelectedIds(new Set());
       await onRefresh();
       await loadPlan();
@@ -116,8 +110,8 @@ export function ShotBatchPlanner({ projectId, shots, onRefresh, onNotice, onErro
           <div className="shot-batch-selection-bar">
             <label><input type="checkbox" checked={allEligibleSelected} onChange={toggleAll} disabled={!eligibleIds.length || loading || creating} /> 全选符合条件的镜头</label>
             <span>{selectedIds.size} / {plan?.maxItems ?? 100} 已选择 · {plan?.eligibleCount ?? 0} 个符合条件</span>
-            <button type="button" className="shot-primary-action" onClick={() => void createAndStart()} disabled={creating || loading || !selectedIds.size}>
-              {creating ? "正在创建队列…" : stage === "image" ? "批量生成关键帧" : "批量生成视频（H3）"}
+            <button type="button" className="shot-primary-action" onClick={() => void prepareBatch()} disabled={creating || loading || !selectedIds.size}>
+              {creating ? "正在准备生产…" : stage === "image" ? "准备批量关键帧" : "准备批量视频（H3）"}
             </button>
           </div>
           {loading ? <p className="project-loading">正在检查当前工作流、素材与任务状态…</p> : (

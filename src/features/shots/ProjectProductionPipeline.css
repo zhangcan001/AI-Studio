@@ -17,7 +17,8 @@
 .pipeline-selection-toolbar,
 .pipeline-review-actions,
 .pipeline-action-grid,
-.pipeline-stage-tabs {
+.pipeline-stage-tabs,
+.pipeline-filter-tabs {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -212,6 +213,58 @@
   font-variant-numeric: tabular-nums;
 }
 
+.pipeline-filter-tabs {
+  flex-wrap: wrap;
+}
+
+.pipeline-filter-tabs button {
+  border: 1px solid var(--ux-border);
+  color: var(--ux-muted);
+  background: var(--ux-surface-2);
+}
+
+.pipeline-filter-tabs button.active {
+  color: var(--ux-text);
+  border-color: var(--ux-accent);
+  background: color-mix(in srgb, var(--ux-accent) 10%, var(--ux-surface-2));
+}
+
+.pipeline-preparation-summary,
+.pipeline-preparation-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--ux-border);
+  border-radius: 9px;
+  color: var(--ux-muted);
+  background: var(--ux-surface-2);
+  font-size: 0.78rem;
+}
+
+.pipeline-preparation-summary label {
+  margin-left: auto;
+}
+
+.pipeline-preparation-limit {
+  margin: 0;
+  padding: 9px 12px;
+  border-left: 3px solid #d06b72;
+  color: #d06b72;
+  background: color-mix(in srgb, #d06b72 7%, var(--ux-surface-2));
+  font-size: 0.78rem;
+}
+
+.pipeline-preparation-result {
+  justify-content: space-between;
+  color: var(--ux-text);
+}
+
+.pipeline-preparation-result span {
+  color: var(--ux-muted);
+}
+
 .pipeline-shot-table-wrap {
   max-height: 420px;
   overflow: auto;
@@ -221,7 +274,7 @@
 
 .pipeline-shot-table {
   width: 100%;
-  min-width: 840px;
+  min-width: 1180px;
   border-collapse: collapse;
   font-size: 0.8rem;
 }

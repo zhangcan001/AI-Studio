@@ -136,6 +136,21 @@ pub struct ScenePreparationView {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectPreparationView {
+    pub project_id: String,
+    pub stage: String,
+    pub total: usize,
+    pub ready_count: usize,
+    pub incomplete_count: usize,
+    pub blocked_count: usize,
+    pub prepared_count: usize,
+    pub warning_count: usize,
+    pub items: Vec<ShotProductionPlanSummary>,
+    pub evaluated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreparationSnapshotPrompt {
     pub rendered_text: String,
     pub negative_prompt: String,

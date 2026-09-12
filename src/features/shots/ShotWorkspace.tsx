@@ -1228,6 +1228,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             onError={(message) => setError(message)}
             onConfigureStage={configureBulkStage}
             onBulkPrompt={assignBulkPrompt}
+            onOpenProductionQueue={onOpenProductionQueue ? () => { void openProductionQueue(); } : undefined}
             busy={busy}
             onOpenReview={(reviewStage, shotIds) => {
               if (busy || !shotIds.length) return;

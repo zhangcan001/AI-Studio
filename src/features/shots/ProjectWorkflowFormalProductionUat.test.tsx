@@ -11,6 +11,11 @@ import type {
   ProjectWorkflowConfigView,
 } from "../../types/projectWorkflow";
 import type { ProductionBatchDetail, ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
+import type {
+  ProjectPreparationView,
+  ProjectProductionAdmissionResult,
+  ShotProductionPlanSummary,
+} from "../../types/productionPreparation";
 import type { ShotInputValues, ShotStage, ShotStageConfig, ShotView } from "../../types/shot";
 import type { TaskView } from "../../types/task";
 import { ShotWorkspace } from "./ShotWorkspace";
@@ -36,6 +41,8 @@ const tauriMocks = vi.hoisted(() => ({
   planShotBatch: vi.fn(),
   createShotBatch: vi.fn(),
   startProductionQueue: vi.fn(),
+  getProjectProductionPreflight: vi.fn(),
+  admitProjectProduction: vi.fn(),
 }));
 
 const taskEvents = vi.hoisted(() => ({
@@ -285,6 +292,67 @@ class FakeSqliteProductionAdapter {
     };
   }
 
+  async getProjectProductionPreflight(projectId: string, stage: ShotStage): Promise<ProjectPreparationView> {
+    expect(projectId).toBe(PROJECT_ID);
+    const items: ShotProductionPlanSummary[] = [...this.shots.values()].map((item) => {
+      const config = item.stageConfigs.find((candidate) => candidate.stage === stage);
+      const prepared = [...this.batches.values()].some((batch) => batch.items.some((batchItem) => batchItem.id.startsWith("pbi-") && batchItem.workflowVersionId === config?.workflowVersionId && batchItem.recipeId === config?.recipeId));
+      return {
+        shotId: item.id,
+        ordinal: item.ordinal,
+        name: item.name,
+        status: config ? "READY" : "INCOMPLETE",
+        score: config ? 1 : 0,
+        warningCount: 0,
+        incompleteCount: config ? 0 : 1,
+        blockerCount: config ? 0 : 1,
+        contextHash: `context-${item.id}-${stage}`,
+        workflowVersionId: config?.workflowVersionId,
+        recipeId: config?.recipeId,
+        currentStageStatus: config ? "READY" : "DRAFT",
+        alreadyPrepared: prepared,
+        blockers: config ? [] : ["未配置阶段工作流"],
+        warnings: [],
+        referenceCount: 0,
+      };
+    });
+    return {
+      projectId,
+      stage,
+      total: items.length,
+      readyCount: items.filter((item) => item.status === "READY").length,
+      incompleteCount: items.filter((item) => item.status === "INCOMPLETE").length,
+      blockedCount: 0,
+      preparedCount: items.filter((item) => item.alreadyPrepared).length,
+      warningCount: 0,
+      items,
+      evaluatedAt: TIMESTAMP,
+    };
+  }
+
+  async admitProjectProduction(request: {
+    projectId: string;
+    stage: ShotStage;
+    shotIds: string[];
+    allowPartial: boolean;
+  }): Promise<ProjectProductionAdmissionResult> {
+    expect(request.projectId).toBe(PROJECT_ID);
+    expect(request.allowPartial).toBe(false);
+    const batch = await this.createShotBatch(request);
+    return {
+      projectId: request.projectId,
+      stage: request.stage,
+      createdBatchIds: [batch.id],
+      batchId: batch.id,
+      createdCount: request.shotIds.length,
+      skippedIncomplete: 0,
+      skippedBlocked: 0,
+      alreadyPreparedCount: 0,
+      matchingPreparedBatchIds: [],
+      message: "prepared",
+    };
+  }
+
   async createShotBatch(request: { projectId: string; stage: ShotStage; shotIds: string[] }): Promise<ProductionBatchDetail> {
     const items = request.shotIds.map((shotId, ordinal) => {
       const config = this.shots.get(shotId)?.stageConfigs.find((item) => item.stage === request.stage);
@@ -410,6 +478,8 @@ function installAdapter(adapter: FakeSqliteProductionAdapter): void {
   tauriMocks.planShotBatch.mockImplementation((projectId: string, stage: ShotStage) => adapter.planShotBatch(projectId, stage));
   tauriMocks.createShotBatch.mockImplementation((request) => adapter.createShotBatch(request));
   tauriMocks.startProductionQueue.mockImplementation((projectId: string, batchId: string) => adapter.startProductionQueue(projectId, batchId));
+  tauriMocks.getProjectProductionPreflight.mockImplementation((request: { projectId: string; stage: ShotStage }) => adapter.getProjectProductionPreflight(request.projectId, request.stage));
+  tauriMocks.admitProjectProduction.mockImplementation((request) => adapter.admitProjectProduction(request));
   tauriMocks.listProductionQueues.mockImplementation(() => adapter.queueSummaries());
   tauriMocks.getProductionQueueOverview.mockImplementation(() => adapter.queueOverview());
   tauriMocks.listRecentAssets.mockResolvedValue([]);
@@ -459,14 +529,21 @@ describe("DEV-080 formal project workflow production UAT", () => {
       recipeId: CUSTOM_IMAGE_A.recipeId,
     })));
 
-    await user.click(screen.getByRole("button", { name: "创建图片批次" }));
-    await waitFor(() => expect(adapter.comfySubmissions).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "准备图片生产" }));
+    await waitFor(() => expect(tauriMocks.admitProjectProduction).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      stage: "image",
+      shotIds: [SHOT_ID],
+      allowPartial: false,
+    }));
+    expect(adapter.comfySubmissions).toHaveLength(0);
 
     const frozen = adapter.frozenBatch("pbt-dev080");
     expect(frozen?.items[0]).toMatchObject({
       workflowVersionId: CUSTOM_IMAGE_A.workflowVersionId,
       recipeId: CUSTOM_IMAGE_A.recipeId,
     });
+    await tauriMocks.startProductionQueue(PROJECT_ID, "pbt-dev080");
     expect(adapter.comfySubmissions[0]).toMatchObject({
       workflowId: CUSTOM_IMAGE_A.workflowId,
       workflowVersionId: CUSTOM_IMAGE_A.workflowVersionId,

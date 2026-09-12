@@ -199,9 +199,27 @@ export interface ScenePreparationView {
   evaluatedAt?: string;
 }
 
+export interface ProjectPreparationView {
+  projectId: string;
+  stage: ProductionPreparationStage;
+  total: number;
+  readyCount: number;
+  incompleteCount: number;
+  blockedCount: number;
+  preparedCount: number;
+  warningCount: number;
+  items: ShotProductionPlanSummary[];
+  evaluatedAt?: string;
+}
+
 export interface SceneProductionPreflightRequest {
   projectId: string;
   sceneId: string;
+  stage: ProductionPreparationStage;
+}
+
+export interface ProjectProductionPreflightRequest {
+  projectId: string;
   stage: ProductionPreparationStage;
 }
 
@@ -243,6 +261,11 @@ export interface SceneProductionAdmissionRequest extends SceneProductionPrefligh
   allowPartial: boolean;
 }
 
+export interface ProjectProductionAdmissionRequest extends ProjectProductionPreflightRequest {
+  shotIds: string[];
+  allowPartial: boolean;
+}
+
 export interface SceneProductionAdmissionResult {
   projectId: string;
   sceneId?: string;
@@ -258,6 +281,7 @@ export interface SceneProductionAdmissionResult {
 }
 
 export type ProductionPreparationAdmission = SceneProductionAdmissionResult;
+export type ProjectProductionAdmissionResult = ProductionPreparationAdmission;
 
 export const MAX_PREPARATION_BATCH_ITEMS = 100;
 

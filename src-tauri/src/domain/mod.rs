@@ -45,8 +45,8 @@ pub use production_package::*;
 pub use production_preparation::{
     ComfyCapabilityEvidence, PreparationSnapshotIdentity, PreparationSnapshotRecord,
     PreparationSnapshotV1, PreparedShotBatchRecord, ProductionPreparationAdmission,
-    ResolvedShotContextView, ScenePreparationView, ShotProductionPlan, ShotProductionPlanSummary,
-    PREPARATION_SNAPSHOT_SCHEMA_VERSION,
+    ProjectPreparationView, ResolvedShotContextView, ScenePreparationView, ShotProductionPlan,
+    ShotProductionPlanSummary, PREPARATION_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use production_queue::{
     ProductionBatch, ProductionBatchDetail, ProductionBatchId, ProductionBatchItem,

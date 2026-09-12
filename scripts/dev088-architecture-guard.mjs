@@ -534,6 +534,32 @@ if (!["onNavigate", "actionKind", "dailyProductionNavigation"].every((marker) =>
   throw new Error("DAILY_PRODUCTION_NAVIGATION failed: daily production items must use existing typed navigation");
 }
 
+const shotBulkConfigSource = readFileSync(join(root, "src/features/shots/ShotBulkConfigPanel.tsx"), "utf8");
+const shotBatchPlannerSource = readFileSync(join(root, "src/features/shots/ShotBatchPlanner.tsx"), "utf8");
+const productionPreparationSource = readFileSync(join(root, "src-tauri/src/application/production_preparation_service.rs"), "utf8");
+const productionPreparationCommandSource = readFileSync(join(root, "src-tauri/src/commands/production_preparation.rs"), "utf8");
+const bulkPreparationUiSource = `${shotBulkConfigSource}\n${shotBatchPlannerSource}`;
+if (bulkPreparationUiSource.includes("startProductionQueue")
+  || bulkPreparationUiSource.includes("production_queue_start")
+  || bulkPreparationUiSource.includes("createAndStart")) {
+  throw new Error("BULK_PREPARE_NO_AUTO_START failed: bulk preparation UI must not start the queue");
+}
+if (!shotBulkConfigSource.includes("admitProjectProduction")
+  || !shotBulkConfigSource.includes("allowPartial")
+  || !shotBulkConfigSource.includes("MAX_BULK_PREPARATION_ITEMS")) {
+  throw new Error("BATCH_CREATE_NO_AUTO_START failed: project bulk preparation must use explicit bounded admission");
+}
+if (!productionPreparationSource.includes("pub async fn plan_many(")
+  || !productionPreparationSource.includes("pub async fn admit(")
+  || !productionPreparationSource.includes("ProductionBatchStatus::Ready")
+  || productionPreparationSource.includes("startProductionQueue")
+  || productionPreparationSource.includes("production_queue_start")) {
+  throw new Error("EXPLICIT_QUEUE_START_ONLY failed: preparation authority must create READY state without queue start");
+}
+if (!["project_production_preflight", "project_production_admit", "MAX_PROJECT_PLAN_SHOTS", "MAX_PREPARATION_BATCH_ITEMS"].every((marker) => productionPreparationCommandSource.includes(marker))) {
+  throw new Error("BULK_PREPARATION_AUTHORITY failed: project plan/admit must use the existing preparation service with 500/100 bounds");
+}
+
 console.log(`WORKFLOW_SMART_IMPORT_CONTROLLER=PASS`);
 console.log(`WORKFLOW_PARAMETER_EXPOSURE_CONTROLLER=PASS`);
 console.log(`RECIPE_HISTORY_QUERY_AUTHORITY=PASS`);
@@ -563,6 +589,10 @@ console.log(`DAILY_PRODUCTION_DERIVED=PASS`);
 console.log(`DAILY_PRODUCTION_NO_SECOND_STATE=PASS`);
 console.log(`DAILY_PRODUCTION_EXACT_TARGETS=PASS`);
 console.log(`DAILY_PRODUCTION_NO_AUTO_EXECUTION=PASS`);
+console.log(`BULK_PREPARE_NO_AUTO_START=PASS`);
+console.log(`BATCH_CREATE_NO_AUTO_START=PASS`);
+console.log(`EXPLICIT_QUEUE_START_ONLY=PASS`);
+console.log(`BULK_PREPARATION_AUTHORITY=PASS`);
 console.log(`INTERNAL_SCRIPT_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_STORYBOARD_AUTHORING_RETIRED=PASS`);
 console.log(`INTERNAL_PROMPT_AUTHORING_RETIRED=PASS`);

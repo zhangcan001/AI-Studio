@@ -1321,6 +1321,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_preparation::scene_production_preflight,
             commands::production_preparation::scene_production_admit,
             commands::production_preparation::shot_production_plan_detail,
+            commands::production_preparation::project_production_preflight,
+            commands::production_preparation::project_production_admit,
             commands::shot_bulk::preview_shot_bulk_import,
             commands::shot_bulk::commit_shot_bulk_import,
             commands::shot_bulk::bulk_assign_shot_prompt,
