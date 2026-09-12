@@ -407,6 +407,32 @@ describe("ProjectCommandCenter", () => {
     expect(onNavigate).toHaveBeenCalledWith({ destination: "shots", section: "production", batchId: "batch-first", actionKind: "ACTIVE_PRODUCTION" });
   });
 
+  it("uses the unique READY batch from the daily board for Continue Work", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const emptyBucket = { totalCount: 0, items: [], hasMore: false };
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      shots: { ...aggregate().shots, ready: 1, firstReadyShotId: "shot-ready" },
+      recommendedAction: { ...aggregate().recommendedAction, kind: "READY", shotId: null, batchId: null },
+      dailyProduction: {
+        needsAttention: emptyBucket,
+        ready: {
+          totalCount: 1,
+          hasMore: false,
+          items: [{ id: "ready-1", label: "Shot 1", reasonCode: "READY", reason: "待启动", severity: "INFO", destination: "shots", stage: "image", shotId: "shot-ready", batchId: "batch-ready", taskId: null, assetId: null, workflowVersionId: "workflow-1", recipeId: "recipe-1" }],
+        },
+        running: emptyBucket,
+        review: emptyBucket,
+        completed: emptyBucket,
+        topAction: null,
+      },
+    })} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "继续工作" }));
+
+    expect(onNavigate).toHaveBeenCalledWith({ destination: "shots", section: "production", shotId: "shot-ready", batchId: "batch-ready", actionKind: "READY" });
+  });
+
   it("carries exact running shot and task targets from the derived queue facts", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();

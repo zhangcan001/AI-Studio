@@ -166,6 +166,7 @@ export function SceneProductionPreparation({
     if (!confirmAdmission(ids.length)) return;
     setBusyAction("admit");
     clearFeedback();
+    setAdmissionResult(undefined);
     try {
       const result = await admitSceneProduction({
         projectId,
@@ -176,7 +177,7 @@ export function SceneProductionPreparation({
       });
       setAdmissionResult(result);
       setSelectedShotIds(new Set());
-      const message = "已加入生产队列：创建 " + result.createdCount + " 个，复用 " + result.alreadyPreparedCount + " 个，跳过 " + (result.skippedIncomplete + result.skippedBlocked) + " 个。";
+      const message = "已准备完成：已创建 " + result.createdCount + " 个待启动项目；当前尚未开始生产。复用 " + result.alreadyPreparedCount + " 个，跳过 " + (result.skippedIncomplete + result.skippedBlocked) + " 个。";
       setNotice(message);
       onNotice?.(message);
       setView((current) => current ? markAdmittedItems(current, ids, result) : current);
@@ -249,7 +250,7 @@ export function SceneProductionPreparation({
 
       {notice && <div className="scene-production-notice" role="status">{notice}</div>}
       {admissionResult && <section className="scene-preparation-success" aria-label="加入生产结果">
-        <div><strong>已加入生产队列</strong><span>已创建 Batch / BatchItem；没有启动队列，也没有提交生成。</span></div>
+        <div><strong>已准备完成 · 待启动</strong><span>已创建 READY Batch / BatchItem；当前尚未开始生产，也没有提交生成。</span></div>
         <dl><div><dt>创建</dt><dd>{admissionResult.createdCount}</dd></div><div><dt>复用</dt><dd>{admissionResult.alreadyPreparedCount}</dd></div><div><dt>跳过</dt><dd>{admissionResult.skippedIncomplete + admissionResult.skippedBlocked}</dd></div></dl>
         <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(admissionResult.batchId ?? admissionResult.createdBatchIds?.[0])} disabled={!onOpenProductionQueue}>前往生产队列</button>
       </section>}

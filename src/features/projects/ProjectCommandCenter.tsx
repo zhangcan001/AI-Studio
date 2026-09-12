@@ -589,6 +589,8 @@ function recommendedActionFromAggregate(
   aggregate: ProjectCommandCenterAggregate,
 ): RecommendedAction {
   const consistencyAction = consistencyRecommendedAction(aggregate);
+  const readyBatchIds = [...new Set((aggregate.dailyProduction?.ready.items ?? []).map((item) => item.batchId).filter((batchId): batchId is string => Boolean(batchId)))];
+  const exactReadyBatchId = action.kind === "READY" && readyBatchIds.length === 1 ? readyBatchIds[0] : undefined;
   const shotId = action.shotId
     ?? (action.kind === "IMAGE_REVIEW" ? aggregate.shots.firstImageReviewShotId : undefined)
     ?? (action.kind === "VIDEO_REVIEW" ? aggregate.shots.firstVideoReviewShotId : undefined)
@@ -597,6 +599,7 @@ function recommendedActionFromAggregate(
     ?? (action.kind === "READY" ? aggregate.shots.firstReadyShotId : undefined)
     ?? (action.kind === "COMPLETE" ? aggregate.shots.firstCompletedShotId : undefined);
   const batchId = action.batchId
+    ?? exactReadyBatchId
     ?? (action.kind === "ACTIVE_PRODUCTION" ? aggregate.queue.firstActiveBatchId : undefined)
     ?? (action.kind === "AUTO_RESUMABLE" ? aggregate.queue.firstAutoResumableBatchId : undefined)
     ?? (action.kind === "REVIEW_REQUIRED" ? aggregate.queue.firstReviewRequiredBatchId : undefined);

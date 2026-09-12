@@ -231,17 +231,55 @@ describe("ShotBatchReviewBoard adapter", () => {
     expect(onOpenProductionQueue).not.toHaveBeenCalled();
   });
 
-  it("creates a confirmed video rework without an auto-start field and never starts the queue", async () => {
+  it("creates a confirmed video rework without an auto-start field and exposes the exact READY queue continuation", async () => {
     const item = reviewItem({ itemId: "video-item", shotId: "video-shot", stage: "VIDEO", outputAssets: [asset("video-a", "video")], candidateAssets: [candidate("video-a", "video")] });
     const onOpenProductionQueue = vi.fn();
     await renderReviewBoard([item], { stage: "video", onOpenProductionQueue });
     window.confirm = vi.fn(() => true);
-    vi.mocked(invoke).mockResolvedValue({ selectedCount: 1 });
+    vi.mocked(invoke).mockResolvedValue({ selectedCount: 1, batch: { id: "rework-batch" } });
     await userEvent.setup().click(screen.getByRole("button", { name: "创建返工批次" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("production_item_review_regenerate", { request: expect.objectContaining({ itemId: "video-item" }) }));
     expect(vi.mocked(invoke).mock.calls[0]?.[1]).not.toHaveProperty("request.autoStart");
     expect(invoke).not.toHaveBeenCalledWith("production_queue_start", expect.anything());
+    expect(await screen.findByText(/已创建 READY 返工批次/)).toBeTruthy();
+    expect(onOpenProductionQueue).not.toHaveBeenCalled();
+    await userEvent.setup().click(screen.getByRole("button", { name: "打开生产队列" }));
     expect(onOpenProductionQueue).toHaveBeenCalledOnce();
+    expect(onOpenProductionQueue).toHaveBeenCalledWith("rework-batch");
+  });
+
+  it("offers exact Shot and Asset continuation after approving the selected result", async () => {
+    const item = reviewItem({ itemId: "video-item", shotId: "video-shot", stage: "VIDEO", outputAssets: [asset("video-a", "video")], candidateAssets: [candidate("video-a", "video")] });
+    const onOpenShot = vi.fn();
+    const onOpenAsset = vi.fn();
+    vi.mocked(invoke).mockResolvedValue({});
+    await renderReviewBoard([item], { stage: "video", onOpenShot, onOpenAsset });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "确认并通过" }));
+    expect(await screen.findByText(/下一步可继续审片/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "查看 Shot" }));
+    await user.click(screen.getByRole("button", { name: "打开 Asset" }));
+
+    expect(onOpenShot).toHaveBeenCalledWith("video-shot");
+    expect(onOpenAsset).toHaveBeenCalledWith("video-a");
+  });
+
+  it("does not leave a queue continuation after rework creation fails", async () => {
+    const item = reviewItem({ itemId: "video-item", shotId: "video-shot", stage: "VIDEO", outputAssets: [asset("video-a", "video")], candidateAssets: [candidate("video-a", "video")] });
+    const onOpenProductionQueue = vi.fn();
+    await renderReviewBoard([item], { stage: "video", onOpenProductionQueue });
+    window.confirm = vi.fn(() => true);
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "production_item_review_regenerate") throw new Error("rework failed");
+      return new ArrayBuffer(0);
+    });
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "创建返工批次" }));
+    await waitFor(() => expect(screen.getAllByRole("alert").some((element) => element.textContent?.includes("rework failed"))).toBe(true));
+
+    expect(screen.queryByRole("button", { name: "打开生产队列" })).toBeNull();
+    expect(onOpenProductionQueue).not.toHaveBeenCalled();
   });
 
   it("disables review rework for image items and preserves the legacy retry boundary", async () => {

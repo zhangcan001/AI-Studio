@@ -584,6 +584,15 @@ function App() {
     navigateToStudioSection("production");
   }
 
+  function openProductionQueueFromShot(batchId?: string) {
+    if (batchId) {
+      applyNavigationFocus({ workspace: "shots", section: "production", batchId });
+      navigateToRoute("shots", "production", true);
+      return;
+    }
+    navigateToStudioSection("production");
+  }
+
   async function reconnectComfy() {
     setConnectionLoading(true);
     setError(null);
@@ -1021,7 +1030,7 @@ function App() {
             focusProductionBatchId={focusedProductionBatchId}
             focusProductionReviewItemId={focusedProductionReviewItemId}
             focusProductionStage={focusedProductionStage}
-            onOpenProductionQueue={() => navigateToStudioSection("production")}
+            onOpenProductionQueue={openProductionQueueFromShot}
             consistencyWorkspace={{
               profiles: consistencyProfiles,
               referenceSets: consistencyReferenceSets,

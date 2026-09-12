@@ -492,7 +492,7 @@ function installAdapter(adapter: FakeSqliteProductionAdapter): void {
   tauriMocks.getProductionAdmissionStatus.mockResolvedValue({ busy: false });
 }
 
-function renderWorkspace(adapter: FakeSqliteProductionAdapter, mode: "creation" | "production" = "creation"): void {
+function renderWorkspace(adapter: FakeSqliteProductionAdapter, mode: "creation" | "production" = "creation", onOpenProductionQueue?: (batchId?: string) => void): void {
   installAdapter(adapter);
   render(
     <ShotWorkspace
@@ -501,6 +501,7 @@ function renderWorkspace(adapter: FakeSqliteProductionAdapter, mode: "creation" 
       catalog={CATALOG}
       initialSelectedShotId={SHOT_ID}
       mode={mode}
+      onOpenProductionQueue={onOpenProductionQueue}
     />,
   );
 }
@@ -516,7 +517,8 @@ describe("DEV-080 formal project workflow production UAT", () => {
   it("carries a custom image default into Shot config, freezes the exact pair, and reaches fake Comfy", async () => {
     const adapter = new FakeSqliteProductionAdapter(projectConfig(binding(CUSTOM_IMAGE_A)), [shot()]);
     const user = userEvent.setup();
-    renderWorkspace(adapter, "production");
+    const onOpenProductionQueue = vi.fn();
+    renderWorkspace(adapter, "production", onOpenProductionQueue);
 
     await user.click(await screen.findByRole("tab", { name: "项目生产" }));
     await user.click(screen.getByRole("button", { name: "全选" }));
@@ -537,6 +539,10 @@ describe("DEV-080 formal project workflow production UAT", () => {
       allowPartial: false,
     }));
     expect(adapter.comfySubmissions).toHaveLength(0);
+    expect(await screen.findByText(/已准备完成/)).toBeTruthy();
+    expect(tauriMocks.startProductionQueue).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "打开生产队列" }));
+    expect(onOpenProductionQueue).toHaveBeenCalledWith("pbt-dev080");
 
     const frozen = adapter.frozenBatch("pbt-dev080");
     expect(frozen?.items[0]).toMatchObject({

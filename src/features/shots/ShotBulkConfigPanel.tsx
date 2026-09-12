@@ -23,7 +23,7 @@ export interface ShotBulkConfigPanelProps {
   onError?: (message?: string) => void;
   onConfigureStage?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
   onBulkPrompt?: (stage: ShotStage, shotIds: string[], promptText: string) => void | Promise<void>;
-  onOpenProductionQueue?: () => void | Promise<void>;
+  onOpenProductionQueue?: (batchId?: string) => void | Promise<void>;
 }
 
 export const MAX_BULK_PREPARATION_ITEMS = 100;
@@ -223,6 +223,7 @@ export function ShotBulkConfigPanel({
   }
 
   async function prepareBatch(nextStage: ShotStage) {
+    setPreparationResult(undefined);
     await runAction(
       `prepare-${nextStage}`,
       async (shotIds) => {
@@ -353,7 +354,7 @@ export function ShotBulkConfigPanel({
       </div>
 
       <p className="pipeline-human-review-note"><strong>人工审核保持不变：</strong>批量操作不会自动选择第一张图片、最新图片或第一个视频；图片生成后停在图片审核，视频生成后停在视频审核。</p>
-      {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备 {preparationResult.createdCount} 个镜头</strong><span>已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。没有启动队列或创建 Task。</span>{onOpenProductionQueue && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue()}>打开生产队列</button>}</div>}
+      {preparationResult && <div className="pipeline-preparation-result" role="status"><strong>已准备完成 · {preparationResult.createdCount} 个镜头</strong><span>已创建待启动批次；当前尚未开始生产。已准备 {preparationResult.alreadyPreparedCount} · 阻塞跳过 {preparationResult.skippedBlocked} · 不完整跳过 {preparationResult.skippedIncomplete}。</span>{onOpenProductionQueue && preparationResult.createdCount > 0 && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue(preparationResult.batchId ?? preparationResult.createdBatchIds?.[0])}>打开生产队列</button>}</div>}
       {localNotice && <p className="studio-notice">{localNotice}</p>}
       {localError && <p className="error-message" role="alert">{localError}</p>}
     </section>

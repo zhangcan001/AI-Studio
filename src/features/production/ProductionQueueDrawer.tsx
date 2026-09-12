@@ -186,6 +186,7 @@ export function ProductionQueueDrawer({
 
       {isExpanded && (
         <div id={contentId} className="production-queue-drawer-body">
+          <p className="production-queue-drawer-start-note">只有在这里点击“开始”才会创建并提交生产任务；准备和返工不会自动启动。</p>
           {visibleRows.length ? (
             <ul className="production-queue-drawer-list" aria-label="生产队列批次">
               {visibleRows.map((row) => (

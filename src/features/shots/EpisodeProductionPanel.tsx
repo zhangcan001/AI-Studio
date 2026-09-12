@@ -159,6 +159,7 @@ export function EpisodeProductionPanel({
       return;
     }
     if (!window.confirm(episodePrepareConfirmation(plan.episodeName, stage, selectedPlans.length, selectedShotIds.length))) return;
+    setResult(undefined);
     await runAction("prepare", async () => {
       try {
         const next = await prepareEpisodeProduction({ projectId, episodeId, stage, sceneIds: selectedSceneIds, allowPartial });
@@ -280,18 +281,21 @@ export function EpisodePrepareResultView({
   onNavigateToScene,
 }: {
   result: EpisodeProductionPrepareResult;
-  onOpenProductionQueue?: () => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   disabled: boolean;
   onNavigateToScene?: (sceneId: string) => void;
 }) {
   const status = result.status ?? (result.skippedBlockedScenes.length > 0 ? "PARTIAL" : result.createdBatches > 0 ? "SUCCESS" : "NOOP");
   const blockerRows = result.results.filter((row) => row.blockingReasons.length > 0 || row.status === "BLOCKED" || Boolean(row.error));
+  const createdBatchIds = [...new Set(result.results.filter((row) => row.created && row.batchId).map((row) => row.batchId as string))];
+  const createdBatchId = createdBatchIds.length === 1 ? createdBatchIds[0] : undefined;
+  const canOpenQueue = (status === "SUCCESS" || status === "PARTIAL") && result.createdBatches > 0 && Boolean(onOpenProductionQueue);
   return <section className={`episode-production-result episode-production-result-${status.toLowerCase()}`} aria-label="集准备结果">
     <div><span className="section-label">准备结果</span><h4>{episodePrepareStatusLabel(status)}</h4></div>
-    <p>创建批次：<strong>{result.createdBatches}</strong> · 新建镜头项目：<strong>{result.createdItems}</strong> · 已跳过：<strong>{result.alreadyPreparedScenes.length + result.skippedDoneScenes.length + result.skippedEmptyScenes.length}</strong></p>
+    <p>创建批次：<strong>{result.createdBatches}</strong> · 新建镜头项目：<strong>{result.createdItems}</strong> · 已跳过：<strong>{result.alreadyPreparedScenes.length + result.skippedDoneScenes.length + result.skippedEmptyScenes.length}</strong>{canOpenQueue && " · 批次当前为 READY，尚未启动"}</p>
     {status === "PARTIAL" && <p>已成功准备部分场景，其余场景因状态变化或阻塞未准备。</p>}
     {blockerRows.length > 0 && <div className="episode-production-blockers"><strong>阻塞场景</strong>{blockerRows.map((row) => <div key={row.sceneId}><span>{row.sceneName || row.sceneId}：{row.blockingReasons.join("；") || row.error || "状态阻塞"}</span><button type="button" className="quiet-button" onClick={() => onNavigateToScene?.(row.sceneId)} disabled={disabled}>查看场景</button></div>)}</div>}
-    <button type="button" onClick={onOpenProductionQueue} disabled={disabled || !onOpenProductionQueue}>打开生产队列</button>
+    {canOpenQueue && <button type="button" onClick={() => onOpenProductionQueue?.(createdBatchId)} disabled={disabled}>打开生产队列</button>}
   </section>;
 }
 

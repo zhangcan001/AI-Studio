@@ -157,6 +157,7 @@ export function SeriesProductionPanel({
       return;
     }
     if (!confirmIfAvailable(seriesPrepareConfirmation(plan.seriesName, selectedEpisodePlans.length, selectedSceneIds.length, stage))) return;
+    setResult(undefined);
     await runAction("prepare", async () => {
       const next = await onPrepare({ projectId, seriesId, stage, episodeIds: selectedEpisodeIds, allowPartial });
       setResult(next);
@@ -243,11 +244,14 @@ export function SeriesProductionPanel({
   );
 }
 
-export function SeriesPrepareResultView({ result, onOpenProductionQueue, disabled, onNavigateToEpisode }: { result: SeriesProductionPrepareResult; onOpenProductionQueue?: () => void; disabled: boolean; onNavigateToEpisode?: (episodeId: string) => void }) {
+export function SeriesPrepareResultView({ result, onOpenProductionQueue, disabled, onNavigateToEpisode }: { result: SeriesProductionPrepareResult; onOpenProductionQueue?: (batchId?: string) => void; disabled: boolean; onNavigateToEpisode?: (episodeId: string) => void }) {
   const status = result.status ?? (result.skippedBlockedEpisodes.length ? "PARTIAL" : result.createdBatches ? "SUCCESS" : "NOOP");
   const blockers = result.episodeResults.filter((row) => (row.blockingReasons?.length ?? 0) > 0 || Boolean(row.error) || row.status === "BLOCKED");
   const skipped = result.alreadyPreparedEpisodes.length + result.skippedDoneEpisodes.length + result.skippedEmptyEpisodes.length + result.skippedBlockedEpisodes.length;
-  return <section className={`series-production-result series-production-result-${status.toLowerCase()}`} aria-label="系列准备结果"><div><span className="section-label">准备结果</span><h4>{seriesPrepareStatusLabel(status)}</h4></div><p>成功创建：<strong>{result.createdBatches}</strong> 个批次 · <strong>{result.createdItems}</strong> 个镜头项目 · 已跳过：<strong>{skipped}</strong> 个集</p>{status === "PARTIAL" && <p>部分集在准备期间状态发生变化，已创建内容不会回滚。</p>}{blockers.length > 0 && <div className="series-production-blockers"><strong>阻塞集</strong>{blockers.map((row) => <div key={row.episodeId}><span>{row.episodeName || row.episodeId}：{row.blockingReasons?.join("；") || row.error || "状态阻塞"}</span><button type="button" className="quiet-button" onClick={() => onNavigateToEpisode?.(row.episodeId)} disabled={disabled}>查看集</button></div>)}</div>}<button type="button" onClick={onOpenProductionQueue} disabled={disabled || !onOpenProductionQueue}>打开生产队列</button></section>;
+  const createdBatchIds = [...new Set(result.episodeResults.flatMap((row) => row.batchIds ?? []))];
+  const createdBatchId = createdBatchIds.length === 1 ? createdBatchIds[0] : undefined;
+  const canOpenQueue = (status === "SUCCESS" || status === "PARTIAL") && result.createdBatches > 0 && Boolean(onOpenProductionQueue);
+  return <section className={`series-production-result series-production-result-${status.toLowerCase()}`} aria-label="系列准备结果"><div><span className="section-label">准备结果</span><h4>{seriesPrepareStatusLabel(status)}</h4></div><p>成功创建：<strong>{result.createdBatches}</strong> 个批次 · <strong>{result.createdItems}</strong> 个镜头项目 · 已跳过：<strong>{skipped}</strong> 个集{canOpenQueue && " · 批次当前为 READY，尚未启动"}</p>{status === "PARTIAL" && <p>部分集在准备期间状态发生变化，已创建内容不会回滚。</p>}{blockers.length > 0 && <div className="series-production-blockers"><strong>阻塞集</strong>{blockers.map((row) => <div key={row.episodeId}><span>{row.episodeName || row.episodeId}：{row.blockingReasons?.join("；") || row.error || "状态阻塞"}</span><button type="button" className="quiet-button" onClick={() => onNavigateToEpisode?.(row.episodeId)} disabled={disabled}>查看集</button></div>)}</div>}{canOpenQueue && <button type="button" onClick={() => onOpenProductionQueue?.(createdBatchId)} disabled={disabled}>打开生产队列</button>}</section>;
 }
 
 export function productionSeriesOptions(tree: SeriesProductionPanelProps["tree"]): Array<{ value: string; label: string }> {

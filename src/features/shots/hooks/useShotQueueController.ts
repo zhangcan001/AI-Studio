@@ -41,7 +41,7 @@ export interface UseShotQueueControllerOptions {
   onError: (message: string) => void;
   onNotice: (message: string) => void;
   onFocusBatch?: (batchId: string) => void;
-  onOpenProductionQueue?: () => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
 }
 
 export function useShotQueueController({
@@ -122,7 +122,7 @@ export function useShotQueueController({
       throw new Error("Created production batch is not visible in queue projection");
     }
     setExpanded(true);
-    onOpenProductionQueue?.();
+    onOpenProductionQueue?.(firstBatchId);
   }, [focusBatch, onOpenProductionQueue, reloadProductionQueues]);
 
   const maybeAdvanceSequentialBatchStart = useCallback(async () => {
@@ -303,6 +303,7 @@ export function useShotQueueController({
       if (!isCurrentSession()) return;
       applySequentialAction({ type: "START_ACTIVE", batchId });
       focusBatch(batchId);
+      onNotice("批次已启动；可在生产监控中查看运行任务。");
       await reloadProductionQueues();
       if (!isCurrentSession()) return;
       await reloadWorkspace();

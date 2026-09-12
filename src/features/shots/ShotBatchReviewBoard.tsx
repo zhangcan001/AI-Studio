@@ -32,20 +32,24 @@ interface Props {
   onSelect: (shotId: string, stage: ShotStage, assetId: string, fromLinkedTask: boolean) => void;
   onRetry: (shotId: string, stage: ShotStage) => void;
   onOpenTask?: (taskId: string) => void;
+  onOpenShot?: (shotId: string) => void;
+  onOpenAsset?: (assetId: string) => void;
   /** Optional seam for hosts that can resolve a production review batch. */
   reviewBatchId?: string;
   initialReviewItemId?: string;
   reviewBatchLoader?: (projectId: string, batchId: string) => Promise<ProductionBatchReviewProductivity>;
-  onOpenProductionQueue?: () => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
 }
 
 export type ReviewFilter = "ALL" | "UNREVIEWED" | "APPROVED" | "STARRED" | "REGENERATE" | "REJECTED" | "FAILED";
 
-export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask, reviewBatchId, initialReviewItemId, reviewBatchLoader = getProductionBatchReviewProductivity, onOpenProductionQueue }: Props) {
+export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask, onOpenShot, onOpenAsset, reviewBatchId, initialReviewItemId, reviewBatchLoader = getProductionBatchReviewProductivity, onOpenProductionQueue }: Props) {
   const [review, setReview] = useState<ProductionBatchReviewProductivity>();
   const [reviewError, setReviewError] = useState<string>();
   const [reviewTargetUnavailable, setReviewTargetUnavailable] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [readyReworkBatchId, setReadyReworkBatchId] = useState<string>();
+  const [selectionContinuation, setSelectionContinuation] = useState<{ shotId: string; assetId: string }>();
   const [filter, setFilter] = useState<ReviewFilter>("ALL");
   const [currentReviewItemId, setCurrentReviewItemId] = useState<string>();
   const [localCompareShotId, setLocalCompareShotId] = useState<string>();
@@ -61,7 +65,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
   }, [assets, candidateIds, localCompareShotId, onAssetsLoaded, projectId, reviewBatchId]);
 
   useEffect(() => {
-    setReview(undefined); setReviewError(undefined); setReviewTargetUnavailable(false); setCurrentReviewItemId(undefined);
+    setReview(undefined); setReviewError(undefined); setReviewTargetUnavailable(false); setCurrentReviewItemId(undefined); setReadyReworkBatchId(undefined); setSelectionContinuation(undefined); setNotice(undefined);
     setLocalCompareShotId(undefined);
     if (!reviewBatchId) return;
     let active = true;
@@ -143,9 +147,10 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
     const resultStage = normalizeStage(item.stage);
     if (!resultStage) return;
     setReviewError(undefined);
+    setSelectionContinuation(undefined);
     try { await selectShotResult({ projectId, shotId: item.shotId, stage: resultStage, assetId: candidate.id, fromLinkedTask: true }); }
     catch (error: unknown) { setReviewError(error instanceof Error ? error.message : "候选选择失败。"); return; }
-    try { await setProductionReviewStatus({ projectId, batchId: reviewBatchId, itemId: item.id, status: "APPROVED" }); setNotice("候选已设为采用结果，审片状态已更新为通过。"); await reloadReview(); }
+    try { await setProductionReviewStatus({ projectId, batchId: reviewBatchId, itemId: item.id, status: "APPROVED" }); setNotice("候选已设为采用结果，审片状态已更新为通过。下一步可继续审片，或查看对应 Shot / Asset。"); setSelectionContinuation({ shotId: item.shotId, assetId: candidate.id }); await reloadReview(); }
     catch { setReviewError("候选已设为采用结果，但审片状态未更新，请重新点击通过。"); }
   }
 
@@ -168,10 +173,12 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
       ? window.confirm("确定创建返工批次吗？\n创建后不会自动开始，仍需前往生产队列手动启动。")
       : false;
     if (!confirmed) return;
+    setReadyReworkBatchId(undefined);
+    setNotice(undefined);
     try {
       const result = await regenerateProductionItem({ projectId, batchId: reviewBatchId, itemId: item.id, durationSeconds: sourceItem.durationSeconds, width: sourceItem.width, height: sourceItem.height, useOriginalSeed: false });
-      setNotice(`已创建 READY 返工批次（${result.selectedCount} 项），请打开/手动开始队列。`);
-      onOpenProductionQueue?.();
+      setNotice(`已创建 READY 返工批次（${result.selectedCount} 项），尚未启动。请打开生产队列后明确点击“开始”。`);
+      setReadyReworkBatchId(result.batch.id);
       await reloadReview();
     } catch (error: unknown) { setReviewError(error instanceof Error ? error.message : "返工批次创建失败。"); }
   }
@@ -198,14 +205,20 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
           {([ ["ALL", `全部 ${mappedItems.length}`], ["UNREVIEWED", `未审核 ${counts.unreviewed}`], ["APPROVED", `已通过 ${counts.approved}`], ["STARRED", `标星 ${counts.starred}`], ["REGENERATE", `待返工 ${counts.regenerate}`], ["REJECTED", `已拒绝 ${counts.rejected}`], ["FAILED", `失败 ${counts.failed}`] ] as const).map(([value, label]) => <button key={value} type="button" className={filter === value ? "review-filter-active" : "quiet-button"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
         </div>
         {reviewError && <p className="review-compare-error" role="alert">{reviewError}</p>}
-        {notice && <p className="studio-notice" role="status">{notice}</p>}
+        {notice && <div className="studio-notice" role="status">
+          <span>{notice}</span>
+          {selectionContinuation && <span>下一步：</span>}
+          {selectionContinuation && onOpenShot && <button type="button" className="quiet-button" onClick={() => onOpenShot(selectionContinuation.shotId)}>查看 Shot</button>}
+          {selectionContinuation && onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(selectionContinuation.assetId)}>打开 Asset</button>}
+          {readyReworkBatchId && onOpenProductionQueue && <button type="button" className="quiet-button" onClick={() => { const batchId = readyReworkBatchId; setReadyReworkBatchId(undefined); onOpenProductionQueue(batchId); }}>打开生产队列</button>}
+        </div>}
         {compareItems.length ? <ReviewCompareWorkspace
           items={compareItems}
           currentItemId={currentReviewItemId}
           busy={busy}
           error={reviewError}
           actionAvailability={{ confirmAndApprove: Boolean(reviewBatchId), approve: Boolean(reviewBatchId), star: Boolean(reviewBatchId), reject: Boolean(reviewBatchId), regenerate: Boolean(reviewBatchId), createReworkBatch: Boolean(reviewBatchId) && createReworkBatchAvailable, saveNote: Boolean(reviewBatchId) }}
-          onItemChange={(item) => setCurrentReviewItemId(item.id)}
+          onItemChange={(item) => { setCurrentReviewItemId(item.id); setSelectionContinuation(undefined); setReadyReworkBatchId(undefined); }}
           onConfirmAndApprove={(candidate, item) => void confirmAndApprove(candidate, item)}
           onApprove={(_candidate, item) => void setReviewStatus("APPROVED", item)}
           onStar={(_candidate, item) => void setReviewStatus("STARRED", item)}

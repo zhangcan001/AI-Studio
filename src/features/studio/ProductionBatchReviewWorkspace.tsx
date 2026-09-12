@@ -131,7 +131,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
     setNotice(undefined);
     try {
       const result = await regenerateMarkedProductionItems({ projectId, batchId });
-      setNotice(`已创建返工批次，共 ${result.selectedCount} 项，等待启动。`);
+      setNotice(`已创建 READY 返工批次，共 ${result.selectedCount} 项，尚未启动。`);
       setReadyBatchId(result.batch.id);
       await onBatchChanged?.();
       await refresh();
@@ -160,7 +160,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         ...request,
       });
       setRegenerateItem(undefined);
-      setNotice("已创建返工批次，等待启动。");
+      setNotice("已创建 READY 返工批次，尚未启动。");
       setReadyBatchId(result.batch.id);
       await onBatchChanged?.();
       await refresh();

@@ -234,7 +234,7 @@ describe("Scene preparation client boundary", () => {
         allowPartial: false,
       });
       expect(admitMock.mock.calls[0]?.[0].shotIds).toHaveLength(100);
-      expect(textContent(tree)).toContain("已加入生产队列");
+      expect(textContent(tree)).toContain("已准备完成");
 
       const queueButton = findSingle(tree, (element) => element.type === "button" && textContent(element) === "前往生产队列");
       (queueButton.props.onClick as () => void)();

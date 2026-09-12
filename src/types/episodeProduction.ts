@@ -90,6 +90,6 @@ export interface EpisodeProductionPanelProps {
   onRefresh?: () => Promise<void>;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
-  onOpenProductionQueue?: () => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   onNavigateToScene?: (sceneId: string) => void;
 }

@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
+
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ShotView } from "../../types/shot";
 import type { SeriesProductionPlan } from "../../types/seriesProduction";
@@ -14,6 +18,8 @@ import {
   seriesPresetConfirmation,
   seriesProductionActionDisabled,
 } from "./SeriesProductionPanel";
+
+afterEach(cleanup);
 
 const tree: ProductionStructureTree = {
   projectId: "project-1",
@@ -70,10 +76,20 @@ describe("SeriesProductionPanel", () => {
   });
 
   it("renders prepare result and queue/episode deep-link affordances", () => {
-    const html = renderToStaticMarkup(<SeriesPrepareResultView result={{ projectId: "project-1", seriesId: "series-1", stage: "image", status: "PARTIAL", requestedEpisodes: 2, requestedScenes: 2, createdBatches: 1, createdItems: 3, alreadyPreparedEpisodes: [], skippedDoneEpisodes: [], skippedEmptyEpisodes: [], skippedBlockedEpisodes: ["episode-2"], episodeResults: [{ episodeId: "episode-2", episodeName: "夜战", status: "BLOCKED", createdBatches: 0, createdItems: 0, alreadyPrepared: false, skipped: true, blockingReasons: ["缺少图片提示词"], batchIds: [] }] }} onOpenProductionQueue={() => undefined} disabled={false} onNavigateToEpisode={() => undefined} />);
+    const html = renderToStaticMarkup(<SeriesPrepareResultView result={{ projectId: "project-1", seriesId: "series-1", stage: "image", status: "PARTIAL", requestedEpisodes: 2, requestedScenes: 2, createdBatches: 1, createdItems: 3, alreadyPreparedEpisodes: [], skippedDoneEpisodes: [], skippedEmptyEpisodes: [], skippedBlockedEpisodes: ["episode-2"], episodeResults: [{ episodeId: "episode-1", episodeName: "雨夜", status: "SUCCESS", createdBatches: 1, createdItems: 3, alreadyPrepared: false, skipped: false, blockingReasons: [], batchIds: ["series-batch"] }, { episodeId: "episode-2", episodeName: "夜战", status: "BLOCKED", createdBatches: 0, createdItems: 0, alreadyPrepared: false, skipped: true, blockingReasons: ["缺少图片提示词"], batchIds: [] }] }} onOpenProductionQueue={() => undefined} disabled={false} onNavigateToEpisode={() => undefined} />);
     expect(html).toContain("部分准备");
     expect(html).toContain("创建：<strong>1</strong> 个批次");
+    expect(html).toContain("READY");
     expect(html).toContain("打开生产队列");
     expect(html).toContain("查看集");
+  });
+
+  it("passes the exact created batch when a series result has one batch", async () => {
+    const onOpenQueue = vi.fn();
+    render(<SeriesPrepareResultView result={{ projectId: "project-1", seriesId: "series-1", stage: "image", status: "SUCCESS", requestedEpisodes: 1, requestedScenes: 1, createdBatches: 1, createdItems: 3, alreadyPreparedEpisodes: [], skippedDoneEpisodes: [], skippedEmptyEpisodes: [], skippedBlockedEpisodes: [], episodeResults: [{ episodeId: "episode-1", episodeName: "雨夜", status: "SUCCESS", createdBatches: 1, createdItems: 3, alreadyPrepared: false, skipped: false, blockingReasons: [], batchIds: ["series-batch"] }] }} onOpenProductionQueue={onOpenQueue} disabled={false} />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "打开生产队列" }));
+
+    expect(onOpenQueue).toHaveBeenCalledWith("series-batch");
   });
 });

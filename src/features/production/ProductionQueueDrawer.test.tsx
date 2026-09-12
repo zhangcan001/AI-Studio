@@ -102,6 +102,7 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain("第一季 · 第01集 · Scene 05");
     expect(html).toContain("图片");
     expect(html).toContain("8");
+    expect(html).toContain("只有在这里点击“开始”才会创建并提交生产任务");
     expect(html).toContain('data-action="start"');
   });
 

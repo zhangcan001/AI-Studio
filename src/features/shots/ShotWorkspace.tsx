@@ -246,7 +246,7 @@ interface Props {
   focusProductionBatchId?: string;
   focusProductionReviewItemId?: string;
   focusProductionStage?: ShotStage;
-  onOpenProductionQueue?: () => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   consistencyWorkspace?: Omit<ScopeConsistencyWorkspaceProps, "projectId" | "scope" | "scopeOptions" | "onScopeChange"> & {
     scopeOptions?: ConsistencyScopeOption[];
     onScopeChange?: (scope: ConsistencyScopeRef) => void;
@@ -1257,7 +1257,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             runbook={productionBatchRunbook}
             onRefresh={reload}
             onStartBatch={startProductionBatch}
-            onOpenProductionQueue={onOpenProductionQueue ? () => { void openProductionQueue(); } : undefined}
+            onOpenProductionQueue={onOpenProductionQueue}
             onNavigateToEpisode={(episodeId) => selectWorkspaceSelection({ type: "episode", episodeId })}
             onNavigateToScene={(sceneId) => selectWorkspaceSelection({ type: "scene", sceneId })}
           />
@@ -1269,7 +1269,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             onError={(message) => setError(message)}
             onConfigureStage={configureBulkStage}
             onBulkPrompt={assignBulkPrompt}
-            onOpenProductionQueue={onOpenProductionQueue ? () => { void openProductionQueue(); } : undefined}
+            onOpenProductionQueue={onOpenProductionQueue}
             busy={busy}
             onOpenReview={(reviewStage, shotIds) => {
               if (busy || !shotIds.length) return;
@@ -1313,6 +1313,8 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         onSelect={(shotId, reviewStage, assetId, fromLinkedTask) => void selectBatchResult(shotId, reviewStage, assetId, fromLinkedTask)}
         onRetry={(shotId, reviewStage) => void retryShot(shotId, reviewStage)}
         onOpenTask={onOpenTask}
+        onOpenShot={(shotId) => onNavigate?.({ destination: "shots", section: "creation", shotId, projectId })}
+        onOpenAsset={onOpenAsset}
         reviewBatchId={mode === "review" ? focusProductionBatchId : undefined}
         initialReviewItemId={mode === "review" ? focusProductionReviewItemId : undefined}
         onOpenProductionQueue={onOpenProductionQueue}
@@ -1557,7 +1559,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         onPause={pauseProductionBatch}
         onOpen={mode === "production"
           ? (batchId) => openProductionMonitorBatch(batchId)
-          : onOpenProductionQueue ? () => onOpenProductionQueue() : undefined}
+          : onOpenProductionQueue ? (batchId) => onOpenProductionQueue(batchId) : undefined}
       />
       {mode === "production" && (
         <>

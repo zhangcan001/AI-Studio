@@ -114,7 +114,7 @@ export interface SeriesProductionPanelProps {
   onRefresh?: () => Promise<void>;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
-  onOpenProductionQueue?: () => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   onOpenRunbook?: () => void;
   onNavigateToEpisode?: (episodeId: string) => void;
 }
