@@ -240,6 +240,7 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
   focusProductionBatchId?: string;
   focusProductionReviewItemId?: string;
+  focusProductionStage?: ShotStage;
   onOpenProductionQueue?: () => void;
   consistencyWorkspace?: Omit<ScopeConsistencyWorkspaceProps, "projectId" | "scope" | "scopeOptions" | "onScopeChange"> & {
     scopeOptions?: ConsistencyScopeOption[];
@@ -259,7 +260,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, focusProductionBatchId, focusProductionReviewItemId, onOpenProductionQueue, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, focusProductionBatchId, focusProductionReviewItemId, focusProductionStage, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -268,7 +269,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     selectShot,
     reconcileSelectedShot,
   } = useShotWorkspaceSelection({ projectId, initialSelectedShotId, onShotSelected });
-  const [stage, setStage] = useState<ShotStage>("image");
+  const [stage, setStage] = useState<ShotStage>(focusProductionStage ?? "image");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
@@ -484,6 +485,11 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     }
   }, [projectId, reconcileSelectedShot]);
 
+  useEffect(() => {
+    if (!initialSelectedShotId || loading || shots.some((shot) => shot.id === initialSelectedShotId)) return;
+    setError("目标镜头不存在或已不可用。");
+  }, [initialSelectedShotId, loading, shots]);
+
   const reloadProductionQueuesRef = useRef<((throwOnError?: boolean) => Promise<ProductionQueueSnapshot | undefined>) | undefined>(undefined);
   const reloadProductionQueues = useCallback(
     (throwOnError = false) => reloadProductionQueuesRef.current?.(throwOnError) ?? Promise.resolve(undefined),
@@ -550,6 +556,28 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     pauseBatch: pauseProductionBatch,
     requeueItem: requeueProductionMonitorItemFromQueue,
   } = queueController;
+
+  useEffect(() => {
+    if (mode !== "production" || !focusProductionBatchId) return;
+    let active = true;
+    void reloadProductionQueues(true).then((snapshot) => {
+      if (!active) return;
+      if (!snapshot?.queues.some((queue) => queue.id === focusProductionBatchId)) {
+        setError("目标生产批次不存在或已不可用。");
+        return;
+      }
+      focusProductionQueueBatch(focusProductionBatchId);
+    }).catch((loadError: unknown) => {
+      if (active) setError(toUserMessage(loadError));
+    });
+    return () => {
+      active = false;
+    };
+  }, [focusProductionBatchId, focusProductionQueueBatch, mode, reloadProductionQueues]);
+
+  useEffect(() => {
+    if (mode === "review" && focusProductionStage) setStage(focusProductionStage);
+  }, [focusProductionStage, mode]);
 
   const monitorController = useShotProductionMonitor({
     projectId,

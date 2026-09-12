@@ -123,6 +123,8 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
   }, [requestPage]);
 
   useEffect(() => {
+    setSelectedAsset(undefined);
+    setError(undefined);
     if (!initialAssetId) return;
     let active = true;
     void getAsset(projectId, initialAssetId)

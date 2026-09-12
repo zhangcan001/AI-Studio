@@ -823,6 +823,16 @@ describe("ShotWorkspace production package queue integration", () => {
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
   });
 
+  it("opens and visibly focuses an externally requested production batch", async () => {
+    queues = [makeQueue()];
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" focusProductionBatchId="pbt_uat_001" />);
+
+    const drawer = await screen.findByRole("region", { name: "生产队列" });
+    await waitFor(() => expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-focused")).toBe("true"));
+    expect((drawer.querySelector("button[aria-controls]") as HTMLButtonElement).getAttribute("aria-expanded")).toBe("true");
+    expect(mocks.startProductionQueue).not.toHaveBeenCalled();
+  });
+
   it("quick-creates, opens, focuses, and keeps a created generic batch manually startable", async () => {
     const user = userEvent.setup();
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);

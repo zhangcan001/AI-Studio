@@ -44,6 +44,7 @@ export type ReviewFilter = "ALL" | "UNREVIEWED" | "APPROVED" | "STARRED" | "REGE
 export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask, reviewBatchId, initialReviewItemId, reviewBatchLoader = getProductionBatchReviewProductivity, onOpenProductionQueue }: Props) {
   const [review, setReview] = useState<ProductionBatchReviewProductivity>();
   const [reviewError, setReviewError] = useState<string>();
+  const [reviewTargetUnavailable, setReviewTargetUnavailable] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [filter, setFilter] = useState<ReviewFilter>("ALL");
   const [currentReviewItemId, setCurrentReviewItemId] = useState<string>();
@@ -60,11 +61,24 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
   }, [assets, candidateIds, localCompareShotId, onAssetsLoaded, projectId, reviewBatchId]);
 
   useEffect(() => {
-    setReview(undefined); setReviewError(undefined); setCurrentReviewItemId(undefined);
+    setReview(undefined); setReviewError(undefined); setReviewTargetUnavailable(false); setCurrentReviewItemId(undefined);
     setLocalCompareShotId(undefined);
     if (!reviewBatchId) return;
     let active = true;
-    void reviewBatchLoader(projectId, reviewBatchId).then((next) => { if (!active) return; setReview(next); setCurrentReviewItemId(next.items.some((item) => item.itemId === initialReviewItemId) ? initialReviewItemId : next.items[0]?.itemId); }).catch(() => { if (active) setReviewError("当前批次没有可用的生产复核上下文，已保留原有批量审片。"); });
+    void reviewBatchLoader(projectId, reviewBatchId).then((next) => {
+      if (!active) return;
+      setReview(next);
+      if (initialReviewItemId && !next.items.some((item) => item.itemId === initialReviewItemId)) {
+        setReviewTargetUnavailable(true);
+        setReviewError("目标审片项不存在或已不可用。");
+        return;
+      }
+      setCurrentReviewItemId(initialReviewItemId ?? next.items[0]?.itemId);
+    }).catch(() => {
+      if (!active) return;
+      setReviewTargetUnavailable(true);
+      setReviewError("目标批次没有可用的生产复核上下文。");
+    });
     return () => { active = false; };
   }, [initialReviewItemId, projectId, reviewBatchId, reviewBatchLoader]);
 
@@ -72,7 +86,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
   const detailedCompareAvailable = Boolean(review && mappedItems.length > 0);
   const filteredItems = useMemo(() => mappedItems.filter((item) => matchesFilter(item, filter)), [filter, mappedItems]);
   const failedItems = useMemo(() => (review?.items ?? []).filter((item) => isFailedReviewItem(item) && (normalizeStage(item.stage) === stage || !item.stage)), [review, stage]);
-  const currentItem = filteredItems.find((item) => item.itemId === currentReviewItemId) ?? filteredItems[0];
+  const currentItem = reviewTargetUnavailable ? undefined : filteredItems.find((item) => item.itemId === currentReviewItemId) ?? filteredItems[0];
   const createReworkBatchAvailable = isVideoReviewReworkAvailable(currentItem);
   const reviewImageIds = useMemo(() => reviewImageIdsForItem(currentItem), [currentItem]);
   const [reviewImageUrls, setReviewImageUrls] = useState<Record<string, string>>({});
@@ -98,9 +112,30 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
     return shot ? toLocalCompareItem(shot, assets, stage, projectId) : undefined;
   }, [assets, localCompareShotId, projectId, reviewBatchId, shots, stage]);
 
+  if (reviewBatchId && !review) {
+    return <ReviewTargetState loading={!reviewError} message={reviewError ?? "正在加载目标审片上下文……"} />;
+  }
+
+  if (reviewBatchId && (reviewTargetUnavailable || !mappedItems.length)) {
+    return <ReviewTargetState message={reviewError ?? "目标审片批次没有可用的当前阶段内容。"} />;
+  }
+
   async function reloadReview() {
     if (!reviewBatchId) return;
-    try { setReview(await reviewBatchLoader(projectId, reviewBatchId)); } catch (error: unknown) { setReviewError(error instanceof Error ? error.message : "审片结果刷新失败。"); }
+    try {
+      const next = await reviewBatchLoader(projectId, reviewBatchId);
+      setReview(next);
+      if (initialReviewItemId && !next.items.some((item) => item.itemId === initialReviewItemId)) {
+        setReviewTargetUnavailable(true);
+        setReviewError("目标审片项不存在或已不可用。");
+        return;
+      }
+      setReviewTargetUnavailable(false);
+      setReviewError(undefined);
+    } catch (error: unknown) {
+      setReviewTargetUnavailable(true);
+      setReviewError(error instanceof Error ? error.message : "审片结果刷新失败。");
+    }
   }
 
   async function confirmAndApprove(candidate: ReviewCompareCandidate, item: ReviewCompareItem) {
@@ -193,6 +228,13 @@ function LegacyReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoad
 
 function FailedReviewItems({ items, busy, onRetry, onOpenTask }: { items: ProductionReviewProductivityItem[]; busy: boolean; onRetry: Props["onRetry"]; onOpenTask?: Props["onOpenTask"] }) {
   return <section className="shot-batch-review-failure" aria-label="失败复核项"><strong>失败项（{items.length}）</strong>{items.map((item) => <div key={item.itemId}><span>{item.itemId} · 生成任务失败，需要处理</span><div>{item.shotId && item.stage && <button type="button" className="quiet-button" disabled={busy} onClick={() => onRetry(item.shotId!, normalizeStage(item.stage) ?? "image")}>重新加入队列</button>}{onOpenTask && item.taskId && <button type="button" className="quiet-button" disabled={busy} onClick={() => onOpenTask(item.taskId!)}>查看任务详情</button>}</div></div>)}</section>;
+}
+
+function ReviewTargetState({ loading = false, message }: { loading?: boolean; message: string }) {
+  return <section className="shot-batch-review-board" aria-label="目标审片上下文" aria-busy={loading || undefined}>
+    <div className="shot-block-heading"><div><span className="section-label">人工复核</span><h3>无法定位目标审片项</h3></div></div>
+    <p className={loading ? "empty-state" : "review-compare-error"} role={loading ? "status" : "alert"}>{message}</p>
+  </section>;
 }
 
 function ReviewAssetMedia({ projectId, asset, stage }: { projectId: string; asset: AssetView; stage: ShotStage }) {

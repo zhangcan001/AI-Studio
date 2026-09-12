@@ -50,6 +50,34 @@ describe("project workflow navigation", () => {
       itemId: "item-9",
       shotId: "shot-9",
       taskId: "task-9",
-    })).toEqual({ workspace: "shots", section: "review", shotId: "shot-9", batchId: "batch-9", itemId: "item-9", taskId: "task-9" });
+    })).toEqual({ workspace: "shots", section: "review", shotId: "shot-9", batchId: "batch-9", itemId: "item-9", reviewId: "item-9", taskId: "task-9" });
+  });
+
+  it("applies exact target precedence without dropping context IDs", () => {
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "tasks",
+      section: "production",
+      projectId: "project-a",
+      taskId: "task-1",
+      batchId: "batch-1",
+      shotId: "shot-1",
+    })).toEqual({ workspace: "tasks", section: "review", projectId: "project-a", shotId: "shot-1", batchId: "batch-1", taskId: "task-1" });
+
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "tasks",
+      section: "production",
+      projectId: "project-a",
+      reviewId: "review-1",
+      itemId: "item-1",
+      taskId: "task-1",
+      batchId: "batch-1",
+      shotId: "shot-1",
+      assetId: "asset-1",
+      stage: "VIDEO",
+    })).toEqual({ workspace: "shots", section: "review", projectId: "project-a", shotId: "shot-1", batchId: "batch-1", itemId: "item-1", reviewId: "review-1", taskId: "task-1", assetId: "asset-1", stage: "VIDEO" });
+
+    expect(resolveProjectCommandCenterNavigation({ destination: "shots", section: "creation", batchId: "batch-1" })).toEqual({ workspace: "shots", section: "production", batchId: "batch-1" });
+    expect(resolveProjectCommandCenterNavigation({ destination: "shots", section: "creation", assetId: "asset-1" })).toEqual({ workspace: "assets", section: "assets", assetId: "asset-1" });
+    expect(resolveProjectCommandCenterNavigation({ destination: "tasks", shotId: "shot-1" })).toEqual({ workspace: "shots", section: "creation", shotId: "shot-1" });
   });
 });

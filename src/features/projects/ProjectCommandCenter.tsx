@@ -47,12 +47,15 @@ export type ProjectCommandCenterNavigationSection =
 
 export interface ProjectCommandCenterNavigationRequest {
   destination: ProjectCommandCenterDestination;
+  projectId?: string;
   section?: ProjectCommandCenterNavigationSection;
   shotId?: string;
   batchId?: string;
   itemId?: string;
+  reviewId?: string;
   taskId?: string;
   assetId?: string;
+  stage?: string;
   actionKind?: string;
 }
 
@@ -175,6 +178,10 @@ export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCent
   const [error, setError] = useState<string>();
   const requestId = useRef(0);
 
+  const scopedNavigate = useCallback((request: ProjectCommandCenterNavigationRequest) => {
+    onNavigate?.(projectId ? { ...request, projectId } : request);
+  }, [onNavigate, projectId]);
+
   const loadSnapshot = useCallback(async () => {
     const currentRequest = ++requestId.current;
     if (!projectId) {
@@ -257,7 +264,7 @@ export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCent
         onRefresh={() => void refresh()}
         onRetry={() => void loadSnapshot()}
         onRepreflight={() => void repreflight()}
-        onNavigate={onNavigate}
+        onNavigate={scopedNavigate}
         onOpenImport={() => setImportOpen(true)}
       />
       {projectId && importOpen && (
@@ -267,7 +274,7 @@ export function ProjectCommandCenter({ project, onNavigate }: ProjectCommandCent
           onImported={() => loadSnapshot()}
           onOpenStructure={() => {
             setImportOpen(false);
-            onNavigate?.({ destination: "shots", section: "creation" });
+            scopedNavigate({ destination: "shots", section: "creation" });
           }}
         />
       )}

@@ -77,7 +77,7 @@ export function ProductionReviewInbox({ projectId, onNavigate }: Props) {
                 <small>更新于 {formatDateTime(item.updatedAt)} · {item.workflowVersionId} · {item.recipeId}</small></details>
               </div>
               <div className="production-review-inbox-actions">
-                <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "review", batchId: item.batchId, itemId: item.itemId, taskId: item.taskId, shotId: item.shotId })} disabled={!onNavigate}>打开审片</button>
+                <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "review", batchId: item.batchId, itemId: item.itemId, reviewId: item.itemId, taskId: item.taskId, shotId: item.shotId, stage: item.stage })} disabled={!onNavigate}>打开审片</button>
                 {item.taskId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "tasks", taskId: item.taskId })} disabled={!onNavigate}>任务</button>}
                 {item.shotId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "creation", shotId: item.shotId })} disabled={!onNavigate}>镜头</button>}
                 {item.assetId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "assets", assetId: item.assetId })} disabled={!onNavigate}>资产</button>}

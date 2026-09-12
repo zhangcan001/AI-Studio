@@ -60,13 +60,26 @@ vi.mock("../features/workflows/WorkflowWorkspace", () => ({
     </button>
   ),
 }));
-vi.mock("../features/projects/ProjectCommandCenter", () => ({ ProjectCommandCenter: () => null }));
+vi.mock("../features/projects/ProjectCommandCenter", () => ({
+  ProjectCommandCenter: ({ onNavigate }: { onNavigate?: (request: { destination: "shots"; section: "creation"; projectId: string; shotId: string }) => void }) => (
+    <button
+      type="button"
+      onClick={() => onNavigate?.({ destination: "shots", section: "creation", projectId: "project-2", shotId: "shot-2" })}
+    >
+      打开跨项目镜头
+    </button>
+  ),
+}));
 vi.mock("../features/projects/ProjectWorkspace", () => ({ ProjectWorkspace: () => null }));
 vi.mock("../features/studio/GenerationStudio", () => ({ GenerationStudio: () => null }));
 vi.mock("../features/assets/AssetWorkspace", () => ({ AssetWorkspace: () => null }));
 vi.mock("../features/assets/AssetVideoBatchWorkspace", () => ({ AssetVideoBatchWorkspace: () => null }));
 vi.mock("../features/tasks/TaskHistory", () => ({ TaskHistory: () => null }));
-vi.mock("../features/shots/ShotWorkspace", () => ({ ShotWorkspace: () => null }));
+vi.mock("../features/shots/ShotWorkspace", () => ({
+  ShotWorkspace: ({ projectId, initialSelectedShotId, mode }: { projectId: string; initialSelectedShotId?: string; mode?: string }) => (
+    <output data-testid="shot-workspace-target">{projectId}:{initialSelectedShotId ?? "none"}:{mode ?? "none"}</output>
+  ),
+}));
 vi.mock("../features/settings/SettingsWorkspace", () => ({ SettingsWorkspace: () => null }));
 
 const project = {
@@ -75,6 +88,12 @@ const project = {
   description: "",
   createdAt: "2026-09-03T00:00:00.000Z",
   updatedAt: "2026-09-03T00:00:00.000Z",
+};
+
+const secondProject = {
+  ...project,
+  id: "project-2",
+  name: "Second Project",
 };
 
 function recipe(outputTypes?: Array<"image" | "video">): RecipeViewModel {
@@ -122,9 +141,9 @@ async function openWorkflowAction() {
   await user.click(await screen.findByRole("button", { name: "用于当前项目" }));
 }
 
-function prepareApp(catalog: RecipeViewModel[], hasProject = true) {
+function prepareApp(catalog: RecipeViewModel[], hasProject = true, projectList = hasProject ? [project] : []) {
   mocks.listGenerationCatalog.mockResolvedValue(catalog);
-  mocks.listProjects.mockResolvedValue(hasProject ? [project] : []);
+  mocks.listProjects.mockResolvedValue(projectList);
   mocks.getWorkspaceResume.mockResolvedValue(EMPTY_WORKSPACE_RESUME);
   mocks.saveWorkspaceResume.mockImplementation(async (resume: unknown) => resume);
   mocks.getProductionAdmissionStatus.mockResolvedValue({ busy: false });
@@ -277,5 +296,15 @@ describe("DEV-080 用于当前项目持久化 UAT", () => {
     await waitFor(() => expect(document.querySelector(".workflow-notice")?.textContent).toContain("同时输出图片和视频，未自动绑定"));
     expect(mocks.getProjectWorkflowConfig).not.toHaveBeenCalled();
     expect(mocks.replaceProjectWorkflowConfig).not.toHaveBeenCalled();
+  });
+
+  it("切换到目标项目后再应用精确镜头焦点", async () => {
+    prepareApp([recipe(["image"])], true, [project, secondProject]);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "打开跨项目镜头" }));
+
+    await waitFor(() => expect(screen.getByTestId("shot-workspace-target").textContent).toBe("project-2:shot-2:creation"));
+    expect(useProjectStore.getState().activeProjectId).toBe("project-2");
   });
 });

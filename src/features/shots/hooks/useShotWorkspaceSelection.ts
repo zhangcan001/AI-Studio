@@ -28,6 +28,8 @@ export function useShotWorkspaceSelection({
   const selectedShotIdRef = useRef(selectedShotId);
   const workspaceSelectionRef = useRef(workspaceSelection);
   const initialSelectedShotIdRef = useRef(initialSelectedShotId);
+  const initialTargetActiveRef = useRef(Boolean(initialSelectedShotId));
+  const projectIdRef = useRef(projectId);
   const onShotSelectedRef = useRef(onShotSelected);
 
   useEffect(() => {
@@ -35,11 +37,13 @@ export function useShotWorkspaceSelection({
   }, [onShotSelected]);
 
   useEffect(() => {
+    const projectChanged = projectIdRef.current !== projectId;
+    const initialTargetChanged = initialSelectedShotIdRef.current !== initialSelectedShotId;
+    const targetAlreadySelected = initialTargetChanged && initialSelectedShotId === selectedShotIdRef.current;
+    projectIdRef.current = projectId;
     initialSelectedShotIdRef.current = initialSelectedShotId;
-  }, [initialSelectedShotId]);
-
-  useEffect(() => {
-    if (workspaceSelectionRef.current.type === "shot") {
+    if (projectChanged || (initialTargetChanged && !targetAlreadySelected)) initialTargetActiveRef.current = Boolean(initialSelectedShotId);
+    if (!projectChanged && !initialTargetChanged && workspaceSelectionRef.current.type === "shot") {
       return;
     }
     const nextSelection = initialSelectedShotId
@@ -54,7 +58,11 @@ export function useShotWorkspaceSelection({
   const selectWorkspaceSelection = useCallback((selection: WorkspaceSelection) => {
     workspaceSelectionRef.current = selection;
     setWorkspaceSelection(selection);
-    if (selection.type !== "shot") return;
+    if (selection.type !== "shot") {
+      initialTargetActiveRef.current = false;
+      return;
+    }
+    if (selection.shotId !== initialSelectedShotIdRef.current) initialTargetActiveRef.current = false;
     selectedShotIdRef.current = selection.shotId;
     setSelectedShotId(selection.shotId);
     onShotSelectedRef.current?.(selection.shotId);
@@ -66,16 +74,17 @@ export function useShotWorkspaceSelection({
 
   const reconcileSelectedShot = useCallback((shotIds: string[]) => {
     const current = selectedShotIdRef.current;
+    const requestedShotId = initialSelectedShotIdRef.current;
     const nextSelectedShotId = current && shotIds.includes(current)
       ? current
-      : initialSelectedShotIdRef.current && shotIds.includes(initialSelectedShotIdRef.current)
-        ? initialSelectedShotIdRef.current
+      : requestedShotId && initialTargetActiveRef.current
+        ? shotIds.includes(requestedShotId) ? requestedShotId : undefined
         : shotIds[0];
 
     if (nextSelectedShotId !== current) {
       selectedShotIdRef.current = nextSelectedShotId;
       setSelectedShotId(nextSelectedShotId);
-      onShotSelectedRef.current?.(nextSelectedShotId);
+      if (nextSelectedShotId || !requestedShotId || !initialTargetActiveRef.current) onShotSelectedRef.current?.(nextSelectedShotId);
     }
 
     const currentSelection = workspaceSelectionRef.current;

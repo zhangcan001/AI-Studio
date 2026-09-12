@@ -186,6 +186,38 @@ describe("ShotBatchReviewBoard adapter", () => {
     expect(await screen.findByRole("heading", { name: "shot-rejected" })).toBeTruthy();
   });
 
+  it("opens the exact requested review item instead of the first item", async () => {
+    const items = [
+      reviewItem({ itemId: "item-1", shotId: "shot-1", stage: "VIDEO", outputAssets: [asset("video-1", "video")], candidateAssets: [candidate("video-1", "video")] }),
+      reviewItem({ itemId: "item-2", shotId: "shot-2", stage: "VIDEO", outputAssets: [asset("video-2", "video")], candidateAssets: [candidate("video-2", "video")] }),
+    ];
+    await renderReviewBoard(items, { stage: "video", initialReviewItemId: "item-2" });
+    expect(await screen.findByRole("heading", { name: "shot-2" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "shot-1" })).toBeNull();
+  });
+
+  it("fails closed when the requested review item is unavailable", async () => {
+    const item = reviewItem({ itemId: "item-1", shotId: "shot-1" });
+    const loader = vi.fn(async () => reviewBatch([item]));
+    render(
+      <ShotBatchReviewBoard
+        projectId="project-1"
+        shots={[]}
+        assets={[]}
+        stage="image"
+        busy={false}
+        onAssetsLoaded={vi.fn()}
+        onSelect={vi.fn()}
+        onRetry={vi.fn()}
+        reviewBatchId="batch-1"
+        initialReviewItemId="missing-item"
+        reviewBatchLoader={loader}
+      />,
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain("目标审片项不存在或已不可用");
+    expect(screen.queryByRole("heading", { name: "shot-1" })).toBeNull();
+  });
+
   it("requires explicit confirmation before creating an eligible video rework batch", async () => {
     const item = reviewItem({ itemId: "video-item", shotId: "video-shot", stage: "VIDEO", outputAssets: [asset("video-a", "video")], candidateAssets: [candidate("video-a", "video")] });
     const onOpenProductionQueue = vi.fn();

@@ -99,34 +99,60 @@ export function workflowUseProjectDestination(
 }
 
 export interface ResolvedProjectCommandCenterNavigation {
+  projectId?: string;
   workspace: Workspace;
   section: StudioSection;
   shotId?: string;
   batchId?: string;
   itemId?: string;
+  reviewId?: string;
   taskId?: string;
   assetId?: string;
+  stage?: string;
 }
 
 export function resolveProjectCommandCenterNavigation(
   request: ProjectCommandCenterNavigationRequest,
 ): ResolvedProjectCommandCenterNavigation {
-  if (request.section) {
-    const route = studioRouteForSection(request.section);
-    return { workspace: route.workspace, section: route.section, shotId: request.shotId, batchId: request.batchId, ...(request.itemId ? { itemId: request.itemId } : {}), ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
-  }
-  if (request.destination === "studio" || request.destination === "shots") {
-    return { workspace: "shots", section: "creation", shotId: request.shotId, batchId: request.batchId, ...(request.itemId ? { itemId: request.itemId } : {}), ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
-  }
-  return {
-    workspace: request.destination,
-    section: defaultStudioSectionForWorkspace(request.destination),
+  const reviewId = request.reviewId ?? request.itemId;
+  const target = {
+    ...(request.projectId ? { projectId: request.projectId } : {}),
     shotId: request.shotId,
     batchId: request.batchId,
     ...(request.itemId ? { itemId: request.itemId } : {}),
+    ...(reviewId ? { reviewId } : {}),
     ...(request.taskId ? { taskId: request.taskId } : {}),
     ...(request.assetId ? { assetId: request.assetId } : {}),
+    ...(request.stage ? { stage: request.stage } : {}),
   };
+
+  // A review item is the primary target when present; task/batch/shot/asset
+  // IDs remain context and must not replace the review authority.
+  if (reviewId) return { ...target, workspace: "shots", section: "review" };
+  if (request.taskId) return { ...target, workspace: "tasks", section: "review" };
+  if (request.batchId) return { ...target, workspace: "shots", section: "production" };
+  if (request.assetId) return { ...target, workspace: "assets", section: "assets" };
+  if (request.shotId) {
+    const section = request.section === "production" || request.section === "review" ? request.section : "creation";
+    return { ...target, workspace: "shots", section };
+  }
+  if (request.section) {
+    const route = studioRouteForSection(request.section);
+    return { ...target, workspace: route.workspace, section: route.section };
+  }
+  if (request.destination === "studio" || request.destination === "shots") {
+    return { ...target, workspace: "shots", section: "creation" };
+  }
+  return {
+    ...target,
+    workspace: request.destination,
+    section: defaultStudioSectionForWorkspace(request.destination),
+  };
+}
+
+function normalizeNavigationStage(stage?: string): ShotStage | undefined {
+  const normalized = stage?.toLowerCase();
+  return normalized === "image" || normalized === "video" ? normalized : undefined;
 }
 
 export type WorkflowDefaultStage = "IMAGE" | "VIDEO";
@@ -186,6 +212,7 @@ function App() {
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
   const [focusedProductionReviewItemId, setFocusedProductionReviewItemId] = useState<string>();
+  const [focusedProductionStage, setFocusedProductionStage] = useState<ShotStage>();
   const [focusedAssetId, setFocusedAssetId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -330,7 +357,6 @@ function App() {
   }, [loadWorkspaceResume, setProjectError, setProjectLoading, setProjects]);
 
   useEffect(() => {
-    setFocusedTaskId(undefined);
     setVideoBatchAssets([]);
   }, [activeProjectId]);
 
@@ -444,7 +470,31 @@ function App() {
     return getShotContextDraft(activeProjectId ?? scope.scopeId, scope.scopeId, stage);
   }, [activeProjectId]);
 
-  function navigateToRoute(nextWorkspace: Workspace, nextSection = defaultStudioSectionForWorkspace(nextWorkspace)) {
+  function clearNavigationFocus() {
+    setResumeShotId(undefined);
+    setFocusedTaskId(undefined);
+    setFocusedProductionBatchId(undefined);
+    setFocusedProductionReviewItemId(undefined);
+    setFocusedProductionStage(undefined);
+    setFocusedAssetId(undefined);
+  }
+
+  function applyNavigationFocus(navigation: ResolvedProjectCommandCenterNavigation) {
+    setResumeShotId(navigation.shotId);
+    setFocusedTaskId(navigation.taskId);
+    setFocusedProductionBatchId(navigation.batchId);
+    setFocusedProductionReviewItemId(navigation.reviewId ?? navigation.itemId);
+    setFocusedProductionStage(normalizeNavigationStage(navigation.stage));
+    setFocusedAssetId(navigation.assetId);
+    if (navigation.shotId) void recordShotChange(navigation.shotId);
+  }
+
+  function navigateToRoute(
+    nextWorkspace: Workspace,
+    nextSection = defaultStudioSectionForWorkspace(nextWorkspace),
+    preserveFocus = false,
+  ) {
+    if (!preserveFocus) clearNavigationFocus();
     if (nextWorkspace === workspace && nextSection === activeStudioSection) return;
     setWorkspace(nextWorkspace);
     setActiveStudioSection(nextSection);
@@ -464,6 +514,16 @@ function App() {
     navigateToRoute(route.workspace, route.section);
   }
 
+  function openTask(taskId: string) {
+    applyNavigationFocus({ workspace: "tasks", section: "review", taskId });
+    navigateToRoute("tasks", "review", true);
+  }
+
+  function openShot(shotId: string, section: StudioSection = "creation") {
+    applyNavigationFocus({ workspace: "shots", section, shotId });
+    navigateToRoute("shots", section, true);
+  }
+
   function handleShotSelected(shotId?: string) {
     setResumeShotId(shotId);
     void recordShotChange(shotId);
@@ -471,8 +531,7 @@ function App() {
 
   function openProject(
     projectId: string,
-    preserveProductionBatch = false,
-    destination: Workspace = preserveProductionBatch ? "studio" : "command-center",
+    destination: Workspace = "command-center",
     section: StudioSection = defaultStudioSectionForWorkspace(destination),
   ) {
     if (projectId === activeProjectId) {
@@ -482,9 +541,7 @@ function App() {
     useTaskStore.getState().clear();
     useStudioStore.getState().resetDraft();
     useStudioStore.getState().clearPendingAssetIntent();
-    if (!preserveProductionBatch) setFocusedProductionBatchId(undefined);
-    setFocusedTaskId(undefined);
-    setFocusedAssetId(undefined);
+    clearNavigationFocus();
     setVideoBatchAssets([]);
     useProjectStore.getState().setActiveProject(projectId);
     setProjectContextLoading(true);
@@ -502,9 +559,14 @@ function App() {
   function openProductionQueue() {
     const { batchId, projectId } = productionAdmission;
     if (batchId && projectId) {
-      setFocusedProductionBatchId(batchId);
-      if (projectId !== activeProjectId) openProject(projectId, true, "shots", "production");
-      else navigateToRoute("shots", "production");
+      const navigation: ResolvedProjectCommandCenterNavigation = { workspace: "shots", section: "production", batchId };
+      if (projectId !== activeProjectId) {
+        openProject(projectId, "shots", "production");
+        applyNavigationFocus(navigation);
+      } else {
+        applyNavigationFocus(navigation);
+        navigateToRoute("shots", "production", true);
+      }
       return;
     }
     navigateToStudioSection("production");
@@ -600,7 +662,7 @@ function App() {
         return;
       }
       if (selection === "DUAL") {
-        openProject(currentProject.id, false, "projects");
+        openProject(currentProject.id, "projects");
         setWorkflowNotice("该工作流同时输出图片和视频，未自动绑定。请在项目工作流设置中明确选择图片或视频默认工作流。");
         return;
       }
@@ -619,7 +681,7 @@ function App() {
         return;
       }
 
-      openProject(currentProject.id, false, "projects");
+      openProject(currentProject.id, "projects");
       setWorkflowNotice(
         `已设为当前项目${selection === "IMAGE" ? "图片" : "视频"}默认工作流：${recipe.name}（${recipe.workflowVersionId} · ${recipe.recipeId}）`,
       );
@@ -720,31 +782,33 @@ function App() {
   }
 
   function openAssetFromShot(assetId: string) {
-    setFocusedAssetId(assetId);
-    navigateToWorkspace("assets");
+    applyNavigationFocus({ workspace: "assets", section: "assets", assetId });
+    navigateToRoute("assets", "assets", true);
   }
 
   function openShotFromAsset(shotId: string) {
-    setResumeShotId(shotId);
-    void recordShotChange(shotId);
-    navigateToWorkspace("shots");
+    openShot(shotId);
   }
 
   function navigateFromCommandCenter(request: ProjectCommandCenterNavigationRequest) {
     const navigation = resolveProjectCommandCenterNavigation(request);
-    setFocusedProductionBatchId(navigation.batchId);
-    setFocusedProductionReviewItemId(navigation.itemId);
-    setFocusedTaskId(navigation.taskId);
-    setFocusedAssetId(navigation.assetId);
-    if (navigation.shotId) {
-      setResumeShotId(navigation.shotId);
-      void recordShotChange(navigation.shotId);
-    }
-    if (request.section || request.destination === "studio" || request.destination === "shots") {
-      navigateToStudioSection(navigation.section);
+    const targetProjectId = navigation.projectId ?? activeProjectId;
+    if (request.projectId && !projects.some((project) => project.id === request.projectId)) {
+      clearNavigationFocus();
+      setError("目标项目不存在或已不可用。");
       return;
     }
-    navigateToWorkspace(navigation.workspace);
+    if (targetProjectId && targetProjectId !== activeProjectId) {
+      openProject(
+        targetProjectId,
+        navigation.workspace,
+        navigation.section,
+      );
+      applyNavigationFocus(navigation);
+      return;
+    }
+    applyNavigationFocus(navigation);
+    navigateToRoute(navigation.workspace, navigation.section, true);
   }
 
   const comfy = bootstrapState?.comfy;
@@ -898,12 +962,13 @@ function App() {
             onOpenWorkflows={() => navigateToWorkspace("workflows")}
             onReconnectComfy={() => void reconnectComfy()}
             onOpenTask={(taskId) => {
-              setFocusedTaskId(taskId);
-              navigateToWorkspace("tasks");
+              openTask(taskId);
             }}
             onOpenProductionQueue={(batchId) => {
-              if (batchId) setFocusedProductionBatchId(batchId);
-              navigateToStudioSection("production");
+              if (batchId) {
+                applyNavigationFocus({ workspace: "shots", section: "production", batchId });
+                navigateToRoute("shots", "production", true);
+              } else navigateToStudioSection("production");
             }}
           />
         </section>
@@ -915,8 +980,7 @@ function App() {
           onUseInStudio={useAssetInStudio}
           onOpenVideoBatch={openVideoBatch}
           onOpenTask={(taskId) => {
-            setFocusedTaskId(taskId);
-            navigateToWorkspace("tasks");
+            openTask(taskId);
           }}
           onOpenShot={openShotFromAsset}
         />
@@ -938,11 +1002,11 @@ function App() {
             contextPathTarget={shotContextTarget}
             onOpenAsset={openAssetFromShot}
             onOpenTask={(taskId) => {
-              setFocusedTaskId(taskId);
-              navigateToWorkspace("tasks");
+              openTask(taskId);
             }}
             focusProductionBatchId={focusedProductionBatchId}
             focusProductionReviewItemId={focusedProductionReviewItemId}
+            focusProductionStage={focusedProductionStage}
             onOpenProductionQueue={() => navigateToStudioSection("production")}
             consistencyWorkspace={{
               profiles: consistencyProfiles,
@@ -978,12 +1042,13 @@ function App() {
             onAdmissionChanged={refreshProductionAdmission}
             onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
             onOpenTask={(taskId) => {
-              setFocusedTaskId(taskId);
-              navigateToWorkspace("tasks");
+              openTask(taskId);
             }}
             onOpenProductionQueue={(batchId) => {
-              if (batchId) setFocusedProductionBatchId(batchId);
-              navigateToStudioSection("production");
+              if (batchId) {
+                applyNavigationFocus({ workspace: "shots", section: "production", batchId });
+                navigateToRoute("shots", "production", true);
+              } else navigateToStudioSection("production");
             }}
             onBackToAssets={() => navigateToWorkspace("assets")}
             onOpenWorkflows={() => navigateToWorkspace("workflows")}
@@ -997,7 +1062,7 @@ function App() {
           productionBusy={productionAdmission.busy}
           focusTaskId={focusedTaskId}
           onLoadInputs={loadHistoricalInputs}
-          onOpenShot={() => navigateToWorkspace("shots")}
+          onOpenShot={(shotId) => openShot(shotId)}
         />
       )}
       {workspace === "projects" && (
@@ -1021,8 +1086,7 @@ function App() {
           onUseInProject={openWorkflowForProject}
           onOpenProjectSettings={() => navigateToWorkspace("projects")}
           onOpenTask={(taskId) => {
-            setFocusedTaskId(taskId);
-            navigateToWorkspace("tasks");
+            openTask(taskId);
           }}
         />
       )}

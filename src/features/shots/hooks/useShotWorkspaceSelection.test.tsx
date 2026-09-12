@@ -24,6 +24,7 @@ function Harness({ projectId, initialSelectedShotId, onShotSelected }: {
       <button type="button" onClick={() => select({ type: "shot", shotId: "shot-2" })}>select-shot-2</button>
       <button type="button" onClick={() => select({ type: "scene", sceneId: "scene-1" })}>select-scene</button>
       <button type="button" onClick={() => selection.reconcileSelectedShot(["shot-3"])}>reconcile-shot-3</button>
+      <button type="button" onClick={() => selection.reconcileSelectedShot(["shot-1", "shot-2"])}>reconcile-available-shots</button>
       <button type="button" onClick={() => selection.reconcileSelectedShot([])}>reconcile-empty</button>
     </div>
   );
@@ -59,5 +60,15 @@ describe("useShotWorkspaceSelection", () => {
     await user.click(screen.getByRole("button", { name: "select-scene" }));
     await user.click(screen.getByRole("button", { name: "reconcile-empty" }));
     expect(screen.getByTestId("selection-type").textContent).toBe("scene");
+  });
+
+  it("does not silently fall back when an explicit target is unavailable", async () => {
+    const user = userEvent.setup();
+    const onShotSelected = vi.fn();
+    render(<Harness projectId="project-1" initialSelectedShotId="missing-shot" onShotSelected={onShotSelected} />);
+
+    await user.click(screen.getByRole("button", { name: "reconcile-available-shots" }));
+    expect(screen.getByTestId("selected-shot").textContent).toBe("none");
+    expect(onShotSelected).not.toHaveBeenCalled();
   });
 });
