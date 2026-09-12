@@ -4,10 +4,10 @@
 TASK=DEV-099
 RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
-ROADMAP_STATUS=UPDATED_BY_DEV_104
+ROADMAP_STATUS=UPDATED_BY_DEV_105
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
-NEXT_MAIN_THEME=Production Execution / Review Operations
+NEXT_MAIN_THEME=Product Polish / Agent Handoff Tooling / 1.2 Readiness
 ```
 
 ## Product baseline
@@ -88,8 +88,20 @@ backed by the existing `ProductionPreparationService`, a strict 100-shot
 preparation boundary inside a 500-shot project plan, explicit partial mode,
 exact workflow-version/recipe identity, and a prepare-only UI boundary. No
 new queue, executor, task model, migration, or automatic start was added.
-The next main theme is Production Execution / Review Operations; DEV-105 has
-not started.
+
+### P1 — Production Execution / Review Operations — CLOSED (DEV-105)
+
+DEV-105 closes the execution/review operations slice without adding a second
+queue, executor, task model, or migration. Prepare and batch creation remain
+separate from Start; review regeneration now creates READY rework batches only;
+retry and partial-resume actions do not auto-execute; and the existing
+Production Queue remains the only explicit start authority. The project
+Command Center now has a bounded, read-only Review Inbox projection with
+exact Batch/item/task/Shot/Asset navigation, while Shot selected output
+authority and existing review mutations remain canonical.
+
+The next main theme is Product Polish / Agent Handoff Tooling / 1.2
+Readiness. It is recorded only here and is not started by DEV-105.
 
 ### P2 — Product polish and operational clarity
 
