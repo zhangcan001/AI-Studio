@@ -160,7 +160,7 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported, o
           <p className="section-description">先读取、检查并预览镜头文件；选择文件不会修改项目数据。</p>
         </div>
         <div className="project-import-mode-actions">
-          <button type="button" className="quiet-button" onClick={() => setMode("handoff")} disabled={busy}>External Agent Handoff</button>
+          <button type="button" className="quiet-button" onClick={() => setMode("handoff")} disabled={busy}>导入外部生产数据</button>
           <button type="button" className="quiet-button" onClick={onClose} disabled={busy}>返回项目指挥中心</button>
         </div>
       </div>

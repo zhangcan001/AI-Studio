@@ -1,5 +1,15 @@
 # AI Studio Post-1.1 Product Audit
 
+> **Current-state addendum (DEV-106):** The capability gaps below are the
+> time-stamped DEV-099 baseline, **not** current blockers. DEV-101 shipped the
+> hierarchical External Agent Handoff V1 with migration 032 and backup V18;
+> DEV-102 closed Asset/Reference continuity; DEV-103 closed the bounded Daily
+> Production board; DEV-104 closed bulk preparation; DEV-105 closed explicit
+> execution/review operations. See the active
+> [roadmap](AI_STUDIO_POST_1_1_ROADMAP.md) and
+> [DEV-106 polish audit](../DEV_106_PRODUCT_POLISH_AUDIT.md) for current
+> product truth. This historical audit remains unchanged below.
+
 ```text
 TASK=DEV-099
 BASELINE=41c0b347ee7cd4a11c5afa6441bada492427c41c

@@ -4,7 +4,7 @@
 TASK=DEV-099
 RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
-ROADMAP_STATUS=UPDATED_BY_DEV_105
+ROADMAP_STATUS=DEV_106_READINESS_GATE_IN_PROGRESS
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
 NEXT_MAIN_THEME=Product Polish / Agent Handoff Tooling / 1.2 Readiness
@@ -51,14 +51,14 @@ AUTO_RETRY=NO
 AUTO_REBIND=NO
 ```
 
-### P1 — External Agent → AI Studio Production Handoff
+### P1 — External Agent → AI Studio Production Handoff — CLOSED (DEV-101)
 
-Freeze a provider-neutral, project-scoped handoff contract for structured
-production inputs supplied by an external agent. AI Studio must preview and
-explicitly confirm formal production input without becoming a Script, Draft,
-Storyboard, or Prompt authoring product. The full hierarchy importer is
-blocked by the current schema and must not add a migration, second Shot model,
-queue, executor, or Task model.
+DEV-101 shipped the provider-neutral, project-scoped V1 importer with
+read-only preview and explicit atomic confirmation of formal hierarchy,
+prompts, references, and provenance. Migration 032 and backup V18 support
+handoff identity and restore. No second Shot model, queue, executor, or Task
+model was added; internal Script, Draft, Storyboard, and Prompt authoring stay
+retired. DEV-106 adds machine-readable schema, example, and agent instructions.
 
 ### P1 — Asset / Reference Continuity — CLOSED (DEV-102)
 
@@ -100,8 +100,8 @@ Command Center now has a bounded, read-only Review Inbox projection with
 exact Batch/item/task/Shot/Asset navigation, while Shot selected output
 authority and existing review mutations remain canonical.
 
-The next main theme is Product Polish / Agent Handoff Tooling / 1.2
-Readiness. It is recorded only here and is not started by DEV-105.
+DEV-106 is the Product Polish / Agent Handoff Tooling / 1.2 Readiness gate.
+Its final verdict and next main theme are recorded after required remote CI.
 
 ### P2 — Product polish and operational clarity
 
@@ -123,7 +123,7 @@ cross-workspace breadcrumbs where they do not change domain authority.
 - Version bump, `v1.2.0` tag, GitHub Release, or installer publication in
   DEV-099.
 
-## Why Production Continuity is first
+## Historical DEV-099 rationale: why Production Continuity was first
 
 The audit ranked Production Continuity first because it is high-frequency,
 high-friction, and implementable entirely from existing project-scoped read
@@ -131,15 +131,13 @@ facts. It connects capabilities users already have instead of adding a new
 domain model. It also gives the product a clear new ability suitable for a
 future `1.2.0` release while leaving the published `1.1.0` line immutable.
 
-The external-agent handoff is frozen as a contract, but full hierarchy
-implementation is deferred because the current schema has no handoff identity,
-provenance, idempotency, or single-transaction boundary. Asset continuity is
-deferred as an independent theme because the first train only needs exact
-deliverable navigation. Broad explainability is deferred as a separate theme
-because P0 includes only the reason text required to make the selected
-continuation actionable.
+At DEV-099, the external-agent hierarchy importer was deferred because schema
+031 had no handoff identity, provenance, idempotency, or single-transaction
+boundary. Migration 032 and DEV-101 subsequently closed that gap. DEV-102 and
+DEV-103 then closed the separately scoped Asset continuity and explainability
+themes.
 
-## Frozen implementation boundary
+## Historical DEV-099 implementation boundary
 
 DEV-099 may change only the Project Command Center read projection, its typed
 frontend model, existing navigation/focus plumbing, and focused tests/docs.

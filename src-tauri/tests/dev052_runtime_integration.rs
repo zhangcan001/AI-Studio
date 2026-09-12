@@ -1827,6 +1827,35 @@ async fn runtime_500_shot_plan_uses_one_bounded_preflight_path() {
 }
 
 #[tokio::test]
+async fn runtime_500_shot_project_admits_exactly_100_ready_without_starting() {
+    let harness = harness().await;
+    let shot_ids = seed_bulk_shots(
+        &harness.pool,
+        &harness.workflow_version_id,
+        &harness.recipe_id,
+    )
+    .await;
+    let too_many = harness
+        .preparation
+        .admit(PROJECT_ID, &shot_ids[..101], ShotStage::Image, false)
+        .await
+        .expect_err("101 selected Shots must fail without chunking");
+    assert!(too_many.to_string().contains("100"));
+    assert_eq!(count(&harness.pool, "production_batches").await, 0);
+
+    let admitted = harness
+        .preparation
+        .admit(PROJECT_ID, &shot_ids[..100], ShotStage::Image, false)
+        .await
+        .expect("100 ready Shots should prepare one batch");
+    assert_eq!(admitted.created_count, 100);
+    assert_eq!(count(&harness.pool, "production_batches").await, 1);
+    assert_eq!(count(&harness.pool, "production_batch_items").await, 100);
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn runtime_database_is_fresh_migrated_through_031() {
     let harness = harness().await;
     assert_eq!(

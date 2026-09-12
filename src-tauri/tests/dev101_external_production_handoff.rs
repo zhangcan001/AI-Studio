@@ -3,7 +3,9 @@
 use ai_studio_lib::infrastructure::database::repositories::SqliteAssetUsageRepository;
 use ai_studio_lib::{
     application::{
-        external_production_handoff_service::ExternalProductionHandoffService,
+        external_production_handoff_service::{
+            ExternalProductionHandoffService, ExternalProductionHandoffV1, MAX_HANDOFF_SHOTS,
+        },
         ports::{
             ExternalProductionHandoffAssetReference, ExternalProductionHandoffEntityMapping,
             ExternalProductionHandoffEpisode, ExternalProductionHandoffImportPlan,
@@ -31,6 +33,173 @@ use tempfile::{tempdir, TempDir};
 const PROJECT_A: &str = "prj_550e8400-e29b-41d4-a716-446655440000";
 const PROJECT_B: &str = "prj_550e8400-e29b-41d4-a716-446655440001";
 const CREATED_AT: &str = "2026-09-12T00:00:00Z";
+
+fn schema_required(node: &Value) -> Vec<&str> {
+    node["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn dev106_schema_and_example_track_the_strict_rust_handoff_contract() {
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../docs/schemas/production-handoff-v1.schema.json"
+    ))
+    .unwrap();
+    let example: Value = serde_json::from_str(include_str!(
+        "../../docs/examples/production-handoff-v1.example.json"
+    ))
+    .unwrap();
+    assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+    assert_eq!(
+        schema_required(&schema),
+        ["schemaVersion", "projectId", "source", "series"]
+    );
+    assert_eq!(
+        schema_required(&schema["$defs"]["shot"]),
+        ["externalId", "name", "ordinal", "description"]
+    );
+    assert_eq!(
+        schema_required(&schema["$defs"]["stage"]),
+        ["workflowVersionId", "recipeId"]
+    );
+    assert_eq!(schema_required(&schema["$defs"]["assetRef"]), ["assetId"]);
+    for name in [
+        "source", "limits", "series", "episode", "scene", "shot", "stages", "stage", "assetRef",
+    ] {
+        assert_eq!(
+            schema["$defs"][name]["additionalProperties"], false,
+            "{name}"
+        );
+    }
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(
+        schema["$defs"]["scene"]["properties"]["shots"]["maxItems"],
+        MAX_HANDOFF_SHOTS
+    );
+    assert_eq!(
+        schema["$defs"]["shot"]["properties"]["assetRefs"]["maxItems"],
+        20
+    );
+    for (name, expected) in [
+        ("series", "episodes"),
+        ("episode", "scenes"),
+        ("scene", "shots"),
+    ] {
+        assert!(
+            schema["$defs"][name]["properties"].get(expected).is_some(),
+            "{name}.{expected}"
+        );
+    }
+    for name in ["imagePrompt", "videoPrompt", "assetRefs", "stages"] {
+        assert!(
+            schema["$defs"]["shot"]["properties"].get(name).is_some(),
+            "{name}"
+        );
+    }
+    assert_eq!(example["schemaVersion"], 1);
+    let parsed: ExternalProductionHandoffV1 = serde_json::from_value(example.clone()).unwrap();
+    assert_eq!(parsed.series.len(), 1);
+    assert_eq!(parsed.series[0].episodes.len(), 1);
+    assert_eq!(parsed.series[0].episodes[0].scenes.len(), 1);
+    let shots = &parsed.series[0].episodes[0].scenes[0].shots;
+    assert_eq!(shots.len(), 2);
+    assert!(shots[0].stages.image.is_none());
+    assert!(shots[1].stages.image.is_some());
+    let mut unknown = example;
+    unknown["series"][0]["episodes"][0]["scenes"][0]["shots"][0]["unknown"] = json!(true);
+    assert!(serde_json::from_value::<ExternalProductionHandoffV1>(unknown).is_err());
+}
+
+#[tokio::test]
+async fn dev106_example_previews_after_replacing_project_and_exact_pair() {
+    let harness = harness().await;
+    insert_workflow(&harness.pool, false).await;
+    let mut example: Value = serde_json::from_str(include_str!(
+        "../../docs/examples/production-handoff-v1.example.json"
+    ))
+    .unwrap();
+    example["projectId"] = json!(PROJECT_A);
+    let stage =
+        &mut example["series"][0]["episodes"][0]["scenes"][0]["shots"][1]["stages"]["image"];
+    stage["workflowVersionId"] = json!("wv_dev101");
+    stage["recipeId"] = json!("recipe_dev101");
+    let preview = harness
+        .service
+        .preview(PROJECT_A, &example.to_string())
+        .await
+        .unwrap();
+    assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+    assert_eq!(
+        (
+            preview.series_count,
+            preview.episode_count,
+            preview.scene_count,
+            preview.shot_count
+        ),
+        (1, 1, 1, 2)
+    );
+    assert_eq!(count(&harness.pool, "tasks", PROJECT_A).await, 0);
+    assert_eq!(
+        count(&harness.pool, "production_batches", PROJECT_A).await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn dev106_five_hundred_shot_handoff_is_bounded_and_does_not_start_production() {
+    let harness = harness().await;
+    let mut handoff: Value = serde_json::from_str(&document(PROJECT_A, None, None, None)).unwrap();
+    let shots = &mut handoff["series"][0]["episodes"][0]["scenes"][0]["shots"];
+    *shots = Value::Array(
+        (1..=MAX_HANDOFF_SHOTS)
+            .map(|ordinal| {
+                json!({
+                    "externalId": format!("shot-{ordinal}"),
+                    "name": format!("Shot {ordinal}"),
+                    "ordinal": ordinal,
+                    "description": "A production shot."
+                })
+            })
+            .collect(),
+    );
+    let content = handoff.to_string();
+    let preview = harness.service.preview(PROJECT_A, &content).await.unwrap();
+    assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+    assert_eq!(preview.shot_count, 500);
+    assert_eq!(count(&harness.pool, "shots", PROJECT_A).await, 0);
+
+    handoff["series"][0]["episodes"][0]["scenes"][0]["shots"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"externalId":"shot-501","name":"Shot 501","ordinal":501,"description":"Over limit"}));
+    let over_limit = harness
+        .service
+        .preview(PROJECT_A, &handoff.to_string())
+        .await
+        .unwrap();
+    assert!(over_limit
+        .errors
+        .iter()
+        .any(|issue| issue.code == "HANDOFF_TOO_LARGE"));
+    assert_eq!(count(&harness.pool, "shots", PROJECT_A).await, 0);
+
+    let imported = harness
+        .service
+        .confirm(PROJECT_A, &content, &preview.document_sha256)
+        .await
+        .unwrap();
+    assert_eq!(imported.shot_count, 500);
+    assert_eq!(count(&harness.pool, "shots", PROJECT_A).await, 500);
+    assert_eq!(count(&harness.pool, "tasks", PROJECT_A).await, 0);
+    assert_eq!(
+        count(&harness.pool, "production_batches", PROJECT_A).await,
+        0
+    );
+}
 
 struct Harness {
     _directory: TempDir,

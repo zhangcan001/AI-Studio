@@ -52,7 +52,7 @@ export function ProductionReviewInbox({ projectId, onNavigate }: Props) {
       <div className="project-command-card-heading">
         <div>
           <span className="section-label">项目级审片</span>
-          <h3 id="production-review-inbox-title">Review Inbox</h3>
+          <h3 id="production-review-inbox-title">待审核结果</h3>
           <p>{page ? `${page.total} 项待处理 · 未审 ${page.unreviewedCount} · 待返工 ${page.regenerateCount}` : "正在加载待处理结果…"}</p>
         </div>
         <button type="button" className="quiet-button" onClick={() => void load(0, false)} disabled={loading}>刷新</button>
@@ -66,20 +66,22 @@ export function ProductionReviewInbox({ projectId, onNavigate }: Props) {
               <div className="production-review-inbox-copy">
                 <strong>{item.promptSummary || `第 ${item.ordinal + 1} 项`}</strong>
                 <span>{item.batchName} · #{item.ordinal + 1} · {statusLabels[item.reviewStatus]}</span>
-                <small>
+                {item.selectedAssetId && <span>已选最终结果 · 可打开素材查看</span>}
+                <details><summary>查看技术详情</summary><small>
                   批次 {item.batchId} · 项目 {item.itemId}
                   {item.shotId ? ` · 镜头 ${item.shotId}` : ""}
                   {item.taskId ? ` · 任务 ${item.taskId}` : " · 尚未创建任务"}
                   {item.assetId ? ` · 输出 ${item.assetName || item.assetId}` : " · 暂无输出资产"}
-                  {item.selectedAssetId ? ` · Shot 已选 ${item.selectedAssetId}` : ""}
+                  {item.selectedAssetId ? ` · 镜头已选 ${item.selectedAssetId}` : ""}
                 </small>
-                <small>更新于 {formatDateTime(item.updatedAt)} · {item.workflowVersionId} · {item.recipeId}</small>
+                <small>更新于 {formatDateTime(item.updatedAt)} · {item.workflowVersionId} · {item.recipeId}</small></details>
               </div>
               <div className="production-review-inbox-actions">
                 <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "review", batchId: item.batchId, itemId: item.itemId, taskId: item.taskId, shotId: item.shotId })} disabled={!onNavigate}>打开审片</button>
                 {item.taskId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "tasks", taskId: item.taskId })} disabled={!onNavigate}>任务</button>}
                 {item.shotId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "creation", shotId: item.shotId })} disabled={!onNavigate}>镜头</button>}
                 {item.assetId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "assets", assetId: item.assetId })} disabled={!onNavigate}>资产</button>}
+                {item.selectedAssetId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "assets", assetId: item.selectedAssetId })} disabled={!onNavigate}>最终结果</button>}
               </div>
             </article>
           ))}

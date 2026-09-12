@@ -94,6 +94,36 @@ if (!["previewExternalProductionHandoff", "confirmExternalProductionHandoff", "e
   throw new Error("EXTERNAL_HANDOFF_TYPED_IPC failed: typed client and command parity is required");
 }
 
+const handoffSchema = JSON.parse(readFileSync(join(root, "docs/schemas/production-handoff-v1.schema.json"), "utf8"));
+const handoffExample = JSON.parse(readFileSync(join(root, "docs/examples/production-handoff-v1.example.json"), "utf8"));
+const handoffTemplate = readFileSync(join(root, "docs/EXTERNAL_AGENT_HANDOFF_PROMPT_TEMPLATE.md"), "utf8");
+const handoffObjectTypes = [handoffSchema, ...Object.values(handoffSchema.$defs).filter((definition) => definition.type === "object")];
+if (handoffSchema.properties?.schemaVersion?.const !== 1
+  || handoffSchema.$schema !== "https://json-schema.org/draft/2020-12/schema"
+  || handoffSchema.$defs?.scene?.properties?.shots?.maxItems !== 500
+  || !handoffServiceSource.includes("pub const MAX_HANDOFF_SHOTS: usize = 500")
+  || handoffObjectTypes.some((definition) => definition.additionalProperties !== false)
+  || ["schemaVersion", "projectId", "source", "series"].some((field) => !handoffSchema.required?.includes(field))
+  || ["externalId", "name", "ordinal", "description", "imagePrompt", "videoPrompt", "assetRefs", "stages"].some((field) => !handoffSchema.$defs?.shot?.properties?.[field])
+  || ["workflowVersionId", "recipeId"].some((field) => !handoffSchema.$defs?.stage?.required?.includes(field))) {
+  throw new Error("HANDOFF_JSON_SCHEMA_PARITY failed: V1 shape, strictness, or bounds drifted");
+}
+const exampleShots = handoffExample.series?.[0]?.episodes?.[0]?.scenes?.[0]?.shots;
+if (handoffExample.schemaVersion !== 1 || handoffExample.series?.length !== 1
+  || handoffExample.series[0].episodes?.length !== 1
+  || handoffExample.series[0].episodes[0].scenes?.length !== 1
+  || exampleShots?.length !== 2 || exampleShots.some((shot) => !shot.imagePrompt || !shot.videoPrompt)
+  || exampleShots[0].stages || !exampleShots[1].stages?.image?.workflowVersionId
+  || !exampleShots[1].stages.image.recipeId) {
+  throw new Error("HANDOFF_EXAMPLE_VALID failed: canonical hierarchy or stage-pair fixture drifted");
+}
+if (!handoffContractSource.includes("SERVER_VALIDATED")
+  || !handoffTemplate.includes("Return **only** one JSON object")
+  || !handoffTemplate.includes("Do not guess Asset IDs")
+  || /(?:api key|connector|provider adapter)/i.test(handoffTemplate)) {
+  throw new Error("HANDOFF_TOOLING_PROVIDER_NEUTRAL failed: handoff template or server-validation boundary drifted");
+}
+
 function collectSourceFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
@@ -639,6 +669,9 @@ console.log(`EXTERNAL_HANDOFF_PREVIEW_READ_ONLY=PASS`);
 console.log(`EXTERNAL_HANDOFF_SINGLE_TRANSACTION=PASS`);
 console.log(`EXTERNAL_HANDOFF_EXACT_WORKFLOW_RECIPE=PASS`);
 console.log(`EXTERNAL_HANDOFF_TYPED_IPC=PASS`);
+console.log(`HANDOFF_JSON_SCHEMA_PARITY=PASS`);
+console.log(`HANDOFF_EXAMPLE_VALID=PASS`);
+console.log(`HANDOFF_TOOLING_PROVIDER_NEUTRAL=PASS`);
 
 console.log(`FRONTEND_NO_RAW_INVOKE=PASS`);
 console.log(`RAW_INVOKE_OUTSIDE_TRANSPORT=0`);

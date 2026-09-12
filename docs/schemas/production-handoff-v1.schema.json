@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zhangcan001/AI-Studio/blob/master/docs/schemas/production-handoff-v1.schema.json",
+  "title": "AI Studio ExternalProductionHandoffV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectId", "source", "series"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "projectId": { "type": "string", "minLength": 1 },
+    "source": { "$ref": "#/$defs/source" },
+    "series": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/series" } },
+    "limits": { "anyOf": [{ "$ref": "#/$defs/limits" }, { "type": "null" }] }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "revision": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxShots": { "type": ["integer", "null"], "minimum": 0, "maximum": 500 },
+        "maxSeries": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+        "maxEpisodes": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+        "maxScenes": { "type": ["integer", "null"], "minimum": 0, "maximum": 200 }
+      }
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalId", "name", "description", "ordinal", "episodes"],
+      "properties": {
+        "externalId": { "$ref": "#/$defs/externalId" },
+        "name": { "$ref": "#/$defs/name" },
+        "description": { "$ref": "#/$defs/description" },
+        "ordinal": { "$ref": "#/$defs/ordinal" },
+        "episodes": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/episode" } }
+      }
+    },
+    "episode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalId", "name", "description", "ordinal", "scenes"],
+      "properties": {
+        "externalId": { "$ref": "#/$defs/externalId" },
+        "name": { "$ref": "#/$defs/name" },
+        "description": { "$ref": "#/$defs/description" },
+        "ordinal": { "$ref": "#/$defs/ordinal" },
+        "scenes": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/scene" } }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalId", "name", "description", "ordinal", "shots"],
+      "properties": {
+        "externalId": { "$ref": "#/$defs/externalId" },
+        "name": { "$ref": "#/$defs/name" },
+        "description": { "$ref": "#/$defs/description" },
+        "ordinal": { "$ref": "#/$defs/ordinal" },
+        "shots": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/shot" } }
+      }
+    },
+    "shot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalId", "name", "ordinal", "description"],
+      "properties": {
+        "externalId": { "$ref": "#/$defs/externalId" },
+        "name": { "$ref": "#/$defs/name" },
+        "ordinal": { "$ref": "#/$defs/ordinal" },
+        "description": { "$ref": "#/$defs/description" },
+        "imagePrompt": { "type": ["string", "null"] },
+        "videoPrompt": { "type": ["string", "null"] },
+        "assetRefs": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/assetRef" } },
+        "stages": { "$ref": "#/$defs/stages" }
+      }
+    },
+    "assetRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetId"],
+      "properties": { "assetId": { "type": "string", "minLength": 1 } }
+    },
+    "stages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": { "anyOf": [{ "$ref": "#/$defs/stage" }, { "type": "null" }] },
+        "video": { "anyOf": [{ "$ref": "#/$defs/stage" }, { "type": "null" }] }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflowVersionId", "recipeId"],
+      "properties": {
+        "workflowVersionId": { "type": "string", "minLength": 1 },
+        "recipeId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "externalId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "description": { "type": "string", "maxLength": 1000 },
+    "ordinal": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+  }
+}

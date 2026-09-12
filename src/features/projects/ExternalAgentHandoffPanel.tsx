@@ -11,6 +11,7 @@ import type {
   ExternalProductionHandoffPreview,
 } from "../../types/externalProductionHandoff";
 import { UiErrorNotice } from "../../i18n/UiErrorNotice";
+import handoffExample from "../../../docs/examples/production-handoff-v1.example.json";
 
 interface Props {
   projectId: string;
@@ -30,6 +31,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [completed, setCompleted] = useState(false);
+  const [copyNotice, setCopyNotice] = useState("");
 
   useEffect(() => {
     setContent("");
@@ -37,6 +39,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
     setPreview(undefined);
     setError(undefined);
     setCompleted(false);
+    setCopyNotice("");
     setSelectedHandoffId(undefined);
     setMappings([]);
     void listExternalProductionHandoffs(projectId)
@@ -103,13 +106,23 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
     }
   }
 
+  async function copyExample() {
+    try {
+      const example = { ...handoffExample, projectId };
+      await navigator.clipboard.writeText(`${JSON.stringify(example, null, 2)}\n`);
+      setCopyNotice("标准示例已复制；请替换示例中的 Workflow/Recipe 占位符，再运行预检。");
+    } catch (copyError) {
+      setError(copyError);
+    }
+  }
+
   return (
     <section className="workspace-panel project-import-workspace" aria-busy={busy} aria-label="External Agent Handoff 工作区">
       <div className="section-heading workspace-heading">
         <div>
-          <span className="section-label">项目工具 · External Agent</span>
-          <h2>External Agent Production Handoff</h2>
-          <p className="section-description">读取严格的 ProductionHandoffV1 文档，先预检，再由你明确确认写入正式生产结构。</p>
+          <span className="section-label">项目工具 · 外部智能体</span>
+          <h2>导入生产数据</h2>
+          <p className="section-description">导入外部智能体提供的 JSON（格式版本 1）。先预检，再由你确认写入镜头和生产输入；不会自动开始生产。</p>
         </div>
         <button type="button" className="quiet-button" onClick={onBack} disabled={busy}>返回镜头批量导入</button>
       </div>
@@ -118,7 +131,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
         <div className="project-import-card-heading">
           <div>
             <span className="section-label">1 · 选择交接文档</span>
-            <h3 id="external-handoff-file-title">ProductionHandoffV1 JSON</h3>
+            <h3 id="external-handoff-file-title">生产交接 JSON · schemaVersion 1</h3>
           </div>
           {fileName && <span>{fileName}</span>}
         </div>
@@ -148,7 +161,13 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
           disabled={busy}
         />
         <p className="project-import-help">预检是只读的；写入会创建 Series / Episode / Scene / Shot、提示词、阶段配置、已有素材引用和来源映射，不会创建 Queue Task、Comfy 任务或自动执行。</p>
+        <details>
+          <summary>查看格式说明</summary>
+          <p>必填：schemaVersion=1、当前 projectId、source.agent、series。Series → Episode → Scene → Shot 均使用稳定 externalId、名称、描述和正整数顺序。最多 500 个镜头；素材和工作流配置只能使用当前项目的真实 ID。</p>
+          <p>可先复制标准示例，再替换其中的工作流/配方占位符；不知道精确配置时，删除 stages 字段。预检会指出阻塞字段，不会写入数据。</p>
+        </details>
         <div className="project-import-actions">
+          <button type="button" className="quiet-button" onClick={() => void copyExample()} disabled={busy}>复制标准示例</button>
           <button type="button" className="primary-action" onClick={() => void runPreview()} disabled={busy || !content.trim()}>
             {busy ? "处理中…" : "运行交接预检"}
           </button>
@@ -156,6 +175,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
             清除
           </button>
         </div>
+        {copyNotice && <p role="status">{copyNotice}</p>}
       </section>
 
       {error !== undefined && <UiErrorNotice error={error} />}
@@ -177,7 +197,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
           {preview.replay.status !== "NEW" && <p role="status">幂等状态：{preview.replay.status}，不会重复创建正式实体。</p>}
           {(preview.errors.length > 0 || preview.warnings.length > 0) && (
             <ul className="project-import-issues">
-              {[...preview.errors, ...preview.warnings].map((issue, index) => <li key={`${issue.code}-${index}`}><strong>{issue.code}</strong>：{issue.message}</li>)}
+              {[...preview.errors, ...preview.warnings].map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.path && <><code>{issue.path}</code> · </>}<strong>{issue.code}</strong>：{issue.message}</li>)}
             </ul>
           )}
           <p>预计写入：{preview.writePlan.createsSeries} 个 Series、{preview.writePlan.createsEpisodes} 个 Episode、{preview.writePlan.createsScenes} 个 Scene、{preview.writePlan.createsShots} 个 Shot。</p>

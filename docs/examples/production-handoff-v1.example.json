@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "projectId": "prj_replace_with_current_project_id",
+  "source": {
+    "agent": "external-production-agent",
+    "revision": "draft-001"
+  },
+  "series": [
+    {
+      "externalId": "series-opening",
+      "name": "Opening",
+      "description": "A short opening sequence.",
+      "ordinal": 1,
+      "episodes": [
+        {
+          "externalId": "episode-arrival",
+          "name": "Arrival",
+          "description": "The arrival episode.",
+          "ordinal": 1,
+          "scenes": [
+            {
+              "externalId": "scene-gate",
+              "name": "The Gate",
+              "description": "The gate in the rain.",
+              "ordinal": 1,
+              "shots": [
+                {
+                  "externalId": "shot-gate-wide",
+                  "name": "Gate wide shot",
+                  "ordinal": 1,
+                  "description": "The gate stands closed in the rain.",
+                  "imagePrompt": "Wide view of a rain-soaked gate at dusk.",
+                  "videoPrompt": "Camera slowly approaches the closed gate."
+                },
+                {
+                  "externalId": "shot-gate-close",
+                  "name": "Gate close-up",
+                  "ordinal": 2,
+                  "description": "A hand reaches for the gate.",
+                  "imagePrompt": "Close-up of a hand reaching for a wet gate latch.",
+                  "videoPrompt": "The hand moves toward the latch.",
+                  "stages": {
+                    "image": {
+                      "workflowVersionId": "wv_replace_with_active_exact_version",
+                      "recipeId": "recipe_replace_with_matching_active_recipe"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

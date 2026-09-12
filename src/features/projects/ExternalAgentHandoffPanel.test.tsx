@@ -91,14 +91,28 @@ describe("ExternalAgentHandoffPanel", () => {
 
   it("keeps confirmation blocked for schema errors and exposes stale confirmation failures", async () => {
     vi.mocked(previewExternalProductionHandoff).mockResolvedValue(validPreview({
-      errors: [{ severity: "error", code: "HANDOFF_UNKNOWN_FIELD", message: "unknown field" }],
+      errors: [{ severity: "error", code: "HANDOFF_UNKNOWN_FIELD", message: "unknown field", path: "series[0].episodes[0].scenes[0].shots[0].assetRefs[0]" }],
     }));
     const actor = userEvent.setup();
     render(<ExternalAgentHandoffPanel projectId="project-1" onBack={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("或粘贴交接 JSON"), { target: { value: "{}" } });
     await actor.click(screen.getByRole("button", { name: "运行交接预检" }));
     await waitFor(() => expect(screen.getByText("HANDOFF_UNKNOWN_FIELD")).toBeTruthy());
+    expect(screen.getByText("series[0].episodes[0].scenes[0].shots[0].assetRefs[0]")).toBeTruthy();
     expect(screen.getByRole("button", { name: "明确确认并写入" })).toHaveProperty("disabled", true);
+  });
+
+  it("copies the provider-neutral example with the current project ID", async () => {
+    const actor = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    render(<ExternalAgentHandoffPanel projectId="project-1" onBack={vi.fn()} />);
+    await actor.click(screen.getByRole("button", { name: "复制标准示例" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const example = JSON.parse(writeText.mock.calls[0][0]);
+    expect(example.projectId).toBe("project-1");
+    expect(example.schemaVersion).toBe(1);
+    expect(example.series[0].episodes[0].scenes[0].shots).toHaveLength(2);
   });
 
   it("reloads project-scoped history and clears the handoff draft when project changes", async () => {

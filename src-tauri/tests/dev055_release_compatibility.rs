@@ -1587,6 +1587,46 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_032() {
 }
 
 #[tokio::test]
+async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_032() {
+    let (directory, pool) = database().await;
+    insert_consistency_project(&pool, &directory.path().join("published-1-1-project")).await;
+    sqlx::query("DROP TABLE external_production_handoff_entities")
+        .execute(&pool)
+        .await
+        .expect("isolated 032 mapping table should drop");
+    sqlx::query("DROP TABLE external_production_handoffs")
+        .execute(&pool)
+        .await
+        .expect("isolated 032 handoff table should drop");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 32")
+        .execute(&pool)
+        .await
+        .expect("isolated 032 marker should drop");
+    assert_eq!(max_migration(&pool).await, 31);
+    pool.close().await;
+
+    let upgraded = initialize(&directory.path().join("app.db"))
+        .await
+        .expect("reconstructed 1.1 database should upgrade through migration 032");
+    assert_current_migration_gate(&upgraded).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = ?")
+            .bind(CONSISTENCY_PROJECT_ID)
+            .fetch_one(&upgraded)
+            .await
+            .expect("1.1 project should remain readable"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflow_recipe_runtime_states")
+            .fetch_one(&upgraded)
+            .await
+            .expect("1.1 recipe lifecycle table should remain readable"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn dev055_official_062_to_070_upgrade_isolated_or_env_blocked() {
     let Some(old_binary) = environment_path("DEV055_OFFICIAL_062_BINARY") else {
         report_env_blocked("DEV055_OFFICIAL_062_BINARY is not a file");
@@ -1770,6 +1810,35 @@ async fn dev055_backup_12_inspect_restore_and_backup_13_restore_use_real_export(
 async fn dev055_backup_18_roundtrip_preserves_consistency_and_preparation_snapshot() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("consistency-project")).await;
+    sqlx::query(
+        "INSERT INTO external_production_handoffs
+         (id, project_id, schema_version, source_agent, source_revision, document_sha256, imported_at)
+         VALUES ('hnd_dev106_fixture', ?, 1, 'fixture-agent', 'rev-1', ?, ?)",
+    )
+    .bind(CONSISTENCY_PROJECT_ID)
+    .bind("a".repeat(64))
+    .bind(CREATED_AT)
+    .execute(&pool)
+    .await
+    .expect("handoff provenance fixture should insert");
+    for (kind, external_id, formal_id) in [
+        ("series", "source-series", CONSISTENCY_SERIES_ID),
+        ("episode", "source-episode", CONSISTENCY_EPISODE_ID),
+        ("scene", "source-scene", CONSISTENCY_SCENE_ID),
+        ("shot", "source-shot", CONSISTENCY_SHOT_ID),
+    ] {
+        sqlx::query(
+            "INSERT INTO external_production_handoff_entities
+             (handoff_id, entity_kind, external_id, formal_entity_id)
+             VALUES ('hnd_dev106_fixture', ?, ?, ?)",
+        )
+        .bind(kind)
+        .bind(external_id)
+        .bind(formal_id)
+        .execute(&pool)
+        .await
+        .expect("handoff mapping fixture should insert");
+    }
     let service = ProjectBackupService::new(
         pool.clone(),
         directory.path().join("restored-projects"),
@@ -1797,6 +1866,8 @@ async fn dev055_backup_18_roundtrip_preserves_consistency_and_preparation_snapsh
         ("scopeProfileBindings", 2),
         ("scopeReferenceSetBindings", 2),
         ("preparationSnapshots", 1),
+        ("externalProductionHandoffs", 1),
+        ("externalProductionHandoffEntities", 4),
     ] {
         assert_eq!(
             archive_document[field].as_array().map(Vec::len),
@@ -1816,6 +1887,42 @@ async fn dev055_backup_18_roundtrip_preserves_consistency_and_preparation_snapsh
         .await
         .expect("Backup 18 should restore");
     assert_ne!(restored.id, CONSISTENCY_PROJECT_ID);
+    let restored_handoff: (String, String, String) = sqlx::query_as(
+        "SELECT id, project_id, document_sha256 FROM external_production_handoffs
+         WHERE project_id = ?",
+    )
+    .bind(&restored.id)
+    .fetch_one(&pool)
+    .await
+    .expect("handoff provenance should restore");
+    assert_ne!(restored_handoff.0, "hnd_dev106_fixture");
+    assert_eq!(restored_handoff.1, restored.id);
+    assert_eq!(restored_handoff.2, "a".repeat(64));
+    let restored_mappings: Vec<(String, String)> = sqlx::query_as(
+        "SELECT entity_kind, formal_entity_id FROM external_production_handoff_entities
+         WHERE handoff_id = ? ORDER BY entity_kind",
+    )
+    .bind(&restored_handoff.0)
+    .fetch_all(&pool)
+    .await
+    .expect("handoff mappings should restore");
+    assert_eq!(restored_mappings.len(), 4);
+    for (kind, formal_id) in restored_mappings {
+        let table = match kind.as_str() {
+            "series" => "production_series",
+            "episode" => "production_episodes",
+            "scene" => "production_scenes",
+            "shot" => "shots",
+            _ => panic!("unexpected handoff entity kind"),
+        };
+        let query = format!("SELECT COUNT(*) FROM {table} WHERE id = ?");
+        let count: i64 = sqlx::query_scalar(&query)
+            .bind(&formal_id)
+            .fetch_one(&pool)
+            .await
+            .expect("remapped formal entity should exist");
+        assert_eq!(count, 1);
+    }
 
     let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT

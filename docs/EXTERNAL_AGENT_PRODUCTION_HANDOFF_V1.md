@@ -30,6 +30,15 @@ Task history, and ComfyUI execution.
 
 ## Target document
 
+Tooling for external agents: [strict JSON Schema](schemas/production-handoff-v1.schema.json),
+[canonical two-Shot example](examples/production-handoff-v1.example.json), and
+[provider-neutral instruction template](EXTERNAL_AGENT_HANDOFF_PROMPT_TEMPLATE.md).
+Replace the example `projectId` with the current project ID. Its second Shot
+contains placeholder `workflowVersionId` + `recipeId`: replace **both** with
+an exact active pair from that project, or remove `stages` if no pair is known.
+Do not submit placeholder Asset IDs. The first Shot deliberately has no stage
+configuration and may still be imported as an incomplete production input.
+
 The target V1 document has exactly these top-level fields:
 
 | Field | Required | Meaning |
@@ -98,6 +107,17 @@ The shipped importer must:
    without guessing from names; and
 7. perform one server-side all-or-nothing transaction for hierarchy records,
    Shots, prompt input/snapshot provenance, references, and handoff identity.
+
+The schema mirrors field names, required fields, unknown-field rejection,
+and locally expressible size bounds. **SERVER_VALIDATED:** the server also
+checks the 4 MiB UTF-8 document limit, aggregate 500-Shot limit across all
+Scenes, aggregate Episode/Scene limits, each prompt's 64 KiB UTF-8 byte limit,
+trimmed/non-newline text and identifiers, sibling uniqueness, project and
+Asset ownership, and exact active workflow-version/recipe pairing. JSON
+Schema `maxLength` and per-array `maxItems` cannot replace those checks.
+Names are limited to 100 characters, descriptions to 1,000, external IDs and
+source metadata to 200, and each Shot to 20 asset references. A valid schema
+result is **not** a successful server preview.
 
 Preview is read-only and returns normalized records, warnings, errors, exact
 references, and the write plan. Confirm is a separate explicit action. Neither
