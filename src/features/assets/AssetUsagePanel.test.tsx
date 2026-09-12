@@ -1,10 +1,22 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssetUsageSummary, UsageRelation } from "../../types/consistency";
+import { getAssetUsage } from "../../services/tauriClient";
 import { AssetUsagePanel, usageBucketItems } from "./AssetUsagePanel";
 
+vi.mock("../../services/tauriClient", () => ({ getAssetUsage: vi.fn() }));
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
 const usageRelation = (relationType: string, name: string): UsageRelation => ({
-  entityType: "shot",
+  entityType: "relation",
   entityId: name,
   displayName: name,
   relationType,
@@ -38,5 +50,19 @@ describe("AssetUsagePanel", () => {
     expect(html).toContain("Asset Usage");
     expect(html).toContain("使用情况");
     expect(html).toContain("正在加载使用情况");
+  });
+
+  it("opens the exact Shot target from usage", async () => {
+    const user = userEvent.setup();
+    const onOpenShot = vi.fn();
+    vi.mocked(getAssetUsage).mockResolvedValue({
+      ...summary,
+      shots: [{ ...usageRelation("REFERENCE_ASSET", "镜头 01"), entityType: "SHOT", shotId: "shot-1", entityId: "shot-1" }],
+      selectedKeyframes: [],
+    });
+
+    render(<AssetUsagePanel projectId="project-1" assetId="asset-1" onOpenShot={onOpenShot} />);
+    await user.click(await screen.findByRole("button", { name: "查看镜头" }));
+    expect(onOpenShot).toHaveBeenCalledWith("shot-1");
   });
 });

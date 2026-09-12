@@ -647,6 +647,45 @@ async fn usage_and_deletion_blocker_fixtures_are_project_scoped() {
 }
 
 #[tokio::test]
+async fn asset_usage_does_not_leak_a_shot_from_another_project() {
+    let (_directory, pool) = database().await;
+    let other_project = "project-dev051-other";
+    insert_project(&pool, other_project).await;
+    insert_asset(
+        &pool,
+        "ast_dev051_isolated",
+        PROJECT_ID,
+        "Isolated asset",
+        None,
+        256,
+        256,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO shots
+         (id, project_id, ordinal, name, prompt_text, selected_image_asset_id, created_at, updated_at)
+         VALUES ('shot-dev051-other', ?, 0, 'Other project shot', 'prompt', ?, ?, ?)",
+    )
+    .bind(other_project)
+    .bind("ast_dev051_isolated")
+    .bind(CREATED_AT)
+    .bind(CREATED_AT)
+    .execute(&pool)
+    .await
+    .expect("cross-project shot fixture should insert");
+
+    let usage = SqliteAssetUsageRepository::new(pool)
+        .asset_usage(
+            PROJECT_ID,
+            &domain::AssetId::parse("ast_dev051_isolated").expect("asset id should parse"),
+        )
+        .await
+        .expect("isolated asset usage should load");
+    assert!(usage.shots.is_empty());
+    assert!(usage.selected_keyframes.is_empty());
+}
+
+#[tokio::test]
 async fn explicit_anchor_conversion_preserves_legacy_anchor_rows() {
     let (_directory, pool) = database().await;
     insert_asset(

@@ -236,6 +236,7 @@ interface Props {
   onShotSelected?: (shotId?: string) => void;
   onContextPathChange?: (path: ShotContextPathItem[]) => void;
   contextPathTarget?: ShotContextPathItem;
+  onOpenAsset?: (assetId: string) => void;
   onOpenTask?: (taskId: string) => void;
   onOpenProductionQueue?: () => void;
   consistencyWorkspace?: Omit<ScopeConsistencyWorkspaceProps, "projectId" | "scope" | "scopeOptions" | "onScopeChange"> & {
@@ -256,7 +257,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -1352,6 +1353,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
               previewAsset={previewAsset}
               onCandidateSelect={(candidate) => setPreviewAssetId(candidate.asset.id)}
               onCandidateConfirm={(assetId, fromLinkedTask) => void selectResult(assetId, fromLinkedTask ?? false)}
+              onOpenAsset={onOpenAsset}
               onOpenTask={onOpenTask}
               history={stageLinks}
               onRetry={(link) => retryShot(selectedShot?.id ?? "", link.stage)}

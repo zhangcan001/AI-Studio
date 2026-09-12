@@ -11,12 +11,13 @@ interface Props {
   onClose: () => void;
   onUseInStudio?: (asset: AssetView) => void;
   onOpenTask?: (taskId: string) => void;
+  onOpenShot?: (shotId: string) => void;
   allTags?: AssetTag[];
   onOrganizationChanged?: (asset: AssetView) => void;
   onRequestDelete?: (asset: AssetView) => void;
 }
 
-export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenTask, allTags = [], onOrganizationChanged, onRequestDelete }: Props) {
+export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenTask, onOpenShot, allTags = [], onOrganizationChanged, onRequestDelete }: Props) {
   const [url, setUrl] = useState<string>();
   const [posterUrl, setPosterUrl] = useState<string>();
   const [error, setError] = useState<string>();
@@ -231,7 +232,7 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
             <button type="button" className="quiet-button" onClick={() => void createAndAddTag()} disabled={organizationBusy || !newTagName.trim()}>新建并添加</button>
           </div>
         </section>
-        <AssetUsagePanel projectId={projectId} assetId={asset.id} assetName={displayName} />
+        <AssetUsagePanel projectId={projectId} assetId={asset.id} assetName={displayName} onOpenShot={onOpenShot} onOpenTask={onOpenTask} />
       </section>
     </div>
   );

@@ -57,6 +57,7 @@ export interface ShotInspectorProps {
   selectedAnchorId?: string;
   onAnchorChange?: (anchorId: string) => void;
   keyframeAsset?: AssetView;
+  onOpenAsset?: (assetId: string) => void;
   onReferenceAdd?: (assetId: string) => void;
   onReferenceRemove?: (assetId: string) => void;
   onReferenceMove?: (index: number, delta: -1 | 1) => void;
@@ -97,6 +98,7 @@ export function ShotInspector({
   selectedAnchorId = "",
   onAnchorChange,
   keyframeAsset,
+  onOpenAsset,
   onReferenceAdd,
   onReferenceRemove,
   onReferenceMove,
@@ -193,6 +195,7 @@ export function ShotInspector({
           selectedAnchorId={selectedAnchorId}
           onAnchorChange={onAnchorChange}
           keyframeAsset={keyframeAsset}
+          onOpenAsset={onOpenAsset}
           onReferenceAdd={onReferenceAdd}
           onReferenceRemove={onReferenceRemove}
           onReferenceMove={onReferenceMove}
@@ -256,7 +259,7 @@ function ScalarField({ field, value, disabled, onChange }: { field: ScalarRecipe
   );
 }
 
-function ReferenceInspector({ projectId, stage, references, availableReferences, referenceAnchors, selectedAnchorId, onAnchorChange, keyframeAsset, onReferenceAdd, onReferenceRemove, onReferenceMove, onApplyAnchor, onSaveReferences, busy }: {
+function ReferenceInspector({ projectId, stage, references, availableReferences, referenceAnchors, selectedAnchorId, onAnchorChange, keyframeAsset, onOpenAsset, onReferenceAdd, onReferenceRemove, onReferenceMove, onApplyAnchor, onSaveReferences, busy }: {
   projectId: string;
   stage: ShotStage;
   references: ShotReferenceItem[];
@@ -265,6 +268,7 @@ function ReferenceInspector({ projectId, stage, references, availableReferences,
   selectedAnchorId: string;
   onAnchorChange?: (anchorId: string) => void;
   keyframeAsset?: AssetView;
+  onOpenAsset?: (assetId: string) => void;
   onReferenceAdd?: (assetId: string) => void;
   onReferenceRemove?: (assetId: string) => void;
   onReferenceMove?: (index: number, delta: -1 | 1) => void;
@@ -278,7 +282,7 @@ function ReferenceInspector({ projectId, stage, references, availableReferences,
     <div className="shot-inspector-panel" role="tabpanel" aria-label="参考">
       <section className="shot-inspector-section">
         <div className="shot-inspector-section-heading"><div><span className="shot-inspector-label">参考素材</span><h3>{stage === "video" ? "有序参考图" : "参考素材"}</h3></div>{onSaveReferences && <button type="button" className="quiet-button" onClick={() => void onSaveReferences()} disabled={busy}>保存</button>}</div>
-        {stage === "video" && keyframeAsset && <div className="shot-inspector-keyframe"><AssetThumb projectId={projectId} asset={keyframeAsset} /><span><small>关键帧</small><strong>{keyframeAsset.name}</strong></span></div>}
+        {stage === "video" && keyframeAsset && <div className="shot-inspector-keyframe"><AssetThumb projectId={projectId} asset={keyframeAsset} /><span><small>关键帧</small><strong>{keyframeAsset.name}</strong></span>{onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(keyframeAsset.id)}>查看素材</button>}</div>}
         {referenceAnchors.length > 0 && (
           <div className="shot-inspector-anchor-picker">
             <label className="shot-inspector-field"><span>参考锚点</span><select value={selectedAnchorId} onChange={(event) => onAnchorChange?.(event.target.value)} disabled={busy || !onAnchorChange}><option value="">选择参考锚点</option>{referenceAnchors.map((anchor) => <option key={anchor.id} value={anchor.id} disabled={anchor.usable === false}>{anchor.kind ? `[${referenceAnchorKindLabels[anchor.kind as keyof typeof referenceAnchorKindLabels] ?? "其他"}] ` : ""}{anchor.name}</option>)}</select></label>
@@ -292,9 +296,10 @@ function ReferenceInspector({ projectId, stage, references, availableReferences,
           {references.map((reference, index) => (
             <div className="shot-inspector-reference-row" key={`${reference.assetId}:${index}`}>
               <span className="shot-inspector-reference-index">@图片{index + 1}</span>
-              {reference.asset ? <AssetThumb projectId={projectId} asset={reference.asset} /> : <span className="shot-inspector-thumb-placeholder">素材</span>}
-              <span className="shot-inspector-reference-copy"><strong>{reference.label ?? reference.asset?.name ?? reference.assetId}</strong><small>{reference.assetId}</small></span>
+              {reference.asset ? <AssetThumb projectId={projectId} asset={reference.asset} /> : <span className="shot-inspector-thumb-placeholder">引用素材不可用</span>}
+              <span className="shot-inspector-reference-copy"><strong>{reference.asset ? (reference.label ?? reference.asset.name) : "引用素材不可用"}</strong><small>{reference.assetId}</small></span>
               <div className="shot-inspector-reference-actions">
+                {onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(reference.assetId)}>查看素材</button>}
                 <button type="button" className="quiet-button" aria-label={`上移 ${reference.label ?? reference.asset?.name ?? reference.assetId}`} onClick={() => onReferenceMove?.(index, -1)} disabled={busy || !onReferenceMove || index === 0}>↑</button>
                 <button type="button" className="quiet-button" aria-label={`下移 ${reference.label ?? reference.asset?.name ?? reference.assetId}`} onClick={() => onReferenceMove?.(index, 1)} disabled={busy || !onReferenceMove || index === references.length - 1}>↓</button>
                 <button type="button" className="quiet-button" onClick={() => onReferenceRemove?.(reference.assetId)} disabled={busy || !onReferenceRemove}>移除</button>

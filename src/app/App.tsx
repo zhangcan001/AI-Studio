@@ -716,6 +716,17 @@ function App() {
     setError(null);
   }
 
+  function openAssetFromShot(assetId: string) {
+    setFocusedAssetId(assetId);
+    navigateToWorkspace("assets");
+  }
+
+  function openShotFromAsset(shotId: string) {
+    setResumeShotId(shotId);
+    void recordShotChange(shotId);
+    navigateToWorkspace("shots");
+  }
+
   function navigateFromCommandCenter(request: ProjectCommandCenterNavigationRequest) {
     const navigation = resolveProjectCommandCenterNavigation(request);
     setFocusedProductionBatchId(navigation.batchId);
@@ -899,6 +910,7 @@ function App() {
             setFocusedTaskId(taskId);
             navigateToWorkspace("tasks");
           }}
+          onOpenShot={openShotFromAsset}
         />
       )}
       {activeProject && workspace === "shots" && (
@@ -916,6 +928,7 @@ function App() {
             onShotSelected={handleShotSelected}
             onContextPathChange={handleShotContextPathChange}
             contextPathTarget={shotContextTarget}
+            onOpenAsset={openAssetFromShot}
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
               navigateToWorkspace("tasks");

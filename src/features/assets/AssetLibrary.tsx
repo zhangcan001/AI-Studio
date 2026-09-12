@@ -37,9 +37,10 @@ interface Props {
   onUseInStudio: (asset: AssetView) => void;
   onOpenVideoBatch: (assets: AssetView[]) => void;
   onOpenTask: (taskId: string) => void;
+  onOpenShot?: (shotId: string) => void;
 }
 
-export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenVideoBatch, onOpenTask }: Props) {
+export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenVideoBatch, onOpenTask, onOpenShot }: Props) {
   const [category, setCategory] = useState<AssetCategoryFilter>("ALL");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -414,6 +415,7 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
           onClose={() => setSelectedAsset(undefined)}
           onUseInStudio={onUseInStudio}
           onOpenTask={onOpenTask}
+          onOpenShot={onOpenShot}
           allTags={tags}
           onOrganizationChanged={applyOrganizationAsset}
           onRequestDelete={(asset) => setDeleteRequest([asset])}

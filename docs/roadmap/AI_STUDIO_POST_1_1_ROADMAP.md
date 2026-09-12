@@ -4,7 +4,7 @@
 TASK=DEV-099
 RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
-ROADMAP_STATUS=FROZEN
+ROADMAP_STATUS=UPDATED_BY_DEV_102
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
 ```
@@ -59,11 +59,17 @@ Storyboard, or Prompt authoring product. The full hierarchy importer is
 blocked by the current schema and must not add a migration, second Shot model,
 queue, executor, or Task model.
 
-### P1 — Asset / Reference Continuity
+### P1 — Asset / Reference Continuity — CLOSED (DEV-102)
 
 Improve direct visibility and navigation between existing ReferenceSet/Profile,
 Shot references, generated inputs, and selected deliverables. Keep the existing
 Asset Library authoritative; no duplicate store, table, or implicit file copy.
+
+DEV-102 closes this read/navigation slice with the existing
+`AssetUsageService`, exact Shot/Asset/Task targets, explicit unavailable
+reference states, Shot input/result separation, and Project Complete →
+selected Asset continuity. The next main theme is Daily Production
+Explainability; DEV-103 has not started.
 
 ### P1 — Daily Production Explainability
 

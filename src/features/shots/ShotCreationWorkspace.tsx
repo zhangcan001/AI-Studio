@@ -38,6 +38,7 @@ export interface ShotCreationWorkspaceProps extends Omit<ShotInspectorProps, "pr
   previewAsset?: AssetView;
   onCandidateSelect?: (candidate: ShotWorkspaceCandidate) => void;
   onCandidateConfirm?: (assetId: string, fromLinkedTask?: boolean) => void | Promise<void>;
+  onOpenAsset?: (assetId: string) => void;
   onOpenTask?: (taskId: string) => void;
   history?: ShotGenerationLink[];
   onRetry?: (link: ShotGenerationLink) => void | Promise<void>;
@@ -165,6 +166,9 @@ export function ShotCreationWorkspace({
             candidates={candidates}
             selectedAssetId={selectedAssetId}
             previewAsset={preview}
+            references={orderedReferences}
+            keyframeAsset={inspectorProps.keyframeAsset}
+            onOpenAsset={inspectorProps.onOpenAsset}
             onCandidateSelect={onCandidateSelect}
             onCandidateConfirm={onCandidateConfirm}
             previewResetKey={`${shot.id}:${stage}`}
@@ -175,7 +179,7 @@ export function ShotCreationWorkspace({
             onEditPrompt={() => selectInspectorTab("prompt")}
           />}
           {selectedWorkspaceTab === "consistency" && (consistency ? <ScopeConsistencyWorkspace {...consistency} stage={stage} /> : <div className="shot-creation-view shot-consistency-empty"><div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">一致性</span><h2>镜头一致性</h2></div></div><p className="shot-creation-muted">一致性绑定服务尚未接入当前工作区。</p></div>)}
-          {selectedWorkspaceTab === "references" && <ReferenceWorkspace projectId={projectId} stage={stage} references={orderedReferences} keyframeAsset={inspectorProps.keyframeAsset} />}
+          {selectedWorkspaceTab === "references" && <ReferenceWorkspace projectId={projectId} stage={stage} references={orderedReferences} keyframeAsset={inspectorProps.keyframeAsset} onOpenAsset={inspectorProps.onOpenAsset} />}
           {selectedWorkspaceTab === "history" && <HistoryWorkspace history={stageHistory} onOpenTask={onOpenTask} onRetry={onRetry} busy={inspectorProps.busy ?? false} />}
           {selectedWorkspaceTab === "settings" && <SettingsWorkspace shot={shot} onDeleteShot={onDeleteShot} busy={inspectorProps.busy ?? false} />}
         </main>
@@ -186,12 +190,15 @@ export function ShotCreationWorkspace({
   );
 }
 
-function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, previewAsset, onCandidateSelect, onCandidateConfirm, previewResetKey, onGenerate, busy, promptText, onCopyPrompt, onEditPrompt }: {
+function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, previewAsset, references, keyframeAsset, onOpenAsset, onCandidateSelect, onCandidateConfirm, previewResetKey, onGenerate, busy, promptText, onCopyPrompt, onEditPrompt }: {
   projectId: string;
   stage: ShotStage;
   candidates: ShotWorkspaceCandidate[];
   selectedAssetId?: string;
   previewAsset?: AssetView;
+  references: ShotInspectorProps["references"];
+  keyframeAsset?: AssetView;
+  onOpenAsset?: (assetId: string) => void;
   onCandidateSelect?: (candidate: ShotWorkspaceCandidate) => void;
   onCandidateConfirm?: (assetId: string, fromLinkedTask?: boolean) => void | Promise<void>;
   previewResetKey: string;
@@ -226,11 +233,39 @@ function GenerateWorkspace({ projectId, stage, candidates, selectedAssetId, prev
           <button type="button" className="shot-candidate-confirm" onClick={() => previewCandidate && void onCandidateConfirm?.(previewCandidate.asset.id, previewCandidate.fromLinkedTask)} disabled={busy || !canConfirmPreview}>确认当前候选</button>
         </aside>
       </section>
+      <AssetContinuitySummary references={references} keyframeAsset={keyframeAsset} candidates={candidates} selectedAssetId={selectedAssetId} onOpenAsset={onOpenAsset} />
       <section className="shot-prompt-preview" aria-label="提示词预览">
         <div className="shot-prompt-preview-heading"><div><span className="shot-creation-kicker">提示词预览</span><strong>当前实际提示词</strong></div><div className="shot-prompt-preview-actions"><button type="button" className="quiet-button" onClick={() => onCopyPrompt?.(promptText)} disabled={!onCopyPrompt || !promptText.trim()}>复制</button><button type="button" className="quiet-button" onClick={onEditPrompt}>编辑</button></div></div>
         <p>{promptText || "尚未填写提示词。"}</p>
       </section>
     </div>
+  );
+}
+
+function AssetContinuitySummary({ references = [], keyframeAsset, candidates, selectedAssetId, onOpenAsset }: {
+  references: ShotInspectorProps["references"];
+  keyframeAsset?: AssetView;
+  candidates: ShotWorkspaceCandidate[];
+  selectedAssetId?: string;
+  onOpenAsset?: (assetId: string) => void;
+}) {
+  const selected = candidates.find((candidate) => candidate.asset.id === selectedAssetId)?.asset;
+  const inputs = [...(keyframeAsset ? [{ assetId: keyframeAsset.id, asset: keyframeAsset, label: "关键帧" }] : []), ...references];
+  return (
+    <section className="shot-asset-continuity" aria-label="镜头素材连续性" style={{ display: "grid", gap: 10, marginTop: 14, padding: 12, border: "1px solid var(--studio-border, rgba(255,255,255,.08))", borderRadius: 8 }}>
+      <div className="shot-creation-view-heading" style={{ marginBottom: 0 }}><div><span className="shot-creation-kicker">素材连续性</span><h3>参考 / 输入素材</h3></div><span className="shot-creation-count">{inputs.length} 项</span></div>
+      {inputs.length === 0 ? <p className="shot-creation-muted">当前镜头没有已保存的参考素材。</p> : <div style={{ display: "grid", gap: 6 }}>
+        {inputs.map((reference, index) => <div key={`${reference.assetId}:${index}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{reference.asset ? (reference.label ?? reference.asset.name) : "引用素材不可用"}<small style={{ display: "block", color: "var(--studio-text-secondary, #9ca3af)" }}>{reference.assetId}</small></span>
+          {onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(reference.assetId)}>查看素材</button>}
+        </div>)}
+      </div>}
+      <div className="shot-creation-view-heading" style={{ marginBottom: 0 }}><div><span className="shot-creation-kicker">生成结果</span><h3>当前阶段结果</h3></div><span className="shot-creation-count">{candidates.length} 项</span></div>
+      {selectedAssetId ? <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>{selected?.name ?? "引用素材不可用"}</strong><small style={{ display: "block", color: "var(--studio-text-secondary, #9ca3af)" }}>{selectedAssetId} · 已选结果</small></span>
+        {onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(selectedAssetId)}>查看素材</button>}
+      </div> : <p className="shot-creation-muted">当前阶段尚未选择生成结果。</p>}
+    </section>
   );
 }
 
@@ -247,13 +282,13 @@ function CandidateRailItem({ projectId, candidate, selected, onSelect, disabled 
   );
 }
 
-function ReferenceWorkspace({ projectId, stage, references, keyframeAsset }: { projectId: string; stage: ShotStage; references: ShotInspectorProps["references"]; keyframeAsset?: AssetView }) {
+function ReferenceWorkspace({ projectId, stage, references, keyframeAsset, onOpenAsset }: { projectId: string; stage: ShotStage; references: ShotInspectorProps["references"]; keyframeAsset?: AssetView; onOpenAsset?: (assetId: string) => void }) {
   return (
     <div className="shot-creation-view">
       <div className="shot-creation-view-heading"><div><span className="shot-creation-kicker">参考素材</span><h2>参考素材总览</h2></div><span className="shot-creation-count">{references?.length ?? 0} 张</span></div>
       {stage === "video" && keyframeAsset && <div className="shot-reference-keyframe"><ShotMediaPreview projectId={projectId} asset={keyframeAsset} variant="thumb" /><span><small>关键帧</small><strong>{keyframeAsset.name}</strong></span></div>}
       <div className="shot-reference-grid">
-        {references?.map((reference, index) => <article key={`${reference.assetId}:${index}`} className="shot-reference-card"><span className="shot-reference-index">@图片{index + 1}</span>{reference.asset ? <ShotMediaPreview projectId={projectId} asset={reference.asset} variant="card" /> : <div className="shot-reference-placeholder">暂无预览</div>}<strong>{reference.label ?? reference.asset?.name ?? reference.assetId}</strong><small>{reference.assetId}</small></article>)}
+        {references?.map((reference, index) => <article key={`${reference.assetId}:${index}`} className="shot-reference-card"><span className="shot-reference-index">@图片{index + 1}</span>{reference.asset ? <ShotMediaPreview projectId={projectId} asset={reference.asset} variant="card" /> : <div className="shot-reference-placeholder">引用素材不可用</div>}<strong>{reference.asset ? (reference.label ?? reference.asset.name) : "引用素材不可用"}</strong><small>{reference.assetId}</small>{onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(reference.assetId)}>查看素材</button>}</article>)}
         {!references?.length && <EmptyWorkspaceState title="暂无参考素材" detail="在右侧参数面板的“参考”页添加当前镜头的有序参考图。" />}
       </div>
     </div>

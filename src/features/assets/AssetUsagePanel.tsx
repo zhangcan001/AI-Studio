@@ -7,6 +7,8 @@ interface Props {
   projectId: string;
   assetId: string;
   assetName?: string;
+  onOpenShot?: (shotId: string) => void;
+  onOpenTask?: (taskId: string) => void;
 }
 
 type UsageBucket = "referenceSets" | "profiles" | "shots" | "legacyReferences" | "selectedKeyframes" | "productionHistory";
@@ -76,7 +78,7 @@ function relationSubtitle(item: UsageRelation): string | undefined {
   return parts.length ? parts.join(" · ") : undefined;
 }
 
-export function AssetUsagePanel({ projectId, assetId, assetName }: Props) {
+export function AssetUsagePanel({ projectId, assetId, assetName, onOpenShot, onOpenTask }: Props) {
   const [summary, setSummary] = useState<AssetUsageSummary>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -115,6 +117,16 @@ export function AssetUsagePanel({ projectId, assetId, assetName }: Props) {
               <div key={relationKey(item, index)} style={{ display: "grid", gap: 2, padding: "7px 9px", border: "1px solid var(--studio-border, rgba(255,255,255,.08))", borderRadius: 7 }}>
                 <span style={{ overflowWrap: "anywhere" }}>{relationTitle(item)}</span>
                 {relationSubtitle(item) && <small style={{ color: "var(--studio-text-secondary, #9ca3af)" }}>{relationSubtitle(item)}</small>}
+                {(item.shotId || item.entityType?.toLocaleUpperCase() === "SHOT") && onOpenShot && (
+                  <button type="button" className="quiet-button" onClick={() => onOpenShot(item.shotId ?? item.entityId ?? "")} disabled={!item.shotId && !item.entityId}>
+                    查看镜头
+                  </button>
+                )}
+                {item.entityType?.toLocaleUpperCase() === "TASK" && onOpenTask && item.entityId && (
+                  <button type="button" className="quiet-button" onClick={() => onOpenTask(item.entityId!)}>
+                    查看生成记录
+                  </button>
+                )}
                 {item.blocking && <small style={{ color: "var(--studio-danger, #f87171)" }}>当前关系会阻止删除</small>}
               </div>
             ))}

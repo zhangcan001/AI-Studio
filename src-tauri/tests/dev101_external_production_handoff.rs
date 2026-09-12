@@ -1,5 +1,6 @@
 //! DEV-101 external-agent production handoff gates.
 
+use ai_studio_lib::infrastructure::database::repositories::SqliteAssetUsageRepository;
 use ai_studio_lib::{
     application::{
         external_production_handoff_service::ExternalProductionHandoffService,
@@ -19,6 +20,7 @@ use ai_studio_lib::{
         },
         time::SystemClock,
     },
+    AssetUsageRepository,
 };
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -297,6 +299,44 @@ async fn valid_preview_confirm_replay_and_side_effect_safety() {
     .await
     .unwrap();
     assert_eq!(restored_mapping_count, 4);
+}
+
+#[tokio::test]
+async fn handoff_asset_reference_is_visible_to_reverse_asset_usage() {
+    let harness = harness().await;
+    insert_asset(&harness.pool, "ast_dev102_handoff", PROJECT_A).await;
+    let content = document(
+        PROJECT_A,
+        Some("revision-asset-continuity"),
+        Some("ast_dev102_handoff"),
+        None,
+    );
+    let preview = harness.service.preview(PROJECT_A, &content).await.unwrap();
+    let confirmed = harness
+        .service
+        .confirm(PROJECT_A, &content, &preview.document_sha256)
+        .await
+        .unwrap();
+    let shot_id = confirmed
+        .mappings
+        .iter()
+        .find(|mapping| mapping.entity_kind == "shot")
+        .expect("handoff should map the imported shot")
+        .formal_entity_id
+        .clone();
+
+    let usage = SqliteAssetUsageRepository::new(harness.pool)
+        .asset_usage(
+            PROJECT_A,
+            &ai_studio_lib::domain::AssetId::parse("ast_dev102_handoff")
+                .expect("asset id should parse"),
+        )
+        .await
+        .unwrap();
+    assert!(usage
+        .items
+        .iter()
+        .any(|item| item.shot_id.as_deref() == Some(shot_id.as_str())));
 }
 
 #[tokio::test]

@@ -12,6 +12,7 @@ interface Props {
   onUseInStudio: (asset: AssetView) => void;
   onOpenVideoBatch: (assets: AssetView[]) => void;
   onOpenTask: (taskId: string) => void;
+  onOpenShot?: (shotId: string) => void;
 }
 
 const tabs: Array<{ value: AssetWorkspaceTab; label: string; description: string }> = [
@@ -20,7 +21,7 @@ const tabs: Array<{ value: AssetWorkspaceTab; label: string; description: string
   { value: "referenceSets", label: "参考集", description: "有序图片集合与使用关系" },
 ];
 
-export function AssetWorkspace({ projectId, initialAssetId, onUseInStudio, onOpenVideoBatch, onOpenTask }: Props) {
+export function AssetWorkspace({ projectId, initialAssetId, onUseInStudio, onOpenVideoBatch, onOpenTask, onOpenShot }: Props) {
   const [activeTab, setActiveTab] = useState<AssetWorkspaceTab>("assets");
 
   return (
@@ -42,7 +43,7 @@ export function AssetWorkspace({ projectId, initialAssetId, onUseInStudio, onOpe
         ))}
       </nav>
 
-      {activeTab === "assets" && <AssetLibrary projectId={projectId} initialAssetId={initialAssetId} onUseInStudio={onUseInStudio} onOpenVideoBatch={onOpenVideoBatch} onOpenTask={onOpenTask} />}
+      {activeTab === "assets" && <AssetLibrary projectId={projectId} initialAssetId={initialAssetId} onUseInStudio={onUseInStudio} onOpenVideoBatch={onOpenVideoBatch} onOpenTask={onOpenTask} onOpenShot={onOpenShot} />}
       {activeTab === "profiles" && <ConsistencyProfileLibrary projectId={projectId} />}
       {activeTab === "referenceSets" && <ReferenceSetLibrary projectId={projectId} />}
     </div>

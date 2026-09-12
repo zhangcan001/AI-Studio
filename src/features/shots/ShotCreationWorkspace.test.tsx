@@ -127,6 +127,32 @@ describe("ShotCreationWorkspace", () => {
     expect(canConfirmShotCandidate({ ...candidates[0], status: "reviewed" }, "other")).toBe(false);
   });
 
+  it("exposes exact reference and selected-result asset targets", async () => {
+    const user = userEvent.setup();
+    const onOpenAsset = vi.fn();
+    render(
+      <ShotCreationWorkspace
+        projectId="project-1"
+        shot={shot}
+        stage="video"
+        onStageChange={vi.fn()}
+        candidates={candidates}
+        selectedAssetId="video-1"
+        references={[{ assetId: "reference-1", label: "角色参考" }]}
+        onOpenAsset={onOpenAsset}
+        onGenerate={vi.fn()}
+        currentRecipe={{ workflowId: "h3", workflowVersionId: "h3-v1", recipeId: "h3-r1", name: "H3 Quality", category: "video", mode: "reference_to_video", fields: [] }}
+      />,
+    );
+
+    expect(screen.getByText("参考 / 输入素材")).toBeTruthy();
+    expect(screen.getByText("引用素材不可用")).toBeTruthy();
+    const openButtons = screen.getAllByRole("button", { name: "查看素材" });
+    await user.click(openButtons[0]);
+    await user.click(openButtons[1]);
+    expect(onOpenAsset.mock.calls).toEqual([["reference-1"], ["video-1"]]);
+  });
+
   it("keeps a real empty state when there is no selected shot", () => {
     const html = renderToStaticMarkup(<ShotCreationWorkspace projectId="project-1" stage="image" onStageChange={vi.fn()} onGenerate={vi.fn()} onCreateShot={vi.fn()} />);
     expect(html).toContain("选择一个镜头开始制作");
