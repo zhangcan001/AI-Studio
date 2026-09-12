@@ -4,10 +4,10 @@
 TASK=DEV-099
 RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
-ROADMAP_STATUS=UPDATED_BY_DEV_103
+ROADMAP_STATUS=UPDATED_BY_DEV_104
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
-NEXT_MAIN_THEME=Bulk Production Preparation / Operations
+NEXT_MAIN_THEME=Production Execution / Review Operations
 ```
 
 ## Product baseline
@@ -69,9 +69,7 @@ Asset Library authoritative; no duplicate store, table, or implicit file copy.
 DEV-102 closes this read/navigation slice with the existing
 `AssetUsageService`, exact Shot/Asset/Task targets, explicit unavailable
 reference states, Shot input/result separation, and Project Complete →
-selected Asset continuity. DEV-103 now closes the next explainability slice;
-the next main theme is Bulk Production Preparation / Operations, and DEV-104
-has not started.
+selected Asset continuity. DEV-103 now closes the next explainability slice.
 
 ### P1 — Daily Production Explainability — CLOSED (DEV-103)
 
@@ -83,11 +81,15 @@ DEV-103 closes this slice with a read-only, bounded five-bucket board under
 Project Command Center, stable reason codes, exact existing repair targets,
 and no migration or second persisted issue/next-action state.
 
-### P1 — Bulk Production Preparation / Operations
+### P1 — Bulk Production Preparation / Operations — CLOSED (DEV-104)
 
-DEV-104 has not started. The next train is limited to bulk preparation and
-operations on existing authorities; no new queue, executor, or task model is
-implied.
+DEV-104 closes this slice with a project-level, typed preflight/admit path
+backed by the existing `ProductionPreparationService`, a strict 100-shot
+preparation boundary inside a 500-shot project plan, explicit partial mode,
+exact workflow-version/recipe identity, and a prepare-only UI boundary. No
+new queue, executor, task model, migration, or automatic start was added.
+The next main theme is Production Execution / Review Operations; DEV-105 has
+not started.
 
 ### P2 — Product polish and operational clarity
 
