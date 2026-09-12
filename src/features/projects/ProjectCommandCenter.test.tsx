@@ -294,6 +294,69 @@ describe("ProjectCommandCenter", () => {
     });
   });
 
+  it("opens large project status collections through existing list filters", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      shots: { ...aggregate().shots, ready: 128, completed: 21 },
+      tasksAssets: { ...aggregate().tasksAssets, activeTaskCount: 25, failedTaskCount: 37 },
+    })} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("button", { name: "查看全部 37" }));
+    await user.click(screen.getByRole("button", { name: "查看全部 25" }));
+    await user.click(screen.getByRole("button", { name: "查看全部 128" }));
+    await user.click(screen.getByRole("button", { name: "查看全部 21" }));
+
+    expect(onNavigate.mock.calls).toEqual([
+      [{ destination: "tasks", collectionFilter: { kind: "tasks", status: "FAILED" }, projectId: "project-1" }],
+      [{ destination: "tasks", collectionFilter: { kind: "tasks", status: "ACTIVE" }, projectId: "project-1" }],
+      [{ destination: "shots", section: "production", collectionFilter: { kind: "shots", status: "READY" }, projectId: "project-1" }],
+      [{ destination: "shots", section: "creation", collectionFilter: { kind: "shots", status: "COMPLETED" }, projectId: "project-1" }],
+    ]);
+  });
+
+  it("offers a bounded 500-shot unassigned collection without rendering all rows", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const items = Array.from({ length: 20 }, (_, index) => ({
+      id: `shot:${index}`,
+      label: `Shot ${index}`,
+      reasonCode: "UNASSIGNED_SHOT",
+      reason: "镜头尚未分配到项目结构。",
+      severity: "ERROR",
+      destination: "shots",
+      stage: null,
+      shotId: `shot-${index}`,
+      batchId: null,
+      taskId: null,
+      assetId: null,
+      workflowVersionId: null,
+      recipeId: null,
+    }));
+    const emptyBucket = { totalCount: 0, items: [], hasMore: false };
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      structure: { ...aggregate().structure, unassignedShotCount: 500 },
+      dailyProduction: {
+        needsAttention: { totalCount: 500, items, hasMore: true },
+        ready: emptyBucket,
+        running: emptyBucket,
+        review: emptyBucket,
+        completed: emptyBucket,
+        topAction: null,
+      },
+    })} onNavigate={onNavigate} />);
+
+    const board = screen.getByRole("region", { name: "生产行动板" });
+    expect(board.querySelectorAll(".project-command-daily-item")).toHaveLength(20);
+    await user.click(screen.getByRole("button", { name: "查看全部 500" }));
+    expect(onNavigate).toHaveBeenCalledWith({
+      destination: "shots",
+      section: "creation",
+      projectId: "project-1",
+      collectionFilter: { kind: "shots", sceneId: "UNASSIGNED" },
+    });
+  });
+
   it("offers the project-level bulk import dry-run entry without changing navigation", async () => {
     const user = userEvent.setup();
     const onOpenImport = vi.fn();

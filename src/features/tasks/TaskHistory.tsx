@@ -16,13 +16,14 @@ interface Props {
   comfyConnected: boolean;
   productionBusy: boolean;
   focusTaskId?: string;
+  initialFilter?: TaskHistoryFilter;
   onLoadInputs: (draft: ReusableGenerationDraft) => void;
   onOpenShot?: (shotId: string) => void;
 }
 
-export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, onLoadInputs, onOpenShot }: Props) {
+export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTaskId, initialFilter, onLoadInputs, onOpenShot }: Props) {
   const [view, setView] = useState<"tasks" | "audit">("tasks");
-  const [filter, setFilter] = useState<TaskHistoryFilter>("ALL");
+  const [filter, setFilter] = useState<TaskHistoryFilter>(initialFilter ?? "ALL");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [workflowId, setWorkflowId] = useState("");
@@ -47,6 +48,15 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
   useEffect(() => {
     setWorkflowId("");
   }, [projectId]);
+
+  useEffect(() => {
+    if (!initialFilter) return;
+    setFilter(initialFilter);
+    setKeywordInput("");
+    setKeyword("");
+    setWorkflowId("");
+    setTimeFilter("ALL");
+  }, [initialFilter]);
 
   const loadPage = useCallback(
     async (reset: boolean) => {
@@ -185,6 +195,7 @@ export function TaskHistory({ projectId, comfyConnected, productionBusy, focusTa
       ) : (
         <>
           <TaskHistoryList
+            projectId={projectId}
             filter={filter}
             keyword={keywordInput}
             workflowId={workflowId}

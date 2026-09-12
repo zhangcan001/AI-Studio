@@ -663,6 +663,7 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-video-empty-state { display: grid; gap: 8px; place-items: start; padding: 22px; border: 1px dashed #4d658f; border-radius: 10px; color: #b9c8df; }
 .asset-video-empty-state p { margin: 0; color: #8997ad; }
 .task-history-list { display: grid; gap: 8px; }
+.task-history-active-filter { margin: 6px 0 0; color: #9aabc3; font-size: .72rem; line-height: 1.35; overflow-wrap: anywhere; }
 .task-history-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(120px, 0.55fr); align-items: center; gap: 13px; width: 100%; padding: 13px 14px; border-color: #35435b; text-align: left; background: #111720; }
 .task-history-row:hover:not(:disabled) { border-color: #75a1e9; background: #182337; }
 .task-history-row-main { display: grid; gap: 4px; min-width: 0; }

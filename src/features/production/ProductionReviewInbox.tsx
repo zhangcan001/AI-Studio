@@ -9,6 +9,7 @@ const PAGE_SIZE = 25;
 interface Props {
   projectId?: string;
   onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
+  mode?: "summary" | "workspace";
 }
 
 const statusLabels: Record<ProductionReviewInboxItem["reviewStatus"], string> = {
@@ -21,7 +22,7 @@ const statusLabels: Record<ProductionReviewInboxItem["reviewStatus"], string> = 
   IN_PROGRESS: "生成中",
 };
 
-export function ProductionReviewInbox({ projectId, onNavigate }: Props) {
+export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" }: Props) {
   const [page, setPage] = useState<ProductionReviewInboxPage>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -47,15 +48,20 @@ export function ProductionReviewInbox({ projectId, onNavigate }: Props) {
 
   if (!projectId) return null;
   const items = page?.items ?? [];
+  const navigate = (request: ProjectCommandCenterNavigationRequest) => onNavigate?.({ ...request, projectId });
   return (
-    <section className="project-command-card production-review-inbox" aria-labelledby="production-review-inbox-title">
+    <section className={`project-command-card production-review-inbox${mode === "workspace" ? " production-review-inbox-workspace" : ""}`} aria-labelledby="production-review-inbox-title">
       <div className="project-command-card-heading">
         <div>
           <span className="section-label">项目级审片</span>
-          <h3 id="production-review-inbox-title">待审核结果</h3>
+          <h3 id="production-review-inbox-title">{mode === "workspace" ? "完整待审核集合" : "待审核结果"}</h3>
           <p>{page ? `${page.total} 项待处理 · 未审 ${page.unreviewedCount} · 待返工 ${page.regenerateCount}` : "正在加载待处理结果…"}</p>
+          <small className="production-review-inbox-filter" role="status">筛选：未审 / 待返工 · 项目范围：{projectId}</small>
         </div>
-        <button type="button" className="quiet-button" onClick={() => void load(0, false)} disabled={loading}>刷新</button>
+        <div className="production-review-inbox-heading-actions">
+          {page && page.total > page.items.length && mode === "summary" && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "review", collectionFilter: { kind: "review", state: "PENDING" } })}>查看全部 {page.total}</button>}
+          <button type="button" className="quiet-button" onClick={() => void load(0, false)} disabled={loading}>刷新</button>
+        </div>
       </div>
       {error && <p className="error-message" role="alert">{error}</p>}
       {items.length === 0 && !loading && !error && <p className="disabled-note">当前项目没有待处理审片项。</p>}
@@ -77,11 +83,11 @@ export function ProductionReviewInbox({ projectId, onNavigate }: Props) {
                 <small>更新于 {formatDateTime(item.updatedAt)} · {item.workflowVersionId} · {item.recipeId}</small></details>
               </div>
               <div className="production-review-inbox-actions">
-                <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "review", batchId: item.batchId, itemId: item.itemId, reviewId: item.itemId, taskId: item.taskId, shotId: item.shotId, stage: item.stage })} disabled={!onNavigate}>打开审片</button>
-                {item.taskId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "tasks", taskId: item.taskId })} disabled={!onNavigate}>任务</button>}
-                {item.shotId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "creation", shotId: item.shotId })} disabled={!onNavigate}>镜头</button>}
-                {item.assetId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "assets", assetId: item.assetId })} disabled={!onNavigate}>资产</button>}
-                {item.selectedAssetId && <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "assets", assetId: item.selectedAssetId })} disabled={!onNavigate}>最终结果</button>}
+                <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "review", batchId: item.batchId, itemId: item.itemId, reviewId: item.itemId, taskId: item.taskId, shotId: item.shotId, stage: item.stage })} disabled={!onNavigate}>打开审片</button>
+                {item.taskId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "tasks", taskId: item.taskId })} disabled={!onNavigate}>任务</button>}
+                {item.shotId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "creation", shotId: item.shotId })} disabled={!onNavigate}>镜头</button>}
+                {item.assetId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "assets", assetId: item.assetId })} disabled={!onNavigate}>资产</button>}
+                {item.selectedAssetId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "assets", assetId: item.selectedAssetId })} disabled={!onNavigate}>最终结果</button>}
               </div>
             </article>
           ))}

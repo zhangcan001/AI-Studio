@@ -80,4 +80,63 @@ describe("project workflow navigation", () => {
     expect(resolveProjectCommandCenterNavigation({ destination: "shots", section: "creation", assetId: "asset-1" })).toEqual({ workspace: "assets", section: "assets", assetId: "asset-1" });
     expect(resolveProjectCommandCenterNavigation({ destination: "tasks", shotId: "shot-1" })).toEqual({ workspace: "shots", section: "creation", shotId: "shot-1" });
   });
+
+  it("routes collection filters to the existing project-scoped list surfaces", () => {
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "shots",
+      projectId: "project-a",
+      section: "production",
+      collectionFilter: { kind: "shots", status: "READY" },
+    })).toEqual({
+      workspace: "shots",
+      section: "production",
+      projectId: "project-a",
+      shotId: undefined,
+      batchId: undefined,
+      collectionFilter: { kind: "shots", status: "READY" },
+    });
+
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "tasks",
+      projectId: "project-a",
+      collectionFilter: { kind: "tasks", status: "FAILED" },
+    })).toEqual({
+      workspace: "tasks",
+      section: "review",
+      projectId: "project-a",
+      shotId: undefined,
+      batchId: undefined,
+      collectionFilter: { kind: "tasks", status: "FAILED" },
+    });
+
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "shots",
+      projectId: "project-a",
+      collectionFilter: { kind: "review", state: "PENDING" },
+    })).toEqual({
+      workspace: "shots",
+      section: "review",
+      projectId: "project-a",
+      shotId: undefined,
+      batchId: undefined,
+      collectionFilter: { kind: "review", state: "PENDING" },
+    });
+  });
+
+  it("keeps an exact item target authoritative while retaining its collection context", () => {
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "tasks",
+      projectId: "project-a",
+      taskId: "task-1",
+      collectionFilter: { kind: "tasks", status: "FAILED" },
+    })).toEqual({
+      workspace: "tasks",
+      section: "review",
+      projectId: "project-a",
+      shotId: undefined,
+      batchId: undefined,
+      taskId: "task-1",
+      collectionFilter: { kind: "tasks", status: "FAILED" },
+    });
+  });
 });

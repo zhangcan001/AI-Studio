@@ -27,6 +27,7 @@ it("shows the selected result and navigates to its exact Asset, with IDs folded 
   await userEvent.setup().click(screen.getByRole("button", { name: "打开审片" }));
   expect(onNavigate).toHaveBeenCalledWith({
     destination: "shots",
+    projectId: "project-1",
     section: "review",
     batchId: "batch-1",
     itemId: "item-1",
@@ -36,5 +37,22 @@ it("shows the selected result and navigates to its exact Asset, with IDs folded 
     stage: "VIDEO",
   });
   await userEvent.setup().click(screen.getByRole("button", { name: "最终结果" }));
-  expect(onNavigate).toHaveBeenCalledWith({ destination: "assets", assetId: "selected-1" });
+  expect(onNavigate).toHaveBeenCalledWith({ destination: "assets", projectId: "project-1", assetId: "selected-1" });
+});
+
+it("offers a project-scoped View All entry when the inbox exceeds its preview", async () => {
+  vi.mocked(getProductionReviewInbox).mockResolvedValue({
+    items: [], total: 42, unreviewedCount: 30, regenerateCount: 12, limit: 25, offset: 0,
+  });
+  const onNavigate = vi.fn();
+  render(<ProductionReviewInbox projectId="project-a" onNavigate={onNavigate} />);
+
+  await userEvent.setup().click(await screen.findByRole("button", { name: "查看全部 42" }));
+  expect(onNavigate).toHaveBeenCalledWith({
+    destination: "shots",
+    section: "review",
+    projectId: "project-a",
+    collectionFilter: { kind: "review", state: "PENDING" },
+  });
+  expect(screen.getByText(/项目范围：project-a/).textContent).toContain("筛选：未审 / 待返工");
 });

@@ -33,6 +33,7 @@ import {
 import type { AssetView } from "../../types/asset";
 import type { DraftValue, RecipeField, RecipeViewModel } from "../../types/generation";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
+import type { ProjectCommandCenterCollectionFilter } from "../../types/projectCommandCenter";
 import type { PromptEntryView } from "../../types/prompt";
 import type { ReferenceAnchorView } from "../../types/referenceAnchor";
 import type { ProductionStructureTree } from "../../types/productionStructure";
@@ -58,6 +59,8 @@ import {
 } from "../production/MultiPackageProductionBoard";
 import { ProductionQueueDrawer } from "../production/ProductionQueueDrawer";
 import { ProductionMonitor as ProductionMonitorComponent } from "../production/ProductionMonitor";
+import { ProductionReviewInbox } from "../production/ProductionReviewInbox";
+import type { ProjectCommandCenterNavigationRequest } from "../projects/ProjectCommandCenter";
 import type { ProductionMonitorProps } from "../production/ProductionMonitor";
 import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
@@ -88,7 +91,7 @@ import {
 } from "./referenceAnchorApply";
 import {
   buildShotListView,
-  defaultShotListControls,
+  shotListControlsForNavigation,
   updateShotListControls,
   type ShotListControls,
 } from "./shotListQuery";
@@ -232,12 +235,14 @@ interface Props {
   projectName?: string;
   catalog: RecipeViewModel[];
   initialSelectedShotId?: string;
+  initialCollectionFilter?: ProjectCommandCenterCollectionFilter;
   mode?: ShotWorkspaceMode;
   onShotSelected?: (shotId?: string) => void;
   onContextPathChange?: (path: ShotContextPathItem[]) => void;
   contextPathTarget?: ShotContextPathItem;
   onOpenAsset?: (assetId: string) => void;
   onOpenTask?: (taskId: string) => void;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
   focusProductionBatchId?: string;
   focusProductionReviewItemId?: string;
   focusProductionStage?: ShotStage;
@@ -260,7 +265,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, focusProductionBatchId, focusProductionReviewItemId, focusProductionStage, onOpenProductionQueue, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, focusProductionReviewItemId, focusProductionStage, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -269,7 +274,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     selectShot,
     reconcileSelectedShot,
   } = useShotWorkspaceSelection({ projectId, initialSelectedShotId, onShotSelected });
-  const [stage, setStage] = useState<ShotStage>(focusProductionStage ?? "image");
+  const [stage, setStage] = useState<ShotStage>(focusProductionStage ?? (initialCollectionFilter?.kind === "shots" ? initialCollectionFilter.stage : undefined) ?? "image");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
@@ -299,7 +304,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
   const [notice, setNotice] = useState<string>();
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
-  const [shotListControls, setShotListControls] = useState<ShotListControls>(defaultShotListControls);
+  const [shotListControls, setShotListControls] = useState<ShotListControls>(() => shotListControlsForNavigation(initialCollectionFilter));
   const reloadGeneration = useRef(0);
   const monitorRefreshRef = useRef<((batchId: string) => Promise<void>) | undefined>(undefined);
   const monitorFocusRef = useRef<((batchId: string) => void) | undefined>(undefined);
@@ -633,6 +638,12 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     if (!contextPathTarget) return;
     selectWorkspaceSelection(selectionForContextPathItem(contextPathTarget));
   }, [contextPathTarget]);
+
+  useEffect(() => {
+    if (initialCollectionFilter?.kind !== "shots") return;
+    setShotListControls(shotListControlsForNavigation(initialCollectionFilter));
+    if (initialCollectionFilter.stage) setStage(initialCollectionFilter.stage);
+  }, [initialCollectionFilter]);
 
   useEffect(() => {
     if (shotList.page === shotListControls.page) return;
@@ -1291,9 +1302,10 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
 
   const reviewSurface = (
     <div className="shot-review-surface" data-surface="review">
-      <ShotBatchReviewBoard
+      {mode === "review" && initialCollectionFilter?.kind === "review" && <ProductionReviewInbox projectId={projectId} mode="workspace" onNavigate={onNavigate} />}
+      {!(mode === "review" && initialCollectionFilter?.kind === "review") && <ShotBatchReviewBoard
         projectId={projectId}
-        shots={shots}
+        shots={initialCollectionFilter?.kind === "shots" ? shotList.filteredShots : shots}
         assets={assets}
         stage={stage}
         busy={busy}
@@ -1304,7 +1316,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         reviewBatchId={mode === "review" ? focusProductionBatchId : undefined}
         initialReviewItemId={mode === "review" ? focusProductionReviewItemId : undefined}
         onOpenProductionQueue={onOpenProductionQueue}
-      />
+      />}
     </div>
   );
   const contextSurface = shotContextSurface(mode, workspaceSelection.type);

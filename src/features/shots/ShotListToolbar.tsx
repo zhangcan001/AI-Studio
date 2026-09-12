@@ -32,7 +32,7 @@ export function ShotListToolbar({
   onPageChange,
 }: Props) {
   const [filterOpen, setFilterOpen] = useState(false);
-  const filterActive = controls.status !== "ALL" || controls.sceneId !== "ALL" || controls.pageSize !== DEFAULT_SHOT_LIST_PAGE_SIZE;
+  const filterActive = Boolean(controls.query.trim()) || controls.status !== "ALL" || controls.sceneId !== "ALL" || controls.pageSize !== DEFAULT_SHOT_LIST_PAGE_SIZE;
   return (
     <div className="shot-list-controls">
       <div className="shot-list-control-row">
@@ -71,6 +71,7 @@ export function ShotListToolbar({
           </select>
         </label>
       </div>
+      {filterActive && <p className="shot-list-active-filter" role="status">当前筛选：{activeFilterLabel(controls, sceneOptions)}</p>}
       <div className="shot-list-pagination" aria-label="镜头列表分页">
         <span>{pageStart ? `显示 ${pageStart}-${pageEnd}` : "显示 0"} / 匹配 {filteredCount} / 总计 {totalCount}</span>
         <button type="button" className="quiet-button" onClick={() => onPageChange(controls.page - 1)} disabled={controls.page <= 1}>上一页</button>
@@ -79,4 +80,14 @@ export function ShotListToolbar({
       </div>
     </div>
   );
+}
+
+function activeFilterLabel(controls: ShotListControls, sceneOptions: ReadonlyArray<{ value: string; label: string }>): string {
+  const labels = [
+    controls.query.trim() ? `搜索“${controls.query.trim()}”` : undefined,
+    controls.status !== "ALL" ? `状态 ${SHOT_LIST_STATUS_OPTIONS.find((option) => option.value === controls.status)?.label ?? controls.status}` : undefined,
+    controls.sceneId !== "ALL" ? `场景 ${sceneOptions.find((option) => option.value === controls.sceneId)?.label ?? controls.sceneId}` : undefined,
+  ].filter((label): label is string => Boolean(label));
+  if (controls.pageSize !== DEFAULT_SHOT_LIST_PAGE_SIZE) labels.push(`每页 ${controls.pageSize}`);
+  return labels.join(" · ");
 }

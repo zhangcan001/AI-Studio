@@ -3,6 +3,7 @@ import type { TaskHistoryFilter, TaskHistoryItem, TaskHistoryTimeFilter, TaskHis
 import { workflowDisplayName, formatDateTime, taskStatusLabel } from "../../i18n/statusLabels";
 
 interface Props {
+  projectId: string;
   filter: TaskHistoryFilter;
   keyword: string;
   workflowId: string;
@@ -29,6 +30,7 @@ const filters: Array<{ value: TaskHistoryFilter; label: string }> = [
 ];
 
 export function TaskHistoryList({
+  projectId,
   filter,
   keyword,
   workflowId,
@@ -52,6 +54,7 @@ export function TaskHistoryList({
           <span className="section-label">任务</span>
           <h2>任务历史</h2>
           <p className="section-description">查看当前项目的任务记录和已保存的生成输入。</p>
+          <p className="task-history-active-filter" role="status">当前状态筛选：{filterLabel(filter)} · 项目范围：{projectId}</p>
         </div>
         <button type="button" className="quiet-button" onClick={onRefresh} disabled={loading}>
           {loading ? "正在刷新..." : "刷新"}
@@ -113,6 +116,10 @@ export function TaskHistoryList({
       )}
     </>
   );
+}
+
+function filterLabel(filter: TaskHistoryFilter): string {
+  return filters.find((item) => item.value === filter)?.label ?? "全部";
 }
 
 function formatDuration(task: TaskHistoryItem): string {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ShotView } from "../../types/shot";
 import { deriveShotStatus } from "./shotDomain";
-import { buildShotListView, defaultShotListControls, isShotListFiltered, isShotListReorderDisabled, updateShotListControls } from "./shotListQuery";
+import { buildShotListView, defaultShotListControls, isShotListFiltered, isShotListReorderDisabled, shotListControlsForNavigation, updateShotListControls } from "./shotListQuery";
 
 const shot = (id: string, ordinal: number, overrides: Partial<ShotView> = {}): ShotView => ({
   id,
@@ -28,6 +28,11 @@ function configuredShot(id: string, ordinal: number, taskStatus?: string): ShotV
 }
 
 describe("ShotWorkspace list controls", () => {
+  it("replaces stale shot-list context for a collection navigation", () => {
+    const controls = shotListControlsForNavigation({ kind: "shots", status: "FAILED", sceneId: "scene-a" });
+    expect(controls).toEqual({ query: "", status: "FAILED", sceneId: "scene-a", pageSize: 50, page: 1 });
+  });
+
   it("searches name and prompt case-insensitively before ordinal sorting", () => {
     const shots = [
       shot("two", 2, { name: "Wide Closeup", promptText: "blue room" }),

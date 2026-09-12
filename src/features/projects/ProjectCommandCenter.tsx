@@ -9,6 +9,7 @@ import type { ProductionStructureTree } from "../../types/productionStructure";
 import type { ProjectView } from "../../types/project";
 import type { ShotView } from "../../types/shot";
 import type {
+  ProjectCommandCenterCollectionFilter,
   ProjectCommandCenterAggregate,
   ProjectCommandCenterConsistencyView,
   ProjectCommandCenterDailyProductionBucket,
@@ -57,6 +58,7 @@ export interface ProjectCommandCenterNavigationRequest {
   assetId?: string;
   stage?: string;
   actionKind?: string;
+  collectionFilter?: ProjectCommandCenterCollectionFilter;
 }
 
 export interface ProjectCommandCenterSceneProgress {
@@ -408,8 +410,10 @@ export function ProjectCommandCenterView({
           />
 
           {aggregate?.dailyProduction && (
-            <DailyProductionBoard board={aggregate.dailyProduction} onNavigate={onNavigate} disabled={busyNow} />
+            <DailyProductionBoard board={aggregate.dailyProduction} aggregate={aggregate} projectId={project?.id} onNavigate={onNavigate} disabled={busyNow} />
           )}
+
+          {aggregate && <ProjectCommandCenterCollectionActions aggregate={aggregate} projectId={project?.id} onNavigate={onNavigate} disabled={busyNow} />}
 
           <ProductionReviewInbox projectId={project?.id} onNavigate={onNavigate} />
 
@@ -715,12 +719,91 @@ const DAILY_PRODUCTION_BUCKETS: ReadonlyArray<{
   { key: "completed", label: "已完成", tone: "completed" },
 ];
 
+const COMMAND_CENTER_PREVIEW_LIMIT = 20;
+
+function ProjectCommandCenterCollectionActions({
+  aggregate,
+  projectId,
+  onNavigate,
+  disabled,
+}: {
+  aggregate: ProjectCommandCenterAggregate;
+  projectId?: string;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
+  disabled: boolean;
+}) {
+  const actions = [
+    aggregate.tasksAssets.failedTaskCount > COMMAND_CENTER_PREVIEW_LIMIT && {
+      id: "failed-tasks",
+      label: "失败任务",
+      count: aggregate.tasksAssets.failedTaskCount,
+      detail: "进入完整失败任务集合，查看任务错误和关联目标。",
+      request: { destination: "tasks", collectionFilter: { kind: "tasks", status: "FAILED" } } satisfies ProjectCommandCenterNavigationRequest,
+    },
+    aggregate.tasksAssets.activeTaskCount > COMMAND_CENTER_PREVIEW_LIMIT && {
+      id: "active-tasks",
+      label: "运行中任务",
+      count: aggregate.tasksAssets.activeTaskCount,
+      detail: "进入完整运行中任务集合；不会从这里启动新的任务。",
+      request: { destination: "tasks", collectionFilter: { kind: "tasks", status: "ACTIVE" } } satisfies ProjectCommandCenterNavigationRequest,
+    },
+    aggregate.shots.ready > COMMAND_CENTER_PREVIEW_LIMIT && {
+      id: "ready-shots",
+      label: "待生成镜头",
+      count: aggregate.shots.ready,
+      detail: "进入完整待生成镜头集合，继续使用现有生产队列。",
+      request: { destination: "shots", section: "production", collectionFilter: { kind: "shots", status: "READY" } } satisfies ProjectCommandCenterNavigationRequest,
+    },
+    aggregate.shots.completed > COMMAND_CENTER_PREVIEW_LIMIT && {
+      id: "completed-shots",
+      label: "已完成镜头",
+      count: aggregate.shots.completed,
+      detail: "进入完整已完成镜头集合，逐页查看项目结果。",
+      request: { destination: "shots", section: "creation", collectionFilter: { kind: "shots", status: "COMPLETED" } } satisfies ProjectCommandCenterNavigationRequest,
+    },
+  ].filter(Boolean) as Array<{
+    id: string;
+    label: string;
+    count: number;
+    detail: string;
+    request: ProjectCommandCenterNavigationRequest;
+  }>;
+
+  if (!actions.length) return null;
+  return (
+    <section className="project-command-card project-command-collection-actions" aria-labelledby="project-command-collection-actions-title">
+      <div className="project-command-card-heading">
+        <div>
+          <span className="section-label">完整定位</span>
+          <h3 id="project-command-collection-actions-title">异常与生产集合</h3>
+          <p>摘要仍保持前 20 项预览；以下入口只在需要时打开完整项目列表。</p>
+        </div>
+      </div>
+      <div className="project-command-collection-action-grid">
+        {actions.map((action) => (
+          <article className="project-command-collection-action" key={action.id}>
+            <div><strong>{action.label}</strong><span>{action.count} 项</span></div>
+            <p>{action.detail}</p>
+            <button type="button" className="quiet-button" onClick={() => onNavigate?.(projectId ? { ...action.request, projectId } : action.request)} disabled={!onNavigate || disabled}>
+              查看全部 {action.count}
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DailyProductionBoard({
   board,
+  aggregate,
+  projectId,
   onNavigate,
   disabled,
 }: {
   board: NonNullable<ProjectCommandCenterAggregate["dailyProduction"]>;
+  aggregate: ProjectCommandCenterAggregate;
+  projectId?: string;
   onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
   disabled: boolean;
 }) {
@@ -742,7 +825,10 @@ function DailyProductionBoard({
           {DAILY_PRODUCTION_BUCKETS.map((bucket) => (
             <DailyProductionBucketView
               key={bucket.key}
+              bucketKey={bucket.key}
               bucket={board[bucket.key]}
+              aggregate={aggregate}
+              projectId={projectId}
               label={bucket.label}
               tone={bucket.tone}
               onNavigate={onNavigate}
@@ -756,18 +842,25 @@ function DailyProductionBoard({
 }
 
 function DailyProductionBucketView({
+  bucketKey,
   bucket,
+  aggregate,
+  projectId,
   label,
   tone,
   onNavigate,
   disabled,
 }: {
+  bucketKey: (typeof DAILY_PRODUCTION_BUCKETS)[number]["key"];
   bucket: ProjectCommandCenterDailyProductionBucket;
+  aggregate: ProjectCommandCenterAggregate;
+  projectId?: string;
   label: string;
   tone: string;
   onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
   disabled: boolean;
 }) {
+  const collection = dailyProductionCollectionNavigation(bucketKey, bucket, aggregate);
   return (
     <section className={`project-command-daily-bucket project-command-daily-${tone}`} aria-label={label}>
       <div className="project-command-daily-bucket-heading"><strong>{label}</strong><span>{bucket.totalCount}</span></div>
@@ -789,9 +882,44 @@ function DailyProductionBucketView({
           ))}
         </div>
       ) : <p className="project-command-muted">暂无</p>}
-      {bucket.hasMore && <small className="project-command-daily-more">显示前 {bucket.items.length} 项，共 {bucket.totalCount} 项</small>}
+      {bucket.hasMore && <div className="project-command-daily-more">
+        <small>显示前 {bucket.items.length} 项，共 {bucket.totalCount} 项</small>
+        {collection && <button type="button" className="quiet-button" onClick={() => onNavigate?.(projectId ? { ...collection.request, projectId } : collection.request)} disabled={!onNavigate || disabled}>{collection.label}</button>}
+      </div>}
     </section>
   );
+}
+
+function dailyProductionCollectionNavigation(
+  bucketKey: (typeof DAILY_PRODUCTION_BUCKETS)[number]["key"],
+  bucket: ProjectCommandCenterDailyProductionBucket,
+  aggregate: ProjectCommandCenterAggregate,
+): { label: string; request: ProjectCommandCenterNavigationRequest } | undefined {
+  if (!bucket.hasMore) return undefined;
+  const reasonCodes = new Set(bucket.items.map((item) => item.reasonCode));
+  const all = (codes: readonly string[]) => bucket.items.length > 0 && bucket.items.every((item) => codes.includes(item.reasonCode));
+  if (bucketKey === "ready") {
+    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "production", collectionFilter: { kind: "shots", status: "READY" } } };
+  }
+  if (bucketKey === "running" && bucket.totalCount === aggregate.tasksAssets.activeTaskCount && all(["QUEUE_PENDING", "PRODUCTION_RUNNING"]) && bucket.items.every((item) => Boolean(item.taskId))) {
+    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "tasks", collectionFilter: { kind: "tasks", status: "ACTIVE" } } };
+  }
+  if (bucketKey === "completed") {
+    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "creation", collectionFilter: { kind: "shots", status: "COMPLETED" } } };
+  }
+  if (bucketKey === "needsAttention" && bucket.totalCount === aggregate.structure.unassignedShotCount && reasonCodes.size === 1 && reasonCodes.has("UNASSIGNED_SHOT")) {
+    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "creation", collectionFilter: { kind: "shots", sceneId: "UNASSIGNED" } } };
+  }
+  if (bucketKey === "review" && bucket.totalCount === aggregate.tasksAssets.failedTaskCount && all(["QUEUE_FAILED", "TASK_FAILED"])) {
+    return { label: `查看全部失败任务 ${bucket.totalCount}`, request: { destination: "tasks", collectionFilter: { kind: "tasks", status: "FAILED" } } };
+  }
+  if (bucketKey === "review" && bucket.totalCount === aggregate.shots.imageReview && all(["IMAGE_REVIEW"])) {
+    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "review", collectionFilter: { kind: "shots", status: "IMAGE_REVIEW", stage: "image" } } };
+  }
+  if (bucketKey === "review" && bucket.totalCount === aggregate.shots.videoReview && all(["VIDEO_REVIEW"])) {
+    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "review", collectionFilter: { kind: "shots", status: "VIDEO_REVIEW", stage: "video" } } };
+  }
+  return undefined;
 }
 
 function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem, bucketLabel: string): ProjectCommandCenterNavigationRequest {

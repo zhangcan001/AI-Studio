@@ -21,7 +21,9 @@ vi.mock("../production/ProductionAuditCenter", () => ({ ProductionAuditCenter: (
 vi.mock("./TaskHistoryDetail", () => ({
   TaskHistoryDetail: ({ detail }: { detail: TaskDetail }) => <output data-testid="focused-task">{detail.id}</output>,
 }));
-vi.mock("./TaskHistoryList", () => ({ TaskHistoryList: () => <div aria-label="任务列表" /> }));
+vi.mock("./TaskHistoryList", () => ({
+  TaskHistoryList: ({ filter, keyword }: { filter: string; keyword: string }) => <div aria-label="任务列表">{filter}::{keyword}</div>,
+}));
 
 afterEach(() => cleanup());
 
@@ -46,5 +48,20 @@ describe("TaskHistory exact focus", () => {
 
     await waitFor(() => expect(screen.getByTestId("focused-task").textContent).toBe("task-99"));
     expect(mocks.getTaskDetail).toHaveBeenCalledWith("project-1", "task-99");
+  });
+
+  it("applies a collection filter and clears stale task search context", async () => {
+    render(
+      <TaskHistory
+        projectId="project-1"
+        comfyConnected={false}
+        productionBusy={false}
+        initialFilter="FAILED"
+        onLoadInputs={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("任务列表").textContent).toBe("FAILED::"));
+    expect(mocks.taskHistoryPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1", filter: "FAILED", keyword: undefined }));
   });
 });

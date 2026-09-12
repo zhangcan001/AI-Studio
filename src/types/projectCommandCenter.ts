@@ -2,6 +2,26 @@ import type { ComfyStatus } from "./comfy";
 import type { ComfyPreflightReport } from "./settings";
 import type { ProductionAuditActivity, ProductionAuditSummary } from "./productionAudit";
 
+/**
+ * A navigation-only filter contract. It selects an existing project-scoped
+ * collection; it is not a second production/read-model authority.
+ */
+export type ProjectCommandCenterCollectionFilter =
+  | {
+    kind: "shots";
+    status?: "ALL" | "DRAFT" | "READY" | "GENERATING_IMAGE" | "IMAGE_REVIEW" | "IMAGE_SELECTED" | "GENERATING_VIDEO" | "VIDEO_REVIEW" | "COMPLETED" | "FAILED";
+    sceneId?: string;
+    stage?: "image" | "video";
+  }
+  | {
+    kind: "tasks";
+    status: "ALL" | "ACTIVE" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  }
+  | {
+    kind: "review";
+    state: "PENDING";
+  };
+
 export interface ProjectCommandCenterSceneSummary {
   id: string;
   name: string;

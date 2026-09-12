@@ -1,4 +1,5 @@
 import type { ShotView } from "../../types/shot";
+import type { ProjectCommandCenterCollectionFilter } from "../../types/projectCommandCenter";
 import type { ShotStatus } from "./shotDomain";
 import { deriveShotStatus } from "./shotDomain";
 
@@ -44,6 +45,15 @@ export interface ShotListView {
 
 export function defaultShotListControls(): ShotListControls {
   return { query: "", status: "ALL", sceneId: "ALL", pageSize: DEFAULT_SHOT_LIST_PAGE_SIZE, page: 1 };
+}
+
+export function shotListControlsForNavigation(filter?: ProjectCommandCenterCollectionFilter): ShotListControls {
+  const controls = defaultShotListControls();
+  if (filter?.kind !== "shots") return controls;
+  return updateShotListControls(controls, {
+    status: filter.status ?? "ALL",
+    sceneId: filter.sceneId ?? "ALL",
+  });
 }
 
 export function updateShotListControls(

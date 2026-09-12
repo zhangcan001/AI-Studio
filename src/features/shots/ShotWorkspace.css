@@ -586,6 +586,7 @@
 .shot-list-filter-popover label { display: grid; gap: 3px; color: var(--studio-text-secondary); font-size: 0.66rem; }
 .shot-list-filter-popover select { min-height: 32px; padding: 5px 7px; border-color: var(--studio-border); border-radius: var(--studio-radius-sm); background: var(--studio-surface-1); font-size: 0.7rem; }
 .shot-list-pagination { gap: 5px; color: var(--studio-text-muted); font-size: 0.64rem; }
+.shot-list-active-filter { margin: 0; color: var(--studio-text-secondary); font-size: .68rem; line-height: 1.35; overflow-wrap: anywhere; }
 .shot-list-pagination span:first-child { flex: 1 1 100%; }
 .shot-list-pagination .quiet-button { min-height: 28px; padding: 4px 7px; font-size: 0.66rem; }
 .shot-search-results { gap: 3px; max-height: 190px; }

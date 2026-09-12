@@ -45,6 +45,7 @@ import { useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
+import type { ProjectCommandCenterCollectionFilter } from "../types/projectCommandCenter";
 import type { ProductionAdmissionStatus } from "../types/productionQueue";
 import type { ShotStage } from "../types/shot";
 import type {
@@ -109,6 +110,7 @@ export interface ResolvedProjectCommandCenterNavigation {
   taskId?: string;
   assetId?: string;
   stage?: string;
+  collectionFilter?: ProjectCommandCenterCollectionFilter;
 }
 
 export function resolveProjectCommandCenterNavigation(
@@ -124,6 +126,7 @@ export function resolveProjectCommandCenterNavigation(
     ...(request.taskId ? { taskId: request.taskId } : {}),
     ...(request.assetId ? { assetId: request.assetId } : {}),
     ...(request.stage ? { stage: request.stage } : {}),
+    ...(request.collectionFilter ? { collectionFilter: request.collectionFilter } : {}),
   };
 
   // A review item is the primary target when present; task/batch/shot/asset
@@ -133,6 +136,12 @@ export function resolveProjectCommandCenterNavigation(
   if (request.batchId) return { ...target, workspace: "shots", section: "production" };
   if (request.assetId) return { ...target, workspace: "assets", section: "assets" };
   if (request.shotId) {
+    const section = request.section === "production" || request.section === "review" ? request.section : "creation";
+    return { ...target, workspace: "shots", section };
+  }
+  if (request.collectionFilter?.kind === "tasks") return { ...target, workspace: "tasks", section: "review" };
+  if (request.collectionFilter?.kind === "review") return { ...target, workspace: "shots", section: "review" };
+  if (request.collectionFilter?.kind === "shots") {
     const section = request.section === "production" || request.section === "review" ? request.section : "creation";
     return { ...target, workspace: "shots", section };
   }
@@ -214,6 +223,7 @@ function App() {
   const [focusedProductionReviewItemId, setFocusedProductionReviewItemId] = useState<string>();
   const [focusedProductionStage, setFocusedProductionStage] = useState<ShotStage>();
   const [focusedAssetId, setFocusedAssetId] = useState<string>();
+  const [focusedCollectionFilter, setFocusedCollectionFilter] = useState<ProjectCommandCenterCollectionFilter>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupAttempt, setStartupAttempt] = useState(0);
@@ -477,6 +487,7 @@ function App() {
     setFocusedProductionReviewItemId(undefined);
     setFocusedProductionStage(undefined);
     setFocusedAssetId(undefined);
+    setFocusedCollectionFilter(undefined);
   }
 
   function applyNavigationFocus(navigation: ResolvedProjectCommandCenterNavigation) {
@@ -486,6 +497,7 @@ function App() {
     setFocusedProductionReviewItemId(navigation.reviewId ?? navigation.itemId);
     setFocusedProductionStage(normalizeNavigationStage(navigation.stage));
     setFocusedAssetId(navigation.assetId);
+    setFocusedCollectionFilter(navigation.collectionFilter);
     if (navigation.shotId) void recordShotChange(navigation.shotId);
   }
 
@@ -996,6 +1008,7 @@ function App() {
             projectName={activeProject.name}
             catalog={catalog}
             initialSelectedShotId={resumeShotId}
+            initialCollectionFilter={focusedCollectionFilter}
             mode={shotWorkspaceModeForSection(activeStudioSection)}
             onShotSelected={handleShotSelected}
             onContextPathChange={handleShotContextPathChange}
@@ -1004,6 +1017,7 @@ function App() {
             onOpenTask={(taskId) => {
               openTask(taskId);
             }}
+            onNavigate={navigateFromCommandCenter}
             focusProductionBatchId={focusedProductionBatchId}
             focusProductionReviewItemId={focusedProductionReviewItemId}
             focusProductionStage={focusedProductionStage}
@@ -1061,6 +1075,7 @@ function App() {
           comfyConnected={isConnected}
           productionBusy={productionAdmission.busy}
           focusTaskId={focusedTaskId}
+          initialFilter={focusedCollectionFilter?.kind === "tasks" ? focusedCollectionFilter.status : undefined}
           onLoadInputs={loadHistoricalInputs}
           onOpenShot={(shotId) => openShot(shotId)}
         />
