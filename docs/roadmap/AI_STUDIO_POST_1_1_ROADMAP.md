@@ -7,11 +7,16 @@ BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
 ROADMAP_STATUS=CLOSED_BY_DEV_106
 POST_1_1_PRODUCT_PHASE=CLOSED
 AI_STUDIO_1_2_READINESS=PASS
+CURRENT_RELEASED_VERSION=1.2.0
+CURRENT_RELEASE_TAG=v1.2.0
+AI_STUDIO_1_2_PUBLISHED=YES
+POST_1_2_DEVELOPMENT_STARTED=NO
+AI_STUDIO_1_3_STARTED=NO
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
-NEXT_MAIN_THEME=AI Studio 1.2 Release Train
+NEXT_MAIN_THEME=Post-1.2 development not started
 DEV_107=READY
-DEV_107_STARTED=NO
+DEV_107_STARTED=YES
 ```
 
 ## Historical DEV-099 product baseline
@@ -114,8 +119,9 @@ development-binary launch check. Full local gates and Source-only CI run
 [Readiness evidence](../DEV_106_AI_STUDIO_1_2_READINESS.md) records the gate.
 
 The post-1.1 product phase is closed and the 1.2 feature scope is frozen.
-DEV-107 is ready to run the **release train** but has not started; DEV-106
-does not bump the manifest, tag, publish installers, or create a release.
+DEV-107 completed the release train: tag `v1.2.0` is published with MSI,
+NSIS, portable, and checksum assets. The next development phase is not
+started; DEV-108 and 1.3 work remain outside this task.
 
 ### P2 — Further product polish and operational clarity (deferred)
 
