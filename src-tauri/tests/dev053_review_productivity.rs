@@ -185,8 +185,7 @@ fn review_status_note_and_regeneration_boundaries_are_preserved() {
             "Starred",
             "Regenerate",
             "Rejected",
-            "auto_start: false",
-            "regenerate_marked(&request.project_id, &request.batch_id, false)",
+            "regenerate_marked(&request.project_id, &request.batch_id)",
         ],
     );
     assert_contains_all(
@@ -198,12 +197,8 @@ fn review_status_note_and_regeneration_boundaries_are_preserved() {
             "失败或未完成的 Task 不能设置审片状态或备注",
         ],
     );
-    let regenerate = section(
-        &command,
-        "pub async fn production_item_review_regenerate(",
-        "#[tauri::command",
-    );
-    assert!(!regenerate.contains("request.auto_start"));
+    assert!(!command.contains("auto_start"));
+    assert!(!service.contains("auto_start"));
 }
 
 #[test]
@@ -224,6 +219,28 @@ fn review_read_path_does_not_admit_or_start_generation() {
     ] {
         assert!(!get.contains(forbidden), "read path contains {forbidden}");
     }
+}
+
+#[test]
+fn project_review_inbox_is_bounded_set_based_and_project_scoped() {
+    let repository =
+        read_repo("src-tauri/src/infrastructure/database/repositories/production_item_review.rs");
+    let command = read_repo("src-tauri/src/commands/production_item_review.rs");
+    let client = read_repo("src/services/tauriClient.ts");
+    assert_contains_all(
+        &repository,
+        &[
+            "async fn list_project_inbox",
+            "WHERE r.project_id = ?",
+            "LIMIT ? OFFSET ?",
+            "COUNT(*) OVER ()",
+            "s.project_id = r.project_id",
+            "a.project_id = r.project_id",
+        ],
+    );
+    assert!(repository.contains("production_item_reviews r"));
+    assert!(command.contains("production_item_review_inbox_get"));
+    assert!(client.contains("getProductionReviewInbox"));
 }
 
 #[derive(Default)]

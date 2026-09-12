@@ -238,6 +238,8 @@ interface Props {
   contextPathTarget?: ShotContextPathItem;
   onOpenAsset?: (assetId: string) => void;
   onOpenTask?: (taskId: string) => void;
+  focusProductionBatchId?: string;
+  focusProductionReviewItemId?: string;
   onOpenProductionQueue?: () => void;
   consistencyWorkspace?: Omit<ScopeConsistencyWorkspaceProps, "projectId" | "scope" | "scopeOptions" | "onScopeChange"> & {
     scopeOptions?: ConsistencyScopeOption[];
@@ -257,7 +259,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onOpenProductionQueue, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, focusProductionBatchId, focusProductionReviewItemId, onOpenProductionQueue, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -1271,6 +1273,9 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         onSelect={(shotId, reviewStage, assetId, fromLinkedTask) => void selectBatchResult(shotId, reviewStage, assetId, fromLinkedTask)}
         onRetry={(shotId, reviewStage) => void retryShot(shotId, reviewStage)}
         onOpenTask={onOpenTask}
+        reviewBatchId={mode === "review" ? focusProductionBatchId : undefined}
+        initialReviewItemId={mode === "review" ? focusProductionReviewItemId : undefined}
+        onOpenProductionQueue={onOpenProductionQueue}
       />
     </div>
   );

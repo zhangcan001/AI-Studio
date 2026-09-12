@@ -206,6 +206,7 @@ import type {
   ProductionReviewItem,
   ProductionReviewCandidateAsset,
   ProductionReviewStatus,
+  ProductionReviewInboxPage,
 } from "../types/productionItemReview";
 import type { ReviewCompareContextSnapshot } from "../types/reviewProductivity";
 import type {
@@ -1324,6 +1325,14 @@ export function getProductionBatchReview(projectId: string, batchId: string): Pr
   return invoke<ProductionBatchReview>("production_item_review_get", { projectId, batchId });
 }
 
+export function getProductionReviewInbox(
+  projectId: string,
+  limit = 50,
+  offset = 0,
+): Promise<ProductionReviewInboxPage> {
+  return invoke<ProductionReviewInboxPage>("production_item_review_inbox_get", { projectId, limit, offset });
+}
+
 /** The enriched review payload used by the productivity/compare workspace. */
 export type ProductionReviewProductivityCandidate = ProductionReviewCandidateAsset;
 
@@ -1393,20 +1402,18 @@ export function regenerateProductionItem(request: {
   width?: number;
   height?: number;
   useOriginalSeed: boolean;
-  autoStart: boolean;
 }): Promise<ProductionReviewRegenerateResult> {
   return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate", {
-    request: { ...request, autoStart: false },
+    request,
   });
 }
 
 export function regenerateMarkedProductionItems(request: {
   projectId: string;
   batchId: string;
-  autoStart: boolean;
 }): Promise<ProductionReviewRegenerateResult> {
   return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate_marked", {
-    request: { ...request, autoStart: false },
+    request,
   });
 }
 

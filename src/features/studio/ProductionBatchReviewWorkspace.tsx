@@ -18,6 +18,7 @@ interface Props {
   batchId: string;
   refreshKey?: string;
   onOpenTask: (taskId: string) => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   onBatchChanged?: () => Promise<void>;
 }
 
@@ -57,7 +58,7 @@ function qualityProfileLabel(profile: string): string {
   return { QUALITY: "质量", FAST: "快速" }[profile] ?? profile;
 }
 
-export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey, onOpenTask, onBatchChanged }: Props) {
+export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey, onOpenTask, onOpenProductionQueue, onBatchChanged }: Props) {
   const [review, setReview] = useState<ProductionBatchReview>();
   const [filter, setFilter] = useState<Filter>("ALL");
   const [expandedId, setExpandedId] = useState<string>();
@@ -66,6 +67,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
   const [busyAction, setBusyAction] = useState<string>();
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string>();
+  const [readyBatchId, setReadyBatchId] = useState<string>();
 
   const refresh = useCallback(async () => {
     try {
@@ -81,6 +83,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
     setReview(undefined);
     setExpandedId(undefined);
     setRegenerateItem(undefined);
+    setReadyBatchId(undefined);
   }, [batchId, projectId]);
 
   useEffect(() => {
@@ -127,8 +130,9 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
     setBusyAction("bulk-regenerate");
     setNotice(undefined);
     try {
-      const result = await regenerateMarkedProductionItems({ projectId, batchId, autoStart: true });
-      setNotice(result.autoStarted ? `已创建返工批次，共 ${result.selectedCount} 项，并开始生成。` : `已创建返工批次，共 ${result.selectedCount} 项。`);
+      const result = await regenerateMarkedProductionItems({ projectId, batchId });
+      setNotice(`已创建返工批次，共 ${result.selectedCount} 项，等待启动。`);
+      setReadyBatchId(result.batch.id);
       await onBatchChanged?.();
       await refresh();
     } catch (error: unknown) {
@@ -154,10 +158,10 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         batchId,
         itemId: regenerateItem.itemId,
         ...request,
-        autoStart: true,
       });
       setRegenerateItem(undefined);
-      setNotice(result.autoStarted ? "已创建返工批次并开始生成。" : "已创建返工批次。" );
+      setNotice("已创建返工批次，等待启动。");
+      setReadyBatchId(result.batch.id);
       await onBatchChanged?.();
       await refresh();
     } catch (error: unknown) {
@@ -185,7 +189,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
           onClick={() => void regenerateMarked()}
           disabled={busyAction !== undefined || review.regenerateCount === 0}
         >
-          {busyAction === "bulk-regenerate" ? "正在创建返工…" : `重生成全部待返工（${review.regenerateCount}）`}
+          {busyAction === "bulk-regenerate" ? "正在创建返工批次…" : `创建返工批次（${review.regenerateCount}）`}
         </button>
       </div>
 
@@ -234,7 +238,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         )) : <p className="disabled-note">当前筛选没有结果。</p>}
       </div>
 
-      {notice && <p className="studio-notice" role="status">{notice}</p>}
+      {notice && <div className="studio-notice" role="status"><span>{notice}</span>{readyBatchId && onOpenProductionQueue && <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue(readyBatchId)}>打开生产队列</button>}</div>}
       {regenerateItem && (
         <RegenerateDialog
           item={regenerateItem}
@@ -399,7 +403,7 @@ function RegenerateDialog({
         </div>
         <label className="production-review-dialog-checkbox"><input type="checkbox" checked={useOriginalSeed} onChange={(event) => setUseOriginalSeed(event.target.checked)} disabled={busy} /> 使用原 Seed（默认使用新随机 Seed）</label>
         <p className="disabled-note">生成模式、参考素材、质量档位和配方继承原版本；不会重新扫描本地文件夹。</p>
-        <div className="production-review-dialog-actions"><button type="button" className="quiet-button" onClick={onClose} disabled={busy}>取消</button><button type="button" onClick={() => onSubmit({ promptOverride: overridePrompt ? prompt : undefined, durationSeconds: Number(duration), width: selected.width, height: selected.height, useOriginalSeed })} disabled={busy || !prompt.trim()}>{busy ? "正在创建…" : "创建返工任务"}</button></div>
+        <div className="production-review-dialog-actions"><button type="button" className="quiet-button" onClick={onClose} disabled={busy}>取消</button><button type="button" onClick={() => onSubmit({ promptOverride: overridePrompt ? prompt : undefined, durationSeconds: Number(duration), width: selected.width, height: selected.height, useOriginalSeed })} disabled={busy || !prompt.trim()}>{busy ? "正在创建…" : "创建返工批次"}</button></div>
       </section>
     </div>
   );

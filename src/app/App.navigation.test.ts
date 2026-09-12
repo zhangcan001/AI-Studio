@@ -42,5 +42,14 @@ describe("project workflow navigation", () => {
       assetId: "asset-9",
       actionKind: "COMPLETE",
     })).toEqual({ workspace: "assets", section: "assets", shotId: undefined, batchId: undefined, assetId: "asset-9" });
+
+    expect(resolveProjectCommandCenterNavigation({
+      destination: "shots",
+      section: "review",
+      batchId: "batch-9",
+      itemId: "item-9",
+      shotId: "shot-9",
+      taskId: "task-9",
+    })).toEqual({ workspace: "shots", section: "review", shotId: "shot-9", batchId: "batch-9", itemId: "item-9", taskId: "task-9" });
   });
 });

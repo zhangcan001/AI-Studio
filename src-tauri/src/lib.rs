@@ -679,8 +679,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     asset_repository.clone(),
                     shot_batch_repository.clone(),
                     clock.clone(),
-                )
-                .with_start_admission_service(production_start_admission_service.clone()),
+                ),
             );
             let production_audit_service = Arc::new(ProductionAuditService::new(Arc::new(
                 database::SqliteProductionAuditRepository::new(database_pool.clone()),
@@ -1202,6 +1201,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_partial_resume_plan,
             commands::production_queue::production_queue_partial_resume,
             commands::production_item_review::production_item_review_get,
+            commands::production_item_review::production_item_review_inbox_get,
             commands::production_item_review::production_item_review_productivity_get,
             commands::production_item_review::production_item_review_reveal_asset,
             commands::production_item_review::production_item_review_open_output_folder,

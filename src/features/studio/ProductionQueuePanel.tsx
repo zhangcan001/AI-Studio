@@ -53,6 +53,7 @@ interface Props {
   onAdmissionChanged: () => Promise<void>;
   onFocusedBatchOpened: () => void;
   onOpenTask: (taskId: string) => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   hideCreate?: boolean;
   variant?: "full" | "inline";
   experimentContexts?: Record<string, ExperimentContext>;
@@ -67,6 +68,7 @@ export function ProductionQueuePanel({
   onAdmissionChanged,
   onFocusedBatchOpened,
   onOpenTask,
+  onOpenProductionQueue,
   hideCreate = false,
   variant = "full",
   experimentContexts,
@@ -777,6 +779,7 @@ export function ProductionQueuePanel({
                 batchId={detail.id}
                 refreshKey={detail.items.map((item) => `${item.id}:${item.status}:${item.taskId ?? ""}:${item.updatedAt ?? ""}`).join("|")}
                 onOpenTask={onOpenTask}
+                onOpenProductionQueue={onOpenProductionQueue}
                 onBatchChanged={async () => {
                   await refreshQueues(true);
                   await onAdmissionChanged();

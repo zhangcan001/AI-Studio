@@ -80,6 +80,7 @@ interface Props {
   onAdmissionChanged: () => Promise<void>;
   onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   onBackToAssets: () => void;
   onOpenWorkflows?: () => void;
 }
@@ -567,6 +568,7 @@ export function AssetVideoBatchWorkspace({
   onAdmissionChanged,
   onProductionBatchFocused,
   onOpenTask,
+  onOpenProductionQueue,
   onBackToAssets,
   onOpenWorkflows,
 }: Props) {
@@ -1386,6 +1388,7 @@ export function AssetVideoBatchWorkspace({
               if (focusProductionBatchId) onProductionBatchFocused();
             }}
             onOpenTask={onOpenTask}
+            onOpenProductionQueue={onOpenProductionQueue}
             hideCreate
           />
         </div>
@@ -1525,6 +1528,7 @@ export function AssetVideoBatchWorkspace({
               if (focusProductionBatchId) onProductionBatchFocused();
             }}
             onOpenTask={onOpenTask}
+            onOpenProductionQueue={onOpenProductionQueue}
             hideCreate
           />
         </div>

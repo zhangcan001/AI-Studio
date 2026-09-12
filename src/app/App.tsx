@@ -103,6 +103,7 @@ export interface ResolvedProjectCommandCenterNavigation {
   section: StudioSection;
   shotId?: string;
   batchId?: string;
+  itemId?: string;
   taskId?: string;
   assetId?: string;
 }
@@ -112,16 +113,17 @@ export function resolveProjectCommandCenterNavigation(
 ): ResolvedProjectCommandCenterNavigation {
   if (request.section) {
     const route = studioRouteForSection(request.section);
-    return { workspace: route.workspace, section: route.section, shotId: request.shotId, batchId: request.batchId, ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
+    return { workspace: route.workspace, section: route.section, shotId: request.shotId, batchId: request.batchId, ...(request.itemId ? { itemId: request.itemId } : {}), ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
   }
   if (request.destination === "studio" || request.destination === "shots") {
-    return { workspace: "shots", section: "creation", shotId: request.shotId, batchId: request.batchId, ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
+    return { workspace: "shots", section: "creation", shotId: request.shotId, batchId: request.batchId, ...(request.itemId ? { itemId: request.itemId } : {}), ...(request.taskId ? { taskId: request.taskId } : {}), ...(request.assetId ? { assetId: request.assetId } : {}) };
   }
   return {
     workspace: request.destination,
     section: defaultStudioSectionForWorkspace(request.destination),
     shotId: request.shotId,
     batchId: request.batchId,
+    ...(request.itemId ? { itemId: request.itemId } : {}),
     ...(request.taskId ? { taskId: request.taskId } : {}),
     ...(request.assetId ? { assetId: request.assetId } : {}),
   };
@@ -183,6 +185,7 @@ function App() {
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
+  const [focusedProductionReviewItemId, setFocusedProductionReviewItemId] = useState<string>();
   const [focusedAssetId, setFocusedAssetId] = useState<string>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -730,6 +733,7 @@ function App() {
   function navigateFromCommandCenter(request: ProjectCommandCenterNavigationRequest) {
     const navigation = resolveProjectCommandCenterNavigation(request);
     setFocusedProductionBatchId(navigation.batchId);
+    setFocusedProductionReviewItemId(navigation.itemId);
     setFocusedTaskId(navigation.taskId);
     setFocusedAssetId(navigation.assetId);
     if (navigation.shotId) {
@@ -897,6 +901,10 @@ function App() {
               setFocusedTaskId(taskId);
               navigateToWorkspace("tasks");
             }}
+            onOpenProductionQueue={(batchId) => {
+              if (batchId) setFocusedProductionBatchId(batchId);
+              navigateToStudioSection("production");
+            }}
           />
         </section>
       )}
@@ -933,6 +941,8 @@ function App() {
               setFocusedTaskId(taskId);
               navigateToWorkspace("tasks");
             }}
+            focusProductionBatchId={focusedProductionBatchId}
+            focusProductionReviewItemId={focusedProductionReviewItemId}
             onOpenProductionQueue={() => navigateToStudioSection("production")}
             consistencyWorkspace={{
               profiles: consistencyProfiles,
@@ -970,6 +980,10 @@ function App() {
             onOpenTask={(taskId) => {
               setFocusedTaskId(taskId);
               navigateToWorkspace("tasks");
+            }}
+            onOpenProductionQueue={(batchId) => {
+              if (batchId) setFocusedProductionBatchId(batchId);
+              navigateToStudioSection("production");
             }}
             onBackToAssets={() => navigateToWorkspace("assets")}
             onOpenWorkflows={() => navigateToWorkspace("workflows")}

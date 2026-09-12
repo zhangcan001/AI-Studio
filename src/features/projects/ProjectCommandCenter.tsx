@@ -20,6 +20,7 @@ import { formatDateTime, formatFileSize, projectDisplayName } from "../../i18n/s
 import { deriveShotStatus } from "../shots/shotDomain";
 import { shotProgressSummary, type ShotProgressSummary } from "../shots/shotBatchDomain";
 import { ProjectImportDryRunWorkspace } from "./ProjectImportDryRunWorkspace";
+import { ProductionReviewInbox } from "../production/ProductionReviewInbox";
 import "./ProjectCommandCenter.css";
 
 export type ProjectCommandCenterDestination =
@@ -49,6 +50,7 @@ export interface ProjectCommandCenterNavigationRequest {
   section?: ProjectCommandCenterNavigationSection;
   shotId?: string;
   batchId?: string;
+  itemId?: string;
   taskId?: string;
   assetId?: string;
   actionKind?: string;
@@ -401,6 +403,8 @@ export function ProjectCommandCenterView({
           {aggregate?.dailyProduction && (
             <DailyProductionBoard board={aggregate.dailyProduction} onNavigate={onNavigate} disabled={busyNow} />
           )}
+
+          <ProductionReviewInbox projectId={project?.id} onNavigate={onNavigate} />
 
           {!project && (
             <section className="project-command-recommendation" aria-labelledby="project-command-recommendation-title">

@@ -199,14 +199,15 @@ describe("ShotBatchReviewBoard adapter", () => {
     expect(onOpenProductionQueue).not.toHaveBeenCalled();
   });
 
-  it("creates a confirmed video rework with autoStart false and never starts the queue", async () => {
+  it("creates a confirmed video rework without an auto-start field and never starts the queue", async () => {
     const item = reviewItem({ itemId: "video-item", shotId: "video-shot", stage: "VIDEO", outputAssets: [asset("video-a", "video")], candidateAssets: [candidate("video-a", "video")] });
     const onOpenProductionQueue = vi.fn();
     await renderReviewBoard([item], { stage: "video", onOpenProductionQueue });
     window.confirm = vi.fn(() => true);
     vi.mocked(invoke).mockResolvedValue({ selectedCount: 1 });
     await userEvent.setup().click(screen.getByRole("button", { name: "创建返工批次" }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("production_item_review_regenerate", { request: expect.objectContaining({ itemId: "video-item", autoStart: false }) }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("production_item_review_regenerate", { request: expect.objectContaining({ itemId: "video-item" }) }));
+    expect(vi.mocked(invoke).mock.calls[0]?.[1]).not.toHaveProperty("request.autoStart");
     expect(invoke).not.toHaveBeenCalledWith("production_queue_start", expect.anything());
     expect(onOpenProductionQueue).toHaveBeenCalledOnce();
   });
@@ -284,9 +285,10 @@ describe("ShotBatchReviewBoard adapter", () => {
     expect(reviewImageIdsForItem(undefined)).toEqual([]);
   });
 
-  it("forces regeneration payload autoStart false while retaining the wire field", async () => {
+  it("omits the removed auto-start field from regeneration payloads", async () => {
     vi.mocked(invoke).mockResolvedValue({});
-    await regenerateProductionItem({ projectId: "project-1", batchId: "batch-1", itemId: "item-1", useOriginalSeed: false, autoStart: true });
-    expect(invoke).toHaveBeenCalledWith("production_item_review_regenerate", { request: expect.objectContaining({ projectId: "project-1", batchId: "batch-1", itemId: "item-1", autoStart: false }) });
+    await regenerateProductionItem({ projectId: "project-1", batchId: "batch-1", itemId: "item-1", useOriginalSeed: false });
+    expect(invoke).toHaveBeenCalledWith("production_item_review_regenerate", { request: expect.objectContaining({ projectId: "project-1", batchId: "batch-1", itemId: "item-1" }) });
+    expect(vi.mocked(invoke).mock.calls[0]?.[1]).not.toHaveProperty("request.autoStart");
   });
 });

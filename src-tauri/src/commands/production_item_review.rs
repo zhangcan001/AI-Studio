@@ -65,8 +65,6 @@ pub struct ProductionReviewRegenerateRequest {
     pub height: Option<i64>,
     #[serde(default)]
     pub use_original_seed: bool,
-    #[serde(default)]
-    pub auto_start: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,8 +72,6 @@ pub struct ProductionReviewRegenerateRequest {
 pub struct ProductionReviewBulkRegenerateRequest {
     pub project_id: String,
     pub batch_id: String,
-    #[serde(default)]
-    pub auto_start: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,8 +194,110 @@ pub struct ProductionReviewRegenerateView {
     pub batch: crate::commands::production_queue::ProductionBatchDetailView,
     pub source_item_ids: Vec<String>,
     pub selected_count: usize,
-    pub auto_started: bool,
-    pub start_warning: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionReviewInboxView {
+    pub items: Vec<ProductionReviewInboxItemView>,
+    pub total: usize,
+    pub unreviewed_count: usize,
+    pub regenerate_count: usize,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionReviewInboxItemView {
+    pub project_id: String,
+    pub batch_id: String,
+    pub batch_name: String,
+    pub batch_status: String,
+    pub item_id: String,
+    pub ordinal: i64,
+    pub item_status: String,
+    pub task_id: Option<String>,
+    pub task_status: Option<String>,
+    pub shot_id: Option<String>,
+    pub stage: Option<String>,
+    pub asset_id: Option<String>,
+    pub asset_name: Option<String>,
+    pub asset_type: Option<String>,
+    pub asset_mime_type: Option<String>,
+    pub selected_asset_id: Option<String>,
+    pub review_status: String,
+    pub review_note: String,
+    pub version: i64,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub prompt_summary: Option<String>,
+    pub updated_at: String,
+}
+
+impl From<crate::application::ports::ProductionReviewInboxPage> for ProductionReviewInboxView {
+    fn from(value: crate::application::ports::ProductionReviewInboxPage) -> Self {
+        let items = value.items.into_iter().map(Into::into).collect();
+        Self {
+            items,
+            total: value.total,
+            unreviewed_count: value.unreviewed_count,
+            regenerate_count: value.regenerate_count,
+            limit: 0,
+            offset: 0,
+        }
+    }
+}
+
+impl From<crate::application::ports::ProductionReviewInboxItem> for ProductionReviewInboxItemView {
+    fn from(value: crate::application::ports::ProductionReviewInboxItem) -> Self {
+        Self {
+            project_id: value.project_id,
+            batch_id: value.batch_id,
+            batch_name: value.batch_name,
+            batch_status: value.batch_status,
+            item_id: value.item_id,
+            ordinal: value.ordinal,
+            item_status: value.item_status,
+            task_id: value.task_id,
+            task_status: value.task_status,
+            shot_id: value.shot_id,
+            stage: value.stage,
+            asset_id: value.asset_id,
+            asset_name: value.asset_name,
+            asset_type: value.asset_type,
+            asset_mime_type: value.asset_mime_type,
+            selected_asset_id: value.selected_asset_id,
+            review_status: value.review_status.as_str().to_owned(),
+            review_note: value.review_note,
+            version: value.version,
+            workflow_version_id: value.workflow_version_id,
+            recipe_id: value.recipe_id,
+            prompt_summary: value.prompt_summary,
+            updated_at: value.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn production_item_review_inbox_get(
+    state: State<'_, AppState>,
+    project_id: String,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<ProductionReviewInboxView, AppError> {
+    super::validate_project_id(&project_id)?;
+    let limit = limit.unwrap_or(50).clamp(1, 100);
+    let offset = offset.unwrap_or(0);
+    let mut view: ProductionReviewInboxView = state
+        .production_item_review_service
+        .get_project_inbox(&project_id, limit, offset)
+        .await
+        .map_err(map_review_error)
+        .map(Into::into)?;
+    view.limit = limit;
+    view.offset = offset;
+    Ok(view)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -337,10 +435,6 @@ pub async fn production_item_review_regenerate(
             width: request.width,
             height: request.height,
             use_original_seed: request.use_original_seed,
-            // DEV-053 regeneration creates a READY batch. Starting remains a
-            // separate, explicit queue action even if an older client sends
-            // autoStart=true.
-            auto_start: false,
         })
         .await
         .map(Into::into)
@@ -355,9 +449,7 @@ pub async fn production_item_review_regenerate_marked(
     super::validate_project_id(&request.project_id)?;
     state
         .production_item_review_service
-        // Keep the legacy request field for wire compatibility, but never
-        // start a regeneration batch from the review command.
-        .regenerate_marked(&request.project_id, &request.batch_id, false)
+        .regenerate_marked(&request.project_id, &request.batch_id)
         .await
         .map(Into::into)
         .map_err(map_review_error)
@@ -801,8 +893,6 @@ impl From<crate::application::production_item_review_service::RegenerateResult>
             batch: value.detail.into(),
             source_item_ids: value.source_item_ids,
             selected_count,
-            auto_started: value.auto_started,
-            start_warning: value.start_warning,
         }
     }
 }

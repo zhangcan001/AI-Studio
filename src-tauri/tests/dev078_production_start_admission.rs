@@ -35,11 +35,11 @@ fn production_queue_start_delegates_to_runtime_admission_service() {
 
 #[test]
 fn formal_backend_start_call_sites_do_not_bypass_runtime_admission() {
-    for relative_path in [
-        "src/application/h3_local_import_service.rs",
-        "src/application/production_item_review_service.rs",
-        "src/application/production_orchestrator_service.rs",
-        "src/application/workflow_benchmark_service.rs",
+    for (relative_path, requires_start_facade) in [
+        ("src/application/h3_local_import_service.rs", true),
+        ("src/application/production_item_review_service.rs", false),
+        ("src/application/production_orchestrator_service.rs", true),
+        ("src/application/workflow_benchmark_service.rs", true),
     ] {
         let source = fs::read_to_string(Path::new(ROOT).join(relative_path))
             .expect("formal production service source should be readable");
@@ -48,10 +48,17 @@ fn formal_backend_start_call_sites_do_not_bypass_runtime_admission() {
             !normalized.contains("production_queue_service .start("),
             "{relative_path} must route starts through ProductionStartAdmissionService"
         );
-        assert!(
-            source.contains("start_production"),
-            "{relative_path} must have an explicit guarded start facade"
-        );
+        if requires_start_facade {
+            assert!(
+                source.contains("start_production"),
+                "{relative_path} must have an explicit guarded start facade"
+            );
+        } else {
+            assert!(
+                !source.contains("start_production"),
+                "{relative_path} must not retain a review-owned start facade"
+            );
+        }
     }
 }
 

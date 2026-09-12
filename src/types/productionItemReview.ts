@@ -68,6 +68,39 @@ export interface ProductionReviewRegenerateResult {
   batch: ProductionBatchDetail;
   sourceItemIds: string[];
   selectedCount: number;
-  autoStarted: boolean;
-  startWarning?: string;
+}
+
+export interface ProductionReviewInboxItem {
+  projectId: string;
+  batchId: string;
+  batchName: string;
+  batchStatus: string;
+  itemId: string;
+  ordinal: number;
+  itemStatus: string;
+  taskId?: string;
+  taskStatus?: string;
+  shotId?: string;
+  stage?: string;
+  assetId?: string;
+  assetName?: string;
+  assetType?: string;
+  assetMimeType?: string;
+  selectedAssetId?: string;
+  reviewStatus: ProductionReviewStatus;
+  reviewNote: string;
+  version: number;
+  workflowVersionId: string;
+  recipeId: string;
+  promptSummary?: string;
+  updatedAt: string;
+}
+
+export interface ProductionReviewInboxPage {
+  items: ProductionReviewInboxItem[];
+  total: number;
+  unreviewedCount: number;
+  regenerateCount: number;
+  limit: number;
+  offset: number;
 }

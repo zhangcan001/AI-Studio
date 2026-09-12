@@ -22,8 +22,55 @@ pub struct ProductionItemReviewRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionReviewInboxItem {
+    pub project_id: String,
+    pub batch_id: String,
+    pub batch_name: String,
+    pub batch_status: String,
+    pub item_id: String,
+    pub ordinal: i64,
+    pub item_status: String,
+    pub task_id: Option<String>,
+    pub task_status: Option<String>,
+    pub shot_id: Option<String>,
+    pub stage: Option<String>,
+    pub asset_id: Option<String>,
+    pub asset_name: Option<String>,
+    pub asset_type: Option<String>,
+    pub asset_mime_type: Option<String>,
+    pub selected_asset_id: Option<String>,
+    pub review_status: ProductionReviewStatus,
+    pub review_note: String,
+    pub version: i64,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub prompt_summary: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProductionReviewInboxPage {
+    pub items: Vec<ProductionReviewInboxItem>,
+    pub total: usize,
+    pub unreviewed_count: usize,
+    pub regenerate_count: usize,
+}
+
 #[async_trait]
 pub trait ProductionItemReviewRepository: Send + Sync {
+    /// Reads a bounded project-level review projection. SQLite implements this
+    /// as one set-based query; the default keeps small test repositories source
+    /// compatible without creating a second review store.
+    async fn list_project_inbox(
+        &self,
+        _project_id: &str,
+        _limit: usize,
+        _offset: usize,
+    ) -> Result<ProductionReviewInboxPage, RepositoryError> {
+        Ok(ProductionReviewInboxPage::default())
+    }
+
     async fn list_for_batch(
         &self,
         project_id: &str,

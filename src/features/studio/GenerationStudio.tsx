@@ -76,6 +76,7 @@ interface Props {
   onProductionAdmissionChanged: () => Promise<void>;
   onProductionBatchFocused: () => void;
   onOpenTask: (taskId: string) => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
   onOpenWorkflows: () => void;
   onReconnectComfy: () => void;
 }
@@ -92,6 +93,7 @@ export function GenerationStudio({
   onProductionAdmissionChanged,
   onProductionBatchFocused,
   onOpenTask,
+  onOpenProductionQueue,
   onOpenWorkflows,
   onReconnectComfy,
 }: Props) {
@@ -692,6 +694,7 @@ export function GenerationStudio({
                   onProductionBatchFocused();
                 }}
                 onOpenTask={onOpenTask}
+                onOpenProductionQueue={onOpenProductionQueue}
                 experimentContexts={experimentController.experimentContexts}
                 onPromoteWinner={experimentController.promoteExperimentWinner}
               />

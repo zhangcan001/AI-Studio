@@ -1,6 +1,7 @@
 use super::{format_datetime, map_sqlx_error, parse_datetime};
 use crate::application::ports::{
-    ProductionItemReviewRecord, ProductionItemReviewRepository, RepositoryError,
+    ProductionItemReviewRecord, ProductionItemReviewRepository, ProductionReviewInboxItem,
+    ProductionReviewInboxPage, RepositoryError,
 };
 use crate::domain::ProductionReviewStatus;
 use async_trait::async_trait;
@@ -36,6 +37,36 @@ struct ReviewRow {
     updated_at: String,
 }
 
+#[derive(FromRow)]
+struct ReviewInboxRow {
+    project_id: String,
+    batch_id: String,
+    batch_name: String,
+    batch_status: String,
+    item_id: String,
+    ordinal: i64,
+    item_status: String,
+    task_id: Option<String>,
+    task_status: Option<String>,
+    shot_id: Option<String>,
+    stage: Option<String>,
+    asset_id: Option<String>,
+    asset_name: Option<String>,
+    asset_type: Option<String>,
+    asset_mime_type: Option<String>,
+    selected_asset_id: Option<String>,
+    review_status: String,
+    review_note: String,
+    version: i64,
+    workflow_version_id: String,
+    recipe_id: String,
+    prompt_summary: Option<String>,
+    updated_at: String,
+    total_count: i64,
+    unreviewed_count: i64,
+    regenerate_count: i64,
+}
+
 impl ReviewRow {
     fn into_record(self) -> Result<ProductionItemReviewRecord, RepositoryError> {
         Ok(ProductionItemReviewRecord {
@@ -66,6 +97,138 @@ const REVIEW_SELECT: &str = "SELECT id, project_id, production_batch_id, product
 
 #[async_trait]
 impl ProductionItemReviewRepository for SqliteProductionItemReviewRepository {
+    async fn list_project_inbox(
+        &self,
+        project_id: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<ProductionReviewInboxPage, RepositoryError> {
+        let limit = limit.clamp(1, 100) as i64;
+        let offset = offset as i64;
+        let rows = sqlx::query_as::<_, ReviewInboxRow>(
+            "SELECT
+                r.project_id,
+                r.production_batch_id AS batch_id,
+                b.name AS batch_name,
+                b.status AS batch_status,
+                i.id AS item_id,
+                i.ordinal,
+                i.status AS item_status,
+                i.task_id,
+                t.status AS task_status,
+                link.shot_id,
+                link.stage,
+                a.id AS asset_id,
+                a.name AS asset_name,
+                a.type AS asset_type,
+                a.mime_type AS asset_mime_type,
+                CASE link.stage
+                    WHEN 'video' THEN s.selected_video_asset_id
+                    WHEN 'image' THEN s.selected_image_asset_id
+                END AS selected_asset_id,
+                r.review_status,
+                r.review_note,
+                r.version,
+                i.workflow_version_id,
+                i.recipe_id,
+                json_extract(i.values_json, '$.prompt') AS prompt_summary,
+                r.updated_at,
+                COUNT(*) OVER () AS total_count,
+                SUM(CASE WHEN r.review_status = 'UNREVIEWED' THEN 1 ELSE 0 END) OVER () AS unreviewed_count,
+                SUM(CASE WHEN r.review_status = 'REGENERATE' THEN 1 ELSE 0 END) OVER () AS regenerate_count
+             FROM production_item_reviews r
+             INNER JOIN production_batches b
+                ON b.id = r.production_batch_id AND b.project_id = r.project_id
+             INNER JOIN production_batch_items i
+                ON i.id = r.production_batch_item_id AND i.batch_id = b.id
+             LEFT JOIN tasks t ON t.id = i.task_id
+             LEFT JOIN shot_generation_links link
+                ON link.production_batch_item_id = i.id
+               AND link.id = (
+                   SELECT latest.id
+                   FROM shot_generation_links latest
+                   WHERE latest.production_batch_item_id = i.id
+                   ORDER BY latest.created_at DESC, latest.id DESC
+                   LIMIT 1
+               )
+             LEFT JOIN shots s ON s.id = link.shot_id AND s.project_id = r.project_id
+             LEFT JOIN assets a ON a.id = COALESCE(
+                 r.result_asset_id,
+                 (SELECT MIN(output.asset_id) FROM task_output_assets output WHERE output.task_id = i.task_id)
+             ) AND a.project_id = r.project_id
+             WHERE r.project_id = ?
+               AND b.archived_at IS NULL
+               AND r.review_status IN ('UNREVIEWED', 'REGENERATE')
+             ORDER BY r.updated_at DESC, r.production_batch_id ASC, i.ordinal ASC, i.id ASC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(project_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let total = rows
+            .first()
+            .map(|row| row.total_count.max(0) as usize)
+            .unwrap_or(0);
+        let unreviewed_count = rows
+            .first()
+            .map(|row| row.unreviewed_count.max(0) as usize)
+            .unwrap_or(0);
+        let regenerate_count = rows
+            .first()
+            .map(|row| row.regenerate_count.max(0) as usize)
+            .unwrap_or(0);
+        let items = rows
+            .into_iter()
+            .map(|row| {
+                Ok(ProductionReviewInboxItem {
+                    project_id: row.project_id,
+                    batch_id: row.batch_id,
+                    batch_name: row.batch_name,
+                    batch_status: row.batch_status,
+                    item_id: row.item_id,
+                    ordinal: row.ordinal,
+                    item_status: row.item_status,
+                    task_id: row.task_id,
+                    task_status: row.task_status,
+                    shot_id: row.shot_id,
+                    stage: row.stage,
+                    asset_id: row.asset_id,
+                    asset_name: row.asset_name,
+                    asset_type: row.asset_type,
+                    asset_mime_type: row.asset_mime_type,
+                    selected_asset_id: row.selected_asset_id,
+                    review_status: ProductionReviewStatus::parse(&row.review_status).map_err(
+                        |error| {
+                            RepositoryError::serialization(
+                                "production review inbox status",
+                                error.to_string(),
+                            )
+                        },
+                    )?,
+                    review_note: row.review_note,
+                    version: row.version,
+                    workflow_version_id: row.workflow_version_id,
+                    recipe_id: row.recipe_id,
+                    prompt_summary: row.prompt_summary,
+                    updated_at: parse_datetime(
+                        "production review inbox updated_at",
+                        &row.updated_at,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, RepositoryError>>()?;
+        Ok(ProductionReviewInboxPage {
+            items,
+            total,
+            unreviewed_count,
+            regenerate_count,
+        })
+    }
+
     async fn list_for_batch(
         &self,
         project_id: &str,

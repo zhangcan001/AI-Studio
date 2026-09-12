@@ -34,13 +34,14 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
   /** Optional seam for hosts that can resolve a production review batch. */
   reviewBatchId?: string;
+  initialReviewItemId?: string;
   reviewBatchLoader?: (projectId: string, batchId: string) => Promise<ProductionBatchReviewProductivity>;
   onOpenProductionQueue?: () => void;
 }
 
 export type ReviewFilter = "ALL" | "UNREVIEWED" | "APPROVED" | "STARRED" | "REGENERATE" | "REJECTED" | "FAILED";
 
-export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask, reviewBatchId, reviewBatchLoader = getProductionBatchReviewProductivity, onOpenProductionQueue }: Props) {
+export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, onAssetsLoaded, onSelect, onRetry, onOpenTask, reviewBatchId, initialReviewItemId, reviewBatchLoader = getProductionBatchReviewProductivity, onOpenProductionQueue }: Props) {
   const [review, setReview] = useState<ProductionBatchReviewProductivity>();
   const [reviewError, setReviewError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -63,9 +64,9 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
     setLocalCompareShotId(undefined);
     if (!reviewBatchId) return;
     let active = true;
-    void reviewBatchLoader(projectId, reviewBatchId).then((next) => { if (!active) return; setReview(next); setCurrentReviewItemId(next.items[0]?.itemId); }).catch(() => { if (active) setReviewError("当前批次没有可用的生产复核上下文，已保留原有批量审片。"); });
+    void reviewBatchLoader(projectId, reviewBatchId).then((next) => { if (!active) return; setReview(next); setCurrentReviewItemId(next.items.some((item) => item.itemId === initialReviewItemId) ? initialReviewItemId : next.items[0]?.itemId); }).catch(() => { if (active) setReviewError("当前批次没有可用的生产复核上下文，已保留原有批量审片。"); });
     return () => { active = false; };
-  }, [projectId, reviewBatchId, reviewBatchLoader]);
+  }, [initialReviewItemId, projectId, reviewBatchId, reviewBatchLoader]);
 
   const mappedItems = useMemo(() => review?.items.filter((item) => item.shotId && normalizeStage(item.stage) === stage) ?? [], [review, stage]);
   const detailedCompareAvailable = Boolean(review && mappedItems.length > 0);
@@ -133,7 +134,7 @@ export function ShotBatchReviewBoard({ projectId, shots, assets, stage, busy, on
       : false;
     if (!confirmed) return;
     try {
-      const result = await regenerateProductionItem({ projectId, batchId: reviewBatchId, itemId: item.id, durationSeconds: sourceItem.durationSeconds, width: sourceItem.width, height: sourceItem.height, useOriginalSeed: false, autoStart: false });
+      const result = await regenerateProductionItem({ projectId, batchId: reviewBatchId, itemId: item.id, durationSeconds: sourceItem.durationSeconds, width: sourceItem.width, height: sourceItem.height, useOriginalSeed: false });
       setNotice(`已创建 READY 返工批次（${result.selectedCount} 项），请打开/手动开始队列。`);
       onOpenProductionQueue?.();
       await reloadReview();
