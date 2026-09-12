@@ -4,9 +4,10 @@
 TASK=DEV-099
 RELEASED_BASELINE=1.1.0
 BASELINE_SHA=41c0b347ee7cd4a11c5afa6441bada492427c41c
-ROADMAP_STATUS=UPDATED_BY_DEV_102
+ROADMAP_STATUS=UPDATED_BY_DEV_103
 NEXT_VERSION_RECOMMENDATION=1.2.0
 SELECTED_FIRST_DELIVERY_THEME=External Agent → AI Studio Production Handoff
+NEXT_MAIN_THEME=Bulk Production Preparation / Operations
 ```
 
 ## Product baseline
@@ -68,14 +69,25 @@ Asset Library authoritative; no duplicate store, table, or implicit file copy.
 DEV-102 closes this read/navigation slice with the existing
 `AssetUsageService`, exact Shot/Asset/Task targets, explicit unavailable
 reference states, Shot input/result separation, and Project Complete →
-selected Asset continuity. The next main theme is Daily Production
-Explainability; DEV-103 has not started.
+selected Asset continuity. DEV-103 now closes the next explainability slice;
+the next main theme is Bulk Production Preparation / Operations, and DEV-104
+has not started.
 
-### P1 — Daily Production Explainability
+### P1 — Daily Production Explainability — CLOSED (DEV-103)
 
 Expand the derived explanation surface for “why blocked”, “what is running”,
 “what needs review”, and “what is complete” after the P0 continuity target
 model is proven in daily use.
+
+DEV-103 closes this slice with a read-only, bounded five-bucket board under
+Project Command Center, stable reason codes, exact existing repair targets,
+and no migration or second persisted issue/next-action state.
+
+### P1 — Bulk Production Preparation / Operations
+
+DEV-104 has not started. The next train is limited to bulk preparation and
+operations on existing authorities; no new queue, executor, or task model is
+implied.
 
 ### P2 — Product polish and operational clarity
 
