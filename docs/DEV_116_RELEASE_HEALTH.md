@@ -6,11 +6,12 @@ BASELINE_SHA=635194d56db119b5739ff56ab5b4902b0cfe6178
 TARGET_VERSION=1.3.1
 AI_STUDIO_VERSION=1.3.1
 CANCELLATION_RELIABILITY=IMPROVED
-CI_STABILITY=IMPROVED
+CI_STABILITY=PASS_AFTER_RETRY
 BUILD_WARNING=REDUCED
 ERROR_VISIBILITY=IMPROVED
-REMOTE_CI_RUN=TO_BE_DISPATCHED
-REMOTE_CI_STATUS=TO_BE_DISPATCHED
+REMOTE_CI_RUN=34748866820
+REMOTE_CI_STATUS=PASS
+REMOTE_CI_HEAD=13e56ebb8daec48091f024a16e0306b2011818c3
 P0=NONE
 P1=NONE
 ```
@@ -35,8 +36,11 @@ Store remain authoritative.
 ## Validation baseline
 
 The v1.3.1 local gate is recorded in `docs/DEV_116_STABILITY_REPORT.md`.
-Remote Source-only CI is dispatched against the exact final pushed commit after
-all local checks and documentation are complete.
+Source-only CI run `34748866820` passed against implementation commit
+`13e56ebb8daec48091f024a16e0306b2011818c3` after the first attempt
+`34747747124` was cancelled at the Rust timeout while the unbounded polling
+helper was still present. The final documentation-only closeout does not
+change runtime behavior.
 
 ## Remaining non-blocking debt
 

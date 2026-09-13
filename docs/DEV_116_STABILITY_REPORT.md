@@ -52,12 +52,13 @@ explicit timeout budget:
 - Frontend source checks: 10 minutes.
 
 This bounds hung runners without changing the production workflow or masking
-failures. The final exact-head dispatch is recorded in the health document
-once the pushed commit has completed remotely. The first exact-head attempt
-(`34747747124`) was cancelled by the 25-minute Rust job timeout while waiting
-in the existing production-orchestrator lineage test's unbounded polling
-helper; it was not reported as a test assertion failure. The helper is now
-bounded so a missing transition fails visibly instead of hanging the job.
+failures. The passing exact-head dispatch is recorded in the health document:
+`34748866820` passed against `13e56ebb8daec48091f024a16e0306b2011818c3`.
+The first exact-head attempt (`34747747124`) was cancelled by the 25-minute
+Rust job timeout while waiting in the existing production-orchestrator lineage
+test's unbounded polling helper; it was not reported as a test assertion
+failure. The helper is now bounded so a missing transition fails visibly
+instead of hanging the job.
 
 ## 3. Frontend build audit
 
@@ -123,7 +124,7 @@ to DEV-116.
 P0=NONE
 P1=NONE
 P2_REMAINING=CI-113-01; FE-113-03; PERF-113-02
-DEV_116=COMPLETE_AFTER_FINAL_REMOTE_GATE
+DEV_116=COMPLETE
 DEV_117_STARTED=NO
 AUTO_NEXT_TASK=NO
 ```
