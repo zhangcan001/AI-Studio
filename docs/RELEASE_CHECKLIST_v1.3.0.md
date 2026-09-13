@@ -29,7 +29,8 @@
 - [x] Production build — passed; existing main-chunk warning only.
 - [x] Rust checks — format, check, and all-target tests passed; release
       metadata and the existing version consistency gate changed only.
-- [ ] Source-only CI — record exact final-head run below.
+- [x] Source-only CI — run `34743034346` passed on the exact pushed release
+      head `cbf2f1853c2553bd02e646adf386da53b6aff87e`.
 
 ## Installer
 
@@ -47,14 +48,14 @@
 
 ```text
 BASELINE_SHA=35d75b7d0a319aa3220741935c56be20a0247975
-FINAL_SHA=TO_BE_RECORDED
+FINAL_SHA=cbf2f1853c2553bd02e646adf386da53b6aff87e (release code head)
 VERSION=1.3.0
 FRONTEND_TEST=PASS (150 files, 823 tests)
 TSC=PASS
 BUILD=PASS (existing >500 kB main chunk warning only)
 RUST_CHANGED=YES (package metadata and existing version gate only)
-REMOTE_CI_RUN=TO_BE_RECORDED
-REMOTE_CI_STATUS=TO_BE_RECORDED
+REMOTE_CI_RUN=34743034346
+REMOTE_CI_STATUS=PASS
 TAG=TO_BE_RECORDED
 GITHUB_RELEASE=TO_BE_RECORDED
 P0=NONE
