@@ -170,7 +170,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenProductionQueue={openQueue} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    const createButton = screen.getByRole("button", { name: "创建并打开生产队列（150 项）" }) as HTMLButtonElement;
+    const createButton = screen.getByRole("button", { name: "创建待启动批次并打开队列（150 项）" }) as HTMLButtonElement;
     await user.click(createButton);
     await waitFor(() => expect(createMock).toHaveBeenCalledWith(
       "inspection-150",
@@ -181,15 +181,15 @@ describe("ProductionPackageWorkspace", () => {
 
     resolveCreate(created);
     await waitFor(() => expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-state")).toBe("CREATED"));
-    expect(screen.getByText("已创建 2 个生产批次")).toBeTruthy();
+    expect(screen.getByText("已创建 2 个待启动生产批次")).toBeTruthy();
     const createdRegion = screen.getByRole("region", { name: "生产包创建结果" });
     expect(within(createdRegion).getByText("150 个项目")).toBeTruthy();
     expect(within(createdRegion).getByText(/自动启动：否/)).toBeTruthy();
     await waitFor(() => expect(openQueue).toHaveBeenCalledWith(created));
     expect(openQueue).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("生产批次已创建并已打开生产队列；不会自动开始生成。")).toBeTruthy();
+    expect(screen.getByText("待启动生产批次已创建并已打开生产队列；尚未开始真实生产。")).toBeTruthy();
     expect(screen.queryByText("批次已创建；不会自动打开或启动生产队列。")).toBeNull();
-    expect((screen.getByRole("button", { name: "批次已创建" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "批次已创建，待启动" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows a media-change error and offers reinspection after create fails", async () => {
@@ -201,7 +201,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: /创建并打开生产队列/ }));
+    await user.click(screen.getByRole("button", { name: /创建待启动批次并打开队列/ }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("媒体文件已变化");
     expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-state")).toBe("ERROR");
@@ -227,7 +227,7 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: /创建并打开生产队列/ }));
+    await user.click(screen.getByRole("button", { name: /创建待启动批次并打开队列/ }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("工作流不兼容当前生产模式");
     expect(alert.textContent).toContain("FL2VA_TEXT_TO_VIDEO");
@@ -267,14 +267,14 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenQueue={openQueue} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（4 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（4 项）" }));
     await waitFor(() => expect(screen.getByRole("region", { name: "生产包创建结果" })).toBeTruthy());
 
     const createdRegion = screen.getByRole("region", { name: "生产包创建结果" });
     expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-state")).toBe("PARTIAL");
-    expect(within(createdRegion).getByText("已加入生产：2")).toBeTruthy();
+    expect(within(createdRegion).getByText("已创建待启动项目：2")).toBeTruthy();
     expect(within(createdRegion).getByText("尚未加入：2")).toBeTruthy();
-    expect(within(createdRegion).getByText("状态：部分完成")).toBeTruthy();
+    expect(within(createdRegion).getByText("状态：部分创建，已加入项目待启动")).toBeTruthy();
     expect(within(createdRegion).getByText(/请求项目：4/)).toBeTruthy();
     await waitFor(() => expect(openQueue).toHaveBeenCalledTimes(1));
     expect(within(createdRegion).getByRole("button", { name: "打开已创建队列" })).toBeTruthy();
@@ -315,20 +315,20 @@ describe("ProductionPackageWorkspace", () => {
     render(<ProductionPackageWorkspace projectId="project-1" folderPath="C:/packages/ep01" onOpenQueue={openQueue} />);
 
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("生产批次已创建，但生产队列暂时无法打开");
     expect(screen.getByText("批次已经创建，可重新打开生产队列；不会重复创建批次。")).toBeTruthy();
     expect(screen.queryByText(/再次创建批次|重新创建批次/)).toBeNull();
     expect(screen.getByRole("button", { name: "重新打开生产队列" })).toBeTruthy();
-    expect((screen.getByRole("button", { name: "批次已创建" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "批次已创建，待启动" }) as HTMLButtonElement).disabled).toBe(true);
     expect(createMock).toHaveBeenCalledTimes(1);
 
     openQueue.mockResolvedValueOnce(undefined);
     await user.click(screen.getByRole("button", { name: "重新打开生产队列" }));
     await waitFor(() => expect(openQueue).toHaveBeenCalledTimes(2));
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("生产批次已创建并已打开生产队列；不会自动开始生成。")).toBeTruthy();
+    expect(screen.getByText("待启动生产批次已创建并已打开生产队列；尚未开始真实生产。")).toBeTruthy();
   });
 
   it("clears only the package workspace for the next package", async () => {
@@ -339,9 +339,9 @@ describe("ProductionPackageWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "检查文件夹" }));
     await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
-    expect(screen.getByText("生产批次已创建；不会自动开始生成。")).toBeTruthy();
+    expect(screen.getByText("待启动批次已创建；父层未接入队列打开回调，尚未开始真实生产。")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "选择下一个生产包" }));
 
     expect(screen.getByRole("region", { name: "Production Package 工作区" }).getAttribute("data-state")).toBe("EMPTY");

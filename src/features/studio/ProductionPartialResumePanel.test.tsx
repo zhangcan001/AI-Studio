@@ -101,7 +101,7 @@ describe("failed batch partial resume frontend contract", () => {
       />,
     );
 
-    expect(html).toContain("正在恢复…");
+    expect(html).toContain("正在恢复并启动…");
     expect(html).toContain('button type="button" disabled=""');
   });
 });

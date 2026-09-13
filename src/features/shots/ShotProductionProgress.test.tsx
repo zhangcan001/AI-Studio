@@ -34,7 +34,7 @@ describe("ShotProductionProgress", () => {
     expect(screen.getByText("需要先填写提示词")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "图片：受阻" }));
-    await user.click(screen.getByRole("button", { name: "继续" }));
+    await user.click(screen.getByRole("button", { name: "打开处理" }));
     expect(onNavigate).toHaveBeenNthCalledWith(1, "image");
     expect(onNavigate).toHaveBeenNthCalledWith(2, "image");
   });

@@ -131,7 +131,7 @@ function queueRow(id: BatchId): HTMLElement {
 }
 
 function startButton(id: BatchId): HTMLElement {
-  return within(queueRow(id)).getByRole("button", { name: `开始队列 ${id}` });
+  return within(queueRow(id)).getByRole("button", { name: `开始生产队列 ${id}` });
 }
 
 async function flushAsyncWork() {
@@ -320,7 +320,7 @@ describe("ShotWorkspace explicit sequential batch start", () => {
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
     expect(within(queueRow("batch-b")).getByText(/等待自动开始 #1/)).toBeTruthy();
     expect(within(queueRow("batch-c")).getByText(/等待自动开始 #2/)).toBeTruthy();
-    expect(within(queueRow("batch-d")).getByRole("button", { name: "开始队列 batch-d" })).toBeTruthy();
+    expect(within(queueRow("batch-d")).getByRole("button", { name: "开始生产队列 batch-d" })).toBeTruthy();
 
     await completeBatch("batch-a");
     expect(mocks.startProductionQueue).toHaveBeenNthCalledWith(2, "project-1", "batch-b");
@@ -367,7 +367,7 @@ describe("ShotWorkspace explicit sequential batch start", () => {
 
     fireEvent.click(within(queueRow("batch-b")).getByRole("button", { name: "取消等待 batch-b" }));
     await flushAsyncWork();
-    expect(within(queueRow("batch-b")).getByRole("button", { name: "开始队列 batch-b" })).toBeTruthy();
+    expect(within(queueRow("batch-b")).getByRole("button", { name: "开始生产队列 batch-b" })).toBeTruthy();
     await completeBatch("batch-a");
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
   });

@@ -472,13 +472,13 @@ function auditActivityLabel(kind: string): string {
 
 function auditStatusLabel(status: string): string {
   const labels: Record<string, string> = {
-    READY: "就绪",
+    READY: "待启动",
     RUNNING: "运行中",
-    QUEUED: "已排队",
-    WAITING: "等待中",
+    QUEUED: "待执行",
+    WAITING: "待执行",
     SUCCEEDED: "已完成",
     COMPLETED: "已完成",
-    FAILED: "失败",
+    FAILED: "失败，需要处理",
     CANCELLED: "已取消",
     PAUSED: "已暂停",
   };

@@ -9,7 +9,7 @@ import {
 } from "../../services/tauriClient";
 import { getAssetMediaUrl } from "../../services/tauriClient";
 import { toUserMessage } from "../../i18n/errorMessages";
-import { formatDateTime, productionItemStatusLabel, taskStatusLabel } from "../../i18n/statusLabels";
+import { formatDateTime, productionItemStatusLabel, productionReviewStatusLabel, taskStatusLabel } from "../../i18n/statusLabels";
 import { MINIMAX_H3_RESOLUTION_PRESETS } from "../runtime/resolutionPresets";
 import type { ProductionBatchReview, ProductionReviewItem, ProductionReviewStatus } from "../../types/productionItemReview";
 
@@ -26,23 +26,13 @@ type Filter = "ALL" | ProductionReviewStatus;
 
 const FILTERS: Array<{ value: Filter; label: string }> = [
   { value: "ALL", label: "全部" },
-  { value: "UNREVIEWED", label: "未审" },
-  { value: "APPROVED", label: "通过" },
-  { value: "STARRED", label: "优秀" },
-  { value: "REGENERATE", label: "待重生成" },
-  { value: "REJECTED", label: "废弃" },
-  { value: "FAILED", label: "生成失败" },
+  { value: "UNREVIEWED", label: "待审核" },
+  { value: "APPROVED", label: "已通过" },
+  { value: "STARRED", label: "已标星" },
+  { value: "REGENERATE", label: "待返工" },
+  { value: "REJECTED", label: "已拒绝" },
+  { value: "FAILED", label: "失败" },
 ];
-
-const REVIEW_LABELS: Record<ProductionReviewStatus, string> = {
-  UNREVIEWED: "未审",
-  APPROVED: "通过",
-  STARRED: "优秀",
-  REGENERATE: "待重生成",
-  REJECTED: "废弃",
-  FAILED: "生成失败",
-  IN_PROGRESS: "生成中",
-};
 
 const REVIEW_CLASS: Record<ProductionReviewStatus, string> = {
   UNREVIEWED: "review-status-unreviewed",
@@ -131,7 +121,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
     setNotice(undefined);
     try {
       const result = await regenerateMarkedProductionItems({ projectId, batchId });
-      setNotice(`已创建 READY 返工批次，共 ${result.selectedCount} 项，尚未启动。`);
+      setNotice(`返工批次已创建，状态为待启动；尚未开始真实生产，共 ${result.selectedCount} 项。`);
       setReadyBatchId(result.batch.id);
       await onBatchChanged?.();
       await refresh();
@@ -160,7 +150,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         ...request,
       });
       setRegenerateItem(undefined);
-      setNotice("已创建 READY 返工批次，尚未启动。");
+      setNotice("返工批次已创建，状态为待启动；尚未开始真实生产。");
       setReadyBatchId(result.batch.id);
       await onBatchChanged?.();
       await refresh();
@@ -181,7 +171,7 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         <div>
           <span className="section-label">H3 批量审片</span>
           <h3>生成结果审核与局部返工</h3>
-          <p>审核状态独立于任务；返工从已冻结参数创建新版本，不重新扫描项目文件夹。</p>
+          <p>审核状态独立于任务；返工只创建新的待启动批次，不会立即重新生成，也不重新扫描项目文件夹。</p>
         </div>
         <button
           type="button"
@@ -197,11 +187,11 @@ export function ProductionBatchReviewWorkspace({ projectId, batchId, refreshKey,
         <ReviewStat label="总计" value={review.total} />
         <ReviewStat label="成功" value={review.successCount} />
         <ReviewStat label="失败" value={review.failedCount} />
-        <ReviewStat label="未审" value={review.unreviewedCount} />
-        <ReviewStat label="通过" value={review.approvedCount} />
-        <ReviewStat label="优秀" value={review.starredCount} />
-        <ReviewStat label="待重生成" value={review.regenerateCount} />
-        <ReviewStat label="废弃" value={review.rejectedCount} />
+        <ReviewStat label="待审核" value={review.unreviewedCount} />
+        <ReviewStat label="已通过" value={review.approvedCount} />
+        <ReviewStat label="已标星" value={review.starredCount} />
+        <ReviewStat label="待返工" value={review.regenerateCount} />
+        <ReviewStat label="已拒绝" value={review.rejectedCount} />
       </div>
 
       <div className="production-review-filters" role="toolbar" aria-label="审片筛选">
@@ -299,7 +289,7 @@ function ReviewCard({
         <span className="production-review-card-summary">
           <span className="production-review-card-title">
             <strong>{item.version ? `V${item.version}` : "—"}</strong>
-            <span className={`review-status ${REVIEW_CLASS[item.reviewStatus]}`}>{REVIEW_LABELS[item.reviewStatus]}</span>
+            <span className={`review-status ${REVIEW_CLASS[item.reviewStatus]}`}>{productionReviewStatusLabel(item.reviewStatus)}</span>
             {item.preferred && <span className="review-preferred">当前优选</span>}
           </span>
           <span className="production-review-prompt">{item.promptText || "未提取提示词"}</span>
@@ -326,12 +316,12 @@ function ReviewCard({
             <button type="button" className="quiet-button" onClick={onSaveNote} disabled={busy || reviewDisabled}>保存备注</button>
           </label>
           <div className="production-review-actions">
-            <button type="button" onClick={() => onStatus("APPROVED")} disabled={busy || reviewDisabled}>通过</button>
-            <button type="button" className="review-star-button" onClick={() => onStatus("STARRED")} disabled={busy || reviewDisabled}>优秀</button>
-            <button type="button" className="quiet-button" onClick={() => onStatus("REGENERATE")} disabled={busy || reviewDisabled}>待重生成</button>
-            <button type="button" className="quiet-button danger-button" onClick={() => onStatus("REJECTED")} disabled={busy || reviewDisabled}>废弃</button>
+            <button type="button" onClick={() => onStatus("APPROVED")} disabled={busy || reviewDisabled}>审核通过</button>
+            <button type="button" className="review-star-button" onClick={() => onStatus("STARRED")} disabled={busy || reviewDisabled}>标记为已标星</button>
+            <button type="button" className="quiet-button" onClick={() => onStatus("REGENERATE")} disabled={busy || reviewDisabled}>标记为待返工</button>
+            <button type="button" className="quiet-button danger-button" onClick={() => onStatus("REJECTED")} disabled={busy || reviewDisabled}>审核拒绝</button>
             {item.taskId && <button type="button" className="quiet-button" onClick={() => onOpenTask(item.taskId!)}>查看任务</button>}
-            {!reviewDisabled && <button type="button" className="quiet-button" onClick={onRegenerate} disabled={busy}>编辑并重生成</button>}
+            {!reviewDisabled && <button type="button" className="quiet-button" onClick={onRegenerate} disabled={busy}>编辑返工准备</button>}
           </div>
         </div>
       )}
@@ -393,16 +383,16 @@ function RegenerateDialog({
     ?? MINIMAX_H3_RESOLUTION_PRESETS[3];
   return (
     <div className="production-review-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="production-review-dialog" role="dialog" aria-modal="true" aria-label="编辑并重生成" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="production-review-dialog-heading"><div><span className="section-label">局部返工</span><h3>编辑并重生成</h3></div><button type="button" className="quiet-button" onClick={onClose}>关闭</button></div>
+      <section className="production-review-dialog" role="dialog" aria-modal="true" aria-label="编辑并创建返工批次" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="production-review-dialog-heading"><div><span className="section-label">返工准备</span><h3>编辑并创建返工批次</h3></div><button type="button" className="quiet-button" onClick={onClose}>关闭</button></div>
         <label className="production-review-dialog-checkbox"><input type="checkbox" checked={overridePrompt} onChange={(event) => setOverridePrompt(event.target.checked)} /> 修改提示词</label>
-        <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={!overridePrompt || busy} aria-label="重生成提示词" />
+        <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={!overridePrompt || busy} aria-label="返工提示词" />
         <div className="production-review-dialog-grid">
           <label>时长（1–15 秒）<input type="number" min={1} max={15} value={duration} onChange={(event) => setDuration(event.target.value)} disabled={busy} /></label>
           <label>分辨率<select value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy}>{MINIMAX_H3_RESOLUTION_PRESETS.map((preset) => <option key={preset.id} value={`${preset.width}x${preset.height}`}>{preset.width} × {preset.height}</option>)}</select></label>
         </div>
         <label className="production-review-dialog-checkbox"><input type="checkbox" checked={useOriginalSeed} onChange={(event) => setUseOriginalSeed(event.target.checked)} disabled={busy} /> 使用原 Seed（默认使用新随机 Seed）</label>
-        <p className="disabled-note">生成模式、参考素材、质量档位和配方继承原版本；不会重新扫描本地文件夹。</p>
+        <p className="disabled-note">返工会继承生成模式、参考素材、质量档位和配方；提交后只创建待启动批次，不会立即生成。</p>
         <div className="production-review-dialog-actions"><button type="button" className="quiet-button" onClick={onClose} disabled={busy}>取消</button><button type="button" onClick={() => onSubmit({ promptOverride: overridePrompt ? prompt : undefined, durationSeconds: Number(duration), width: selected.width, height: selected.height, useOriginalSeed })} disabled={busy || !prompt.trim()}>{busy ? "正在创建…" : "创建返工批次"}</button></div>
       </section>
     </div>

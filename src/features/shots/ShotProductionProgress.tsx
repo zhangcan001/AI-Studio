@@ -7,11 +7,11 @@ export interface ShotProductionProgressProps {
 }
 const statusLabels: Record<ShotProductionStepStatus, string> = {
   COMPLETE: "已完成",
-  ACTIVE: "进行中",
-  READY: "待处理",
+  ACTIVE: "运行中",
+  READY: "待启动",
   BLOCKED: "受阻",
-  PENDING: "等待",
-  FAILED: "失败",
+  PENDING: "待执行",
+  FAILED: "失败，需要处理",
 };
 
 function StepContent({ step }: { step: ShotProductionStep }) {
@@ -57,7 +57,7 @@ export function ShotProductionProgress({ model, onNavigate }: ShotProductionProg
         </div>
         {model.nextAction.actionable && (
           <button type="button" className="shot-production-next-action-button" onClick={() => onNavigate(model.nextAction.stepId)}>
-            继续
+            打开处理
           </button>
         )}
       </div>

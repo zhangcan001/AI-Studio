@@ -423,7 +423,7 @@ describe("ShotWorkspace multi-package completion convergence", () => {
 
     expect(within(boardRow("EP2")).getByText("运行中")).toBeTruthy();
     expect(within(queueRow(ids.ep2Batch)).getByText("运行中")).toBeTruthy();
-    expect(screen.getByTestId("production-monitor").querySelector(".production-monitor-batch-status")?.textContent).toContain("生成中");
+    expect(screen.getByTestId("production-monitor").querySelector(".production-monitor-batch-status")?.textContent).toContain("运行中");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4000);

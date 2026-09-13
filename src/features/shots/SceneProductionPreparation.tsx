@@ -140,9 +140,9 @@ export function SceneProductionPreparation({
     const limited = readyItems.slice(0, MAX_PREPARATION_BATCH_ITEMS);
     setSelectedShotIds(new Set(limited.map((item) => item.shotId)));
     if (readyItems.length > MAX_PREPARATION_BATCH_ITEMS) {
-      setNotice("当前有 " + readyItems.length + " 个 READY 镜头，已只选择前 " + MAX_PREPARATION_BATCH_ITEMS + " 个。单批次最多 " + MAX_PREPARATION_BATCH_ITEMS + " 个镜头。");
+      setNotice("当前有 " + readyItems.length + " 个可准备镜头，已只选择前 " + MAX_PREPARATION_BATCH_ITEMS + " 个。单批次最多 " + MAX_PREPARATION_BATCH_ITEMS + " 个镜头。");
     } else {
-      setNotice("已选择 " + limited.length + " 个 READY 镜头。");
+      setNotice("已选择 " + limited.length + " 个可准备镜头。");
     }
   }
 
@@ -198,7 +198,7 @@ export function SceneProductionPreparation({
         <div>
           <span className="section-label">PRODUCTION PREPARATION</span>
           <h2>场景生产准备</h2>
-          <p>先解析当前场景的上下文与 ComfyUI 能力，再由你选择 READY 镜头加入现有生产队列。</p>
+          <p>先解析当前场景的上下文与 ComfyUI 能力，再由你选择可准备镜头创建待启动批次。</p>
         </div>
         <span className="scene-preparation-safety">准备 ≠ 生成 · 加入 ≠ 启动</span>
       </header>
@@ -220,9 +220,9 @@ export function SceneProductionPreparation({
 
       <div className="scene-preparation-summary" aria-label="场景准备统计">
         <SummaryCard label="总镜头" value={view?.total ?? 0} />
-        <SummaryCard label="READY" value={view?.readyCount ?? 0} tone="ready" />
-        <SummaryCard label="INCOMPLETE" value={view?.incompleteCount ?? 0} tone="incomplete" />
-        <SummaryCard label="BLOCKED" value={view?.blockedCount ?? 0} tone="blocked" />
+        <SummaryCard label="可准备" value={view?.readyCount ?? 0} tone="ready" />
+        <SummaryCard label="资料不完整" value={view?.incompleteCount ?? 0} tone="incomplete" />
+        <SummaryCard label="有阻塞" value={view?.blockedCount ?? 0} tone="blocked" />
         <SummaryCard label="已准备" value={view?.preparedCount ?? 0} tone="prepared" />
       </div>
 
@@ -232,16 +232,16 @@ export function SceneProductionPreparation({
             <div><span className="section-label">SHOT PLAN</span><h3>{view?.sceneName || "当前场景"} · {stage === "image" ? "图片" : "视频"}</h3></div>
             <div className="scene-preparation-selection-actions">
               <span>{selectedCount}/{MAX_PREPARATION_BATCH_ITEMS} 已选</span>
-              <button type="button" className="quiet-button" onClick={selectAllReady} disabled={isBusy || !readyItems.length}>选择全部 READY</button>
+              <button type="button" className="quiet-button" onClick={selectAllReady} disabled={isBusy || !readyItems.length}>选择全部可准备</button>
             </div>
           </div>
-          {readyItems.length > MAX_PREPARATION_BATCH_ITEMS && <p className="scene-preparation-limit" role="status">READY 镜头超过 {MAX_PREPARATION_BATCH_ITEMS} 个；选择全部时只取前 {MAX_PREPARATION_BATCH_ITEMS} 个，单批次最多 {MAX_PREPARATION_BATCH_ITEMS} 个镜头。</p>}
+          {readyItems.length > MAX_PREPARATION_BATCH_ITEMS && <p className="scene-preparation-limit" role="status">可准备镜头超过 {MAX_PREPARATION_BATCH_ITEMS} 个；选择全部时只取前 {MAX_PREPARATION_BATCH_ITEMS} 个，单批次最多 {MAX_PREPARATION_BATCH_ITEMS} 个镜头。</p>}
           {!view && busyAction === "preflight" && <div className="scene-preparation-empty"><strong>正在检查场景</strong><span>只执行一次场景级 Live preflight，不会创建 Batch、Task 或生成任务。</span></div>}
           {view && !items.length && <div className="scene-preparation-empty"><strong>场景暂无镜头</strong><span>请回到现有内容结构分配镜头。</span></div>}
           {items.length > 0 && <div className="scene-preparation-shot-list">{items.map((item) => <ShotPreparationCard key={item.shotId} item={item} selected={selectedShotIds.has(item.shotId)} onToggle={() => toggleShot(item)} onInspect={() => void openDetail(item)} disabled={isBusy} />)}</div>}
           <div className="scene-preparation-admission-bar">
-            <div><strong>{selectedCount ? "将加入 " + selectedCount + " 个 READY 镜头" : "请选择 READY 镜头"}</strong><span>后端会再次 Live preflight；页面缓存不会直接授权生产。</span></div>
-            <button type="button" onClick={() => void admit()} disabled={isBusy || selectedCount === 0}>{busyAction === "admit" ? "加入中…" : "加入生产"}</button>
+            <div><strong>{selectedCount ? "将创建 " + selectedCount + " 个待启动批次项目" : "请选择可准备镜头"}</strong><span>后端会再次 Live preflight；本动作只创建待启动批次，不会开始真实生产。</span></div>
+            <button type="button" onClick={() => void admit()} disabled={isBusy || selectedCount === 0}>{busyAction === "admit" ? "创建中…" : "创建待启动批次"}</button>
           </div>
         </section>
 
@@ -249,12 +249,12 @@ export function SceneProductionPreparation({
       </div>
 
       {notice && <div className="scene-production-notice" role="status">{notice}</div>}
-      {admissionResult && <section className="scene-preparation-success" aria-label="加入生产结果">
-        <div><strong>已准备完成 · 待启动</strong><span>已创建 READY Batch / BatchItem；当前尚未开始生产，也没有提交生成。</span></div>
+      {admissionResult && <section className="scene-preparation-success" aria-label="待启动批次创建结果">
+        <div><strong>已准备完成 · 待启动</strong><span>已创建待启动批次和项目；当前尚未开始生产，也没有提交生成。</span></div>
         <dl><div><dt>创建</dt><dd>{admissionResult.createdCount}</dd></div><div><dt>复用</dt><dd>{admissionResult.alreadyPreparedCount}</dd></div><div><dt>跳过</dt><dd>{admissionResult.skippedIncomplete + admissionResult.skippedBlocked}</dd></div></dl>
         <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(admissionResult.batchId ?? admissionResult.createdBatchIds?.[0])} disabled={!onOpenProductionQueue}>前往生产队列</button>
       </section>}
-      <p className="scene-preparation-footer-note">生产队列仍由现有 Runbook 手动操作；本页面只负责准备与加入生产。</p>
+      <p className="scene-preparation-footer-note">生产队列仍由现有 Runbook 手动操作；本页面只负责准备并创建待启动批次。</p>
     </section>
   );
 }
@@ -319,7 +319,7 @@ function unique(values: string[]): string[] {
 
 function confirmAdmission(count: number): boolean {
   if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-  return window.confirm("将加入 " + count + " 个 READY 镜头。后端会重新检查上下文；加入生产不会启动队列。是否继续？");
+  return window.confirm("将为 " + count + " 个可准备镜头创建待启动批次。后端会重新检查上下文；不会启动生产队列。是否继续？");
 }
 
 function formatTime(value: string): string {

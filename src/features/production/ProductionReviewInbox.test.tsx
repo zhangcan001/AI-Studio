@@ -21,7 +21,7 @@ it("shows the selected result and navigates to its exact Asset, with IDs folded 
   });
   const onNavigate = vi.fn();
   render(<ProductionReviewInbox projectId="project-1" onNavigate={onNavigate} />);
-  expect(await screen.findByText("已选最终结果 · 可打开素材查看")).toBeTruthy();
+  expect(await screen.findByText("已选择结果 · 可打开素材查看")).toBeTruthy();
   expect(screen.getByText("待审核结果")).toBeTruthy();
   expect(screen.getByText(/批次 batch-1/).closest("details")?.open).toBe(false);
   await userEvent.setup().click(screen.getByRole("button", { name: "打开审片" }));
@@ -36,7 +36,7 @@ it("shows the selected result and navigates to its exact Asset, with IDs folded 
     shotId: "shot-1",
     stage: "VIDEO",
   });
-  await userEvent.setup().click(screen.getByRole("button", { name: "最终结果" }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "已选择结果" }));
   expect(onNavigate).toHaveBeenCalledWith({ destination: "assets", projectId: "project-1", assetId: "selected-1" });
 });
 
@@ -54,5 +54,5 @@ it("offers a project-scoped View All entry when the inbox exceeds its preview", 
     projectId: "project-a",
     collectionFilter: { kind: "review", state: "PENDING" },
   });
-  expect(screen.getByText(/项目范围：project-a/).textContent).toContain("筛选：未审 / 待返工");
+  expect(screen.getByText(/项目范围：project-a/).textContent).toContain("筛选：待审核 / 待返工");
 });

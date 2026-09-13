@@ -11,7 +11,7 @@ import type {
 } from "../../types/productionQueue";
 import { formatUiError, toUserMessage } from "../../i18n/errorMessages";
 
-const QUEUE_BUSY_NOTICE = "恢复任务已准备完成，当前生产队列繁忙，可稍后启动。";
+const QUEUE_BUSY_NOTICE = "恢复项已创建，当前队列繁忙，尚未开始生产；请稍后手动开始。";
 
 export function defaultPartialResumeSelection(plan: ProductionPartialResumePlan): string[] {
   return plan.entries
@@ -46,7 +46,7 @@ export function PartialResumePreview({
       <div className="production-partial-resume-heading">
         <div>
           <span className="section-label">失败项恢复</span>
-          <p>只恢复已确认安全的失败项，原始任务和输入保持不变。</p>
+          <p>只恢复已确认安全的失败项；会创建新的待执行项目并尝试开始生产，原始任务和输入保持不变。</p>
         </div>
       </div>
       <div className="production-partial-resume-stats" aria-label="失败项恢复统计">
@@ -59,7 +59,7 @@ export function PartialResumePreview({
       {(plan.pending > 0 || plan.active > 0 || !plan.canResume) && (
         <p className="disabled-note">
           {plan.pending > 0 || plan.active > 0
-            ? "当前批次仍有等待中或执行中的项目，完成后再进行局部恢复。"
+            ? "当前批次仍有待执行或运行中的项目，完成后再进行局部恢复。"
             : "当前批次暂时不能进行局部恢复。"}
         </p>
       )}
@@ -85,7 +85,7 @@ export function PartialResumePreview({
           onClick={onConfirm}
           disabled={busy || disabled || !plan.canResume || selectedLeafItemIds.length === 0}
         >
-          {busy ? "正在恢复…" : "恢复选中项"}
+          {busy ? "正在恢复并启动…" : "恢复并开始选中项"}
         </button>
       </div>
     </div>
@@ -206,17 +206,17 @@ export function ProductionPartialResumePanel({
         try {
           const started = await startProductionQueue(projectId, batchId);
           await notifyBatchChanged(started);
-          setNotice("恢复任务已准备完成并开始生产。");
+          setNotice("恢复项已创建并开始生产；可在生产监控查看进度。");
         } catch (error: unknown) {
           await notifyBatchChanged(result.detail);
           if (formatUiError(error).code === "PRODUCTION_QUEUE_BUSY") {
             setNotice(QUEUE_BUSY_NOTICE);
           } else {
-            setNotice(`恢复任务已准备完成，但启动失败：${toUserMessage(error)}`);
+            setNotice(`恢复项已创建，但开始生产失败：${toUserMessage(error)}`);
           }
         }
       } else {
-        setNotice("没有新增恢复任务，所选项已经准备完成。");
+        setNotice("没有新增恢复任务；所选项已经是待启动状态。");
       }
       await loadPlan(false);
     } catch (error: unknown) {
@@ -236,7 +236,7 @@ export function ProductionPartialResumePanel({
         onClick={toggleExpanded}
         disabled={disabled}
       >
-        {expanded ? "收起失败项恢复" : "恢复失败项"}
+        {expanded ? "收起失败项恢复" : "恢复失败项并开始生产"}
       </button>
       {expanded && (
         loading && !plan

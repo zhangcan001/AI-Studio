@@ -51,13 +51,13 @@ export function recentProductionQueues(
 export function productionQueueAction(
   status: ProductionBatchStatus,
   archivedAt?: string,
-): "开始" | "继续" | "暂停" | "查看" {
+): "开始生产" | "继续生产" | "暂停" | "查看" {
   if (archivedAt) return "查看";
   switch (status) {
     case "READY":
-      return "开始";
+      return "开始生产";
     case "PAUSED":
-      return "继续";
+      return "继续生产";
     case "RUNNING":
     case "COMPLETED":
       return status === "RUNNING" ? "暂停" : "查看";

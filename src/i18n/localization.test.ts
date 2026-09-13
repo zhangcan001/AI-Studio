@@ -7,6 +7,7 @@ import {
   formatDateTime,
   projectDisplayName,
   productionItemStatusLabel,
+  productionReviewStatusLabel,
   productionStatusLabel,
   taskStatusLabel,
   workflowDisplayName,
@@ -16,10 +17,17 @@ import { errorMessageForCode, formatUiError, toUserMessage } from "./errorMessag
 
 describe("简体中文状态展示", () => {
   it("maps task and production status values without changing protocol values", () => {
-    expect(taskStatusLabel("RUNNING")).toBe("生成中");
+    expect(taskStatusLabel("RUNNING")).toBe("运行中");
     expect(taskStatusLabel("CANCEL_REQUESTED")).toBe("正在取消");
     expect(productionStatusLabel("PAUSED")).toBe("已暂停");
-    expect(productionItemStatusLabel("DISPATCHED")).toBe("执行中");
+    expect(productionStatusLabel("READY")).toBe("待启动");
+    expect(productionStatusLabel("RUNNING")).toBe("运行中");
+    expect(productionItemStatusLabel("PENDING")).toBe("待执行");
+    expect(productionItemStatusLabel("DISPATCHED")).toBe("运行中");
+    expect(productionReviewStatusLabel("UNREVIEWED")).toBe("待审核");
+    expect(productionReviewStatusLabel("APPROVED")).toBe("已通过");
+    expect(productionReviewStatusLabel("REGENERATE")).toBe("待返工");
+    expect(productionStatusLabel("READY")).not.toBe(productionStatusLabel("RUNNING"));
     expect(comfyStatusLabel("CONNECTED")).toBe("已连接");
     expect(comfyStatusLabel("OFFLINE")).toBe("离线");
     expect(taskStatusLabel("UNKNOWN_STATUS")).toBe("未知状态");

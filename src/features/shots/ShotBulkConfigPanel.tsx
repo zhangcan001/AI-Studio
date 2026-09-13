@@ -8,6 +8,7 @@ import type {
   ProjectPreparationView,
   ProjectProductionAdmissionResult,
 } from "../../types/productionPreparation";
+import { preparationStatusLabel } from "../../types/productionPreparation";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { deriveShotStatus, deriveStageStatus, statusLabel } from "./shotDomain";
 import "./ProjectProductionPipeline.css";
@@ -156,7 +157,7 @@ export function ShotBulkConfigPanel({
       preset === "all"
         ? `已选择全部 ${shots.length} 个镜头。`
         : preset === "ready"
-          ? `已选择当前${stageLabel(stage)}待生成的镜头。`
+          ? `已选择当前${stageLabel(stage)}待启动的镜头。`
           : `已选择当前${stageLabel(stage)}未配置的镜头。`,
     );
   }
@@ -311,9 +312,9 @@ export function ShotBulkConfigPanel({
 
       <div className="pipeline-preparation-summary" aria-label="项目生产准备计划">
         <span>{planLoading ? "正在进行项目级 Live preflight…" : `当前${stageLabel(stage)}计划：${projectPlan?.total ?? 0} 个镜头`}</span>
-        <span>READY {projectPlan?.readyCount ?? 0} · 已准备 {projectPlan?.preparedCount ?? 0} · 阻塞 {projectPlan?.blockedCount ?? 0}</span>
-        <label><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={Boolean(busyAction) || planLoading} /> 允许部分准备：只准备当前 READY 镜头，阻塞镜头不写入本批次</label>
-        <small>READY 只是可准备；已准备不等于 Running。启动仍只在生产队列中由用户明确执行。</small>
+        <span>可准备 {projectPlan?.readyCount ?? 0} · 已准备 {projectPlan?.preparedCount ?? 0} · 阻塞 {projectPlan?.blockedCount ?? 0}</span>
+        <label><input type="checkbox" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} disabled={Boolean(busyAction) || planLoading} /> 允许部分准备：只准备当前可准备镜头，阻塞镜头不写入本批次</label>
+        <small>可准备只是准备前状态；已创建批次为待启动，不等于运行中。只有生产队列的“开始生产”会执行。</small>
       </div>
       {selectedOverLimit && <p className="pipeline-preparation-limit" role="alert">本次最多准备 {MAX_BULK_PREPARATION_ITEMS} 个镜头；系统不会自动拆分批次，请减少选择或使用“选择就绪项”。</p>}
 
@@ -341,7 +342,7 @@ export function ShotBulkConfigPanel({
                 </td>
                 <td><strong>{String(shot.ordinal + 1).padStart(2, "0")} · {shot.name}</strong><small>{shot.id}</small></td>
                 <td><span className="pipeline-prompt-preview">{promptPreview(shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptText ?? shot.promptText)}</span><small>{shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptEntryId && shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId ? `提示词库版本 ${shot.stagePrompts?.find((prompt) => prompt.stage === stage)?.promptVersionId?.slice(-8)}` : "手工/导入阶段快照"}</small></td>
-                <td><strong>{planByShotId.get(shot.id)?.status ?? statusLabel(deriveStageStatus(shot, stage))}</strong><small>{planByShotId.get(shot.id)?.alreadyPrepared ? "已准备" : planByShotId.get(shot.id)?.blockers?.[0] ?? "可继续检查"}</small></td>
+                <td><strong>{planByShotId.get(shot.id)?.status ? preparationStatusLabel(planByShotId.get(shot.id)!.status) : statusLabel(deriveStageStatus(shot, stage))}</strong><small>{planByShotId.get(shot.id)?.alreadyPrepared ? "已准备，待启动" : planByShotId.get(shot.id)?.blockers?.[0] ?? "可继续检查"}</small></td>
                 <td><small>{planByShotId.get(shot.id)?.workflowVersionId && planByShotId.get(shot.id)?.recipeId ? `${planByShotId.get(shot.id)?.workflowVersionId} / ${planByShotId.get(shot.id)?.recipeId}` : "未配置精确配对"}</small></td>
                 <td>{planByShotId.get(shot.id)?.referenceCount ?? 0}</td>
                 <td><span className="pipeline-status-chip">{statusLabel(deriveStageStatus(shot, "image"))}</span></td>

@@ -278,7 +278,7 @@ export function ProductionQueuePanel({
         })),
       });
       setName("");
-      commitDetail(created, `已保存生产队列，共 ${created.total} 项。`);
+      commitDetail(created, `已创建待启动生产队列，共 ${created.total} 项；尚未开始真实生产。`);
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
     } finally {
@@ -333,7 +333,7 @@ export function ProductionQueuePanel({
     }
     await runMutation(async () => {
       const updated = await startProductionQueue(projectId, batchId);
-      commitDetail(updated, "生产队列已在后台运行。");
+      commitDetail(updated, "生产已启动，任务正在运行；可在生产监控查看进度。");
     });
   }
 
@@ -345,7 +345,7 @@ export function ProductionQueuePanel({
   }
 
   async function cancelPendingQueue(batchId: string) {
-    if (!window.confirm("确定取消这个待开始的生产队列吗？尚未提交的项目会标记为已取消，不会启动 GPU 任务；已有任务和资产不受影响。")) return;
+    if (!window.confirm("确定取消这个待启动的生产队列吗？尚未提交的项目会标记为已取消，不会启动 GPU 任务；已有任务和资产不受影响。")) return;
     await runMutation(async () => {
       const updated = await cancelPendingProductionQueue(projectId, batchId);
       commitDetail(updated, "队列已取消，未提交 GPU 任务。已有任务和资产未受影响。");
@@ -386,7 +386,7 @@ export function ProductionQueuePanel({
     if (!detail) return;
     await runMutation(async () => {
       const updated = await skipProductionQueueItem(projectId, detail.id, itemId);
-      commitDetail(updated, "该项已标记为跳过，需要时请手动继续队列。");
+      commitDetail(updated, "该项已标记为跳过；如需继续，请手动开始队列。");
     });
   }
 
@@ -394,7 +394,7 @@ export function ProductionQueuePanel({
     if (!detail) return;
     await runMutation(async () => {
       const updated = await requeueProductionQueueItem(projectId, detail.id, itemId);
-      commitDetail(updated, "已追加新的等待重试项，原失败任务保持不变。");
+      commitDetail(updated, "已创建新的待执行重试项；原失败任务保持不变。");
     });
   }
 
@@ -463,8 +463,8 @@ export function ProductionQueuePanel({
         <div className="production-overview" aria-label="生产队列概览">
           <OverviewStat label="队列" value={overview.totalQueues} />
           <OverviewStat label="运行中" value={overview.runningQueues} />
-          <OverviewStat label="等待中" value={overview.pendingItems} />
-          <OverviewStat label="执行中" value={overview.activeItems} />
+          <OverviewStat label="待执行" value={overview.pendingItems} />
+          <OverviewStat label="运行中" value={overview.activeItems} />
           <OverviewStat label="已完成" value={overview.succeededItems} />
           <OverviewStat label="失败" value={overview.failedItems} />
           <OverviewStat label="已归档" value={overview.archivedQueues} />
@@ -499,7 +499,7 @@ export function ProductionQueuePanel({
           非执行失败或取消后继续
         </label>
         <button type="button" disabled={busy || !batchItems.length} onClick={() => void saveQueue()}>
-          保存队列（{batchItems.length}）
+          创建待启动队列（{batchItems.length}）
         </button>
       </div>}
 
@@ -547,7 +547,7 @@ export function ProductionQueuePanel({
                         onClick={() => void startQueue(queue.id)}
                         disabled={busy || !comfyConnected}
                       >
-                        {queue.status === "PAUSED" ? "继续" : "开始"}
+                        {queue.status === "PAUSED" ? "继续生产" : "开始生产"}
                       </button>
                     )}
                     <button type="button" className="quiet-button" onClick={() => void archiveQueue(queue.id)} disabled={busy}>
@@ -646,7 +646,7 @@ export function ProductionQueuePanel({
                   disabled={busy}
                   title="取消所有尚未提交的队列项目，不会启动 GPU 任务"
                 >
-                  取消待开始
+                  取消待启动
                 </button>
               )}
               <small>{detail.id}</small>
@@ -654,8 +654,8 @@ export function ProductionQueuePanel({
           </div>
           <div className="production-queue-stats">
             <span>总数 <strong>{detail.total}</strong></span>
-            <span>等待中 <strong>{detail.pending}</strong></span>
-            <span>执行中 <strong>{detail.running}</strong></span>
+            <span>待执行 <strong>{detail.pending}</strong></span>
+            <span>运行中 <strong>{detail.running}</strong></span>
             <span>已完成 <strong>{detail.succeeded}</strong></span>
             <span>失败 <strong>{detail.failed}</strong></span>
             <span>已取消 <strong>{detail.cancelled}</strong></span>
@@ -682,6 +682,7 @@ export function ProductionQueuePanel({
               const itemLabel = item.promptText?.trim() || item.taskId || `第 ${item.ordinal + 1} 项`;
               const itemBody = (
                 <>
+                  <strong title={itemLabel}>{itemLabel}</strong>
                   <span>#{item.ordinal + 1}</span>
                   <strong>{productionItemStatusLabel(item.status)}</strong>
                   <div className="production-item-identity">
@@ -715,10 +716,10 @@ export function ProductionQueuePanel({
                     )}
                     {canRequeue && (
                       <button type="button" className="quiet-button" onClick={() => void requeueItem(item.id)} disabled={busy}>
-                        重新排队
+                        创建重试项
                       </button>
                     )}
-                    {reviewRequired && <span className="review-required">需要检查</span>}
+                    {reviewRequired && <span className="review-required">需要处理</span>}
                   </div>
                   {resultAssets.length > 0 && item.taskId && (
                     <div className="production-item-results" aria-label={`第 ${item.ordinal + 1} 项输出资产`}>

@@ -129,8 +129,8 @@ describe("ShotBatchReviewBoard adapter", () => {
     const imageShot = { id: "shot-1", ordinal: 0, name: "镜头 1", stageConfigs: [], referenceAssets: [], generationLinks: [{ stage: "image", task: { outputAssetIds: ["asset-a"] } }], status: "READY", imageStatus: "READY", videoStatus: "NOT_STARTED" } as never;
     const videoShot = { id: "shot-2", ordinal: 1, name: "镜头 2", stageConfigs: [], referenceAssets: [], generationLinks: [{ stage: "video", task: { outputAssetIds: ["asset-v"] } }], status: "READY", imageStatus: "READY", videoStatus: "READY" } as never;
     const common = { projectId: "project-1", assets: [asset("asset-a"), asset("asset-v", "video")], busy: false, onAssetsLoaded: vi.fn(), onSelect, onRetry: vi.fn() };
-    expect(renderToStaticMarkup(<ShotBatchReviewBoard {...common} shots={[imageShot]} stage="image" />)).toContain("设为关键帧");
-    expect(renderToStaticMarkup(<ShotBatchReviewBoard {...common} shots={[videoShot]} stage="video" />)).toContain("设为最终视频");
+    expect(renderToStaticMarkup(<ShotBatchReviewBoard {...common} shots={[imageShot]} stage="image" />)).toContain("选择关键帧结果");
+    expect(renderToStaticMarkup(<ShotBatchReviewBoard {...common} shots={[videoShot]} stage="video" />)).toContain("选择视频结果");
     expect(renderToStaticMarkup(<ShotBatchReviewBoard {...common} shots={[imageShot]} stage="image" />)).toContain("打开 A/B 对比");
     expect(onSelect).not.toHaveBeenCalled();
   });
@@ -176,11 +176,11 @@ describe("ShotBatchReviewBoard adapter", () => {
     ];
     const user = userEvent.setup();
     await renderReviewBoard(items, { stage: "video" });
-    for (const label of ["全部 6", "未审核 1", "已通过 1", "标星 1", "待返工 1", "已拒绝 1", "失败 1"]) expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    for (const label of ["全部 6", "待审核 1", "已通过 1", "已标星 1", "待返工 1", "已拒绝 1", "失败 1"]) expect(screen.getByRole("button", { name: label })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "已通过 1" }));
     expect(await screen.findByRole("heading", { name: "shot-approved" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "shot-unreviewed" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "标星 1" }));
+    await user.click(screen.getByRole("button", { name: "已标星 1" }));
     expect(await screen.findByRole("heading", { name: "shot-starred" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "已拒绝 1" }));
     expect(await screen.findByRole("heading", { name: "shot-rejected" })).toBeTruthy();
@@ -241,7 +241,7 @@ describe("ShotBatchReviewBoard adapter", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("production_item_review_regenerate", { request: expect.objectContaining({ itemId: "video-item" }) }));
     expect(vi.mocked(invoke).mock.calls[0]?.[1]).not.toHaveProperty("request.autoStart");
     expect(invoke).not.toHaveBeenCalledWith("production_queue_start", expect.anything());
-    expect(await screen.findByText(/已创建 READY 返工批次/)).toBeTruthy();
+    expect(await screen.findByText(/返工批次已创建（1 项），状态为待启动，尚未开始真实生产/)).toBeTruthy();
     expect(onOpenProductionQueue).not.toHaveBeenCalled();
     await userEvent.setup().click(screen.getByRole("button", { name: "打开生产队列" }));
     expect(onOpenProductionQueue).toHaveBeenCalledOnce();
@@ -256,8 +256,9 @@ describe("ShotBatchReviewBoard adapter", () => {
     await renderReviewBoard([item], { stage: "video", onOpenShot, onOpenAsset });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "确认并通过" }));
+    await user.click(screen.getByRole("button", { name: "选择结果并通过" }));
     expect(await screen.findByText(/下一步可继续审片/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("此动作不代表发布");
     await user.click(screen.getByRole("button", { name: "查看 Shot" }));
     await user.click(screen.getByRole("button", { name: "打开 Asset" }));
 
@@ -304,7 +305,7 @@ describe("ShotBatchReviewBoard adapter", () => {
       return {};
     });
     await renderReviewBoard([item], { stage: "video" });
-    await userEvent.setup().click(screen.getByRole("button", { name: "确认并通过" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "选择结果并通过" }));
     await waitFor(() => expect(calls).toEqual(["shot_result_select", "production_item_review_set_status"]));
 
     cleanup();
@@ -315,7 +316,7 @@ describe("ShotBatchReviewBoard adapter", () => {
       return {};
     });
     await renderReviewBoard([item], { stage: "video" });
-    await userEvent.setup().click(screen.getByRole("button", { name: "确认并通过" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "选择结果并通过" }));
     await waitFor(() =>
       expect(
         screen.getAllByRole("alert").some((element) => element.textContent?.includes("selection rejected")),
@@ -334,7 +335,7 @@ describe("ShotBatchReviewBoard adapter", () => {
     });
     const user = userEvent.setup();
     await renderReviewBoard([first, second], { stage: "video" });
-    await user.click(screen.getByRole("button", { name: "确认并通过" }));
+    await user.click(screen.getByRole("button", { name: "选择结果并通过" }));
     await waitFor(() =>
       expect(
         screen

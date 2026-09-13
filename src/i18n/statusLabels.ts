@@ -5,7 +5,7 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   VALIDATING: "正在校验",
   PREPARING: "正在准备",
   QUEUED: "已排队",
-  RUNNING: "生成中",
+  RUNNING: "运行中",
   CANCEL_REQUESTED: "正在取消",
   COLLECTING: "正在收集结果",
   SUCCEEDED: "已完成",
@@ -14,18 +14,18 @@ const TASK_STATUS_LABELS: Record<string, string> = {
 };
 
 const PRODUCTION_STATUS_LABELS: Record<string, string> = {
-  READY: "待开始",
+  READY: "待启动",
   RUNNING: "运行中",
   PAUSED: "已暂停",
   COMPLETED: "已完成",
 };
 
 const PRODUCTION_ITEM_STATUS_LABELS: Record<string, string> = {
-  PENDING: "等待中",
+  PENDING: "待执行",
   DISPATCHING: "正在提交",
-  DISPATCHED: "执行中",
+  DISPATCHED: "运行中",
   SUCCEEDED: "已完成",
-  FAILED: "失败",
+  FAILED: "失败，需要处理",
   CANCELLED: "已取消",
   SKIPPED: "已跳过",
 };
@@ -100,6 +100,16 @@ const STAGING_STATUS_LABELS: Record<string, string> = {
   STALE_STAGING: "过期暂存",
 };
 
+const PRODUCTION_REVIEW_STATUS_LABELS: Record<string, string> = {
+  UNREVIEWED: "待审核",
+  APPROVED: "已通过",
+  STARRED: "已标星",
+  REGENERATE: "待返工",
+  REJECTED: "已拒绝",
+  FAILED: "失败，需要处理",
+  IN_PROGRESS: "运行中",
+};
+
 export function taskStatusLabel(status: string): string {
   return TASK_STATUS_LABELS[status] ?? "未知状态";
 }
@@ -110,6 +120,10 @@ export function productionStatusLabel(status: string): string {
 
 export function productionItemStatusLabel(status: string): string {
   return PRODUCTION_ITEM_STATUS_LABELS[status] ?? "未知状态";
+}
+
+export function productionReviewStatusLabel(status: string): string {
+  return PRODUCTION_REVIEW_STATUS_LABELS[status] ?? "未知状态";
 }
 
 export function assetCategoryLabel(category: string): string {

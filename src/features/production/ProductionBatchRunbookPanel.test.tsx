@@ -25,7 +25,7 @@ describe("ProductionBatchRunbookPanel", () => {
   it("renders hierarchy, running recommendation, recommended batch and deep links", () => {
     const html = renderToStaticMarkup(<ProductionBatchRunbookPanel projectId="project-1" runbook={runbook} onStartBatch={vi.fn()} onOpenProductionQueue={vi.fn()} onNavigateToScene={vi.fn()} onNavigateToEpisode={vi.fn()} />);
     expect(html).toContain("生产批次执行清单");
-    expect(html).toContain("当前正在生产");
+    expect(html).toContain("当前运行中");
     expect(html).toContain("建议下一批");
     expect(html).toContain("打开队列");
     expect(html).toContain("巷口");

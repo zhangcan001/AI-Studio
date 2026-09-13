@@ -77,15 +77,15 @@ describe("SceneProductionPreparation", () => {
 
     expect(html).toContain("场景生产准备");
     expect(html).toContain("<span>总镜头</span><strong>4</strong>");
-    expect(html).toContain("<span>READY</span><strong>2</strong>");
-    expect(html).toContain("<span>INCOMPLETE</span><strong>1</strong>");
-    expect(html).toContain("<span>BLOCKED</span><strong>1</strong>");
+    expect(html).toContain("<span>可准备</span><strong>2</strong>");
+    expect(html).toContain("<span>资料不完整</span><strong>1</strong>");
+    expect(html).toContain("<span>有阻塞</span><strong>1</strong>");
     expect(html).toContain("<span>已准备</span><strong>1</strong>");
-    expect(html).toContain("READY");
-    expect(html).toContain("INCOMPLETE");
-    expect(html).toContain("BLOCKED");
+    expect(html).toContain("可准备");
+    expect(html).toContain("资料不完整");
+    expect(html).toContain("有阻塞");
     expect(html).toContain("已准备");
-    expect(html).toContain("选择全部 READY");
+    expect(html).toContain("选择全部可准备");
     expect(html).toContain("已有旧上下文准备版本");
     expect(html).toContain("ComfyUI 离线");
     expect(html).not.toContain("立即启动");
@@ -116,7 +116,7 @@ describe("SceneProductionPreparation", () => {
         initialView={largeReadyView}
       />,
     );
-    expect(html).toContain("READY 镜头超过 100 个");
+    expect(html).toContain("可准备镜头超过 100 个");
     expect(html).toContain("只取前 100 个");
     expect(html.match(/type="checkbox"/g) ?? []).toHaveLength(105);
   });
@@ -216,12 +216,12 @@ describe("Scene preparation client boundary", () => {
       };
 
       let tree = render();
-      const selectAll = findSingle(tree, (element) => element.type === "button" && textContent(element) === "选择全部 READY");
+      const selectAll = findSingle(tree, (element) => element.type === "button" && textContent(element) === "选择全部可准备");
       (selectAll.props.onClick as () => void)();
       tree = render();
       expect(findElements(tree, (element) => element.type === "input" && element.props.type === "checkbox" && element.props.checked === true)).toHaveLength(100);
 
-      const admit = findSingle(tree, (element) => element.type === "button" && textContent(element) === "加入生产");
+      const admit = findSingle(tree, (element) => element.type === "button" && textContent(element) === "创建待启动批次");
       (admit.props.onClick as () => void)();
       await flushMicrotasks();
       tree = render();

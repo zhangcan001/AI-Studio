@@ -201,12 +201,12 @@ function recipeValueError(recipe: RecipeViewModel, values: GenerationValues): st
 
 function statusLabel(status: string): string {
   switch (status) {
-    case "READY": return "就绪";
-    case "RUNNING": return "执行中";
-    case "WAITING_FOR_SELECTION": return "等待选图";
+    case "READY": return "待启动";
+    case "RUNNING": return "运行中";
+    case "WAITING_FOR_SELECTION": return "待选择图片";
     case "SUCCEEDED": return "已完成";
     case "PARTIAL_FAILED": return "部分失败";
-    case "FAILED": return "失败";
+    case "FAILED": return "失败，需要处理";
     case "CANCELLED": return "已取消";
     default: return "未知状态";
   }
@@ -476,7 +476,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       });
       adoptRun(created);
       setRuns((current) => [created, ...current.filter((run) => run.id !== created.id)]);
-      setNotice(`${selectedMode.label} 生产运行已创建，输入已冻结。 `);
+      setNotice(`${selectedMode.label} 生产已准备完成，当前待启动；输入已冻结。`);
     } catch (createError: unknown) { setError(toUserMessage(createError)); }
     finally { setBusy(false); }
   }
@@ -632,13 +632,13 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
           </div>
           {selectionError && <p className="error-message" role="alert">{selectionError}</p>}
           {selectionFrozen && missingSelectedCount > 0 && <p className="disabled-note" role="status">已冻结的参考图片中有素材当前不可预览；顺序仍按持久化记录保留。</p>}
-          <button type="button" onClick={() => void execute(() => selectProductionRunAssets(projectId, selectedRun.id, selectedAssetIds), "选图已冻结，H3 阶段已就绪。 ")} disabled={busy || selectionFrozen || !selectionReady || modeMismatch}>确认选图</button>
+          <button type="button" onClick={() => void execute(() => selectProductionRunAssets(projectId, selectedRun.id, selectedAssetIds), "已确认图片选择结果，H3 阶段待启动；尚未开始视频生产。 ")} disabled={busy || selectionFrozen || !selectionReady || modeMismatch}>确认选择结果</button>
         </div>}
         <div className="production-run-actions">
-          {imageStage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionImages(projectId, selectedRun.id), "Krea2 图片阶段已进入普通串行队列。 ")} disabled={busy}>执行图片阶段</button>}
-          {h3Stage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionVideo(projectId, selectedRun.id), "H3 视频阶段已进入普通串行队列。 ")} disabled={busy || !selectionReady || modeMismatch}>执行视频阶段</button>}
-          {h3Stage?.status === "FAILED" && <button type="button" onClick={() => void execute(() => retryProductionVideo(projectId, selectedRun.id), "H3 已创建新尝试，Krea2 图片保留。 ")} disabled={busy}>重试 H3</button>}
-          {!['SUCCEEDED', 'CANCELLED'].includes(selectedRun.status) && <button type="button" className="quiet-button" onClick={() => void execute(() => cancelProductionRun(projectId, selectedRun.id), "生产运行已取消，成功资产保留。 ")} disabled={busy}>取消运行</button>}
+          {imageStage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionImages(projectId, selectedRun.id), "图片生产已启动，任务进入串行执行。 ")} disabled={busy}>开始图片生产</button>}
+          {h3Stage?.status === "READY" && <button type="button" onClick={() => void execute(() => runProductionVideo(projectId, selectedRun.id), "视频生产已启动，任务进入串行执行。 ")} disabled={busy || !selectionReady || modeMismatch}>开始视频生产</button>}
+          {h3Stage?.status === "FAILED" && <button type="button" onClick={() => void execute(() => retryProductionVideo(projectId, selectedRun.id), "已创建新的 H3 生产尝试，Krea2 图片保留；请查看运行进度。 ")} disabled={busy}>创建新的 H3 生产尝试</button>}
+          {!['SUCCEEDED', 'CANCELLED'].includes(selectedRun.status) && <button type="button" className="quiet-button" onClick={() => void execute(() => cancelProductionRun(projectId, selectedRun.id), "生产运行已取消，成功资产保留。 ")} disabled={busy}>取消本次生产</button>}
         </div>
         {finalVideoIds.length > 0 && <FinalVideoPreview projectId={projectId} assetIds={finalVideoIds} />}
         {h3Stage?.status === "SUCCEEDED" && finalVideoIds.length === 0 && <p className="disabled-note" role="status">H3 已完成，但当前没有可播放的视频资产；请刷新运行或查看诊断。</p>}

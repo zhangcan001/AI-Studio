@@ -287,9 +287,9 @@ export const MAX_PREPARATION_BATCH_ITEMS = 100;
 
 export function preparationStatusLabel(status: string): string {
   return {
-    READY: "READY",
-    INCOMPLETE: "INCOMPLETE",
-    BLOCKED: "BLOCKED",
+    READY: "可准备",
+    INCOMPLETE: "资料不完整",
+    BLOCKED: "有阻塞",
   }[status] ?? status;
 }
 

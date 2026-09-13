@@ -8,6 +8,7 @@ import type {
 import { REVIEW_NOTE_MAX_BYTES, reviewNoteByteLength, validateReviewNote } from "../../types/reviewProductivity";
 import { ReviewCompareInspector } from "./ReviewCompareInspector";
 import { ReviewCompareMedia } from "./ReviewCompareMedia";
+import { productionReviewStatusLabel } from "../../i18n/statusLabels";
 import "./ReviewCompareWorkspace.css";
 
 export type ReviewCompareActionHandler = (candidate: ReviewCompareCandidate, item: ReviewCompareItem) => void | Promise<void>;
@@ -30,16 +31,6 @@ export interface ReviewCompareWorkspaceProps {
   onSaveNote?: ReviewCompareNoteHandler;
 }
 
-const REVIEW_STATUS_LABELS: Record<string, string> = {
-  UNREVIEWED: "未审",
-  APPROVED: "通过",
-  STARRED: "已标星",
-  REGENERATE: "待返工",
-  REJECTED: "已拒绝",
-  FAILED: "失败",
-  IN_PROGRESS: "生成中",
-};
-
 const FAILURE_STATUSES = new Set(["FAILED", "ERROR", "CANCELLED", "SKIPPED", "PENDING", "DISPATCHING", "DISPATCHED", "IN_PROGRESS", "RUNNING"]);
 
 function candidateTitle(candidate: ReviewCompareCandidate): string {
@@ -59,7 +50,7 @@ function itemIsReviewable(item: ReviewCompareItem): boolean {
 
 function statusLabel(candidate: ReviewCompareCandidate, item: ReviewCompareItem): string {
   if (candidate.selected || item.selectedCandidateId === candidate.id) return "当前选择";
-  return candidate.reviewStatus ? REVIEW_STATUS_LABELS[candidate.reviewStatus] ?? candidate.reviewStatus : item.reviewStatus ? REVIEW_STATUS_LABELS[item.reviewStatus] ?? item.reviewStatus : "候选结果";
+  return candidate.reviewStatus ? productionReviewStatusLabel(candidate.reviewStatus) : item.reviewStatus ? productionReviewStatusLabel(item.reviewStatus) : "候选结果";
 }
 
 export function ReviewCompareWorkspace({
@@ -280,8 +271,8 @@ export function ReviewCompareWorkspace({
       </div>
 
       <div className="review-compare-actions" aria-label="审核动作">
-        {setFinalResultAvailable && <button type="button" onClick={() => runAction(onConfirmAndApprove)} disabled={!can("confirmAndApprove", onConfirmAndApprove)}>确认并通过</button>}
-        <button type="button" onClick={() => runAction(onApprove)} disabled={!can("approve", onApprove) || !successful}>仅通过</button>
+        {setFinalResultAvailable && <button type="button" onClick={() => runAction(onConfirmAndApprove)} disabled={!can("confirmAndApprove", onConfirmAndApprove)}>选择结果并通过</button>}
+        <button type="button" onClick={() => runAction(onApprove)} disabled={!can("approve", onApprove) || !successful}>审核通过</button>
         <button type="button" className="review-star-button" onClick={() => runAction(onStar)} disabled={!can("star", onStar) || !successful}>标星</button>
         <button type="button" className="quiet-button danger-button" onClick={() => runAction(onReject)} disabled={!can("reject", onReject) || !successful}>拒绝</button>
         <button type="button" className="quiet-button" onClick={() => runAction(onRegenerate)} disabled={!can("regenerate", onRegenerate) || !successful}>标记返工</button>

@@ -31,15 +31,15 @@ describe("ProductionMonitor", () => {
 
     expect(screen.getByRole("heading", { name: "第一批" })).toBeTruthy();
     expect(screen.getByTestId("production-monitor-summary").textContent).toContain("6总数");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1等待中");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1生成中");
+    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1待执行");
+    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1运行中");
     expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1成功");
     expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1失败");
     expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1已取消");
     expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1已跳过");
     expect(screen.getByLabelText("终态进度 67%")).toBeTruthy();
     expect(screen.getByLabelText("成功率 17%")).toBeTruthy();
-    expect(screen.getAllByText("生成中").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
     expect(screen.getAllByText("已取消").length).toBeGreaterThan(0);
   });
 
@@ -78,12 +78,12 @@ describe("ProductionMonitor", () => {
     render(<ProductionMonitor batch={{ items, total: 62 }} />);
 
     await user.click(screen.getByRole("button", { name: "下一页" }));
-    await user.click(screen.getByRole("button", { name: /已完成/ }));
+    await user.click(screen.getByRole("button", { name: /^已完成/ }));
     expect(screen.getByText("第 1 / 2 页 · 每页 50 项")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(50);
-    expect(screen.getByRole("button", { name: /已完成/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^已完成/ }).getAttribute("aria-pressed")).toBe("true");
 
-    await user.click(screen.getByRole("button", { name: /生成中/ }));
+    await user.click(screen.getByRole("button", { name: /运行中/ }));
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("镜头 61")).toBeTruthy();
 
@@ -141,7 +141,7 @@ describe("ProductionMonitor", () => {
     );
 
     expect(screen.getByText("批次已完成")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "查看全部成品" }));
+    await user.click(screen.getByRole("button", { name: "查看已完成成品" }));
     await user.click(screen.getByRole("button", { name: "打开成品文件夹" }));
     await user.click(screen.getByRole("button", { name: "导出成品清单" }));
     await user.click(screen.getByRole("button", { name: "选择下一个生产包" }));
@@ -155,17 +155,35 @@ describe("ProductionMonitor", () => {
     const user = userEvent.setup();
     render(<ProductionMonitor batch={{ status: "COMPLETED", items: [item(1, "SUCCEEDED", { assetId: "asset-1", assetType: "video" }), item(2, "FAILED")] }} />);
 
-    const viewAll = screen.getByRole("button", { name: "查看全部成品" });
+    const viewAll = screen.getByRole("button", { name: "查看已完成成品" });
     expect((viewAll as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByRole("button", { name: "打开成品文件夹" })).toBeNull();
     expect(screen.queryByRole("button", { name: "导出成品清单" })).toBeNull();
     expect(screen.queryByRole("button", { name: "选择下一个生产包" })).toBeNull();
     await user.click(viewAll);
 
-    expect(screen.getByRole("button", { name: /已完成/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^已完成/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("镜头 1")).toBeTruthy();
     expect(screen.queryByText("镜头 2")).toBeNull();
+  });
+
+  it("keeps failed completion in handling mode and removes success-only actions", () => {
+    render(
+      <ProductionMonitor
+        batch={{ status: "FAILED", items: [item(1, "SUCCEEDED", { videoUrl: "https://example.test/1.mp4" }), item(2, "FAILED")] }}
+        onOpenProductsFolder={vi.fn()}
+        onExportProductList={vi.fn()}
+        onSelectNextProductionPackage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "批次已结束，存在失败项目" })).toBeTruthy();
+    expect(screen.getByText("失败项目需要处理，已完成结果仍可查看。", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "查看已完成成品" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开成品文件夹" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "导出成品清单" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "选择下一个生产包" })).toBeNull();
   });
 
   it("keeps a 500-item batch to ten pages and reaches the final ordered page", async () => {

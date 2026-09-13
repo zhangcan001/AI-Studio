@@ -60,11 +60,11 @@ const stepLabels: Record<ShotProductionStepId, string> = {
 
 const statusLabels: Record<ShotProductionStepStatus, string> = {
   COMPLETE: "已完成",
-  ACTIVE: "进行中",
-  READY: "待处理",
+  ACTIVE: "运行中",
+  READY: "待启动",
   BLOCKED: "受阻",
-  PENDING: "等待",
-  FAILED: "失败",
+  PENDING: "待执行",
+  FAILED: "失败，需要处理",
 };
 
 const nextActionLabels: Partial<Record<ShotProductionStepId, string>> = {
@@ -112,7 +112,7 @@ function stageStatus(
   const status = deriveStageStatus(shot, stage);
   if (status === "FAILED") return { status: "FAILED", detail: "最近一次生成失败，需要处理" };
   if (status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO") {
-    return { status: "ACTIVE", detail: "生成任务进行中" };
+    return { status: "ACTIVE", detail: "生产任务运行中" };
   }
   if (status === "IMAGE_REVIEW" || status === "VIDEO_REVIEW") {
     return { status: "COMPLETE", detail: "候选已生成，等待人工确认" };
@@ -122,7 +122,7 @@ function stageStatus(
   }
   return {
     status: "READY",
-    detail: status === "DRAFT" ? "可以开始生成" : statusLabels[status],
+    detail: status === "DRAFT" ? "可以准备生产" : statusLabels[status],
   };
 }
 
@@ -138,7 +138,7 @@ function reviewStatus(
   const status = deriveStageStatus(shot, stage);
   if (status === "FAILED") return { status: "FAILED", detail: "生成失败，暂无可确认候选" };
   if (status === "IMAGE_REVIEW" || status === "VIDEO_REVIEW") return { status: "ACTIVE", detail: "候选等待人工确认" };
-  if (status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO") return { status: "PENDING", detail: "等待生成结果" };
+  if (status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO") return { status: "PENDING", detail: "等待生产结果" };
   return { status: "PENDING", detail: "生成候选后再确认" };
 }
 

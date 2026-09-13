@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getProductionReviewInbox } from "../../services/tauriClient";
-import type { ProductionReviewInboxItem, ProductionReviewInboxPage } from "../../types/productionItemReview";
-import { formatDateTime } from "../../i18n/statusLabels";
+import type { ProductionReviewInboxPage } from "../../types/productionItemReview";
+import { formatDateTime, productionReviewStatusLabel } from "../../i18n/statusLabels";
 import type { ProjectCommandCenterNavigationRequest } from "../projects/ProjectCommandCenter";
 
 const PAGE_SIZE = 25;
@@ -11,16 +11,6 @@ interface Props {
   onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
   mode?: "summary" | "workspace";
 }
-
-const statusLabels: Record<ProductionReviewInboxItem["reviewStatus"], string> = {
-  UNREVIEWED: "未审",
-  REGENERATE: "待返工",
-  APPROVED: "通过",
-  STARRED: "优秀",
-  REJECTED: "废弃",
-  FAILED: "失败",
-  IN_PROGRESS: "生成中",
-};
 
 export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" }: Props) {
   const [page, setPage] = useState<ProductionReviewInboxPage>();
@@ -55,8 +45,8 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
         <div>
           <span className="section-label">项目级审片</span>
           <h3 id="production-review-inbox-title">{mode === "workspace" ? "完整待审核集合" : "待审核结果"}</h3>
-          <p>{page ? `${page.total} 项待处理 · 未审 ${page.unreviewedCount} · 待返工 ${page.regenerateCount}` : "正在加载待处理结果…"}</p>
-          <small className="production-review-inbox-filter" role="status">筛选：未审 / 待返工 · 项目范围：{projectId}</small>
+          <p>{page ? `${page.total} 项待处理 · 待审核 ${page.unreviewedCount} · 待返工 ${page.regenerateCount}` : "正在加载待处理结果…"}</p>
+          <small className="production-review-inbox-filter" role="status">筛选：待审核 / 待返工 · 项目范围：{projectId}</small>
         </div>
         <div className="production-review-inbox-heading-actions">
           {page && page.total > page.items.length && mode === "summary" && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "review", collectionFilter: { kind: "review", state: "PENDING" } })}>查看全部 {page.total}</button>}
@@ -71,8 +61,8 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
             <article className="production-review-inbox-row" key={`${item.batchId}:${item.itemId}`}>
               <div className="production-review-inbox-copy">
                 <strong>{item.promptSummary || `第 ${item.ordinal + 1} 项`}</strong>
-                <span>{item.batchName} · #{item.ordinal + 1} · {statusLabels[item.reviewStatus]}</span>
-                {item.selectedAssetId && <span>已选最终结果 · 可打开素材查看</span>}
+                <span>{item.batchName} · #{item.ordinal + 1} · {productionReviewStatusLabel(item.reviewStatus)}</span>
+                {item.selectedAssetId && <span>已选择结果 · 可打开素材查看</span>}
                 <details><summary>查看技术详情</summary><small>
                   批次 {item.batchId} · 项目 {item.itemId}
                   {item.shotId ? ` · 镜头 ${item.shotId}` : ""}
@@ -87,7 +77,7 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
                 {item.taskId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "tasks", taskId: item.taskId })} disabled={!onNavigate}>任务</button>}
                 {item.shotId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "creation", shotId: item.shotId })} disabled={!onNavigate}>镜头</button>}
                 {item.assetId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "assets", assetId: item.assetId })} disabled={!onNavigate}>资产</button>}
-                {item.selectedAssetId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "assets", assetId: item.selectedAssetId })} disabled={!onNavigate}>最终结果</button>}
+                {item.selectedAssetId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "assets", assetId: item.selectedAssetId })} disabled={!onNavigate}>已选择结果</button>}
               </div>
             </article>
           ))}

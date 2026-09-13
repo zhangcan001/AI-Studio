@@ -23,14 +23,14 @@ const ACTIVE_TASK_STATUSES = new Set([
 
 export const shotStatusLabels: Record<ShotStatus, string> = {
   DRAFT: "草稿",
-  READY: "待生成",
-  GENERATING_IMAGE: "正在生成关键帧",
-  IMAGE_REVIEW: "图片候选待选择",
-  IMAGE_SELECTED: "已选关键帧",
-  GENERATING_VIDEO: "正在生成视频",
-  VIDEO_REVIEW: "视频候选待选择",
+  READY: "待启动",
+  GENERATING_IMAGE: "运行中 · 关键帧",
+  IMAGE_REVIEW: "待审核 · 图片候选",
+  IMAGE_SELECTED: "已选择关键帧",
+  GENERATING_VIDEO: "运行中 · 视频",
+  VIDEO_REVIEW: "待审核 · 视频候选",
   COMPLETED: "已完成",
-  FAILED: "生成失败",
+  FAILED: "失败，需要处理",
 };
 
 export function deriveStageStatus(

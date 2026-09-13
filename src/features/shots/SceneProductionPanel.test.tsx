@@ -62,8 +62,8 @@ describe("SceneProductionPanel", () => {
     expect(html).toContain("场景选择");
     expect(html).toContain("场景生产准备");
     expect(html).toContain("准备阶段");
-    expect(html).toContain("选择全部 READY");
-    expect(html).toContain("加入生产");
+    expect(html).toContain("选择全部可准备");
+    expect(html).toContain("创建待启动批次");
     expect(html).toContain("打开旧版批量配置工具");
     expect(html).not.toContain("启动生产");
   });

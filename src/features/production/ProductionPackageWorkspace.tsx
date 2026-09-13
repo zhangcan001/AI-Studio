@@ -384,10 +384,10 @@ export function ProductionPackageWorkspace({
       const createdCount = result.createdCount ?? result.itemCount;
       const remainingCount = result.remainingCount ?? result.remainingItemIds?.length ?? 0;
       setNotice(hasQueueCallback
-        ? "批次已创建，正在打开生产队列…"
+        ? "待启动批次已创建，正在打开生产队列…"
         : result.status === "PARTIAL"
-          ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚未加入 ${remainingCount} 个项目；不会自动启动队列。`
-          : `已创建 ${result.batchCount} 个生产批次，共 ${createdCount} 个项目；不会自动启动队列。`);
+          ? `待启动批次创建部分完成：已加入 ${createdCount} 个项目，尚未加入 ${remainingCount} 个项目；不会自动开始生产。`
+          : `已创建 ${result.batchCount} 个待启动生产批次，共 ${createdCount} 个项目；尚未开始真实生产。`);
       if (hasQueueCallback) await openQueue(result);
     } catch (createError: unknown) {
       setError(toWorkspaceError(createError, "create"));
@@ -405,7 +405,7 @@ export function ProductionPackageWorkspace({
       if (onOpenProductionQueue) await onOpenProductionQueue(resultToOpen);
       else await onOpenQueue?.();
       setQueueOpenFailed(false);
-      setNotice("已打开生产队列；请点击“开始”后才会提交生成任务。 ");
+      setNotice("已打开生产队列；请点击“开始生产”后才会提交真实生产任务。");
     } catch (openError: unknown) {
       const openFailure = toWorkspaceError(openError, "open");
       setQueueOpenFailed(true);
@@ -423,10 +423,10 @@ export function ProductionPackageWorkspace({
     ? queueOpenFailed
       ? "生产批次已创建，但生产队列暂时无法打开。"
       : isPartialCreate
-        ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚有 ${remainingCount} 个项目待重新检查。`
+        ? `批次创建部分完成：已加入 ${createdCount} 个项目，尚有 ${remainingCount} 个项目待重新检查；已加入项目均待启动。`
         : hasQueueCallback
-          ? "生产批次已创建并已打开生产队列；不会自动开始生成。"
-          : "生产批次已创建；不会自动开始生成。"
+          ? "待启动生产批次已创建并已打开生产队列；尚未开始真实生产。"
+          : "待启动生产批次已创建；尚未开始真实生产。"
     : statusMessageForState(workspaceState, counts, selectedItems.length);
 
   return (
@@ -441,7 +441,7 @@ export function ProductionPackageWorkspace({
         <div>
           <span className="section-label">External Production Package V1</span>
           <h2>{inspection?.packageName || "批量视频生产"}</h2>
-          <p className="section-description">选择或拖入外部智能体准备好的 Production Package 文件夹；检查后创建并打开队列，开始生产仍由你明确点击。</p>
+          <p className="section-description">选择或拖入外部智能体准备好的 Production Package 文件夹；检查后创建待启动批次，开始生产仍由你明确点击。</p>
         </div>
         <span className={`production-package-workspace-state production-package-workspace-state-${workspaceState.toLowerCase()}`}>
           {workspaceStateLabel(workspaceState)}
@@ -502,7 +502,7 @@ export function ProductionPackageWorkspace({
             <li>schemaVersion 必须为 1，packageType 必须为 AI_STUDIO_VIDEO_PRODUCTION。</li>
             <li>每个项目需要唯一 ID、名称和非空 videoPrompt；完整提示词不会在预览中展开。</li>
             <li>项目最多 500 个；READY 默认选中，WARNING 需要手动确认，BLOCKED 不可选。</li>
-            <li>创建并打开只会加入现有生产队列，不会自动启动生成；开始按钮仍是唯一生产闸门。</li>
+            <li>创建并打开只会加入现有生产队列，不会自动启动生成；“开始生产”按钮仍是唯一生产闸门。</li>
           </ul>
         </div>
       </details>
@@ -606,22 +606,22 @@ export function ProductionPackageWorkspace({
           <div className="production-package-workspace-created-heading">
             <div>
               <span className="section-label">CREATE RESULT</span>
-              <h3>{isPartialCreate ? "批次创建部分完成" : `已创建 ${createdResult.batchCount} 个生产批次`}</h3>
+              <h3>{isPartialCreate ? "待启动批次创建部分完成" : `已创建 ${createdResult.batchCount} 个待启动生产批次`}</h3>
             </div>
             <span className="production-package-workspace-created-count">{isPartialCreate ? `${createdCount} 个项目已加入` : `${createdCount} 个项目`}</span>
           </div>
           <div className="production-package-workspace-created-summary" role="status">
-            <strong>已加入生产：{createdCount}</strong>
+            <strong>已创建待启动项目：{createdCount}</strong>
             <span>请求项目：{requestedCount}</span>
             <span>尚未加入：{remainingCount}</span>
-            <span>状态：{isPartialCreate ? "部分完成" : "完成"}</span>
-            <span>自动启动：{createdResult.autoStarted ? "是" : "否"}</span>
+            <span>状态：{isPartialCreate ? "部分创建，已加入项目待启动" : "已创建，等待启动"}</span>
+            <span>自动启动：{createdResult.autoStarted ? "是" : "否（等待手动开始）"}</span>
           </div>
           <p>{queueOpenFailed
             ? "生产批次已创建，但生产队列暂时无法打开。"
             : hasQueueCallback
-              ? "生产队列已打开；不会自动开始生成，请在队列中点击“开始”。"
-              : "批次已创建；父层未接入队列打开回调，不会自动启动生成。"}</p>
+              ? "生产批次已创建，尚未开始真实生产；请在生产队列中点击“开始生产”。"
+              : "待启动批次已创建；父层未接入队列打开回调，尚未开始真实生产。"}</p>
           <details className="production-package-workspace-batch-details">
             <summary>查看批次详细信息（{createdResult.batchCount} 个）</summary>
             <ul className="production-package-workspace-batch-list" aria-label="已创建生产批次">
@@ -656,7 +656,7 @@ export function ProductionPackageWorkspace({
           onClick={() => void createBatches()}
           disabled={!canCreate}
         >
-          {isCreating ? "正在创建批次…" : createdResult ? "批次已创建" : `创建并打开生产队列${selectionIdsForCreate.length ? `（${selectionIdsForCreate.length} 项）` : ""}`}
+          {isCreating ? "正在创建待启动批次…" : createdResult ? "批次已创建，待启动" : `创建待启动批次并打开队列${selectionIdsForCreate.length ? `（${selectionIdsForCreate.length} 项）` : ""}`}
         </button>
         {workspaceState === "BLOCKED" && <small>没有可创建的 READY/WARNING 项目，请修复生产包后重新检查。</small>}
         {workspaceState === "ERROR" && !requiresReinspect && !queueOpenFailed && <small>可先重新检查，也可修复错误后再次创建批次。</small>}
@@ -720,7 +720,7 @@ function workspaceStateLabel(state: ProductionPackageWorkspaceState): string {
     case "PARTIAL": return "部分项目需要确认";
     case "BLOCKED": return "生产包存在问题";
     case "CREATING_BATCHES": return "正在创建批次";
-    case "CREATED": return "批次已创建";
+    case "CREATED": return "批次已创建，待启动";
     case "ERROR": return "需要处理错误";
   }
 }
@@ -738,7 +738,7 @@ function statusMessageForState(
     case "PARTIAL": return `检查完成：${counts.ready} 个 READY、${counts.warning} 个 WARNING、${counts.blocked} 个 BLOCKED；当前已选择 ${selectedCount} 项。`;
     case "BLOCKED": return "检查完成，但没有可创建的 READY 或 WARNING 项目。请修复生产包后重新检查。";
     case "CREATING_BATCHES": return `正在创建批次，${selectedCount} 个已选择项目处理中；操作完成前控件已禁用。`;
-    case "CREATED": return "生产批次已创建；队列不会自动开始生成。";
+    case "CREATED": return "生产批次已创建，状态为待启动；队列不会自动开始生成。";
     case "ERROR": return "操作遇到错误；请根据提示重新检查后继续。";
   }
 }
@@ -773,7 +773,7 @@ function folderStatusLabel(input: {
 }): string {
   if (!input.hasPath) return "尚未选择 Production Package 文件夹";
   if (input.isInspecting) return "已选择 · 正在检查";
-  if (input.hasCreatedResult) return "已选择 · 已创建生产批次";
+  if (input.hasCreatedResult) return "已选择 · 已创建待启动批次";
   if (input.hasError || input.isBlocked) return "已选择 · 检查发现问题";
   if (input.hasInspection) return "已选择 · 检查完成";
   return "已选择";

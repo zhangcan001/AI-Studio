@@ -33,8 +33,8 @@ describe("Pack 08 production UX source contracts", () => {
   });
 
   it("derives safe queue actions from persisted status", () => {
-    expect(productionQueueAction("READY")).toBe("开始");
-    expect(productionQueueAction("PAUSED")).toBe("继续");
+    expect(productionQueueAction("READY")).toBe("开始生产");
+    expect(productionQueueAction("PAUSED")).toBe("继续生产");
     expect(productionQueueAction("RUNNING")).toBe("暂停");
     expect(productionQueueAction("COMPLETED")).toBe("查看");
     expect(productionQueueAction("READY", "2026-08-10T00:00:00Z")).toBe("查看");

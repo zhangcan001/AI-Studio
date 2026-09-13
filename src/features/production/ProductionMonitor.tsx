@@ -158,7 +158,7 @@ interface NormalizedBatch {
 
 const filters: Array<{ value: ProductionMonitorFilter; label: string }> = [
   { value: "ALL", label: "全部" },
-  { value: "RUNNING", label: "生成中" },
+  { value: "RUNNING", label: "运行中" },
   { value: "FAILED", label: "失败" },
   { value: "COMPLETED", label: "已完成" },
 ];
@@ -202,6 +202,7 @@ export function ProductionMonitor({
   const terminalPercent = model.counts.total > 0 ? Math.min(100, Math.round((terminal / model.counts.total) * 100)) : 0;
   const successPercent = model.counts.total > 0 ? Math.min(100, Math.round((model.counts.succeeded / model.counts.total) * 100)) : 0;
   const isComplete = isCompletedBatch(model.status) || (model.counts.total > 0 && terminal >= model.counts.total);
+  const hasFailures = model.status === "FAILED" || model.counts.failed > 0;
 
   useEffect(() => {
     if (page !== safePage) setPage(safePage);
@@ -250,8 +251,8 @@ export function ProductionMonitor({
 
       <div className="production-monitor-summary" aria-label="生产摘要" data-testid="production-monitor-summary">
         <SummaryCard label="总数" value={model.counts.total} />
-        <SummaryCard label="等待中" value={model.counts.pending} />
-        <SummaryCard label="生成中" value={model.counts.running} />
+        <SummaryCard label="待执行" value={model.counts.pending} />
+        <SummaryCard label="运行中" value={model.counts.running} />
         <SummaryCard label="成功" value={model.counts.succeeded} tone="success" />
         <SummaryCard label="失败" value={model.counts.failed} tone="danger" />
         <SummaryCard label="已取消" value={model.counts.cancelled} />
@@ -319,17 +320,17 @@ export function ProductionMonitor({
       </footer>
 
       {isComplete && (
-        <section className="production-monitor-completion" aria-label="批次完成操作">
+        <section className="production-monitor-completion" aria-label={hasFailures ? "批次失败处理" : "批次完成操作"}>
           <div>
             <p className="production-monitor-eyebrow">批次已结束</p>
-            <h3>{model.counts.failed > 0 ? "批次已完成，部分项目失败" : "批次已完成"}</h3>
-            <p>已终止 {terminal} 项，可继续查看或导出本批次成品。</p>
+            <h3>{model.status === "CANCELLED" ? "批次已取消" : hasFailures ? "批次已结束，存在失败项目" : "批次已完成"}</h3>
+            <p>{hasFailures ? `已处理 ${terminal} 项；失败项目需要处理，已完成结果仍可查看。` : `已处理 ${terminal} 项，可继续查看或导出本批次成品。`}</p>
           </div>
           <div className="production-monitor-completion-actions">
-            <ActionButton label="查看全部成品" action={() => void runAction("view-products", viewAllProducts)} busy={busyAction === "view-products"} />
-            {openFolder && <ActionButton label="打开成品文件夹" action={() => runAction("open-folder", openFolder)} busy={busyAction === "open-folder"} />}
-            {exportList && <ActionButton label="导出成品清单" action={() => runAction("export-list", exportList)} busy={busyAction === "export-list"} />}
-            {selectNext && <ActionButton label="选择下一个生产包" action={() => runAction("select-next", selectNext)} busy={busyAction === "select-next"} primary />}
+            {model.counts.succeeded > 0 && <ActionButton label="查看已完成成品" action={() => void runAction("view-products", viewAllProducts)} busy={busyAction === "view-products"} />}
+            {!hasFailures && openFolder && <ActionButton label="打开成品文件夹" action={() => runAction("open-folder", openFolder)} busy={busyAction === "open-folder"} />}
+            {!hasFailures && exportList && <ActionButton label="导出成品清单" action={() => runAction("export-list", exportList)} busy={busyAction === "export-list"} />}
+            {!hasFailures && selectNext && <ActionButton label="选择下一个生产包" action={() => runAction("select-next", selectNext)} busy={busyAction === "select-next"} primary />}
           </div>
         </section>
       )}
@@ -361,6 +362,7 @@ function MonitorItem({ item, busyAction, playable, onRetry, onPlay, onOpenFile }
           <div className="production-monitor-error" role="alert">
             <strong>{item.errorCode ? `错误 ${item.errorCode}` : "错误详情"}</strong>
             <span>{item.errorMessage ?? "未提供错误详情"}</span>
+            <small>{onRetry ? "失败，需要处理；可点击“重试”创建新的执行尝试，原失败记录会保留。" : "失败，需要处理；请查看错误详情。"}</small>
           </div>
         )}
         {item.status === "SUCCEEDED" && (
@@ -502,19 +504,21 @@ function statusClass(status: string): string {
 
 function itemStatusLabel(status: string): string {
   return {
-    PENDING: "等待中",
-    RUNNING: "生成中",
+    PENDING: "待执行",
+    RUNNING: "运行中",
     PAUSED: "已暂停",
     SUCCEEDED: "已完成",
-    FAILED: "失败",
+    FAILED: "失败，需要处理",
     CANCELLED: "已取消",
     SKIPPED: "已跳过",
   }[status] ?? "处理中";
 }
 
 function batchStatusLabel(status: string, complete: boolean): string {
+  if (status === "FAILED") return "失败，需要处理";
+  if (status === "CANCELLED") return "已取消";
   if (complete) return "已完成";
-  return { PENDING: "等待中", RUNNING: "生成中", PAUSED: "已暂停", FAILED: "失败", CANCELLED: "已取消" }[status] ?? itemStatusLabel(status);
+  return { PENDING: "待启动", RUNNING: "运行中", PAUSED: "已暂停" }[status] ?? itemStatusLabel(status);
 }
 
 export function filterProductionMonitorItems(items: readonly ProductionMonitorItemReadModel[], filter: ProductionMonitorFilter): ProductionMonitorItemReadModel[] {

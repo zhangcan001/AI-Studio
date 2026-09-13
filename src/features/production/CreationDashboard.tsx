@@ -52,6 +52,7 @@ export function CreationDashboard({
   const [loading, setLoading] = useState(false);
   const [busyQueueId, setBusyQueueId] = useState<string>();
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -95,11 +96,15 @@ export function CreationDashboard({
     }
     setBusyQueueId(queue.id);
     setError(undefined);
+    setNotice(undefined);
     try {
       if (queue.status === "RUNNING") await pauseProductionQueue(projectId, queue.id);
       else await startProductionQueue(projectId, queue.id);
       await refresh();
       await onAdmissionChanged();
+      setNotice(queue.status === "RUNNING"
+        ? "队列已暂停；已经提交的任务会继续运行到结束。"
+        : "生产已启动，任务正在运行；可打开生产队列查看进度。");
     } catch (value: unknown) {
       setError(toUserMessage(value));
     } finally {
@@ -115,8 +120,8 @@ export function CreationDashboard({
           <div className="creation-dashboard-card-heading"><strong>生产概览</strong><button type="button" className="quiet-button" onClick={() => void refresh()} disabled={loading}>{loading ? "刷新中..." : "刷新"}</button></div>
           <div className="creation-dashboard-stats">
             <span>运行中队列 <strong>{summary.runningCount}</strong></span>
-            <span>等待任务 <strong>{overview?.pendingItems ?? 0}</strong></span>
-            <span>执行中任务 <strong>{summary.activeItemCount}</strong></span>
+            <span>待执行任务 <strong>{overview?.pendingItems ?? 0}</strong></span>
+            <span>运行中任务 <strong>{summary.activeItemCount}</strong></span>
             <span>成功任务 <strong>{summary.succeededItemCount}</strong></span>
             <span>失败任务 <strong>{summary.failedItemCount}</strong></span>
             <span>队列 <strong>{summary.queueCount}</strong></span>
@@ -125,7 +130,7 @@ export function CreationDashboard({
             <strong>最近队列</strong>
             {recentQueues.map((queue) => {
               const action = productionQueueAction(queue.status, queue.archivedAt);
-              return <div key={queue.id} className="creation-dashboard-row"><div><strong>{queue.name}</strong><small>{queue.archivedAt ? "已归档" : productionStatusLabel(queue.status)} · {formatDateTime(queue.updatedAt)}</small></div><button type="button" className="quiet-button" onClick={() => void actOnQueue(queue)} disabled={busyQueueId === queue.id}>{busyQueueId === queue.id ? "处理中..." : action}</button></div>;
+              return <div key={queue.id} className="creation-dashboard-row"><div><strong>{queue.name}</strong><small>{queue.archivedAt ? "已归档" : productionStatusLabel(queue.status)} · {formatDateTime(queue.updatedAt)}</small></div><button type="button" className="quiet-button" onClick={() => void actOnQueue(queue)} disabled={busyQueueId === queue.id}>{busyQueueId === queue.id ? "正在更新…" : action}</button></div>;
             })}
             {!recentQueues.length && <p className="disabled-note">当前项目还没有生产队列。</p>}
           </div>
@@ -151,6 +156,7 @@ export function CreationDashboard({
           </div>
         </section>
       </div>
+      {notice && <p className="disabled-note" role="status" aria-live="polite">{notice}</p>}
       {error && <p className="error-message" role="alert">生产概览：{error}</p>}
     </details>
   );

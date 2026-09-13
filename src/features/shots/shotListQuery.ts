@@ -14,7 +14,7 @@ export const SHOT_LIST_STATUS_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "ALL", label: "全部" },
   { value: "DRAFT", label: "待配置" },
-  { value: "READY", label: "待生成" },
+  { value: "READY", label: "待启动" },
   { value: "GENERATING_IMAGE", label: "图片处理中" },
   { value: "IMAGE_REVIEW", label: "图片待审核" },
   { value: "IMAGE_SELECTED", label: "图片已选" },

@@ -79,7 +79,7 @@ describe("SeriesProductionPanel", () => {
     const html = renderToStaticMarkup(<SeriesPrepareResultView result={{ projectId: "project-1", seriesId: "series-1", stage: "image", status: "PARTIAL", requestedEpisodes: 2, requestedScenes: 2, createdBatches: 1, createdItems: 3, alreadyPreparedEpisodes: [], skippedDoneEpisodes: [], skippedEmptyEpisodes: [], skippedBlockedEpisodes: ["episode-2"], episodeResults: [{ episodeId: "episode-1", episodeName: "雨夜", status: "SUCCESS", createdBatches: 1, createdItems: 3, alreadyPrepared: false, skipped: false, blockingReasons: [], batchIds: ["series-batch"] }, { episodeId: "episode-2", episodeName: "夜战", status: "BLOCKED", createdBatches: 0, createdItems: 0, alreadyPrepared: false, skipped: true, blockingReasons: ["缺少图片提示词"], batchIds: [] }] }} onOpenProductionQueue={() => undefined} disabled={false} onNavigateToEpisode={() => undefined} />);
     expect(html).toContain("部分准备");
     expect(html).toContain("创建：<strong>1</strong> 个批次");
-    expect(html).toContain("READY");
+    expect(html).toContain("待启动");
     expect(html).toContain("打开生产队列");
     expect(html).toContain("查看集");
   });

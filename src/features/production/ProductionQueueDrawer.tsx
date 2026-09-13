@@ -165,7 +165,7 @@ export function ProductionQueueDrawer({
         </span>
         <span className="production-queue-drawer-stats" aria-label="生产队列摘要">
           <span><strong>{formatCount(stats.running)}</strong><small>运行中</small></span>
-          <span><strong>{formatCount(stats.pending)}</strong><small>等待中</small></span>
+          <span><strong>{formatCount(stats.pending)}</strong><small>待执行</small></span>
           <span><strong>{formatCount(stats.failed)}</strong><small>失败</small></span>
         </span>
         <span className="production-queue-drawer-chevron" aria-hidden="true">{isExpanded ? "⌄" : "⌃"}</span>
@@ -186,7 +186,7 @@ export function ProductionQueueDrawer({
 
       {isExpanded && (
         <div id={contentId} className="production-queue-drawer-body">
-          <p className="production-queue-drawer-start-note">只有在这里点击“开始”才会创建并提交生产任务；准备和返工不会自动启动。</p>
+          <p className="production-queue-drawer-start-note">只有在这里点击“开始生产”才会创建并提交真实生产任务；准备和返工不会自动启动。</p>
           {visibleRows.length ? (
             <ul className="production-queue-drawer-list" aria-label="生产队列批次">
               {visibleRows.map((row) => (
@@ -317,11 +317,11 @@ function BatchRow({
           <button
             type="button"
             data-action="start"
-            aria-label={`开始队列 ${row.id}`}
+            aria-label={`开始生产队列 ${row.id}`}
             onClick={() => onStart(row.id)}
             disabled={Boolean(busyAction && !busyAction.startsWith("start:"))}
           >
-            {row.status === "PAUSED" ? "继续" : "开始"}
+            {row.status === "PAUSED" ? "继续生产" : "开始生产"}
           </button>
         )}
         {onPause && row.status === "RUNNING" && (
@@ -598,11 +598,11 @@ function statusLabel(status: string): string {
     RUNNING: "运行中",
     PAUSED: "已暂停",
     COMPLETED: "已完成",
-    PENDING: "等待中",
+    PENDING: "待执行",
     DISPATCHING: "提交中",
-    DISPATCHED: "执行中",
-    SUCCEEDED: "成功",
-    FAILED: "失败",
+    DISPATCHED: "运行中",
+    SUCCEEDED: "已完成",
+    FAILED: "失败，需要处理",
     CANCELLED: "已取消",
     SKIPPED: "已跳过",
   }[status] ?? status;

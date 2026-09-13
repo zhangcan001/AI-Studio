@@ -83,10 +83,10 @@ describe("EpisodeProductionPanel", () => {
     const partialHtml = renderToStaticMarkup(<EpisodePrepareResultView result={{ projectId: "project-1", episodeId: "episode-1", stage: "image", status: "PARTIAL", requestedScenes: 2, createdBatches: 1, createdItems: 2, alreadyPreparedScenes: [], skippedDoneScenes: [], skippedEmptyScenes: [], skippedBlockedScenes: ["scene-2"], results: [{ sceneId: "scene-1", sceneName: "巷口", status: "SUCCESS", created: true, createdCount: 2, batchId: "episode-batch", existingBatchIds: [], blockingReasons: [] }, { sceneId: "scene-2", sceneName: "屋顶", status: "FAILED", created: false, createdCount: 0, existingBatchIds: [], blockingReasons: [], error: "状态发生变化" }] }} onOpenProductionQueue={onOpenQueue} disabled={false} onNavigateToScene={onNavigate} />);
     const blockedHtml = renderToStaticMarkup(<EpisodePrepareResultView result={{ projectId: "project-1", episodeId: "episode-1", stage: "image", status: "BLOCKED", requestedScenes: 1, createdBatches: 0, createdItems: 0, alreadyPreparedScenes: [], skippedDoneScenes: [], skippedEmptyScenes: [], skippedBlockedScenes: ["scene-2"], results: [{ sceneId: "scene-2", sceneName: "屋顶", status: "BLOCKED", created: false, createdCount: 0, existingBatchIds: [], blockingReasons: ["缺少提示词"] }] }} onOpenProductionQueue={onOpenQueue} disabled={false} onNavigateToScene={onNavigate} />);
     expect(successHtml).toContain("已准备");
-    expect(successHtml).toContain("READY");
+    expect(successHtml).toContain("待启动");
     expect(successHtml).toContain("打开生产队列");
     expect(partialHtml).toContain("部分准备");
-    expect(partialHtml).toContain("READY");
+    expect(partialHtml).toContain("待启动");
     expect(partialHtml).toContain("状态发生变化");
     expect(blockedHtml).toContain("未创建批次");
     expect(blockedHtml).not.toContain("打开生产队列");

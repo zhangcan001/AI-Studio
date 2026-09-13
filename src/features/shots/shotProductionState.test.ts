@@ -84,7 +84,7 @@ describe("shot production read model", () => {
       shot({ stageConfigs: [config("image")], generationLinks: [taskLink("image", "RUNNING")] }),
       context(),
     );
-    expect(step(generating, "image")).toMatchObject({ status: "ACTIVE", detail: "生成任务进行中" });
+    expect(step(generating, "image")).toMatchObject({ status: "ACTIVE", detail: "生产任务运行中" });
     expect(generating.nextAction.stepId).toBe("image");
 
     const reviewing = buildShotProductionReadModel(

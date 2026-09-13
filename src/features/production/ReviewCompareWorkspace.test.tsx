@@ -187,7 +187,7 @@ describe("ReviewCompareWorkspace", () => {
 
     render(<ReviewCompareWorkspace items={[first, second]} onConfirmAndApprove={onConfirmAndApprove} onItemChange={onItemChange} />);
 
-    const confirmButton = screen.getByRole("button", { name: "确认并通过" });
+    const confirmButton = screen.getByRole("button", { name: "选择结果并通过" });
     expect(onConfirmAndApprove).not.toHaveBeenCalled();
 
     await user.click(confirmButton);
@@ -211,7 +211,7 @@ describe("ReviewCompareWorkspace", () => {
       />,
     );
 
-    for (const label of ["确认并通过", "仅通过", "标星", "拒绝", "标记返工", "创建返工批次", "保存备注"]) {
+    for (const label of ["选择结果并通过", "审核通过", "标星", "拒绝", "标记返工", "创建返工批次", "保存备注"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
   });
@@ -323,14 +323,14 @@ describe("ReviewCompareWorkspace", () => {
 
     render(<ReviewCompareWorkspace items={[first, second]} onConfirmAndApprove={onConfirmAndApprove} onItemChange={onItemChange} />);
 
-    expect(screen.queryByRole("button", { name: "确认并通过" })).toBeNull();
-    expect((screen.getByRole("button", { name: "仅通过" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "选择结果并通过" })).toBeNull();
+    expect((screen.getByRole("button", { name: "审核通过" }) as HTMLButtonElement).disabled).toBe(true);
 
     await user.click(slotButton("成功候选", "A"));
-    expect(screen.getByRole("button", { name: "确认并通过" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "选择结果并通过" })).toBeTruthy();
     expect(onConfirmAndApprove).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "确认并通过" }));
+    await user.click(screen.getByRole("button", { name: "选择结果并通过" }));
     await waitFor(() => expect(onConfirmAndApprove).toHaveBeenCalledWith(first.candidates[1], first));
     expect(screen.getByRole("heading", { level: 2, name: "Shot 01" })).toBeTruthy();
     expect(onItemChange).not.toHaveBeenCalled();
@@ -381,8 +381,8 @@ describe("ReviewCompareWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "确认并通过" })).toBeNull();
-    expect(screen.getByRole("button", { name: "仅通过" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "选择结果并通过" })).toBeNull();
+    expect(screen.getByRole("button", { name: "审核通过" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "标星" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "拒绝" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "标记返工" })).toBeTruthy();

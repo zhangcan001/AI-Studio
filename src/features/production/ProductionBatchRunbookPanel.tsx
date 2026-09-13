@@ -39,11 +39,11 @@ export function ProductionBatchRunbookPanel({
   return (
     <section className="production-batch-runbook-panel" aria-label="生产批次执行清单" aria-busy={isBusy} data-project-id={projectId}>
       <div className="production-batch-runbook-header">
-        <div><span className="section-label">生产批次执行清单</span><h3>生产批次执行清单</h3><p>执行清单只读派生现有批次；每次只允许手动启动一个批次。</p></div>
+        <div><span className="section-label">生产批次执行清单</span><h3>生产批次执行清单</h3><p>执行清单只读派生现有批次；每次只允许手动开始一个批次，点击“开始生产”后才会执行。</p></div>
         <button type="button" className="quiet-button" onClick={() => void onRefresh?.()} disabled={isBusy || !onRefresh}>{isBusy ? "处理中…" : "刷新执行清单"}</button>
       </div>
 
-      {runningRow && <div className="production-batch-runbook-running" role="status"><strong>当前正在生产</strong><span>第 {ordinalLabel(runningRow.episodeOrdinal)} 集 / 场景 {ordinalLabel(runningRow.sceneOrdinal)} / {runbookStageLabel(runningRow.stage)}</span><button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(runningRow.batchId)} disabled={isBusy || !onOpenProductionQueue}>打开队列</button></div>}
+      {runningRow && <div className="production-batch-runbook-running" role="status"><strong>当前运行中</strong><span>第 {ordinalLabel(runningRow.episodeOrdinal)} 集 / 场景 {ordinalLabel(runningRow.sceneOrdinal)} / {runbookStageLabel(runningRow.stage)}</span><button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(runningRow.batchId)} disabled={isBusy || !onOpenProductionQueue}>打开队列</button></div>}
 
       <div className="production-batch-runbook-filters" role="group" aria-label="执行清单筛选">{FILTERS.map((value) => <button key={value} type="button" className={filter === value ? "active" : ""} onClick={() => setFilter(value)} disabled={isBusy}>{runbookFilterLabel(value)}</button>)}</div>
 
@@ -59,7 +59,7 @@ export function ProductionBatchRunbookPanel({
           <td>{row.shotCount}</td>
           <td><span className={`production-batch-runbook-status production-batch-runbook-status-${row.batchStatus.toLowerCase()}`}>{runbookStatusLabel(row.batchStatus)}</span></td>
           <td><div className="production-batch-runbook-progress" aria-label={`${runbookProgress(row)}%`}><span style={{ width: `${runbookProgress(row)}%` }} /><small>{row.succeeded}/{row.shotCount}</small></div></td>
-          <td><div className="production-batch-runbook-actions"><button type="button" onClick={() => void startBatch(row)} disabled={!canStart || isBusy}>{busyBatchId === row.batchId ? "启动中…" : "启动"}</button><button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(row.batchId)} disabled={isBusy || !onOpenProductionQueue}>打开队列</button></div></td>
+          <td><div className="production-batch-runbook-actions"><button type="button" onClick={() => void startBatch(row)} disabled={!canStart || isBusy}>{busyBatchId === row.batchId ? "正在开始生产…" : "开始生产"}</button><button type="button" className="quiet-button" onClick={() => onOpenProductionQueue?.(row.batchId)} disabled={isBusy || !onOpenProductionQueue}>打开队列</button></div></td>
         </tr>;
       })}</tbody></table></div>
       {!rows.length && <div className="production-batch-runbook-empty"><strong>当前筛选没有批次</strong><span>通用批次不属于系列执行清单；请在原生产队列中查看。</span></div>}
@@ -88,7 +88,7 @@ export function runbookProgress(row: ProductionBatchRunbookRow): number {
 }
 
 export function runbookFilterLabel(filter: ProductionBatchRunbookFilter): string {
-  return { active: "当前与最近完成", ready: "待启动", running: "执行中", paused: "已暂停", completed: "已完成", all: "全部" }[filter];
+  return { active: "当前与最近完成", ready: "待启动", running: "运行中", paused: "已暂停", completed: "已完成", all: "全部" }[filter];
 }
 
 function stagePriority(stage: ProductionBatchRunbookRow["stage"]): number {
@@ -96,7 +96,7 @@ function stagePriority(stage: ProductionBatchRunbookRow["stage"]): number {
 }
 
 function runbookStatusLabel(status: ProductionBatchRunbookStatus): string {
-  return { READY: "待启动", RUNNING: "执行中", PAUSED: "已暂停", COMPLETED: "已完成" }[status] ?? status;
+  return { READY: "待启动", RUNNING: "运行中", PAUSED: "已暂停", COMPLETED: "已完成" }[status] ?? status;
 }
 
 function runbookStageLabel(stage: ProductionBatchRunbookRow["stage"]): string {

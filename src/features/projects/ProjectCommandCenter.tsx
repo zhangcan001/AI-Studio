@@ -438,7 +438,7 @@ export function ProjectCommandCenterView({
                 <CardHeading eyebrow="进度" title="项目进度" id="project-command-progress-title" />
                 <ProgressBar percent={derived.progress.percent} label={`${derived.progress.completed} / ${derived.progress.total} 个镜头已完成`} />
                 <div className="project-command-stat-row">
-                  <Stat label="待生成" value={derived.progress.pendingKeyframes} />
+                  <Stat label="待启动" value={derived.progress.pendingKeyframes} />
                   <Stat label="待选关键帧" value={Math.max(0, derived.progress.keyframesSelected - derived.progress.completed)} />
                   <Stat label="视频复核" value={derived.progress.pendingVideoReview} />
                   <Stat label="需关注" value={derived.progress.needsAttention} />
@@ -626,15 +626,15 @@ function recommendedActionFromAggregate(
   const actions: Record<string, Omit<RecommendedAction, "actionKind" | "shotId" | "batchId">> = {
     STRUCTURAL_BLOCKED: { label: "修复项目结构", detail: "项目结构或生产链路存在阻断，先处理结构问题。", destination: "shots", section: "creation" },
     COMFY_BLOCKED: { label: "修复运行环境", detail: "当前 ComfyUI 或生产工作流被阻断，先完成运行时预检。", destination: "settings", section: "settings" },
-    REVIEW_REQUIRED: { label: "处理生产复核", detail: "有失败或不可自动恢复的生产项需要人工检查。", destination: "shots", section: "production" },
-    AUTO_RESUMABLE: { label: "恢复生产", detail: "有可自动恢复的生产项，继续处理未完成工作。", destination: "shots", section: "production" },
-    ACTIVE_PRODUCTION: { label: "查看运行进度", detail: "项目仍有任务或生产批次活动中，先确认当前进度。", destination: "shots", section: "production" },
-    IMAGE_REVIEW: { label: "完成图片复核", detail: "有关键帧候选等待人工确认。", destination: "shots", section: "review" },
-    VIDEO_REVIEW: { label: "完成视频复核", detail: "有视频候选等待人工确认。", destination: "shots", section: "review" },
+    REVIEW_REQUIRED: { label: "处理失败项", detail: "有失败或不可自动恢复的生产项需要人工处理。", destination: "shots", section: "production" },
+    AUTO_RESUMABLE: { label: "恢复并开始生产", detail: "有可自动恢复的生产项；恢复动作会创建新尝试并开始生产。", destination: "shots", section: "production" },
+    ACTIVE_PRODUCTION: { label: "查看运行进度", detail: "项目仍有任务或生产批次运行中，先确认当前进度。", destination: "shots", section: "production" },
+    IMAGE_REVIEW: { label: "处理图片审核", detail: "有关键帧候选待审核，需要人工选择结果。", destination: "shots", section: "review" },
+    VIDEO_REVIEW: { label: "处理视频审核", detail: "有视频候选待审核，需要人工选择结果。", destination: "shots", section: "review" },
     MISSING_CONFIG: { label: "配置下一镜头", detail: "还有镜头缺少工作流或配方配置。", destination: "shots", section: "creation" },
     UNASSIGNED: { label: "整理项目结构", detail: "还有镜头尚未分配到场景。", destination: "shots", section: "creation" },
     NO_SHOTS: { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots", section: "creation" },
-    READY: { label: "继续创作", detail: "项目已经准备好进入下一步生产。", destination: "shots", section: "production" },
+    READY: { label: "查看待启动生产", detail: "生产准备已完成但尚未执行；请在生产队列中明确点击“开始生产”。", destination: "shots", section: "production" },
     COMPLETE: { label: "查看交付结果", detail: "已有完成结果，打开现有交付素材继续检查或使用。", destination: "assets", section: "assets" },
   };
   return { ...(actions[action.kind] ?? { label: "继续工作", detail: action.reason, destination: "shots", section: "creation" }), ...target };
@@ -649,7 +649,7 @@ function consistencyRecommendedAction(aggregate: ProjectCommandCenterAggregate):
     return { label: "配置镜头一致性", detail: "已有一致性档案或参考集，先为镜头配置绑定再进入生产。", destination: "shots" };
   }
   if (bindingCount > 0 && aggregate.preparation && aggregate.preparation.snapshotCount === 0 && aggregate.shots.total > 0) {
-    return { label: "生产准备", detail: "绑定已就绪，先为镜头生成生产准备快照，再手动加入队列。", destination: "shots" };
+    return { label: "生产准备", detail: "绑定可用，先为镜头生成生产准备快照，再创建待启动批次。", destination: "shots" };
   }
   return undefined;
 }
@@ -716,9 +716,9 @@ const DAILY_PRODUCTION_BUCKETS: ReadonlyArray<{
   tone: string;
 }> = [
   { key: "needsAttention", label: "需要处理", tone: "attention" },
-  { key: "ready", label: "已就绪", tone: "ready" },
-  { key: "running", label: "生产中", tone: "running" },
-  { key: "review", label: "待复核", tone: "review" },
+  { key: "ready", label: "待启动", tone: "ready" },
+  { key: "running", label: "运行中", tone: "running" },
+  { key: "review", label: "待审核", tone: "review" },
   { key: "completed", label: "已完成", tone: "completed" },
 ];
 
@@ -752,9 +752,9 @@ function ProjectCommandCenterCollectionActions({
     },
     aggregate.shots.ready > COMMAND_CENTER_PREVIEW_LIMIT && {
       id: "ready-shots",
-      label: "待生成镜头",
+      label: "待启动镜头",
       count: aggregate.shots.ready,
-      detail: "进入完整待生成镜头集合，继续使用现有生产队列。",
+      detail: "进入完整待启动镜头集合，继续使用现有生产队列。",
       request: { destination: "shots", section: "production", collectionFilter: { kind: "shots", status: "READY" } } satisfies ProjectCommandCenterNavigationRequest,
     },
     aggregate.shots.completed > COMMAND_CENTER_PREVIEW_LIMIT && {
@@ -820,6 +820,7 @@ function DailyProductionBoard({
         </div>
         <small className="project-command-muted">只读派生 · 刷新后以当前事实为准</small>
       </div>
+      <p className="project-command-daily-contract">状态口径：待启动=已准备但未执行 · 运行中=已开始执行 · 待审核=等待人工选择 · 已完成=已有执行结果。</p>
       {board.topAction && <p className="project-command-daily-top">推荐：{board.topAction.reason} · {board.topAction.label}</p>}
       {totalItems === 0 ? (
         <p className="project-command-daily-empty">还没有生产镜头。创建镜头或使用批量导入预检后，这里会显示生产状态。</p>
@@ -874,7 +875,7 @@ function DailyProductionBucketView({
               type="button"
               className="project-command-daily-item"
               key={item.id}
-              onClick={() => onNavigate?.(dailyProductionNavigation(item, label))}
+              onClick={() => onNavigate?.(dailyProductionNavigation(item, bucketKey))}
               disabled={!onNavigate || disabled}
             >
               <span className="project-command-daily-item-title">{item.label}</span>
@@ -925,7 +926,7 @@ function dailyProductionCollectionNavigation(
   return undefined;
 }
 
-function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem, bucketLabel: string): ProjectCommandCenterNavigationRequest {
+function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem, bucketKey: (typeof DAILY_PRODUCTION_BUCKETS)[number]["key"]): ProjectCommandCenterNavigationRequest {
   const destination = (item.destination === "assets" || item.destination === "tasks" || item.destination === "workflows" || item.destination === "settings" || item.destination === "shots")
     ? item.destination
     : "shots";
@@ -935,7 +936,7 @@ function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem
       ? "workflows"
       : destination === "assets"
         ? "assets"
-        : bucketLabel === "待复核"
+        : bucketKey === "review"
           ? "review"
           : destination === "tasks"
             ? "production"
@@ -952,10 +953,10 @@ function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem
 }
 
 function dailyProductionTargetLabel(item: ProjectCommandCenterDailyProductionItem): string {
-  if (item.assetId) return `定位素材 ${item.assetId}`;
-  if (item.taskId) return `定位任务 ${item.taskId}`;
-  if (item.batchId) return `定位批次 ${item.batchId}`;
-  if (item.shotId) return `定位镜头 ${item.shotId}`;
+  if (item.assetId) return "定位交付素材";
+  if (item.taskId) return "定位运行任务";
+  if (item.batchId) return "定位生产批次";
+  if (item.shotId) return "定位镜头";
   return `打开${item.destination === "settings" ? "运行环境设置" : "对应工作区"}`;
 }
 

@@ -812,14 +812,14 @@ describe("ShotWorkspace production package queue integration", () => {
 
     await user.click(await screen.findByRole("button", { name: "选择生产包文件夹" }));
     await waitFor(() => expect(mocks.inspectProductionPackage).toHaveBeenCalledWith("project-1", "C:/uat"));
-    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
 
     await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("true"));
     expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-focused")).toBe("true");
     expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-recently-created")).toBe("true");
     expect(within(drawer).getByText("刚刚创建")).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: "开始队列 pbt_uat_001" })).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "开始生产队列 pbt_uat_001" })).toBeTruthy();
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
   });
 
@@ -839,7 +839,7 @@ describe("ShotWorkspace production package queue integration", () => {
 
     await user.click(await screen.findByRole("button", { name: "选择生产包文件夹" }));
     await waitFor(() => expect(mocks.inspectProductionPackage).toHaveBeenCalledWith("project-1", "C:/uat"));
-    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
 
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
@@ -849,10 +849,10 @@ describe("ShotWorkspace production package queue integration", () => {
     expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-recently-created")).toBe("true");
     expect(within(drawer).getByText("刚刚创建")).toBeTruthy();
     expect(within(drawer).getByText("pbt_uat_001")).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: "开始队列 pbt_uat_001" })).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "开始生产队列 pbt_uat_001" })).toBeTruthy();
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
 
-    await user.click(within(drawer).getByRole("button", { name: "开始队列 pbt_uat_001" }));
+    await user.click(within(drawer).getByRole("button", { name: "开始生产队列 pbt_uat_001" }));
     await waitFor(() => expect(mocks.startProductionQueue).toHaveBeenCalledWith("project-1", "pbt_uat_001"));
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
   });
@@ -863,7 +863,7 @@ describe("ShotWorkspace production package queue integration", () => {
 
     await user.click(await screen.findByRole("button", { name: "选择生产包文件夹" }));
     await waitFor(() => expect(mocks.inspectProductionPackage).toHaveBeenCalledWith("project-1", "C:/uat"));
-    await user.click(screen.getByRole("button", { name: "创建并打开生产队列（1 项）" }));
+    await user.click(screen.getByRole("button", { name: "创建待启动批次并打开队列（1 项）" }));
     await screen.findByRole("region", { name: "生产包创建结果" });
 
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
@@ -872,7 +872,7 @@ describe("ShotWorkspace production package queue integration", () => {
     expect(mocks.getProductionBatchReviewProductivity).toHaveBeenCalledWith("project-1", "pbt_uat_001");
 
     const drawer = await screen.findByRole("region", { name: "生产队列" });
-    await user.click(within(drawer).getByRole("button", { name: "开始队列 pbt_uat_001" }));
+    await user.click(within(drawer).getByRole("button", { name: "开始生产队列 pbt_uat_001" }));
     await waitFor(() => expect(mocks.startProductionQueue).toHaveBeenCalledWith("project-1", "pbt_uat_001"));
     await waitFor(() => expect(screen.getByTestId("monitor-batch-status").textContent).toContain("RUNNING"));
 

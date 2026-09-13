@@ -11,10 +11,10 @@ export function ShotProgressDashboard({ shots }: { shots: ShotView[] }) {
   const imagesReady = shotImagesReady(shots);
   const metrics = [
     ["总镜头", summary.total, "neutral"],
-    ["图片已就绪", imagesReady, "muted"],
-    ["图片已选", summary.keyframesSelected, "success"],
-    ["视频生成中", summary.videoGenerating, "active"],
-    ["视频已就绪", summary.pendingVideoReview, "review"],
+    ["图片候选待审核", imagesReady, "muted"],
+    ["已选择关键帧", summary.keyframesSelected, "success"],
+    ["视频运行中", summary.videoGenerating, "active"],
+    ["视频候选待审核", summary.pendingVideoReview, "review"],
     ["已完成", summary.completed, "success"],
     ["失败", summary.needsAttention, "danger"],
   ] as const;

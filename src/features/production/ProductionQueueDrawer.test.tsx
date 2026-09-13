@@ -102,7 +102,7 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain("第一季 · 第01集 · Scene 05");
     expect(html).toContain("图片");
     expect(html).toContain("8");
-    expect(html).toContain("只有在这里点击“开始”才会创建并提交生产任务");
+    expect(html).toContain("只有在这里点击“开始生产”才会创建并提交真实生产任务");
     expect(html).toContain('data-action="start"');
   });
 
@@ -166,7 +166,7 @@ describe("ProductionQueueDrawer", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="开始队列 batch-ready"');
+    expect(html).toContain('aria-label="开始生产队列 batch-ready"');
     expect(html).toContain('aria-label="暂停队列 batch-1"');
     expect(html).toContain('aria-label="打开队列 batch-1"');
     expect(html).not.toContain("Start All");
@@ -210,7 +210,7 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain('data-batch-id="batch-1" data-focused="true" data-recently-created="true"');
     expect(html).toContain('data-batch-id="batch-2" data-recently-created="true"');
     expect(html.match(/刚刚创建/g)).toHaveLength(2);
-    expect(html).toContain('aria-label="开始队列 batch-1"');
-    expect(html).toContain('aria-label="开始队列 batch-2"');
+    expect(html).toContain('aria-label="开始生产队列 batch-1"');
+    expect(html).toContain('aria-label="开始生产队列 batch-2"');
   });
 });

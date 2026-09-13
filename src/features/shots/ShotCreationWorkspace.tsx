@@ -66,11 +66,11 @@ const workspaceTabs: Array<{ id: ShotCreationWorkspaceTab; label: string }> = [
 
 const candidateStatusLabels: Record<ShotCandidateStatus, string> = {
   ready: "待审核",
-  selected: "已确认",
+  selected: "已选择",
   reviewed: "已审核",
   failed: "失败",
-  generating: "生成中",
-  queued: "排队中",
+  generating: "运行中",
+  queued: "待执行",
 };
 
 export function resolveShotPreviewAsset(candidates: ShotWorkspaceCandidate[], selectedAssetId?: string, previewAsset?: AssetView): AssetView | undefined {
@@ -262,7 +262,7 @@ function AssetContinuitySummary({ references = [], keyframeAsset, candidates, se
       </div>}
       <div className="shot-creation-view-heading" style={{ marginBottom: 0 }}><div><span className="shot-creation-kicker">生成结果</span><h3>当前阶段结果</h3></div><span className="shot-creation-count">{candidates.length} 项</span></div>
       {selectedAssetId ? <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <span style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>{selected?.name ?? "引用素材不可用"}</strong><small style={{ display: "block", color: "var(--studio-text-secondary, #9ca3af)" }}>{selectedAssetId} · 已选结果</small></span>
+        <span style={{ minWidth: 0, overflowWrap: "anywhere" }}><strong>{selected?.name ?? "引用素材不可用"}</strong><small style={{ display: "block", color: "var(--studio-text-secondary, #9ca3af)" }}>{selectedAssetId} · 已选择结果</small></span>
         {onOpenAsset && <button type="button" className="quiet-button" onClick={() => onOpenAsset(selectedAssetId)}>查看素材</button>}
       </div> : <p className="shot-creation-muted">当前阶段尚未选择生成结果。</p>}
     </section>
