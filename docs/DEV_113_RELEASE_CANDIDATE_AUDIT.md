@@ -126,8 +126,9 @@ FRONTEND_TEST=PASS — pnpm test (150 files, 820 tests)
 TSC=PASS — pnpm exec tsc --noEmit
 BUILD=PASS — pnpm build
 RUST_CHANGED=NO
-RUST_TEST=NOT RUN — no Rust source changed; latest DEV-112 exact-head Source-only CI evidence was passing
-REMOTE_CI=PENDING AT DOCUMENT AUTHORING — final exact-head Source-only CI is recorded in the DEV-113 result after push
+RUST_TEST=PASS — Source-only CI run 34738770691 attempt 2; no Rust source changed in DEV-113
+REMOTE_CI=PASS — exact-head Source-only CI run 34738770691 attempt 2 for 02a29ef4c6165f4b3e8be34f67dc01fc3122f826
+REMOTE_CI_INITIAL_ATTEMPT=FAIL — existing cancellation race test reported task did not reach RUNNING; retry passed
 ```
 
 The build emitted the existing non-blocking Vite chunk-size warning for the main bundle. The test run emitted the existing jsdom navigation warning in production coverage; it did not fail a test.
