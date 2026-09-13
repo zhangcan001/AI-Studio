@@ -61,5 +61,13 @@ These are non-blocking P2/P3 items; no P0 or P1 release blocker remains.
 
 ## Verification
 
-The release checklist and exact validation record are in
+- Frontend: 150 test files and 823 tests passed; TypeScript check and
+  production build passed.
+- Rust: format, check, and all-target tests passed locally.
+- Source-only CI: runs `34743034346` and `34743701927` passed; the tag run
+  validated exact head `d69e250102be9254c1237d1db1fbe2d63de0b4db`.
+- Installer: portable executable, MSI, and NSIS artifacts were generated and
+  published with the accompanying `SHA256SUMS.txt` file.
+
+The detailed release checklist and exact closeout record are in
 `docs/RELEASE_CHECKLIST_v1.3.0.md` and `docs/DEV_115_RELEASE_CLOSEOUT.md`.
