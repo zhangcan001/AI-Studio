@@ -1,3 +1,4 @@
+use crate::application::asset_data_service::AssetDataService;
 use crate::application::asset_deletion_service::AssetDeletionService;
 use crate::application::asset_library_service::AssetLibraryService;
 use crate::application::asset_query_service::AssetQueryService;
@@ -78,6 +79,7 @@ pub struct AppState {
     pub task_query_service: Arc<TaskQueryService>,
     pub asset_query_service: Arc<AssetQueryService>,
     pub asset_library_service: Arc<AssetLibraryService>,
+    pub asset_data_service: Arc<AssetDataService>,
     pub asset_usage_service: Arc<AssetUsageService>,
     pub production_structure_service: Arc<ProductionStructureService>,
     pub project_command_center_service: Arc<ProjectCommandCenterService>,
@@ -142,6 +144,7 @@ impl AppState {
         task_query_service: Arc<TaskQueryService>,
         asset_query_service: Arc<AssetQueryService>,
         asset_library_service: Arc<AssetLibraryService>,
+        asset_data_service: Arc<AssetDataService>,
         asset_usage_service: Arc<AssetUsageService>,
         production_structure_service: Arc<ProductionStructureService>,
         project_command_center_service: Arc<ProjectCommandCenterService>,
@@ -204,6 +207,7 @@ impl AppState {
             task_query_service,
             asset_query_service,
             asset_library_service,
+            asset_data_service,
             asset_usage_service,
             production_structure_service,
             project_command_center_service,

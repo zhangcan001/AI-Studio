@@ -679,6 +679,9 @@ fn asset_summary_from_candidate(
     candidate: &crate::application::production_item_review_service::ProductionReviewCandidateAsset,
     created_at: &str,
 ) -> AssetSummaryView {
+    let created_at = chrono::DateTime::parse_from_rfc3339(created_at)
+        .map(|value| value.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now());
     AssetSummaryView {
         id: candidate.asset_id.clone(),
         asset_type: candidate.asset_type.clone(),
@@ -694,9 +697,8 @@ fn asset_summary_from_candidate(
         height: (candidate.height > 0).then_some(candidate.height),
         duration_ms: None,
         file_size: 0,
-        created_at: chrono::DateTime::parse_from_rfc3339(created_at)
-            .map(|value| value.with_timezone(&chrono::Utc))
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at,
+        updated_at: created_at,
         source_task_id: candidate.task_id.clone(),
         thumbnail_available: candidate.thumbnail_available,
         is_favorite: false,

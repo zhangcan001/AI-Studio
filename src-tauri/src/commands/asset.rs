@@ -5,6 +5,7 @@ use crate::{
         AssetSourceFilter,
     },
     application::{
+        asset_data_service::AssetDataError,
         asset_deletion_service::{AssetDeleteInspection, AssetDeleteResult, AssetDeletionError},
         asset_library_service::{AssetLibraryError, AssetLibraryPageView},
         asset_query_service::{AssetQueryError, AssetView},
@@ -13,8 +14,10 @@ use crate::{
             SourceAssetImportError, MAX_SOURCE_AUDIO_BYTES, MAX_SOURCE_VIDEO_BYTES,
         },
     },
+    domain::{AssetRelation, AssetVersion},
     error::AppError,
 };
+use chrono::{DateTime, Utc};
 use std::path::Path;
 use tauri::{ipc::Response, AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -205,6 +208,104 @@ pub async fn asset_get(
         .get(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetVersionView {
+    pub id: String,
+    pub project_id: String,
+    pub asset_id: String,
+    pub version_number: u32,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<AssetVersion> for AssetVersionView {
+    fn from(version: AssetVersion) -> Self {
+        Self {
+            id: version.id.as_str().to_owned(),
+            project_id: version.project_id,
+            asset_id: version.asset_id.as_str().to_owned(),
+            version_number: version.version_number,
+            created_at: version.created_at,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetRelationView {
+    pub id: String,
+    pub project_id: String,
+    pub source_asset_id: String,
+    pub target_asset_id: String,
+    pub source_asset_name: String,
+    pub target_asset_name: String,
+    pub relation_type: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl AssetRelationView {
+    async fn from_relation(
+        state: &AppState,
+        project_id: &str,
+        relation: AssetRelation,
+    ) -> Result<Self, AppError> {
+        let source_asset = state
+            .asset_query_service
+            .get(project_id, relation.source_asset_id.as_str())
+            .await
+            .map_err(map_asset_error)?;
+        let target_asset = state
+            .asset_query_service
+            .get(project_id, relation.target_asset_id.as_str())
+            .await
+            .map_err(map_asset_error)?;
+        Ok(Self {
+            id: relation.id.as_str().to_owned(),
+            project_id: relation.project_id,
+            source_asset_id: relation.source_asset_id.as_str().to_owned(),
+            target_asset_id: relation.target_asset_id.as_str().to_owned(),
+            source_asset_name: source_asset.name,
+            target_asset_name: target_asset.name,
+            relation_type: relation.relation_type.as_str().to_owned(),
+            created_at: relation.created_at,
+        })
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_versions_list(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_id: String,
+) -> Result<Vec<AssetVersionView>, AppError> {
+    super::validate_project_id(&project_id)?;
+    state
+        .asset_data_service
+        .list_versions(&project_id, &asset_id)
+        .await
+        .map(|versions| versions.into_iter().map(AssetVersionView::from).collect())
+        .map_err(map_asset_data_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn asset_relations_list(
+    state: State<'_, AppState>,
+    project_id: String,
+    asset_id: String,
+) -> Result<Vec<AssetRelationView>, AppError> {
+    super::validate_project_id(&project_id)?;
+    let relations = state
+        .asset_data_service
+        .list_relations(&project_id, &asset_id)
+        .await
+        .map_err(map_asset_data_error)?;
+    let mut views = Vec::with_capacity(relations.len());
+    for relation in relations {
+        views.push(AssetRelationView::from_relation(&state, &project_id, relation).await?);
+    }
+    Ok(views)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -511,6 +612,14 @@ fn map_asset_library_error(error: AssetLibraryError) -> AppError {
             AppError::invalid_input("INVALID_PROJECT_ID: project id must not be empty")
         }
         AssetLibraryError::Repository(error) => super::map_repository_error(&error),
+    }
+}
+
+fn map_asset_data_error(error: AssetDataError) -> AppError {
+    match error {
+        AssetDataError::InvalidInput(message) => AppError::invalid_input(message),
+        AssetDataError::NotFound(asset_id) => AppError::asset_not_found(asset_id),
+        AssetDataError::Repository(error) => super::map_repository_error(&error),
     }
 }
 

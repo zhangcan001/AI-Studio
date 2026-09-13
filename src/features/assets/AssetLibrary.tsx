@@ -364,7 +364,12 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
           <button type="button" className="quiet-button" onClick={() => setSelectedAssetIds(new Set())} disabled={bulkBusy || !selectedAssetIds.size}>取消选择</button>
         </section>
       )}
-      {error && <p className="error-message">资产加载失败：{error}</p>}
+      <div className="asset-library-project-scope" aria-label={`项目筛选：${projectId}`}>
+        <span className="section-label">项目筛选</span>
+        <strong>{projectId}</strong>
+        <small>当前页面只读取该项目的资产。</small>
+      </div>
+      {error && <p className="error-message" role="alert">资产加载失败：{error}</p>}
       {importError && <p className="error-message" role="alert">资产导入失败：{importError}</p>}
       {notice && <p className="studio-notice" role="status">{notice}</p>}
       <AssetGrid
@@ -379,6 +384,7 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
         selectionMode={selectionMode}
         selectedIds={[...selectedAssetIds]}
         onToggleSelection={toggleBulkSelection}
+        loading={loading}
       />
       <ReferenceAnchorPanel
         projectId={projectId}

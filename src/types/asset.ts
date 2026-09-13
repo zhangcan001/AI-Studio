@@ -10,10 +10,33 @@ export interface AssetView {
   durationMs?: number | null;
   fileSize: number;
   createdAt: string;
+  /** Added by the asset summary transport; legacy callers may omit it. */
+  updatedAt?: string;
+  /** Populated when a catalog query provides the latest version number. */
+  currentVersionNumber?: number | null;
   sourceTaskId?: string;
   thumbnailAvailable?: boolean;
   isFavorite: boolean;
   tags: Array<{ id: string; name: string }>;
+}
+
+export interface AssetVersionView {
+  id: string;
+  projectId: string;
+  assetId: string;
+  versionNumber: number;
+  createdAt: string;
+}
+
+export interface AssetRelationView {
+  id: string;
+  projectId: string;
+  sourceAssetId: string;
+  targetAssetId: string;
+  sourceAssetName?: string;
+  targetAssetName?: string;
+  relationType: string;
+  createdAt: string;
 }
 
 export interface AssetImportFailure {

@@ -13,29 +13,36 @@ interface Props {
   selectionMode?: boolean;
   selectedIds?: string[];
   onToggleSelection?: (asset: AssetView) => void;
+  loading?: boolean;
 }
 
-export function AssetGrid({ projectId, assets, onSelect, emptyMessage = "没有找到符合条件的素材。", compareMode, compareIds = [], onToggleCompare, onFavorite, selectionMode, selectedIds = [], onToggleSelection }: Props) {
+export function AssetGrid({ projectId, assets, onSelect, emptyMessage = "没有找到符合条件的素材。", compareMode, compareIds = [], onToggleCompare, onFavorite, selectionMode, selectedIds = [], onToggleSelection, loading = false }: Props) {
+  if (loading && !assets.length) {
+    return <p className="disabled-note" role="status">正在加载素材…</p>;
+  }
   if (!assets.length) {
     return <p className="empty-state">{emptyMessage}</p>;
   }
   return (
-    <div className="asset-library-grid">
-      {assets.map((asset) => (
-        <AssetCard
-          key={asset.id}
-          projectId={projectId}
-          asset={asset}
-          onSelect={onSelect}
-          compareMode={compareMode}
-          compared={compareIds.includes(asset.id)}
-          onToggleCompare={onToggleCompare}
-          onFavorite={onFavorite}
-          selectionMode={selectionMode}
-          selected={selectedIds.includes(asset.id)}
-          onToggleSelection={onToggleSelection}
-        />
-      ))}
-    </div>
+    <>
+      {loading && <p className="disabled-note" role="status">正在加载下一页素材…</p>}
+      <div className="asset-library-grid">
+        {assets.map((asset) => (
+          <AssetCard
+            key={asset.id}
+            projectId={projectId}
+            asset={asset}
+            onSelect={onSelect}
+            compareMode={compareMode}
+            compared={compareIds.includes(asset.id)}
+            onToggleCompare={onToggleCompare}
+            onFavorite={onFavorite}
+            selectionMode={selectionMode}
+            selected={selectedIds.includes(asset.id)}
+            onToggleSelection={onToggleSelection}
+          />
+        ))}
+      </div>
+    </>
   );
 }

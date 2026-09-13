@@ -11,8 +11,10 @@ import type {
   AssetDeleteResult,
   AssetLibraryPage,
   AssetLibraryQuery,
+  AssetRelationView,
   AssetSourceImportBatch,
   AssetView,
+  AssetVersionView,
 } from "../types/asset";
 import type { AssetVideoPromptView } from "../types/assetVideoPrompt";
 import type {
@@ -1681,6 +1683,14 @@ export function getProjectCommandCenter(projectId: string): Promise<ProjectComma
 
 export function assetLibraryPage(query: AssetLibraryQuery): Promise<AssetLibraryPage> {
   return invoke<AssetLibraryPage>("asset_library_page", { query });
+}
+
+export function listAssetVersions(projectId: string, assetId: string): Promise<AssetVersionView[]> {
+  return invoke<AssetVersionView[]>("asset_versions_list", { projectId, assetId });
+}
+
+export function listAssetRelations(projectId: string, assetId: string): Promise<AssetRelationView[]> {
+  return invoke<AssetRelationView[]>("asset_relations_list", { projectId, assetId });
 }
 
 export function listAssetTags(projectId: string): Promise<AssetTag[]> {

@@ -100,7 +100,8 @@ export function AssetCard({ projectId, asset, onSelect, compareMode = false, com
         <small>
           {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatFileSize(asset.fileSize)}
         </small>
-        <small>{formatDateTime(asset.createdAt)}</small>
+        <small>当前版本：{asset.currentVersionNumber ? `v${asset.currentVersionNumber}` : "未建立版本记录"}</small>
+        <small>更新时间：{formatDateTime(asset.updatedAt ?? asset.createdAt)}</small>
         <span className="asset-tag-chips" aria-label="素材标签">
           {asset.tags.slice(0, 3).map((tag) => <span key={tag.id}>{tag.name}</span>)}
           {asset.tags.length > 3 && <span>+{asset.tags.length - 3}</span>}

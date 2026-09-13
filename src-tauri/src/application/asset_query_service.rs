@@ -251,6 +251,7 @@ pub struct AssetSummaryView {
     pub duration_ms: Option<u64>,
     pub file_size: u64,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub source_task_id: Option<String>,
     pub thumbnail_available: bool,
     pub is_favorite: bool,
@@ -287,6 +288,7 @@ impl From<crate::domain::Asset> for AssetSummaryView {
             duration_ms: asset.duration_ms,
             file_size: asset.file_size,
             created_at: asset.created_at,
+            updated_at: asset.updated_at,
             source_task_id: asset
                 .source_task_id
                 .map(|task_id| task_id.as_str().to_owned()),

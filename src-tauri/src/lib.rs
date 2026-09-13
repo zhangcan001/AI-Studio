@@ -29,6 +29,7 @@ pub use infrastructure::database::{
 
 use app_state::AppState;
 use application::{
+    asset_data_service::AssetDataService,
     asset_deletion_service::AssetDeletionService,
     asset_library_service::AssetLibraryService,
     asset_query_service::AssetQueryService,
@@ -593,6 +594,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 asset_browse_repository,
                 organization_repository.clone(),
             ));
+            let asset_data_service = Arc::new(AssetDataService::new(asset_repository.clone()));
             let reference_anchor_service = Arc::new(ReferenceAnchorService::new(
                 reference_anchor_repository.clone(),
                 asset_repository.clone(),
@@ -924,6 +926,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 task_query_service,
                 asset_query_service,
                 asset_library_service,
+                asset_data_service,
                 asset_usage_service,
                 production_structure_service,
                 project_command_center_service,
@@ -1355,6 +1358,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::asset::asset_read_thumbnail,
             commands::asset::asset_library_page,
             commands::asset::asset_get,
+            commands::asset::asset_versions_list,
+            commands::asset::asset_relations_list,
             commands::asset::inspect_asset_deletion,
             commands::asset::delete_assets,
             commands::asset::asset_video_prompt_get,

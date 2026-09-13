@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, getAssetVideoPrompt, readAssetImage, readAssetThumbnail, removeAssetTag, setAssetFavorite, setAssetVideoPrompt } from "../../services/tauriClient";
-import type { AssetView } from "../../types/asset";
+import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, getAssetVideoPrompt, listAssetRelations, listAssetVersions, readAssetImage, readAssetThumbnail, removeAssetTag, setAssetFavorite, setAssetVideoPrompt } from "../../services/tauriClient";
+import type { AssetRelationView, AssetVersionView, AssetView } from "../../types/asset";
 import type { AssetTag } from "../../types/organization";
 import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 import { AssetUsagePanel } from "./AssetUsagePanel";
@@ -27,6 +27,10 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
   const [videoPrompt, setVideoPrompt] = useState("");
   const [videoPromptBusy, setVideoPromptBusy] = useState(false);
   const [videoPromptNotice, setVideoPromptNotice] = useState<string>();
+  const [versions, setVersions] = useState<AssetVersionView[]>([]);
+  const [relations, setRelations] = useState<AssetRelationView[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string>();
 
   useEffect(() => {
     let active = true;
@@ -74,6 +78,30 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
 
   useEffect(() => {
     let active = true;
+    setVersions([]);
+    setRelations([]);
+    setHistoryLoading(true);
+    setHistoryError(undefined);
+    void Promise.all([
+      listAssetVersions(projectId, asset.id),
+      listAssetRelations(projectId, asset.id),
+    ])
+      .then(([nextVersions, nextRelations]) => {
+        if (!active) return;
+        setVersions(nextVersions);
+        setRelations(nextRelations);
+      })
+      .catch((value: unknown) => {
+        if (active) setHistoryError(toAssetDetailError(value));
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
+      });
+    return () => { active = false; };
+  }, [asset.id, projectId]);
+
+  useEffect(() => {
+    let active = true;
     setVideoPrompt("");
     setVideoPromptNotice(undefined);
     if (!isImage) return () => { active = false; };
@@ -92,6 +120,9 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
   const videoPromptBytes = new TextEncoder().encode(videoPrompt).byteLength;
   const displayName = assetDisplayName(asset);
   const displayOriginalName = assetDisplayName(asset, asset.originalName);
+  const currentVersion = versions.reduce<AssetVersionView | undefined>((current, version) => (
+    !current || version.versionNumber > current.versionNumber ? version : current
+  ), undefined);
 
   async function refreshOrganization() {
     const refreshed = await getAsset(projectId, asset.id);
@@ -183,6 +214,57 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
         <p className="asset-preview-meta">
           {assetTypeLabel(asset)} · {displayOriginalName} · {isVideo || isAudio ? formatDurationMs(asset.durationMs) : `${asset.width ?? "--"} × ${asset.height ?? "--"}`} · {formatFileSize(asset.fileSize)} · {formatDateTime(asset.createdAt)}
         </p>
+        <section className="asset-detail-metadata" aria-label="素材元数据">
+          <div className="asset-detail-section-heading"><strong>元数据</strong><span className="status-pill">项目：{projectId}</span></div>
+          <dl className="asset-detail-definition-list">
+            <div><dt>名称</dt><dd>{displayName}</dd></div>
+            <div><dt>类型</dt><dd>{assetTypeLabel(asset)}</dd></div>
+            <div><dt>描述</dt><dd>{"暂无描述"}</dd></div>
+            <div><dt>标签</dt><dd>{asset.tags.length ? asset.tags.map((tag) => tag.name).join("、") : "暂无标签"}</dd></div>
+            <div><dt>当前版本</dt><dd>{currentVersion ? `v${currentVersion.versionNumber}` : "未建立版本记录"}</dd></div>
+            <div><dt>更新时间</dt><dd>{formatDateTime(asset.updatedAt ?? asset.createdAt)}</dd></div>
+          </dl>
+        </section>
+        <section className="asset-detail-section" aria-label="版本历史">
+          <div className="asset-detail-section-heading"><div><strong>版本历史</strong><small>历史版本只读，不会覆盖已有素材。</small></div>{currentVersion && <span className="status-pill">当前 v{currentVersion.versionNumber}</span>}</div>
+          {historyLoading && <p className="disabled-note" role="status">正在加载版本历史…</p>}
+          {historyError && <p className="error-message" role="alert">版本与关系加载失败：{historyError}</p>}
+          {!historyLoading && !historyError && !versions.length && <p className="empty-state">暂无版本历史。当前资产仍可作为未建立版本记录的旧资产使用。</p>}
+          {!historyLoading && !historyError && versions.length > 0 && (
+            <ol className="asset-version-history">
+              {[...versions].sort((left, right) => right.versionNumber - left.versionNumber).map((version) => (
+                <li key={version.id} className={version.id === currentVersion?.id ? "asset-version-current" : undefined}>
+                  <strong>v{version.versionNumber}</strong>
+                  {version.id === currentVersion?.id && <span className="status-pill">当前</span>}
+                  <small>{formatDateTime(version.createdAt)}</small>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+        <section className="asset-detail-section" aria-label="资产关系">
+          <div className="asset-detail-section-heading"><div><strong>资产关系</strong><small>关系使用稳定资产 ID，并保持当前项目隔离。</small></div><span className="status-pill">{relations.length} 条</span></div>
+          {!historyLoading && !historyError && !relations.length && <p className="empty-state">暂无资产关系。</p>}
+          {!historyLoading && !historyError && relations.length > 0 && (
+            <ul className="asset-relation-list">
+              {relations.map((relation) => {
+                const outgoing = relation.sourceAssetId === asset.id;
+                const relatedName = outgoing ? relation.targetAssetName : relation.sourceAssetName;
+                const relatedId = outgoing ? relation.targetAssetId : relation.sourceAssetId;
+                return <li key={relation.id}><strong>{relationTypeLabel(relation.relationType)}</strong><span>{relatedName || "未命名资产"}</span><small>{relatedId} · {formatDateTime(relation.createdAt)}</small></li>;
+              })}
+            </ul>
+          )}
+        </section>
+        <section className="asset-detail-section" aria-label="素材来源与溯源">
+          <div className="asset-detail-section-heading"><div><strong>来源与溯源</strong><small>只展示现有 Asset/Task 传输提供的来源信息。</small></div></div>
+          <dl className="asset-detail-definition-list">
+            <div><dt>Prompt</dt><dd>{asset.sourceTaskId ? "随生成任务记录" : "未关联 Prompt"}</dd></div>
+            <div><dt>Model</dt><dd>未记录</dd></div>
+            <div><dt>Generation</dt><dd>{asset.sourceTaskId ? `任务 ${asset.sourceTaskId}` : "本地导入或未关联生成记录"}</dd></div>
+            <div><dt>Date</dt><dd>{formatDateTime(asset.createdAt)}</dd></div>
+          </dl>
+        </section>
         {isImage && (
           <section className="asset-video-prompt-panel" aria-label="视频提示词">
             <div className="asset-video-prompt-heading">
@@ -236,4 +318,22 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
       </section>
     </div>
   );
+}
+
+function relationTypeLabel(value: string): string {
+  const labels: Record<string, string> = {
+    SOURCE_OF: "来源于",
+    DERIVED_FROM: "派生自",
+    VARIANT_OF: "变体",
+    REFERENCE: "参考",
+    REPLACEMENT: "替代",
+    RELATED: "相关",
+  };
+  return labels[value] ?? value;
+}
+
+function toAssetDetailError(value: unknown): string {
+  if (value instanceof Error && value.message) return value.message;
+  if (typeof value === "string" && value) return value;
+  return "请稍后重试。";
 }

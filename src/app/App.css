@@ -411,6 +411,9 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-library-card-copy { display: grid; gap: 4px; padding: 11px; }
 .asset-library-card-copy strong, .asset-library-card-copy span, .asset-library-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-library-card-copy span, .asset-library-card-copy small { color: #8997ad; font-size: 0.76rem; }
+.asset-library-project-scope { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 12px 0; padding: 10px 12px; border: 1px solid #35435b; border-radius: 10px; background: #111720; color: #b9c8df; }
+.asset-library-project-scope strong { color: #eef4ff; font-size: 0.85rem; }
+.asset-library-project-scope small { color: #8997ad; }
 .load-more-button { display: block; margin: 20px auto 0; min-width: 140px; }
 .empty-state { margin: 24px 0 0; color: #8997ad; }
 .asset-preview-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 24px; background: rgb(4 7 12 / 78%); }
@@ -421,6 +424,18 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .asset-preview-image audio { width: min(620px, 90%); }
 .asset-preview-image p { color: #8997ad; }
 .asset-preview-meta { margin: 12px 0 0; color: #8997ad; font-size: 0.8rem; }
+.asset-detail-section, .asset-detail-metadata { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #2d394d; }
+.asset-detail-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.asset-detail-section-heading > div { display: grid; gap: 3px; }
+.asset-detail-section-heading small { color: #8997ad; }
+.asset-detail-definition-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.asset-detail-definition-list > div { min-width: 0; padding: 8px 10px; border: 1px solid #2d394d; border-radius: 8px; background: #111720; }
+.asset-detail-definition-list dt { color: #8997ad; font-size: 0.72rem; }
+.asset-detail-definition-list dd { margin: 3px 0 0; color: #eef4ff; overflow-wrap: anywhere; }
+.asset-version-history, .asset-relation-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.asset-version-history li, .asset-relation-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 8px 10px; border: 1px solid #2d394d; border-radius: 8px; background: #111720; }
+.asset-version-history li small, .asset-relation-list li small { color: #8997ad; }
+.asset-version-current { border-color: #75a1e9 !important; }
 .asset-video-prompt-panel {
   display: grid;
   gap: 10px;
