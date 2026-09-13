@@ -5,7 +5,7 @@ reliability of cancellation test synchronization, bounds Source-only CI jobs,
 reduces the initial frontend bundle warning, and makes generic task failures
 easier to diagnose without changing the product execution model.
 
-## What changed
+## Stability Improvements
 
 - Cancellation end-to-end tests now use bounded, scheduler-friendly waits and
   cover repeated cancellation while still asserting interruption, terminal
@@ -18,6 +18,14 @@ easier to diagnose without changing the product execution model.
   initial JavaScript chunk is below Vite's 500 kB warning threshold.
 - Failed Studio tasks show localized next-action guidance, expandable technical
   details, and the existing task-detail route when available.
+
+## No Workflow Changes
+
+Production workflow remains unchanged.
+
+Queue Start remains the only execution gate. The Production Queue remains the
+only production execution authority; preparation and review do not start
+production.
 
 ## Safety and compatibility
 
@@ -36,7 +44,7 @@ new product flow.
 - Source-only CI: exact final-head run is recorded in
   `docs/DEV_116_RELEASE_HEALTH.md`.
 
-## Known non-blocking debt
+## Known Issues
 
 - Documentation-only Source-only CI dispatch remains manual.
 - Some diagnostic vocabulary remains technical by design.
