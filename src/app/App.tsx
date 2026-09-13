@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import {
   getComfyStatus,
   getRuntimeActivityStatus,
@@ -27,18 +27,8 @@ import { useWorkspaceResumeStore } from "../stores/workspaceResumeStore";
 import type { RecipeViewModel } from "../types/generation";
 import type { AssetView } from "../types/asset";
 import type { TemplateProjectResult } from "../types/organization";
-import { GenerationStudio } from "../features/studio/GenerationStudio";
-import { AssetWorkspace } from "../features/assets/AssetWorkspace";
-import { AssetVideoBatchWorkspace } from "../features/assets/AssetVideoBatchWorkspace";
-import { TaskHistory } from "../features/tasks/TaskHistory";
-import { ProjectWorkspace } from "../features/projects/ProjectWorkspace";
-import {
-  ProjectCommandCenter,
-  type ProjectCommandCenterNavigationRequest,
-} from "../features/projects/ProjectCommandCenter";
-import { WorkflowWorkspace } from "../features/workflows/WorkflowWorkspace";
-import { SettingsWorkspace } from "../features/settings/SettingsWorkspace";
-import { ShotWorkspace, type ShotContextPathItem } from "../features/shots/ShotWorkspace";
+import type { ProjectCommandCenterNavigationRequest } from "../features/projects/ProjectCommandCenter";
+import type { ShotContextPathItem } from "../features/shots/ShotWorkspace";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import { useStudioStore } from "../stores/studioStore";
@@ -76,6 +66,16 @@ import {
 import "./App.css";
 import "../styles/studioTokens.css";
 import "../styles/uiPolish.css";
+
+const GenerationStudio = lazy(() => import("../features/studio/GenerationStudio").then(({ GenerationStudio }) => ({ default: GenerationStudio })));
+const AssetWorkspace = lazy(() => import("../features/assets/AssetWorkspace").then(({ AssetWorkspace }) => ({ default: AssetWorkspace })));
+const AssetVideoBatchWorkspace = lazy(() => import("../features/assets/AssetVideoBatchWorkspace").then(({ AssetVideoBatchWorkspace }) => ({ default: AssetVideoBatchWorkspace })));
+const TaskHistory = lazy(() => import("../features/tasks/TaskHistory").then(({ TaskHistory }) => ({ default: TaskHistory })));
+const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
+const ProjectCommandCenter = lazy(() => import("../features/projects/ProjectCommandCenter").then(({ ProjectCommandCenter }) => ({ default: ProjectCommandCenter })));
+const WorkflowWorkspace = lazy(() => import("../features/workflows/WorkflowWorkspace").then(({ WorkflowWorkspace }) => ({ default: WorkflowWorkspace })));
+const SettingsWorkspace = lazy(() => import("../features/settings/SettingsWorkspace").then(({ SettingsWorkspace }) => ({ default: SettingsWorkspace })));
+const ShotWorkspace = lazy(() => import("../features/shots/ShotWorkspace").then(({ ShotWorkspace }) => ({ default: ShotWorkspace })));
 
 const workspaceLabels: Record<Workspace, string> = {
   "command-center": "项目中心",
@@ -958,172 +958,174 @@ function App() {
       )}
 
       {!activeProject && projectError && <p className="error-message global-error">项目加载失败：{projectError}</p>}
-      {workspace === "command-center" && (
-        <WorkspaceErrorBoundary
-          resetKey={activeProject?.id ?? "no-project"}
-          onBackToAssets={() => navigateToWorkspace("assets")}
-          onRetry={() => navigateToWorkspace("command-center")}
-        >
-          <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />
-        </WorkspaceErrorBoundary>
-      )}
-      {activeProject && workspace === "studio" && (
-        <section className="studio-layout">
-          <GenerationStudio
-            projectId={activeProject.id}
-            catalog={catalog}
-            comfyConnected={isConnected}
-            taskEventsReady={taskEventsReady}
-            taskEventError={taskEventError}
-            productionAdmission={productionAdmission}
-            focusProductionBatchId={focusedProductionBatchId}
-            onCatalogChanged={reloadCatalog}
-            onProductionAdmissionChanged={refreshProductionAdmission}
-            onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
-            onOpenWorkflows={() => navigateToWorkspace("workflows")}
-            onReconnectComfy={() => void reconnectComfy()}
-            onOpenTask={(taskId) => {
-              openTask(taskId);
-            }}
-            onOpenProductionQueue={(batchId) => {
-              if (batchId) {
-                applyNavigationFocus({ workspace: "shots", section: "production", batchId });
-                navigateToRoute("shots", "production", true);
-              } else navigateToStudioSection("production");
-            }}
-          />
-        </section>
-      )}
-      {activeProject && workspace === "assets" && (
-        <AssetWorkspace
-          projectId={activeProject.id}
-          initialAssetId={focusedAssetId}
-          onUseInStudio={useAssetInStudio}
-          onOpenVideoBatch={openVideoBatch}
-          onOpenTask={(taskId) => {
-            openTask(taskId);
-          }}
-          onOpenShot={openShotFromAsset}
-        />
-      )}
-      {activeProject && workspace === "shots" && (
-        <WorkspaceErrorBoundary
-          resetKey={activeProject.id}
-          onBackToAssets={() => navigateToWorkspace("assets")}
-          onRetry={() => navigateToWorkspace("shots")}
-        >
-          <ShotWorkspace
-            projectId={activeProject.id}
-            projectName={activeProject.name}
-            catalog={catalog}
-            initialSelectedShotId={resumeShotId}
-            initialCollectionFilter={focusedCollectionFilter}
-            mode={shotWorkspaceModeForSection(activeStudioSection)}
-            onShotSelected={handleShotSelected}
-            onContextPathChange={handleShotContextPathChange}
-            contextPathTarget={shotContextTarget}
-            onOpenAsset={openAssetFromShot}
-            onOpenTask={(taskId) => {
-              openTask(taskId);
-            }}
-            onNavigate={navigateFromCommandCenter}
-            focusProductionBatchId={focusedProductionBatchId}
-            focusProductionReviewItemId={focusedProductionReviewItemId}
-            focusProductionStage={focusedProductionStage}
-            onOpenProductionQueue={openProductionQueueFromShot}
-            consistencyWorkspace={{
-              profiles: consistencyProfiles,
-              referenceSets: consistencyReferenceSets,
-              costumesByCharacter: consistencyCostumes,
-              loading: consistencyLoading,
-              error: consistencyError,
-              loadBindingPack: loadConsistencyBindingPack,
-              onSaveBindingPack: saveConsistencyBindingPack,
-              loadContext: loadConsistencyContext,
-              onOpenAssets: () => navigateToWorkspace("assets"),
-            }}
-          />
-        </WorkspaceErrorBoundary>
-      )}
-      {activeProject && workspace === "video" && (
-        <WorkspaceErrorBoundary
-          resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
-          onBackToAssets={() => navigateToWorkspace("assets")}
-          onRetry={() => {
-            setVideoBatchAssets([]);
-            navigateToWorkspace("video");
-          }}
-        >
-          <AssetVideoBatchWorkspace
-            projectId={activeProject.id}
-            catalog={catalog}
-            initialAssets={videoBatchAssets}
-            comfyConnected={isConnected}
-            taskEventsReady={taskEventsReady}
-            productionAdmission={productionAdmission}
-            focusProductionBatchId={focusedProductionBatchId}
-            onAdmissionChanged={refreshProductionAdmission}
-            onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
-            onOpenTask={(taskId) => {
-              openTask(taskId);
-            }}
-            onOpenProductionQueue={(batchId) => {
-              if (batchId) {
-                applyNavigationFocus({ workspace: "shots", section: "production", batchId });
-                navigateToRoute("shots", "production", true);
-              } else navigateToStudioSection("production");
-            }}
+      <Suspense fallback={<p className="workspace-loading" role="status">正在加载工作区...</p>}>
+        {workspace === "command-center" && (
+          <WorkspaceErrorBoundary
+            resetKey={activeProject?.id ?? "no-project"}
             onBackToAssets={() => navigateToWorkspace("assets")}
-            onOpenWorkflows={() => navigateToWorkspace("workflows")}
+            onRetry={() => navigateToWorkspace("command-center")}
+          >
+            <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />
+          </WorkspaceErrorBoundary>
+        )}
+        {activeProject && workspace === "studio" && (
+          <section className="studio-layout">
+            <GenerationStudio
+              projectId={activeProject.id}
+              catalog={catalog}
+              comfyConnected={isConnected}
+              taskEventsReady={taskEventsReady}
+              taskEventError={taskEventError}
+              productionAdmission={productionAdmission}
+              focusProductionBatchId={focusedProductionBatchId}
+              onCatalogChanged={reloadCatalog}
+              onProductionAdmissionChanged={refreshProductionAdmission}
+              onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
+              onOpenWorkflows={() => navigateToWorkspace("workflows")}
+              onReconnectComfy={() => void reconnectComfy()}
+              onOpenTask={(taskId) => {
+                openTask(taskId);
+              }}
+              onOpenProductionQueue={(batchId) => {
+                if (batchId) {
+                  applyNavigationFocus({ workspace: "shots", section: "production", batchId });
+                  navigateToRoute("shots", "production", true);
+                } else navigateToStudioSection("production");
+              }}
+            />
+          </section>
+        )}
+        {activeProject && workspace === "assets" && (
+          <AssetWorkspace
+            projectId={activeProject.id}
+            initialAssetId={focusedAssetId}
+            onUseInStudio={useAssetInStudio}
+            onOpenVideoBatch={openVideoBatch}
+            onOpenTask={(taskId) => {
+              openTask(taskId);
+            }}
+            onOpenShot={openShotFromAsset}
           />
-        </WorkspaceErrorBoundary>
-      )}
-      {activeProject && workspace === "tasks" && (
-        <TaskHistory
-          projectId={activeProject.id}
-          comfyConnected={isConnected}
-          productionBusy={productionAdmission.busy}
-          focusTaskId={focusedTaskId}
-          initialFilter={focusedCollectionFilter?.kind === "tasks" ? focusedCollectionFilter.status : undefined}
-          onLoadInputs={loadHistoricalInputs}
-          onOpenShot={(shotId) => openShot(shotId)}
-        />
-      )}
-      {workspace === "projects" && (
-        <ProjectWorkspace
-          projects={projects}
-          activeProjectId={activeProjectId}
-          catalog={catalog}
-          onOpen={openProject}
-          onProjectUpdated={handleProjectUpdated}
-          onProjectRestored={handleProjectRestored}
-          onTemplateProjectCreated={handleTemplateProjectCreated}
-        />
-      )}
-      {workspace === "workflows" && (
-        <WorkflowWorkspace
-          projectId={activeProject?.id}
-          catalog={catalog}
-          comfyConnected={isConnected}
-          onCatalogChanged={reloadCatalog}
-          onOpenStudio={openPublishedWorkflow}
-          onUseInProject={openWorkflowForProject}
-          onOpenProjectSettings={() => navigateToWorkspace("projects")}
-          onOpenTask={(taskId) => {
-            openTask(taskId);
-          }}
-        />
-      )}
-      {workspace === "settings" && (
-        <SettingsWorkspace
-          comfy={comfy}
-          connectionLoading={connectionLoading}
-          capabilityLoading={capabilityLoading}
-          onReconnect={() => void reconnectComfy()}
-          onRefreshCapabilities={() => void refreshCapabilities()}
-          onEndpointApplied={() => void refreshRuntimeAfterEndpoint()}
-        />
-      )}
+        )}
+        {activeProject && workspace === "shots" && (
+          <WorkspaceErrorBoundary
+            resetKey={activeProject.id}
+            onBackToAssets={() => navigateToWorkspace("assets")}
+            onRetry={() => navigateToWorkspace("shots")}
+          >
+            <ShotWorkspace
+              projectId={activeProject.id}
+              projectName={activeProject.name}
+              catalog={catalog}
+              initialSelectedShotId={resumeShotId}
+              initialCollectionFilter={focusedCollectionFilter}
+              mode={shotWorkspaceModeForSection(activeStudioSection)}
+              onShotSelected={handleShotSelected}
+              onContextPathChange={handleShotContextPathChange}
+              contextPathTarget={shotContextTarget}
+              onOpenAsset={openAssetFromShot}
+              onOpenTask={(taskId) => {
+                openTask(taskId);
+              }}
+              onNavigate={navigateFromCommandCenter}
+              focusProductionBatchId={focusedProductionBatchId}
+              focusProductionReviewItemId={focusedProductionReviewItemId}
+              focusProductionStage={focusedProductionStage}
+              onOpenProductionQueue={openProductionQueueFromShot}
+              consistencyWorkspace={{
+                profiles: consistencyProfiles,
+                referenceSets: consistencyReferenceSets,
+                costumesByCharacter: consistencyCostumes,
+                loading: consistencyLoading,
+                error: consistencyError,
+                loadBindingPack: loadConsistencyBindingPack,
+                onSaveBindingPack: saveConsistencyBindingPack,
+                loadContext: loadConsistencyContext,
+                onOpenAssets: () => navigateToWorkspace("assets"),
+              }}
+            />
+          </WorkspaceErrorBoundary>
+        )}
+        {activeProject && workspace === "video" && (
+          <WorkspaceErrorBoundary
+            resetKey={`${activeProject.id}:${videoBatchAssets.map((asset) => asset.id).join(",")}`}
+            onBackToAssets={() => navigateToWorkspace("assets")}
+            onRetry={() => {
+              setVideoBatchAssets([]);
+              navigateToWorkspace("video");
+            }}
+          >
+            <AssetVideoBatchWorkspace
+              projectId={activeProject.id}
+              catalog={catalog}
+              initialAssets={videoBatchAssets}
+              comfyConnected={isConnected}
+              taskEventsReady={taskEventsReady}
+              productionAdmission={productionAdmission}
+              focusProductionBatchId={focusedProductionBatchId}
+              onAdmissionChanged={refreshProductionAdmission}
+              onProductionBatchFocused={() => setFocusedProductionBatchId(undefined)}
+              onOpenTask={(taskId) => {
+                openTask(taskId);
+              }}
+              onOpenProductionQueue={(batchId) => {
+                if (batchId) {
+                  applyNavigationFocus({ workspace: "shots", section: "production", batchId });
+                  navigateToRoute("shots", "production", true);
+                } else navigateToStudioSection("production");
+              }}
+              onBackToAssets={() => navigateToWorkspace("assets")}
+              onOpenWorkflows={() => navigateToWorkspace("workflows")}
+            />
+          </WorkspaceErrorBoundary>
+        )}
+        {activeProject && workspace === "tasks" && (
+          <TaskHistory
+            projectId={activeProject.id}
+            comfyConnected={isConnected}
+            productionBusy={productionAdmission.busy}
+            focusTaskId={focusedTaskId}
+            initialFilter={focusedCollectionFilter?.kind === "tasks" ? focusedCollectionFilter.status : undefined}
+            onLoadInputs={loadHistoricalInputs}
+            onOpenShot={(shotId) => openShot(shotId)}
+          />
+        )}
+        {workspace === "projects" && (
+          <ProjectWorkspace
+            projects={projects}
+            activeProjectId={activeProjectId}
+            catalog={catalog}
+            onOpen={openProject}
+            onProjectUpdated={handleProjectUpdated}
+            onProjectRestored={handleProjectRestored}
+            onTemplateProjectCreated={handleTemplateProjectCreated}
+          />
+        )}
+        {workspace === "workflows" && (
+          <WorkflowWorkspace
+            projectId={activeProject?.id}
+            catalog={catalog}
+            comfyConnected={isConnected}
+            onCatalogChanged={reloadCatalog}
+            onOpenStudio={openPublishedWorkflow}
+            onUseInProject={openWorkflowForProject}
+            onOpenProjectSettings={() => navigateToWorkspace("projects")}
+            onOpenTask={(taskId) => {
+              openTask(taskId);
+            }}
+          />
+        )}
+        {workspace === "settings" && (
+          <SettingsWorkspace
+            comfy={comfy}
+            connectionLoading={connectionLoading}
+            capabilityLoading={capabilityLoading}
+            onReconnect={() => void reconnectComfy()}
+            onRefreshCapabilities={() => void refreshCapabilities()}
+            onEndpointApplied={() => void refreshRuntimeAfterEndpoint()}
+          />
+        )}
+      </Suspense>
 
       {taskEventError && <p className="error-message global-error">{taskEventError}</p>}
       {workflowNotice && <p className="workflow-notice" role="status">{workflowNotice}</p>}

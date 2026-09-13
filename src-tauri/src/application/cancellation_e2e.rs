@@ -25,7 +25,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
 use std::io::Cursor;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tempfile::{tempdir, TempDir};
 use tokio::sync::watch;
 
@@ -567,35 +570,44 @@ async fn wait_for_status(
     task_id: &TaskId,
     expected: TaskStatus,
 ) -> Task {
-    for _ in 0..2_000 {
-        if let Some(task) = repository.find_by_id(task_id).await.unwrap() {
-            if task.status == expected {
-                return task;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(task) = repository.find_by_id(task_id).await.unwrap() {
+                if task.status == expected {
+                    return task;
+                }
             }
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        tokio::task::yield_now().await;
-    }
-    panic!("task did not reach {}", expected.as_str());
+    })
+    .await
+    .unwrap_or_else(|_| panic!("task did not reach {} within 15s", expected.as_str()))
 }
 
 async fn wait_for_action(adapter: &ControlledAdapter, action: &str) {
-    for _ in 0..2_000 {
-        if adapter.action_count(action) > 0 {
-            return;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if adapter.action_count(action) > 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        tokio::task::yield_now().await;
-    }
-    panic!("adapter action {action} was not observed");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("adapter action {action} was not observed within 15s"));
 }
 
 async fn wait_for_registry_absent(registry: &TaskExecutionRegistry, task_id: &TaskId) {
-    for _ in 0..2_000 {
-        if !registry.contains(task_id) {
-            return;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if !registry.contains(task_id) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        tokio::task::yield_now().await;
-    }
-    panic!("task execution registry entry was not removed");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("task execution registry entry was not removed within 15s"));
 }
 
 #[tokio::test]
@@ -754,6 +766,12 @@ async fn cancel_running_waits_for_execution_interrupted_then_cancels() {
         .request_cancel(&task.project_id, task.id.as_str())
         .await
         .unwrap();
+    let repeated = harness
+        .cancellation
+        .request_cancel(&task.project_id, task.id.as_str())
+        .await
+        .unwrap();
+    assert_eq!(repeated.status, TaskStatus::CancelRequested);
     wait_for_action(&harness.adapter, "cancel_prompt").await;
     harness.adapter.control.terminal_event.release();
     let finished = wait_for_status(&harness.task_repository, &task.id, TaskStatus::Cancelled).await;

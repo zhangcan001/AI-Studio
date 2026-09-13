@@ -90,4 +90,21 @@ describe("studio product UX contracts", () => {
     expect(successHtml).toContain("用时");
     expect(successHtml).toContain("compact-task-card");
   });
+
+  it("shows localized failure guidance and opens task details", () => {
+    const task: TaskView = {
+      id: "tsk_failed",
+      projectId: "prj_default",
+      status: "FAILED",
+      progress: { mode: "indeterminate" },
+      error: { code: "EXECUTION_ERROR", message: "ComfyUI execution failed" },
+      createdAt: "2026-08-09T00:00:00.000Z",
+      finishedAt: "2026-08-09T00:00:42.000Z",
+      outputAssetIds: [],
+    };
+
+    const html = renderToStaticMarkup(<TaskProgressCard task={task} onOpenTask={vi.fn()} />);
+    expect(html).toContain("生成执行失败，请查看任务详情中的技术信息。");
+    expect(html).toContain("打开任务详情处理");
+  });
 });

@@ -16,6 +16,7 @@ jobs:
   rust:
     name: Rust source checks
     runs-on: windows-latest
+    timeout-minutes: 25
     env:
       AI_STUDIO_LIVE_COMFY: "0"
     steps:
@@ -45,6 +46,7 @@ jobs:
   frontend:
     name: Frontend source checks
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4

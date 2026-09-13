@@ -1,14 +1,15 @@
 import type { TaskView } from "../../types/task";
-import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDurationMs, taskStatusLabel } from "../../i18n/statusLabels";
+import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 
 interface Props {
   task?: TaskView;
   cancelling?: boolean;
   onCancel?: () => void | Promise<void>;
+  onOpenTask?: () => void;
 }
 
-export function TaskProgressCard({ task, cancelling = false, onCancel }: Props) {
+export function TaskProgressCard({ task, cancelling = false, onCancel, onOpenTask }: Props) {
   if (!task) {
     return (
       <section className="task-card empty-task">
@@ -45,8 +46,8 @@ export function TaskProgressCard({ task, cancelling = false, onCancel }: Props) 
       </div>
       {task.status === "FAILED" && task.error && (
         <div className="task-error">
-          <strong>{task.error.code}</strong>
-          <span>{toUserMessage(task.error)}</span>
+          <UiErrorNotice error={task.error} className="task-error-notice" />
+          {onOpenTask && <button type="button" className="quiet-button" onClick={onOpenTask}>打开任务详情处理</button>}
         </div>
       )}
       {task.progress.mode === "step" && progress !== undefined ? (
