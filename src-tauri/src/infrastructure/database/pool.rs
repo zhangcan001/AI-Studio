@@ -73,6 +73,7 @@ mod tests {
                'production_runs', 'production_stages', 'production_stage_items',
                'production_run_templates', 'reference_anchors', 'reference_anchor_assets',
                'asset_versions', 'asset_relations',
+               'models', 'model_versions',
                'production_series', 'production_episodes', 'production_scenes',
                'shot_scene_assignments', 'profile_revisions', 'reference_sets',
                'style_profiles', 'character_profiles', 'scene_profiles', 'prop_profiles',
@@ -98,13 +99,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 61);
+        assert_eq!(table_count(&pool).await, 63);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            33
+            34
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -215,6 +216,55 @@ mod tests {
                 "parent_task_id"
             ]
         );
+        let model_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('models') ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("model columns should be readable");
+        assert_eq!(
+            model_columns,
+            vec![
+                "id",
+                "name",
+                "provider",
+                "type",
+                "description",
+                "metadata_json",
+                "created_at"
+            ]
+        );
+        let model_version_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('model_versions') ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("model version columns should be readable");
+        assert_eq!(
+            model_version_columns,
+            vec![
+                "id",
+                "model_id",
+                "version",
+                "capabilities_json",
+                "parameter_schema_json",
+                "created_at"
+            ]
+        );
+        for (table, column) in [
+            ("prompt_versions", "model_version_id"),
+            ("generation_snapshots", "model_version_id"),
+        ] {
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                ))
+                .fetch_one(&pool)
+                .await
+                .expect("model provenance column should be readable"),
+                1
+            );
+        }
         assert_eq!(
             sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM sqlite_master
@@ -278,12 +328,12 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 61);
+        assert_eq!(table_count(&second_pool).await, 63);
         second_pool.close().await;
     }
 
     #[tokio::test]
-    async fn migration_033_preserves_existing_project_asset_shot_task_review_rows() {
+    async fn migration_033_and_034_preserve_existing_project_asset_shot_task_review_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-032.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -486,6 +536,49 @@ mod tests {
                 .expect("foreign keys pragma should be readable"),
             1
         );
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/034_prompt_studio_model_foundation.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration 034 should apply to the legacy database");
+
+        let after_034: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM projects WHERE id = 'legacy-v2-project'),
+               (SELECT COUNT(*) FROM assets WHERE id = 'ast_legacy_v2_asset'),
+               (SELECT COUNT(*) FROM shots WHERE id = 'legacy-v2-shot'),
+               (SELECT COUNT(*) FROM tasks WHERE id = 'legacy-v2-task'),
+               (SELECT COUNT(*) FROM production_item_reviews WHERE id = 'legacy-v2-review')",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("post-034 row snapshot should be readable");
+        assert_eq!(after_034, before);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name IN ('models', 'model_versions')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("model tables should be readable"),
+            2
+        );
+        for (table, column) in [
+            ("prompt_versions", "model_version_id"),
+            ("generation_snapshots", "model_version_id"),
+        ] {
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                ))
+                .fetch_one(&pool)
+                .await
+                .expect("model provenance column should be readable"),
+                1
+            );
+        }
         pool.close().await;
     }
 

@@ -3,6 +3,7 @@ use crate::application::ports::{
     Clock, PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
     RepositoryError,
 };
+use crate::domain::ModelVersionId;
 use serde::Serialize;
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 use uuid::Uuid;
@@ -20,6 +21,7 @@ pub struct PromptVersionView {
     pub version: i64,
     pub text: String,
     pub created_at: String,
+    pub model_version_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -111,12 +113,26 @@ impl PromptLibraryService {
         tags: &[String],
         text: &str,
     ) -> Result<PromptEntryView, PromptLibraryError> {
+        self.create_with_model_version(project_id, kind, name, tags, text, None)
+            .await
+    }
+
+    pub async fn create_with_model_version(
+        &self,
+        project_id: &str,
+        kind: &str,
+        name: &str,
+        tags: &[String],
+        text: &str,
+        model_version_id: Option<&str>,
+    ) -> Result<PromptEntryView, PromptLibraryError> {
         validate_project_id(project_id)?;
         let kind = validate_kind(kind)?;
         let (name, normalized_name) =
             canonical_prompt_name(name).map_err(PromptLibraryError::InvalidInput)?;
         let tags = canonical_prompt_tags(tags).map_err(PromptLibraryError::InvalidInput)?;
         let text = canonical_prompt_text(text).map_err(PromptLibraryError::InvalidInput)?;
+        let model_version_id = normalize_model_version_id(model_version_id)?;
         let now = self.clock.now().to_rfc3339();
         let entry = PromptEntryRecord {
             id: format!("prm_{}", Uuid::new_v4()),
@@ -136,6 +152,7 @@ impl PromptLibraryService {
             version: 1,
             text,
             created_at: now,
+            model_version_id,
         };
         self.repository.create(&entry, &first_version).await?;
         record_to_view(entry, vec![first_version])
@@ -147,9 +164,21 @@ impl PromptLibraryService {
         prompt_id: &str,
         text: &str,
     ) -> Result<PromptVersionView, PromptLibraryError> {
+        self.add_version_with_model_version(project_id, prompt_id, text, None)
+            .await
+    }
+
+    pub async fn add_version_with_model_version(
+        &self,
+        project_id: &str,
+        prompt_id: &str,
+        text: &str,
+        model_version_id: Option<&str>,
+    ) -> Result<PromptVersionView, PromptLibraryError> {
         validate_project_id(project_id)?;
         validate_id(prompt_id, "PROMPT")?;
         let text = canonical_prompt_text(text).map_err(PromptLibraryError::InvalidInput)?;
+        let model_version_id = normalize_model_version_id(model_version_id)?;
         let version = self
             .repository
             .append_version(
@@ -157,6 +186,7 @@ impl PromptLibraryService {
                 prompt_id,
                 &format!("prv_{}", Uuid::new_v4()),
                 &text,
+                model_version_id.as_deref(),
                 &self.clock.now().to_rfc3339(),
             )
             .await?;
@@ -237,7 +267,18 @@ fn version_to_view(version: PromptVersionRecord) -> PromptVersionView {
         version: version.version,
         text: version.text,
         created_at: version.created_at,
+        model_version_id: version.model_version_id,
     }
+}
+
+fn normalize_model_version_id(value: Option<&str>) -> Result<Option<String>, PromptLibraryError> {
+    value
+        .map(|value| {
+            ModelVersionId::parse(value.trim().to_owned())
+                .map(|id| id.as_str().to_owned())
+                .map_err(|error| PromptLibraryError::InvalidInput(error.to_string()))
+        })
+        .transpose()
 }
 
 pub(crate) fn canonical_prompt_name(value: &str) -> Result<(String, String), String> {
@@ -356,7 +397,9 @@ impl From<RepositoryError> for PromptLibraryError {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_prompt_name, canonical_prompt_tags, canonical_prompt_text};
+    use super::{
+        canonical_prompt_name, canonical_prompt_tags, canonical_prompt_text, PromptLibraryService,
+    };
 
     #[test]
     fn normalizes_names_tags_and_line_endings() {
@@ -457,6 +500,66 @@ mod tests {
             .await
             .unwrap(),
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn persists_prompt_version_model_provenance() {
+        use crate::application::ports::PromptLibraryRepository;
+        use crate::infrastructure::database::{initialize, SqlitePromptLibraryRepository};
+        use crate::infrastructure::time::SystemClock;
+        use std::sync::Arc;
+        use tempfile::tempdir;
+
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prompt-model.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('prompt-model-project', 'Prompt model', 'C:/prompt-model',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO models
+             (id, name, provider, type, description, metadata_json, created_at)
+             VALUES ('mdl_prompt_model', 'H3', 'MiniMax', 'video', '', '{}',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO model_versions
+             (id, model_id, version, capabilities_json, parameter_schema_json, created_at)
+             VALUES ('mdv_prompt_model_v1', 'mdl_prompt_model', '2026-01',
+                     '[\"text_to_video\"]', '{}', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let repository: Arc<dyn PromptLibraryRepository> =
+            Arc::new(SqlitePromptLibraryRepository::new(pool));
+        let service = PromptLibraryService::new(repository, Arc::new(SystemClock));
+        let prompt = service
+            .create_with_model_version(
+                "prompt-model-project",
+                "prompt",
+                "Video prompt",
+                &[],
+                "a cinematic shot",
+                Some("mdv_prompt_model_v1"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            prompt.versions[0].model_version_id.as_deref(),
+            Some("mdv_prompt_model_v1")
         );
     }
 

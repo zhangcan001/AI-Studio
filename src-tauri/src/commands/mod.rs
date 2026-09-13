@@ -9,6 +9,7 @@ pub mod episode_production;
 pub mod external_production_handoff;
 pub mod generation;
 pub mod h3_local_import;
+pub mod model;
 pub mod organization;
 pub mod preflight;
 pub mod preset;

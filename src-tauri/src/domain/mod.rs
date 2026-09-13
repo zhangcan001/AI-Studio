@@ -6,6 +6,7 @@
 pub mod asset;
 pub mod consistency;
 pub mod generation_snapshot;
+pub mod model;
 pub mod preset;
 pub mod production_item_review;
 pub mod production_package;
@@ -40,6 +41,7 @@ pub use consistency::{
     ShotReferenceSetBinding, StyleProfile, ValidationError,
 };
 pub use generation_snapshot::{GenerationSnapshot, SnapshotDomainError, SnapshotId};
+pub use model::{Model, ModelDomainError, ModelId, ModelVersion, ModelVersionId};
 pub use preset::{Preset, PresetDomainError, PresetId};
 pub use production_item_review::{ProductionReviewDomainError, ProductionReviewStatus};
 pub use production_package::*;

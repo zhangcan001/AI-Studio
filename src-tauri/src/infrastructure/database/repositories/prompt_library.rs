@@ -116,7 +116,8 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
         prompt_id: &str,
     ) -> Result<Vec<PromptVersionRecord>, RepositoryError> {
         let rows = sqlx::query_as::<_, PromptVersionRow>(
-            "SELECT v.id, v.prompt_id, v.version, v.text, v.created_at
+            "SELECT v.id, v.prompt_id, v.version, v.text, v.created_at,
+                    v.model_version_id
              FROM prompt_versions v
              JOIN prompt_entries e ON e.id = v.prompt_id
              WHERE e.project_id = ? AND v.prompt_id = ?
@@ -156,14 +157,16 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
         .await
         .map_err(map_sqlx_error)?;
         sqlx::query(
-            "INSERT INTO prompt_versions (id, prompt_id, version, text, created_at)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO prompt_versions
+             (id, prompt_id, version, text, created_at, model_version_id)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&first_version.id)
         .bind(&first_version.prompt_id)
         .bind(first_version.version)
         .bind(&first_version.text)
         .bind(&first_version.created_at)
+        .bind(&first_version.model_version_id)
         .execute(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
@@ -176,6 +179,7 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
         prompt_id: &str,
         version_id: &str,
         text: &str,
+        model_version_id: Option<&str>,
         created_at: &str,
     ) -> Result<PromptVersionRecord, RepositoryError> {
         let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
@@ -198,14 +202,16 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
         .map_err(map_sqlx_error)?;
         let version = latest.saturating_add(1);
         sqlx::query(
-            "INSERT INTO prompt_versions (id, prompt_id, version, text, created_at)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO prompt_versions
+             (id, prompt_id, version, text, created_at, model_version_id)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(version_id)
         .bind(prompt_id)
         .bind(version)
         .bind(text)
         .bind(created_at)
+        .bind(model_version_id)
         .execute(&mut *transaction)
         .await
         .map_err(map_sqlx_error)?;
@@ -223,6 +229,7 @@ impl PromptLibraryRepository for SqlitePromptLibraryRepository {
             version,
             text: text.to_owned(),
             created_at: created_at.to_owned(),
+            model_version_id: model_version_id.map(ToOwned::to_owned),
         })
     }
 
@@ -310,6 +317,7 @@ struct PromptVersionRow {
     version: i64,
     text: String,
     created_at: String,
+    model_version_id: Option<String>,
 }
 
 impl PromptVersionRow {
@@ -320,6 +328,7 @@ impl PromptVersionRow {
             version: self.version,
             text: self.text,
             created_at: self.created_at,
+            model_version_id: self.model_version_id,
         }
     }
 }
@@ -366,6 +375,7 @@ mod tests {
                         version: 1,
                         text: format!("text {index}"),
                         created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+                        model_version_id: None,
                     },
                 )
                 .await

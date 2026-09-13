@@ -1350,6 +1350,7 @@ impl ProductionQueueService {
                             project_id: project_id.to_owned(),
                             workflow_version_id: next.workflow_version_id.clone(),
                             recipe_id: next.recipe_id.clone(),
+                            model_version_id: None,
                             values,
                             reference_manifest,
                             submission_idempotency_key: Some(format!(
@@ -1871,6 +1872,8 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
         GenerationServiceError::Compile(_) => "QUEUE_COMPILE_ERROR",
         GenerationServiceError::InputPrepare(error) => error.code(),
         GenerationServiceError::Snapshot(_) => "SNAPSHOT_ERROR",
+        GenerationServiceError::InvalidModelVersionId(_) => "MODEL_VERSION_ID_INVALID",
+        GenerationServiceError::ModelVersionNotFound(_) => "MODEL_VERSION_NOT_FOUND",
         GenerationServiceError::Domain(_) => "TASK_DOMAIN_ERROR",
         GenerationServiceError::Comfy(error) => match error.kind() {
             "OFFLINE" => "COMFY_OFFLINE",

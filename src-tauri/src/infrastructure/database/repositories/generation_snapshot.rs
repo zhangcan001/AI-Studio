@@ -2,7 +2,7 @@ use super::{
     format_datetime, map_domain_error, map_sqlx_error, parse_datetime, parse_json, serialize_json,
 };
 use crate::application::ports::{GenerationSnapshotRepository, RepositoryError};
-use crate::domain::{GenerationSnapshot, SnapshotId, TaskId};
+use crate::domain::{GenerationSnapshot, ModelVersionId, SnapshotId, TaskId};
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
@@ -46,8 +46,8 @@ impl GenerationSnapshotRepository for SqliteGenerationSnapshotRepository {
         sqlx::query(
             "INSERT INTO generation_snapshots (
                 id, task_id, workflow_json, recipe_yaml,
-                user_inputs_json, resolved_inputs_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                user_inputs_json, resolved_inputs_json, model_version_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(snapshot.id.as_str())
         .bind(snapshot.task_id.as_str())
@@ -55,6 +55,12 @@ impl GenerationSnapshotRepository for SqliteGenerationSnapshotRepository {
         .bind(&snapshot.recipe_yaml)
         .bind(user_inputs_json)
         .bind(resolved_inputs_json)
+        .bind(
+            snapshot
+                .model_version_id
+                .as_ref()
+                .map(ModelVersionId::as_str),
+        )
         .bind(format_datetime(snapshot.created_at))
         .execute(&self.pool)
         .await
@@ -69,7 +75,7 @@ impl GenerationSnapshotRepository for SqliteGenerationSnapshotRepository {
     ) -> Result<Option<GenerationSnapshot>, RepositoryError> {
         let row = sqlx::query_as::<_, SnapshotRow>(
             "SELECT id, task_id, workflow_json, recipe_yaml,
-                    user_inputs_json, resolved_inputs_json, created_at
+                    user_inputs_json, resolved_inputs_json, model_version_id, created_at
              FROM generation_snapshots WHERE task_id = ?",
         )
         .bind(task_id.as_str())
@@ -89,6 +95,7 @@ struct SnapshotRow {
     recipe_yaml: String,
     user_inputs_json: String,
     resolved_inputs_json: String,
+    model_version_id: Option<String>,
     created_at: String,
 }
 
@@ -119,6 +126,13 @@ impl SnapshotRow {
             recipe_yaml: self.recipe_yaml,
             user_inputs_json,
             resolved_inputs_json,
+            model_version_id: self
+                .model_version_id
+                .map(|id| {
+                    ModelVersionId::parse(id)
+                        .map_err(|error| map_domain_error("snapshot model_version_id", error))
+                })
+                .transpose()?,
             created_at: parse_datetime("snapshot created_at", &self.created_at)?,
         };
         snapshot
@@ -132,7 +146,7 @@ impl SnapshotRow {
 mod tests {
     use super::SqliteGenerationSnapshotRepository;
     use crate::application::ports::{GenerationSnapshotRepository, TaskRepository};
-    use crate::domain::{GenerationSnapshot, Task};
+    use crate::domain::{GenerationSnapshot, ModelVersionId, Task};
     use crate::infrastructure::database::{
         initialize,
         repositories::{test_support, SqliteTaskRepository},
@@ -199,6 +213,42 @@ mod tests {
         assert_eq!(found, snapshot);
         assert_eq!(found.user_inputs_json["seed"], "random");
         assert_eq!(found.resolved_inputs_json["seed"], 123);
+    }
+
+    #[tokio::test]
+    async fn model_version_provenance_round_trips_with_snapshot() {
+        let (_directory, pool, task, repository) = setup().await;
+        sqlx::query(
+            "INSERT INTO models
+             (id, name, provider, type, description, metadata_json, created_at)
+             VALUES ('mdl_snapshot', 'H3', 'MiniMax', 'video', '', '{}', ?)",
+        )
+        .bind(task.created_at.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO model_versions
+             (id, model_id, version, capabilities_json, parameter_schema_json, created_at)
+             VALUES ('mdv_snapshot', 'mdl_snapshot', '2026-01', '[]', '{}', ?)",
+        )
+        .bind(task.created_at.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let snapshot = GenerationSnapshot::new_with_model_version(
+            task.id.clone(),
+            json!({"3": {"inputs": {}, "class_type": "KSampler"}}),
+            "schema_version: 1\nid: test",
+            json!({"prompt": "hello"}),
+            json!({"prompt": "hello"}),
+            Some(ModelVersionId::parse("mdv_snapshot").unwrap()),
+            task.created_at,
+        )
+        .unwrap();
+        repository.insert(&snapshot).await.unwrap();
+        let found = repository.find_by_task_id(&task.id).await.unwrap().unwrap();
+        assert_eq!(found.model_version_id, snapshot.model_version_id);
     }
 
     #[tokio::test]

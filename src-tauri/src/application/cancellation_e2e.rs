@@ -509,6 +509,7 @@ impl Harness {
             project_id: "project-1".to_owned(),
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
+            model_version_id: None,
             values,
             reference_manifest: None,
             submission_idempotency_key: None,

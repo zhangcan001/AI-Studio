@@ -16,6 +16,8 @@ pub struct PromptLibraryCreateRequest {
     #[serde(default)]
     pub tags: Vec<String>,
     pub text: String,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +26,8 @@ pub struct PromptLibraryVersionRequest {
     pub project_id: String,
     pub prompt_id: String,
     pub text: String,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,12 +84,13 @@ pub async fn prompt_library_create(
 ) -> Result<PromptEntryView, AppError> {
     state
         .prompt_library_service
-        .create(
+        .create_with_model_version(
             &request.project_id,
             &request.kind,
             &request.name,
             &request.tags,
             &request.text,
+            request.model_version_id.as_deref(),
         )
         .await
         .map_err(map_prompt_error)
@@ -98,7 +103,12 @@ pub async fn prompt_library_add_version(
 ) -> Result<PromptVersionView, AppError> {
     state
         .prompt_library_service
-        .add_version(&request.project_id, &request.prompt_id, &request.text)
+        .add_version_with_model_version(
+            &request.project_id,
+            &request.prompt_id,
+            &request.text,
+            request.model_version_id.as_deref(),
+        )
         .await
         .map_err(map_prompt_error)
 }

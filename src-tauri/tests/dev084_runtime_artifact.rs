@@ -754,6 +754,7 @@ fn generation_request(workflow_version_id: String, recipe_id: String) -> CreateG
         project_id: "prj_default".to_owned(),
         workflow_version_id,
         recipe_id,
+        model_version_id: None,
         values: BTreeMap::new(),
         reference_manifest: None,
         submission_idempotency_key: None,

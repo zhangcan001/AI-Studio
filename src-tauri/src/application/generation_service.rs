@@ -9,8 +9,8 @@ use crate::application::output_collector::{OutputCollector, OutputCollectorError
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError, ComfyExecutionEvent,
     ComfyHistory, ComfyHistoryStatus, GenerationDefinitionRepository, GenerationSnapshotRepository,
-    MonotonicEventClock, NoopTaskUpdateSink, ProjectRepository, RepositoryError, TaskRepository,
-    TaskUpdateSink,
+    ModelRepository, MonotonicEventClock, NoopTaskUpdateSink, ProjectRepository, RepositoryError,
+    TaskRepository, TaskUpdateSink,
 };
 use crate::application::scheduler::scheduler_decision;
 use crate::application::task_execution_registry::TaskExecutionRegistry;
@@ -23,8 +23,9 @@ use crate::compiler::{
     WorkflowCompiler,
 };
 use crate::domain::{
-    AssetId, CompileRequest, GenerationSnapshot, ResolvedInputValue, RuntimeProvenance, SeedValue,
-    Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus, TaskTelemetryPatch,
+    AssetId, CompileRequest, GenerationSnapshot, ModelVersionId, ResolvedInputValue,
+    RuntimeProvenance, SeedValue, Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
+    TaskTelemetryPatch,
 };
 use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
@@ -43,6 +44,9 @@ pub struct CreateGenerationRequest {
     pub project_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    /// Optional Prompt Studio model provenance. This is metadata only; the
+    /// existing Task/Queue execution path remains authoritative.
+    pub model_version_id: Option<String>,
     pub values: BTreeMap<String, GenerationInputValue>,
     pub reference_manifest: Option<ReferenceManifest>,
     /// A caller-owned idempotency boundary. Reusing it returns the original Task
@@ -104,6 +108,8 @@ pub enum GenerationServiceError {
     Compile(CompileError),
     InputPrepare(GenerationInputPrepareError),
     Snapshot(String),
+    InvalidModelVersionId(String),
+    ModelVersionNotFound(String),
     Domain(TaskDomainError),
     Comfy(ComfyAdapterError),
     StreamDisconnected(String),
@@ -133,6 +139,12 @@ impl fmt::Display for GenerationServiceError {
             Self::Compile(error) => write!(formatter, "{error}"),
             Self::InputPrepare(error) => write!(formatter, "{error}"),
             Self::Snapshot(message) => write!(formatter, "SNAPSHOT_ERROR: {message}"),
+            Self::InvalidModelVersionId(message) => {
+                write!(formatter, "MODEL_VERSION_ID_INVALID: {message}")
+            }
+            Self::ModelVersionNotFound(id) => {
+                write!(formatter, "MODEL_VERSION_NOT_FOUND: model version {id}")
+            }
             Self::Domain(error) => write!(formatter, "TASK_DOMAIN_ERROR: {error}"),
             Self::Comfy(error) => write!(formatter, "{error}"),
             Self::StreamDisconnected(message) => {
@@ -186,6 +198,7 @@ pub struct GenerationService {
     compiler: WorkflowCompiler,
     workflow_compatibility_service: Option<Arc<WorkflowOnboardingService>>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
+    model_repository: Option<Arc<dyn ModelRepository>>,
 }
 
 enum CancelResolution {
@@ -233,6 +246,7 @@ impl GenerationService {
             compiler: WorkflowCompiler,
             workflow_compatibility_service: None,
             new_generation_admission: None,
+            model_repository: None,
         }
     }
 
@@ -263,6 +277,13 @@ impl GenerationService {
         admission: Arc<dyn NewGenerationAdmission>,
     ) -> Self {
         self.new_generation_admission = Some(admission);
+        self
+    }
+
+    /// Validate optional Prompt Studio model provenance before a Task is
+    /// created. Existing callers without a model repository remain compatible.
+    pub fn with_model_repository(mut self, repository: Arc<dyn ModelRepository>) -> Self {
+        self.model_repository = Some(repository);
         self
     }
 
@@ -392,7 +413,7 @@ impl GenerationService {
 
     async fn prepare_task(
         &self,
-        request: CreateGenerationRequest,
+        mut request: CreateGenerationRequest,
     ) -> Result<
         (
             CreateGenerationRequest,
@@ -401,6 +422,33 @@ impl GenerationService {
         ),
         GenerationServiceError,
     > {
+        let normalized_model_version_id = request
+            .model_version_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| {
+                ModelVersionId::parse(id.to_owned())
+                    .map(|version_id| version_id.as_str().to_owned())
+                    .map_err(|error| {
+                        GenerationServiceError::InvalidModelVersionId(error.to_string())
+                    })
+            })
+            .transpose()?;
+        request.model_version_id = normalized_model_version_id;
+        if let Some(model_version_id) = request.model_version_id.as_deref() {
+            let version_id =
+                ModelVersionId::parse(model_version_id.to_owned()).map_err(|error| {
+                    GenerationServiceError::InvalidModelVersionId(error.to_string())
+                })?;
+            if let Some(repository) = &self.model_repository {
+                if repository.find_version_by_id(&version_id).await?.is_none() {
+                    return Err(GenerationServiceError::ModelVersionNotFound(
+                        model_version_id.to_owned(),
+                    ));
+                }
+            }
+        }
         if let Some(admission) = &self.new_generation_admission {
             let available = admission
                 .is_available_for_new_generation(&request.workflow_version_id, &request.recipe_id)
@@ -713,12 +761,22 @@ impl GenerationService {
             return Ok(task);
         }
 
-        let snapshot = match GenerationSnapshot::new(
+        let model_version_id = request
+            .model_version_id
+            .as_deref()
+            .map(|id| {
+                ModelVersionId::parse(id.to_owned()).map_err(|error| {
+                    GenerationServiceError::InvalidModelVersionId(error.to_string())
+                })
+            })
+            .transpose()?;
+        let snapshot = match GenerationSnapshot::new_with_model_version(
             task.id.clone(),
             compile_result.workflow.clone(),
             definition.recipe_yaml.clone(),
             input_values_to_json(&request.values),
             resolved_inputs_to_json(&compile_result.resolved_inputs, &prepared),
+            model_version_id,
             self.clock.now(),
         ) {
             Ok(snapshot) => snapshot,

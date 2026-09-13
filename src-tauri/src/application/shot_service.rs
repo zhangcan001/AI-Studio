@@ -644,6 +644,7 @@ impl ShotService {
             project_id: request.project_id.clone(),
             workflow_version_id,
             recipe_id,
+            model_version_id: None,
             values,
             reference_manifest,
             submission_idempotency_key: None,

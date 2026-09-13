@@ -9,10 +9,10 @@ pub mod infrastructure;
 pub use application::ports::{
     AssetDeletionRepository, AssetRepository, AssetStore, AssetUsageRepository,
     AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
-    GenerationSnapshotRepository, ProductionItemReviewRepository, ProductionQueueRepository,
-    ProjectBackupRepository, ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
-    ProjectWorkflowBindingRepository, RecipeHistoryQueryRepository, RepositoryError,
-    TaskOutputAssetMapping, TaskRepository, WorkflowLibraryRepository,
+    GenerationSnapshotRepository, ModelRepository, ProductionItemReviewRepository,
+    ProductionQueueRepository, ProjectBackupRepository, ProjectRecord, ProjectRepository,
+    ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RecipeHistoryQueryRepository,
+    RepositoryError, TaskOutputAssetMapping, TaskRepository, WorkflowLibraryRepository,
     WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
     WorkflowRuntimeStateRepository,
 };
@@ -21,10 +21,11 @@ pub use infrastructure::database::{
     initialize, SqliteAssetDeletionRepository, SqliteAssetRepository,
     SqliteAssetVideoPromptRepository, SqliteExternalProductionHandoffRepository,
     SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
-    SqliteOrganizationRepository, SqlitePresetRepository, SqliteProductionItemReviewRepository,
-    SqliteProductionQueueRepository, SqliteProjectBackupRepository, SqliteProjectRepository,
-    SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository, SqliteTaskRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteModelRepository, SqliteOrganizationRepository, SqlitePresetRepository,
+    SqliteProductionItemReviewRepository, SqliteProductionQueueRepository,
+    SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
+    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -48,6 +49,7 @@ use application::{
     generation_service::GenerationService,
     h3_local_import_service::H3LocalImportService,
     media_protocol::MediaProtocolService,
+    model_service::ModelService,
     organization_service::OrganizationService,
     ports::{ComfyAdapterFactory, ComfyConnectionConfig, SettingsStore, WorkflowLibrarySource},
     preset_service::PresetService,
@@ -300,6 +302,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let prompt_library_repository: Arc<dyn application::ports::PromptLibraryRepository> = Arc::new(
                 infrastructure::database::SqlitePromptLibraryRepository::new(database_pool.clone()),
+            );
+            let model_repository: Arc<dyn application::ports::ModelRepository> = Arc::new(
+                infrastructure::database::SqliteModelRepository::new(database_pool.clone()),
             );
             let shot_repository_impl = Arc::new(
                 infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
@@ -572,6 +577,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 )
                 .with_workflow_compatibility_service(workflow_onboarding_service.clone())
                 .with_new_generation_admission(workflow_registry_service.clone())
+                .with_model_repository(model_repository.clone())
                 .with_task_update_sink(task_update_sink.clone())
                 .with_execution_registry(execution_registry.clone()),
             );
@@ -834,6 +840,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 prompt_library_repository.clone(),
                 clock.clone(),
             ));
+            let model_service = Arc::new(ModelService::new(model_repository, clock.clone()));
             let shot_bulk_service = Arc::new(ShotBulkService::new(
                 shot_bulk_repository.clone(),
                 definition_repository.clone(),
@@ -950,6 +957,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_workflow_binding_service,
                 preset_service,
                 prompt_library_service,
+                model_service,
                 shot_service,
                 shot_batch_service,
                 shot_bulk_service,
@@ -1245,6 +1253,15 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::prompt_library::prompt_library_add_version,
             commands::prompt_library::prompt_library_update_metadata,
             commands::prompt_library::prompt_library_delete,
+            commands::model::model_list,
+            commands::model::model_get,
+            commands::model::model_create,
+            commands::model::model_update,
+            commands::model::model_delete,
+            commands::model::model_version_list,
+            commands::model::model_version_current,
+            commands::model::model_version_get,
+            commands::model::model_version_create,
             commands::reference_anchor::reference_anchors_list,
             commands::reference_anchor::reference_anchor_get,
             commands::reference_anchor::reference_anchor_create,

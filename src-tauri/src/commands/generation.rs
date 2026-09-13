@@ -20,6 +20,8 @@ pub struct GenerationCreateRequest {
     pub recipe_id: String,
     pub values: BTreeMap<String, InputValueDto>,
     #[serde(default)]
+    pub model_version_id: Option<String>,
+    #[serde(default)]
     pub submission_idempotency_key: Option<String>,
 }
 
@@ -52,6 +54,8 @@ pub struct GenerationBatchItemRequest {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub values: BTreeMap<String, InputValueDto>,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -209,6 +213,7 @@ impl GenerationCreateRequest {
             project_id: self.project_id,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
+            model_version_id: self.model_version_id,
             values,
             reference_manifest: None,
             submission_idempotency_key: self.submission_idempotency_key,
@@ -230,6 +235,7 @@ impl GenerationBatchItemRequest {
             project_id,
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
+            model_version_id: self.model_version_id,
             values,
             reference_manifest: None,
             submission_idempotency_key: None,
@@ -332,6 +338,10 @@ pub(crate) fn map_generation_error(error: GenerationServiceError) -> AppError {
         }
         GenerationServiceError::Compile(_) => AppError::invalid_input(error.to_string()),
         GenerationServiceError::InputPrepare(_) => AppError::invalid_input(error.to_string()),
+        GenerationServiceError::InvalidModelVersionId(_)
+        | GenerationServiceError::ModelVersionNotFound(_) => {
+            AppError::invalid_input(error.to_string())
+        }
         GenerationServiceError::Domain(_)
         | GenerationServiceError::Snapshot(_)
         | GenerationServiceError::Comfy(_)

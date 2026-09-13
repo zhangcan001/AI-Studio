@@ -14,6 +14,7 @@ pub mod database_health_probe;
 pub mod external_production_handoff_repository;
 pub mod generation_definition_repository;
 pub mod generation_snapshot_repository;
+pub mod model_repository;
 pub mod organization_repository;
 pub mod preset_repository;
 pub mod production_audit_repository;
@@ -93,6 +94,7 @@ pub use generation_definition_repository::{
     AvailableGenerationDefinition, GenerationDefinition, GenerationDefinitionRepository,
 };
 pub use generation_snapshot_repository::GenerationSnapshotRepository;
+pub use model_repository::ModelRepository;
 pub use organization_repository::{
     AssetOrganization, AssetTag, NewProjectTemplate, OrganizationRepository, ProjectTemplate,
 };

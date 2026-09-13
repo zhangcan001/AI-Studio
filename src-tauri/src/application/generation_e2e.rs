@@ -386,6 +386,7 @@ mod tests {
             project_id: "project-1".to_owned(),
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
+            model_version_id: None,
             values: std::collections::BTreeMap::from([
                 (
                     "prompt".to_owned(),
@@ -680,6 +681,7 @@ outputs:
             project_id: "project-1".to_owned(),
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
+            model_version_id: None,
             values,
             reference_manifest,
             submission_idempotency_key: None,
@@ -771,6 +773,7 @@ outputs:
                     project_id: "project-1".to_owned(),
                     workflow_version_id: "workflow-version-1".to_owned(),
                     recipe_id: "recipe-1".to_owned(),
+                    model_version_id: None,
                     values: BTreeMap::from([
                         (
                             "prompt".to_owned(),

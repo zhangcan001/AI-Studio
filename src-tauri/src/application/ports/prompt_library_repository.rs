@@ -22,6 +22,7 @@ pub struct PromptVersionRecord {
     pub version: i64,
     pub text: String,
     pub created_at: String,
+    pub model_version_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +66,7 @@ pub trait PromptLibraryRepository: Send + Sync {
         prompt_id: &str,
         version_id: &str,
         text: &str,
+        model_version_id: Option<&str>,
         created_at: &str,
     ) -> Result<PromptVersionRecord, RepositoryError>;
 

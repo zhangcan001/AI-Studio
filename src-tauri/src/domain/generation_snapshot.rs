@@ -1,4 +1,7 @@
-use super::task::{TaskDomainError, TaskId};
+use super::{
+    model::ModelVersionId,
+    task::{TaskDomainError, TaskId},
+};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::{error::Error, fmt};
@@ -46,6 +49,7 @@ pub struct GenerationSnapshot {
     pub recipe_yaml: String,
     pub user_inputs_json: Value,
     pub resolved_inputs_json: Value,
+    pub model_version_id: Option<ModelVersionId>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -58,6 +62,26 @@ impl GenerationSnapshot {
         resolved_inputs_json: Value,
         created_at: DateTime<Utc>,
     ) -> Result<Self, SnapshotDomainError> {
+        Self::new_with_model_version(
+            task_id,
+            workflow_json,
+            recipe_yaml,
+            user_inputs_json,
+            resolved_inputs_json,
+            None,
+            created_at,
+        )
+    }
+
+    pub fn new_with_model_version(
+        task_id: TaskId,
+        workflow_json: Value,
+        recipe_yaml: impl Into<String>,
+        user_inputs_json: Value,
+        resolved_inputs_json: Value,
+        model_version_id: Option<ModelVersionId>,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, SnapshotDomainError> {
         let snapshot = Self {
             id: SnapshotId::new(),
             task_id,
@@ -65,6 +89,7 @@ impl GenerationSnapshot {
             recipe_yaml: recipe_yaml.into(),
             user_inputs_json,
             resolved_inputs_json,
+            model_version_id,
             created_at,
         };
         snapshot.validate()?;
@@ -135,6 +160,7 @@ mod tests {
         assert!(snapshot.id.as_str().starts_with("snp_"));
         assert_eq!(snapshot.user_inputs_json["seed"], "random");
         assert_eq!(snapshot.resolved_inputs_json["seed"], 123);
+        assert_eq!(snapshot.model_version_id, None);
     }
 
     #[test]

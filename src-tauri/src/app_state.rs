@@ -16,6 +16,7 @@ use crate::application::external_production_handoff_service::ExternalProductionH
 use crate::application::generation_catalog_service::GenerationCatalogService;
 use crate::application::generation_service::GenerationService;
 use crate::application::h3_local_import_service::H3LocalImportService;
+use crate::application::model_service::ModelService;
 use crate::application::organization_service::OrganizationService;
 use crate::application::preset_service::PresetService;
 use crate::application::production_audit_service::ProductionAuditService;
@@ -103,6 +104,7 @@ pub struct AppState {
     pub project_workflow_binding_service: Arc<ProjectWorkflowBindingService>,
     pub preset_service: Arc<PresetService>,
     pub prompt_library_service: Arc<PromptLibraryService>,
+    pub model_service: Arc<ModelService>,
     pub shot_service: Arc<ShotService>,
     pub shot_batch_service: Arc<ShotBatchService>,
     pub shot_bulk_service: Arc<ShotBulkService>,
@@ -168,6 +170,7 @@ impl AppState {
         project_workflow_binding_service: Arc<ProjectWorkflowBindingService>,
         preset_service: Arc<PresetService>,
         prompt_library_service: Arc<PromptLibraryService>,
+        model_service: Arc<ModelService>,
         shot_service: Arc<ShotService>,
         shot_batch_service: Arc<ShotBatchService>,
         shot_bulk_service: Arc<ShotBulkService>,
@@ -231,6 +234,7 @@ impl AppState {
             project_workflow_binding_service,
             preset_service,
             prompt_library_service,
+            model_service,
             shot_service,
             shot_batch_service,
             shot_bulk_service,
