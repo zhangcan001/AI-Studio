@@ -435,7 +435,7 @@ export function ProjectStructureTree({
           {!unassignedSelected && <div className="project-structure-tree-empty">选择未归档镜头后在此定位</div>}
         </div>
       )}
-      {!series.length && !tree.unassignedShotIds.length && <div className="project-structure-tree-empty">暂无系列，请使用右上角 + 新建。</div>}
+      {!series.length && !tree.unassignedShotIds.length && <div className="project-structure-tree-empty">暂无系列，请使用右上角 + 新建；也可以从项目中心导入 Production Handoff。</div>}
     </>
   );
 

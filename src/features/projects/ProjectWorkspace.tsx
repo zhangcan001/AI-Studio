@@ -303,7 +303,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
             </div>
           );
         })}
-        {!projects.length && <p className="empty-state">暂无项目。</p>}
+        {!projects.length && <p className="empty-state">暂无项目。创建第一个项目后，可以导入 Production Handoff 或建立镜头。</p>}
       </div>
     </section>
   );

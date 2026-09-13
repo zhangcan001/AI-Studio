@@ -242,7 +242,7 @@ export function AssetLibrary({ projectId, initialAssetId, onUseInStudio, onOpenV
   }
 
   const hasFilters = Boolean(keyword || category !== "ALL" || mediaType !== "ALL" || sourceKind !== "ALL" || favoriteOnly || tagId);
-  const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。";
+  const emptyMessage = hasFilters ? "没有找到符合条件的素材。" : "当前项目还没有素材。导入本地素材或完成一次生产后，结果会在这里显示。";
   const selectedH3Assets = assets.filter((asset) => selectedAssetIds.has(asset.id));
   const selectedAnchorAssets = assets.filter((asset) => selectedAssetIds.has(asset.id) && isImageAsset(asset));
 

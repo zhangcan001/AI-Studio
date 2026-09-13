@@ -75,6 +75,30 @@
 .project-command-error, .project-command-empty { display: grid; justify-items: start; gap: 10px; padding: 28px; border: 1px dashed #405a83; border-radius: 12px; background: #182941; }
 .project-command-error strong, .project-command-empty h3 { margin: 0; color: #eef4ff; }
 .project-command-error p, .project-command-empty p { margin: 5px 0 0; color: #a8b7cd; line-height: 1.5; overflow-wrap: anywhere; }
+.project-command-onboarding { display: grid; gap: 14px; padding: 20px; border: 1px solid #5576a9; border-radius: 14px; background: linear-gradient(120deg, #1e3357, #182946); }
+.project-command-onboarding-copy { display: grid; gap: 4px; }
+.project-command-onboarding-copy h3 { margin: 2px 0 0; color: #f0f5ff; }
+.project-command-onboarding-copy p { max-width: 72ch; margin: 0; color: #b5c5df; line-height: 1.5; overflow-wrap: anywhere; }
+.project-command-onboarding-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: onboarding-step; }
+.project-command-onboarding-steps li { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 11px; border: 1px solid #385170; border-radius: 10px; background: #182941; counter-increment: onboarding-step; }
+.project-command-onboarding-steps li::before { content: counter(onboarding-step); display: grid; place-items: center; width: 22px; height: 22px; color: #dce8ff; border-radius: 50%; background: #385b91; font-size: .72rem; font-weight: 700; }
+.project-command-onboarding-steps strong, .project-command-onboarding-steps span { overflow-wrap: anywhere; }
+.project-command-onboarding-steps strong { color: #eef4ff; font-size: .82rem; }
+.project-command-onboarding-steps span { color: #9aabc3; font-size: .72rem; line-height: 1.4; }
+.project-command-onboarding-steps .is-complete { border-color: #397c5b; }
+.project-command-onboarding-steps .is-complete::before { content: "✓"; background: #397c5b; }
+.project-command-onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-command-final-result { border-color: #397c5b; background: linear-gradient(145deg, rgb(26 65 61 / 50%), rgb(18 29 48 / 86%)); }
+.project-command-final-result-status { padding: 4px 8px; color: #83e2ae; border: 1px solid rgb(131 226 174 / 45%); border-radius: 999px; font-size: .72rem; white-space: nowrap; }
+.project-command-final-result-summary { display: grid; gap: 3px; padding: 11px 13px; border-left: 3px solid #7de0ac; background: rgb(41 93 77 / 32%); }
+.project-command-final-result-summary strong { color: #f0f5ff; overflow-wrap: anywhere; }
+.project-command-final-result-summary span { color: #b9d8ca; font-size: .76rem; line-height: 1.4; overflow-wrap: anywhere; }
+.project-command-final-result-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.project-command-final-result-links > div { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; border: 1px solid #385170; border-radius: 9px; background: #182941; }
+.project-command-final-result-links dt { color: #91a1ba; font-size: .72rem; }
+.project-command-final-result-links dd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: #dce8f8; font-size: .78rem; line-height: 1.4; overflow-wrap: anywhere; }
+.project-command-final-result-links button { margin-left: auto; }
+.project-command-final-result-open { justify-self: start; }
 .production-review-inbox-list { display: grid; gap: 8px; }
 .production-review-inbox-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #334865; border-radius: 10px; background: #182941; }
 .production-review-inbox-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
@@ -89,6 +113,7 @@
 @keyframes project-command-spin { to { transform: rotate(360deg); } }
 @media (max-width: 1100px) { .project-command-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .project-command-project { display: grid; } .project-command-project-meta { min-width: 0; } .project-command-activity { grid-template-columns: 1fr; gap: 7px; } }
 @media (max-width: 700px) { .project-command-heading, .project-command-recommendation { display: grid; } .project-command-heading-actions { justify-content: flex-start; } .project-command-summary-grid, .project-command-columns, .project-command-action-grid { grid-template-columns: 1fr; } .project-command-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .project-command-scene-row { grid-template-columns: 1fr; } .project-command-progress-compact { min-width: 0; } }
+@media (max-width: 760px) { .project-command-onboarding-steps, .project-command-final-result-links { grid-template-columns: 1fr; } }
 
 /* Information hierarchy refinement: keep one clear next action, one primary
    progress column, and a compact context rail for issues and recent activity. */

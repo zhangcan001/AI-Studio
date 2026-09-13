@@ -384,6 +384,18 @@
   outline-offset: 1px;
 }
 
+.shot-production-flow-guide {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--ux-muted);
+  border-left: 3px solid var(--ux-accent);
+  background: color-mix(in srgb, var(--ux-accent) 8%, var(--ux-surface-2));
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.shot-production-flow-guide strong { color: var(--ux-text); }
+
 .shot-production-mode-tabpanel {
   min-width: 0;
 }

@@ -318,6 +318,14 @@ export function ProjectCommandCenterView({
   const busyNow = busy || refreshBusy || preflightBusy || loading;
   const refreshDisabled = busyNow || !onRefresh;
   const preflightDisabled = busyNow || !onRepreflight;
+  const showActiveProjectOnboarding = Boolean(
+    project
+      && hasSnapshot
+      && !loading
+      && !error
+      && derived.content.shots === 0
+      && derived.content.assets === 0,
+  );
 
   return (
     <section className="workspace-panel project-command-center" aria-busy={busyNow || undefined}>
@@ -329,7 +337,7 @@ export function ProjectCommandCenterView({
         </div>
         <div className="project-command-heading-actions">
           <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "projects" })} disabled={!onNavigate || busyNow}>管理项目</button>
-          {project && onOpenImport && <button type="button" className="quiet-button" onClick={onOpenImport} disabled={busyNow}>批量导入预检</button>}
+          {project && onOpenImport && <button type="button" className="quiet-button" title="导入 Production Handoff" onClick={onOpenImport} disabled={busyNow}>批量导入预检</button>}
           <button type="button" onClick={onRefresh} disabled={refreshDisabled}>
             {refreshBusy || loading ? "正在刷新……" : "刷新项目"}
           </button>
@@ -371,20 +379,24 @@ export function ProjectCommandCenterView({
       )}
 
       {!loading && !hasSnapshot && !error && (
-        <section className="project-command-empty" aria-label="项目为空">
-          <span className="section-label">项目为空</span>
-          <h3>{project ? "当前项目还没有内容" : "暂无项目"}</h3>
-          <p>{project ? "先创建镜头或开始一次创作，完成后这里会汇总项目状态。" : "选择一个项目后，这里会显示项目就绪度、生产进度和最近活动。"}</p>
-          {project ? (
-            <button type="button" onClick={() => onNavigate?.({ destination: "shots", section: "creation", actionKind: "NO_SHOTS" })} disabled={!onNavigate}>开始创作</button>
-          ) : (
-            <button type="button" onClick={() => onNavigate?.({ destination: "projects" })} disabled={!onNavigate}>管理项目</button>
-          )}
-        </section>
+        <FirstTimeUserGuide
+          hasProject={Boolean(project)}
+          onNavigate={onNavigate}
+          onOpenImport={onOpenImport}
+          disabled={busyNow}
+        />
       )}
 
       {hasSnapshot && (
         <>
+          {showActiveProjectOnboarding && (
+            <FirstTimeUserGuide
+              hasProject
+              onNavigate={onNavigate}
+              onOpenImport={onOpenImport}
+              disabled={busyNow}
+            />
+          )}
           <div className="project-command-summary-grid" aria-label="项目摘要">
             <SummaryCard label="总体进度" title={`${derived.progress.completed} / ${derived.progress.total}`}>
               <span>{derived.progress.percent}% 已完成</span>
@@ -414,6 +426,8 @@ export function ProjectCommandCenterView({
           )}
 
           {aggregate && <ProjectCommandCenterCollectionActions aggregate={aggregate} projectId={project?.id} onNavigate={onNavigate} disabled={busyNow} />}
+
+          {aggregate && <ProjectFinalResultSection aggregate={aggregate} onNavigate={onNavigate} disabled={busyNow} />}
 
           <ProductionReviewInbox projectId={project?.id} onNavigate={onNavigate} />
 
@@ -1043,6 +1057,93 @@ function nextActionReason(action: RecommendedAction, issues: ProjectCommandCente
   if (!issues.length) return undefined;
   if (!["STRUCTURAL_BLOCKED", "COMFY_BLOCKED", "REVIEW_REQUIRED", "AUTO_RESUMABLE", "ACTIVE_PRODUCTION"].includes(action.actionKind ?? "")) return undefined;
   return issues.find((issue) => issue.severity !== "INFO")?.detail;
+}
+
+function FirstTimeUserGuide({
+  hasProject,
+  onNavigate,
+  onOpenImport,
+  disabled,
+}: {
+  hasProject: boolean;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
+  onOpenImport?: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <section className="project-command-onboarding" aria-label="首次使用引导">
+      <div className="project-command-onboarding-copy">
+        <span className="section-label">{hasProject ? "项目为空" : "暂无项目"}</span>
+        <h3>开始 AI 生产</h3>
+        <p>{hasProject ? "从下面任一步开始；准备只创建待启动批次，真正生产仍由你在队列中明确开始。" : "先创建一个项目，随后可以导入 Production Handoff 或建立第一个镜头。"}</p>
+      </div>
+      <ol className="project-command-onboarding-steps">
+        <li className={hasProject ? "is-complete" : undefined}><strong>{hasProject ? "项目已创建" : "创建项目"}</strong><span>{hasProject ? "当前项目已就绪" : "建立一个项目作为生产范围"}</span></li>
+        <li><strong>导入 Production Handoff</strong><span>接收外部智能体准备好的生产计划</span></li>
+        <li><strong>准备镜头</strong><span>检查配置并创建待启动批次</span></li>
+        <li><strong>在生产队列开始生产</strong><span>只有点击“开始生产”才会执行</span></li>
+        <li><strong>审核并选择结果</strong><span>从项目中心找到最终结果</span></li>
+      </ol>
+      <div className="project-command-onboarding-actions">
+        {!hasProject ? (
+          <>
+            <button type="button" className="primary-action" onClick={() => onNavigate?.({ destination: "projects" })} disabled={!onNavigate || disabled}>创建第一个项目</button>
+            <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "projects" })} disabled={!onNavigate || disabled}>管理项目</button>
+          </>
+        ) : (
+          <>
+            {onOpenImport && <button type="button" className="primary-action" onClick={onOpenImport} disabled={disabled}>导入 Production Handoff</button>}
+            <button type="button" className="quiet-button" onClick={() => onNavigate?.({ destination: "shots", section: "creation", actionKind: "NO_SHOTS" })} disabled={!onNavigate || disabled}>开始创作</button>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ProjectFinalResultSection({
+  aggregate,
+  onNavigate,
+  disabled,
+}: {
+  aggregate: ProjectCommandCenterAggregate;
+  onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
+  disabled: boolean;
+}) {
+  const completedItems = aggregate.dailyProduction?.completed.items ?? [];
+  const firstCompletedItem = completedItems.find((item) => item.shotId === aggregate.shots.firstCompletedShotId)
+    ?? completedItems.find((item) => item.assetId === aggregate.shots.firstCompletedAssetId)
+    ?? completedItems[0];
+  const shotId = aggregate.shots.firstCompletedShotId ?? firstCompletedItem?.shotId ?? undefined;
+  const assetId = aggregate.shots.firstCompletedAssetId ?? firstCompletedItem?.assetId ?? undefined;
+  const batchId = firstCompletedItem?.batchId ?? undefined;
+  if (!shotId && !assetId) return null;
+
+  const resultLabel = firstCompletedItem?.label ?? "已选择结果";
+  const navigate = (request: ProjectCommandCenterNavigationRequest) => onNavigate?.(request);
+
+  return (
+    <section className="project-command-card project-command-final-result" aria-label="最终结果">
+      <div className="project-command-card-heading">
+        <div>
+          <span className="section-label">交付结果</span>
+          <h3>最终结果</h3>
+          <p>从同一个入口确认已选择结果对应的镜头、资产和文件位置。</p>
+        </div>
+        <span className="project-command-final-result-status">已选择</span>
+      </div>
+      <div className="project-command-final-result-summary">
+        <strong>{resultLabel}</strong>
+        <span>该结果已由镜头选择并纳入项目完成状态。</span>
+      </div>
+      <dl className="project-command-final-result-links">
+        <div><dt>镜头</dt><dd>{shotId ? "已关联当前项目镜头" : "暂未关联镜头"}{shotId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "creation", shotId, actionKind: "FINAL_RESULT" })} disabled={!onNavigate || disabled}>查看镜头</button>}</dd></div>
+        <div><dt>资产</dt><dd>{assetId ? "已关联生成资产" : "暂未关联资产"}{assetId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "assets", section: "assets", shotId, assetId, actionKind: "FINAL_RESULT" })} disabled={!onNavigate || disabled}>打开资产</button>}</dd></div>
+        <div><dt>文件</dt><dd>{batchId ? "生产监控中的已完成成品" : "资产预览中的成品"}{batchId && <button type="button" className="quiet-button" onClick={() => navigate({ destination: "shots", section: "production", shotId, batchId, assetId, actionKind: "FINAL_RESULT_FILE" })} disabled={!onNavigate || disabled}>查看文件位置</button>}</dd></div>
+      </dl>
+      {assetId && <button type="button" className="primary-action project-command-final-result-open" onClick={() => navigate({ destination: "assets", section: "assets", shotId, assetId, actionKind: "FINAL_RESULT" })} disabled={!onNavigate || disabled}>打开已选择结果</button>}
+    </section>
+  );
 }
 
 function auditIssue(issue: ProductionAuditIssue): ProjectCommandCenterIssue {

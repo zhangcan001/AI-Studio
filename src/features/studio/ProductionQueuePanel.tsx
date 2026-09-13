@@ -589,7 +589,7 @@ export function ProductionQueuePanel({
       {inline && !detail && !inlineQueueHistory.length && (
         <div className="production-inline-empty" role="status">
           <strong>当前项目暂无已保存批次</strong>
-          <span>创建批次后，进度会持久化保存，并在重新打开软件后自动恢复。</span>
+          <span>先在生产准备中创建待启动批次，再回到这里点击“开始生产”；进度会持久化保存，并在重新打开软件后自动恢复。</span>
         </div>
       )}
 

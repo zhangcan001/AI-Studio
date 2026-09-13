@@ -10,7 +10,7 @@ import type { ProductionBatchReviewProductivity } from "../../services/tauriClie
 import type { AssetView } from "../../types/asset";
 import type { ProductionPackageBatchBinding } from "../../types/productionPackage";
 import type { ShotView } from "../../types/shot";
-import { buildLocalDeliveryManifest, ShotWorkspace } from "./ShotWorkspace";
+import { buildLocalDeliveryManifest, ProductionModeTabs, ShotWorkspace } from "./ShotWorkspace";
 
 const mocks = vi.hoisted(() => ({
   listShots: vi.fn(),
@@ -465,6 +465,13 @@ afterEach(() => {
 });
 
 describe("ShotWorkspace production package queue integration", () => {
+  it("explains the prepare-to-start handoff without starting anything", () => {
+    render(<ProductionModeTabs packagePanel={<div>package</div>} projectProductionPanel={<div>project</div>} />);
+
+    expect(screen.getByRole("status").textContent).toContain("准备并创建待启动批次");
+    expect(screen.getByRole("status").textContent).toContain("明确点击“开始生产”");
+  });
+
   it("fails closed with an explicit project workflow loading error", async () => {
     mocks.listShots.mockResolvedValue([configReadFailureShot]);
     mocks.getProjectWorkflowConfig.mockRejectedValue(new Error("database unavailable"));

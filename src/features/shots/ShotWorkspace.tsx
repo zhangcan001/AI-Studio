@@ -192,6 +192,7 @@ export function ProductionModeTabs({ packagePanel, projectProductionPanel, multi
           项目生产
         </button>
       </div>
+      <p className="shot-production-flow-guide" role="status"><strong>生产流程：</strong>先准备并创建待启动批次 → 打开生产队列 → 明确点击“开始生产” → 在监控和审核中查看结果。准备、返工都不会自动开始生产。</p>
 
       <section
         id={packagePanelId}

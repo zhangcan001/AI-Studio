@@ -54,7 +54,7 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
         </div>
       </div>
       {error && <p className="error-message" role="alert">{error}</p>}
-      {items.length === 0 && !loading && !error && <p className="disabled-note">当前项目没有待处理审片项。</p>}
+      {items.length === 0 && !loading && !error && <p className="disabled-note">当前项目没有待处理审片项。完成生产后，待审核结果会出现在这里；已选择结果可从项目中心的“最终结果”进入。</p>}
       {items.length > 0 && (
         <div className="production-review-inbox-list">
           {items.map((item) => (

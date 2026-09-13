@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -142,6 +142,8 @@ describe("ProjectCommandCenter", () => {
     const html = renderToStaticMarkup(<ProjectCommandCenterView onNavigate={vi.fn()} />);
     expect(html).toContain("暂无项目");
     expect(html).toContain("管理项目");
+    expect(html).toContain("开始 AI 生产");
+    expect(html).toContain("创建第一个项目");
   });
 
   it("offers a single creative entry point for an active empty project", async () => {
@@ -153,6 +155,19 @@ describe("ProjectCommandCenter", () => {
     await user.click(screen.getByRole("button", { name: "开始创作" }));
 
     expect(onNavigate).toHaveBeenCalledWith({ destination: "shots", section: "creation", actionKind: "NO_SHOTS" });
+  });
+
+  it("shows the first-time flow and sends the Handoff CTA to the existing import entry", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const onOpenImport = vi.fn();
+    render(<ProjectCommandCenterView project={project} onNavigate={onNavigate} onOpenImport={onOpenImport} />);
+
+    expect(screen.getByRole("region", { name: "首次使用引导" }).textContent).toContain("导入 Production Handoff");
+    await user.click(screen.getByRole("button", { name: "导入 Production Handoff" }));
+
+    expect(onOpenImport).toHaveBeenCalledTimes(1);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("renders complete progress and recommends a next creative round", () => {
@@ -471,6 +486,42 @@ describe("ProjectCommandCenter", () => {
       assetId: "asset-complete",
       actionKind: "COMPLETE",
     });
+  });
+
+  it("makes the selected final result visible and keeps Shot and Asset navigation exact", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const emptyBucket = { totalCount: 0, items: [], hasMore: false };
+    render(<ProjectCommandCenterView project={project} aggregate={aggregate({
+      shots: { ...aggregate().shots, firstCompletedShotId: "shot-final", firstCompletedAssetId: "asset-final", completed: 1 },
+      dailyProduction: {
+        needsAttention: emptyBucket,
+        ready: emptyBucket,
+        running: emptyBucket,
+        review: emptyBucket,
+        completed: {
+          totalCount: 1,
+          hasMore: false,
+          items: [{ id: "shot:shot-final:COMPLETED", label: "最终镜头", reasonCode: "COMPLETED", reason: "镜头已有已选交付结果。", severity: "INFO", destination: "assets", stage: null, shotId: "shot-final", batchId: "batch-final", taskId: "task-final", assetId: "asset-final", workflowVersionId: null, recipeId: null }],
+        },
+        topAction: null,
+      },
+    })} onNavigate={onNavigate} />);
+
+    const result = screen.getByRole("region", { name: "最终结果" });
+    expect(result.textContent).toContain("最终镜头");
+    expect(result.textContent).toContain("已关联生成资产");
+    await user.click(within(result).getByRole("button", { name: "查看镜头" }));
+    await user.click(within(result).getByRole("button", { name: "打开资产" }));
+    await user.click(within(result).getByRole("button", { name: "查看文件位置" }));
+    await user.click(within(result).getByRole("button", { name: "打开已选择结果" }));
+
+    expect(onNavigate.mock.calls).toEqual([
+      [{ destination: "shots", section: "creation", shotId: "shot-final", actionKind: "FINAL_RESULT" }],
+      [{ destination: "assets", section: "assets", shotId: "shot-final", assetId: "asset-final", actionKind: "FINAL_RESULT" }],
+      [{ destination: "shots", section: "production", shotId: "shot-final", batchId: "batch-final", assetId: "asset-final", actionKind: "FINAL_RESULT_FILE" }],
+      [{ destination: "assets", section: "assets", shotId: "shot-final", assetId: "asset-final", actionKind: "FINAL_RESULT" }],
+    ]);
   });
 
   it("surfaces the authoritative blocked reason beside the continuation target", () => {
