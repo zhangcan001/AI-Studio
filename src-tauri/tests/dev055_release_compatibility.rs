@@ -836,6 +836,14 @@ fn migration_versions() -> Vec<u64> {
 }
 
 async fn remove_migration_028_schema(pool: &SqlitePool) {
+    sqlx::query("DROP TABLE IF EXISTS asset_relations")
+        .execute(pool)
+        .await
+        .expect("033 asset relation table should be removable from the isolated fixture");
+    sqlx::query("DROP TABLE IF EXISTS asset_versions")
+        .execute(pool)
+        .await
+        .expect("033 asset version table should be removable from the isolated fixture");
     sqlx::query("DROP TABLE IF EXISTS external_production_handoff_entities")
         .execute(pool)
         .await
@@ -1180,8 +1188,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 32);
-    assert_eq!(migration_marker_count(pool, 32).await, 1);
+    assert_eq!(max_migration(pool).await, 33);
+    assert_eq!(migration_marker_count(pool, 33).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1343,13 +1351,13 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_032() {
+async fn dev055_migration_matrix_reaches_033() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(32));
+    assert_eq!(versions.last().copied(), Some(33));
     assert!(
-        versions.contains(&32),
-        "repository must contain migration 032"
+        versions.contains(&33),
+        "repository must contain migration 033"
     );
 
     let (_fresh_directory, fresh_pool) = database().await;
@@ -1456,7 +1464,7 @@ async fn dev055_migration_matrix_reaches_032() {
 }
 
 #[tokio::test]
-async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_032() {
+async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_033() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-0-project")).await;
     insert_published_1_0_post_legacy_rows(&pool).await;
@@ -1466,7 +1474,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_032() {
     pool.close().await;
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.0 database should upgrade through migration 032");
+        .expect("reconstructed 1.0 database should upgrade through migration 033");
     assert_current_migration_gate(&upgraded).await;
 
     assert_eq!(
@@ -1587,7 +1595,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_032() {
 }
 
 #[tokio::test]
-async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_032() {
+async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_033() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-1-project")).await;
     sqlx::query("DROP TABLE external_production_handoff_entities")
@@ -1598,16 +1606,24 @@ async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_032() {
         .execute(&pool)
         .await
         .expect("isolated 032 handoff table should drop");
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 32")
+    sqlx::query("DROP TABLE IF EXISTS asset_relations")
         .execute(&pool)
         .await
-        .expect("isolated 032 marker should drop");
+        .expect("isolated 033 asset relation table should drop");
+    sqlx::query("DROP TABLE IF EXISTS asset_versions")
+        .execute(&pool)
+        .await
+        .expect("isolated 033 asset version table should drop");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 32")
+        .execute(&pool)
+        .await
+        .expect("isolated 032-033 markers should drop");
     assert_eq!(max_migration(&pool).await, 31);
     pool.close().await;
 
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.1 database should upgrade through migration 032");
+        .expect("reconstructed 1.1 database should upgrade through migration 033");
     assert_current_migration_gate(&upgraded).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = ?")

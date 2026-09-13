@@ -72,6 +72,7 @@ mod tests {
                'benchmark_candidates', 'benchmark_runs', 'benchmark_quality_scores',
                'production_runs', 'production_stages', 'production_stage_items',
                'production_run_templates', 'reference_anchors', 'reference_anchor_assets',
+               'asset_versions', 'asset_relations',
                'production_series', 'production_episodes', 'production_scenes',
                'shot_scene_assignments', 'profile_revisions', 'reference_sets',
                'style_profiles', 'character_profiles', 'scene_profiles', 'prop_profiles',
@@ -97,13 +98,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 59);
+        assert_eq!(table_count(&pool).await, 61);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            32
+            33
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -277,8 +278,215 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 59);
+        assert_eq!(table_count(&second_pool).await, 61);
         second_pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn migration_033_preserves_existing_project_asset_shot_task_review_rows() {
+        let temporary_directory = tempdir().expect("temporary directory should be created");
+        let database_path = temporary_directory.path().join("legacy-032.db");
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("legacy database should connect");
+
+        for migration in [
+            include_str!("../../../migrations/001_initial.sql"),
+            include_str!("../../../migrations/002_browse_indexes.sql"),
+            include_str!("../../../migrations/003_presets.sql"),
+            include_str!("../../../migrations/004_video_outputs.sql"),
+            include_str!("../../../migrations/005_workflow_runtime_state.sql"),
+            include_str!("../../../migrations/006_production_queue.sql"),
+            include_str!("../../../migrations/007_production_queue_operations.sql"),
+            include_str!("../../../migrations/008_organization.sql"),
+            include_str!("../../../migrations/009_prompt_library.sql"),
+            include_str!("../../../migrations/010_shot_production.sql"),
+            include_str!("../../../migrations/011_asset_video_prompt.sql"),
+            include_str!("../../../migrations/012_production_item_review.sql"),
+            include_str!("../../../migrations/013_workflow_archive_and_package_metadata.sql"),
+            include_str!("../../../migrations/014_workflow_benchmark.sql"),
+            include_str!("../../../migrations/015_runtime_provenance.sql"),
+            include_str!("../../../migrations/016_generation_telemetry.sql"),
+            include_str!("../../../migrations/017_submission_idempotency.sql"),
+            include_str!("../../../migrations/018_production_orchestrator.sql"),
+            include_str!("../../../migrations/019_shot_stage_prompts.sql"),
+            include_str!("../../../migrations/020_reference_anchors.sql"),
+            include_str!("../../../migrations/021_production_structure.sql"),
+            include_str!("../../../migrations/022_consistency_profiles_and_reference_sets.sql"),
+            include_str!("../../../migrations/023_consistency_scope_bindings.sql"),
+            include_str!("../../../migrations/024_production_preparation_snapshots.sql"),
+            include_str!("../../../migrations/025_script_draft_foundation.sql"),
+            include_str!("../../../migrations/026_production_package_batch_bindings.sql"),
+            include_str!("../../../migrations/027_project_workflow_bindings.sql"),
+            include_str!("../../../migrations/028_workflow_registry_v2.sql"),
+            include_str!(
+                "../../../migrations/029_workflow_registry_runtime_artifact_reconciliation.sql"
+            ),
+            include_str!("../../../migrations/030_workflow_recipe_promotions.sql"),
+            include_str!("../../../migrations/031_workflow_recipe_archive_state.sql"),
+            include_str!("../../../migrations/032_external_production_handoffs.sql"),
+        ] {
+            sqlx::raw_sql(migration)
+                .execute(&pool)
+                .await
+                .expect("pre-033 migrations should apply");
+        }
+
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('legacy-v2-project', 'Legacy v2', 'C:/legacy-v2',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy project fixture should insert");
+        sqlx::query(
+            "INSERT INTO workflows
+             (id, name, category, mode, current_version_id, created_at, updated_at)
+             VALUES ('legacy-v2-workflow', 'Legacy workflow', 'image', 'text_to_image',
+                     'legacy-v2-version', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy workflow fixture should insert");
+        sqlx::query(
+            "INSERT INTO workflow_versions
+             (id, workflow_id, version, api_workflow_json, workflow_sha256, created_at)
+             VALUES ('legacy-v2-version', 'legacy-v2-workflow', '1', '{}', 'legacy-sha',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy workflow version fixture should insert");
+        sqlx::query(
+            "INSERT INTO recipes
+             (id, workflow_version_id, version, schema_version, recipe_yaml, recipe_sha256, created_at)
+             VALUES ('legacy-v2-recipe', 'legacy-v2-version', '1', 1, 'schema_version: 1',
+                     'legacy-recipe-sha', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy recipe fixture should insert");
+        sqlx::query(
+            "INSERT INTO tasks
+             (id, project_id, workflow_id, workflow_version_id, recipe_id, status, created_at)
+             VALUES ('legacy-v2-task', 'legacy-v2-project', 'legacy-v2-workflow',
+                     'legacy-v2-version', 'legacy-v2-recipe', 'SUCCEEDED',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy task fixture should insert");
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path, sha256,
+              mime_type, width, height, file_size, source_task_id, metadata_json, created_at, updated_at)
+             VALUES ('ast_legacy_v2_asset', 'legacy-v2-project', 'image', 'source_image',
+                     'Legacy asset', 'legacy.png', 'C:/legacy-v2/legacy.png', 'asset-sha',
+                     'image/png', 1280, 720, 1024, 'legacy-v2-task', '{}',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy asset fixture should insert");
+        sqlx::query(
+            "INSERT INTO production_batches
+             (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+             VALUES ('legacy-v2-batch', 'legacy-v2-project', 'Legacy batch', 'COMPLETED', 0,
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy batch fixture should insert");
+        sqlx::query(
+            "INSERT INTO production_batch_items
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status,
+              created_at, updated_at)
+             VALUES ('legacy-v2-item', 'legacy-v2-batch', 0, 'legacy-v2-version',
+                     'legacy-v2-recipe', '{}', 'SUCCEEDED',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy batch item fixture should insert");
+        sqlx::query(
+            "INSERT INTO shots
+             (id, project_id, ordinal, name, prompt_text, created_at, updated_at)
+             VALUES ('legacy-v2-shot', 'legacy-v2-project', 0, 'Legacy shot', 'legacy prompt',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy shot fixture should insert");
+        sqlx::query(
+            "INSERT INTO production_item_reviews
+             (id, project_id, production_batch_id, production_batch_item_id, task_id,
+              result_asset_id, review_status, review_note, version, lineage_key,
+              parent_batch_id, parent_item_id, created_at, updated_at)
+             VALUES ('legacy-v2-review', 'legacy-v2-project', 'legacy-v2-batch',
+                     'legacy-v2-item', 'legacy-v2-task', 'ast_legacy_v2_asset', 'APPROVED',
+                     'preserve me', 1, 'legacy-v2-lineage', NULL, NULL,
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy review fixture should insert");
+
+        let before: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM projects WHERE id = 'legacy-v2-project'),
+               (SELECT COUNT(*) FROM assets WHERE id = 'ast_legacy_v2_asset'),
+               (SELECT COUNT(*) FROM shots WHERE id = 'legacy-v2-shot'),
+               (SELECT COUNT(*) FROM tasks WHERE id = 'legacy-v2-task'),
+               (SELECT COUNT(*) FROM production_item_reviews WHERE id = 'legacy-v2-review')",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("legacy row snapshot should be readable");
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/033_asset_library_data_layer.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration 033 should apply to the legacy database");
+
+        let after: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM projects WHERE id = 'legacy-v2-project'),
+               (SELECT COUNT(*) FROM assets WHERE id = 'ast_legacy_v2_asset'),
+               (SELECT COUNT(*) FROM shots WHERE id = 'legacy-v2-shot'),
+               (SELECT COUNT(*) FROM tasks WHERE id = 'legacy-v2-task'),
+               (SELECT COUNT(*) FROM production_item_reviews WHERE id = 'legacy-v2-review')",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("post-033 row snapshot should be readable");
+        assert_eq!(after, before);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name IN ('asset_versions', 'asset_relations')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("new asset library tables should be readable"),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
+                .fetch_one(&pool)
+                .await
+                .expect("foreign keys pragma should be readable"),
+            1
+        );
+        pool.close().await;
     }
 
     #[tokio::test]

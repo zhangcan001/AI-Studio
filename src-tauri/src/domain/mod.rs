@@ -23,8 +23,9 @@ pub mod task;
 pub mod workflow;
 
 pub use asset::{
-    Asset, AssetDomainError, AssetId, AssetType, GENERATED_IMAGE_CATEGORY,
-    GENERATED_VIDEO_CATEGORY, SOURCE_AUDIO_CATEGORY, SOURCE_IMAGE_CATEGORY, SOURCE_VIDEO_CATEGORY,
+    Asset, AssetDomainError, AssetId, AssetRelation, AssetRelationId, AssetRelationType, AssetType,
+    AssetVersion, AssetVersionId, GENERATED_IMAGE_CATEGORY, GENERATED_VIDEO_CATEGORY,
+    SOURCE_AUDIO_CATEGORY, SOURCE_IMAGE_CATEGORY, SOURCE_VIDEO_CATEGORY,
 };
 pub use consistency::{
     generate_consistency_id, validate_consistency_id, validate_metadata_json,

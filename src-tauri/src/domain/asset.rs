@@ -407,10 +407,209 @@ impl Asset {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AssetVersionId(String);
+
+impl AssetVersionId {
+    pub fn new() -> Self {
+        Self(format!("av_{}", Uuid::new_v4()))
+    }
+
+    pub fn parse(value: impl Into<String>) -> Result<Self, AssetDomainError> {
+        let value = value.into();
+        if value.starts_with("av_") && value.len() > "av_".len() {
+            Ok(Self(value))
+        } else {
+            Err(AssetDomainError::InvalidVersionId(value))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for AssetVersionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssetVersion {
+    pub id: AssetVersionId,
+    pub project_id: String,
+    pub asset_id: AssetId,
+    pub version_number: u32,
+    pub metadata_snapshot: Value,
+    pub location: String,
+    pub checksum: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl AssetVersion {
+    pub fn new(
+        id: AssetVersionId,
+        project_id: impl Into<String>,
+        asset_id: AssetId,
+        version_number: u32,
+        metadata_snapshot: Value,
+        location: impl Into<String>,
+        checksum: impl Into<String>,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, AssetDomainError> {
+        let version = Self {
+            id,
+            project_id: project_id.into(),
+            asset_id,
+            version_number,
+            metadata_snapshot,
+            location: location.into(),
+            checksum: checksum.into(),
+            created_at,
+        };
+        version.validate()?;
+        Ok(version)
+    }
+
+    pub fn validate(&self) -> Result<(), AssetDomainError> {
+        for (field, value) in [
+            ("project_id", self.project_id.as_str()),
+            ("location", self.location.as_str()),
+            ("checksum", self.checksum.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(AssetDomainError::InvalidField(field.to_owned()));
+            }
+        }
+        if self.version_number == 0 {
+            return Err(AssetDomainError::InvalidField(
+                "version_number must be positive".to_owned(),
+            ));
+        }
+        if self.metadata_snapshot.is_null() {
+            return Err(AssetDomainError::InvalidField(
+                "metadata_snapshot must not be null".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssetRelationType {
+    SourceOf,
+    DerivedFrom,
+    VariantOf,
+    Reference,
+    Replacement,
+    Related,
+}
+
+impl AssetRelationType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SourceOf => "SOURCE_OF",
+            Self::DerivedFrom => "DERIVED_FROM",
+            Self::VariantOf => "VARIANT_OF",
+            Self::Reference => "REFERENCE",
+            Self::Replacement => "REPLACEMENT",
+            Self::Related => "RELATED",
+        }
+    }
+
+    pub fn try_from_db(value: &str) -> Result<Self, AssetDomainError> {
+        match value {
+            "SOURCE_OF" => Ok(Self::SourceOf),
+            "DERIVED_FROM" => Ok(Self::DerivedFrom),
+            "VARIANT_OF" => Ok(Self::VariantOf),
+            "REFERENCE" => Ok(Self::Reference),
+            "REPLACEMENT" => Ok(Self::Replacement),
+            "RELATED" => Ok(Self::Related),
+            other => Err(AssetDomainError::InvalidRelationType(other.to_owned())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AssetRelationId(String);
+
+impl AssetRelationId {
+    pub fn new() -> Self {
+        Self(format!("rel_{}", Uuid::new_v4()))
+    }
+
+    pub fn parse(value: impl Into<String>) -> Result<Self, AssetDomainError> {
+        let value = value.into();
+        if value.starts_with("rel_") && value.len() > "rel_".len() {
+            Ok(Self(value))
+        } else {
+            Err(AssetDomainError::InvalidRelationId(value))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for AssetRelationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssetRelation {
+    pub id: AssetRelationId,
+    pub project_id: String,
+    pub source_asset_id: AssetId,
+    pub target_asset_id: AssetId,
+    pub relation_type: AssetRelationType,
+    pub created_at: DateTime<Utc>,
+}
+
+impl AssetRelation {
+    pub fn new(
+        id: AssetRelationId,
+        project_id: impl Into<String>,
+        source_asset_id: AssetId,
+        target_asset_id: AssetId,
+        relation_type: AssetRelationType,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, AssetDomainError> {
+        let relation = Self {
+            id,
+            project_id: project_id.into(),
+            source_asset_id,
+            target_asset_id,
+            relation_type,
+            created_at,
+        };
+        relation.validate()?;
+        Ok(relation)
+    }
+
+    pub fn validate(&self) -> Result<(), AssetDomainError> {
+        if self.project_id.trim().is_empty() {
+            return Err(AssetDomainError::InvalidField("project_id".to_owned()));
+        }
+        if self.source_asset_id == self.target_asset_id {
+            return Err(AssetDomainError::InvalidField(
+                "source and target assets must differ".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssetDomainError {
     InvalidId(String),
+    InvalidVersionId(String),
+    InvalidRelationId(String),
     InvalidType(String),
+    InvalidRelationType(String),
     InvalidField(String),
 }
 
@@ -418,7 +617,14 @@ impl fmt::Display for AssetDomainError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidId(value) => write!(formatter, "invalid asset id: {value}"),
+            Self::InvalidVersionId(value) => write!(formatter, "invalid asset version id: {value}"),
+            Self::InvalidRelationId(value) => {
+                write!(formatter, "invalid asset relation id: {value}")
+            }
             Self::InvalidType(value) => write!(formatter, "invalid asset type: {value}"),
+            Self::InvalidRelationType(value) => {
+                write!(formatter, "invalid asset relation type: {value}")
+            }
             Self::InvalidField(message) => write!(formatter, "invalid asset: {message}"),
         }
     }

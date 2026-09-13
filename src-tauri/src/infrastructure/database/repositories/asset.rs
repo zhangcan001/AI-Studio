@@ -3,7 +3,10 @@ use super::{
     serialize_json,
 };
 use crate::application::ports::{AssetRepository, RepositoryError, TaskOutputAssetMapping};
-use crate::domain::{Asset, AssetId, AssetType, TaskId};
+use crate::domain::{
+    Asset, AssetId, AssetRelation, AssetRelationId, AssetRelationType, AssetType, AssetVersion,
+    AssetVersionId, TaskId,
+};
 use async_trait::async_trait;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool, Transaction};
 
@@ -162,6 +165,170 @@ impl AssetRepository for SqliteAssetRepository {
         .await
         .map_err(map_sqlx_error)?;
         rows.into_iter().map(AssetRow::try_into_domain).collect()
+    }
+
+    async fn insert_asset_version(&self, version: &AssetVersion) -> Result<(), RepositoryError> {
+        version
+            .validate()
+            .map_err(|error| map_domain_error("asset version validation", error))?;
+        let metadata_snapshot = serialize_json(
+            "asset version metadata_snapshot",
+            Some(&version.metadata_snapshot),
+        )?
+        .ok_or_else(|| {
+            RepositoryError::serialization("asset version metadata_snapshot", "missing value")
+        })?;
+        let result = sqlx::query(
+            "INSERT INTO asset_versions
+                (id, project_id, asset_id, version_number, metadata_snapshot,
+                 location, checksum, created_at)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?
+             WHERE EXISTS (
+                 SELECT 1 FROM assets WHERE id = ? AND project_id = ?
+             )",
+        )
+        .bind(version.id.as_str())
+        .bind(&version.project_id)
+        .bind(version.asset_id.as_str())
+        .bind(i64::from(version.version_number))
+        .bind(metadata_snapshot)
+        .bind(&version.location)
+        .bind(&version.checksum)
+        .bind(format_datetime(version.created_at))
+        .bind(version.asset_id.as_str())
+        .bind(&version.project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Err(RepositoryError::not_found(
+                "asset",
+                version.asset_id.as_str(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn list_asset_versions(
+        &self,
+        project_id: &str,
+        asset_id: &AssetId,
+    ) -> Result<Vec<AssetVersion>, RepositoryError> {
+        let rows = sqlx::query_as::<_, AssetVersionRow>(
+            "SELECT id, project_id, asset_id, version_number, metadata_snapshot,
+                    location, checksum, created_at
+             FROM asset_versions
+             WHERE project_id = ? AND asset_id = ?
+             ORDER BY version_number ASC, id ASC",
+        )
+        .bind(project_id)
+        .bind(asset_id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(AssetVersionRow::try_into_domain)
+            .collect()
+    }
+
+    async fn current_asset_version(
+        &self,
+        project_id: &str,
+        asset_id: &AssetId,
+    ) -> Result<Option<AssetVersion>, RepositoryError> {
+        let row = sqlx::query_as::<_, AssetVersionRow>(
+            "SELECT id, project_id, asset_id, version_number, metadata_snapshot,
+                    location, checksum, created_at
+             FROM asset_versions
+             WHERE project_id = ? AND asset_id = ?
+             ORDER BY version_number DESC, id DESC
+             LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(asset_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        row.map(AssetVersionRow::try_into_domain).transpose()
+    }
+
+    async fn insert_asset_relation(&self, relation: &AssetRelation) -> Result<(), RepositoryError> {
+        relation
+            .validate()
+            .map_err(|error| map_domain_error("asset relation validation", error))?;
+        let result = sqlx::query(
+            "INSERT INTO asset_relations
+                (id, project_id, source_asset_id, target_asset_id, relation_type, created_at)
+             SELECT ?, ?, ?, ?, ?, ?
+             WHERE EXISTS (
+                 SELECT 1 FROM assets WHERE id = ? AND project_id = ?
+             )
+               AND EXISTS (
+                 SELECT 1 FROM assets WHERE id = ? AND project_id = ?
+             )",
+        )
+        .bind(relation.id.as_str())
+        .bind(&relation.project_id)
+        .bind(relation.source_asset_id.as_str())
+        .bind(relation.target_asset_id.as_str())
+        .bind(relation.relation_type.as_str())
+        .bind(format_datetime(relation.created_at))
+        .bind(relation.source_asset_id.as_str())
+        .bind(&relation.project_id)
+        .bind(relation.target_asset_id.as_str())
+        .bind(&relation.project_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Err(RepositoryError::not_found(
+                "asset relation asset",
+                relation.source_asset_id.as_str(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn list_asset_relations(
+        &self,
+        project_id: &str,
+        asset_id: &AssetId,
+    ) -> Result<Vec<AssetRelation>, RepositoryError> {
+        let rows = sqlx::query_as::<_, AssetRelationRow>(
+            "SELECT id, project_id, source_asset_id, target_asset_id, relation_type, created_at
+             FROM asset_relations
+             WHERE project_id = ? AND (source_asset_id = ? OR target_asset_id = ?)
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(project_id)
+        .bind(asset_id.as_str())
+        .bind(asset_id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(AssetRelationRow::try_into_domain)
+            .collect()
+    }
+
+    async fn delete_asset_relation(
+        &self,
+        project_id: &str,
+        relation_id: &AssetRelationId,
+    ) -> Result<(), RepositoryError> {
+        let result = sqlx::query("DELETE FROM asset_relations WHERE project_id = ? AND id = ?")
+            .bind(project_id)
+            .bind(relation_id.as_str())
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Err(RepositoryError::not_found(
+                "asset relation",
+                relation_id.as_str(),
+            ));
+        }
+        Ok(())
     }
 
     async fn delete_by_ids(
@@ -383,6 +550,77 @@ impl AssetRow {
             .validate()
             .map_err(|error| map_domain_error("asset integrity", error))?;
         Ok(asset)
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AssetVersionRow {
+    id: String,
+    project_id: String,
+    asset_id: String,
+    version_number: i64,
+    metadata_snapshot: String,
+    location: String,
+    checksum: String,
+    created_at: String,
+}
+
+impl AssetVersionRow {
+    fn try_into_domain(self) -> Result<AssetVersion, RepositoryError> {
+        let metadata_snapshot = parse_json(
+            "asset_versions metadata_snapshot",
+            Some(&self.metadata_snapshot),
+        )?
+        .ok_or_else(|| {
+            RepositoryError::serialization("asset_versions metadata_snapshot", "missing value")
+        })?;
+        let version = AssetVersion::new(
+            AssetVersionId::parse(self.id)
+                .map_err(|error| map_domain_error("asset_versions id", error))?,
+            self.project_id,
+            AssetId::parse(self.asset_id)
+                .map_err(|error| map_domain_error("asset_versions asset_id", error))?,
+            u32::try_from(self.version_number).map_err(|_| {
+                RepositoryError::serialization(
+                    "asset_versions version_number",
+                    format!("invalid value {}", self.version_number),
+                )
+            })?,
+            metadata_snapshot,
+            self.location,
+            self.checksum,
+            parse_datetime("asset_versions created_at", &self.created_at)?,
+        )
+        .map_err(|error| map_domain_error("asset_versions integrity", error))?;
+        Ok(version)
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AssetRelationRow {
+    id: String,
+    project_id: String,
+    source_asset_id: String,
+    target_asset_id: String,
+    relation_type: String,
+    created_at: String,
+}
+
+impl AssetRelationRow {
+    fn try_into_domain(self) -> Result<AssetRelation, RepositoryError> {
+        AssetRelation::new(
+            AssetRelationId::parse(self.id)
+                .map_err(|error| map_domain_error("asset_relations id", error))?,
+            self.project_id,
+            AssetId::parse(self.source_asset_id)
+                .map_err(|error| map_domain_error("asset_relations source_asset_id", error))?,
+            AssetId::parse(self.target_asset_id)
+                .map_err(|error| map_domain_error("asset_relations target_asset_id", error))?,
+            AssetRelationType::try_from_db(&self.relation_type)
+                .map_err(|error| map_domain_error("asset_relations relation_type", error))?,
+            parse_datetime("asset_relations created_at", &self.created_at)?,
+        )
+        .map_err(|error| map_domain_error("asset_relations integrity", error))
     }
 }
 

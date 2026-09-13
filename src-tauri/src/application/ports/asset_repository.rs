@@ -1,5 +1,5 @@
 use super::RepositoryError;
-use crate::domain::{Asset, AssetId, TaskId};
+use crate::domain::{Asset, AssetId, AssetRelation, AssetRelationId, AssetVersion, TaskId};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -52,6 +52,61 @@ pub trait AssetRepository: Send + Sync {
         project_id: &str,
         limit: u32,
     ) -> Result<Vec<Asset>, RepositoryError>;
+
+    async fn insert_asset_version(&self, _version: &AssetVersion) -> Result<(), RepositoryError> {
+        Err(RepositoryError::database(
+            "asset version persistence is not supported by this repository",
+        ))
+    }
+
+    async fn list_asset_versions(
+        &self,
+        _project_id: &str,
+        _asset_id: &AssetId,
+    ) -> Result<Vec<AssetVersion>, RepositoryError> {
+        Err(RepositoryError::database(
+            "asset version queries are not supported by this repository",
+        ))
+    }
+
+    async fn current_asset_version(
+        &self,
+        _project_id: &str,
+        _asset_id: &AssetId,
+    ) -> Result<Option<AssetVersion>, RepositoryError> {
+        Err(RepositoryError::database(
+            "current asset version queries are not supported by this repository",
+        ))
+    }
+
+    async fn insert_asset_relation(
+        &self,
+        _relation: &AssetRelation,
+    ) -> Result<(), RepositoryError> {
+        Err(RepositoryError::database(
+            "asset relation persistence is not supported by this repository",
+        ))
+    }
+
+    async fn list_asset_relations(
+        &self,
+        _project_id: &str,
+        _asset_id: &AssetId,
+    ) -> Result<Vec<AssetRelation>, RepositoryError> {
+        Err(RepositoryError::database(
+            "asset relation queries are not supported by this repository",
+        ))
+    }
+
+    async fn delete_asset_relation(
+        &self,
+        _project_id: &str,
+        _relation_id: &AssetRelationId,
+    ) -> Result<(), RepositoryError> {
+        Err(RepositoryError::database(
+            "asset relation deletion is not supported by this repository",
+        ))
+    }
 
     /// Deletes only the selected asset rows and their project-local relation rows.
     ///

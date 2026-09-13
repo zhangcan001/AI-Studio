@@ -1,3 +1,4 @@
+pub mod asset_data_service;
 pub mod asset_deletion_service;
 pub mod asset_import_service;
 pub mod asset_library_service;
