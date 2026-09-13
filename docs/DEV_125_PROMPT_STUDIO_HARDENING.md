@@ -154,8 +154,8 @@ BUILD=PASS
 RUST_FMT=PASS
 RUST_CHECK=PASS
 RUST_TEST=PASS (full cargo test; unit and integration suites passed)
-REMOTE_CI_RUN=DISPATCHED_AFTER_PUSH
-REMOTE_CI_STATUS=PENDING
+REMOTE_CI_RUN=34788275312 (https://github.com/zhangcan001/AI-Studio/actions/runs/34788275312)
+REMOTE_CI_STATUS=PASS
 ```
 
 Commands executed locally:
@@ -169,10 +169,12 @@ cargo check
 cargo test
 ```
 
-Source-only CI is dispatched manually after the final commit is pushed because
+Source-only CI was dispatched manually after the final commit was pushed because
 `.github/workflows/ci.yml` runs on tags, pull requests, or
-`workflow_dispatch`, not on an ordinary push to `master`. The run ID, URL, and
-final result will be recorded here after the remote run completes.
+`workflow_dispatch`, not on an ordinary push to `master`. Run
+`34788275312` passed both the Rust and Frontend source-check jobs. GitHub also
+reported an existing Node.js 20 action deprecation annotation; it did not affect
+the result.
 
 ## 8. Files changed
 
