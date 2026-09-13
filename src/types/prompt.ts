@@ -8,6 +8,7 @@ export interface PromptVersionView {
   version: number;
   text: string;
   createdAt: string;
+  modelVersionId?: string | null;
 }
 
 export interface PromptEntryView {

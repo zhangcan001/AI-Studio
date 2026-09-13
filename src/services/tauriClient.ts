@@ -192,6 +192,7 @@ import type {
   PromptLibraryPage,
   PromptVersionView,
 } from "../types/prompt";
+import type { ModelVersionView, ModelView } from "../types/model";
 import type { PageCursor } from "../types/asset";
 import type {
   ProductionBatchCreateItem,
@@ -380,6 +381,26 @@ export function updatePromptLibraryMetadata(request: PromptLibraryMetadataReques
 
 export function deletePromptLibraryEntry(projectId: string, promptId: string): Promise<void> {
   return invoke<void>("prompt_library_delete", { projectId, promptId });
+}
+
+export function listModels(): Promise<ModelView[]> {
+  return invoke<ModelView[]>("model_list");
+}
+
+export function getModel(modelId: string): Promise<ModelView> {
+  return invoke<ModelView>("model_get", { modelId });
+}
+
+export function listModelVersions(modelId: string): Promise<ModelVersionView[]> {
+  return invoke<ModelVersionView[]>("model_version_list", { modelId });
+}
+
+export function getCurrentModelVersion(modelId: string): Promise<ModelVersionView | null> {
+  return invoke<ModelVersionView | null>("model_version_current", { modelId });
+}
+
+export function getModelVersion(versionId: string): Promise<ModelVersionView> {
+  return invoke<ModelVersionView>("model_version_get", { versionId });
 }
 
 export function getComfyStatus(): Promise<ComfyStatus> {

@@ -13,6 +13,7 @@ const STUDIO_SECTION_ROUTES: Record<StudioSection, StudioRoute> = {
   project: { workspace: "command-center", section: "project" },
   creation: { workspace: "shots", section: "creation" },
   assets: { workspace: "assets", section: "assets" },
+  prompts: { workspace: "prompts", section: "prompts" },
   production: { workspace: "shots", section: "production" },
   review: { workspace: "shots", section: "review" },
   workflows: { workspace: "workflows", section: "workflows" },
@@ -31,6 +32,8 @@ export function defaultStudioSectionForWorkspace(workspace: Workspace): StudioSe
       return "project";
     case "assets":
       return "assets";
+    case "prompts":
+      return "prompts";
     case "workflows":
       return "workflows";
     case "shots":

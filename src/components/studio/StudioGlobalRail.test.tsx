@@ -3,18 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultStudioRailItems, StudioGlobalRail } from "./StudioGlobalRail";
 
 describe("StudioGlobalRail", () => {
-  it("shows the seven primary product areas without a duplicate analysis entry", () => {
+  it("shows the primary product areas without a duplicate analysis entry", () => {
     expect(defaultStudioRailItems.map((item) => item.id)).toEqual([
       "project",
       "creation",
       "assets",
+      "prompts",
       "production",
       "review",
       "workflows",
       "settings",
     ]);
     expect(defaultStudioRailItems).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "analysis" })]));
-    expect(defaultStudioRailItems[5]).toMatchObject({
+    expect(defaultStudioRailItems[6]).toMatchObject({
       id: "workflows",
       label: "工作流",
       destination: "workflows",
@@ -24,6 +25,7 @@ describe("StudioGlobalRail", () => {
     const html = renderToStaticMarkup(<StudioGlobalRail onNavigate={vi.fn()} />);
     expect(html).toContain('aria-label="工作流：添加和管理 ComfyUI 工作流"');
     expect(html).toContain('title="添加和管理 ComfyUI 工作流"');
+    expect(html).toContain('aria-label="提示词：提示词工作台"');
   });
 
   it.each(["creation", "production", "review", "workflows"] as const)("marks only %s as active", (section) => {

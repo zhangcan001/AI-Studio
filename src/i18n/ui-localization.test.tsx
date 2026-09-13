@@ -24,6 +24,7 @@ const keyUiSources = import.meta.glob([
   "../features/experiments/ExperimentResultGrid.tsx",
   "../features/shots/ShotBatchPlanner.tsx",
   "../features/prompts/PromptLibraryPanel.tsx",
+  "../features/prompts/PromptStudio.tsx",
   "../features/workflows/WorkflowWorkspace.tsx",
   "../features/workflows/WorkflowImportIssues.tsx",
   "../features/settings/SettingsWorkspace.tsx",

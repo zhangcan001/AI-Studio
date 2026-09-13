@@ -69,6 +69,7 @@ import "../styles/uiPolish.css";
 
 const GenerationStudio = lazy(() => import("../features/studio/GenerationStudio").then(({ GenerationStudio }) => ({ default: GenerationStudio })));
 const AssetWorkspace = lazy(() => import("../features/assets/AssetWorkspace").then(({ AssetWorkspace }) => ({ default: AssetWorkspace })));
+const PromptStudio = lazy(() => import("../features/prompts/PromptStudio").then(({ PromptStudio }) => ({ default: PromptStudio })));
 const AssetVideoBatchWorkspace = lazy(() => import("../features/assets/AssetVideoBatchWorkspace").then(({ AssetVideoBatchWorkspace }) => ({ default: AssetVideoBatchWorkspace })));
 const TaskHistory = lazy(() => import("../features/tasks/TaskHistory").then(({ TaskHistory }) => ({ default: TaskHistory })));
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
@@ -83,6 +84,7 @@ const workspaceLabels: Record<Workspace, string> = {
   video: "批量视频",
   shots: "镜头生产",
   assets: "资产库",
+  prompts: "提示词工作台",
   tasks: "任务",
   projects: "项目",
   workflows: "工作流",
@@ -934,7 +936,7 @@ function App() {
       {projectContextLoading && activeProject && (
         <p className="project-loading" role="status">正在加载项目...</p>
       )}
-      {workspace !== "settings" && showComfyWarning && (
+      {workspace !== "settings" && workspace !== "prompts" && showComfyWarning && (
         <section className="comfy-status-warning" role="status" aria-live="polite">
           <div>
             <span className="section-label">运行环境提醒</span>
@@ -1005,6 +1007,12 @@ function App() {
               openTask(taskId);
             }}
             onOpenShot={openShotFromAsset}
+          />
+        )}
+        {activeProject && workspace === "prompts" && (
+          <PromptStudio
+            projectId={activeProject.id}
+            onOpenTaskHistory={() => navigateToWorkspace("tasks")}
           />
         )}
         {activeProject && workspace === "shots" && (

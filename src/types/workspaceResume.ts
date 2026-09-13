@@ -6,6 +6,7 @@ export const WORKSPACES = [
   "video",
   "shots",
   "assets",
+  "prompts",
   "tasks",
   "projects",
   "workflows",

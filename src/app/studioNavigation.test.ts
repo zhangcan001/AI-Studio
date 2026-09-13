@@ -10,6 +10,7 @@ describe("studio section routes", () => {
     expect(studioRouteForSection("project")).toEqual({ workspace: "command-center", section: "project" });
     expect(studioRouteForSection("creation")).toEqual({ workspace: "shots", section: "creation" });
     expect(studioRouteForSection("assets")).toEqual({ workspace: "assets", section: "assets" });
+    expect(studioRouteForSection("prompts")).toEqual({ workspace: "prompts", section: "prompts" });
     expect(studioRouteForSection("production")).toEqual({ workspace: "shots", section: "production" });
     expect(studioRouteForSection("review")).toEqual({ workspace: "shots", section: "review" });
     expect(studioRouteForSection("workflows")).toEqual({ workspace: "workflows", section: "workflows" });
