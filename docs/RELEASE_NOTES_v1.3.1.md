@@ -10,6 +10,8 @@ easier to diagnose without changing the product execution model.
 - Cancellation end-to-end tests now use bounded, scheduler-friendly waits and
   cover repeated cancellation while still asserting interruption, terminal
   state, and registry cleanup.
+- A production-orchestrator test wait is also bounded, preventing an
+  unobserved background transition from hanging the Rust CI job indefinitely.
 - Source-only CI keeps the existing gates and adds conservative Rust and
   frontend timeout budgets.
 - Existing workspaces are loaded at the existing workspace boundary so the

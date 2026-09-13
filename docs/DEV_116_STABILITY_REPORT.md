@@ -20,6 +20,9 @@ The reliability fix is test-only:
 
 - `wait_for_status`, `wait_for_action`, and `wait_for_registry_absent` now use
   a 15-second bounded wall-clock deadline with a 1 ms scheduler-friendly sleep.
+- The production-orchestrator lineage test's
+  `wait_until_batch_item_is_observed` helper now uses the same bounded wait
+  pattern instead of an unbounded cooperative-yield loop.
 - Timeout failures remain explicit and identify the missing lifecycle
   observation; no test is disabled, deleted, or hidden behind a retry.
 - The running-cancellation test requests cancellation twice and verifies the
@@ -50,7 +53,11 @@ explicit timeout budget:
 
 This bounds hung runners without changing the production workflow or masking
 failures. The final exact-head dispatch is recorded in the health document
-once the pushed commit has completed remotely.
+once the pushed commit has completed remotely. The first exact-head attempt
+(`34747747124`) was cancelled by the 25-minute Rust job timeout while waiting
+in the existing production-orchestrator lineage test's unbounded polling
+helper; it was not reported as a test assertion failure. The helper is now
+bounded so a missing transition fails visibly instead of hanging the job.
 
 ## 3. Frontend build audit
 
@@ -105,8 +112,10 @@ RUST_TEST=PASS
 ```
 
 The Rust gate includes the focused cancellation E2E suite and all-target tests
-with one test thread. One existing jsdom navigation warning is emitted by the
-frontend suite; it does not fail the suite and is unrelated to DEV-116.
+with one test thread. The all-target gate was rerun after bounding the
+production-orchestrator polling helper. One existing jsdom navigation warning
+is emitted by the frontend suite; it does not fail the suite and is unrelated
+to DEV-116.
 
 ## 6. Release decision
 

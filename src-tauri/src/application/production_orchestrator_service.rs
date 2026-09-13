@@ -1677,8 +1677,11 @@ mod tests {
     use crate::infrastructure::time::SystemClock;
     use async_trait::async_trait;
     use sqlx::SqlitePool;
-    use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        time::Duration,
+    };
     use tempfile::tempdir;
 
     const SIMPLE_RECIPE_YAML: &str = include_str!(concat!(
@@ -2140,19 +2143,25 @@ outputs:
     }
 
     async fn wait_until_batch_item_is_observed(pool: &SqlitePool, item_id: &str) {
-        loop {
-            let status = sqlx::query_scalar::<_, String>(
-                "SELECT status FROM production_batch_items WHERE id = ?",
-            )
-            .bind(item_id)
-            .fetch_one(pool)
-            .await
-            .expect("production item should remain readable");
-            if !matches!(status.as_str(), "PENDING" | "DISPATCHING") {
-                return;
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let status = sqlx::query_scalar::<_, String>(
+                    "SELECT status FROM production_batch_items WHERE id = ?",
+                )
+                .bind(item_id)
+                .fetch_one(pool)
+                .await
+                .expect("production item should remain readable");
+                if !matches!(status.as_str(), "PENDING" | "DISPATCHING") {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
-            tokio::task::yield_now().await;
-        }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!("production item {item_id} was not observed beyond dispatch within 15s")
+        });
     }
 
     #[tokio::test]
