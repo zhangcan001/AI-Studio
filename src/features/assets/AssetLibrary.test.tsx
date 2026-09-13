@@ -105,4 +105,19 @@ describe("Asset Library MVP", () => {
     expect(html).toContain("当前项目还没有素材");
     expect(html).not.toContain('type="file"');
   });
+
+  it("renders a visible list error without hiding the project boundary", async () => {
+    mocks.assetLibraryPage.mockRejectedValue(new Error("asset list unavailable"));
+    render(
+      <AssetLibrary
+        projectId="project-1"
+        onUseInStudio={vi.fn()}
+        onOpenVideoBatch={vi.fn()}
+        onOpenTask={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("资产加载失败", { exact: false })).toBeTruthy();
+    expect(screen.getByLabelText("项目筛选：project-1")).toBeTruthy();
+  });
 });

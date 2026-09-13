@@ -174,6 +174,7 @@ mod tests {
     };
     use chrono::{TimeZone, Utc};
     use serde_json::json;
+    use sqlx::SqlitePool;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -182,6 +183,7 @@ mod tests {
         AssetDataService,
         SqliteAssetRepository,
         Task,
+        SqlitePool,
     ) {
         let directory = tempdir().expect("temporary directory");
         let pool = initialize(&directory.path().join("app.db"))
@@ -199,9 +201,9 @@ mod tests {
             .create(&task, &task.created_event())
             .await
             .expect("task fixture");
-        let repository = SqliteAssetRepository::new(pool);
+        let repository = SqliteAssetRepository::new(pool.clone());
         let service = AssetDataService::new(Arc::new(repository.clone()));
-        (directory, service, repository, task)
+        (directory, service, repository, task, pool)
     }
 
     fn asset(task_id: &TaskId, id: &str, name: &str) -> Asset {
@@ -223,9 +225,27 @@ mod tests {
         .unwrap()
     }
 
+    fn source_asset(project_id: &str, id: &str, name: &str) -> Asset {
+        Asset::new_source_image(
+            AssetId::parse(id).unwrap(),
+            project_id,
+            name,
+            format!("{name}.png"),
+            format!("C:/{project_id}/{id}.png"),
+            format!("{id:0<64}"),
+            "image/png",
+            2,
+            2,
+            64,
+            json!({"source": "test"}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap(),
+        )
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn create_and_query_asset_versions_and_current_version() {
-        let (_directory, service, repository, task) = setup().await;
+        let (_directory, service, repository, task, _pool) = setup().await;
         let image = asset(&task.id, "ast_versioned", "Versioned");
         repository
             .insert_many(std::slice::from_ref(&image))
@@ -291,11 +311,24 @@ mod tests {
 
     #[tokio::test]
     async fn create_query_and_remove_asset_relations() {
-        let (_directory, service, repository, task) = setup().await;
+        let (_directory, service, repository, task, _pool) = setup().await;
         let source = asset(&task.id, "ast_relation_source", "Source");
         let target = asset(&task.id, "ast_relation_target", "Target");
         repository
             .insert_many(&[source.clone(), target.clone()])
+            .await
+            .unwrap();
+
+        service
+            .create_version(
+                "project-1",
+                source.id.as_str(),
+                1,
+                json!({"label": "history"}),
+                "assets/source/image/ast_relation_source-v1.png",
+                "d".repeat(64),
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 2).unwrap(),
+            )
             .await
             .unwrap();
 
@@ -333,11 +366,19 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+        assert_eq!(
+            service
+                .list_versions("project-1", source.id.as_str())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
     async fn relation_rejects_self_links() {
-        let (_directory, service, repository, task) = setup().await;
+        let (_directory, service, repository, task, _pool) = setup().await;
         let image = asset(&task.id, "ast_self_relation", "Self");
         repository
             .insert_many(std::slice::from_ref(&image))
@@ -351,6 +392,140 @@ mod tests {
                 image.id.as_str(),
                 AssetRelationType::Related,
                 Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 2).unwrap(),
+            )
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn project_scope_rejects_cross_project_version_and_relation_access() {
+        let (_directory, service, repository, _task, pool) = setup().await;
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES ('project-2', 'Other', 'C:/other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let project_one_source = source_asset("project-1", "ast_scope_a1", "A one");
+        let project_one_target = source_asset("project-1", "ast_scope_a2", "A two");
+        let project_two_source = source_asset("project-2", "ast_scope_b1", "B one");
+        let project_two_target = source_asset("project-2", "ast_scope_b2", "B two");
+        repository
+            .insert_many(&[
+                project_one_source.clone(),
+                project_one_target.clone(),
+                project_two_source.clone(),
+                project_two_target.clone(),
+            ])
+            .await
+            .unwrap();
+
+        let a_version = service
+            .create_version(
+                "project-1",
+                project_one_source.id.as_str(),
+                1,
+                json!({"project": "a"}),
+                "C:/project-1/a-v1.png",
+                "a".repeat(64),
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 2).unwrap(),
+            )
+            .await
+            .unwrap();
+        let b_version = service
+            .create_version(
+                "project-2",
+                project_two_source.id.as_str(),
+                1,
+                json!({"project": "b"}),
+                "C:/project-2/b-v1.png",
+                "b".repeat(64),
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 3).unwrap(),
+            )
+            .await
+            .unwrap();
+        let a_relation = service
+            .create_relation(
+                "project-1",
+                project_one_source.id.as_str(),
+                project_one_target.id.as_str(),
+                AssetRelationType::DerivedFrom,
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 4).unwrap(),
+            )
+            .await
+            .unwrap();
+        let b_relation = service
+            .create_relation(
+                "project-2",
+                project_two_source.id.as_str(),
+                project_two_target.id.as_str(),
+                AssetRelationType::VariantOf,
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 5).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service
+                .list_versions("project-1", project_one_source.id.as_str())
+                .await
+                .unwrap(),
+            vec![a_version]
+        );
+        assert_eq!(
+            service
+                .list_versions("project-2", project_two_source.id.as_str())
+                .await
+                .unwrap(),
+            vec![b_version]
+        );
+        assert!(matches!(
+            service
+                .list_versions("project-2", project_one_source.id.as_str())
+                .await,
+            Err(super::AssetDataError::NotFound(_))
+        ));
+        assert!(matches!(
+            service
+                .list_versions("project-1", project_two_source.id.as_str())
+                .await,
+            Err(super::AssetDataError::NotFound(_))
+        ));
+        assert_eq!(
+            service
+                .list_relations("project-1", project_one_source.id.as_str())
+                .await
+                .unwrap(),
+            vec![a_relation]
+        );
+        assert_eq!(
+            service
+                .list_relations("project-2", project_two_source.id.as_str())
+                .await
+                .unwrap(),
+            vec![b_relation]
+        );
+        assert!(matches!(
+            service
+                .list_relations("project-2", project_one_source.id.as_str())
+                .await,
+            Err(super::AssetDataError::NotFound(_))
+        ));
+        assert!(matches!(
+            service
+                .list_relations("project-1", project_two_source.id.as_str())
+                .await,
+            Err(super::AssetDataError::NotFound(_))
+        ));
+        assert!(service
+            .create_relation(
+                "project-1",
+                project_one_source.id.as_str(),
+                project_two_source.id.as_str(),
+                AssetRelationType::Related,
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 6).unwrap(),
             )
             .await
             .is_err());

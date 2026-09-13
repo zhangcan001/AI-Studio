@@ -460,6 +460,12 @@ mod tests {
                 .bytes,
             bytes
         );
+        let moved_path = directory.path().join("moved-image.png");
+        std::fs::rename(&path, &moved_path).unwrap();
+        assert!(matches!(
+            service.read_image("project-1", "ast_read_test").await,
+            Err(AssetQueryError::Read(_))
+        ));
         assert!(matches!(
             service.read_image("project-1", "ast_missing").await,
             Err(AssetQueryError::NotFound(_))

@@ -760,4 +760,122 @@ mod tests {
         assert_eq!(isolated.items.len(), 1);
         assert_eq!(isolated.items[0].project_id, "project-2");
     }
+
+    #[tokio::test]
+    async fn queries_catalog_with_thousand_assets_and_ten_thousand_v2_rows() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = SqliteAssetRepository::new(pool.clone());
+        let base = Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap();
+        let assets = (0..1_000)
+            .map(|index| {
+                Asset::new_source_image(
+                    AssetId::parse(format!("ast_v2_perf_{index:04}"))
+                        .expect("asset id should parse"),
+                    "project-1",
+                    format!("perf-{index:04}.png"),
+                    format!("perf-{index:04}.png"),
+                    format!("C:/project/assets/source/image/perf-{index:04}.png"),
+                    format!("{index:064x}"),
+                    "image/png",
+                    64,
+                    64,
+                    4_096,
+                    json!({"synthetic": true}),
+                    base + Duration::seconds(index as i64),
+                )
+                .expect("performance asset should be valid")
+            })
+            .collect::<Vec<_>>();
+        repository
+            .insert_many(&assets)
+            .await
+            .expect("performance assets should insert");
+
+        let mut transaction = pool.begin().await.unwrap();
+        for index in 0..10_000 {
+            let asset_index = index % 1_000;
+            sqlx::query(
+                "INSERT INTO asset_versions
+                 (id, project_id, asset_id, version_number, metadata_snapshot, location, checksum, created_at)
+                 VALUES (?, 'project-1', ?, ?, '{}', ?, ?, '2026-03-01T00:00:00Z')",
+            )
+            .bind(format!("av_v2_perf_{index:05}"))
+            .bind(format!("ast_v2_perf_{asset_index:04}"))
+            .bind((index / 1_000 + 1) as i64)
+            .bind(format!(
+                "C:/project/assets/source/image/perf-{asset_index:04}-v{}.png",
+                index / 1_000 + 1
+            ))
+            .bind(format!("{index:064x}"))
+            .execute(&mut *transaction)
+            .await
+            .expect("performance version should insert");
+        }
+        for index in 0..10_000 {
+            let source_index = index % 1_000;
+            let target_index = (source_index + index / 1_000 + 1) % 1_000;
+            sqlx::query(
+                "INSERT INTO asset_relations
+                 (id, project_id, source_asset_id, target_asset_id, relation_type, created_at)
+                 VALUES (?, 'project-1', ?, ?, 'RELATED', '2026-03-01T00:00:00Z')",
+            )
+            .bind(format!("rel_v2_perf_{index:05}"))
+            .bind(format!("ast_v2_perf_{source_index:04}"))
+            .bind(format!("ast_v2_perf_{target_index:04}"))
+            .execute(&mut *transaction)
+            .await
+            .expect("performance relation should insert");
+        }
+        transaction.commit().await.unwrap();
+
+        let versions = repository
+            .list_asset_versions("project-1", &assets[0].id)
+            .await
+            .expect("version list should query");
+        assert_eq!(versions.len(), 10);
+        assert_eq!(versions.last().unwrap().version_number, 10);
+        assert_eq!(
+            repository
+                .current_asset_version("project-1", &assets[0].id)
+                .await
+                .expect("current version should query")
+                .unwrap()
+                .version_number,
+            10
+        );
+        assert_eq!(
+            repository
+                .list_asset_relations("project-1", &assets[0].id)
+                .await
+                .expect("relation list should query")
+                .len(),
+            20
+        );
+        assert!(repository
+            .find_by_id(&assets[0].id)
+            .await
+            .expect("detail should query")
+            .is_some());
+
+        let browser = SqliteAssetBrowseRepository::new(pool);
+        let page = browser
+            .list_page(AssetLibraryQuery {
+                project_id: "project-1".to_owned(),
+                category: AssetCategoryFilter::SourceImage,
+                keyword: Some("perf-".to_owned()),
+                media_type: AssetMediaTypeFilter::Image,
+                source_kind: AssetSourceFilter::Source,
+                favorite_only: false,
+                tag_id: None,
+                created_order: AssetCreatedOrder::Newest,
+                cursor: None,
+                limit: 50,
+            })
+            .await
+            .expect("filtered list should query");
+        assert_eq!(page.items.len(), 50);
+        assert!(page.next_cursor.is_some());
+    }
 }

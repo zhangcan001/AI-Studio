@@ -1103,4 +1103,74 @@ mod tests {
             .expect("task should remain")
             .is_some());
     }
+
+    #[tokio::test]
+    async fn deleting_asset_cascades_v2_rows_and_preserves_unrelated_records() {
+        let (_directory, pool, task, repository) = setup().await;
+        let source = source_asset("ast_v2_cascade_source");
+        let target = source_asset("ast_v2_cascade_target");
+        repository
+            .insert_many(&[source.clone(), target.clone()])
+            .await
+            .expect("assets should insert");
+        let now = "2026-01-01T00:00:02Z";
+        sqlx::query(
+            "INSERT INTO asset_versions
+             (id, project_id, asset_id, version_number, metadata_snapshot, location, checksum, created_at)
+             VALUES ('av_v2_cascade', 'project-1', ?, 1, '{}', 'C:/project/v1.png', ?, ?)",
+        )
+        .bind(source.id.as_str())
+        .bind("c".repeat(64))
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("version fixture should insert");
+        sqlx::query(
+            "INSERT INTO asset_relations
+             (id, project_id, source_asset_id, target_asset_id, relation_type, created_at)
+             VALUES ('rel_v2_cascade', 'project-1', ?, ?, 'DERIVED_FROM', ?)",
+        )
+        .bind(source.id.as_str())
+        .bind(target.id.as_str())
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("relation fixture should insert");
+
+        repository
+            .delete_by_ids("project-1", std::slice::from_ref(&source.id))
+            .await
+            .expect("asset should delete with v2 rows");
+
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM asset_versions WHERE asset_id = ?",)
+                .bind(source.id.as_str())
+                .fetch_one(&pool)
+                .await
+                .expect("version count"),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM asset_relations
+                 WHERE source_asset_id = ? OR target_asset_id = ?",
+            )
+            .bind(source.id.as_str())
+            .bind(source.id.as_str())
+            .fetch_one(&pool)
+            .await
+            .expect("relation count"),
+            0
+        );
+        assert!(repository
+            .find_by_id(&target.id)
+            .await
+            .expect("unrelated asset should remain")
+            .is_some());
+        assert!(SqliteTaskRepository::new(pool)
+            .find_by_id(&task.id)
+            .await
+            .expect("task history should remain")
+            .is_some());
+    }
 }
