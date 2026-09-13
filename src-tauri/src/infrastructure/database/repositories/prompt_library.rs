@@ -431,4 +431,148 @@ mod tests {
             .unwrap();
         assert!(isolated.items.is_empty());
     }
+
+    #[tokio::test]
+    async fn large_prompt_catalog_is_scoped_filterable_and_detail_queryable() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("prompt-performance.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES
+                ('prompt-perf-a', 'Prompt performance A', 'C:/prompt-perf-a',
+                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'),
+                ('prompt-perf-b', 'Prompt performance B', 'C:/prompt-perf-b',
+                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        for index in 0..1_000 {
+            let prompt_id = format!("prm_perf_a_{index:04}");
+            let name = format!("Performance prompt {index:04}");
+            let normalized_name = name.to_lowercase();
+            let tags = format!("[\"tag-{}\",\"shared\"]", index % 10);
+            sqlx::query(
+                "INSERT INTO prompt_entries
+                 (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
+                 VALUES (?, 'prompt-perf-a', 'prompt', ?, ?, ?,
+                         '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+            )
+            .bind(&prompt_id)
+            .bind(&name)
+            .bind(&normalized_name)
+            .bind(&tags)
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+
+            for version in 1..=5 {
+                sqlx::query(
+                    "INSERT INTO prompt_versions
+                     (id, prompt_id, version, text, created_at)
+                     VALUES (?, ?, ?, ?, '2026-01-01T00:00:00+00:00')",
+                )
+                .bind(format!("prv_perf_a_{index:04}_{version}"))
+                .bind(&prompt_id)
+                .bind(version)
+                .bind(format!("prompt {index} version {version}"))
+                .execute(&mut *transaction)
+                .await
+                .unwrap();
+            }
+        }
+        sqlx::query(
+            "INSERT INTO prompt_entries
+             (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
+             VALUES ('prm_perf_b', 'prompt-perf-b', 'prompt', 'Other project prompt',
+                     'other project prompt', '[\"other\"]',
+                     '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+        )
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO prompt_versions (id, prompt_id, version, text, created_at)
+             VALUES ('prv_perf_b_0001', 'prm_perf_b', 1, 'other project text',
+                     '2026-01-01T00:00:00+00:00')",
+        )
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let repository = SqlitePromptLibraryRepository::new(pool);
+        let page = repository
+            .list_page(PromptLibraryQuery {
+                project_id: "prompt-perf-a".to_owned(),
+                kind: Some("prompt".to_owned()),
+                keyword: None,
+                tag: None,
+                cursor: None,
+                limit: 50,
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 50);
+        assert!(page.next_cursor.is_some());
+        assert!(page
+            .items
+            .iter()
+            .all(|item| item.project_id == "prompt-perf-a"));
+
+        let filtered = repository
+            .list_page(PromptLibraryQuery {
+                project_id: "prompt-perf-a".to_owned(),
+                kind: Some("prompt".to_owned()),
+                keyword: Some("0999".to_owned()),
+                tag: Some("tag-9".to_owned()),
+                cursor: None,
+                limit: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].id, "prm_perf_a_0999");
+        assert_eq!(filtered.items[0].version_count, 5);
+
+        let detail = repository
+            .find_by_id("prompt-perf-a", "prm_perf_a_0999")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.version_count, 5);
+        let versions = repository
+            .list_versions("prompt-perf-a", "prm_perf_a_0999")
+            .await
+            .unwrap();
+        assert_eq!(versions.len(), 5);
+        assert_eq!(versions[0].text, "prompt 999 version 1");
+        assert!(repository
+            .find_by_id("prompt-perf-b", "prm_perf_a_0999")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(repository
+            .list_versions("prompt-perf-b", "prm_perf_a_0999")
+            .await
+            .unwrap()
+            .is_empty());
+        let other_project = repository
+            .list_page(PromptLibraryQuery {
+                project_id: "prompt-perf-b".to_owned(),
+                kind: None,
+                keyword: None,
+                tag: None,
+                cursor: None,
+                limit: 50,
+            })
+            .await
+            .unwrap();
+        assert_eq!(other_project.items.len(), 1);
+        assert_eq!(other_project.items[0].id, "prm_perf_b");
+    }
 }

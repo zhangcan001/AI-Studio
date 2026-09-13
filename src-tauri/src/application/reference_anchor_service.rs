@@ -571,6 +571,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(service.list("project-1").await.unwrap().len(), 4);
+        let other_project_anchor = service
+            .create(CreateReferenceAnchorRequest {
+                project_id: "project-2".to_owned(),
+                kind: crate::domain::ReferenceAnchorKind::Character,
+                name: "Other project reference".to_owned(),
+                description: String::new(),
+                asset_ids: vec!["ast_x".to_owned()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(service.list("project-2").await.unwrap().len(), 1);
+        assert!(service
+            .get("project-1", &other_project_anchor.id)
+            .await
+            .is_err());
+        assert!(service
+            .get("project-2", &other_project_anchor.id)
+            .await
+            .is_ok());
 
         let updated = service
             .update(UpdateReferenceAnchorRequest {

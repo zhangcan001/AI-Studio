@@ -464,6 +464,10 @@ mod tests {
         assert_eq!(second.version, 2);
         let found = service.get("prompt-project-1", &first.id).await.unwrap();
         assert_eq!(found.versions.len(), 2);
+        assert_eq!(found.versions[0].version, 1);
+        assert_eq!(found.versions[0].text, "人物\n柔光");
+        assert_eq!(found.versions[1].version, 2);
+        assert_eq!(found.versions[1].text, "人物\n硬光");
         assert_eq!(
             service
                 .list(

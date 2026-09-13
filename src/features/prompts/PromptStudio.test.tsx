@@ -96,6 +96,8 @@ describe("PromptStudio", () => {
     expect(screen.getByRole("columnheader", { name: "更新时间" })).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "提示词列表" })).getByText("MiniMax / H3 · 2.0")).toBeTruthy();
     expect(mocks.listPromptLibrary).toHaveBeenCalledWith("project-1", expect.objectContaining({ kind: "prompt" }));
+    expect(mocks.getPromptLibraryEntry).toHaveBeenCalledWith("project-1", "prm-1");
+    expect(mocks.taskHistoryPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1" }));
   });
 
   it("shows prompt detail, model view, version history, and provenance", async () => {
@@ -125,6 +127,31 @@ describe("PromptStudio", () => {
     await screen.findByRole("button", { name: "人物镜头提示词" });
     await user.selectOptions(screen.getByLabelText("提示词类型"), "snippet");
     await waitFor(() => expect(mocks.listPromptLibrary).toHaveBeenCalledWith("project-1", expect.objectContaining({ kind: "snippet" })));
+  });
+
+  it("exposes loading and list error states", async () => {
+    mocks.listPromptLibrary.mockImplementationOnce(() => new Promise(() => undefined));
+    render(<PromptStudio projectId="project-1" />);
+    expect(screen.getByText("正在加载提示词…")).toBeTruthy();
+
+    cleanup();
+    mocks.listPromptLibrary.mockRejectedValueOnce(new Error("list unavailable"));
+    render(<PromptStudio projectId="project-1" />);
+    expect(await screen.findByText("提示词列表加载失败：操作失败，请查看技术详情。")).toBeTruthy();
+  });
+
+  it("exposes a detail error when a prompt cannot be read", async () => {
+    mocks.getPromptLibraryEntry.mockRejectedValue(new Error("detail unavailable"));
+    render(<PromptStudio projectId="project-1" />);
+    expect(await screen.findByText("提示词详情加载失败：操作失败，请查看技术详情。")).toBeTruthy();
+  });
+
+  it("exposes model and generation-history errors", async () => {
+    mocks.listModels.mockRejectedValueOnce(new Error("model registry unavailable"));
+    mocks.taskHistoryPage.mockRejectedValueOnce(new Error("history unavailable"));
+    render(<PromptStudio projectId="project-1" />);
+    expect(await screen.findByText("模型加载失败：操作失败，请查看技术详情。")).toBeTruthy();
+    expect(await screen.findByText("生成历史加载失败：操作失败，请查看技术详情。")).toBeTruthy();
   });
 
   it("exposes an empty state", async () => {

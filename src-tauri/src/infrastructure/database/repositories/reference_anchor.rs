@@ -470,4 +470,70 @@ mod tests {
             1
         );
     }
+
+    #[tokio::test]
+    async fn large_reference_catalog_is_scoped_and_detail_queryable() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("reference-performance.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES
+                ('reference-perf-a', 'Reference performance A', 'C:/reference-perf-a',
+                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'),
+                ('reference-perf-b', 'Reference performance B', 'C:/reference-perf-b',
+                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        for index in 0..10_000 {
+            let name = format!("Reference {index:05}");
+            sqlx::query(
+                "INSERT INTO reference_anchors
+                 (id, project_id, kind, name, normalized_name, description, created_at, updated_at)
+                 VALUES (?, 'reference-perf-a', 'CHARACTER', ?, ?, '',
+                         '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+            )
+            .bind(format!("anc_perf_a_{index:05}"))
+            .bind(&name)
+            .bind(name.to_lowercase())
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO reference_anchors
+             (id, project_id, kind, name, normalized_name, description, created_at, updated_at)
+             VALUES ('anc_perf_b_00000', 'reference-perf-b', 'CHARACTER', 'Other reference',
+                     'other reference', '', '2026-01-01T00:00:00+00:00',
+                     '2026-01-01T00:00:00+00:00')",
+        )
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let repository = SqliteReferenceAnchorRepository::new(pool);
+        let project_a = repository.list("reference-perf-a").await.unwrap();
+        assert_eq!(project_a.len(), 10_000);
+        assert!(project_a
+            .iter()
+            .all(|record| record.anchor.project_id == "reference-perf-a"));
+        let first_id = ReferenceAnchorId::parse("anc_perf_a_00000").unwrap();
+        let detail = repository
+            .find("reference-perf-a", &first_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.anchor.name, "Reference 00000");
+        assert!(repository
+            .find("reference-perf-b", &first_id)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(repository.list("reference-perf-b").await.unwrap().len(), 1);
+    }
 }

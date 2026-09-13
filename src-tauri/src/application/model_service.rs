@@ -392,6 +392,7 @@ mod tests {
             version.id
         );
         assert_eq!(service.list_versions(&created.id).await.unwrap().len(), 1);
+        let version_before_model_update = service.get_version(&version.id).await.unwrap();
 
         let updated = service
             .update(UpdateModelRequest {
@@ -405,6 +406,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.name, "H3 updated");
+        assert_eq!(
+            service.get_version(&version.id).await.unwrap(),
+            version_before_model_update
+        );
         assert!(matches!(
             service
                 .create_version(CreateModelVersionRequest {

@@ -94,6 +94,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
     const request = ++promptRequest.current;
     setLoading(true);
     setError(undefined);
+    setDetailError(undefined);
     try {
       const page = await listPromptLibrary(projectId, {
         kind,
@@ -115,6 +116,8 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
         page.items.map((entry) => getPromptLibraryEntry(projectId, entry.id)),
       );
       if (promptRequest.current !== request) return;
+      const firstDetailError = detailResults.find((item) => item.status === "rejected");
+      if (firstDetailError?.status === "rejected") setDetailError(toUserMessage(firstDetailError.reason));
       const details = detailResults.reduce<Record<string, PromptEntryView>>((result, item) => {
         if (item.status === "fulfilled") result[item.value.id] = item.value;
         return result;
