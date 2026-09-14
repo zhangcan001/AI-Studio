@@ -74,6 +74,7 @@ mod tests {
                'production_run_templates', 'reference_anchors', 'reference_anchor_assets',
                'asset_versions', 'asset_relations',
                'models', 'model_versions',
+               'tools', 'tool_versions', 'tool_capabilities', 'tool_instances',
                'production_series', 'production_episodes', 'production_scenes',
                'shot_scene_assignments', 'profile_revisions', 'reference_sets',
                'style_profiles', 'character_profiles', 'scene_profiles', 'prop_profiles',
@@ -99,13 +100,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 63);
+        assert_eq!(table_count(&pool).await, 67);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            34
+            35
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -328,12 +329,12 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 63);
+        assert_eq!(table_count(&second_pool).await, 67);
         second_pool.close().await;
     }
 
     #[tokio::test]
-    async fn migration_033_and_034_preserve_existing_project_asset_shot_task_review_rows() {
+    async fn migration_033_through_035_preserve_existing_project_asset_shot_task_review_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-032.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -579,6 +580,36 @@ mod tests {
                 1
             );
         }
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/035_local_tool_hub_data_foundation.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration 035 should apply to the legacy database");
+
+        let after_035: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM projects WHERE id = 'legacy-v2-project'),
+               (SELECT COUNT(*) FROM assets WHERE id = 'ast_legacy_v2_asset'),
+               (SELECT COUNT(*) FROM shots WHERE id = 'legacy-v2-shot'),
+               (SELECT COUNT(*) FROM tasks WHERE id = 'legacy-v2-task'),
+               (SELECT COUNT(*) FROM production_item_reviews WHERE id = 'legacy-v2-review')",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("post-035 row snapshot should be readable");
+        assert_eq!(after_035, before);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name IN
+                 ('tools', 'tool_versions', 'tool_capabilities', 'tool_instances')",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("tool tables should be readable"),
+            4
+        );
         pool.close().await;
     }
 

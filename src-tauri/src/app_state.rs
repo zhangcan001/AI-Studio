@@ -52,6 +52,7 @@ use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::application::task_history_service::TaskHistoryService;
 use crate::application::task_query_service::TaskQueryService;
 use crate::application::task_recovery_service::TaskRecoveryService;
+use crate::application::tool_service::ToolService;
 use crate::application::workflow_benchmark_service::WorkflowBenchmarkService;
 use crate::application::workflow_library_service::WorkflowLibraryService;
 use crate::application::workflow_lifecycle_coordinator::WorkflowLifecycleCoordinator;
@@ -105,6 +106,7 @@ pub struct AppState {
     pub preset_service: Arc<PresetService>,
     pub prompt_library_service: Arc<PromptLibraryService>,
     pub model_service: Arc<ModelService>,
+    pub tool_service: Arc<ToolService>,
     pub shot_service: Arc<ShotService>,
     pub shot_batch_service: Arc<ShotBatchService>,
     pub shot_bulk_service: Arc<ShotBulkService>,
@@ -171,6 +173,7 @@ impl AppState {
         preset_service: Arc<PresetService>,
         prompt_library_service: Arc<PromptLibraryService>,
         model_service: Arc<ModelService>,
+        tool_service: Arc<ToolService>,
         shot_service: Arc<ShotService>,
         shot_batch_service: Arc<ShotBatchService>,
         shot_bulk_service: Arc<ShotBulkService>,
@@ -235,6 +238,7 @@ impl AppState {
             preset_service,
             prompt_library_service,
             model_service,
+            tool_service,
             shot_service,
             shot_batch_service,
             shot_bulk_service,

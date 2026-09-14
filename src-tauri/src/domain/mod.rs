@@ -21,6 +21,7 @@ pub mod shot;
 pub mod shot_context;
 pub mod shot_readiness;
 pub mod task;
+pub mod tool;
 pub mod workflow;
 
 pub use asset::{
@@ -90,5 +91,9 @@ pub use task::{
     NewTaskEvent, RuntimeProvenance, StoredTaskEvent, Task, TaskDomainError, TaskError,
     TaskEventType, TaskId, TaskProgress, TaskStateMachine, TaskStatus, TaskTelemetry,
     TaskTelemetryDurations, TaskTelemetryPatch,
+};
+pub use tool::{
+    Capability, Tool, ToolCapability, ToolDomainError, ToolHealthStatus, ToolId, ToolInstance,
+    ToolInstanceId, ToolVersion, ToolVersionId,
 };
 pub use workflow::{WorkflowDocument, WorkflowError};

@@ -298,6 +298,15 @@ async fn remove_022_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
 
 async fn remove_024_for_upgrade_fixture(pool: &sqlx::SqlitePool) {
     for statement in [
+        "DROP INDEX IF EXISTS idx_tool_instances_last_checked",
+        "DROP INDEX IF EXISTS idx_tool_instances_tool_status",
+        "DROP TABLE IF EXISTS tool_instances",
+        "DROP INDEX IF EXISTS idx_tool_capabilities_name",
+        "DROP TABLE IF EXISTS tool_capabilities",
+        "DROP INDEX IF EXISTS idx_tool_versions_tool_observed",
+        "DROP TABLE IF EXISTS tool_versions",
+        "DROP INDEX IF EXISTS idx_tools_name",
+        "DROP TABLE IF EXISTS tools",
         "DROP INDEX IF EXISTS idx_prompt_versions_model_version",
         "ALTER TABLE prompt_versions DROP COLUMN model_version_id",
         "DROP INDEX IF EXISTS idx_generation_snapshots_model_version",
@@ -574,7 +583,7 @@ fn reference_binding(
 }
 
 #[tokio::test]
-async fn dev048_fresh_migration_001_to_034_creates_only_the_frozen_tables() {
+async fn dev048_fresh_migration_001_to_035_creates_only_the_frozen_tables() {
     let directory = tempdir().unwrap();
     let pool = initialize(&directory.path().join("fresh.db"))
         .await
@@ -584,7 +593,7 @@ async fn dev048_fresh_migration_001_to_034_creates_only_the_frozen_tables() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        34
+        35
     );
     let required_tables = [
         "profile_revisions",
@@ -633,7 +642,7 @@ async fn dev048_fresh_migration_001_to_034_creates_only_the_frozen_tables() {
 }
 
 #[tokio::test]
-async fn dev048_021_to_034_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
+async fn dev048_021_to_035_preserves_all_legacy_sentinels_and_leaves_new_tables_empty() {
     let (directory, pool) = setup().await;
     insert_legacy_sentinels(&pool).await;
     let before = legacy_counts(&pool).await;
@@ -648,7 +657,7 @@ async fn dev048_021_to_034_preserves_all_legacy_sentinels_and_leaves_new_tables_
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        34
+        35
     );
     assert_eq!(legacy_counts(&upgraded).await, before);
     assert_eq!(
@@ -701,7 +710,7 @@ async fn dev048_021_to_034_preserves_all_legacy_sentinels_and_leaves_new_tables_
 }
 
 #[tokio::test]
-async fn dev052_existing_023_to_034_creates_preparation_snapshot_table() {
+async fn dev052_existing_023_to_035_creates_preparation_snapshot_table() {
     let (directory, pool) = setup().await;
     remove_024_for_upgrade_fixture(&pool).await;
     pool.close().await;
@@ -714,7 +723,7 @@ async fn dev052_existing_023_to_034_creates_preparation_snapshot_table() {
             .fetch_one(&upgraded)
             .await
             .unwrap(),
-        34
+        35
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1527,7 +1536,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(migrations.iter().all(|name| {
         name.get(..3)
             .and_then(|prefix| prefix.parse::<u32>().ok())
-            .is_some_and(|version| version <= 34)
+            .is_some_and(|version| version <= 35)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
     assert!(package.contains("\"version\": \"1.3.1\""));

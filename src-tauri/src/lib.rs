@@ -12,9 +12,9 @@ pub use application::ports::{
     GenerationSnapshotRepository, ModelRepository, ProductionItemReviewRepository,
     ProductionQueueRepository, ProjectBackupRepository, ProjectRecord, ProjectRepository,
     ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RecipeHistoryQueryRepository,
-    RepositoryError, TaskOutputAssetMapping, TaskRepository, WorkflowLibraryRepository,
-    WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository, WorkflowRuntimeRepository,
-    WorkflowRuntimeStateRepository,
+    RepositoryError, TaskOutputAssetMapping, TaskRepository, ToolRepository,
+    WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository,
+    WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
 };
 pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
@@ -24,8 +24,8 @@ pub use infrastructure::database::{
     SqliteModelRepository, SqliteOrganizationRepository, SqlitePresetRepository,
     SqliteProductionItemReviewRepository, SqliteProductionQueueRepository,
     SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
-    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteWorkflowLibraryRepository,
-    SqliteWorkflowRunRepository,
+    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteToolRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -89,6 +89,7 @@ use application::{
     task_history_service::TaskHistoryService,
     task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
+    tool_service::ToolService,
     workflow_benchmark_service::WorkflowBenchmarkService,
     workflow_library_service::WorkflowLibraryService,
     workflow_lifecycle_coordinator::WorkflowLifecycleCoordinator,
@@ -305,6 +306,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let model_repository: Arc<dyn application::ports::ModelRepository> = Arc::new(
                 infrastructure::database::SqliteModelRepository::new(database_pool.clone()),
+            );
+            let tool_repository: Arc<dyn application::ports::ToolRepository> = Arc::new(
+                infrastructure::database::SqliteToolRepository::new(database_pool.clone()),
             );
             let shot_repository_impl = Arc::new(
                 infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
@@ -841,6 +845,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             ));
             let model_service = Arc::new(ModelService::new(model_repository, clock.clone()));
+            let tool_service = Arc::new(ToolService::new(tool_repository, clock.clone()));
             let shot_bulk_service = Arc::new(ShotBulkService::new(
                 shot_bulk_repository.clone(),
                 definition_repository.clone(),
@@ -958,6 +963,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 preset_service,
                 prompt_library_service,
                 model_service,
+                tool_service,
                 shot_service,
                 shot_batch_service,
                 shot_bulk_service,
@@ -1262,6 +1268,20 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::model::model_version_current,
             commands::model::model_version_get,
             commands::model::model_version_create,
+            commands::tool::tool_list,
+            commands::tool::tool_get,
+            commands::tool::tool_create,
+            commands::tool::tool_update,
+            commands::tool::tool_delete,
+            commands::tool::tool_instance_list,
+            commands::tool::tool_instance_get,
+            commands::tool::tool_instance_create,
+            commands::tool::tool_instance_record_health,
+            commands::tool::tool_version_list,
+            commands::tool::tool_version_get,
+            commands::tool::tool_version_create,
+            commands::tool::tool_capability_list,
+            commands::tool::tool_capability_create,
             commands::reference_anchor::reference_anchors_list,
             commands::reference_anchor::reference_anchor_get,
             commands::reference_anchor::reference_anchor_create,

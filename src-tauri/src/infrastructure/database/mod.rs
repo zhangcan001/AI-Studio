@@ -20,11 +20,12 @@ pub use repositories::{
     SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository,
     SqliteRecipeHistoryQueryRepository, SqliteReferenceAnchorRepository,
     SqliteReferenceSetRepository, SqliteShotConsistencyRepository, SqliteShotRepository,
-    SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteWorkflowBenchmarkRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRecipePromotionRepository,
-    SqliteWorkflowRecipeRuntimeStateRepository, SqliteWorkflowRegistryRepository,
-    SqliteWorkflowRunRepository, SqliteWorkflowRuntimeArtifactRepository,
-    SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
+    SqliteTaskHistoryRepository, SqliteTaskRepository, SqliteToolRepository,
+    SqliteWorkflowBenchmarkRepository, SqliteWorkflowLibraryRepository,
+    SqliteWorkflowRecipePromotionRepository, SqliteWorkflowRecipeRuntimeStateRepository,
+    SqliteWorkflowRegistryRepository, SqliteWorkflowRunRepository,
+    SqliteWorkflowRuntimeArtifactRepository, SqliteWorkflowRuntimeRepository,
+    SqliteWorkflowRuntimeStateRepository,
 };
 
 #[cfg(test)]
