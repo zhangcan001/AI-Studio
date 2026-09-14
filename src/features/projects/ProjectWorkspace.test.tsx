@@ -125,6 +125,20 @@ describe("ProjectWorkspace archive UX", () => {
       ...project,
       id: "restored-1",
       name: "归档项目（恢复）",
+      status: "COMPLETE",
+      backupVersion: 19,
+      assets: 3,
+      versions: 5,
+      generations: 2,
+      warnings: ["工具状态为 UNKNOWN。"],
+      missingTools: ["tool-instance-1"],
+      missingModels: [],
+      missingFiles: [],
+      restoredGenerationToolUsages: 1,
+      restoredGenerationAssetVersions: 2,
+      unresolvedModelVersionIds: [],
+      unresolvedToolInstanceIds: ["tool-instance-1"],
+      unresolvedToolVersionIds: [],
     });
     const confirm = vi.fn((message?: string) => {
       void message;
@@ -143,6 +157,10 @@ describe("ProjectWorkspace archive UX", () => {
     expect(message).toContain("不会覆盖");
     expect(message).toContain("不会自动生成");
     expect(restoreProjectBackup).toHaveBeenCalledWith("bki_1");
+    expect(await screen.findByText("Restore Complete")).toBeTruthy();
+    expect(screen.getByText(/Assets: 3/)).toBeTruthy();
+    expect(screen.getByText(/Missing Tools: 1/)).toBeTruthy();
+    expect(screen.getByText("工具状态为 UNKNOWN。")).toBeTruthy();
   });
 
   it("export uses typed transport only", async () => {

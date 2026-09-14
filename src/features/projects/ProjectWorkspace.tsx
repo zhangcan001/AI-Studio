@@ -10,7 +10,7 @@ import {
   listProjectTemplates,
   updateProjectTemplate,
 } from "../../services/tauriClient";
-import type { ProjectBackupPreview, ProjectView } from "../../types/project";
+import type { ProjectBackupPreview, ProjectView, RestoredProjectView } from "../../types/project";
 import type { RecipeViewModel } from "../../types/generation";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
@@ -40,6 +40,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
   const [error, setError] = useState<string>();
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupPreview, setBackupPreview] = useState<ProjectBackupPreview>();
+  const [restoreReport, setRestoreReport] = useState<RestoredProjectView>();
   const [backupNotice, setBackupNotice] = useState<string>();
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [templateBusy, setTemplateBusy] = useState(false);
@@ -129,6 +130,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     setBackupBusy(true);
     setError(undefined);
     setBackupNotice(undefined);
+    setRestoreReport(undefined);
     try {
       const exported = await exportProjectBackup(projectId);
       if (exported) {
@@ -145,6 +147,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     setBackupBusy(true);
     setError(undefined);
     setBackupNotice(undefined);
+    setRestoreReport(undefined);
     try {
       const preview = await inspectProjectBackup();
       if (preview) setBackupPreview(preview);
@@ -163,6 +166,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     try {
       const restored = await restoreProjectBackup(backupPreview.inspectionId);
       setBackupPreview(undefined);
+      setRestoreReport(restored);
       setBackupNotice(`项目已恢复：${restored.name}`);
       onProjectRestored(restored);
     } catch (backupError: unknown) {
@@ -189,6 +193,25 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
 
       {backupNotice && <p className="settings-notice" role="status">{backupNotice}</p>}
       {error && !formMode && <p className="error-message" role="alert">{error}</p>}
+      {restoreReport && (
+        <section className="project-backup-preview" aria-labelledby="project-restore-report-title" aria-live="polite">
+          <div className="section-heading">
+            <div>
+              <span className="section-label">归档恢复</span>
+              <h3 id="project-restore-report-title">Restore Complete</h3>
+            </div>
+          </div>
+          <p>Project: {restoreReport.name} · Backup v{restoreReport.backupVersion}</p>
+          <p>Assets: {restoreReport.assets} · Versions: {restoreReport.versions} · Generations: {restoreReport.generations}</p>
+          <p>Missing Tools: {restoreReport.missingTools.length} · Missing Models: {restoreReport.missingModels.length} · Missing Files: {restoreReport.missingFiles.length}</p>
+          <p>Warnings:</p>
+          {restoreReport.warnings.length > 0 ? (
+            <ul>
+              {restoreReport.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          ) : <p>无</p>}
+        </section>
+      )}
       {backupPreview && (
         <section className="project-backup-preview" aria-labelledby="project-backup-preview-title">
           <div className="section-heading">

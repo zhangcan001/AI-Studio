@@ -131,10 +131,27 @@ pub struct RestoredProjectView {
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub status: String,
+    pub backup_version: u32,
+    pub assets: usize,
+    pub versions: usize,
+    pub generations: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_files: Vec<String>,
+    pub restored_generation_tool_usages: usize,
+    pub restored_generation_asset_versions: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unresolved_model_version_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unresolved_tool_instance_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unresolved_tool_version_ids: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -155,6 +172,53 @@ fn map_repository_error(error: RepositoryError) -> AppError {
         RepositoryError::Integrity { message } => AppError::backup_invalid(message),
         other => AppError::backup_invalid(other.to_string()),
     }
+}
+
+fn build_restore_warnings(
+    backup_version: u32,
+    expected_generation_tool_usages: usize,
+    expected_generation_asset_versions: usize,
+    result: &ProjectBackupRestoreResult,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if backup_version < BACKUP_VERSION {
+        warnings.push(format!(
+            "已兼容恢复 Backup v{backup_version}；该归档可能不包含当前 v{BACKUP_VERSION} 的全部 v2 数据。"
+        ));
+    }
+    if !result.unresolved_model_version_ids.is_empty() {
+        warnings.push(format!(
+            "以下 ModelVersion 未能解析，相关历史关系保留为 UNKNOWN：{}。",
+            result.unresolved_model_version_ids.join(", ")
+        ));
+    }
+    if !result.unresolved_tool_instance_ids.is_empty() {
+        warnings.push(format!(
+            "以下 ToolInstance 未能解析，相关工具溯源未伪造：{}。",
+            result.unresolved_tool_instance_ids.join(", ")
+        ));
+    }
+    if !result.unresolved_tool_version_ids.is_empty() {
+        warnings.push(format!(
+            "以下 ToolVersion 未能解析，相关生成记录保留但版本显示为 UNKNOWN：{}。",
+            result.unresolved_tool_version_ids.join(", ")
+        ));
+    }
+    if result.restored_generation_tool_usages < expected_generation_tool_usages {
+        warnings.push(format!(
+            "归档中的 {} 条工具使用溯源中有 {} 条未恢复；未根据名称、路径或时间猜测关系。",
+            expected_generation_tool_usages,
+            expected_generation_tool_usages - result.restored_generation_tool_usages
+        ));
+    }
+    if result.restored_generation_asset_versions < expected_generation_asset_versions {
+        warnings.push(format!(
+            "归档中的 {} 条生成资产版本关系中有 {} 条未恢复；恢复未执行启发式修复。",
+            expected_generation_asset_versions,
+            expected_generation_asset_versions - result.restored_generation_asset_versions
+        ));
+    }
+    warnings
 }
 
 pub struct ProjectBackupService {
@@ -539,6 +603,11 @@ impl ProjectBackupService {
         }
 
         let restored_project = project.clone();
+        let restored_asset_count = document.assets.len();
+        let restored_version_count = document.asset_versions.len();
+        let restored_generation_count = document.tasks.len();
+        let expected_generation_tool_usages = document.generation_tool_usages.len();
+        let expected_generation_asset_versions = document.generation_asset_versions.len();
         let restored_snapshots = prepare_restored_snapshots(&document, &asset_ids)?;
         let restore_result = self
             .repository
@@ -593,14 +662,34 @@ impl ProjectBackupService {
             }
         };
         let _ = fs::remove_file(&inspection.archive_path);
+        let missing_models = restore_meta.unresolved_model_version_ids.clone();
+        let missing_tools = restore_meta.unresolved_tool_instance_ids.clone();
+        let warnings = build_restore_warnings(
+            manifest.version,
+            expected_generation_tool_usages,
+            expected_generation_asset_versions,
+            &restore_meta,
+        );
         Ok(RestoredProjectView {
             id: restored_project.id,
             name: restored_project.name,
             description: restored_project.description,
             created_at: restored_project.created_at,
             updated_at: restored_project.updated_at,
+            status: "COMPLETE".to_owned(),
+            backup_version: manifest.version,
+            assets: restored_asset_count,
+            versions: restored_version_count,
+            generations: restored_generation_count,
+            warnings,
+            missing_tools,
+            missing_models,
+            missing_files: Vec::new(),
+            restored_generation_tool_usages: restore_meta.restored_generation_tool_usages,
+            restored_generation_asset_versions: restore_meta.restored_generation_asset_versions,
             unresolved_model_version_ids: restore_meta.unresolved_model_version_ids,
             unresolved_tool_instance_ids: restore_meta.unresolved_tool_instance_ids,
+            unresolved_tool_version_ids: restore_meta.unresolved_tool_version_ids,
         })
     }
 
@@ -4841,8 +4930,9 @@ mod tests {
         BackupModelVersion, BackupProductionEpisode, BackupProductionScene, BackupProductionSeries,
         BackupProject, BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor,
         BackupReferenceAnchorAsset, BackupShot, BackupShotSceneAssignment, BackupSnapshot,
-        BackupTask, BackupTool, BackupToolInstance, DbReferenceAnchor, DbReferenceAnchorAsset,
-        ProductionStructureIds, ProjectBackupManifest, ProjectBackupService,
+        BackupTask, BackupTool, BackupToolCapability, BackupToolInstance, BackupToolVersion,
+        DbReferenceAnchor, DbReferenceAnchorAsset, ProductionStructureIds, ProjectBackupManifest,
+        ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{
@@ -7554,6 +7644,14 @@ mod tests {
         assert_eq!(preview.asset_versions, 1);
         assert_eq!(preview.tools, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(restored.status, "COMPLETE");
+        assert_eq!(restored.backup_version, 19);
+        assert_eq!(restored.assets, 2);
+        assert_eq!(restored.versions, 1);
+        assert_eq!(restored.generations, 1);
+        assert_eq!(restored.restored_generation_tool_usages, 1);
+        assert_eq!(restored.restored_generation_asset_versions, 1);
+        assert!(restored.warnings.is_empty());
 
         let version_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM asset_versions WHERE project_id = ?")
@@ -8023,6 +8121,48 @@ mod tests {
         )
     }
 
+    fn terminal_backup_task(id: &str, prompt_id: Option<&str>, timestamp: &str) -> BackupTask {
+        BackupTask {
+            id: id.to_owned(),
+            workflow_id: "workflow-1".to_owned(),
+            workflow_version_id: "workflow-version-1".to_owned(),
+            recipe_id: "recipe-1".to_owned(),
+            app_version: None,
+            build_commit: None,
+            workflow_version: None,
+            workflow_sha256: None,
+            recipe_version: None,
+            recipe_sha256: None,
+            package_name: None,
+            package_source_path: None,
+            dynamic_binding_targets: None,
+            generation_execution_id: None,
+            compiled_workflow_sha256: None,
+            runtime_profile: None,
+            concurrency_class: None,
+            prepare_started_at: None,
+            prepared_at: None,
+            submitted_at: None,
+            execution_started_at: None,
+            execution_finished_at: None,
+            collection_finished_at: None,
+            status: "SUCCEEDED".to_owned(),
+            prompt_id: prompt_id.map(str::to_owned),
+            queue_number: None,
+            progress_mode: "indeterminate".to_owned(),
+            progress_current: None,
+            progress_total: None,
+            current_node_id: None,
+            error_code: None,
+            error_message: None,
+            raw_error: None,
+            created_at: timestamp.to_owned(),
+            queued_at: None,
+            started_at: None,
+            finished_at: Some(timestamp.to_owned()),
+        }
+    }
+
     fn rewrite_manifest_entry(
         source: &Path,
         destination: &Path,
@@ -8438,6 +8578,573 @@ mod tests {
         assert_eq!(foreign_lineage, 0);
     }
 
+    #[tokio::test]
+    async fn archive_v19_multimedia_round_trip_preserves_v2_lineage_and_report() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        crate::infrastructure::database::repositories::test_support::seed_task_dependencies(&pool)
+            .await;
+
+        let foreign_root = data_dirs.projects.join("project-foreign");
+        std::fs::create_dir_all(&foreign_root).unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("project-foreign")
+        .bind("Foreign project")
+        .bind(Option::<String>::None)
+        .bind(foreign_root.to_string_lossy().to_string())
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let old_project = "project-v19-multimedia";
+        let timestamp = "2026-01-01T00:00:00Z";
+        let mut document = empty_archive_document(old_project, "多媒体归档");
+        document.tasks = vec![terminal_backup_task(
+            "tsk_multimedia",
+            Some("prm_multimedia"),
+            timestamp,
+        )];
+        document.prompt_entries = vec![BackupPromptEntry {
+            id: "prm_multimedia".to_owned(),
+            project_id: old_project.to_owned(),
+            kind: "prompt".to_owned(),
+            name: "多媒体提示词".to_owned(),
+            normalized_name: "多媒体提示词".to_owned(),
+            tags: Vec::new(),
+            created_at: timestamp.to_owned(),
+            updated_at: timestamp.to_owned(),
+        }];
+        document.prompt_versions = vec![BackupPromptVersion {
+            id: "prv_multimedia".to_owned(),
+            project_id: old_project.to_owned(),
+            prompt_id: "prm_multimedia".to_owned(),
+            version: 1,
+            text: "生成多媒体内容".to_owned(),
+            model_version_id: Some("mdv_multimedia".to_owned()),
+            created_at: timestamp.to_owned(),
+        }];
+        document.models = vec![BackupModel {
+            id: "mdl_multimedia".to_owned(),
+            name: "H3".to_owned(),
+            provider: "MiniMax".to_owned(),
+            model_type: "video".to_owned(),
+            description: "multimedia test model".to_owned(),
+            metadata_json: json!({"fixture": true}),
+            created_at: timestamp.to_owned(),
+        }];
+        document.model_versions = vec![BackupModelVersion {
+            id: "mdv_multimedia".to_owned(),
+            model_id: "mdl_multimedia".to_owned(),
+            version: "2026-01".to_owned(),
+            capabilities_json: json!(["image", "video", "audio"]),
+            parameter_schema_json: json!({"seed": "integer"}),
+            created_at: timestamp.to_owned(),
+        }];
+        document.snapshots = vec![BackupSnapshot {
+            id: "snp_multimedia".to_owned(),
+            task_id: "tsk_multimedia".to_owned(),
+            workflow: json!({"kind": "multimedia"}),
+            recipe_yaml: "schema_version: 1\ninputs: {}\n".to_owned(),
+            user_inputs: json!({}),
+            resolved_inputs: json!({}),
+            model_version_id: Some("mdv_multimedia".to_owned()),
+            created_at: timestamp.to_owned(),
+        }];
+        document.tools = vec![BackupTool {
+            id: "tool_multimedia".to_owned(),
+            name: "ComfyUI".to_owned(),
+            tool_type: "local".to_owned(),
+            description: "multimedia tool".to_owned(),
+            metadata_json: json!({}),
+            created_at: timestamp.to_owned(),
+        }];
+        document.tool_versions = vec![BackupToolVersion {
+            id: "tver_multimedia".to_owned(),
+            tool_id: "tool_multimedia".to_owned(),
+            version: "0.1".to_owned(),
+            observed_at: timestamp.to_owned(),
+            metadata_json: json!({}),
+        }];
+        document.tool_capabilities = vec![BackupToolCapability {
+            tool_id: "tool_multimedia".to_owned(),
+            capability_name: "multimedia_generation".to_owned(),
+            metadata_json: json!({}),
+        }];
+        document.tool_instances = vec![BackupToolInstance {
+            id: "tins_multimedia".to_owned(),
+            tool_id: "tool_multimedia".to_owned(),
+            path: Some("/old/comfy".to_owned()),
+            endpoint: Some("http://127.0.0.1:8188".to_owned()),
+            status: "AVAILABLE".to_owned(),
+            last_checked: Some(timestamp.to_owned()),
+        }];
+        document.generation_tool_usages = vec![BackupGenerationToolUsage {
+            id: "gtu_multimedia".to_owned(),
+            generation_id: "tsk_multimedia".to_owned(),
+            tool_instance_id: "tins_multimedia".to_owned(),
+            tool_version_id: Some("tver_multimedia".to_owned()),
+            metadata_json: json!({"executor": "comfy"}),
+            created_at: timestamp.to_owned(),
+        }];
+
+        let media_dir = directory.path().join("media");
+        std::fs::create_dir_all(&media_dir).unwrap();
+        let media = [
+            ("image", "image/png", "source_image", None),
+            ("video", "video/mp4", "source_video", Some(4_000_i64)),
+            ("audio", "audio/mpeg", "source_audio", Some(8_000_i64)),
+        ];
+        let mut files = Vec::with_capacity(media.len());
+        for (ordinal, (kind, mime_type, category, duration_ms)) in media.into_iter().enumerate() {
+            let asset_id = format!("ast_{kind}");
+            let bytes = format!("{kind}-media-bytes").into_bytes();
+            let source_path = media_dir.join(format!("{asset_id}.bin"));
+            std::fs::write(&source_path, &bytes).unwrap();
+            let content_path = format!("assets/{asset_id}/content.bin");
+            let (mut asset, sha) = archive_media_asset(&asset_id, &bytes, &content_path);
+            asset.asset_type = kind.to_owned();
+            asset.category = category.to_owned();
+            asset.mime_type = mime_type.to_owned();
+            asset.duration_ms = duration_ms;
+            asset.source_task_id = Some("tsk_multimedia".to_owned());
+            asset.original_name = format!("{kind}.media");
+            document.assets.push(asset);
+
+            for version_number in 1..=2 {
+                document.asset_versions.push(BackupAssetVersion {
+                    id: format!("asv_{kind}_v{version_number}"),
+                    project_id: old_project.to_owned(),
+                    asset_id: asset_id.clone(),
+                    version_number,
+                    metadata_snapshot: json!({"version": version_number}),
+                    location: format!("/old/project/{kind}/v{version_number}.media"),
+                    checksum: sha.clone(),
+                    created_at: timestamp.to_owned(),
+                });
+            }
+            let output_id = format!("out_{kind}");
+            document.mappings.push(BackupMapping {
+                task_id: "tsk_multimedia".to_owned(),
+                output_id: output_id.clone(),
+                ordinal: ordinal as i64,
+                asset_id: asset_id.clone(),
+                created_at: timestamp.to_owned(),
+            });
+            document
+                .generation_asset_versions
+                .push(BackupGenerationAssetVersion {
+                    id: format!("gav_{kind}"),
+                    generation_id: "tsk_multimedia".to_owned(),
+                    output_id,
+                    ordinal: ordinal as i64,
+                    asset_version_id: format!("asv_{kind}_v2"),
+                    relation_type: "OUTPUT".to_owned(),
+                    created_at: timestamp.to_owned(),
+                });
+            files.push(BackupFileSource {
+                zip_path: content_path,
+                source_path,
+                expected_size: bytes.len() as u64,
+                expected_sha256: Some(sha),
+            });
+        }
+        document.asset_relations = vec![
+            BackupAssetRelation {
+                id: "rel_image_video".to_owned(),
+                project_id: old_project.to_owned(),
+                source_asset_id: "ast_image".to_owned(),
+                target_asset_id: "ast_video".to_owned(),
+                relation_type: "SOURCE_OF".to_owned(),
+                created_at: timestamp.to_owned(),
+            },
+            BackupAssetRelation {
+                id: "rel_video_audio".to_owned(),
+                project_id: old_project.to_owned(),
+                source_asset_id: "ast_video".to_owned(),
+                target_asset_id: "ast_audio".to_owned(),
+                relation_type: "DERIVED_FROM".to_owned(),
+                created_at: timestamp.to_owned(),
+            },
+        ];
+
+        let archive_path = directory.path().join("multimedia-v19.aiarchive");
+        write_zip_to_path(&document, &files, &archive_path).unwrap();
+        let (manifest, loaded, _) = inspect_archive(&archive_path).unwrap();
+        assert_eq!(manifest.version, 19);
+        let inventory = manifest.inventory.expect("v19 inventory");
+        assert_eq!(inventory.assets, 3);
+        assert_eq!(inventory.asset_versions, 6);
+        assert_eq!(inventory.relations, 2);
+        assert_eq!(inventory.models, 1);
+        assert_eq!(inventory.tools, 1);
+        assert_eq!(inventory.lineage, 4);
+        assert_eq!(loaded.assets.len(), 3);
+        assert_eq!(loaded.asset_versions.len(), 6);
+        assert_eq!(loaded.generation_tool_usages.len(), 1);
+        assert_eq!(loaded.generation_asset_versions.len(), 3);
+
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let preview = service.inspect(archive_path).await.unwrap();
+        assert_eq!(preview.image_count, 1);
+        assert_eq!(preview.video_count, 1);
+        assert_eq!(preview.audio_count, 1);
+        assert_eq!(preview.asset_versions, 6);
+        assert_eq!(preview.generation_tool_usages, 1);
+        assert_eq!(preview.generation_asset_versions, 3);
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+
+        assert_eq!(restored.status, "COMPLETE");
+        assert_eq!(restored.backup_version, 19);
+        assert_eq!(restored.assets, 3);
+        assert_eq!(restored.versions, 6);
+        assert_eq!(restored.generations, 1);
+        assert_eq!(restored.restored_generation_tool_usages, 1);
+        assert_eq!(restored.restored_generation_asset_versions, 3);
+        assert!(restored.warnings.is_empty());
+        assert!(restored.missing_tools.is_empty());
+        assert!(restored.missing_models.is_empty());
+        assert!(restored.missing_files.is_empty());
+
+        let restored_asset_ids: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM assets WHERE project_id = ? ORDER BY id")
+                .bind(&restored.id)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let source_asset_ids = HashSet::from([
+            "ast_image".to_owned(),
+            "ast_video".to_owned(),
+            "ast_audio".to_owned(),
+        ]);
+        let source_version_ids = HashSet::from([
+            "asv_image_v1".to_owned(),
+            "asv_image_v2".to_owned(),
+            "asv_video_v1".to_owned(),
+            "asv_video_v2".to_owned(),
+            "asv_audio_v1".to_owned(),
+            "asv_audio_v2".to_owned(),
+        ]);
+        assert_eq!(restored_asset_ids.len(), 3);
+        assert!(restored_asset_ids
+            .iter()
+            .all(|id| !source_asset_ids.contains(id)));
+
+        let version_rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT av.id, av.asset_id
+             FROM asset_versions av
+             JOIN assets a ON a.id = av.asset_id
+             WHERE av.project_id = ? AND a.project_id = ?
+             ORDER BY av.id",
+        )
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(version_rows.len(), 6);
+        assert!(version_rows.iter().all(|(version_id, asset_id)| {
+            !source_version_ids.contains(version_id) && restored_asset_ids.contains(asset_id)
+        }));
+        let restored_type_counts: (i64, i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM assets WHERE project_id = ? AND type = 'image'),
+               (SELECT COUNT(*) FROM assets WHERE project_id = ? AND type = 'video'),
+               (SELECT COUNT(*) FROM assets WHERE project_id = ? AND type = 'audio')",
+        )
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_type_counts, (1, 1, 1));
+
+        let relation_rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT id, source_asset_id, target_asset_id
+             FROM asset_relations WHERE project_id = ? ORDER BY id",
+        )
+        .bind(&restored.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(relation_rows.len(), 2);
+        let source_relation_ids =
+            HashSet::from(["rel_image_video".to_owned(), "rel_video_audio".to_owned()]);
+        assert!(relation_rows.iter().all(|(id, source, target)| {
+            !source_relation_ids.contains(id)
+                && restored_asset_ids.contains(source)
+                && restored_asset_ids.contains(target)
+        }));
+
+        let lineage_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)
+             FROM generation_asset_versions gav
+             JOIN tasks t ON t.id = gav.generation_id
+             JOIN asset_versions av ON av.id = gav.asset_version_id
+             JOIN assets a ON a.id = av.asset_id
+             JOIN task_output_assets toa
+               ON toa.task_id = gav.generation_id
+              AND toa.output_id = gav.output_id
+              AND toa.ordinal = gav.ordinal
+              AND toa.asset_id = av.asset_id
+             WHERE t.project_id = ? AND av.project_id = ? AND a.project_id = ?",
+        )
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(lineage_count, 3);
+        let tool_usage_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM generation_tool_usages gtu
+             JOIN tasks t ON t.id = gtu.generation_id
+             JOIN tool_instances ti ON ti.id = gtu.tool_instance_id
+             JOIN tool_versions tv ON tv.id = gtu.tool_version_id
+             WHERE t.project_id = ? AND ti.id = 'tins_multimedia' AND tv.id = 'tver_multimedia'",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(tool_usage_count, 1);
+
+        let snapshot_model: String = sqlx::query_scalar(
+            "SELECT model_version_id FROM generation_snapshots gs
+             JOIN tasks t ON t.id = gs.task_id WHERE t.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(snapshot_model, "mdv_multimedia");
+        let prompt_model: String = sqlx::query_scalar(
+            "SELECT model_version_id FROM prompt_versions pv
+             JOIN prompt_entries pe ON pe.id = pv.prompt_id WHERE pe.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(prompt_model, "mdv_multimedia");
+        let restored_task_prompt: Option<String> =
+            sqlx::query_scalar("SELECT prompt_id FROM tasks WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let restored_prompt_id: String =
+            sqlx::query_scalar("SELECT id FROM prompt_entries WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            restored_task_prompt.as_deref(),
+            Some(restored_prompt_id.as_str())
+        );
+        assert_ne!(restored_task_prompt.as_deref(), Some("prm_multimedia"));
+
+        let locations: Vec<String> =
+            sqlx::query_scalar("SELECT location FROM asset_versions WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let restored_root = data_dirs.projects.join(&restored.id);
+        let restored_root_string = restored_root.to_string_lossy().to_string();
+        assert!(locations.iter().all(|location| {
+            location.starts_with(&restored_root_string) && Path::new(location).is_file()
+        }));
+        let foreign_projects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id = 'project-foreign'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(foreign_projects, 1);
+        let foreign_assets: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM assets WHERE project_id = 'project-foreign'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(foreign_assets, 0);
+    }
+
+    #[tokio::test]
+    async fn restore_report_surfaces_unknown_model_and_tool_without_guessing() {
+        let directory = tempdir().unwrap();
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        crate::infrastructure::database::repositories::test_support::seed_task_dependencies(&pool)
+            .await;
+
+        let timestamp = "2026-01-01T00:00:00Z";
+        let old_project = "project-unknown-registry";
+        let mut document = empty_archive_document(old_project, "未知注册表");
+        document.tasks = vec![terminal_backup_task(
+            "tsk_unknown",
+            Some("prm_unknown"),
+            timestamp,
+        )];
+        document.prompt_entries = vec![BackupPromptEntry {
+            id: "prm_unknown".to_owned(),
+            project_id: old_project.to_owned(),
+            kind: "prompt".to_owned(),
+            name: "未知来源提示词".to_owned(),
+            normalized_name: "未知来源提示词".to_owned(),
+            tags: Vec::new(),
+            created_at: timestamp.to_owned(),
+            updated_at: timestamp.to_owned(),
+        }];
+        document.prompt_versions = vec![BackupPromptVersion {
+            id: "prv_unknown".to_owned(),
+            project_id: old_project.to_owned(),
+            prompt_id: "prm_unknown".to_owned(),
+            version: 1,
+            text: "保留显式来源".to_owned(),
+            model_version_id: Some("mdv_unknown".to_owned()),
+            created_at: timestamp.to_owned(),
+        }];
+        document.snapshots = vec![BackupSnapshot {
+            id: "snp_unknown".to_owned(),
+            task_id: "tsk_unknown".to_owned(),
+            workflow: json!({}),
+            recipe_yaml: "schema_version: 1\ninputs: {}\n".to_owned(),
+            user_inputs: json!({}),
+            resolved_inputs: json!({}),
+            model_version_id: Some("mdv_unknown".to_owned()),
+            created_at: timestamp.to_owned(),
+        }];
+        document.models = vec![BackupModel {
+            id: "mdl_unknown".to_owned(),
+            name: "Archive Model".to_owned(),
+            provider: "Archive Provider".to_owned(),
+            model_type: "image".to_owned(),
+            description: String::new(),
+            metadata_json: json!({}),
+            created_at: timestamp.to_owned(),
+        }];
+        document.model_versions = vec![BackupModelVersion {
+            id: "mdv_unknown".to_owned(),
+            model_id: "mdl_unknown".to_owned(),
+            version: "archive-1".to_owned(),
+            capabilities_json: json!([]),
+            parameter_schema_json: json!({}),
+            created_at: timestamp.to_owned(),
+        }];
+        document.tools = vec![BackupTool {
+            id: "tool_unknown".to_owned(),
+            name: "Archive Tool".to_owned(),
+            tool_type: "local".to_owned(),
+            description: String::new(),
+            metadata_json: json!({}),
+            created_at: timestamp.to_owned(),
+        }];
+        document.tool_versions = vec![BackupToolVersion {
+            id: "tver_unknown".to_owned(),
+            tool_id: "tool_unknown".to_owned(),
+            version: "archive-1".to_owned(),
+            observed_at: timestamp.to_owned(),
+            metadata_json: json!({}),
+        }];
+        document.tool_instances = vec![BackupToolInstance {
+            id: "tins_unknown".to_owned(),
+            tool_id: "tool_unknown".to_owned(),
+            path: Some("/archive/tool".to_owned()),
+            endpoint: Some("http://127.0.0.1:9999".to_owned()),
+            status: "AVAILABLE".to_owned(),
+            last_checked: Some(timestamp.to_owned()),
+        }];
+        document.generation_tool_usages = vec![BackupGenerationToolUsage {
+            id: "gtu_unknown".to_owned(),
+            generation_id: "tsk_unknown".to_owned(),
+            tool_instance_id: "tins_unknown".to_owned(),
+            tool_version_id: Some("tver_unknown".to_owned()),
+            metadata_json: json!({}),
+            created_at: timestamp.to_owned(),
+        }];
+
+        // Deliberately create immutable identity conflicts. Restore must expose UNKNOWN,
+        // not match these rows by name/path/time or fabricate a replacement relationship.
+        sqlx::query(
+            "INSERT INTO models (id, name, provider, type, description, metadata_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("mdl_unknown")
+        .bind("Existing Model")
+        .bind("Existing Provider")
+        .bind("image")
+        .bind("")
+        .bind("{}")
+        .bind(timestamp)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO tools (id, name, type, description, metadata_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind("tool_unknown")
+        .bind("Existing Tool")
+        .bind("local")
+        .bind("")
+        .bind("{}")
+        .bind(timestamp)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let archive_path = directory.path().join("unknown-registry.aiarchive");
+        write_zip_to_path(&document, &[], &archive_path).unwrap();
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let preview = service.inspect(archive_path).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+
+        assert_eq!(restored.status, "COMPLETE");
+        assert_eq!(restored.backup_version, 19);
+        assert_eq!(restored.generations, 1);
+        assert_eq!(restored.missing_models, vec!["mdv_unknown".to_owned()]);
+        assert_eq!(restored.missing_tools, vec!["tins_unknown".to_owned()]);
+        assert_eq!(
+            restored.unresolved_tool_version_ids,
+            vec!["tver_unknown".to_owned()]
+        );
+        assert_eq!(restored.restored_generation_tool_usages, 0);
+        assert!(restored
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("UNKNOWN")));
+        assert!(restored
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("未根据名称") || warning.contains("未执行启发式")));
+
+        let restored_usage_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM generation_tool_usages gtu
+             JOIN tasks t ON t.id = gtu.generation_id WHERE t.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_usage_count, 0);
+        let restored_prompt_model: Option<String> = sqlx::query_scalar(
+            "SELECT model_version_id FROM prompt_versions pv
+             JOIN prompt_entries pe ON pe.id = pv.prompt_id WHERE pe.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_prompt_model, None);
+    }
+
     /// Bounded synthetic scale/integrity probe for DEV-129-D.
     /// Product planning target is Projects:100 / Assets:10000 / Versions:50000 /
     /// Relations:100000; this environment uses a smaller N that still exercises
@@ -8564,9 +9271,9 @@ mod tests {
         assert_eq!(leftover_old_project, 0);
     }
 
-    #[test]
-    fn v18_zip_compat_regression_still_inspects() {
-        // Explicit DEV-129-D regression pointer to historical v18 inspect support.
+    #[tokio::test]
+    async fn v18_zip_compat_regression_restores_with_visible_warning() {
+        // Explicit DEV-130.1-C regression pointer to historical v18 restore support.
         let directory = tempdir().unwrap();
         let archive_path = directory.path().join("legacy-v18-hardening.zip");
         let file = File::create(&archive_path).unwrap();
@@ -8608,5 +9315,21 @@ mod tests {
         assert_eq!(loaded_manifest.version, 18);
         assert!(loaded_manifest.logical_snapshot_checksum.is_none());
         assert!(loaded_manifest.inventory.is_none());
+
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let preview = service.inspect(archive_path).await.unwrap();
+        let restored = service.restore(&preview.inspection_id).await.unwrap();
+        assert_eq!(restored.status, "COMPLETE");
+        assert_eq!(restored.backup_version, 18);
+        assert_eq!(restored.assets, 0);
+        assert_eq!(restored.versions, 0);
+        assert_eq!(restored.generations, 0);
+        assert!(restored.missing_files.is_empty());
+        assert!(restored
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Backup v18")));
     }
 }

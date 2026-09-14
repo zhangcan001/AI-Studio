@@ -37,6 +37,9 @@ pub struct ProjectBackupSnapshot {
 pub struct ProjectBackupRestoreResult {
     pub unresolved_model_version_ids: Vec<String>,
     pub unresolved_tool_instance_ids: Vec<String>,
+    pub unresolved_tool_version_ids: Vec<String>,
+    pub restored_generation_tool_usages: usize,
+    pub restored_generation_asset_versions: usize,
 }
 
 pub struct ProjectBackupRestorePlan {

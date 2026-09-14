@@ -2803,8 +2803,12 @@ async fn restore_rows_in_transaction(
 
     let (model_version_map, unresolved_model_version_ids) =
         restore_model_registry(transaction, document).await?;
-    let (tool_instance_map, tool_version_map, unresolved_tool_instance_ids) =
-        restore_tool_registry(transaction, document).await?;
+    let (
+        tool_instance_map,
+        tool_version_map,
+        unresolved_tool_instance_ids,
+        unresolved_tool_version_ids,
+    ) = restore_tool_registry(transaction, document).await?;
 
     for binding in &document.project_workflow_bindings {
         sqlx::query(
@@ -2925,7 +2929,11 @@ async fn restore_rows_in_transaction(
         .bind(&task.package_source_path)
         .bind(task.dynamic_binding_targets.as_ref().map(|value| value.to_string()))
         .bind(status)
-        .bind(&task.prompt_id)
+        .bind(
+            task.prompt_id
+                .as_ref()
+                .and_then(|prompt_id| prompt_ids.get(prompt_id)),
+        )
         .bind(task.queue_number)
         .bind(&task.progress_mode)
         .bind(task.progress_current)
@@ -3419,17 +3427,18 @@ async fn restore_rows_in_transaction(
             .bind(task_id).bind(&mapping.output_id).bind(mapping.ordinal).bind(asset_id).bind(&mapping.created_at)
             .execute(&mut **transaction).await.map_err(|error| RepositoryError::database(error.to_string()))?;
     }
-    restore_provenance_lineage(
-        transaction,
-        document,
-        task_ids,
-        asset_version_ids,
-        generation_tool_usage_ids,
-        generation_asset_version_ids,
-        &tool_instance_map,
-        &tool_version_map,
-    )
-    .await?;
+    let (restored_generation_tool_usages, restored_generation_asset_versions) =
+        restore_provenance_lineage(
+            transaction,
+            document,
+            task_ids,
+            asset_version_ids,
+            generation_tool_usage_ids,
+            generation_asset_version_ids,
+            &tool_instance_map,
+            &tool_version_map,
+        )
+        .await?;
     for preset in &document.presets {
         let Some(preset_id) = preset_ids.get(&preset.id) else {
             continue;
@@ -4517,6 +4526,9 @@ async fn restore_rows_in_transaction(
     Ok(ProjectBackupRestoreResult {
         unresolved_model_version_ids,
         unresolved_tool_instance_ids,
+        unresolved_tool_version_ids,
+        restored_generation_tool_usages,
+        restored_generation_asset_versions,
     })
 }
 
@@ -5680,6 +5692,7 @@ async fn restore_tool_registry(
         HashMap<String, String>,
         HashMap<String, String>,
         Vec<String>,
+        Vec<String>,
     ),
     RepositoryError,
 > {
@@ -5748,11 +5761,14 @@ async fn restore_tool_registry(
     }
 
     let mut tool_version_map = HashMap::new();
+    let mut unresolved_tool_version_ids = Vec::new();
     for version in &document.tool_versions {
         let Some(tool_id) = tool_id_map.get(&version.tool_id).cloned() else {
+            unresolved_tool_version_ids.push(version.id.clone());
             continue;
         };
         if unresolved_tools.contains(&version.tool_id) {
+            unresolved_tool_version_ids.push(version.id.clone());
             continue;
         }
         let existing_by_id = sqlx::query_as::<_, (String, String)>(
@@ -5767,6 +5783,7 @@ async fn restore_tool_registry(
                 tool_version_map.insert(version.id.clone(), version.id.clone());
                 continue;
             }
+            unresolved_tool_version_ids.push(version.id.clone());
             continue;
         }
         let existing_by_unique = sqlx::query_scalar::<_, String>(
@@ -5842,7 +5859,14 @@ async fn restore_tool_registry(
 
     unresolved_instances.sort();
     unresolved_instances.dedup();
-    Ok((tool_instance_map, tool_version_map, unresolved_instances))
+    unresolved_tool_version_ids.sort();
+    unresolved_tool_version_ids.dedup();
+    Ok((
+        tool_instance_map,
+        tool_version_map,
+        unresolved_instances,
+        unresolved_tool_version_ids,
+    ))
 }
 
 async fn restore_asset_versions_and_relations(
@@ -5932,7 +5956,9 @@ async fn restore_provenance_lineage(
     generation_asset_version_ids: &HashMap<String, String>,
     tool_instance_map: &HashMap<String, String>,
     tool_version_map: &HashMap<String, String>,
-) -> Result<(), RepositoryError> {
+) -> Result<(usize, usize), RepositoryError> {
+    let mut restored_generation_tool_usages = 0;
+    let mut restored_generation_asset_versions = 0;
     for usage in &document.generation_tool_usages {
         let usage_id = generation_tool_usage_ids.get(&usage.id).ok_or_else(|| {
             RepositoryError::integrity(format!("generation_tool_usage ID 映射缺失：{}", usage.id))
@@ -5963,6 +5989,7 @@ async fn restore_provenance_lineage(
         .execute(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
+        restored_generation_tool_usages += 1;
     }
 
     for link in &document.generation_asset_versions {
@@ -5992,6 +6019,10 @@ async fn restore_provenance_lineage(
         .execute(&mut **transaction)
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
+        restored_generation_asset_versions += 1;
     }
-    Ok(())
+    Ok((
+        restored_generation_tool_usages,
+        restored_generation_asset_versions,
+    ))
 }

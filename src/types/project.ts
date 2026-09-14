@@ -6,6 +6,23 @@ export interface ProjectView {
   updatedAt: string;
 }
 
+export interface RestoredProjectView extends ProjectView {
+  status: string;
+  backupVersion: number;
+  assets: number;
+  versions: number;
+  generations: number;
+  warnings: string[];
+  missingTools: string[];
+  missingModels: string[];
+  missingFiles: string[];
+  restoredGenerationToolUsages: number;
+  restoredGenerationAssetVersions: number;
+  unresolvedModelVersionIds: string[];
+  unresolvedToolInstanceIds: string[];
+  unresolvedToolVersionIds: string[];
+}
+
 export interface ProjectBackupExportView {
   fileName: string;
   bytes: number;

@@ -49,6 +49,12 @@ struct ReviewReferenceRow {
 }
 
 #[derive(FromRow)]
+struct GenerationAssetVersionReferenceRow {
+    asset_id: String,
+    link_id: String,
+}
+
+#[derive(FromRow)]
 struct ReferenceSetReferenceRow {
     asset_id: String,
     reference_set_id: String,
@@ -238,6 +244,28 @@ impl AssetDeletionRepository for SqliteAssetDeletionRepository {
                 .get_mut(&row.result_asset_id)
                 .expect("selected asset reference");
             push_unique(&mut reference.historical_review_ids, row.review_id);
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT versions.asset_id, lineage.id AS link_id
+             FROM generation_asset_versions lineage
+             INNER JOIN asset_versions versions ON versions.id = lineage.asset_version_id
+             WHERE versions.project_id = ",
+        );
+        query
+            .push_bind(project_id)
+            .push(" AND versions.asset_id IN (");
+        push_asset_ids(&mut query, asset_ids);
+        query.push(") ORDER BY lineage.id ASC");
+        let rows = query
+            .build_query_as::<GenerationAssetVersionReferenceRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        for row in rows {
+            if let Some(reference) = references.get_mut(&row.asset_id) {
+                push_unique(&mut reference.generation_asset_version_ids, row.link_id);
+            }
         }
 
         // Semantic relations are live references.  Each query is explicitly
@@ -456,9 +484,12 @@ fn collect_asset_ids(value: &Value, output: &mut HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::{extract_asset_ids, SqliteAssetDeletionRepository};
-    use crate::application::ports::AssetDeletionRepository;
+    use crate::application::ports::{AssetDeletionRepository, AssetRepository};
     use crate::domain::AssetId;
-    use crate::infrastructure::database::{initialize, repositories::test_support};
+    use crate::infrastructure::database::{
+        initialize,
+        repositories::{test_support, SqliteAssetRepository},
+    };
     use chrono::Utc;
     use serde_json::json;
     use sqlx::SqlitePool;
@@ -573,5 +604,110 @@ mod tests {
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].historical_review_ids, vec!["pri_delete_test"]);
         assert!(references[0].active_production_item_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reports_generation_asset_version_and_database_delete_guard() {
+        let (_directory, pool) = setup_queue().await;
+        let now = "2026-01-01T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO tasks
+             (id, project_id, workflow_id, workflow_version_id, recipe_id, status, created_at)
+             VALUES ('tsk_lineage_delete', 'project-1', 'workflow-1', 'workflow-version-1',
+                     'recipe-1', 'SUCCEEDED', ?)",
+        )
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("task fixture");
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path,
+              sha256, mime_type, width, height, file_size, metadata_json, created_at, updated_at)
+             VALUES ('ast_lineage_delete', 'project-1', 'image', 'generated_image',
+                     'Lineage asset', 'lineage.png', 'C:/project/lineage.png', ?, 'image/png',
+                     1, 1, 1, '{}', ?, ?),
+                    ('ast_free_delete', 'project-1', 'image', 'source_image',
+                     'Free asset', 'free.png', 'C:/project/free.png', ?, 'image/png',
+                     1, 1, 1, '{}', ?, ?)",
+        )
+        .bind("a".repeat(64))
+        .bind(now)
+        .bind(now)
+        .bind("b".repeat(64))
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("asset fixtures");
+        sqlx::query(
+            "INSERT INTO asset_versions
+             (id, project_id, asset_id, version_number, metadata_snapshot, location, checksum, created_at)
+             VALUES ('asv_lineage_delete', 'project-1', 'ast_lineage_delete', 1, '{}',
+                     'C:/project/lineage.png', ?, ?)",
+        )
+        .bind("a".repeat(64))
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("asset version fixture");
+        sqlx::query(
+            "INSERT INTO task_output_assets (task_id, output_id, ordinal, asset_id, created_at)
+             VALUES ('tsk_lineage_delete', 'output', 0, 'ast_lineage_delete', ?)",
+        )
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("output mapping fixture");
+        sqlx::query(
+            "INSERT INTO generation_asset_versions
+             (id, generation_id, output_id, ordinal, asset_version_id, relation_type, created_at)
+             VALUES ('gav_delete_guard', 'tsk_lineage_delete', 'output', 0,
+                     'asv_lineage_delete', 'OUTPUT', ?)",
+        )
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("lineage fixture");
+
+        let references = SqliteAssetDeletionRepository::new(pool.clone())
+            .references_for(
+                "project-1",
+                &[AssetId::parse("ast_lineage_delete").expect("asset id")],
+            )
+            .await
+            .expect("references should load");
+        assert_eq!(references.len(), 1);
+        assert_eq!(
+            references[0].generation_asset_version_ids,
+            vec!["gav_delete_guard"]
+        );
+
+        let asset_repository = SqliteAssetRepository::new(pool.clone());
+        let guarded_error = asset_repository
+            .delete_by_ids(
+                "project-1",
+                &[AssetId::parse("ast_lineage_delete").expect("asset id")],
+            )
+            .await
+            .expect_err("lineage asset must be protected");
+        assert!(guarded_error.to_string().contains("gav_delete_guard"));
+
+        asset_repository
+            .delete_by_ids(
+                "project-1",
+                &[AssetId::parse("ast_free_delete").expect("asset id")],
+            )
+            .await
+            .expect("unreferenced asset should delete");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM assets WHERE id = 'ast_free_delete'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("free asset count"),
+            0
+        );
     }
 }

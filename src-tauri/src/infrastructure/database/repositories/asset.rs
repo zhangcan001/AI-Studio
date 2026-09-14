@@ -360,6 +360,25 @@ impl AssetRepository for SqliteAssetRepository {
         }
 
         for asset_id in asset_ids {
+            let lineage_id: Option<String> = sqlx::query_scalar(
+                "SELECT lineage.id
+                 FROM generation_asset_versions lineage
+                 INNER JOIN asset_versions versions ON versions.id = lineage.asset_version_id
+                 WHERE versions.project_id = ? AND versions.asset_id = ?
+                 LIMIT 1",
+            )
+            .bind(project_id)
+            .bind(asset_id.as_str())
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(map_sqlx_error)?;
+            if let Some(lineage_id) = lineage_id {
+                return Err(RepositoryError::integrity(format!(
+                    "asset {} is referenced by generation asset version {}",
+                    asset_id.as_str(),
+                    lineage_id
+                )));
+            }
             for statement in [
                 "DELETE FROM task_output_assets WHERE asset_id = ?",
                 "DELETE FROM asset_tag_links WHERE project_id = ? AND asset_id = ?",

@@ -85,6 +85,7 @@ import type {
   ProjectBackupExportView,
   ProjectBackupPreview,
   ProjectView,
+  RestoredProjectView,
 } from "../types/project";
 import type {
   ProjectWorkflowConfigUpdateRequest,
@@ -1509,8 +1510,8 @@ export function inspectProjectBackup(): Promise<ProjectBackupPreview | null> {
   return invoke<ProjectBackupPreview | null>("project_backup_inspect");
 }
 
-export function restoreProjectBackup(inspectionId: string): Promise<ProjectView> {
-  return invoke<ProjectView>("project_backup_restore", { inspectionId });
+export function restoreProjectBackup(inspectionId: string): Promise<RestoredProjectView> {
+  return invoke<RestoredProjectView>("project_backup_restore", { inspectionId });
 }
 
 export function getTask(projectId: string, taskId: string): Promise<TaskView> {

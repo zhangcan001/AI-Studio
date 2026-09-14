@@ -9,6 +9,9 @@ pub struct AssetDeletionReferences {
     pub active_task_ids: Vec<TaskId>,
     pub historical_task_ids: Vec<TaskId>,
     pub historical_review_ids: Vec<String>,
+    /// Immutable provenance edges that point at one of this asset's versions.
+    /// These are hard blockers: removing the asset would destroy lineage.
+    pub generation_asset_version_ids: Vec<String>,
     /// Live semantic relations.  These are kept as IDs so the repository
     /// port remains independent from UI wording while the application layer
     /// can produce concrete, readable blocker messages.

@@ -139,6 +139,15 @@ impl AssetDeletionService {
                     ),
                 );
             }
+            if !reference.generation_asset_version_ids.is_empty() {
+                push_unique_reason(
+                    &mut blocking_reasons,
+                    format!(
+                        "该素材的资产版本仍被生成溯源记录“{}”使用，请先移除溯源关系。",
+                        reference.generation_asset_version_ids.join("、")
+                    ),
+                );
+            }
             for reference_anchor_id in &reference.reference_anchor_ids {
                 push_unique_reason(
                     &mut blocking_reasons,
@@ -699,6 +708,7 @@ mod tests {
                 selected_by_shot_ids: vec!["shot_2".to_owned()],
                 selected_image_by_shot_ids: vec!["shot_image".to_owned()],
                 selected_video_by_shot_ids: vec!["shot_video".to_owned()],
+                generation_asset_version_ids: vec!["gav_lineage".to_owned()],
                 ..Default::default()
             }],
             false,
@@ -709,7 +719,8 @@ mod tests {
             .await
             .expect("semantic usage should inspect");
         let reasons = &inspection.items[0].blocking_reasons;
-        assert_eq!(reasons.len(), 6);
+        assert_eq!(reasons.len(), 7);
+        assert!(reasons.iter().any(|reason| reason.contains("gav_lineage")));
         assert!(reasons.iter().any(|reason| reason.contains("rs_character")));
         assert!(reasons
             .iter()
