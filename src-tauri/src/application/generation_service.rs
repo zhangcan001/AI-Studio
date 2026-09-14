@@ -12,6 +12,9 @@ use crate::application::ports::{
     ModelRepository, MonotonicEventClock, NoopTaskUpdateSink, ProjectRepository, RepositoryError,
     TaskRepository, TaskUpdateSink,
 };
+use crate::application::provenance_lineage_service::{
+    GenerationProvenanceContext, ProvenanceLineageError, ProvenanceLineageService,
+};
 use crate::application::scheduler::scheduler_decision;
 use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::application::workflow_onboarding_service::{
@@ -25,7 +28,7 @@ use crate::compiler::{
 use crate::domain::{
     AssetId, CompileRequest, GenerationSnapshot, ModelVersionId, ResolvedInputValue,
     RuntimeProvenance, SeedValue, Task, TaskDomainError, TaskError, TaskStateMachine, TaskStatus,
-    TaskTelemetryPatch,
+    TaskTelemetryPatch, ToolInstanceId, ToolVersionId,
 };
 use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
@@ -47,6 +50,13 @@ pub struct CreateGenerationRequest {
     /// Optional Prompt Studio model provenance. This is metadata only; the
     /// existing Task/Queue execution path remains authoritative.
     pub model_version_id: Option<String>,
+    /// Optional Prompt Studio prompt identity. It is captured only when a
+    /// caller supplies the exact identity; runtime prompt IDs are not used.
+    pub prompt_version_id: Option<String>,
+    /// Optional explicit Local Tool Hub identity. Comfy settings are not used
+    /// to infer these values because multiple local instances may exist.
+    pub tool_instance_id: Option<String>,
+    pub tool_version_id: Option<String>,
     pub values: BTreeMap<String, GenerationInputValue>,
     pub reference_manifest: Option<ReferenceManifest>,
     /// A caller-owned idempotency boundary. Reusing it returns the original Task
@@ -110,6 +120,8 @@ pub enum GenerationServiceError {
     Snapshot(String),
     InvalidModelVersionId(String),
     ModelVersionNotFound(String),
+    InvalidProvenanceContext(String),
+    ProvenanceCapture(ProvenanceLineageError),
     Domain(TaskDomainError),
     Comfy(ComfyAdapterError),
     StreamDisconnected(String),
@@ -145,6 +157,10 @@ impl fmt::Display for GenerationServiceError {
             Self::ModelVersionNotFound(id) => {
                 write!(formatter, "MODEL_VERSION_NOT_FOUND: model version {id}")
             }
+            Self::InvalidProvenanceContext(message) => {
+                write!(formatter, "PROVENANCE_CONTEXT_INVALID: {message}")
+            }
+            Self::ProvenanceCapture(error) => write!(formatter, "{error}"),
             Self::Domain(error) => write!(formatter, "TASK_DOMAIN_ERROR: {error}"),
             Self::Comfy(error) => write!(formatter, "{error}"),
             Self::StreamDisconnected(message) => {
@@ -202,6 +218,7 @@ pub struct GenerationService {
     workflow_compatibility_service: Option<Arc<WorkflowOnboardingService>>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
     model_repository: Option<Arc<dyn ModelRepository>>,
+    provenance_lineage_service: Option<Arc<ProvenanceLineageService>>,
 }
 
 enum CancelResolution {
@@ -287,6 +304,7 @@ impl GenerationService {
             workflow_compatibility_service: None,
             new_generation_admission: None,
             model_repository: None,
+            provenance_lineage_service: None,
         }
     }
 
@@ -324,6 +342,14 @@ impl GenerationService {
     /// created. Existing callers without a model repository remain compatible.
     pub fn with_model_repository(mut self, repository: Arc<dyn ModelRepository>) -> Self {
         self.model_repository = Some(repository);
+        self
+    }
+
+    pub fn with_provenance_lineage_service(
+        mut self,
+        service: Arc<ProvenanceLineageService>,
+    ) -> Self {
+        self.provenance_lineage_service = Some(service);
         self
     }
 
@@ -476,6 +502,15 @@ impl GenerationService {
             })
             .transpose()?;
         request.model_version_id = normalized_model_version_id;
+        request.prompt_version_id =
+            normalize_optional_context_id(request.prompt_version_id, "prompt version id")?;
+        request.tool_instance_id = normalize_tool_instance_id(request.tool_instance_id)?;
+        request.tool_version_id = normalize_tool_version_id(request.tool_version_id)?;
+        if request.tool_version_id.is_some() && request.tool_instance_id.is_none() {
+            return Err(GenerationServiceError::InvalidProvenanceContext(
+                "tool version id requires an explicit tool instance id".to_owned(),
+            ));
+        }
         if let Some(model_version_id) = request.model_version_id.as_deref() {
             let version_id =
                 ModelVersionId::parse(model_version_id.to_owned()).map_err(|error| {
@@ -570,6 +605,12 @@ impl GenerationService {
         mut cancel_signal: watch::Receiver<bool>,
     ) -> Result<Task, GenerationServiceError> {
         let project_id = request.project_id.clone();
+        let provenance_context = GenerationProvenanceContext {
+            prompt_version_id: request.prompt_version_id.clone(),
+            model_version_id: request.model_version_id.clone(),
+            tool_instance_id: request.tool_instance_id.clone(),
+            tool_version_id: request.tool_version_id.clone(),
+        };
         self.transition_and_persist(&mut task, TaskStatus::Validating)
             .await?;
         if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
@@ -1008,6 +1049,7 @@ impl GenerationService {
                                 &project_id,
                                 &prompt_id,
                                 Some(&history),
+                                &provenance_context,
                             )
                             .await;
                     }
@@ -1135,7 +1177,14 @@ impl GenerationService {
                     }
                     if task.status == TaskStatus::CancelRequested {
                         return self
-                            .complete_success(&mut task, &recipe, &project_id, &prompt_id, None)
+                            .complete_success(
+                                &mut task,
+                                &recipe,
+                                &project_id,
+                                &prompt_id,
+                                None,
+                                &provenance_context,
+                            )
                             .await;
                     }
                     if task.status != TaskStatus::Running {
@@ -1143,7 +1192,14 @@ impl GenerationService {
                     }
                     self.persist_execution_finished(&mut task).await?;
                     return self
-                        .complete_success(&mut task, &recipe, &project_id, &prompt_id, None)
+                        .complete_success(
+                            &mut task,
+                            &recipe,
+                            &project_id,
+                            &prompt_id,
+                            None,
+                            &provenance_context,
+                        )
                         .await;
                 }
                 ComfyExecutionEvent::ExecutionError {
@@ -1315,6 +1371,7 @@ impl GenerationService {
         project_id: &str,
         prompt_id: &str,
         history: Option<&ComfyHistory>,
+        provenance_context: &GenerationProvenanceContext,
     ) -> Result<Task, GenerationServiceError> {
         if task.status == TaskStatus::CancelRequested {
             let event = task.record_cancel_not_effective(self.clock.now())?;
@@ -1367,6 +1424,39 @@ impl GenerationService {
                 let original = GenerationServiceError::AssetImport(error);
                 return Err(self
                     .fail_and_preserve(task, task_error_from_output(&original), original)
+                    .await);
+            }
+        }
+        let output_keys = self
+            .asset_repository
+            .list_output_mappings(&task.id)
+            .await
+            .map_err(GenerationServiceError::Repository)?
+            .into_iter()
+            .map(|mapping| (mapping.output_id, mapping.ordinal))
+            .collect::<Vec<_>>();
+
+        if let Some(service) = &self.provenance_lineage_service {
+            if let Err(error) = service
+                .capture_successful_generation(
+                    project_id,
+                    task.id.as_str(),
+                    provenance_context,
+                    &output_keys,
+                )
+                .await
+            {
+                let original = GenerationServiceError::ProvenanceCapture(error);
+                return Err(self
+                    .fail_and_preserve(
+                        task,
+                        TaskError {
+                            code: "PROVENANCE_CAPTURE_FAILED".to_owned(),
+                            message: original.to_string(),
+                            raw: None,
+                        },
+                        original,
+                    )
                     .await);
             }
         }
@@ -1764,6 +1854,51 @@ fn task_error_from_submission_failure(
             "adapterError": task_error_from_adapter(error).raw,
         })),
     }
+}
+
+fn normalize_optional_context_id(
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<String>, GenerationServiceError> {
+    let normalized = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    if value.is_some() && normalized.is_none() {
+        return Err(GenerationServiceError::InvalidProvenanceContext(format!(
+            "{field} must not be blank"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn normalize_tool_instance_id(
+    value: Option<String>,
+) -> Result<Option<String>, GenerationServiceError> {
+    normalize_optional_context_id(value, "tool instance id")?
+        .map(|value| {
+            ToolInstanceId::parse(value.clone())
+                .map(|id| id.as_str().to_owned())
+                .map_err(|error| {
+                    GenerationServiceError::InvalidProvenanceContext(error.to_string())
+                })
+        })
+        .transpose()
+}
+
+fn normalize_tool_version_id(
+    value: Option<String>,
+) -> Result<Option<String>, GenerationServiceError> {
+    normalize_optional_context_id(value, "tool version id")?
+        .map(|value| {
+            ToolVersionId::parse(value.clone())
+                .map(|id| id.as_str().to_owned())
+                .map_err(|error| {
+                    GenerationServiceError::InvalidProvenanceContext(error.to_string())
+                })
+        })
+        .transpose()
 }
 
 fn task_error_from_output(error: &GenerationServiceError) -> TaskError {

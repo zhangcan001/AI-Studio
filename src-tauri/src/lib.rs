@@ -316,6 +316,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     database_pool.clone(),
                 ),
             );
+            let provenance_lineage_service = Arc::new(ProvenanceLineageService::new(
+                provenance_lineage_repository.clone(),
+                task_repository.clone(),
+                tool_repository.clone(),
+                asset_repository.clone(),
+                clock.clone(),
+            ));
             let shot_repository_impl = Arc::new(
                 infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
             );
@@ -588,6 +595,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 .with_workflow_compatibility_service(workflow_onboarding_service.clone())
                 .with_new_generation_admission(workflow_registry_service.clone())
                 .with_model_repository(model_repository.clone())
+                .with_provenance_lineage_service(provenance_lineage_service.clone())
                 .with_task_update_sink(task_update_sink.clone())
                 .with_execution_registry(execution_registry.clone()),
             );
@@ -852,13 +860,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             ));
             let model_service = Arc::new(ModelService::new(model_repository, clock.clone()));
             let tool_service = Arc::new(ToolService::new(tool_repository.clone(), clock.clone()));
-            let provenance_lineage_service = Arc::new(ProvenanceLineageService::new(
-                provenance_lineage_repository,
-                task_repository.clone(),
-                tool_repository,
-                asset_repository.clone(),
-                clock.clone(),
-            ));
             let shot_bulk_service = Arc::new(ShotBulkService::new(
                 shot_bulk_repository.clone(),
                 definition_repository.clone(),

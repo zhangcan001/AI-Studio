@@ -262,9 +262,9 @@ mod tests {
         AssetRepository, ProvenanceLineageRepository, TaskOutputAssetMapping, TaskRepository,
     };
     use crate::domain::{
-        Asset, AssetId, AssetVersion, AssetVersionId, GenerationAssetVersion,
-        GenerationAssetVersionId, GenerationAssetVersionRelationType, GenerationToolUsage,
-        GenerationToolUsageId, Task, TaskId, ToolInstanceId, ToolVersionId,
+        Asset, AssetId, AssetVersionId, GenerationAssetVersion, GenerationAssetVersionId,
+        GenerationAssetVersionRelationType, GenerationToolUsage, GenerationToolUsageId, Task,
+        TaskId, ToolInstanceId, ToolVersionId,
     };
     use crate::infrastructure::database::{
         initialize,
@@ -419,21 +419,11 @@ mod tests {
             .insert_generated_outputs(std::slice::from_ref(&asset), std::slice::from_ref(&mapping))
             .await
             .expect("output fixture should persist");
-        let version = AssetVersion::new(
-            AssetVersionId::parse("av_lineage").unwrap(),
-            "project-1",
-            asset.id,
-            1,
-            json!({"version": 1}),
-            "C:/project/lineage.png",
-            "lineage-sha",
-            now(),
-        )
-        .unwrap();
-        asset_repository
-            .insert_asset_version(&version)
+        let version = asset_repository
+            .current_asset_version("project-1", &asset.id)
             .await
-            .expect("asset version fixture should persist");
+            .expect("generated asset version should persist")
+            .expect("generated asset version should exist");
         let expected = GenerationAssetVersion::new(
             GenerationAssetVersionId::parse("gav_test").unwrap(),
             task.id.clone(),

@@ -146,8 +146,8 @@ describe("PromptStudio", () => {
     render(<PromptStudio projectId="project-1" />);
 
     expect(await screen.findByText("Used Generations")).toBeTruthy();
-    expect(screen.getByText("tver-comfy-1")).toBeTruthy();
-    expect(screen.getByText("av-1")).toBeTruthy();
+    expect(await screen.findByText("tver-comfy-1")).toBeTruthy();
+    expect(await screen.findByText("av-1")).toBeTruthy();
     expect(screen.getByText("当前数据层尚未建立 Prompt Version → Generation 显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。")).toBeTruthy();
     expect(mocks.listGenerationToolUsages).toHaveBeenCalledWith("project-1", "tsk-1");
     expect(mocks.listGenerationAssetVersionLinks).toHaveBeenCalledWith("project-1", "tsk-1");

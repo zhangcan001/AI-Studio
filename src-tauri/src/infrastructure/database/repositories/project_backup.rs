@@ -345,12 +345,8 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             &asset_versions,
         )
         .await?;
-        let (models, model_versions) = query_backup_referenced_models(
-            &mut transaction,
-            &prompt_versions,
-            &snapshots,
-        )
-        .await?;
+        let (models, model_versions) =
+            query_backup_referenced_models(&mut transaction, &prompt_versions, &snapshots).await?;
         let (tools, tool_versions, tool_capabilities, tool_instances) =
             query_backup_referenced_tools(&mut transaction, &generation_tool_usages).await?;
         transaction
@@ -5160,7 +5156,10 @@ async fn query_backup_asset_versions(
                 project_id: row.project_id,
                 asset_id: row.asset_id,
                 version_number: row.version_number,
-                metadata_snapshot: parse_value(Some(&row.metadata_snapshot), "asset version metadata")?,
+                metadata_snapshot: parse_value(
+                    Some(&row.metadata_snapshot),
+                    "asset version metadata",
+                )?,
                 location: row.location,
                 checksum: row.checksum,
                 created_at: row.created_at,
@@ -5221,7 +5220,10 @@ async fn query_backup_generation_tool_usages(
                 generation_id: row.generation_id,
                 tool_instance_id: row.tool_instance_id,
                 tool_version_id: row.tool_version_id,
-                metadata_json: parse_value(Some(&row.metadata_json), "generation tool usage metadata")?,
+                metadata_json: parse_value(
+                    Some(&row.metadata_json),
+                    "generation tool usage metadata",
+                )?,
                 created_at: row.created_at,
             });
         }
@@ -5673,18 +5675,24 @@ async fn restore_model_registry(
 async fn restore_tool_registry(
     transaction: &mut Transaction<'_, Sqlite>,
     document: &BackupDocument,
-) -> Result<(HashMap<String, String>, HashMap<String, String>, Vec<String>), RepositoryError> {
+) -> Result<
+    (
+        HashMap<String, String>,
+        HashMap<String, String>,
+        Vec<String>,
+    ),
+    RepositoryError,
+> {
     let mut tool_id_map = HashMap::new();
     let mut unresolved_tools = HashSet::new();
 
     for tool in &document.tools {
-        let existing = sqlx::query_as::<_, (String, String)>(
-            "SELECT name, type FROM tools WHERE id = ?",
-        )
-        .bind(&tool.id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(|error| RepositoryError::database(error.to_string()))?;
+        let existing =
+            sqlx::query_as::<_, (String, String)>("SELECT name, type FROM tools WHERE id = ?")
+                .bind(&tool.id)
+                .fetch_optional(&mut **transaction)
+                .await
+                .map_err(|error| RepositoryError::database(error.to_string()))?;
         if let Some((name, tool_type)) = existing {
             if name == tool.name && tool_type == tool.tool_type {
                 tool_id_map.insert(tool.id.clone(), tool.id.clone());
@@ -5891,12 +5899,12 @@ async fn restore_asset_versions_and_relations(
         let relation_id = asset_relation_ids.get(&relation.id).ok_or_else(|| {
             RepositoryError::integrity(format!("资产关系 ID 映射缺失：{}", relation.id))
         })?;
-        let source = asset_ids.get(&relation.source_asset_id).ok_or_else(|| {
-            RepositoryError::integrity("资产关系源端点不在恢复项目内")
-        })?;
-        let target = asset_ids.get(&relation.target_asset_id).ok_or_else(|| {
-            RepositoryError::integrity("资产关系目标端点不在恢复项目内")
-        })?;
+        let source = asset_ids
+            .get(&relation.source_asset_id)
+            .ok_or_else(|| RepositoryError::integrity("资产关系源端点不在恢复项目内"))?;
+        let target = asset_ids
+            .get(&relation.target_asset_id)
+            .ok_or_else(|| RepositoryError::integrity("资产关系目标端点不在恢复项目内"))?;
         sqlx::query(
             "INSERT INTO asset_relations
              (id, project_id, source_asset_id, target_asset_id, relation_type, created_at)
@@ -5929,9 +5937,9 @@ async fn restore_provenance_lineage(
         let usage_id = generation_tool_usage_ids.get(&usage.id).ok_or_else(|| {
             RepositoryError::integrity(format!("generation_tool_usage ID 映射缺失：{}", usage.id))
         })?;
-        let generation_id = task_ids.get(&usage.generation_id).ok_or_else(|| {
-            RepositoryError::integrity("provenance generation_id 缺少任务映射")
-        })?;
+        let generation_id = task_ids
+            .get(&usage.generation_id)
+            .ok_or_else(|| RepositoryError::integrity("provenance generation_id 缺少任务映射"))?;
         let Some(tool_instance_id) = tool_instance_map.get(&usage.tool_instance_id) else {
             // Preserve package history in the backup document; skip DB insert when the
             // tool instance remains unresolved after registry policy.
@@ -5959,17 +5967,16 @@ async fn restore_provenance_lineage(
 
     for link in &document.generation_asset_versions {
         let link_id = generation_asset_version_ids.get(&link.id).ok_or_else(|| {
-            RepositoryError::integrity(format!(
-                "generation_asset_version ID 映射缺失：{}",
-                link.id
-            ))
+            RepositoryError::integrity(format!("generation_asset_version ID 映射缺失：{}", link.id))
         })?;
-        let generation_id = task_ids.get(&link.generation_id).ok_or_else(|| {
-            RepositoryError::integrity("generation_asset_version 缺少任务映射")
-        })?;
-        let asset_version_id = asset_version_ids.get(&link.asset_version_id).ok_or_else(|| {
-            RepositoryError::integrity("generation_asset_version 缺少资产版本映射")
-        })?;
+        let generation_id = task_ids
+            .get(&link.generation_id)
+            .ok_or_else(|| RepositoryError::integrity("generation_asset_version 缺少任务映射"))?;
+        let asset_version_id = asset_version_ids
+            .get(&link.asset_version_id)
+            .ok_or_else(|| {
+                RepositoryError::integrity("generation_asset_version 缺少资产版本映射")
+            })?;
         sqlx::query(
             "INSERT INTO generation_asset_versions
              (id, generation_id, output_id, ordinal, asset_version_id, relation_type, created_at)

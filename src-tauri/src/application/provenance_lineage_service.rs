@@ -12,6 +12,23 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{error::Error, fmt, sync::Arc};
 
+/// Explicit provenance facts supplied by a generation caller. Missing values
+/// stay missing; this type is never populated from filenames, endpoints, or
+/// prompt text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GenerationProvenanceContext {
+    pub prompt_version_id: Option<String>,
+    pub model_version_id: Option<String>,
+    pub tool_instance_id: Option<String>,
+    pub tool_version_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GenerationProvenanceCaptureReport {
+    pub tool_usage_recorded: bool,
+    pub asset_versions_linked: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct CreateGenerationToolUsageRequest {
     pub project_id: String,
@@ -214,6 +231,126 @@ impl ProvenanceLineageService {
             .collect()
     }
 
+    /// Capture only the explicit facts observed for a successful generation.
+    /// The output keys are supplied by the current output collection pass, so
+    /// this method never reinterprets historical files or task names.
+    pub async fn capture_successful_generation(
+        &self,
+        project_id: &str,
+        generation_id: &str,
+        context: &GenerationProvenanceContext,
+        output_keys: &[(String, u32)],
+    ) -> Result<GenerationProvenanceCaptureReport, ProvenanceLineageError> {
+        let generation_id = self
+            .generation_in_project(project_id, generation_id)
+            .await?;
+        if context.tool_version_id.is_some() && context.tool_instance_id.is_none() {
+            return Err(ProvenanceLineageError::InvalidInput(
+                "tool version provenance requires an explicit tool instance".to_owned(),
+            ));
+        }
+
+        let mut report = GenerationProvenanceCaptureReport::default();
+        if let Some(tool_instance_id) = context.tool_instance_id.as_deref() {
+            let existing = self
+                .repository
+                .list_tool_usages(project_id.trim(), &generation_id)
+                .await?;
+            let tool_version_id = context.tool_version_id.as_deref();
+            let already_recorded = existing.iter().any(|usage| {
+                usage.tool_instance_id.as_str() == tool_instance_id
+                    && usage.tool_version_id.as_ref().map(|id| id.as_str()) == tool_version_id
+            });
+            if !already_recorded {
+                let mut metadata = serde_json::Map::new();
+                metadata.insert(
+                    "capture".to_owned(),
+                    Value::String("generation_success".to_owned()),
+                );
+                if let Some(prompt_version_id) = context.prompt_version_id.as_deref() {
+                    metadata.insert(
+                        "promptVersionId".to_owned(),
+                        Value::String(prompt_version_id.to_owned()),
+                    );
+                }
+                if let Some(model_version_id) = context.model_version_id.as_deref() {
+                    metadata.insert(
+                        "modelVersionId".to_owned(),
+                        Value::String(model_version_id.to_owned()),
+                    );
+                }
+                self.create_tool_usage(CreateGenerationToolUsageRequest {
+                    project_id: project_id.to_owned(),
+                    generation_id: generation_id.to_string(),
+                    tool_instance_id: tool_instance_id.to_owned(),
+                    tool_version_id: tool_version_id.map(ToOwned::to_owned),
+                    metadata: Value::Object(metadata),
+                })
+                .await?;
+            }
+            report.tool_usage_recorded = true;
+        }
+
+        if output_keys.is_empty() {
+            return Ok(report);
+        }
+
+        let mappings = self
+            .asset_repository
+            .list_output_mappings(&generation_id)
+            .await?;
+        let existing_links = self
+            .repository
+            .list_asset_version_links(project_id.trim(), &generation_id)
+            .await?;
+        for (output_id, ordinal) in output_keys {
+            let mapping = mappings
+                .iter()
+                .find(|mapping| mapping.output_id == *output_id && mapping.ordinal == *ordinal)
+                .ok_or_else(|| {
+                    ProvenanceLineageError::NotFound(format!(
+                        "{}:{}:{}",
+                        generation_id, output_id, ordinal
+                    ))
+                })?;
+            let version = self
+                .asset_repository
+                .current_asset_version(project_id.trim(), &mapping.asset_id)
+                .await?
+                .ok_or_else(|| {
+                    ProvenanceLineageError::NotFound(format!(
+                        "asset version for {}:{}:{}",
+                        generation_id, output_id, ordinal
+                    ))
+                })?;
+            if let Some(existing) = existing_links
+                .iter()
+                .find(|link| link.output_id == *output_id && link.ordinal == *ordinal)
+            {
+                if existing.asset_version_id == version.id
+                    && existing.relation_type == GenerationAssetVersionRelationType::Output
+                {
+                    continue;
+                }
+                return Err(ProvenanceLineageError::InvalidInput(format!(
+                    "generation output {}:{} already has a different AssetVersion lineage",
+                    output_id, ordinal
+                )));
+            }
+            self.create_asset_version_link(CreateGenerationAssetVersionRequest {
+                project_id: project_id.to_owned(),
+                generation_id: generation_id.to_string(),
+                output_id: output_id.clone(),
+                ordinal: *ordinal,
+                asset_version_id: version.id.as_str().to_owned(),
+                relation_type: "OUTPUT".to_owned(),
+            })
+            .await?;
+            report.asset_versions_linked += 1;
+        }
+        Ok(report)
+    }
+
     async fn generation_in_project(
         &self,
         project_id: &str,
@@ -291,7 +428,7 @@ fn parse_asset_version_id(value: &str) -> Result<AssetVersionId, ProvenanceLinea
         .map_err(|error| ProvenanceLineageError::InvalidInput(error.to_string()))
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ProvenanceLineageError {
     InvalidInput(String),
     NotFound(String),
@@ -326,12 +463,12 @@ impl From<RepositoryError> for ProvenanceLineageError {
 mod tests {
     use super::{
         CreateGenerationAssetVersionRequest, CreateGenerationToolUsageRequest,
-        ProvenanceLineageService,
+        GenerationProvenanceContext, ProvenanceLineageService,
     };
     use crate::application::ports::{
         AssetRepository, Clock, TaskOutputAssetMapping, TaskRepository,
     };
-    use crate::domain::{Asset, AssetId, AssetVersion, AssetVersionId, Task};
+    use crate::domain::{Asset, AssetId, Task};
     use crate::infrastructure::database::{
         initialize,
         repositories::{
@@ -430,21 +567,10 @@ mod tests {
             .await
             .expect("output fixture should persist");
         asset_repository
-            .insert_asset_version(
-                &AssetVersion::new(
-                    AssetVersionId::parse("av_service").unwrap(),
-                    "project-1",
-                    asset.id,
-                    1,
-                    json!({}),
-                    "C:/project/service.png",
-                    "service-sha",
-                    now(),
-                )
-                .unwrap(),
-            )
+            .current_asset_version("project-1", &asset.id)
             .await
-            .expect("asset version fixture should persist");
+            .expect("generated asset version should persist")
+            .expect("generated asset version should exist");
         let service = ProvenanceLineageService::new(
             Arc::new(SqliteProvenanceLineageRepository::new(pool.clone())),
             task_repository,
@@ -485,14 +611,22 @@ mod tests {
 
     #[tokio::test]
     async fn service_creates_asset_version_lineage_for_exact_output_key() {
-        let (_directory, _pool, task, service, _assets) = setup().await;
+        let (_directory, _pool, task, service, assets) = setup().await;
+        let version_id = assets
+            .current_asset_version("project-1", &AssetId::parse("ast_service").unwrap())
+            .await
+            .unwrap()
+            .expect("generated asset version should exist")
+            .id
+            .as_str()
+            .to_owned();
         let view = service
             .create_asset_version_link(CreateGenerationAssetVersionRequest {
                 project_id: "project-1".to_owned(),
                 generation_id: task.id.to_string(),
                 output_id: "output_service".to_owned(),
                 ordinal: 0,
-                asset_version_id: "av_service".to_owned(),
+                asset_version_id: version_id,
                 relation_type: "output".to_owned(),
             })
             .await
@@ -506,6 +640,74 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn capture_successful_generation_records_explicit_tool_and_asset_edges() {
+        let (_directory, _pool, task, service, assets) = setup().await;
+        let version_id = assets
+            .current_asset_version("project-1", &AssetId::parse("ast_service").unwrap())
+            .await
+            .unwrap()
+            .expect("generated asset version should exist")
+            .id
+            .as_str()
+            .to_owned();
+        let report = service
+            .capture_successful_generation(
+                "project-1",
+                task.id.as_str(),
+                &GenerationProvenanceContext {
+                    prompt_version_id: Some("prv_explicit".to_owned()),
+                    model_version_id: Some("mdv_explicit".to_owned()),
+                    tool_instance_id: Some("tins_service".to_owned()),
+                    tool_version_id: Some("tver_service".to_owned()),
+                },
+                &[("output_service".to_owned(), 0)],
+            )
+            .await
+            .expect("explicit provenance should be captured");
+        assert_eq!(report.tool_usage_recorded, true);
+        assert_eq!(report.asset_versions_linked, 1);
+        assert_eq!(
+            service
+                .list_tool_usages("project-1", task.id.as_str())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            service
+                .list_asset_version_links("project-1", task.id.as_str())
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|link| link.asset_version_id)
+                .collect::<Vec<_>>(),
+            vec![version_id]
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_without_tool_identity_does_not_guess_tool_usage() {
+        let (_directory, _pool, task, service, _assets) = setup().await;
+        let report = service
+            .capture_successful_generation(
+                "project-1",
+                task.id.as_str(),
+                &GenerationProvenanceContext::default(),
+                &[("output_service".to_owned(), 0)],
+            )
+            .await
+            .expect("asset-only provenance should be captured");
+        assert!(!report.tool_usage_recorded);
+        assert_eq!(report.asset_versions_linked, 1);
+        assert!(service
+            .list_tool_usages("project-1", task.id.as_str())
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

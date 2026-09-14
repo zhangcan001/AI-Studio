@@ -730,6 +730,10 @@ export function createGeneration(request: {
   workflowVersionId: string;
   recipeId: string;
   values: GenerationValues;
+  modelVersionId?: string;
+  promptVersionId?: string;
+  toolInstanceId?: string;
+  toolVersionId?: string;
   submissionIdempotencyKey?: string;
 }): Promise<TaskView> {
   return invoke<TaskView>("generation_create", { request });
@@ -1268,6 +1272,10 @@ export interface GenerationBatchItemRequest {
   workflowVersionId: string;
   recipeId: string;
   values: GenerationValues;
+  modelVersionId?: string;
+  promptVersionId?: string;
+  toolInstanceId?: string;
+  toolVersionId?: string;
 }
 
 export interface GenerationBatchCreateResult {

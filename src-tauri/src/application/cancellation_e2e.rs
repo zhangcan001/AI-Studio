@@ -6,6 +6,7 @@ use crate::application::ports::{
     ComfyImageUpload, ComfyNodeOutput, ComfyOutputData, ComfyOutputFile, ComfyQueueState,
     ComfyUploadedImage, PromptSubmission, SystemStats, TaskRepository, TaskUpdateSink,
 };
+use crate::application::provenance_lineage_service::ProvenanceLineageService;
 use crate::application::task_cancellation_service::TaskCancellationService;
 use crate::application::task_execution_registry::TaskExecutionRegistry;
 use crate::domain::{Asset, AssetId, SeedValue, Task, TaskId, TaskStatus};
@@ -13,7 +14,8 @@ use crate::infrastructure::database::{
     initialize,
     repositories::{
         test_support, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
-        SqliteGenerationSnapshotRepository, SqliteTaskRepository,
+        SqliteGenerationSnapshotRepository, SqliteProvenanceLineageRepository,
+        SqliteTaskRepository, SqliteToolRepository,
     },
     SqliteProjectRepository,
 };
@@ -23,6 +25,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use sqlx::SqlitePool;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::Cursor;
 use std::{
@@ -381,6 +384,7 @@ impl TaskUpdateSink for NoopSink {
 
 struct Harness {
     _directory: TempDir,
+    pool: SqlitePool,
     task_repository: Arc<SqliteTaskRepository>,
     service: Arc<GenerationService>,
     cancellation: TaskCancellationService,
@@ -456,6 +460,13 @@ impl Harness {
 
         let adapter = Arc::new(ControlledAdapter::new(behavior));
         let registry = TaskExecutionRegistry::default();
+        let provenance_lineage_service = Arc::new(ProvenanceLineageService::new(
+            Arc::new(SqliteProvenanceLineageRepository::new(pool.clone())),
+            task_repository.clone(),
+            Arc::new(SqliteToolRepository::new(pool.clone())),
+            asset_repository.clone(),
+            Arc::new(FixedClock),
+        ));
         let service = Arc::new(
             GenerationService::new(
                 task_repository.clone(),
@@ -467,6 +478,7 @@ impl Harness {
                 asset_repository,
                 Arc::new(FixedClock),
             )
+            .with_provenance_lineage_service(provenance_lineage_service)
             .with_task_update_sink(Arc::new(NoopSink))
             .with_execution_registry(registry.clone()),
         );
@@ -478,6 +490,7 @@ impl Harness {
         );
         Self {
             _directory: directory,
+            pool,
             task_repository,
             service,
             cancellation,
@@ -510,6 +523,9 @@ impl Harness {
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
             model_version_id: None,
+            prompt_version_id: None,
+            tool_instance_id: None,
+            tool_version_id: None,
             values,
             reference_manifest: None,
             submission_idempotency_key: None,
@@ -778,6 +794,14 @@ async fn cancel_running_waits_for_execution_interrupted_then_cancels() {
     let finished = wait_for_status(&harness.task_repository, &task.id, TaskStatus::Cancelled).await;
     assert_eq!(finished.status, TaskStatus::Cancelled);
     assert_eq!(harness.adapter.action_count("cancel_prompt"), 1);
+    let lineage_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM generation_asset_versions WHERE generation_id = ?",
+    )
+    .bind(task.id.as_str())
+    .fetch_one(&harness.pool)
+    .await
+    .expect("cancelled generation lineage count");
+    assert_eq!(lineage_count, 0);
     wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
@@ -828,6 +852,14 @@ async fn cancellation_racing_success_preserves_result_and_records_not_effective(
         .iter()
         .any(|event| { event.event_type == crate::domain::TaskEventType::TaskCancelNotEffective }));
     assert!(harness.adapter.action_count("download_output") > 0);
+    let lineage_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM generation_asset_versions WHERE generation_id = ?",
+    )
+    .bind(task.id.as_str())
+    .fetch_one(&harness.pool)
+    .await
+    .expect("successful racing generation lineage count");
+    assert_eq!(lineage_count, 1);
     wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }

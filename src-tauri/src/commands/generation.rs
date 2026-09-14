@@ -22,6 +22,12 @@ pub struct GenerationCreateRequest {
     #[serde(default)]
     pub model_version_id: Option<String>,
     #[serde(default)]
+    pub prompt_version_id: Option<String>,
+    #[serde(default)]
+    pub tool_instance_id: Option<String>,
+    #[serde(default)]
+    pub tool_version_id: Option<String>,
+    #[serde(default)]
     pub submission_idempotency_key: Option<String>,
 }
 
@@ -56,6 +62,12 @@ pub struct GenerationBatchItemRequest {
     pub values: BTreeMap<String, InputValueDto>,
     #[serde(default)]
     pub model_version_id: Option<String>,
+    #[serde(default)]
+    pub prompt_version_id: Option<String>,
+    #[serde(default)]
+    pub tool_instance_id: Option<String>,
+    #[serde(default)]
+    pub tool_version_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -214,6 +226,9 @@ impl GenerationCreateRequest {
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             model_version_id: self.model_version_id,
+            prompt_version_id: self.prompt_version_id,
+            tool_instance_id: self.tool_instance_id,
+            tool_version_id: self.tool_version_id,
             values,
             reference_manifest: None,
             submission_idempotency_key: self.submission_idempotency_key,
@@ -236,6 +251,9 @@ impl GenerationBatchItemRequest {
             workflow_version_id: self.workflow_version_id,
             recipe_id: self.recipe_id,
             model_version_id: self.model_version_id,
+            prompt_version_id: self.prompt_version_id,
+            tool_instance_id: self.tool_instance_id,
+            tool_version_id: self.tool_version_id,
             values,
             reference_manifest: None,
             submission_idempotency_key: None,
@@ -342,12 +360,16 @@ pub(crate) fn map_generation_error(error: GenerationServiceError) -> AppError {
         | GenerationServiceError::ModelVersionNotFound(_) => {
             AppError::invalid_input(error.to_string())
         }
+        GenerationServiceError::InvalidProvenanceContext(_) => {
+            AppError::invalid_input(error.to_string())
+        }
         GenerationServiceError::Domain(_)
         | GenerationServiceError::Snapshot(_)
         | GenerationServiceError::Comfy(_)
         | GenerationServiceError::StreamDisconnected(_)
         | GenerationServiceError::OutputCollection(_)
         | GenerationServiceError::AssetImport(_)
+        | GenerationServiceError::ProvenanceCapture(_)
         | GenerationServiceError::TaskCreatedHook { .. } => AppError::internal(error.to_string()),
         GenerationServiceError::ExecutionFailed { code, .. }
             if code

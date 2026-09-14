@@ -278,7 +278,8 @@ impl ProjectBackupService {
             generation_asset_versions: document.generation_asset_versions.len(),
             missing_workflows,
             active_tasks_excluded: document.active_tasks_excluded,
-            warning: "项目归档包含项目历史、提示词、素材与溯源，请妥善保存。检查不会修改数据库。".to_owned(),
+            warning: "项目归档包含项目历史、提示词、素材与溯源，请妥善保存。检查不会修改数据库。"
+                .to_owned(),
         };
         self.inspections
             .lock()
@@ -427,8 +428,7 @@ impl ProjectBackupService {
         }
         let mut generation_asset_version_ids = HashMap::new();
         for link in &document.generation_asset_versions {
-            generation_asset_version_ids
-                .insert(link.id.clone(), format!("gav_{}", Uuid::new_v4()));
+            generation_asset_version_ids.insert(link.id.clone(), format!("gav_{}", Uuid::new_v4()));
         }
         let mut tag_ids = HashMap::new();
         for tag in &document.asset_tags {
@@ -1209,7 +1209,6 @@ pub(crate) struct BackupScopeReferenceSetBinding {
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2126,11 +2125,13 @@ fn write_zip_to_path(
     let media_inventory = files
         .iter()
         .filter_map(|file| {
-            file.expected_sha256.as_ref().map(|sha256| BackupMediaInventoryEntry {
-                path: file.zip_path.clone(),
-                size: file.expected_size,
-                sha256: sha256.clone(),
-            })
+            file.expected_sha256
+                .as_ref()
+                .map(|sha256| BackupMediaInventoryEntry {
+                    path: file.zip_path.clone(),
+                    size: file.expected_size,
+                    sha256: sha256.clone(),
+                })
         })
         .collect::<Vec<_>>();
     let provenance = build_provenance_document(document);
@@ -2392,8 +2393,7 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18
-                | 19
+            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -2405,7 +2405,13 @@ fn inspect_archive(
     {
         return Err(AppError::backup_invalid("备份项目元数据与 manifest 不一致"));
     }
-    validate_manifest_integrity(&mut archive, &manifest, &document, &project_json_bytes, &names)?;
+    validate_manifest_integrity(
+        &mut archive,
+        &manifest,
+        &document,
+        &project_json_bytes,
+        &names,
+    )?;
     Ok((manifest, document, names))
 }
 
@@ -4829,15 +4835,14 @@ mod tests {
         restored_name, safe_zip_path, validate_asset_video_prompt_document,
         validate_organization_document, validate_production_structure_document,
         validate_prompt_document, validate_reference_anchor_document, write_zip_to_path,
-        BackupAsset, BackupAssetTag, BackupAssetTagLink, BackupAssetRelation, BackupAssetVersion,
+        BackupAsset, BackupAssetRelation, BackupAssetTag, BackupAssetTagLink, BackupAssetVersion,
         BackupAssetVideoPrompt, BackupDocument, BackupFileSource, BackupGenerationAssetVersion,
-        BackupMapping,
-        BackupGenerationToolUsage, BackupInventoryCounts, BackupModel, BackupModelVersion,
-        BackupProductionEpisode, BackupProductionScene, BackupProductionSeries, BackupProject,
-        BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor, BackupReferenceAnchorAsset,
-        BackupShot, BackupShotSceneAssignment, BackupSnapshot, BackupTask, BackupTool,
-        BackupToolInstance, DbReferenceAnchor, DbReferenceAnchorAsset, ProductionStructureIds,
-        ProjectBackupManifest, ProjectBackupService,
+        BackupGenerationToolUsage, BackupInventoryCounts, BackupMapping, BackupModel,
+        BackupModelVersion, BackupProductionEpisode, BackupProductionScene, BackupProductionSeries,
+        BackupProject, BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor,
+        BackupReferenceAnchorAsset, BackupShot, BackupShotSceneAssignment, BackupSnapshot,
+        BackupTask, BackupTool, BackupToolInstance, DbReferenceAnchor, DbReferenceAnchorAsset,
+        ProductionStructureIds, ProjectBackupManifest, ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{
@@ -4848,9 +4853,13 @@ mod tests {
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
     use std::io::Read;
-    use std::{fs::File, io::Write, path::{Path, PathBuf}};
+    use std::sync::Arc;
+    use std::{
+        fs::File,
+        io::Write,
+        path::{Path, PathBuf},
+    };
     use tempfile::tempdir;
     use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
@@ -7546,30 +7555,27 @@ mod tests {
         assert_eq!(preview.tools, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
 
-        let version_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM asset_versions WHERE project_id = ?",
-        )
-        .bind(&restored.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let version_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM asset_versions WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(version_count, 1);
-        let remapped_asset: Option<String> = sqlx::query_scalar(
-            "SELECT asset_id FROM asset_versions WHERE project_id = ?",
-        )
-        .bind(&restored.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let remapped_asset: Option<String> =
+            sqlx::query_scalar("SELECT asset_id FROM asset_versions WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(remapped_asset.is_some());
         assert_ne!(remapped_asset.as_deref(), Some("ast_v19"));
-        let relation_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM asset_relations WHERE project_id = ?",
-        )
-        .bind(&restored.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let relation_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM asset_relations WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(relation_count, 1);
         let lineage_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM generation_asset_versions gav
@@ -7589,19 +7595,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(tool_usage_count, 1);
-        let tool_status: String = sqlx::query_scalar(
-            "SELECT status FROM tool_instances WHERE id = 'tins_v19'",
+        let tool_status: String =
+            sqlx::query_scalar("SELECT status FROM tool_instances WHERE id = 'tins_v19'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(tool_status, "UNKNOWN");
+        let model_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM models WHERE provider = 'MiniMax' AND name = 'H3'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(tool_status, "UNKNOWN");
-        let model_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM models WHERE provider = 'MiniMax' AND name = 'H3'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(model_count, 1, "model registry must reuse UNIQUE(provider,name)");
+        assert_eq!(
+            model_count, 1,
+            "model registry must reuse UNIQUE(provider,name)"
+        );
         let prompt_model: Option<String> = sqlx::query_scalar(
             "SELECT model_version_id FROM prompt_versions pv
              JOIN prompt_entries pe ON pe.id = pv.prompt_id WHERE pe.project_id = ?",
@@ -7937,7 +7946,8 @@ mod tests {
         // Tamper with the published package: rewrite manifest mediaInventory sha256.
         let file = File::open(&archive_path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut rewritten = zip::ZipWriter::new(File::create(directory.path().join("tampered.aiarchive")).unwrap());
+        let mut rewritten =
+            zip::ZipWriter::new(File::create(directory.path().join("tampered.aiarchive")).unwrap());
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).unwrap();
@@ -8083,9 +8093,8 @@ mod tests {
         write_zip_to_path(&document, &[], &archive_path).unwrap();
         let tampered = directory.path().join("checksum-bad.aiarchive");
         rewrite_manifest_entry(&archive_path, &tampered, |manifest| {
-            manifest.logical_snapshot_checksum = Some(
-                "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
-            );
+            manifest.logical_snapshot_checksum =
+                Some("0000000000000000000000000000000000000000000000000000000000000000".to_owned());
         });
         let err = inspect_archive(&tampered).unwrap_err();
         assert_eq!(err.code(), "BACKUP_INVALID");
@@ -8198,8 +8207,7 @@ mod tests {
             .to_string();
         let source_path = directory.path().join("content.bin");
         std::fs::write(&source_path, bytes).unwrap();
-        let (asset, sha) =
-            archive_media_asset("ast_old", bytes, "assets/ast_old/content.bin");
+        let (asset, sha) = archive_media_asset("ast_old", bytes, "assets/ast_old/content.bin");
         // Simulate an export that still recorded absolute host paths on versions.
         let mut document = empty_archive_document("source-path-change", "路径迁移");
         document.assets = vec![asset.clone()];
@@ -8269,8 +8277,10 @@ mod tests {
         let path_b = directory.path().join("b.bin");
         std::fs::write(&path_a, bytes_a).unwrap();
         std::fs::write(&path_b, bytes_b).unwrap();
-        let (asset_a, sha_a) = archive_media_asset("ast_src_a", bytes_a, "assets/ast_src_a/content.bin");
-        let (asset_b, sha_b) = archive_media_asset("ast_src_b", bytes_b, "assets/ast_src_b/content.bin");
+        let (asset_a, sha_a) =
+            archive_media_asset("ast_src_a", bytes_a, "assets/ast_src_a/content.bin");
+        let (asset_b, sha_b) =
+            archive_media_asset("ast_src_b", bytes_b, "assets/ast_src_b/content.bin");
         let old_project = "source-remap-ids";
         let mut document = empty_archive_document(old_project, "重映射");
         document.assets = vec![asset_a.clone(), asset_b.clone()];
@@ -8369,30 +8379,27 @@ mod tests {
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_ne!(restored.id, old_project);
 
-        let leftover_versions: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM asset_versions WHERE project_id = ?",
-        )
-        .bind(old_project)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let leftover_versions: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM asset_versions WHERE project_id = ?")
+                .bind(old_project)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(leftover_versions, 0);
-        let leftover_relations: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM asset_relations WHERE project_id = ?",
-        )
-        .bind(old_project)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let leftover_relations: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM asset_relations WHERE project_id = ?")
+                .bind(old_project)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(leftover_relations, 0);
 
-        let version_row: (String, String) = sqlx::query_as(
-            "SELECT id, asset_id FROM asset_versions WHERE project_id = ?",
-        )
-        .bind(&restored.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let version_row: (String, String) =
+            sqlx::query_as("SELECT id, asset_id FROM asset_versions WHERE project_id = ?")
+                .bind(&restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_ne!(version_row.0, "asv_src");
         assert_ne!(version_row.1, "ast_src_b");
 

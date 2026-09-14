@@ -11,14 +11,17 @@ mod tests {
         GenerationSnapshotRepository, PromptSubmission, RepositoryError, SystemStats,
         TaskRepository, TaskUpdateSink,
     };
+    use crate::application::provenance_lineage_service::{
+        GenerationProvenanceContext, ProvenanceLineageService,
+    };
     use crate::domain::{Asset, AssetId, SeedValue, Task, TaskEventType, TaskStatus};
     use crate::infrastructure::database::{
         initialize,
         repositories::{
             test_support, SqliteAssetRepository, SqliteGenerationDefinitionRepository,
-            SqliteGenerationSnapshotRepository, SqliteTaskRepository,
+            SqliteGenerationSnapshotRepository, SqliteTaskRepository, SqliteToolRepository,
         },
-        SqliteProjectRepository,
+        SqliteProjectRepository, SqliteProvenanceLineageRepository,
     };
     use crate::infrastructure::filesystem::FileSystemAssetStore;
     use async_trait::async_trait;
@@ -308,6 +311,28 @@ mod tests {
     }
 
     async fn run_mode(mode: FakeMode, non_blocking: bool) -> Run {
+        run_mode_with_context(mode, non_blocking, None).await
+    }
+
+    async fn run_with_explicit_tool(mode: FakeMode) -> Run {
+        run_mode_with_context(
+            mode,
+            false,
+            Some(GenerationProvenanceContext {
+                prompt_version_id: Some("prv_e2e".to_owned()),
+                model_version_id: Some("mdv_e2e".to_owned()),
+                tool_instance_id: Some("tins_e2e".to_owned()),
+                tool_version_id: Some("tver_e2e".to_owned()),
+            }),
+        )
+        .await
+    }
+
+    async fn run_mode_with_context(
+        mode: FakeMode,
+        non_blocking: bool,
+        provenance_context: Option<GenerationProvenanceContext>,
+    ) -> Run {
         let directory = tempdir().expect("temporary directory");
         let root = directory.path().join("project");
         std::fs::create_dir_all(&root).expect("project root");
@@ -369,6 +394,77 @@ mod tests {
         let asset_store = Arc::new(FileSystemAssetStore::new());
         let clock = Arc::new(FakeClock::new(clock_values()));
         let sink = Arc::new(RecordingSink::default());
+        let provenance_context = provenance_context.unwrap_or_default();
+        if provenance_context.model_version_id.as_deref() == Some("mdv_e2e") {
+            sqlx::query(
+                "INSERT INTO models
+                 (id, name, provider, type, description, metadata_json, created_at)
+                 VALUES ('model_e2e', 'E2E Model', 'E2E Provider', 'image', '', '{}', ?)",
+            )
+            .bind(
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+                    .unwrap()
+                    .to_rfc3339(),
+            )
+            .execute(&pool)
+            .await
+            .expect("model fixture should persist");
+            sqlx::query(
+                "INSERT INTO model_versions
+                 (id, model_id, version, capabilities_json, parameter_schema_json, created_at)
+                 VALUES ('mdv_e2e', 'model_e2e', '1.0', '[\"image_generation\"]', '{}', ?)",
+            )
+            .bind(
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+                    .unwrap()
+                    .to_rfc3339(),
+            )
+            .execute(&pool)
+            .await
+            .expect("model version fixture should persist");
+        }
+        if provenance_context.tool_instance_id.as_deref() == Some("tins_e2e") {
+            sqlx::query(
+                "INSERT INTO tools (id, name, type, description, metadata_json, created_at)
+                 VALUES ('tool_e2e', 'E2E Tool', 'image', '', '{}', ?)",
+            )
+            .bind(
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+                    .unwrap()
+                    .to_rfc3339(),
+            )
+            .execute(&pool)
+            .await
+            .expect("tool fixture should persist");
+            sqlx::query(
+                "INSERT INTO tool_instances
+                 (id, tool_id, path, endpoint, status, last_checked)
+                 VALUES ('tins_e2e', 'tool_e2e', NULL, NULL, 'UNKNOWN', NULL)",
+            )
+            .execute(&pool)
+            .await
+            .expect("tool instance fixture should persist");
+            sqlx::query(
+                "INSERT INTO tool_versions
+                 (id, tool_id, version, observed_at, metadata_json)
+                 VALUES ('tver_e2e', 'tool_e2e', '1.0', ?, '{}')",
+            )
+            .bind(
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+                    .unwrap()
+                    .to_rfc3339(),
+            )
+            .execute(&pool)
+            .await
+            .expect("tool version fixture should persist");
+        }
+        let provenance_lineage_service = Arc::new(ProvenanceLineageService::new(
+            Arc::new(SqliteProvenanceLineageRepository::new(pool.clone())),
+            task_repository.clone(),
+            Arc::new(SqliteToolRepository::new(pool.clone())),
+            asset_repository.clone(),
+            clock.clone(),
+        ));
         let service = Arc::new(
             GenerationService::new(
                 task_repository.clone(),
@@ -380,13 +476,17 @@ mod tests {
                 asset_repository.clone(),
                 clock,
             )
+            .with_provenance_lineage_service(provenance_lineage_service)
             .with_task_update_sink(sink.clone()),
         );
         let request = CreateGenerationRequest {
             project_id: "project-1".to_owned(),
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
-            model_version_id: None,
+            model_version_id: provenance_context.model_version_id.clone(),
+            prompt_version_id: provenance_context.prompt_version_id.clone(),
+            tool_instance_id: provenance_context.tool_instance_id.clone(),
+            tool_version_id: provenance_context.tool_version_id.clone(),
             values: std::collections::BTreeMap::from([
                 (
                     "prompt".to_owned(),
@@ -682,6 +782,9 @@ outputs:
             workflow_version_id: "workflow-version-1".to_owned(),
             recipe_id: "recipe-1".to_owned(),
             model_version_id: None,
+            prompt_version_id: None,
+            tool_instance_id: None,
+            tool_version_id: None,
             values,
             reference_manifest,
             submission_idempotency_key: None,
@@ -774,6 +877,9 @@ outputs:
                     workflow_version_id: "workflow-version-1".to_owned(),
                     recipe_id: "recipe-1".to_owned(),
                     model_version_id: None,
+                    prompt_version_id: None,
+                    tool_instance_id: None,
+                    tool_version_id: None,
                     values: BTreeMap::from([
                         (
                             "prompt".to_owned(),
@@ -874,6 +980,69 @@ outputs:
             .await
             .expect("snapshot count");
         assert_eq!(snapshot_count, 1);
+        let lineage_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM generation_asset_versions WHERE generation_id = ?",
+        )
+        .bind(run.task.id.as_str())
+        .fetch_one(&run.pool)
+        .await
+        .expect("asset lineage count");
+        assert_eq!(lineage_count, 1);
+        let (output_id, ordinal, version_number): (String, i64, i64) = sqlx::query_as(
+            "SELECT lineage.output_id, lineage.ordinal, version.version_number
+             FROM generation_asset_versions lineage
+             INNER JOIN asset_versions version ON version.id = lineage.asset_version_id
+             WHERE lineage.generation_id = ?",
+        )
+        .bind(run.task.id.as_str())
+        .fetch_one(&run.pool)
+        .await
+        .expect("asset lineage row");
+        assert_eq!(
+            (output_id, ordinal, version_number),
+            ("generated_image".to_owned(), 0, 1)
+        );
+        let tool_usage_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM generation_tool_usages WHERE generation_id = ?",
+        )
+        .bind(run.task.id.as_str())
+        .fetch_one(&run.pool)
+        .await
+        .expect("tool usage count");
+        assert_eq!(tool_usage_count, 0);
+    }
+
+    #[tokio::test]
+    async fn backend_e2e_captures_explicit_tool_usage_and_prompt_context() {
+        let run = run_with_explicit_tool(FakeMode::Success { image_count: 1 }).await;
+        run.outcome
+            .as_ref()
+            .expect("generation with explicit provenance should succeed");
+        let usage: (String, Option<String>, String) = sqlx::query_as(
+            "SELECT tool_instance_id, tool_version_id, metadata_json
+             FROM generation_tool_usages
+             WHERE generation_id = ?",
+        )
+        .bind(run.task.id.as_str())
+        .fetch_one(&run.pool)
+        .await
+        .expect("explicit tool usage should be captured");
+        assert_eq!(usage.0, "tins_e2e");
+        assert_eq!(usage.1.as_deref(), Some("tver_e2e"));
+        let metadata: Value =
+            serde_json::from_str(&usage.2).expect("usage metadata should be JSON");
+        assert_eq!(metadata["capture"], "generation_success");
+        assert_eq!(metadata["promptVersionId"], "prv_e2e");
+        assert_eq!(metadata["modelVersionId"], "mdv_e2e");
+        let model_version_id: Option<String> = sqlx::query_scalar(
+            "SELECT model_version_id FROM generation_snapshots WHERE task_id = ?",
+        )
+        .bind(run.task.id.as_str())
+        .fetch_one(&run.pool)
+        .await
+        .expect("model version provenance should be captured");
+        assert_eq!(model_version_id.as_deref(), Some("mdv_e2e"));
+        assert_eq!(lineage_count(&run).await, 1);
     }
 
     #[tokio::test]
@@ -986,6 +1155,7 @@ outputs:
         assert_eq!(run.task.status, TaskStatus::Failed);
         assert_eq!(run.task.error.as_ref().unwrap().code, "OUTPUT_MISSING");
         assert!(run.assets.is_empty());
+        assert_eq!(lineage_count(&run).await, 0);
     }
 
     #[tokio::test]
@@ -1001,6 +1171,7 @@ outputs:
             "OUTPUT_IMPORT_FAILED"
         );
         assert!(run.assets.is_empty());
+        assert_eq!(lineage_count(&run).await, 0);
     }
 
     #[tokio::test]
@@ -1016,6 +1187,7 @@ outputs:
             "OUTPUT_DOWNLOAD_FAILED"
         );
         assert!(run.assets.is_empty());
+        assert_eq!(lineage_count(&run).await, 0);
     }
 
     #[tokio::test]
@@ -1052,6 +1224,14 @@ outputs:
             run.published_statuses.last().map(String::as_str),
             Some("SUCCEEDED")
         );
+    }
+
+    async fn lineage_count(run: &Run) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM generation_asset_versions WHERE generation_id = ?")
+            .bind(run.task.id.as_str())
+            .fetch_one(&run.pool)
+            .await
+            .expect("asset lineage count")
     }
 
     #[allow(dead_code)]

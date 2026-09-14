@@ -50,6 +50,18 @@ impl AssetRepository for SqliteAssetRepository {
                 .validate()
                 .map_err(|error| map_domain_error("asset validation", error))?;
             insert_asset(&mut transaction, asset).await?;
+            let version = AssetVersion::new(
+                AssetVersionId::new(),
+                asset.project_id.clone(),
+                asset.id.clone(),
+                1,
+                asset.metadata_json.clone(),
+                asset.storage_path.clone(),
+                asset.sha256.clone(),
+                asset.created_at,
+            )
+            .map_err(|error| map_domain_error("generated asset version", error))?;
+            insert_asset_version(&mut transaction, &version).await?;
         }
         for mapping in mappings {
             sqlx::query(
@@ -168,44 +180,9 @@ impl AssetRepository for SqliteAssetRepository {
     }
 
     async fn insert_asset_version(&self, version: &AssetVersion) -> Result<(), RepositoryError> {
-        version
-            .validate()
-            .map_err(|error| map_domain_error("asset version validation", error))?;
-        let metadata_snapshot = serialize_json(
-            "asset version metadata_snapshot",
-            Some(&version.metadata_snapshot),
-        )?
-        .ok_or_else(|| {
-            RepositoryError::serialization("asset version metadata_snapshot", "missing value")
-        })?;
-        let result = sqlx::query(
-            "INSERT INTO asset_versions
-                (id, project_id, asset_id, version_number, metadata_snapshot,
-                 location, checksum, created_at)
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?
-             WHERE EXISTS (
-                 SELECT 1 FROM assets WHERE id = ? AND project_id = ?
-             )",
-        )
-        .bind(version.id.as_str())
-        .bind(&version.project_id)
-        .bind(version.asset_id.as_str())
-        .bind(i64::from(version.version_number))
-        .bind(metadata_snapshot)
-        .bind(&version.location)
-        .bind(&version.checksum)
-        .bind(format_datetime(version.created_at))
-        .bind(version.asset_id.as_str())
-        .bind(&version.project_id)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        if result.rows_affected() != 1 {
-            return Err(RepositoryError::not_found(
-                "asset",
-                version.asset_id.as_str(),
-            ));
-        }
+        let mut transaction = self.pool.begin().await.map_err(map_sqlx_error)?;
+        insert_asset_version(&mut transaction, version).await?;
+        transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
 
@@ -476,6 +453,51 @@ async fn insert_asset(
     .execute(&mut **transaction)
     .await
     .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
+async fn insert_asset_version(
+    transaction: &mut Transaction<'_, Sqlite>,
+    version: &AssetVersion,
+) -> Result<(), RepositoryError> {
+    version
+        .validate()
+        .map_err(|error| map_domain_error("asset version validation", error))?;
+    let metadata_snapshot = serialize_json(
+        "asset version metadata_snapshot",
+        Some(&version.metadata_snapshot),
+    )?
+    .ok_or_else(|| {
+        RepositoryError::serialization("asset version metadata_snapshot", "missing value")
+    })?;
+    let result = sqlx::query(
+        "INSERT INTO asset_versions
+            (id, project_id, asset_id, version_number, metadata_snapshot,
+             location, checksum, created_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+             SELECT 1 FROM assets WHERE id = ? AND project_id = ?
+         )",
+    )
+    .bind(version.id.as_str())
+    .bind(&version.project_id)
+    .bind(version.asset_id.as_str())
+    .bind(i64::from(version.version_number))
+    .bind(metadata_snapshot)
+    .bind(&version.location)
+    .bind(&version.checksum)
+    .bind(format_datetime(version.created_at))
+    .bind(version.asset_id.as_str())
+    .bind(&version.project_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sqlx_error)?;
+    if result.rows_affected() != 1 {
+        return Err(RepositoryError::not_found(
+            "asset",
+            version.asset_id.as_str(),
+        ));
+    }
     Ok(())
 }
 
@@ -887,6 +909,17 @@ mod tests {
             repository.list_mapped_assets(&task.id).await.unwrap(),
             vec![(mapping, video)]
         );
+        let versions = repository
+            .list_asset_versions("project-1", &AssetId::parse("ast_video_one").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].version_number, 1);
+        assert_eq!(
+            versions[0].location,
+            "C:/project/assets/generated/video/ast_video_one.mp4"
+        );
+        assert_eq!(versions[0].checksum, "c".repeat(64));
     }
 
     #[tokio::test]
