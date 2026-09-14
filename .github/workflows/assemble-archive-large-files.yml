@@ -1,0 +1,31 @@
+name: assemble-archive-large-files
+on:
+  push:
+    paths:
+      - '.github/workflows/assemble-archive-large-files.yml'
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure base blobs exist
+        run: |
+          git cat-file -t d47f96c3c565ecf7d26853082e99442b9a0156b3
+          git cat-file -t bd72ba5d2e30436077993c8b0267cefdeb464179
+      - name: Assemble large files from patches
+        run: python3 _assemble/assemble.py
+      - name: Commit assembled files and remove chunks
+        run: |
+          set -euo pipefail
+          rm -rf _assemble
+          rm -f .github/workflows/assemble-archive-large-files.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git status
+          git commit -m "feat(v2): restore archive backup service/repo (v19) from assembled chunks"
+          git push origin HEAD:master
