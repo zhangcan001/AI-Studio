@@ -29,6 +29,7 @@ pub mod project_manifest_repository;
 pub mod project_repository;
 pub mod project_workflow_binding_repository;
 pub mod prompt_library_repository;
+pub mod provenance_lineage_repository;
 pub mod recipe_history_query_repository;
 pub mod reference_anchor_repository;
 pub mod reference_set_repository;
@@ -124,6 +125,7 @@ pub use project_workflow_binding_repository::{
 pub use prompt_library_repository::{
     PromptEntryRecord, PromptLibraryQuery, PromptLibraryRepository, PromptVersionRecord,
 };
+pub use provenance_lineage_repository::ProvenanceLineageRepository;
 pub use recipe_history_query_repository::*;
 pub use reference_anchor_repository::{ReferenceAnchorRecord, ReferenceAnchorRepository};
 pub use reference_set_repository::ReferenceSetRepository;

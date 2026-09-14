@@ -59,6 +59,7 @@ pub mod project_template_service;
 pub mod project_workflow_binding_service;
 pub mod prompt_context_builder;
 pub mod prompt_library_service;
+pub mod provenance_lineage_service;
 pub mod recipe_history_query_service;
 pub mod reference_anchor_service;
 pub mod reference_set_service;

@@ -209,6 +209,25 @@ impl AssetRepository for SqliteAssetRepository {
         Ok(())
     }
 
+    async fn find_asset_version_by_id(
+        &self,
+        project_id: &str,
+        version_id: &AssetVersionId,
+    ) -> Result<Option<AssetVersion>, RepositoryError> {
+        let row = sqlx::query_as::<_, AssetVersionRow>(
+            "SELECT id, project_id, asset_id, version_number, metadata_snapshot,
+                    location, checksum, created_at
+             FROM asset_versions
+             WHERE project_id = ? AND id = ?",
+        )
+        .bind(project_id)
+        .bind(version_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        row.map(AssetVersionRow::try_into_domain).transpose()
+    }
+
     async fn list_asset_versions(
         &self,
         project_id: &str,

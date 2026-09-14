@@ -11,10 +11,10 @@ pub use application::ports::{
     AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
     GenerationSnapshotRepository, ModelRepository, ProductionItemReviewRepository,
     ProductionQueueRepository, ProjectBackupRepository, ProjectRecord, ProjectRepository,
-    ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, RecipeHistoryQueryRepository,
-    RepositoryError, TaskOutputAssetMapping, TaskRepository, ToolRepository,
-    WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository,
-    WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+    ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, ProvenanceLineageRepository,
+    RecipeHistoryQueryRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
+    ToolRepository, WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository,
+    WorkflowRunRepository, WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
 };
 pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
@@ -24,8 +24,8 @@ pub use infrastructure::database::{
     SqliteModelRepository, SqliteOrganizationRepository, SqlitePresetRepository,
     SqliteProductionItemReviewRepository, SqliteProductionQueueRepository,
     SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
-    SqlitePromptLibraryRepository, SqliteTaskRepository, SqliteToolRepository,
-    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqlitePromptLibraryRepository, SqliteProvenanceLineageRepository, SqliteTaskRepository,
+    SqliteToolRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
@@ -71,6 +71,7 @@ use application::{
     project_template_service::ProjectTemplateService,
     project_workflow_binding_service::ProjectWorkflowBindingService,
     prompt_library_service::PromptLibraryService,
+    provenance_lineage_service::ProvenanceLineageService,
     recipe_history_query_service::RecipeHistoryQueryService,
     reference_anchor_service::ReferenceAnchorService,
     reference_set_service::ReferenceSetService,
@@ -309,6 +310,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let tool_repository: Arc<dyn application::ports::ToolRepository> = Arc::new(
                 infrastructure::database::SqliteToolRepository::new(database_pool.clone()),
+            );
+            let provenance_lineage_repository: Arc<dyn ProvenanceLineageRepository> = Arc::new(
+                infrastructure::database::SqliteProvenanceLineageRepository::new(
+                    database_pool.clone(),
+                ),
             );
             let shot_repository_impl = Arc::new(
                 infrastructure::database::SqliteShotRepository::new(database_pool.clone()),
@@ -845,7 +851,14 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             ));
             let model_service = Arc::new(ModelService::new(model_repository, clock.clone()));
-            let tool_service = Arc::new(ToolService::new(tool_repository, clock.clone()));
+            let tool_service = Arc::new(ToolService::new(tool_repository.clone(), clock.clone()));
+            let provenance_lineage_service = Arc::new(ProvenanceLineageService::new(
+                provenance_lineage_repository,
+                task_repository.clone(),
+                tool_repository,
+                asset_repository.clone(),
+                clock.clone(),
+            ));
             let shot_bulk_service = Arc::new(ShotBulkService::new(
                 shot_bulk_repository.clone(),
                 definition_repository.clone(),
@@ -964,6 +977,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 prompt_library_service,
                 model_service,
                 tool_service,
+                provenance_lineage_service,
                 shot_service,
                 shot_batch_service,
                 shot_bulk_service,
@@ -1282,6 +1296,10 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::tool::tool_version_create,
             commands::tool::tool_capability_list,
             commands::tool::tool_capability_create,
+            commands::provenance_lineage::generation_tool_usage_create,
+            commands::provenance_lineage::generation_tool_usage_list,
+            commands::provenance_lineage::generation_asset_version_link_create,
+            commands::provenance_lineage::generation_asset_version_link_list,
             commands::reference_anchor::reference_anchors_list,
             commands::reference_anchor::reference_anchor_get,
             commands::reference_anchor::reference_anchor_create,

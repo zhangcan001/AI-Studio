@@ -15,6 +15,7 @@ pub mod production_queue;
 pub mod production_run;
 pub mod production_structure;
 pub mod project_id;
+pub mod provenance_lineage;
 pub mod recipe;
 pub mod reference_anchor;
 pub mod shot;
@@ -63,6 +64,10 @@ pub use production_structure::{
     ProductionSeriesId, ProductionStructureDomainError, ShotSceneAssignment,
 };
 pub use project_id::{validate_project_id, ProjectIdValidationError};
+pub use provenance_lineage::{
+    GenerationAssetVersion, GenerationAssetVersionId, GenerationAssetVersionRelationType,
+    GenerationToolUsage, GenerationToolUsageId, ProvenanceLineageDomainError,
+};
 pub use recipe::{
     Binding, BindingTarget, CompileRequest, InputDefinition, InputValue, OutputDefinition,
     OutputType, Recipe, RecipeError, ResolvedInputValue, SeedDefault, SeedValue, WorkflowRef,

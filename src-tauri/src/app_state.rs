@@ -35,6 +35,7 @@ use crate::application::project_service::ProjectService;
 use crate::application::project_template_service::ProjectTemplateService;
 use crate::application::project_workflow_binding_service::ProjectWorkflowBindingService;
 use crate::application::prompt_library_service::PromptLibraryService;
+use crate::application::provenance_lineage_service::ProvenanceLineageService;
 use crate::application::recipe_history_query_service::RecipeHistoryQueryService;
 use crate::application::reference_anchor_service::ReferenceAnchorService;
 use crate::application::reference_set_service::ReferenceSetService;
@@ -107,6 +108,7 @@ pub struct AppState {
     pub prompt_library_service: Arc<PromptLibraryService>,
     pub model_service: Arc<ModelService>,
     pub tool_service: Arc<ToolService>,
+    pub provenance_lineage_service: Arc<ProvenanceLineageService>,
     pub shot_service: Arc<ShotService>,
     pub shot_batch_service: Arc<ShotBatchService>,
     pub shot_bulk_service: Arc<ShotBulkService>,
@@ -174,6 +176,7 @@ impl AppState {
         prompt_library_service: Arc<PromptLibraryService>,
         model_service: Arc<ModelService>,
         tool_service: Arc<ToolService>,
+        provenance_lineage_service: Arc<ProvenanceLineageService>,
         shot_service: Arc<ShotService>,
         shot_batch_service: Arc<ShotBatchService>,
         shot_bulk_service: Arc<ShotBulkService>,
@@ -239,6 +242,7 @@ impl AppState {
             prompt_library_service,
             model_service,
             tool_service,
+            provenance_lineage_service,
             shot_service,
             shot_batch_service,
             shot_bulk_service,

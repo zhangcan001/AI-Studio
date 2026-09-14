@@ -1,5 +1,7 @@
 use super::RepositoryError;
-use crate::domain::{Asset, AssetId, AssetRelation, AssetRelationId, AssetVersion, TaskId};
+use crate::domain::{
+    Asset, AssetId, AssetRelation, AssetRelationId, AssetVersion, AssetVersionId, TaskId,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -56,6 +58,16 @@ pub trait AssetRepository: Send + Sync {
     async fn insert_asset_version(&self, _version: &AssetVersion) -> Result<(), RepositoryError> {
         Err(RepositoryError::database(
             "asset version persistence is not supported by this repository",
+        ))
+    }
+
+    async fn find_asset_version_by_id(
+        &self,
+        _project_id: &str,
+        _version_id: &AssetVersionId,
+    ) -> Result<Option<AssetVersion>, RepositoryError> {
+        Err(RepositoryError::database(
+            "asset version lookup is not supported by this repository",
         ))
     }
 
