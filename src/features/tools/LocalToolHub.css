@@ -1,0 +1,333 @@
+.local-tool-hub-workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.local-tool-hub-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.local-tool-hub-scope,
+.local-tool-hub-readonly-label {
+  padding: 6px 9px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-sm, 6px);
+  color: var(--ux-muted);
+  background: var(--ux-surface-1);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.local-tool-hub-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(360px, 0.98fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.local-tool-hub-list-panel,
+.local-tool-hub-detail-panel,
+.local-tool-hub-subpanel {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-md, 8px);
+  background: var(--ux-surface-1);
+}
+
+.local-tool-hub-detail-panel {
+  align-self: start;
+}
+
+.local-tool-hub-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.local-tool-hub-panel-heading > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.local-tool-hub-panel-heading h3,
+.local-tool-hub-panel-heading h4 {
+  margin: 0;
+}
+
+.local-tool-hub-table-wrap {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
+.local-tool-hub-table {
+  width: 100%;
+  min-width: 610px;
+  border-collapse: collapse;
+  color: var(--ux-text);
+  font-size: 0.78rem;
+}
+
+.local-tool-hub-table th,
+.local-tool-hub-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--ux-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.local-tool-hub-table thead th {
+  color: var(--ux-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.local-tool-hub-table tbody tr.active {
+  background: var(--ux-accent-soft);
+}
+
+.local-tool-hub-table tbody th {
+  min-width: 120px;
+  font-weight: 700;
+}
+
+.local-tool-hub-row-button {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  color: var(--ux-text);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.local-tool-hub-row-button:hover:not(:disabled) {
+  color: var(--ux-accent-hover);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.local-tool-hub-location-cell {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--ux-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-tool-health-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.local-tool-health-badge::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.local-tool-health-badge--available {
+  color: #86efac;
+  background: rgb(34 197 94 / 13%);
+}
+
+.local-tool-health-badge--missing {
+  color: #fca5a5;
+  background: rgb(239 68 68 / 13%);
+}
+
+.local-tool-health-badge--unknown {
+  color: #cbd5e1;
+  background: rgb(148 163 184 / 13%);
+}
+
+.local-tool-hub-detail-content {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.local-tool-hub-description,
+.local-tool-hub-note {
+  margin: 0;
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.local-tool-hub-missing-note {
+  margin: 0;
+  padding: 9px 10px;
+  border-left: 2px solid #f87171;
+  color: #fecaca;
+  background: rgb(239 68 68 / 9%);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.local-tool-hub-metadata {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.local-tool-hub-metadata > div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-sm, 6px);
+  background: var(--ux-surface-2);
+}
+
+.local-tool-hub-metadata dt {
+  color: var(--ux-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.local-tool-hub-metadata dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--ux-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.local-tool-hub-subpanel {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  background: var(--ux-surface-2);
+}
+
+.local-tool-hub-instance-list,
+.local-tool-hub-capability-list,
+.local-tool-hub-version-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-tool-hub-instance {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--ux-border);
+  background: var(--ux-surface-1);
+}
+
+.local-tool-hub-instance-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.local-tool-hub-instance-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-tool-hub-instance small,
+.local-tool-hub-version-list small {
+  color: var(--ux-muted);
+  font-size: 0.68rem;
+}
+
+.local-tool-hub-health-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ux-muted);
+  font-size: 0.72rem;
+}
+
+.local-tool-hub-capability-list li,
+.local-tool-hub-version-list li {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--ux-border);
+  background: var(--ux-surface-1);
+}
+
+.local-tool-hub-capability-list strong,
+.local-tool-hub-version-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-tool-hub-capability-list pre,
+.local-tool-hub-version-list pre,
+.local-tool-hub-json {
+  max-height: 110px;
+  margin: 0;
+  padding: 7px;
+  overflow: auto;
+  border: 1px solid var(--ux-border);
+  border-radius: var(--ux-radius-sm, 6px);
+  color: #c8d8ff;
+  background: var(--ux-surface-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.local-tool-hub-version-list > li > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.local-tool-hub-detail-error {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+@media (max-width: 1080px) {
+  .local-tool-hub-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .local-tool-hub-actions {
+    justify-content: flex-start;
+  }
+
+  .local-tool-hub-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

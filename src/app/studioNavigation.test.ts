@@ -11,6 +11,7 @@ describe("studio section routes", () => {
     expect(studioRouteForSection("creation")).toEqual({ workspace: "shots", section: "creation" });
     expect(studioRouteForSection("assets")).toEqual({ workspace: "assets", section: "assets" });
     expect(studioRouteForSection("prompts")).toEqual({ workspace: "prompts", section: "prompts" });
+    expect(studioRouteForSection("tools")).toEqual({ workspace: "tools", section: "tools" });
     expect(studioRouteForSection("production")).toEqual({ workspace: "shots", section: "production" });
     expect(studioRouteForSection("review")).toEqual({ workspace: "shots", section: "review" });
     expect(studioRouteForSection("workflows")).toEqual({ workspace: "workflows", section: "workflows" });
@@ -23,6 +24,7 @@ describe("studio section routes", () => {
     expect(defaultStudioSectionForWorkspace("video")).toBe("production");
     expect(defaultStudioSectionForWorkspace("tasks")).toBe("review");
     expect(defaultStudioSectionForWorkspace("workflows")).toBe("workflows");
+    expect(defaultStudioSectionForWorkspace("tools")).toBe("tools");
     expect(shotWorkspaceModeForSection("creation")).toBe("creation");
     expect(shotWorkspaceModeForSection("production")).toBe("production");
     expect(shotWorkspaceModeForSection("review")).toBe("review");

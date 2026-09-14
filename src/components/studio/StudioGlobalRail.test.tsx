@@ -9,13 +9,14 @@ describe("StudioGlobalRail", () => {
       "creation",
       "assets",
       "prompts",
+      "tools",
       "production",
       "review",
       "workflows",
       "settings",
     ]);
     expect(defaultStudioRailItems).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "analysis" })]));
-    expect(defaultStudioRailItems[6]).toMatchObject({
+    expect(defaultStudioRailItems[7]).toMatchObject({
       id: "workflows",
       label: "工作流",
       destination: "workflows",
@@ -28,7 +29,7 @@ describe("StudioGlobalRail", () => {
     expect(html).toContain('aria-label="提示词：提示词工作台"');
   });
 
-  it.each(["creation", "production", "review", "workflows"] as const)("marks only %s as active", (section) => {
+  it.each(["creation", "tools", "production", "review", "workflows"] as const)("marks only %s as active", (section) => {
     const html = renderToStaticMarkup(<StudioGlobalRail activeItem={section} onNavigate={vi.fn()} />);
     const item = defaultStudioRailItems.find(({ id }) => id === section);
 

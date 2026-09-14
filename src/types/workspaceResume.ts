@@ -7,6 +7,7 @@ export const WORKSPACES = [
   "shots",
   "assets",
   "prompts",
+  "tools",
   "tasks",
   "projects",
   "workflows",

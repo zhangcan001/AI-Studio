@@ -193,6 +193,12 @@ import type {
   PromptVersionView,
 } from "../types/prompt";
 import type { ModelVersionView, ModelView } from "../types/model";
+import type {
+  ToolCapabilityView,
+  ToolInstanceView,
+  ToolVersionView,
+  ToolView,
+} from "../types/tool";
 import type { PageCursor } from "../types/asset";
 import type {
   ProductionBatchCreateItem,
@@ -401,6 +407,22 @@ export function getCurrentModelVersion(modelId: string): Promise<ModelVersionVie
 
 export function getModelVersion(versionId: string): Promise<ModelVersionView> {
   return invoke<ModelVersionView>("model_version_get", { versionId });
+}
+
+export function listTools(): Promise<ToolView[]> {
+  return invoke<ToolView[]>("tool_list");
+}
+
+export function listToolInstances(toolId: string): Promise<ToolInstanceView[]> {
+  return invoke<ToolInstanceView[]>("tool_instance_list", { toolId });
+}
+
+export function listToolVersions(toolId: string): Promise<ToolVersionView[]> {
+  return invoke<ToolVersionView[]>("tool_version_list", { toolId });
+}
+
+export function listToolCapabilities(toolId: string): Promise<ToolCapabilityView[]> {
+  return invoke<ToolCapabilityView[]>("tool_capability_list", { toolId });
 }
 
 export function getComfyStatus(): Promise<ComfyStatus> {

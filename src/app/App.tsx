@@ -70,6 +70,7 @@ import "../styles/uiPolish.css";
 const GenerationStudio = lazy(() => import("../features/studio/GenerationStudio").then(({ GenerationStudio }) => ({ default: GenerationStudio })));
 const AssetWorkspace = lazy(() => import("../features/assets/AssetWorkspace").then(({ AssetWorkspace }) => ({ default: AssetWorkspace })));
 const PromptStudio = lazy(() => import("../features/prompts/PromptStudio").then(({ PromptStudio }) => ({ default: PromptStudio })));
+const LocalToolHub = lazy(() => import("../features/tools/LocalToolHub").then(({ LocalToolHub }) => ({ default: LocalToolHub })));
 const AssetVideoBatchWorkspace = lazy(() => import("../features/assets/AssetVideoBatchWorkspace").then(({ AssetVideoBatchWorkspace }) => ({ default: AssetVideoBatchWorkspace })));
 const TaskHistory = lazy(() => import("../features/tasks/TaskHistory").then(({ TaskHistory }) => ({ default: TaskHistory })));
 const ProjectWorkspace = lazy(() => import("../features/projects/ProjectWorkspace").then(({ ProjectWorkspace }) => ({ default: ProjectWorkspace })));
@@ -85,6 +86,7 @@ const workspaceLabels: Record<Workspace, string> = {
   shots: "镜头生产",
   assets: "资产库",
   prompts: "提示词工作台",
+  tools: "本地工具中心",
   tasks: "任务",
   projects: "项目",
   workflows: "工作流",
@@ -936,7 +938,7 @@ function App() {
       {projectContextLoading && activeProject && (
         <p className="project-loading" role="status">正在加载项目...</p>
       )}
-      {workspace !== "settings" && workspace !== "prompts" && showComfyWarning && (
+      {workspace !== "settings" && workspace !== "prompts" && workspace !== "tools" && showComfyWarning && (
         <section className="comfy-status-warning" role="status" aria-live="polite">
           <div>
             <span className="section-label">运行环境提醒</span>
@@ -1015,6 +1017,7 @@ function App() {
             onOpenTaskHistory={() => navigateToWorkspace("tasks")}
           />
         )}
+        {workspace === "tools" && <LocalToolHub />}
         {activeProject && workspace === "shots" && (
           <WorkspaceErrorBoundary
             resetKey={activeProject.id}

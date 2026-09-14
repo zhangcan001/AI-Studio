@@ -1,8 +1,8 @@
 import type { Workspace } from "../../types/workspaceResume";
 import "./StudioGlobalRail.css";
 
-export type StudioRailItemId = "project" | "creation" | "assets" | "prompts" | "production" | "review" | "workflows" | "analysis" | "settings";
-export type StudioRailIconName = "analysis" | "assets" | "creation" | "prompts" | "production" | "project" | "review" | "workflows" | "settings";
+export type StudioRailItemId = "project" | "creation" | "assets" | "prompts" | "tools" | "production" | "review" | "workflows" | "analysis" | "settings";
+export type StudioRailIconName = "analysis" | "assets" | "creation" | "prompts" | "production" | "project" | "review" | "tools" | "workflows" | "settings";
 
 export interface StudioRailItem {
   id: StudioRailItemId;
@@ -17,6 +17,7 @@ export const defaultStudioRailItems: readonly StudioRailItem[] = [
   { id: "creation", label: "创作", destination: "shots", icon: "creation", hint: "镜头创作工作区" },
   { id: "assets", label: "资产", destination: "assets", icon: "assets", hint: "资产库" },
   { id: "prompts", label: "提示词", destination: "prompts", icon: "prompts", hint: "提示词工作台" },
+  { id: "tools", label: "工具", destination: "tools", icon: "tools", hint: "本地工具中心" },
   { id: "production", label: "生产", destination: "shots", icon: "production", hint: "生产队列与批量运行" },
   { id: "review", label: "审核", destination: "shots", icon: "review", hint: "镜头审核与任务" },
   { id: "workflows", label: "工作流", destination: "workflows", icon: "workflows", hint: "添加和管理 ComfyUI 工作流" },
@@ -70,6 +71,7 @@ function StudioGlobalRailIcon({ name }: { name: StudioRailIconName }) {
     assets: "M3.5 7h6l2 2h9v10h-17z M3.5 7V5.5A1.5 1.5 0 0 1 5 4h5l2 2h7.5A1.5 1.5 0 0 1 21 7.5V9",
     creation: "M12 3v4 M12 17v4 M3 12h4 M17 12h4 M5.6 5.6l2.8 2.8 M15.6 15.6l2.8 2.8 M18.4 5.6l-2.8 2.8 M8.4 15.6l-2.8 2.8 M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z",
     prompts: "M5 5h14v10H9l-4 4z M8 9h8 M8 12h5",
+    tools: "M14.7 6.3a4 4 0 0 0-5.6 5.6L4 17v3h3l5.1-5.1a4 4 0 0 0 5.6-5.6l2-2-2-2-2 2z",
     production: "M5 5h14v14H5z M9 8.5v7l6-3.5z",
     project: "M4 5h16v14H4z M8 9h3 M13 9h3 M8 13h3 M13 13h3 M8 17h8",
     review: "M5 4h14v16H5z M8.5 9.5 11 12l4.5-5 M8 16h8",
