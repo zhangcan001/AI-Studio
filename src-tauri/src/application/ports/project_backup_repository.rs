@@ -33,6 +33,12 @@ pub struct ProjectBackupSnapshot {
     pub(crate) assets: Vec<ProjectBackupAssetSource>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ProjectBackupRestoreResult {
+    pub unresolved_model_version_ids: Vec<String>,
+    pub unresolved_tool_instance_ids: Vec<String>,
+}
+
 pub struct ProjectBackupRestorePlan {
     pub(crate) project: ProjectRecord,
     pub(crate) document: BackupDocument,
@@ -63,6 +69,10 @@ pub struct ProjectBackupRestorePlan {
     pub(crate) consistency_ids: ConsistencyRestoreIds,
     pub(crate) shot_ids: HashMap<String, String>,
     pub(crate) shot_generation_link_ids: HashMap<String, String>,
+    pub(crate) asset_version_ids: HashMap<String, String>,
+    pub(crate) asset_relation_ids: HashMap<String, String>,
+    pub(crate) generation_tool_usage_ids: HashMap<String, String>,
+    pub(crate) generation_asset_version_ids: HashMap<String, String>,
     pub(crate) restored_assets: Vec<RestoredAsset>,
     pub(crate) restored_snapshots: Vec<BackupSnapshot>,
 }
@@ -79,7 +89,10 @@ pub trait ProjectBackupRepository: Send + Sync {
         document: &BackupDocument,
     ) -> Result<Vec<String>, RepositoryError>;
 
-    async fn restore_atomic(&self, plan: ProjectBackupRestorePlan) -> Result<(), RepositoryError>;
+    async fn restore_atomic(
+        &self,
+        plan: ProjectBackupRestorePlan,
+    ) -> Result<ProjectBackupRestoreResult, RepositoryError>;
 }
 
 pub trait ProjectBackupRepositorySource {
