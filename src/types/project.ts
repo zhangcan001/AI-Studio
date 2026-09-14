@@ -23,8 +23,17 @@ export interface ProjectBackupPreview {
   presets: number;
   productionQueues: number;
   benchmarks?: number;
+  productionRuns?: number;
   promptEntries: number;
   shots?: number;
+  assetVersions?: number;
+  assetRelations?: number;
+  models?: number;
+  modelVersions?: number;
+  tools?: number;
+  toolInstances?: number;
+  generationToolUsages?: number;
+  generationAssetVersions?: number;
   missingWorkflows: string[];
   activeTasksExcluded: number;
   warning: string;
