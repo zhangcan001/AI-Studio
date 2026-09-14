@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, getAssetVideoPrompt, listAssetRelations, listAssetVersions, readAssetImage, readAssetThumbnail, removeAssetTag, setAssetFavorite, setAssetVideoPrompt } from "../../services/tauriClient";
+import { assignAssetTag, createAssetTag, getAsset, getAssetMediaUrl, getAssetVideoPrompt, listAssetRelations, listAssetVersions, listGenerationAssetVersionLinks, listGenerationToolUsages, readAssetImage, readAssetThumbnail, removeAssetTag, setAssetFavorite, setAssetVideoPrompt } from "../../services/tauriClient";
 import type { AssetRelationView, AssetVersionView, AssetView } from "../../types/asset";
 import type { AssetTag } from "../../types/organization";
+import type { GenerationAssetVersionView, GenerationToolUsageView } from "../../types/provenance";
 import { assetDisplayName, assetTypeLabel, formatDateTime, formatDurationMs, formatFileSize } from "../../i18n/statusLabels";
 import { AssetUsagePanel } from "./AssetUsagePanel";
 
@@ -31,6 +32,10 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
   const [relations, setRelations] = useState<AssetRelationView[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string>();
+  const [toolUsages, setToolUsages] = useState<GenerationToolUsageView[]>([]);
+  const [assetVersionLinks, setAssetVersionLinks] = useState<GenerationAssetVersionView[]>([]);
+  const [provenanceLoading, setProvenanceLoading] = useState(true);
+  const [provenanceError, setProvenanceError] = useState<string>();
 
   useEffect(() => {
     let active = true;
@@ -102,6 +107,34 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
 
   useEffect(() => {
     let active = true;
+    setToolUsages([]);
+    setAssetVersionLinks([]);
+    setProvenanceError(undefined);
+    if (!asset.sourceTaskId) {
+      setProvenanceLoading(false);
+      return () => { active = false; };
+    }
+    setProvenanceLoading(true);
+    void Promise.all([
+      listGenerationToolUsages(projectId, asset.sourceTaskId),
+      listGenerationAssetVersionLinks(projectId, asset.sourceTaskId),
+    ])
+      .then(([nextToolUsages, nextAssetVersionLinks]) => {
+        if (!active) return;
+        setToolUsages(nextToolUsages);
+        setAssetVersionLinks(nextAssetVersionLinks);
+      })
+      .catch((value: unknown) => {
+        if (active) setProvenanceError(toAssetDetailError(value));
+      })
+      .finally(() => {
+        if (active) setProvenanceLoading(false);
+      });
+    return () => { active = false; };
+  }, [asset.sourceTaskId, projectId]);
+
+  useEffect(() => {
+    let active = true;
     setVideoPrompt("");
     setVideoPromptNotice(undefined);
     if (!isImage) return () => { active = false; };
@@ -123,6 +156,9 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
   const currentVersion = versions.reduce<AssetVersionView | undefined>((current, version) => (
     !current || version.versionNumber > current.versionNumber ? version : current
   ), undefined);
+  const visibleAssetVersionLinks = versions.length
+    ? assetVersionLinks.filter((link) => versions.some((version) => version.id === link.assetVersionId))
+    : [];
 
   async function refreshOrganization() {
     const refreshed = await getAsset(projectId, asset.id);
@@ -257,13 +293,53 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
           )}
         </section>
         <section className="asset-detail-section" aria-label="素材来源与溯源">
-          <div className="asset-detail-section-heading"><div><strong>来源与溯源</strong><small>只展示现有 Asset/Task 传输提供的来源信息。</small></div></div>
+          <div className="asset-detail-section-heading"><div><strong>来源与溯源</strong><small>只展示现有 Asset、Task 与显式跨模块关系，不推断历史关联。</small></div></div>
           <dl className="asset-detail-definition-list">
             <div><dt>Prompt</dt><dd>{asset.sourceTaskId ? "随生成任务记录" : "未关联 Prompt"}</dd></div>
             <div><dt>Model</dt><dd>未记录</dd></div>
             <div><dt>Generation</dt><dd>{asset.sourceTaskId ? `任务 ${asset.sourceTaskId}` : "本地导入或未关联生成记录"}</dd></div>
             <div><dt>Date</dt><dd>{formatDateTime(asset.createdAt)}</dd></div>
           </dl>
+          <section className="asset-detail-section" aria-label="Generation History">
+            <div className="asset-detail-section-heading"><div><strong>Generation History</strong><small>跨模块溯源只接受后端已保存的显式关系。</small></div></div>
+            {provenanceLoading && <p className="disabled-note" role="status">正在加载生成溯源…</p>}
+            {provenanceError && <p className="error-message" role="alert">生成溯源加载失败：{provenanceError}</p>}
+            {!provenanceLoading && !provenanceError && !asset.sourceTaskId && <p className="empty-state">暂无生成历史；该资产没有来源任务。</p>}
+            {!provenanceLoading && !provenanceError && asset.sourceTaskId && (
+              <>
+                <dl className="asset-detail-definition-list">
+                  <div><dt>Prompt Version</dt><dd>未记录（历史数据未提供显式提示词版本关联）</dd></div>
+                  <div><dt>Model Version</dt><dd>未记录（历史数据未提供显式模型版本关联）</dd></div>
+                  <div><dt>Tool Version</dt><dd>{toolVersionLabel(toolUsages)}</dd></div>
+                  <div><dt>Source Task</dt><dd>{asset.sourceTaskId}</dd></div>
+                </dl>
+                <div className="asset-detail-section-heading"><div><strong>Tool Usage</strong><small>工具使用记录来自 ProvenanceLineageService。</small></div><span className="status-pill">{toolUsages.length} 条</span></div>
+                {toolUsages.length > 0 ? (
+                  <ul className="asset-relation-list">
+                    {toolUsages.map((usage) => (
+                      <li key={usage.id}>
+                        <strong>{usage.toolVersionId ?? "工具版本未记录"}</strong>
+                        <span>实例 {usage.toolInstanceId}</span>
+                        <small>{formatDateTime(usage.createdAt)}</small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="empty-state">暂无显式工具使用记录。</p>}
+                <div className="asset-detail-section-heading"><div><strong>Asset Versions</strong><small>只展示当前资产版本已建立的 Generation → AssetVersion 关系。</small></div><span className="status-pill">{visibleAssetVersionLinks.length} 条</span></div>
+                {visibleAssetVersionLinks.length > 0 ? (
+                  <ul className="asset-relation-list">
+                    {visibleAssetVersionLinks.map((link) => (
+                      <li key={link.id}>
+                        <strong>{link.assetVersionId}</strong>
+                        <span>{link.relationType} · 输出 {link.outputId} · 第 {link.ordinal + 1} 项</span>
+                        <small>{formatDateTime(link.createdAt)}</small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="empty-state">暂无显式 AssetVersion 溯源；旧任务可能没有历史关联。</p>}
+              </>
+            )}
+          </section>
         </section>
         {isImage && (
           <section className="asset-video-prompt-panel" aria-label="视频提示词">
@@ -336,4 +412,9 @@ function toAssetDetailError(value: unknown): string {
   if (value instanceof Error && value.message) return value.message;
   if (typeof value === "string" && value) return value;
   return "请稍后重试。";
+}
+
+function toolVersionLabel(usages: readonly GenerationToolUsageView[]): string {
+  const versions = [...new Set(usages.map((usage) => usage.toolVersionId).filter((value): value is string => Boolean(value)))];
+  return versions.length ? versions.join("、") : "未记录";
 }

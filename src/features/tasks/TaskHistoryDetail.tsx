@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createGeneration, getReusableDraft } from "../../services/tauriClient";
+import { createGeneration, getReusableDraft, listGenerationAssetVersionLinks, listGenerationToolUsages } from "../../services/tauriClient";
 import { useTaskStore } from "../../stores/taskStore";
 import type { DraftValue } from "../../types/generation";
 import type {
@@ -9,6 +9,7 @@ import type {
   TaskNodeError,
   TaskTelemetry,
 } from "../../types/history";
+import type { GenerationAssetVersionView, GenerationToolUsageView } from "../../types/provenance";
 import { AssetCard } from "../assets/AssetCard";
 import { taskRetryDecision, taskRetrySubmissionKey } from "./retryPolicy";
 import { productionInteractionPolicy } from "../studio/productionQueuePolicy";
@@ -43,6 +44,10 @@ export function TaskHistoryDetail({
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string>();
   const [retryCreatedTaskId, setRetryCreatedTaskId] = useState<string>();
+  const [toolUsages, setToolUsages] = useState<GenerationToolUsageView[]>([]);
+  const [assetVersionLinks, setAssetVersionLinks] = useState<GenerationAssetVersionView[]>([]);
+  const [provenanceLoading, setProvenanceLoading] = useState(true);
+  const [provenanceError, setProvenanceError] = useState<string>();
   const retryDecision = taskRetryDecision(detail, comfyConnected);
   const productionPolicy = productionInteractionPolicy(productionBusy);
 
@@ -65,6 +70,32 @@ export function TaskHistoryDetail({
       active = false;
     };
   }, [detail.id, detail.reusableDraft.available, projectId]);
+
+  useEffect(() => {
+    let active = true;
+    setToolUsages([]);
+    setAssetVersionLinks([]);
+    setProvenanceLoading(true);
+    setProvenanceError(undefined);
+    void Promise.all([
+      listGenerationToolUsages(projectId, detail.id),
+      listGenerationAssetVersionLinks(projectId, detail.id),
+    ])
+      .then(([nextToolUsages, nextAssetVersionLinks]) => {
+        if (!active) return;
+        setToolUsages(nextToolUsages);
+        setAssetVersionLinks(nextAssetVersionLinks);
+      })
+      .catch((error: unknown) => {
+        if (active) setProvenanceError(toUserMessage(error));
+      })
+      .finally(() => {
+        if (active) setProvenanceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [detail.id, projectId]);
 
   async function retryOnce() {
     if (!retryDecision.allowed || !draft || retryCreatedTaskId || !productionPolicy.canRetryTask) return;
@@ -110,6 +141,15 @@ export function TaskHistoryDetail({
       {(detail.runtimeProvenance || detail.telemetry) && (
         <RuntimeDiagnostics provenance={detail.runtimeProvenance} telemetry={detail.telemetry} />
       )}
+      <GenerationProvenanceSection
+        taskId={detail.id}
+        createdAt={detail.createdAt}
+        finishedAt={detail.finishedAt}
+        toolUsages={toolUsages}
+        assetVersionLinks={assetVersionLinks}
+        loading={provenanceLoading}
+        error={provenanceError}
+      />
       {detail.errorCode === "WORKFLOW_VALIDATION_FAILED" && (
         <ComfyNodeErrorSection nodeErrors={detail.nodeErrors ?? []} rawError={detail.rawError} />
       )}
@@ -189,6 +229,99 @@ export function TaskHistoryDetail({
       </section>
     </div>
   );
+}
+
+function GenerationProvenanceSection({
+  taskId,
+  createdAt,
+  finishedAt,
+  toolUsages,
+  assetVersionLinks,
+  loading,
+  error,
+}: {
+  taskId: string;
+  createdAt: string;
+  finishedAt?: string;
+  toolUsages: readonly GenerationToolUsageView[];
+  assetVersionLinks: readonly GenerationAssetVersionView[];
+  loading: boolean;
+  error?: string;
+}) {
+  const timeline = buildProvenanceTimeline(taskId, createdAt, finishedAt, toolUsages, assetVersionLinks);
+  return (
+    <section className="detail-section generation-provenance" aria-label="Generation Provenance">
+      <div className="section-heading">
+        <div>
+          <span className="section-label">跨模块溯源</span>
+          <h3>Generation Provenance</h3>
+        </div>
+        <span className="status-pill">只读</span>
+      </div>
+      {loading && <p className="disabled-note" role="status">正在加载生成溯源…</p>}
+      {error && <p className="error-message" role="alert">生成溯源加载失败：{error}</p>}
+      {!loading && !error && (
+        <>
+          {!toolUsages.length && !assetVersionLinks.length && <p className="disabled-note">当前任务暂无显式跨模块关系；旧任务可能没有保存历史关联。</p>}
+          <div className="provenance-detail-grid">
+            <section aria-label="Tool Usage">
+              <div className="asset-detail-section-heading"><strong>Tool Usage</strong><span className="status-pill">{toolUsages.length} 条</span></div>
+              {toolUsages.length > 0 ? (
+                <ul className="provenance-relation-list">
+                  {toolUsages.map((usage) => <li key={usage.id}><strong>{usage.toolVersionId ?? "工具版本未记录"}</strong><span>实例 {usage.toolInstanceId}</span><small>{formatDateTime(usage.createdAt)}</small></li>)}
+                </ul>
+              ) : <p className="empty-state">暂无显式工具使用记录。</p>}
+            </section>
+            <section aria-label="Asset Versions">
+              <div className="asset-detail-section-heading"><strong>Asset Versions</strong><span className="status-pill">{assetVersionLinks.length} 条</span></div>
+              {assetVersionLinks.length > 0 ? (
+                <ul className="provenance-relation-list">
+                  {assetVersionLinks.map((link) => <li key={link.id}><strong>{link.assetVersionId}</strong><span>{link.relationType} · 输出 {link.outputId} · 第 {link.ordinal + 1} 项</span><small>{formatDateTime(link.createdAt)}</small></li>)}
+                </ul>
+              ) : <p className="empty-state">暂无显式 AssetVersion 关系。</p>}
+            </section>
+          </div>
+          <section className="provenance-timeline-section" aria-label="Provenance Timeline">
+            <div className="asset-detail-section-heading"><strong>Provenance Timeline</strong><small>按已保存的关系时间排序。</small></div>
+            <ol className="provenance-timeline">
+              {timeline.map((event) => <li key={event.id}><strong>{event.label}</strong><span>{event.value}</span><small>{formatDateTime(event.createdAt)}</small></li>)}
+            </ol>
+          </section>
+        </>
+      )}
+    </section>
+  );
+}
+
+interface ProvenanceTimelineEvent {
+  id: string;
+  label: string;
+  value: string;
+  createdAt: string;
+}
+
+function buildProvenanceTimeline(
+  taskId: string,
+  createdAt: string,
+  finishedAt: string | undefined,
+  toolUsages: readonly GenerationToolUsageView[],
+  assetVersionLinks: readonly GenerationAssetVersionView[],
+): ProvenanceTimelineEvent[] {
+  const events: ProvenanceTimelineEvent[] = [{ id: `task-${taskId}`, label: "Source Task", value: taskId, createdAt }];
+  toolUsages.forEach((usage) => events.push({
+    id: `tool-${usage.id}`,
+    label: "Tool Usage",
+    value: `${usage.toolInstanceId}${usage.toolVersionId ? ` · ${usage.toolVersionId}` : ""}`,
+    createdAt: usage.createdAt,
+  }));
+  assetVersionLinks.forEach((link) => events.push({
+    id: `asset-${link.id}`,
+    label: "Asset Version",
+    value: `${link.assetVersionId} · ${link.relationType}`,
+    createdAt: link.createdAt,
+  }));
+  if (finishedAt) events.push({ id: `finished-${taskId}`, label: "Task Finished", value: taskId, createdAt: finishedAt });
+  return events.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
 }
 
 function RuntimeDiagnostics({

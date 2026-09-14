@@ -199,6 +199,10 @@ import type {
   ToolVersionView,
   ToolView,
 } from "../types/tool";
+import type {
+  GenerationAssetVersionView,
+  GenerationToolUsageView,
+} from "../types/provenance";
 import type { PageCursor } from "../types/asset";
 import type {
   ProductionBatchCreateItem,
@@ -1734,6 +1738,14 @@ export function listAssetVersions(projectId: string, assetId: string): Promise<A
 
 export function listAssetRelations(projectId: string, assetId: string): Promise<AssetRelationView[]> {
   return invoke<AssetRelationView[]>("asset_relations_list", { projectId, assetId });
+}
+
+export function listGenerationToolUsages(projectId: string, generationId: string): Promise<GenerationToolUsageView[]> {
+  return invoke<GenerationToolUsageView[]>("generation_tool_usage_list", { projectId, generationId });
+}
+
+export function listGenerationAssetVersionLinks(projectId: string, generationId: string): Promise<GenerationAssetVersionView[]> {
+  return invoke<GenerationAssetVersionView[]>("generation_asset_version_link_list", { projectId, generationId });
 }
 
 export function listAssetTags(projectId: string): Promise<AssetTag[]> {

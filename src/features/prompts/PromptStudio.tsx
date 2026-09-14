@@ -4,6 +4,8 @@ import {
   listModelVersions,
   listModels,
   listPromptLibrary,
+  listGenerationAssetVersionLinks,
+  listGenerationToolUsages,
   taskHistoryPage,
 } from "../../services/tauriClient";
 import { formatDateTime, taskStatusLabel } from "../../i18n/statusLabels";
@@ -12,10 +14,17 @@ import type { ModelVersionView, ModelView } from "../../types/model";
 import type { PromptEntryView, PromptKind } from "../../types/prompt";
 import type { PageCursor } from "../../types/asset";
 import type { TaskHistoryItem } from "../../types/history";
+import type { GenerationAssetVersionView, GenerationToolUsageView } from "../../types/provenance";
 
 interface Props {
   projectId: string;
   onOpenTaskHistory?: () => void;
+}
+
+interface PromptGenerationProvenance {
+  task: TaskHistoryItem;
+  toolUsages: GenerationToolUsageView[];
+  assetVersionLinks: GenerationAssetVersionView[];
 }
 
 const promptKindLabels: Record<PromptKind, string> = {
@@ -63,6 +72,9 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [generationProvenanceById, setGenerationProvenanceById] = useState<Record<string, PromptGenerationProvenance>>({});
+  const [provenanceLoading, setProvenanceLoading] = useState(false);
+  const [provenanceError, setProvenanceError] = useState<string>();
   const [error, setError] = useState<string>();
   const [detailError, setDetailError] = useState<string>();
   const [modelError, setModelError] = useState<string>();
@@ -172,6 +184,41 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
 
   useEffect(() => {
     let active = true;
+    const visibleHistory = history.slice(0, 6);
+    setGenerationProvenanceById({});
+    setProvenanceError(undefined);
+    if (!visibleHistory.length) {
+      setProvenanceLoading(false);
+      return () => { active = false; };
+    }
+    setProvenanceLoading(true);
+    void Promise.all(
+      visibleHistory.map(async (task): Promise<PromptGenerationProvenance> => {
+        const [toolUsages, assetVersionLinks] = await Promise.all([
+          listGenerationToolUsages(projectId, task.id),
+          listGenerationAssetVersionLinks(projectId, task.id),
+        ]);
+        return { task, toolUsages, assetVersionLinks };
+      }),
+    )
+      .then((records) => {
+        if (!active) return;
+        setGenerationProvenanceById(Object.fromEntries(records.map((record) => [record.task.id, record])));
+      })
+      .catch((value: unknown) => {
+        if (active) setProvenanceError(toUserMessage(value));
+      })
+      .finally(() => {
+        if (active) setProvenanceLoading(false);
+      });
+    return () => { active = false; };
+  }, [history, projectId]);
+
+  useEffect(() => {
+    let active = true;
+    setHistory([]);
+    setGenerationProvenanceById({});
+    setProvenanceError(undefined);
     setHistoryLoading(true);
     setHistoryError(undefined);
     void taskHistoryPage({ projectId, filter: "ALL", timeFilter: "ALL", limit: 20 })
@@ -204,6 +251,18 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   const linkedModel = linkedModelVersion ? modelById.get(linkedModelVersion.modelId) : undefined;
   const inspectedModel = inspectedModelId ? modelById.get(inspectedModelId) : undefined;
   const inspectedVersions = inspectedModelId ? versionsByModel[inspectedModelId] ?? [] : [];
+  const visibleProvenanceRecords = useMemo(
+    () => history.slice(0, 6).map((task) => generationProvenanceById[task.id]).filter((record): record is PromptGenerationProvenance => Boolean(record)),
+    [generationProvenanceById, history],
+  );
+  const toolUsageRecords = useMemo(
+    () => visibleProvenanceRecords.flatMap((record) => record.toolUsages.map((usage) => ({ task: record.task, usage }))),
+    [visibleProvenanceRecords],
+  );
+  const assetVersionLineageRecords = useMemo(
+    () => visibleProvenanceRecords.flatMap((record) => record.assetVersionLinks.map((link) => ({ task: record.task, link }))),
+    [visibleProvenanceRecords],
+  );
 
   useEffect(() => {
     if (linkedModelVersion?.modelId) {
@@ -237,7 +296,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   }
 
   return (
-    <section className="workspace-panel prompt-studio-workspace" aria-label="Prompt Studio 提示词工作台" aria-busy={loading || detailLoading || modelLoading || historyLoading}>
+    <section className="workspace-panel prompt-studio-workspace" aria-label="Prompt Studio 提示词工作台" aria-busy={loading || detailLoading || modelLoading || historyLoading || provenanceLoading}>
       <div className="section-heading workspace-heading">
         <div>
           <span className="section-label">v2 工作台</span>
@@ -348,6 +407,50 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                       {!historyLoading && !historyError && !history.length && <p className="empty-state">当前项目暂无生成任务。</p>}
                       {!historyLoading && !historyError && history.length > 0 && <ul className="prompt-studio-history-list">{history.slice(0, 6).map((task) => <li key={task.id}><strong>{task.workflowName}</strong><span>{taskStatusLabel(task.status)} · {formatDateTime(task.createdAt)} · 输出 {task.outputCount} 个</span></li>)}</ul>}
                       <p className="prompt-studio-note">任务历史和结果资产继续由现有 Task / Result 权威提供；本页面只读展示，不会自动创建任务。</p>
+                    </section>
+                    <section className="prompt-studio-subpanel" aria-label="Prompt Studio 跨模块溯源">
+                      <div className="prompt-studio-panel-heading"><h4>跨模块溯源</h4><span className="status-pill">只读</span></div>
+                      <p className="prompt-studio-note">当前数据层没有 Prompt Version → Generation 显式关系；下列生成、资产和工具仅是当前项目的显式溯源参考，不归因于当前提示词。</p>
+                      {historyLoading && <p className="disabled-note" role="status">等待生成历史后读取溯源…</p>}
+                      {!historyLoading && provenanceLoading && <p className="disabled-note" role="status">正在读取跨模块溯源…</p>}
+                      {provenanceError && <p className="error-message" role="alert">跨模块溯源加载失败：{provenanceError}</p>}
+                      {!historyLoading && !provenanceLoading && !provenanceError && (
+                        <div className="prompt-studio-two-column">
+                          <section className="prompt-studio-subpanel" aria-label="Used Generations">
+                            <h4>Used Generations</h4>
+                            <p className="prompt-studio-note">当前数据层尚未建立 Prompt Version → Generation 显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。</p>
+                            {history.length > 0 ? (
+                              <ul className="prompt-studio-history-list">
+                                {history.slice(0, 6).map((task) => <li key={task.id}><strong>{task.id}</strong><span>{task.workflowName} · {taskStatusLabel(task.status)} · {formatDateTime(task.createdAt)}</span></li>)}
+                              </ul>
+                            ) : <p className="empty-state">暂无生成记录。</p>}
+                          </section>
+                          <section className="prompt-studio-subpanel" aria-label="Generated Assets">
+                            <h4>Generated Assets</h4>
+                            {assetVersionLineageRecords.length > 0 ? (
+                              <ul className="prompt-studio-history-list">
+                                {assetVersionLineageRecords.map(({ task, link }) => <li key={link.id}><strong>{link.assetVersionId}</strong><span>{task.id} · {link.relationType} · 输出 {link.outputId} · 第 {link.ordinal + 1} 项</span></li>)}
+                              </ul>
+                            ) : history.some((task) => task.outputCount > 0) ? (
+                              <p className="empty-state">任务有输出，但尚未建立 Generation → AssetVersion 显式关系。</p>
+                            ) : <p className="empty-state">暂无已建立的结果资产溯源。</p>}
+                          </section>
+                          <section className="prompt-studio-subpanel" aria-label="Model Versions">
+                            <h4>Model Versions</h4>
+                            {selectedVersion?.modelVersionId ? (
+                              <ul className="prompt-studio-history-list"><li><strong>{linkedModel && linkedModelVersion ? `${linkedModel.provider} / ${linkedModel.name}` : selectedVersion.modelVersionId}</strong><span>Prompt Version v{selectedVersion.version} · {linkedModelVersion?.version ?? "历史版本未加载"}</span></li></ul>
+                            ) : <p className="empty-state">当前 Prompt Version 未记录 ModelVersion 关联。</p>}
+                          </section>
+                          <section className="prompt-studio-subpanel" aria-label="Tools">
+                            <h4>Tools</h4>
+                            {toolUsageRecords.length > 0 ? (
+                              <ul className="prompt-studio-history-list">
+                                {toolUsageRecords.map(({ task, usage }) => <li key={usage.id}><strong>{usage.toolVersionId ?? "工具版本未记录"}</strong><span>{task.id} · 实例 {usage.toolInstanceId} · {formatDateTime(usage.createdAt)}</span></li>)}
+                              </ul>
+                            ) : <p className="empty-state">暂无显式工具使用记录；历史生成可能未保存工具关系。</p>}
+                          </section>
+                        </div>
+                      )}
                     </section>
                     <section className="prompt-studio-subpanel" aria-label="生成来源">
                       <h4>生成来源</h4>

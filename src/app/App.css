@@ -6653,6 +6653,54 @@ input[type="radio"] {
   margin: 9px 0 0;
 }
 
+.provenance-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provenance-detail-grid > section,
+.provenance-timeline-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.provenance-relation-list,
+.provenance-timeline {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provenance-relation-list li,
+.provenance-timeline li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--ux-border);
+  border-radius: 8px;
+  background: var(--ux-surface-1);
+}
+
+.provenance-relation-list li span,
+.provenance-relation-list li small,
+.provenance-timeline li span,
+.provenance-timeline li small {
+  color: var(--ux-muted);
+  font-size: 0.7rem;
+}
+
+.provenance-timeline-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ux-border);
+}
+
 .prompt-studio-provenance {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

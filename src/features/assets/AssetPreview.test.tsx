@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   getAssetVideoPrompt: vi.fn(),
   listAssetRelations: vi.fn(),
   listAssetVersions: vi.fn(),
+  listGenerationAssetVersionLinks: vi.fn(),
+  listGenerationToolUsages: vi.fn(),
   readAssetImage: vi.fn(),
 }));
 
@@ -65,6 +67,8 @@ describe("AssetPreview detail MVP", () => {
     mocks.getAssetVideoPrompt.mockResolvedValue(null);
     mocks.listAssetRelations.mockResolvedValue(relations);
     mocks.listAssetVersions.mockResolvedValue(versions);
+    mocks.listGenerationAssetVersionLinks.mockResolvedValue([]);
+    mocks.listGenerationToolUsages.mockResolvedValue([]);
     mocks.readAssetImage.mockRejectedValue(new Error("preview unavailable"));
   });
 
@@ -88,5 +92,34 @@ describe("AssetPreview detail MVP", () => {
     expect(screen.getByText("Model")).toBeTruthy();
     expect(screen.getByText("Generation")).toBeTruthy();
     expect(screen.getByText("Date")).toBeTruthy();
+  });
+
+  it("shows explicit tool and asset-version provenance without inferring missing links", async () => {
+    mocks.listGenerationToolUsages.mockResolvedValue([{
+      id: "gtu-1",
+      generationId: "task-1",
+      toolInstanceId: "tins-comfy",
+      toolVersionId: "tver-comfy-1",
+      metadata: { source: "explicit" },
+      createdAt: "2026-09-02T01:00:00Z",
+    }]);
+    mocks.listGenerationAssetVersionLinks.mockResolvedValue([{
+      id: "gav-1",
+      generationId: "task-1",
+      outputId: "output-0",
+      ordinal: 0,
+      assetVersionId: "av-2",
+      relationType: "OUTPUT",
+      createdAt: "2026-09-02T01:01:00Z",
+    }]);
+
+    render(<AssetPreview projectId="project-1" asset={asset} onClose={vi.fn()} />);
+
+    expect((await screen.findAllByText("tver-comfy-1")).length).toBeGreaterThan(0);
+    expect(screen.getByText("av-2")).toBeTruthy();
+    expect(screen.getByText("未记录（历史数据未提供显式提示词版本关联）")).toBeTruthy();
+    expect(screen.getByText("未记录（历史数据未提供显式模型版本关联）")).toBeTruthy();
+    expect(mocks.listGenerationToolUsages).toHaveBeenCalledWith("project-1", "task-1");
+    expect(mocks.listGenerationAssetVersionLinks).toHaveBeenCalledWith("project-1", "task-1");
   });
 });

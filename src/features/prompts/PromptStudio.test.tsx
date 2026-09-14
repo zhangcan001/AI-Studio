@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   getPromptLibraryEntry: vi.fn(),
   listModels: vi.fn(),
   listModelVersions: vi.fn(),
+  listGenerationAssetVersionLinks: vi.fn(),
+  listGenerationToolUsages: vi.fn(),
   taskHistoryPage: vi.fn(),
 }));
 
@@ -65,6 +67,8 @@ describe("PromptStudio", () => {
     mocks.getPromptLibraryEntry.mockResolvedValue(promptDetail);
     mocks.listModels.mockResolvedValue([model]);
     mocks.listModelVersions.mockResolvedValue([modelVersion]);
+    mocks.listGenerationAssetVersionLinks.mockResolvedValue([]);
+    mocks.listGenerationToolUsages.mockResolvedValue([]);
     mocks.taskHistoryPage.mockResolvedValue({
       items: [{
         id: "tsk-1",
@@ -118,6 +122,42 @@ describe("PromptStudio", () => {
     const versionHistory = screen.getByRole("navigation", { name: "提示词版本历史" });
     await user.click(within(versionHistory).getByRole("button", { name: /v1/ }));
     expect(screen.getByText("旧版人物镜头")).toBeTruthy();
+  });
+
+  it("shows explicit cross-module provenance and missing-link states", async () => {
+    mocks.listGenerationToolUsages.mockResolvedValue([{
+      id: "gtu-1",
+      generationId: "tsk-1",
+      toolInstanceId: "tins-comfy",
+      toolVersionId: "tver-comfy-1",
+      metadata: { source: "explicit" },
+      createdAt: "2026-09-02T01:00:00Z",
+    }]);
+    mocks.listGenerationAssetVersionLinks.mockResolvedValue([{
+      id: "gav-1",
+      generationId: "tsk-1",
+      outputId: "output-0",
+      ordinal: 0,
+      assetVersionId: "av-1",
+      relationType: "OUTPUT",
+      createdAt: "2026-09-02T01:01:00Z",
+    }]);
+
+    render(<PromptStudio projectId="project-1" />);
+
+    expect(await screen.findByText("Used Generations")).toBeTruthy();
+    expect(screen.getByText("tver-comfy-1")).toBeTruthy();
+    expect(screen.getByText("av-1")).toBeTruthy();
+    expect(screen.getByText("当前数据层尚未建立 Prompt Version → Generation 显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。")).toBeTruthy();
+    expect(mocks.listGenerationToolUsages).toHaveBeenCalledWith("project-1", "tsk-1");
+    expect(mocks.listGenerationAssetVersionLinks).toHaveBeenCalledWith("project-1", "tsk-1");
+  });
+
+  it("reports an empty explicit provenance state for historical generations", async () => {
+    render(<PromptStudio projectId="project-1" />);
+
+    expect(await screen.findByText("暂无显式工具使用记录；历史生成可能未保存工具关系。")).toBeTruthy();
+    expect(screen.getByText("任务有输出，但尚未建立 Generation → AssetVersion 显式关系。")).toBeTruthy();
   });
 
   it("uses the typed filter transport", async () => {
