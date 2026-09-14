@@ -1,0 +1,167 @@
+.direct-generation-entry {
+  display: grid;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--ux-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ux-accent) 4%, var(--ux-surface-1));
+}
+
+.direct-generation-entry-heading,
+.direct-generation-recipe-heading,
+.direct-generation-actions,
+.direct-generation-scope-note,
+.direct-generation-created {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.direct-generation-entry-heading h3,
+.direct-generation-recipe-heading h4 {
+  margin: 3px 0 0;
+}
+
+.direct-generation-entry-heading p,
+.direct-generation-scope-note small,
+.direct-generation-created p {
+  margin: 5px 0 0;
+  color: var(--ux-muted);
+  font-size: 0.8rem;
+}
+
+.direct-generation-queue-badge {
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--ux-accent) 50%, var(--ux-border));
+  border-radius: 999px;
+  color: var(--ux-accent);
+  background: var(--ux-surface-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.direct-generation-scope-note {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-left: 3px solid var(--ux-accent);
+  background: var(--ux-surface-2);
+}
+
+.direct-generation-scope-note span,
+.direct-generation-scope-note small {
+  color: var(--ux-muted);
+}
+
+.direct-generation-scope-note small {
+  flex-basis: 100%;
+}
+
+.direct-generation-context-grid,
+.direct-generation-source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.direct-generation-source-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.direct-generation-context-grid label,
+.direct-generation-source-grid label,
+.direct-generation-recipe-heading label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.direct-generation-context-grid label > span,
+.direct-generation-source-grid label > span,
+.direct-generation-recipe-heading label > span {
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+}
+
+.direct-generation-context-grid select,
+.direct-generation-context-grid input,
+.direct-generation-source-grid select,
+.direct-generation-recipe-heading select {
+  width: 100%;
+  min-width: 0;
+}
+
+.direct-generation-target-note {
+  margin: -8px 0 0;
+  color: var(--ux-muted);
+  font-size: 0.8rem;
+}
+
+.direct-generation-recipe-heading {
+  align-items: end;
+}
+
+.direct-generation-recipe-heading label {
+  width: min(100%, 420px);
+}
+
+.direct-generation-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.direct-generation-created {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, #4fba8f 55%, var(--ux-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #4fba8f 8%, var(--ux-surface-2));
+}
+
+.direct-generation-created strong,
+.direct-generation-created span,
+.direct-generation-created small {
+  display: block;
+}
+
+.direct-generation-created span,
+.direct-generation-created small {
+  color: var(--ux-muted);
+  font-size: 0.78rem;
+}
+
+.direct-generation-created p {
+  flex-basis: 100%;
+}
+
+.direct-generation-entry-empty {
+  padding: 18px;
+  border: 1px dashed var(--ux-border);
+  border-radius: 10px;
+  color: var(--ux-muted);
+}
+
+.direct-generation-entry-empty strong {
+  color: var(--ux-text);
+}
+
+@media (max-width: 850px) {
+  .direct-generation-context-grid,
+  .direct-generation-source-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .direct-generation-entry-heading,
+  .direct-generation-recipe-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .direct-generation-recipe-heading label {
+    width: 100%;
+  }
+}

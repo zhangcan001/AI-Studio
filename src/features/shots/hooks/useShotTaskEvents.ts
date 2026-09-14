@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { subscribeTaskUpdates } from "../../../services/taskEvents";
 
-export type ShotProductionModeTab = "package" | "project" | "multi-package";
+export type ShotProductionModeTab = "direct" | "package" | "project" | "multi-package";
 
 export interface UseShotTaskEventsOptions {
   enabled: boolean;

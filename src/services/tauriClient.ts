@@ -1296,6 +1296,14 @@ export function createProductionQueue(request: {
   name: string;
   continueOnFailure: boolean;
   items: ProductionBatchCreateItem[];
+  /** Prepare one direct-generation item without starting the queue. */
+  direct?: boolean;
+  shotId?: string;
+  stage?: ShotStage;
+  promptVersionId?: string;
+  modelVersionId?: string;
+  toolInstanceId?: string;
+  toolVersionId?: string;
 }): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_create", { request });
 }

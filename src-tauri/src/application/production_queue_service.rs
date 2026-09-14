@@ -8,7 +8,7 @@ use crate::application::ordered_reference_binding::{
 };
 use crate::application::ports::{
     ActiveProductionItem, Clock, GenerationDefinitionRepository, ProductionQueueRepository,
-    RepositoryError, ShotBatchRepository, TaskRepository,
+    RepositoryError, ShotBatchBinding, ShotBatchRepository, TaskRepository,
 };
 use crate::application::task_recovery_service::TaskRecoveryService;
 use crate::compiler::{RecipeParser, RecipeValidator, SeedResolver};
@@ -16,8 +16,9 @@ use crate::domain::{
     AssetId, InputDefinition, OutputType, ProductionBatch, ProductionBatchDetail,
     ProductionBatchId, ProductionBatchItem, ProductionBatchItemId, ProductionBatchItemStatus,
     ProductionBatchStatus, ProductionPackageBatchBinding, ProductionPackageProvenance, Recipe,
-    SeedValue, TaskId, TaskStatus,
+    SeedValue, ShotStage, TaskId, TaskStatus,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -43,6 +44,36 @@ pub struct CreateProductionBatchRequest {
     pub name: String,
     pub continue_on_failure: bool,
     pub items: Vec<CreateProductionBatchItem>,
+}
+
+/// The direct-entry adapter creates exactly one item in the existing
+/// production queue. The canonical Task/Generation is still created only
+/// when the queue is started.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateDirectGenerationRequest {
+    pub project_id: String,
+    pub name: String,
+    pub continue_on_failure: bool,
+    pub item: CreateProductionBatchItem,
+    pub shot_id: Option<String>,
+    pub stage: Option<String>,
+    pub prompt_version_id: Option<String>,
+    pub model_version_id: Option<String>,
+    pub tool_instance_id: Option<String>,
+    pub tool_version_id: Option<String>,
+}
+
+const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectGenerationContext {
+    shot_id: Option<String>,
+    stage: Option<String>,
+    prompt_version_id: Option<String>,
+    model_version_id: Option<String>,
+    tool_instance_id: Option<String>,
+    tool_version_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -185,6 +216,69 @@ impl ProductionQueueService {
         request: CreateProductionBatchRequest,
         provenance: Option<ProductionPackageProvenance>,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        self.create_internal(request, provenance, None).await
+    }
+
+    pub async fn create_direct_generation(
+        &self,
+        request: CreateDirectGenerationRequest,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let context = DirectGenerationContext {
+            shot_id: normalize_direct_context_id(request.shot_id, "shot id")?,
+            stage: normalize_direct_context_stage(request.stage)?,
+            prompt_version_id: normalize_direct_context_id(
+                request.prompt_version_id,
+                "prompt version id",
+            )?,
+            model_version_id: normalize_direct_context_id(
+                request.model_version_id,
+                "model version id",
+            )?,
+            tool_instance_id: normalize_direct_context_id(
+                request.tool_instance_id,
+                "tool instance id",
+            )?,
+            tool_version_id: normalize_direct_context_id(
+                request.tool_version_id,
+                "tool version id",
+            )?,
+        };
+        if context.shot_id.is_some() != context.stage.is_some() {
+            return Err(ProductionQueueError::InvalidInput(
+                "direct generation Shot targets require an explicit image or video stage"
+                    .to_owned(),
+            ));
+        }
+        if context.tool_version_id.is_some() && context.tool_instance_id.is_none() {
+            return Err(ProductionQueueError::InvalidInput(
+                "tool version id requires an explicit tool instance id".to_owned(),
+            ));
+        }
+        self.create_internal(
+            CreateProductionBatchRequest {
+                project_id: request.project_id,
+                name: request.name,
+                continue_on_failure: request.continue_on_failure,
+                items: vec![request.item],
+            },
+            None,
+            Some(context),
+        )
+        .await
+    }
+
+    async fn create_internal(
+        &self,
+        request: CreateProductionBatchRequest,
+        provenance: Option<ProductionPackageProvenance>,
+        direct_context: Option<DirectGenerationContext>,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        if provenance.is_some() && direct_context.is_some() {
+            return Err(ProductionQueueError::InvalidInput(
+                "production package provenance cannot be combined with direct generation context"
+                    .to_owned(),
+            ));
+        }
         crate::domain::validate_project_id(&request.project_id)
             .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
         let name = request.name.trim();
@@ -238,13 +332,18 @@ impl ProductionQueueService {
             };
             let values = freeze_random_seed_values(item.values, &recipe)
                 .map_err(ProductionQueueError::InvalidInput)?;
+            let values_json = if direct_context.is_some() {
+                direct_context_values_json(&values, direct_context.as_ref().expect("context"))
+            } else {
+                generation_values_to_json(&values)
+            };
             items.push(ProductionBatchItem {
                 id: ProductionBatchItemId::new(),
                 batch_id: batch_id.clone(),
                 ordinal: u32::try_from(index).expect("production batch item index must fit u32"),
                 workflow_version_id: item.workflow_version_id,
                 recipe_id: item.recipe_id,
-                values_json: generation_values_to_json(&values),
+                values_json,
                 status: ProductionBatchItemStatus::Pending,
                 task_id: None,
                 retry_of_item_id: None,
@@ -279,6 +378,26 @@ impl ProductionQueueService {
             self.repository
                 .insert_with_provenance(&batch, &items, provenance)
                 .await?;
+        } else if let Some(context) = direct_context.as_ref() {
+            if let (Some(shot_id), Some(stage)) = (context.shot_id.as_ref(), context.stage.as_ref())
+            {
+                let stage = ShotStage::try_from_str(stage)
+                    .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+                let item = items.first().expect("direct generation item");
+                self.shot_batch_repository
+                    .insert_batch_with_bindings(
+                        &batch,
+                        &items,
+                        &[ShotBatchBinding {
+                            shot_id: shot_id.clone(),
+                            stage,
+                            production_batch_item_id: item.id.as_str().to_owned(),
+                        }],
+                    )
+                    .await?;
+            } else {
+                self.repository.insert(&batch, &items).await?;
+            }
         } else {
             self.repository.insert(&batch, &items).await?;
         }
@@ -1265,15 +1384,22 @@ impl ProductionQueueService {
                 {
                     continue;
                 }
-                let values = match self
-                    .prepare_queue_values(
-                        &next.workflow_version_id,
-                        &next.recipe_id,
-                        &next.values_json,
-                    )
-                    .await
-                {
-                    Ok(values) => values,
+                let prepared = match direct_generation_context_from_json(&next.values_json) {
+                    Ok(direct_context) => match self
+                        .prepare_queue_values(
+                            &next.workflow_version_id,
+                            &next.recipe_id,
+                            &next.values_json,
+                        )
+                        .await
+                    {
+                        Ok(values) => Ok((direct_context, values)),
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => Err(ProductionQueueError::InvalidInput(error)),
+                };
+                let (direct_context, values) = match prepared {
+                    Ok(prepared) => prepared,
                     Err(error) => {
                         let message = error.to_string();
                         self.repository
@@ -1350,10 +1476,18 @@ impl ProductionQueueService {
                             project_id: project_id.to_owned(),
                             workflow_version_id: next.workflow_version_id.clone(),
                             recipe_id: next.recipe_id.clone(),
-                            model_version_id: None,
-                            prompt_version_id: None,
-                            tool_instance_id: None,
-                            tool_version_id: None,
+                            model_version_id: direct_context
+                                .as_ref()
+                                .and_then(|context| context.model_version_id.clone()),
+                            prompt_version_id: direct_context
+                                .as_ref()
+                                .and_then(|context| context.prompt_version_id.clone()),
+                            tool_instance_id: direct_context
+                                .as_ref()
+                                .and_then(|context| context.tool_instance_id.clone()),
+                            tool_version_id: direct_context
+                                .as_ref()
+                                .and_then(|context| context.tool_version_id.clone()),
                             values,
                             reference_manifest,
                             submission_idempotency_key: Some(format!(
@@ -1941,6 +2075,63 @@ pub(crate) fn generation_values_to_json(values: &BTreeMap<String, GenerationInpu
     Value::Object(object)
 }
 
+fn normalize_direct_context_id(
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<String>, ProductionQueueError> {
+    let normalized = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    if value.is_some() && normalized.is_none() {
+        return Err(ProductionQueueError::InvalidInput(format!(
+            "direct generation {field} must not be blank"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn normalize_direct_context_stage(
+    value: Option<String>,
+) -> Result<Option<String>, ProductionQueueError> {
+    normalize_direct_context_id(value, "stage")?
+        .map(|stage| {
+            ShotStage::try_from_str(&stage)
+                .map(|stage| stage.as_str().to_owned())
+                .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))
+        })
+        .transpose()
+}
+
+fn direct_context_values_json(
+    values: &BTreeMap<String, GenerationInputValue>,
+    context: &DirectGenerationContext,
+) -> Value {
+    let mut object = match generation_values_to_json(values) {
+        Value::Object(object) => object,
+        Value::Array(_) | Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+            unreachable!("generation values must serialize as a JSON object")
+        }
+    };
+    object.insert(DIRECT_GENERATION_CONTEXT_KEY.to_owned(), json!(context));
+    Value::Object(object)
+}
+
+fn direct_generation_context_from_json(
+    value: &Value,
+) -> Result<Option<DirectGenerationContext>, String> {
+    let Some(context) = value
+        .as_object()
+        .and_then(|object| object.get(DIRECT_GENERATION_CONTEXT_KEY))
+    else {
+        return Ok(None);
+    };
+    serde_json::from_value(context.clone())
+        .map(Some)
+        .map_err(|error| format!("direct generation context is invalid: {error}"))
+}
+
 pub(crate) fn freeze_random_seed_values(
     values: BTreeMap<String, GenerationInputValue>,
     recipe: &Recipe,
@@ -1989,6 +2180,7 @@ pub(crate) fn generation_values_from_json(
         .ok_or_else(|| "production queue values must be a JSON object".to_owned())?;
     object
         .iter()
+        .filter(|(key, _)| key.as_str() != DIRECT_GENERATION_CONTEXT_KEY)
         .map(|(key, value)| Ok((key.clone(), generation_value_from_json(key, value)?)))
         .collect()
 }
@@ -2199,7 +2391,8 @@ impl From<RepositoryError> for ProductionQueueError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_partial_resume_plan, build_retry_item, build_retry_lineages, find_admission_blocker,
+        build_partial_resume_plan, build_retry_item, build_retry_lineages,
+        direct_context_values_json, direct_generation_context_from_json, find_admission_blocker,
         find_retry_item, freeze_random_seed_values, generation_start_error_code,
         generation_values_from_json, generation_values_to_json, is_transient_requeue_error,
         reference_manifest_for_values, select_recovery, should_pause_after_terminal,
@@ -2305,6 +2498,43 @@ mod tests {
         );
         let json = generation_values_to_json(&values);
         assert_eq!(generation_values_from_json(&json).unwrap(), values);
+    }
+
+    #[test]
+    fn direct_context_round_trip_keeps_recipe_values_and_explicit_ids_separate() {
+        let values = [(
+            "prompt".to_owned(),
+            GenerationInputValue::Text("hello".to_owned()),
+        )]
+        .into_iter()
+        .collect();
+        let context = super::DirectGenerationContext {
+            shot_id: Some("shot-1".to_owned()),
+            stage: Some("video".to_owned()),
+            prompt_version_id: Some("prompt-version-1".to_owned()),
+            model_version_id: Some("model-version-1".to_owned()),
+            tool_instance_id: Some("tool-instance-1".to_owned()),
+            tool_version_id: Some("tool-version-1".to_owned()),
+        };
+        let encoded = direct_context_values_json(&values, &context);
+
+        assert_eq!(generation_values_from_json(&encoded).unwrap(), values);
+        assert_eq!(
+            direct_generation_context_from_json(&encoded).unwrap(),
+            Some(context)
+        );
+    }
+
+    #[test]
+    fn malformed_direct_context_fails_closed() {
+        let encoded = json!({
+            "prompt": {"type": "string", "value": "hello"},
+            "__ai_studio_direct_generation_context": {"modelVersionId": 42}
+        });
+
+        let error = direct_generation_context_from_json(&encoded)
+            .expect_err("malformed direct context must be rejected");
+        assert!(error.contains("direct generation context is invalid"));
     }
 
     #[test]

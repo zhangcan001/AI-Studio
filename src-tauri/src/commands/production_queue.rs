@@ -1,9 +1,9 @@
 use crate::{
     app_state::AppState,
     application::production_queue_service::{
-        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionAdmissionView,
-        ProductionPartialResumeEntry, ProductionPartialResumePlan, ProductionPartialResumeResult,
-        ProductionQueueError, ProductionQueueOverview,
+        CreateDirectGenerationRequest, CreateProductionBatchItem, CreateProductionBatchRequest,
+        ProductionAdmissionView, ProductionPartialResumeEntry, ProductionPartialResumePlan,
+        ProductionPartialResumeResult, ProductionQueueError, ProductionQueueOverview,
     },
     application::production_start_admission_service::ProductionStartAdmissionError,
     domain::{ProductionBatch, ProductionBatchDetail, ProductionBatchItem},
@@ -23,6 +23,22 @@ pub struct ProductionQueueCreateRequest {
     #[serde(default)]
     pub continue_on_failure: bool,
     pub items: Vec<ProductionQueueCreateItemRequest>,
+    /// When true, the one item is a direct-entry request that is prepared in
+    /// the existing queue and remains waiting until Queue Start is clicked.
+    #[serde(default)]
+    pub direct: bool,
+    #[serde(default)]
+    pub shot_id: Option<String>,
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(default)]
+    pub prompt_version_id: Option<String>,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
+    #[serde(default)]
+    pub tool_instance_id: Option<String>,
+    #[serde(default)]
+    pub tool_version_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -166,21 +182,68 @@ pub async fn production_queue_create(
     state: State<'_, AppState>,
     request: ProductionQueueCreateRequest,
 ) -> Result<ProductionBatchDetailView, AppError> {
-    let items = request
-        .items
+    let ProductionQueueCreateRequest {
+        project_id,
+        name,
+        continue_on_failure,
+        items: requested_items,
+        direct,
+        shot_id,
+        stage,
+        prompt_version_id,
+        model_version_id,
+        tool_instance_id,
+        tool_version_id,
+    } = request;
+    let items = requested_items
         .into_iter()
         .map(ProductionQueueCreateItemRequest::into_application)
         .collect::<Result<Vec<_>, _>>()?;
-    let detail = state
-        .production_queue_service
-        .create(CreateProductionBatchRequest {
-            project_id: request.project_id,
-            name: request.name,
-            continue_on_failure: request.continue_on_failure,
-            items,
-        })
-        .await
-        .map_err(map_queue_error)?;
+    let direct_requested = direct
+        || shot_id.is_some()
+        || stage.is_some()
+        || prompt_version_id.is_some()
+        || model_version_id.is_some()
+        || tool_instance_id.is_some()
+        || tool_version_id.is_some();
+    let detail = if direct_requested {
+        if items.len() != 1 {
+            return Err(AppError::invalid_input(
+                "direct generation requires exactly one queue item",
+            ));
+        }
+        let item = items
+            .into_iter()
+            .next()
+            .expect("direct generation item count was validated");
+        state
+            .production_queue_service
+            .create_direct_generation(CreateDirectGenerationRequest {
+                project_id,
+                name,
+                continue_on_failure,
+                item,
+                shot_id,
+                stage,
+                prompt_version_id,
+                model_version_id,
+                tool_instance_id,
+                tool_version_id,
+            })
+            .await
+            .map_err(map_queue_error)?
+    } else {
+        state
+            .production_queue_service
+            .create(CreateProductionBatchRequest {
+                project_id,
+                name,
+                continue_on_failure,
+                items,
+            })
+            .await
+            .map_err(map_queue_error)?
+    };
     Ok(detail.into())
 }
 

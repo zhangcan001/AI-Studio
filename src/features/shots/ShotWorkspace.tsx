@@ -54,6 +54,7 @@ import { EpisodeProductionPanel } from "./EpisodeProductionPanel";
 import { SeriesProductionPanel } from "./SeriesProductionPanel";
 import { ProductionBatchRunbookPanel } from "../production/ProductionBatchRunbookPanel";
 import { ProductionPackageWorkspace } from "../production/ProductionPackageWorkspace";
+import { DirectGenerationEntry } from "../production/DirectGenerationEntry";
 import {
   MultiPackageProductionBoard,
 } from "../production/MultiPackageProductionBoard";
@@ -125,9 +126,10 @@ export function shotContextSurface(mode: ShotWorkspaceMode, selectionType: Works
   return selectionType;
 }
 
-type ProductionModeTab = "package" | "project" | "multi-package";
+type ProductionModeTab = "direct" | "package" | "project" | "multi-package";
 
 export interface ProductionModeTabsProps {
+  directPanel?: ReactNode;
   packagePanel: ReactNode;
   projectProductionPanel: ReactNode;
   multiPackagePanel?: ReactNode;
@@ -135,14 +137,16 @@ export interface ProductionModeTabsProps {
   onActiveTabChange?: (tab: ProductionModeTab) => void;
 }
 
-export function ProductionModeTabs({ packagePanel, projectProductionPanel, multiPackagePanel, activeTab: controlledActiveTab, onActiveTabChange }: ProductionModeTabsProps) {
+export function ProductionModeTabs({ directPanel, packagePanel, projectProductionPanel, multiPackagePanel, activeTab: controlledActiveTab, onActiveTabChange }: ProductionModeTabsProps) {
   const [uncontrolledActiveTab, setUncontrolledActiveTab] = useState<ProductionModeTab>("package");
   const activeTab = controlledActiveTab ?? uncontrolledActiveTab;
   const idPrefix = useId();
   const packageTabId = `${idPrefix}-production-package-tab`;
+  const directTabId = `${idPrefix}-production-direct-tab`;
   const projectTabId = `${idPrefix}-project-production-tab`;
   const multiPackageTabId = `${idPrefix}-multi-package-production-tab`;
   const packagePanelId = `${idPrefix}-production-package-panel`;
+  const directPanelId = `${idPrefix}-production-direct-panel`;
   const projectPanelId = `${idPrefix}-project-production-panel`;
   const multiPackagePanelId = `${idPrefix}-multi-package-production-panel`;
   const selectTab = (tab: ProductionModeTab) => {
@@ -153,6 +157,18 @@ export function ProductionModeTabs({ packagePanel, projectProductionPanel, multi
   return (
     <div className="shot-production-mode-tabs" data-surface="production" data-active-tab={activeTab}>
       <div className="shot-production-mode-tablist" role="tablist" aria-label="生产模式工作区">
+        {directPanel !== undefined && <button
+          type="button"
+          id={directTabId}
+          className="shot-production-mode-tab"
+          role="tab"
+          aria-selected={activeTab === "direct"}
+          aria-controls={directPanelId}
+          tabIndex={activeTab === "direct" ? 0 : -1}
+          onClick={() => selectTab("direct")}
+        >
+          单次生成
+        </button>}
         <button
           type="button"
           id={packageTabId}
@@ -194,6 +210,17 @@ export function ProductionModeTabs({ packagePanel, projectProductionPanel, multi
       </div>
       <p className="shot-production-flow-guide" role="status"><strong>生产流程：</strong>先准备并创建待启动批次 → 打开生产队列 → 明确点击“开始生产” → 在监控和审核中查看结果。准备、返工都不会自动开始生产。</p>
 
+      {directPanel !== undefined && <section
+        id={directPanelId}
+        className="shot-production-mode-tabpanel"
+        role="tabpanel"
+        aria-labelledby={directTabId}
+        aria-hidden={activeTab !== "direct"}
+        hidden={activeTab !== "direct"}
+        data-tab-panel="direct-generation"
+      >
+        {directPanel}
+      </section>}
       <section
         id={packagePanelId}
         className="shot-production-mode-tabpanel"
@@ -1241,6 +1268,16 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     <ProductionModeTabs
       activeTab={productionModeTab}
       onActiveTabChange={setProductionModeTab}
+      directPanel={(
+        <DirectGenerationEntry
+          enabled={productionModeTab === "direct"}
+          projectId={projectId}
+          projectName={projectName}
+          catalog={catalog}
+          shots={shots}
+          onOpenProductionQueue={onOpenProductionQueue}
+        />
+      )}
       packagePanel={(
         <ProductionPackageWorkspace
           key={productionPackageWorkspaceKey}
