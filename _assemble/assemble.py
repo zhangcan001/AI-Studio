@@ -14,6 +14,7 @@ def assemble(prefix, dest, expect, must_contain=None):
     # Safety: fix known one-byte transcription typo if present (no-op when chunks are correct)
     if prefix.startswith("svc.zlib.b64"):
         payload = payload.replace("KloG9aM5VQkEW", "KloG9aM7VQkEW")
+        payload = payload.replace("gt8u9rk21WqdaudI8z+", "gt8u9rk21W2qdaudI8z+")
     data = zlib.decompress(base64.b64decode(payload))
     path = Path(dest)
     path.parent.mkdir(parents=True, exist_ok=True)
