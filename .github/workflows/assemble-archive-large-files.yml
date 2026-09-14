@@ -1,5 +1,6 @@
 name: assemble-archive-large-files
 on:
+  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/assemble-archive-large-files.yml'
