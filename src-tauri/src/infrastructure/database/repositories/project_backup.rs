@@ -1,1 +1,1 @@
-__LOAD_FROM_FILE__:/workspace/agent-tools/mcp_update_project_backup_repo.json
+file:///workspace/AI-Studio/src-tauri/src/infrastructure/database/repositories/project_backup.rs
