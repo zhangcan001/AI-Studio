@@ -36,7 +36,7 @@ use std::{
     future::Future,
     sync::Arc,
 };
-use tokio::sync::{watch, Mutex as AsyncMutex, Semaphore};
+use tokio::sync::{watch, Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -194,7 +194,10 @@ pub struct GenerationService {
     task_update_sink: Arc<dyn TaskUpdateSink>,
     execution_registry: TaskExecutionRegistry,
     idempotency_gate: Arc<AsyncMutex<()>>,
-    submission_gate: Arc<Semaphore>,
+    /// Shared by interactive and production-queue generation calls. The permit
+    /// is held by `GenerationExecutionLease` until the real Comfy execution
+    /// and output collection have returned.
+    execution_admission: Arc<Semaphore>,
     compiler: WorkflowCompiler,
     workflow_compatibility_service: Option<Arc<WorkflowOnboardingService>>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
@@ -206,6 +209,43 @@ enum CancelResolution {
     Cancelled,
     Success(ComfyHistory),
     Failed(TaskError),
+}
+
+/// Owns the execution admission permit for one generation attempt.
+///
+/// The lease deliberately outlives the Comfy submission call: input uploads,
+/// WebSocket monitoring, cancellation reconciliation, and output collection
+/// are all part of the same GPU execution lifecycle. Dropping the lease on any
+/// return path releases the permit, including errors and task cancellation.
+struct GenerationExecutionLease {
+    task_id: crate::domain::TaskId,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl GenerationExecutionLease {
+    async fn acquire(
+        admission: &Arc<Semaphore>,
+        task_id: &crate::domain::TaskId,
+    ) -> Result<Self, GenerationServiceError> {
+        let permit = Arc::clone(admission)
+            .acquire_owned()
+            .await
+            .map_err(|error| GenerationServiceError::ExecutionFailed {
+                code: "EXECUTION_ADMISSION_UNAVAILABLE".to_owned(),
+                message: error.to_string(),
+            })?;
+        tracing::debug!(task_id = %task_id, "generation execution admission acquired");
+        Ok(Self {
+            task_id: task_id.clone(),
+            _permit: permit,
+        })
+    }
+}
+
+impl Drop for GenerationExecutionLease {
+    fn drop(&mut self) {
+        tracing::debug!(task_id = %self.task_id, "generation execution admission released");
+    }
 }
 
 impl GenerationService {
@@ -242,7 +282,7 @@ impl GenerationService {
             task_update_sink: Arc::new(NoopTaskUpdateSink),
             execution_registry: TaskExecutionRegistry::default(),
             idempotency_gate: Arc::new(AsyncMutex::new(())),
-            submission_gate: Arc::new(Semaphore::new(1)),
+            execution_admission: Arc::new(Semaphore::new(1)),
             compiler: WorkflowCompiler,
             workflow_compatibility_service: None,
             new_generation_admission: None,
@@ -652,6 +692,29 @@ impl GenerationService {
             return Ok(task);
         }
 
+        let _execution_lease =
+            match GenerationExecutionLease::acquire(&self.execution_admission, &task.id).await {
+                Ok(lease) => lease,
+                Err(original) => {
+                    let message = original.to_string();
+                    return Err(self
+                        .fail_and_preserve(
+                            &mut task,
+                            TaskError {
+                                code: "EXECUTION_ADMISSION_UNAVAILABLE".to_owned(),
+                                message,
+                                raw: None,
+                            },
+                            original,
+                        )
+                        .await);
+                }
+            };
+
+        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
+            return Ok(task);
+        }
+
         self.transition_and_persist(&mut task, TaskStatus::Preparing)
             .await?;
         self.persist_telemetry(
@@ -813,14 +876,6 @@ impl GenerationService {
             return Ok(task);
         }
 
-        let submission_permit = Arc::clone(&self.submission_gate)
-            .acquire_owned()
-            .await
-            .expect("generation submission gate should remain open");
-        if self.cancel_checkpoint(&mut task, &cancel_signal).await? {
-            return Ok(task);
-        }
-
         let client_id = Uuid::new_v4().to_string();
         let prompt_id = Uuid::new_v4().to_string();
         let submission_event = task.prepare_submission_with_identity(
@@ -933,7 +988,6 @@ impl GenerationService {
             },
         )
         .await?;
-        drop(submission_permit);
 
         let mut cancel_action_sent = false;
         loop {
@@ -2380,5 +2434,38 @@ outputs: []
         let text = resolved.to_string();
         assert!(!text.contains("storage_path"));
         assert!(!text.contains("C:/"));
+    }
+
+    #[tokio::test]
+    async fn execution_lease_holds_permit_until_the_real_execution_returns() {
+        let admission = Arc::new(Semaphore::new(1));
+        let first_task = crate::domain::TaskId::parse("tsk_execution_first").unwrap();
+        let second_task = crate::domain::TaskId::parse("tsk_execution_second").unwrap();
+        let first = GenerationExecutionLease::acquire(&admission, &first_task)
+            .await
+            .expect("first generation should acquire admission");
+
+        assert_eq!(admission.available_permits(), 0);
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(25),
+                GenerationExecutionLease::acquire(&admission, &second_task),
+            )
+            .await
+            .is_err(),
+            "a second generation must wait while the first execution lease is held"
+        );
+
+        drop(first);
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            GenerationExecutionLease::acquire(&admission, &second_task),
+        )
+        .await
+        .expect("second generation should acquire after release")
+        .expect("admission should remain available");
+        assert_eq!(admission.available_permits(), 0);
+        drop(second);
+        assert_eq!(admission.available_permits(), 1);
     }
 }

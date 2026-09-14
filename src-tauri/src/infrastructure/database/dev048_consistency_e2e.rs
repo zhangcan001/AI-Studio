@@ -1556,7 +1556,7 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
     assert!(tauri.contains("\"version\": \"1.3.1\""));
     let backup =
         fs::read_to_string(root.join("src/application/project_backup_service.rs")).unwrap();
-    assert!(backup.contains("const BACKUP_VERSION: u32 = 18"));
+    assert!(backup.contains("const BACKUP_VERSION: u32 = 19"));
     let manifest =
         fs::read_to_string(root.join("src/application/project_manifest_service.rs")).unwrap();
     assert!(manifest.contains("const MANIFEST_VERSION: u32 = 2"));

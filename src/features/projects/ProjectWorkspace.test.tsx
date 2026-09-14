@@ -126,7 +126,10 @@ describe("ProjectWorkspace archive UX", () => {
       id: "restored-1",
       name: "归档项目（恢复）",
     });
-    const confirm = vi.fn(() => true);
+    const confirm = vi.fn((message?: string) => {
+      void message;
+      return true;
+    });
     vi.stubGlobal("confirm", confirm);
     renderWorkspace();
 

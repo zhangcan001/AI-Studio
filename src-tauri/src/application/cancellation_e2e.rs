@@ -831,3 +831,232 @@ async fn cancellation_racing_success_preserves_result_and_records_not_effective(
     wait_for_registry_absent(&harness.registry, &task.id).await;
     assert!(!harness.registry.contains(&task.id));
 }
+
+#[tokio::test]
+async fn interactive_generations_share_the_execution_admission_lease() {
+    let harness = Harness::new(
+        false,
+        behavior(
+            vec![
+                ComfyExecutionEvent::ExecutionStarted {
+                    prompt_id: "CURRENT".to_owned(),
+                },
+                ComfyExecutionEvent::ExecutionSucceeded {
+                    prompt_id: "CURRENT".to_owned(),
+                },
+            ],
+            Some(success_history()),
+            ComfyQueueState {
+                running_prompt_ids: vec!["CURRENT".to_owned()],
+                pending_prompt_ids: Vec::new(),
+            },
+        ),
+    )
+    .await;
+    harness.adapter.behavior.lock().unwrap().hold_terminal_event = true;
+
+    let first = harness
+        .service
+        .start_generation(harness.request())
+        .await
+        .unwrap();
+    wait_for_status(&harness.task_repository, &first.id, TaskStatus::Running).await;
+    harness
+        .adapter
+        .control
+        .terminal_event
+        .wait_until_reached()
+        .await;
+
+    let mut second_request = harness.request();
+    second_request.values.insert(
+        "seed".to_owned(),
+        GenerationInputValue::Seed(SeedValue::Fixed(456)),
+    );
+    let second = harness
+        .service
+        .start_generation(second_request)
+        .await
+        .unwrap();
+    wait_for_status(&harness.task_repository, &second.id, TaskStatus::Validating).await;
+    assert_eq!(harness.adapter.action_count("submit_workflow"), 1);
+
+    harness.adapter.behavior.lock().unwrap().hold_terminal_event = false;
+    harness.adapter.control.terminal_event.release();
+    wait_for_status(&harness.task_repository, &first.id, TaskStatus::Succeeded).await;
+    wait_for_status(&harness.task_repository, &second.id, TaskStatus::Succeeded).await;
+    assert_eq!(harness.adapter.action_count("submit_workflow"), 2);
+    wait_for_registry_absent(&harness.registry, &first.id).await;
+    wait_for_registry_absent(&harness.registry, &second.id).await;
+}
+
+#[tokio::test]
+async fn queue_generation_entry_point_waits_for_interactive_execution() {
+    let harness = Harness::new(
+        false,
+        behavior(
+            vec![
+                ComfyExecutionEvent::ExecutionStarted {
+                    prompt_id: "CURRENT".to_owned(),
+                },
+                ComfyExecutionEvent::ExecutionSucceeded {
+                    prompt_id: "CURRENT".to_owned(),
+                },
+            ],
+            Some(success_history()),
+            ComfyQueueState {
+                running_prompt_ids: vec!["CURRENT".to_owned()],
+                pending_prompt_ids: Vec::new(),
+            },
+        ),
+    )
+    .await;
+    harness.adapter.behavior.lock().unwrap().hold_terminal_event = true;
+
+    let first = harness
+        .service
+        .start_generation(harness.request())
+        .await
+        .unwrap();
+    wait_for_status(&harness.task_repository, &first.id, TaskStatus::Running).await;
+    harness
+        .adapter
+        .control
+        .terminal_event
+        .wait_until_reached()
+        .await;
+
+    let mut queue_request = harness.request();
+    queue_request.values.insert(
+        "seed".to_owned(),
+        GenerationInputValue::Seed(SeedValue::Fixed(789)),
+    );
+    let queue_task = harness
+        .service
+        .start_generation_with_task_hook(queue_request, |_| async {
+            Ok::<(), crate::application::ports::RepositoryError>(())
+        })
+        .await
+        .unwrap();
+    wait_for_status(
+        &harness.task_repository,
+        &queue_task.id,
+        TaskStatus::Validating,
+    )
+    .await;
+    assert_eq!(harness.adapter.action_count("submit_workflow"), 1);
+
+    harness.adapter.behavior.lock().unwrap().hold_terminal_event = false;
+    harness.adapter.control.terminal_event.release();
+    wait_for_status(&harness.task_repository, &first.id, TaskStatus::Succeeded).await;
+    wait_for_status(
+        &harness.task_repository,
+        &queue_task.id,
+        TaskStatus::Succeeded,
+    )
+    .await;
+    assert_eq!(harness.adapter.action_count("submit_workflow"), 2);
+    wait_for_registry_absent(&harness.registry, &first.id).await;
+    wait_for_registry_absent(&harness.registry, &queue_task.id).await;
+}
+
+#[tokio::test]
+async fn stream_disconnect_releases_execution_admission() {
+    let harness = Harness::new(
+        false,
+        behavior(
+            Vec::new(),
+            None,
+            ComfyQueueState {
+                running_prompt_ids: Vec::new(),
+                pending_prompt_ids: Vec::new(),
+            },
+        ),
+    )
+    .await;
+
+    let first = harness
+        .service
+        .start_generation(harness.request())
+        .await
+        .unwrap();
+    wait_for_registry_absent(&harness.registry, &first.id).await;
+
+    let mut second_request = harness.request();
+    second_request.values.insert(
+        "seed".to_owned(),
+        GenerationInputValue::Seed(SeedValue::Fixed(456)),
+    );
+    let second = harness
+        .service
+        .start_generation(second_request)
+        .await
+        .unwrap();
+    wait_for_registry_absent(&harness.registry, &second.id).await;
+
+    assert_eq!(harness.adapter.action_count("submit_workflow"), 2);
+}
+
+#[tokio::test]
+async fn cancelled_execution_releases_admission_for_the_next_generation() {
+    let harness = Harness::new(
+        false,
+        behavior(
+            vec![
+                ComfyExecutionEvent::ExecutionStarted {
+                    prompt_id: "CURRENT".to_owned(),
+                },
+                ComfyExecutionEvent::ExecutionInterrupted {
+                    prompt_id: "CURRENT".to_owned(),
+                    node_id: None,
+                    raw: json!({"type": "execution_interrupted"}),
+                },
+            ],
+            None,
+            ComfyQueueState {
+                running_prompt_ids: vec!["CURRENT".to_owned()],
+                pending_prompt_ids: Vec::new(),
+            },
+        ),
+    )
+    .await;
+    harness.adapter.behavior.lock().unwrap().hold_terminal_event = true;
+
+    let first = harness
+        .service
+        .start_generation(harness.request())
+        .await
+        .unwrap();
+    wait_for_status(&harness.task_repository, &first.id, TaskStatus::Running).await;
+    harness
+        .adapter
+        .control
+        .terminal_event
+        .wait_until_reached()
+        .await;
+    harness
+        .cancellation
+        .request_cancel(&first.project_id, first.id.as_str())
+        .await
+        .unwrap();
+    wait_for_action(&harness.adapter, "cancel_prompt").await;
+
+    harness.adapter.behavior.lock().unwrap().hold_terminal_event = false;
+    harness.adapter.control.terminal_event.release();
+    wait_for_status(&harness.task_repository, &first.id, TaskStatus::Cancelled).await;
+    wait_for_registry_absent(&harness.registry, &first.id).await;
+
+    let mut second_request = harness.request();
+    second_request.values.insert(
+        "seed".to_owned(),
+        GenerationInputValue::Seed(SeedValue::Fixed(456)),
+    );
+    let second = harness
+        .service
+        .start_generation(second_request)
+        .await
+        .unwrap();
+    wait_for_status(&harness.task_repository, &second.id, TaskStatus::Failed).await;
+    wait_for_registry_absent(&harness.registry, &second.id).await;
+    assert_eq!(harness.adapter.action_count("submit_workflow"), 2);
+}

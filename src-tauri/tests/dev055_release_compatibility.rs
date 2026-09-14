@@ -1925,7 +1925,7 @@ async fn dev055_backup_18_roundtrip_preserves_consistency_and_preparation_snapsh
         .expect("real consistency project export should produce Backup 18");
     assert!(exported.entries >= 6);
     let archive_manifest = read_zip_json(&archive_path, "manifest.json");
-    assert_eq!(archive_manifest["version"], 18);
+    assert_eq!(archive_manifest["version"], 19);
     let archive_document = read_zip_json(&archive_path, "project.json");
     for (field, expected) in [
         ("characterProfiles", 1),
