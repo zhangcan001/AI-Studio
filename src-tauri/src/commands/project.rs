@@ -85,8 +85,8 @@ pub async fn project_backup_export(
     let Some(file) = app_handle
         .dialog()
         .file()
-        .add_filter("AI Studio 项目备份", &["zip"])
-        .set_file_name("AI-Studio-Project-Backup.zip")
+        .add_filter("归档 / 备份", &["aiarchive", "zip"])
+        .set_file_name("AI-Studio-Project.aiarchive")
         .blocking_save_file()
     else {
         return Ok(None);
@@ -110,7 +110,7 @@ pub async fn project_backup_inspect(
     let Some(file) = app_handle
         .dialog()
         .file()
-        .add_filter("AI Studio 项目备份", &["zip"])
+        .add_filter("归档 / 备份", &["aiarchive", "zip"])
         .blocking_pick_file()
     else {
         return Ok(None);
