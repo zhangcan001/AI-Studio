@@ -113,7 +113,7 @@ pub use production_structure_repository::{
 };
 pub use project_backup_repository::{
     ProjectBackupAssetSource, ProjectBackupRepository, ProjectBackupRepositorySource,
-    ProjectBackupRestorePlan, ProjectBackupSnapshot,
+    ProjectBackupRestorePlan, ProjectBackupRestoreResult, ProjectBackupSnapshot,
 };
 pub use project_command_center_repository::*;
 pub use project_directory_store::{ProjectDirectoryStore, ProjectDirectoryStoreError};
