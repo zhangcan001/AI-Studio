@@ -132,7 +132,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     try {
       const exported = await exportProjectBackup(projectId);
       if (exported) {
-        setBackupNotice(`项目备份已保存：${exported.fileName}（${exported.entries} 个文件）`);
+        setBackupNotice(`项目归档已保存：${exported.fileName}（${exported.entries} 个文件）`);
       }
     } catch (backupError: unknown) {
       setError(toUserMessage(backupError));
@@ -157,7 +157,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
 
   async function restoreBackup() {
     if (!backupPreview) return;
-    if (!window.confirm(`确认恢复项目“${backupPreview.projectName}”？恢复后会创建一个新项目，不会自动生成。`)) return;
+    if (!window.confirm(`确认从归档恢复项目“${backupPreview.projectName}”？会新建项目、不会覆盖、不会自动生成。`)) return;
     setBackupBusy(true);
     setError(undefined);
     try {
@@ -181,8 +181,8 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
           <p className="section-description">将任务和资产整理到本地项目中。</p>
         </div>
         <div className="project-heading-actions">
-          <button type="button" onClick={() => activeProjectId && void exportBackup(activeProjectId)} disabled={saving || backupBusy || !activeProjectId}>导出备份</button>
-          <button type="button" onClick={() => void inspectBackup()} disabled={saving || backupBusy}>恢复项目</button>
+          <button type="button" onClick={() => activeProjectId && void exportBackup(activeProjectId)} disabled={saving || backupBusy || !activeProjectId}>导出归档</button>
+          <button type="button" onClick={() => void inspectBackup()} disabled={saving || backupBusy}>检查归档</button>
           <button type="button" onClick={beginCreate} disabled={saving || backupBusy}>新建项目</button>
         </div>
       </div>
@@ -193,16 +193,18 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         <section className="project-backup-preview" aria-labelledby="project-backup-preview-title">
           <div className="section-heading">
             <div>
-              <span className="section-label">备份预览</span>
+              <span className="section-label">归档检查</span>
               <h3 id="project-backup-preview-title">{backupPreview.projectName}</h3>
             </div>
             <button type="button" className="quiet-button" onClick={() => setBackupPreview(undefined)} disabled={backupBusy}>取消</button>
           </div>
+          <p>先检查再恢复：确认内容无误后才会新建项目，不会覆盖现有项目，也不会自动生成。</p>
           <p>图片 {backupPreview.imageCount} · 视频 {backupPreview.videoCount} · 音频 {backupPreview.audioCount} · 历史任务 {backupPreview.historyTasks} · 预设 {backupPreview.presets} · 生产队列 {backupPreview.productionQueues} · 基准实验 {backupPreview.benchmarks ?? 0} · 镜头 {backupPreview.shots ?? 0}</p>
+          <p>资产版本 {backupPreview.assetVersions ?? 0} · 关系 {backupPreview.assetRelations ?? 0} · 模型 {backupPreview.models ?? 0} · 工具 {backupPreview.tools ?? 0} · 溯源 {((backupPreview.generationToolUsages ?? 0) + (backupPreview.generationAssetVersions ?? 0))}</p>
           {backupPreview.missingWorkflows.length > 0 && <p className="error-message">缺少工作流：{backupPreview.missingWorkflows.join("、")}；历史记录仍可恢复。</p>}
           <p className="settings-warning">{backupPreview.warning}</p>
           <button type="button" className="primary-action" onClick={() => void restoreBackup()} disabled={backupBusy}>
-            {backupBusy ? "正在恢复……" : "确认恢复项目"}
+            {backupBusy ? "正在恢复……" : "确认恢复（新建项目）"}
           </button>
         </section>
       )}
@@ -298,7 +300,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
                   打开
                 </button>
                 <button type="button" className="quiet-button" onClick={() => beginEdit(project)} disabled={saving || backupBusy}>编辑</button>
-                <button type="button" className="quiet-button" onClick={() => void exportBackup(project.id)} disabled={saving || backupBusy}>导出备份</button>
+                <button type="button" className="quiet-button" onClick={() => void exportBackup(project.id)} disabled={saving || backupBusy}>导出归档</button>
               </span>
             </div>
           );
