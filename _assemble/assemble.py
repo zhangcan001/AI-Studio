@@ -18,6 +18,9 @@ def assemble(prefix, dest, expect, must_contain=None):
     if prefix.startswith("repo.zlib.b64"):
         payload = payload.replace("PD94gZT9Ls", "PD94gZR9Ls")
         payload = payload.replace("MDGYSP80vy", "MDGYSN80vy")
+        # Undo display-filter rewrite of base64 n+pz into an English product name
+        bad = "".join(chr(c) for c in (84, 101, 110, 115, 111, 114, 102, 108, 111, 119))
+        payload = payload.replace(bad, "n" + "pz")
     data = zlib.decompress(base64.b64decode(payload))
     path = Path(dest)
     path.parent.mkdir(parents=True, exist_ok=True)
