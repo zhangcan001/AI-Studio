@@ -3670,9 +3670,12 @@ fn dry_run_compile(
     let mut values = BTreeMap::new();
     for (key, definition) in &recipe.inputs {
         let value = match definition {
-            InputDefinition::TextArea { default, .. } => InputValue::String(
+            InputDefinition::TextArea {
+                default, required, ..
+            } => InputValue::String(
                 default
                     .clone()
+                    .filter(|value| !*required || !value.trim().is_empty())
                     .unwrap_or_else(|| "onboarding placeholder".to_owned()),
             ),
             InputDefinition::Integer { default, min, .. } => {
@@ -5617,6 +5620,30 @@ outputs: []
         assert_eq!(parsed, recipe);
         assert_eq!(recipe.outputs[0].output_type, OutputType::Image);
         assert!(yaml.contains("schema_version: 1"));
+    }
+
+    #[test]
+    fn read_back_accepts_required_textarea_with_empty_default() {
+        let package = WorkflowPackageBytes::new(
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/runtime_packages/minimax_h3_fl2va_1_0_0/manifest.yaml"
+            ))
+            .to_vec(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/runtime_packages/minimax_h3_fl2va_1_0_0/recipe.yaml"
+            ))
+            .to_vec(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/runtime_packages/minimax_h3_fl2va_1_0_0/workflow_api.json"
+            ))
+            .to_vec(),
+        );
+
+        read_back_and_validate_package(&package)
+            .expect("a required prompt with an empty UI default should use a dry-run placeholder");
     }
 
     #[tokio::test]
