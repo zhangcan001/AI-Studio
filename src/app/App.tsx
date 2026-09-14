@@ -66,6 +66,7 @@ import {
 import "./App.css";
 import "../styles/studioTokens.css";
 import "../styles/uiPolish.css";
+import "../styles/studioQuality.css";
 
 const GenerationStudio = lazy(() => import("../features/studio/GenerationStudio").then(({ GenerationStudio }) => ({ default: GenerationStudio })));
 const AssetWorkspace = lazy(() => import("../features/assets/AssetWorkspace").then(({ AssetWorkspace }) => ({ default: AssetWorkspace })));

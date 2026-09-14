@@ -1,32 +1,37 @@
 :root {
-  --studio-bg: #0b0d10;
-  --studio-surface-1: #101216;
-  --studio-surface-2: #14171c;
-  --studio-surface-3: #191c22;
-  --studio-border: rgba(255, 255, 255, 0.07);
-  --studio-border-strong: rgba(255, 255, 255, 0.12);
+  /* Calm ink surfaces keep attention on the work instead of the chrome. */
+  --studio-bg: #0e1117;
+  --studio-surface-1: #141821;
+  --studio-surface-2: #1a202b;
+  --studio-surface-3: #222a38;
+  --studio-border: rgba(148, 163, 184, 0.16);
+  --studio-border-strong: rgba(148, 163, 184, 0.28);
 
-  --studio-text: #f3f4f6;
-  --studio-text-secondary: #9ca3af;
-  --studio-text-muted: #6b7280;
+  --studio-text: #f1f5f9;
+  --studio-text-secondary: #b3bdcc;
+  --studio-text-muted: #7f8a9c;
 
-  --studio-accent: #8b5cf6;
+  /* Indigo is the single interactive accent; status colors stay semantic. */
+  --studio-accent: #a78bfa;
   --studio-accent-strong: #7c3aed;
-  --studio-accent-hover: #a78bfa;
-  --studio-accent-soft: rgba(139, 92, 246, 0.12);
-  --studio-success: #34d399;
-  --studio-warning: #f59e0b;
-  --studio-danger: #f87171;
+  --studio-accent-hover: #c4b5fd;
+  --studio-accent-soft: rgba(139, 92, 246, 0.16);
+  --studio-success: #4ade80;
+  --studio-warning: #fbbf24;
+  --studio-danger: #fb7185;
+  --studio-info: #60a5fa;
 
-  --studio-radius-sm: 6px;
-  --studio-radius-md: 8px;
+  --studio-radius-sm: 8px;
+  --studio-radius-md: 10px;
+  --studio-radius-lg: 12px;
+  --studio-radius-xl: 16px;
 
-  --studio-topbar-height: 50px;
+  --studio-topbar-height: 56px;
   --studio-global-rail-width: 72px;
-  --studio-structure-width: 260px;
-  --studio-inspector-width: 332px;
-  --studio-queue-collapsed-height: 40px;
-  --studio-queue-expanded-height: 240px;
+  --studio-structure-width: 248px;
+  --studio-inspector-width: 320px;
+  --studio-queue-collapsed-height: 44px;
+  --studio-queue-expanded-height: 264px;
 
   --studio-space-1: 4px;
   --studio-space-2: 8px;
@@ -34,9 +39,14 @@
   --studio-space-4: 16px;
   --studio-space-5: 20px;
   --studio-space-6: 24px;
+  --studio-space-7: 32px;
+  --studio-space-8: 40px;
+  --studio-control-height: 38px;
   --studio-motion-fast: 160ms;
   --studio-motion-standard: 220ms;
   --studio-focus-ring: 0 0 0 2px var(--studio-bg), 0 0 0 4px var(--studio-accent-hover);
+  --studio-shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.22);
+  --studio-shadow-popover: 0 20px 48px rgba(0, 0, 0, 0.34);
   --studio-font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
 
   /* Keep the legacy feature styles on the same visual language inside StudioShell. */

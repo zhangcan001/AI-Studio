@@ -1,0 +1,606 @@
+/*
+ * AI Studio visual quality layer.
+ *
+ * The existing feature CSS is intentionally left in place. This final,
+ * shell-scoped layer gives every workspace the same visual grammar: quiet ink
+ * surfaces, a single indigo action color, readable type, predictable controls,
+ * and clear state affordances. It changes presentation only; data, routing,
+ * transport, and production lifecycle behavior stay untouched.
+ */
+
+:root {
+  color-scheme: dark;
+  color: var(--studio-text);
+  background: var(--studio-bg);
+  font-family: var(--studio-font-family);
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--studio-bg);
+}
+
+body {
+  color: var(--studio-text);
+  font-family: var(--studio-font-family);
+  text-rendering: optimizeLegibility;
+}
+
+/* Remove the legacy grid/vignette decoration so content has visual priority. */
+body::before,
+body::after {
+  display: none;
+}
+
+.startup-screen {
+  min-height: 100vh;
+  padding: var(--studio-space-6);
+  background: var(--studio-bg);
+}
+
+.startup-card {
+  width: min(520px, 100%);
+  padding: var(--studio-space-7);
+  border: 1px solid var(--studio-border-strong);
+  border-radius: var(--studio-radius-xl);
+  background: var(--studio-surface-1);
+  box-shadow: var(--studio-shadow-panel);
+  text-align: center;
+}
+
+.startup-card h1 {
+  margin: var(--studio-space-3) 0;
+  color: var(--studio-text);
+  letter-spacing: -0.025em;
+}
+
+.startup-card p {
+  margin: 0 0 var(--studio-space-5);
+  color: var(--studio-text-secondary);
+  line-height: 1.6;
+}
+
+.startup-card .primary-action {
+  border-color: var(--studio-accent-strong);
+  color: #ffffff;
+  background: var(--studio-accent-strong);
+}
+
+.startup-card .primary-action:hover:not(:disabled) {
+  border-color: var(--studio-accent-hover);
+  background: #8b5cf6;
+}
+
+.studio-shell {
+  --ux-surface-0: var(--studio-bg);
+  --ux-surface-1: var(--studio-surface-1);
+  --ux-surface-2: var(--studio-surface-2);
+  --ux-surface: var(--studio-surface-2);
+  --ux-surface-raised: var(--studio-surface-3);
+  --ux-border: var(--studio-border);
+  --ux-border-strong: var(--studio-border-strong);
+  --ux-text: var(--studio-text);
+  --ux-muted: var(--studio-text-secondary);
+  --ux-accent: var(--studio-accent);
+  --ux-accent-strong: var(--studio-accent-strong);
+  --ux-accent-contrast: #0e1117;
+  --ux-success: var(--studio-success);
+  --ux-warning: var(--studio-warning);
+  --ux-danger: var(--studio-danger);
+  --ux-shadow: var(--studio-shadow-panel);
+  --ux-shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.18);
+  color: var(--studio-text);
+  background: var(--studio-bg);
+}
+
+.studio-shell__body {
+  background: var(--studio-bg);
+}
+
+.studio-shell__main {
+  background: var(--studio-bg);
+}
+
+.studio-shell__structure,
+.studio-shell__inspector,
+.studio-shell__queue {
+  background: var(--studio-surface-1);
+}
+
+.studio-shell__structure {
+  border-right-color: var(--studio-border);
+}
+
+.studio-shell__inspector {
+  border-left-color: var(--studio-border);
+}
+
+.studio-shell__queue {
+  border-top-color: var(--studio-border-strong);
+}
+
+.app-main-content {
+  width: min(100%, 1680px);
+  padding: 28px 30px 48px;
+}
+
+.app-main-content > .workspace-panel:not(.shot-workspace) {
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-lg);
+  background: var(--studio-surface-1);
+  box-shadow: var(--studio-shadow-panel);
+}
+
+.app-main-content :where(h1, h2, h3, h4) {
+  color: var(--studio-text);
+  letter-spacing: -0.02em;
+}
+
+.app-main-content :where(h2) {
+  font-size: 1.28rem;
+  line-height: 1.25;
+}
+
+.app-main-content :where(h3) {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.app-main-content :where(p) {
+  line-height: 1.55;
+}
+
+.studio-shell :where(.section-description, .field-hint, .disabled-note, .empty-state, .prompt-studio-note, .local-tool-hub-note) {
+  color: var(--studio-text-secondary);
+}
+
+.workspace-heading {
+  gap: var(--studio-space-4);
+  margin-bottom: var(--studio-space-5);
+  padding-bottom: var(--studio-space-4);
+  border-bottom-color: var(--studio-border);
+}
+
+.section-label {
+  color: var(--studio-accent);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+/* A restrained panel language replaces feature-by-feature gradients. */
+.studio-shell :where(
+  .studio-panel,
+  .workspace-panel,
+  .studio-empty,
+  .task-card,
+  .output-card,
+  .batch-panel,
+  .production-queue-panel,
+  .production-queue-panel-inline,
+  .h3-mode-selector,
+  .h3-quality-profile,
+  .h3-safety-card,
+  .h3-batch-prompt-panel,
+  .settings-card,
+  .project-template-card,
+  .project-form,
+  .project-backup-preview,
+  .workflow-catalog,
+  .workflow-health-dashboard,
+  .workflow-onboarding-panel,
+  .workflow-diagnostics-panel,
+  .asset-video-batch-card,
+  .prompt-studio-list-panel,
+  .prompt-studio-detail-panel,
+  .prompt-studio-model-panel,
+  .local-tool-hub-list-panel,
+  .local-tool-hub-detail-panel
+) {
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-lg);
+  background: var(--studio-surface-1);
+  box-shadow: var(--studio-shadow-panel);
+}
+
+.studio-shell :where(
+  .prompt-studio-subpanel,
+  .local-tool-hub-subpanel,
+  .detail-section,
+  .production-audit-section,
+  .project-command-card,
+  .project-command-stat,
+  .project-command-scene-row,
+  .project-command-issue,
+  .project-command-activity,
+  .project-command-action
+) {
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-2);
+  box-shadow: none;
+}
+
+/* Shared controls: one height, one focus treatment, no hover lift. */
+.studio-shell :where(button, input, select, textarea) {
+  border-radius: var(--studio-radius-sm);
+  font-family: inherit;
+}
+
+.studio-shell button {
+  min-height: var(--studio-control-height);
+  padding: 8px 12px;
+  border: 1px solid var(--studio-border-strong);
+  color: var(--studio-text);
+  background: var(--studio-surface-2);
+  box-shadow: none;
+  transition: border-color var(--studio-motion-fast) ease, background var(--studio-motion-fast) ease, color var(--studio-motion-fast) ease;
+}
+
+.studio-shell button:hover:not(:disabled) {
+  border-color: var(--studio-accent);
+  color: var(--studio-text);
+  background: var(--studio-surface-3);
+  box-shadow: none;
+  transform: none;
+}
+
+.studio-shell button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.studio-shell :where(input, select, textarea) {
+  min-height: var(--studio-control-height);
+  border: 1px solid var(--studio-border-strong);
+  color: var(--studio-text);
+  background: var(--studio-surface-2);
+  box-shadow: none;
+  transition: border-color var(--studio-motion-fast) ease, background var(--studio-motion-fast) ease, box-shadow var(--studio-motion-fast) ease;
+}
+
+.studio-shell :where(input:not([type="checkbox"]):not([type="radio"]), select) {
+  padding: 8px 11px;
+}
+
+.studio-shell textarea {
+  padding: 10px 11px;
+}
+
+.studio-shell :where(input, select, textarea):hover {
+  border-color: var(--studio-border-strong);
+  background: var(--studio-surface-3);
+}
+
+.studio-shell :where(input, select, textarea):focus {
+  border-color: var(--studio-accent);
+  box-shadow: 0 0 0 3px var(--studio-accent-soft);
+}
+
+.studio-shell :where(input[type="checkbox"], input[type="radio"]) {
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+  accent-color: var(--studio-accent-strong);
+}
+
+.studio-shell :where(button, a, input, select, textarea, summary):focus-visible {
+  outline: none;
+  box-shadow: var(--studio-focus-ring);
+}
+
+.studio-shell :where(.primary-action, .generate-button, .shot-primary-action, .series-production-primary-action, .production-package-workspace-create-button) {
+  border-color: var(--studio-accent-strong);
+  color: #ffffff;
+  background: var(--studio-accent-strong);
+}
+
+.studio-shell :where(.primary-action, .generate-button, .shot-primary-action, .series-production-primary-action, .production-package-workspace-create-button):hover:not(:disabled) {
+  border-color: var(--studio-accent-hover);
+  color: #ffffff;
+  background: #8b5cf6;
+}
+
+.studio-shell .quiet-button {
+  border-color: var(--studio-border);
+  color: var(--studio-text-secondary);
+  background: transparent;
+}
+
+.studio-shell .quiet-button:hover:not(:disabled) {
+  border-color: var(--studio-border-strong);
+  color: var(--studio-text);
+  background: var(--studio-surface-2);
+}
+
+.studio-shell .danger-button {
+  border-color: color-mix(in srgb, var(--studio-danger) 52%, var(--studio-border));
+  color: #fecdd3;
+  background: color-mix(in srgb, var(--studio-danger) 12%, var(--studio-surface-1));
+}
+
+/* Mature-product list rhythm: quiet headers, generous rows, clear selection. */
+.studio-shell :where(.prompt-studio-table, .local-tool-hub-table, .task-history-table, .shot-history-table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--studio-text);
+  font-size: 0.8rem;
+}
+
+.studio-shell :where(.prompt-studio-table, .local-tool-hub-table, .task-history-table, .shot-history-table) :where(th, td) {
+  padding: 11px 10px;
+  border-bottom-color: var(--studio-border);
+}
+
+.studio-shell :where(.prompt-studio-table, .local-tool-hub-table, .task-history-table, .shot-history-table) thead th {
+  color: var(--studio-text-muted);
+  font-size: 0.67rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.studio-shell :where(.prompt-studio-table, .local-tool-hub-table, .task-history-table, .shot-history-table) tbody tr {
+  transition: background var(--studio-motion-fast) ease;
+}
+
+.studio-shell :where(.prompt-studio-table, .local-tool-hub-table, .task-history-table, .shot-history-table) tbody tr:hover {
+  background: color-mix(in srgb, var(--studio-accent) 7%, transparent);
+}
+
+.studio-shell :where(.prompt-studio-table, .local-tool-hub-table, .task-history-table, .shot-history-table) tbody tr.active {
+  background: var(--studio-accent-soft);
+  box-shadow: inset 3px 0 0 var(--studio-accent);
+}
+
+.studio-shell :where(.prompt-studio-row-button, .local-tool-hub-row-button) {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  color: var(--studio-text);
+  background: transparent;
+}
+
+.studio-shell :where(.prompt-studio-row-button, .local-tool-hub-row-button):hover:not(:disabled) {
+  color: var(--studio-accent-hover);
+  background: transparent;
+}
+
+/* Filters and tabs read as controls, not as another stack of cards. */
+.studio-shell :where(.prompt-studio-toolbar, .asset-library-query, .asset-workspace-tabs, .filter-row, .asset-bulk-toolbar, .local-tool-hub-scope) {
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-2);
+  box-shadow: none;
+}
+
+.studio-shell :where(.workspace-nav-button, .asset-workspace-tabs .workspace-nav-button, .filter-button) {
+  color: var(--studio-text-secondary);
+  background: transparent;
+  box-shadow: none;
+}
+
+.studio-shell :where(.workspace-nav-button, .asset-workspace-tabs .workspace-nav-button, .filter-button):hover:not(:disabled) {
+  border-color: var(--studio-border);
+  color: var(--studio-text);
+  background: var(--studio-surface-3);
+}
+
+.studio-shell :where(.workspace-nav-button-active, .filter-button-active, .asset-workspace-tabs [aria-selected="true"]) {
+  border-color: color-mix(in srgb, var(--studio-accent) 64%, var(--studio-border));
+  color: var(--studio-text);
+  background: var(--studio-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--studio-accent) 20%, transparent);
+}
+
+.studio-shell :where(.status-pill, .local-tool-health-badge, .shot-status-chip, .pipeline-status-chip, .workflow-readiness, .workflow-capability) {
+  border: 1px solid var(--studio-border);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.studio-shell :where(.status-pill, .local-tool-health-badge) {
+  padding: 5px 8px;
+}
+
+.studio-shell :where(.empty-state, .workspace-loading, .project-command-loading) {
+  min-height: 72px;
+  margin: 0;
+  padding: 22px 16px;
+  border: 1px dashed var(--studio-border-strong);
+  border-radius: var(--studio-radius-md);
+  color: var(--studio-text-secondary);
+  background: var(--studio-surface-2);
+  text-align: center;
+}
+
+.studio-shell :where(.error-message, .settings-warning, .production-review-item-error, .local-tool-hub-detail-error) {
+  border-color: color-mix(in srgb, var(--studio-danger) 48%, var(--studio-border));
+  border-left: 3px solid var(--studio-danger);
+  border-radius: var(--studio-radius-sm);
+  color: #fecdd3;
+  background: color-mix(in srgb, var(--studio-danger) 9%, var(--studio-surface-1));
+}
+
+.studio-shell :where(.studio-notice, .settings-notice, .workflow-notice) {
+  border-color: color-mix(in srgb, var(--studio-success) 42%, var(--studio-border));
+  border-left: 3px solid var(--studio-success);
+  border-radius: var(--studio-radius-sm);
+  color: #bbf7d0;
+  background: color-mix(in srgb, var(--studio-success) 8%, var(--studio-surface-1));
+}
+
+.studio-shell :where(pre, code) {
+  color: #d7ccff;
+}
+
+/* Asset cards use the media as the focal point and keep metadata quiet. */
+.app-workspace-assets .asset-library-card {
+  border-color: var(--studio-border);
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-surface-1);
+  box-shadow: none;
+  transition: border-color var(--studio-motion-fast) ease, background var(--studio-motion-fast) ease;
+}
+
+.app-workspace-assets .asset-library-card:hover {
+  border-color: var(--studio-accent);
+  background: var(--studio-surface-2);
+  box-shadow: none;
+  transform: none;
+}
+
+.app-workspace-assets .asset-library-image {
+  border-bottom-color: var(--studio-border);
+  background: var(--studio-bg);
+}
+
+.app-workspace-assets .asset-library-card-copy {
+  padding: 12px 13px 10px;
+}
+
+.app-workspace-assets .asset-library-card-copy strong {
+  color: var(--studio-text);
+  font-size: 0.84rem;
+}
+
+.app-workspace-assets .asset-library-card-copy :where(span, small) {
+  color: var(--studio-text-secondary);
+}
+
+/* Top chrome: context first, controls second, with less visual competition. */
+.studio-topbar {
+  min-height: var(--studio-topbar-height);
+  padding-inline: 16px;
+  border-bottom-color: var(--studio-border-strong);
+  background: var(--studio-surface-1);
+}
+
+.studio-topbar__brand-mark {
+  width: 30px;
+  height: 30px;
+  border-color: color-mix(in srgb, var(--studio-accent) 52%, var(--studio-border));
+  border-radius: 9px;
+  color: var(--studio-accent-hover);
+  background: var(--studio-accent-soft);
+}
+
+.studio-topbar__brand-copy strong {
+  color: var(--studio-text);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+}
+
+.studio-topbar__breadcrumb-current {
+  color: var(--studio-text);
+  font-weight: 700;
+}
+
+.studio-topbar__project-context :where(select, button),
+.studio-topbar__search-trigger {
+  border-color: var(--studio-border);
+  background: var(--studio-surface-2);
+}
+
+.studio-topbar__search-trigger {
+  min-height: 38px;
+  color: var(--studio-text-secondary);
+}
+
+.studio-topbar__search-trigger:hover {
+  border-color: var(--studio-accent);
+  color: var(--studio-text);
+  background: var(--studio-surface-3);
+}
+
+.studio-topbar__icon-button {
+  width: 38px;
+  height: 38px;
+  color: var(--studio-text-secondary);
+}
+
+/* Rail: persistent navigation without turning every item into a tile. */
+.studio-global-rail {
+  border-right-color: var(--studio-border-strong);
+  background: #11151d;
+}
+
+.studio-global-rail__brand {
+  min-height: 64px;
+}
+
+.studio-global-rail__brand-mark {
+  width: 32px;
+  height: 32px;
+  border-color: color-mix(in srgb, var(--studio-accent) 52%, var(--studio-border));
+  border-radius: 9px;
+  color: var(--studio-accent-hover);
+  background: var(--studio-accent-soft);
+}
+
+.studio-global-rail__nav {
+  gap: 4px;
+  padding: 8px 6px;
+}
+
+.studio-global-rail__item {
+  min-height: 54px;
+  border-radius: var(--studio-radius-sm);
+  color: var(--studio-text-muted);
+  font-size: 0.66rem;
+}
+
+.studio-global-rail__item:hover {
+  border-color: var(--studio-border);
+  color: var(--studio-text-secondary);
+  background: var(--studio-surface-2);
+}
+
+.studio-global-rail__item--active {
+  border-color: color-mix(in srgb, var(--studio-accent) 28%, var(--studio-border));
+  color: var(--studio-text);
+  background: var(--studio-accent-soft);
+}
+
+.studio-global-rail__item--active::before {
+  background: var(--studio-accent);
+}
+
+.studio-global-rail__item--active svg {
+  color: var(--studio-accent-hover);
+}
+
+/* Keep the shell usable on narrow windows without horizontal page overflow. */
+@media (max-width: 1180px) {
+  .app-main-content {
+    padding: 22px 22px 40px;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-main-content {
+    padding: 16px 12px 32px;
+  }
+
+  .studio-topbar {
+    padding-inline: 10px;
+  }
+
+  .studio-topbar__brand-copy {
+    display: none;
+  }
+
+  .studio-global-rail__item {
+    min-height: 50px;
+    font-size: 0.6rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-shell :where(button, input, select, textarea, .studio-global-rail__item, .studio-topbar__search-trigger, .studio-topbar__icon-button, table tbody tr) {
+    transition: none;
+  }
+}
