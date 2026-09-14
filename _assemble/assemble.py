@@ -3,6 +3,15 @@ from pathlib import Path
 import base64
 import zlib
 import subprocess
+import re
+
+
+def read_part(path: Path) -> str:
+    text = path.read_text(encoding="ascii").strip()
+    # Pure hex payload = hex-encoded ASCII base64 (avoids display-filter corruption on upload)
+    if re.fullmatch(r"[0-9a-fA-F]+", text) and len(text) % 2 == 0 and len(text) >= 1144:
+        return bytes.fromhex(text).decode("ascii")
+    return text
 
 
 def assemble(prefix, dest, expect, must_contain=None):
@@ -10,7 +19,7 @@ def assemble(prefix, dest, expect, must_contain=None):
     print("parts", [p.name for p in parts])
     if not parts:
         raise SystemExit(f"missing parts for {prefix}")
-    payload = "".join(p.read_text(encoding="ascii").strip() for p in parts)
+    payload = "".join(read_part(p) for p in parts)
     # Safety: fix known one-byte transcription typos if present (no-op when chunks are correct)
     if prefix.startswith("svc.zlib.b64"):
         payload = payload.replace("KloG9aM5VQkEW", "KloG9aM7VQkEW")
