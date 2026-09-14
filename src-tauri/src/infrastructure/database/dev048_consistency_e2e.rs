@@ -1549,11 +1549,11 @@ fn dev048_version_migration_and_scope_gate_is_explicit() {
             .is_some_and(|version| version <= 36)
     }));
     let package = fs::read_to_string(root.parent().unwrap().join("package.json")).unwrap();
-    assert!(package.contains("\"version\": \"1.3.1\""));
+    assert!(package.contains("\"version\": \"2.0.0-personal\""));
     let cargo = fs::read_to_string(root.join("Cargo.toml")).unwrap();
-    assert!(cargo.contains("version = \"1.3.1\""));
+    assert!(cargo.contains("version = \"2.0.0-personal\""));
     let tauri = fs::read_to_string(root.join("tauri.conf.json")).unwrap();
-    assert!(tauri.contains("\"version\": \"1.3.1\""));
+    assert!(tauri.contains("\"version\": \"2.0.0-personal\""));
     let backup =
         fs::read_to_string(root.join("src/application/project_backup_service.rs")).unwrap();
     assert!(backup.contains("const BACKUP_VERSION: u32 = 19"));
