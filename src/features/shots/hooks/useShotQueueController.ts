@@ -20,7 +20,7 @@ import { toUserMessage } from "../../../i18n/errorMessages";
 import {
   emptySequentialBatchStartState,
   hasTerminalSequentialFailure,
-  isCleanSequentialCompletion,
+  isSequentialCompletion,
   isStructuredProductionQueueBusy,
   retainSequentialBatchFirst,
   sequentialBatchStartReducer,
@@ -167,12 +167,12 @@ export function useShotQueueController({
           applySequentialAction({ type: "PAUSE", reason: "当前批次已暂停，请先处理当前批次。", canResume: false });
           return;
         }
-        if (!isCleanSequentialCompletion(currentBatch)) {
-          if (hasTerminalSequentialFailure(currentBatch)) {
+        if (!isSequentialCompletion(currentBatch)) {
+          if (currentBatch.status !== "COMPLETED" && hasTerminalSequentialFailure(currentBatch)) {
             if (sequentialRef.current.queuedBatchIds.length === 0) {
               applySequentialAction({ type: "RESET" });
             } else {
-              applySequentialAction({ type: "PAUSE", reason: "上一批存在失败、取消或跳过项。", canResume: true });
+              applySequentialAction({ type: "PAUSE", reason: "当前批次未正常完成，请先确认当前状态。", canResume: true });
             }
           }
           return;

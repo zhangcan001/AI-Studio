@@ -233,4 +233,17 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain("RUNTIME_ADMISSION_COMFY_UNAVAILABLE");
     expect(html).toContain('role="alert"');
   });
+
+  it("does not describe a currently paused batch as a previous-batch failure", () => {
+    const html = renderToStaticMarkup(
+      <ProductionQueueDrawer
+        sequentialStartStatus="PAUSED"
+        sequentialPauseReason="当前批次已暂停，请先处理当前批次。"
+        sequentialCanResume={false}
+      />,
+    );
+
+    expect(html).toContain("请在当前批次中继续生产或处理失败项");
+    expect(html).not.toContain("请先处理上一批失败项");
+  });
 });

@@ -78,7 +78,7 @@ export function ProductionQueuePanel({
   const [name, setName] = useState("");
   const [namePresets, setNamePresets] = useState<string[]>([]);
   const [selectedNamePreset, setSelectedNamePreset] = useState("");
-  const [continueOnFailure, setContinueOnFailure] = useState(false);
+  const [continueOnFailure, setContinueOnFailure] = useState(true);
   const [queues, setQueues] = useState<ProductionBatchSummary[]>([]);
   const [overview, setOverview] = useState<ProductionQueueOverview>();
   const [detail, setDetail] = useState<ProductionBatchDetail>();
@@ -496,7 +496,7 @@ export function ProductionQueuePanel({
             checked={continueOnFailure}
             onChange={(event) => setContinueOnFailure(event.target.checked)}
           />
-          非执行失败或取消后继续
+          单项失败后继续，失败项稍后可重试
         </label>
         <button type="button" disabled={busy || !batchItems.length} onClick={() => void saveQueue()}>
           创建待启动队列（{batchItems.length}）

@@ -417,9 +417,9 @@ impl ShotBatchService {
                 now.format("%Y-%m-%d %H:%M:%S")
             ),
             status: ProductionBatchStatus::Ready,
-            // H3 is intentionally strict-sequential but should still finish
-            // the remaining selected Shots after one item fails.
-            continue_on_failure: request.stage == ShotStage::Video,
+            // H3 remains execution-serial, but an independent failed Shot
+            // should not block the remaining selected Shots.
+            continue_on_failure: true,
             archived_at: None,
             created_at: now,
             updated_at: now,

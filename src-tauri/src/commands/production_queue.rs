@@ -15,12 +15,16 @@ use tauri::State;
 
 use super::generation::InputValueDto;
 
+fn default_continue_on_failure() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductionQueueCreateRequest {
     pub project_id: String,
     pub name: String,
-    #[serde(default)]
+    #[serde(default = "default_continue_on_failure")]
     pub continue_on_failure: bool,
     pub items: Vec<ProductionQueueCreateItemRequest>,
     /// When true, the one item is a direct-entry request that is prepared in

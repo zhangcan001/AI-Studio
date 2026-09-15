@@ -409,14 +409,17 @@ function SequentialStatusBar({
   const formattedPauseReason = pauseReason ? formatUiError(pauseReason) : undefined;
   const displayPauseReason = formattedPauseReason?.code
     ? formattedPauseReason.message
-    : pauseReason ?? "上一批存在失败项。";
+    : pauseReason ?? "连续运行需要先确认当前批次状态。";
   const technicalPauseReason = formattedPauseReason?.code
     && formattedPauseReason.technicalMessage !== displayPauseReason
     ? formattedPauseReason.technicalMessage
     : undefined;
+  const currentBatchPaused = pauseReason === "当前批次已暂停，请先处理当前批次。";
   const pauseGuidance = formattedPauseReason?.code
     ? "请先处理运行环境问题，再重试启动；不会自动提交新的生产任务。"
-    : "请先处理上一批失败项，再继续后续生产。";
+    : currentBatchPaused
+      ? "请在当前批次中继续生产或处理失败项，完成后再继续后续批次。"
+      : "请先确认暂停原因，再继续后续生产。";
 
   return (
     <div className="production-queue-drawer-sequence production-queue-drawer-sequence-paused" data-sequential-status="PAUSED" role="alert">

@@ -3,6 +3,7 @@ import type { ProductionBatchDetail } from "../../types/productionQueue";
 import {
   emptySequentialBatchStartState,
   isCleanSequentialCompletion,
+  isSequentialCompletion,
   isStructuredProductionQueueBusy,
   sequentialBatchStartReducer,
 } from "./shotQueueState";
@@ -55,7 +56,7 @@ describe("shot sequential queue state", () => {
   it("pauses and resumes without creating a second state source", () => {
     const paused = sequentialBatchStartReducer(
       { status: "ACTIVE", currentBatchId: "batch-a", queuedBatchIds: ["batch-b"] },
-      { type: "PAUSE", reason: "上一批存在失败、取消或跳过项。", canResume: true },
+      { type: "PAUSE", reason: "当前批次未正常完成，请先确认当前状态。", canResume: true },
     );
     const resumed = sequentialBatchStartReducer(paused, { type: "RESUME" });
 
@@ -66,6 +67,7 @@ describe("shot sequential queue state", () => {
 
   it("recognizes clean completion and structured queue busy errors", () => {
     expect(isCleanSequentialCompletion(batch())).toBe(true);
+    expect(isSequentialCompletion(batch({ failed: 1, succeeded: 0 }))).toBe(true);
     expect(isCleanSequentialCompletion(batch({ failed: 1, succeeded: 0 }))).toBe(false);
     expect(isStructuredProductionQueueBusy({ code: "PRODUCTION_QUEUE_BUSY" })).toBe(true);
     expect(isStructuredProductionQueueBusy({ code: "COMFY_TIMEOUT" })).toBe(false);

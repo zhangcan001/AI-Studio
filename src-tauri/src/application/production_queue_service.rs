@@ -1984,7 +1984,20 @@ fn should_pause_after_terminal(
     continue_on_failure: bool,
 ) -> bool {
     status != ProductionBatchItemStatus::Succeeded
-        && (!continue_on_failure || matches!(error_code, Some("EXECUTION_ERROR" | "COMFY_OFFLINE")))
+        && (!continue_on_failure || is_safety_blocking_failure(error_code))
+}
+
+fn is_safety_blocking_failure(error_code: Option<&str>) -> bool {
+    matches!(
+        error_code,
+        Some(
+            "COMFY_OFFLINE"
+                | "COMFY_STREAM_DISCONNECTED"
+                | "SUBMISSION_STATE_UNCERTAIN"
+                | "QUEUE_DISPATCH_UNCERTAIN"
+                | "EXECUTION_ADMISSION_UNAVAILABLE"
+        )
+    )
 }
 
 fn normalize_queue_failure_code<'a>(
@@ -2698,7 +2711,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_error_always_pauses_even_when_continue_on_failure_is_enabled() {
+    fn ordinary_failures_continue_but_uncertain_execution_states_pause() {
         assert!(!should_pause_after_terminal(
             ProductionBatchItemStatus::Succeeded,
             None,
@@ -2709,14 +2722,39 @@ mod tests {
             Some("COMFY_TIMEOUT"),
             true,
         ));
-        assert!(should_pause_after_terminal(
+        assert!(!should_pause_after_terminal(
             ProductionBatchItemStatus::Failed,
             Some("EXECUTION_ERROR"),
             true,
         ));
         assert!(should_pause_after_terminal(
             ProductionBatchItemStatus::Failed,
+            Some("EXECUTION_ERROR"),
+            false,
+        ));
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
             Some("COMFY_OFFLINE"),
+            true,
+        ));
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("COMFY_STREAM_DISCONNECTED"),
+            true,
+        ));
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("SUBMISSION_STATE_UNCERTAIN"),
+            true,
+        ));
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("QUEUE_DISPATCH_UNCERTAIN"),
+            true,
+        ));
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("EXECUTION_ADMISSION_UNAVAILABLE"),
             true,
         ));
         assert!(should_pause_after_terminal(

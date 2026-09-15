@@ -123,7 +123,7 @@ const createdBatch: ProductionBatchDetail = {
   projectId: "project-1",
   name: "单次生成",
   status: "READY",
-  continueOnFailure: false,
+  continueOnFailure: true,
   createdAt: "2026-09-15T00:00:00Z",
   updatedAt: "2026-09-15T00:00:00Z",
   total: 1,

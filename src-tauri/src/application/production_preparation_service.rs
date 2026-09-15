@@ -257,7 +257,9 @@ impl ProductionPreparationService {
                 now.format("%Y-%m-%d %H:%M:%S")
             ),
             status: ProductionBatchStatus::Ready,
-            continue_on_failure: stage == ShotStage::Video,
+            // A failed item is recorded and can be retried later; it must not
+            // prevent independent items in the same batch from running.
+            continue_on_failure: true,
             archived_at: None,
             created_at: now,
             updated_at: now,

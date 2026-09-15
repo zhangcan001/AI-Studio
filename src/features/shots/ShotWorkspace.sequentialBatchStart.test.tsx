@@ -390,7 +390,7 @@ describe("ShotWorkspace explicit sequential batch start", () => {
     expect(batchStatuses["batch-a"]).toBe("COMPLETED");
   });
 
-  it("pauses on a failed terminal batch and only continues after explicit confirmation", async () => {
+  it("advances after a completed batch with failures without blocking the next batch", async () => {
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
     await flushAsyncWork();
     screen.getByRole("region", { name: "生产队列" });
@@ -404,11 +404,7 @@ describe("ShotWorkspace explicit sequential batch start", () => {
     emitTerminalTask("batch-a");
     await act(async () => { await vi.advanceTimersByTimeAsync(900); });
     await flushAsyncWork();
-    expect(screen.getByText(/连续运行已暂停/)).toBeTruthy();
-    expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "重试启动" }));
-    await flushAsyncWork();
+    expect(screen.queryByText(/连续运行已暂停/)).toBeNull();
     expect(mocks.startProductionQueue).toHaveBeenNthCalledWith(2, "project-1", "batch-b");
   });
 

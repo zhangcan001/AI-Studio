@@ -150,7 +150,7 @@ export function DirectGenerationEntry({
       const created = await createProductionQueue({
         projectId,
         name: name.trim() || "单次生成",
-        continueOnFailure: false,
+        continueOnFailure: true,
         direct: true,
         shotId: selectedShotId || undefined,
         stage: selectedShotId ? stage : undefined,

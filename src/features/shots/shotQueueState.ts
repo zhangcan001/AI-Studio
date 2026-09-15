@@ -86,13 +86,24 @@ export function retainSequentialBatchFirst(state: SequentialBatchStartState, bat
 }
 
 export function isCleanSequentialCompletion(batch: ProductionBatchDetail): boolean {
-  return batch.status === "COMPLETED"
-    && batch.running === 0
-    && batch.pending === 0
+  return isSequentialCompletion(batch)
     && batch.failed === 0
     && batch.cancelled === 0
     && batch.skipped === 0
     && batch.succeeded === batch.total;
+}
+
+/**
+ * A completed batch is safe to advance when every persisted item is terminal.
+ * Failed items remain visible and retriable; they do not block independent
+ * batches in an explicitly armed sequence.
+ */
+export function isSequentialCompletion(batch: ProductionBatchDetail): boolean {
+  const terminalItemCount = batch.succeeded + batch.failed + batch.cancelled + batch.skipped;
+  return batch.status === "COMPLETED"
+    && batch.running === 0
+    && batch.pending === 0
+    && terminalItemCount >= batch.total;
 }
 
 export function isTerminalProductionBatch(batch?: ProductionBatchDetail | null): boolean {
