@@ -160,3 +160,25 @@ describe("validateRecipeValues media inputs", () => {
     })).toEqual({});
   });
 });
+
+describe("validateRecipeValues first/last frame inputs", () => {
+  it("rejects the same image asset for both frames", () => {
+    const recipe: RecipeViewModel = {
+      workflowId: "workflow-video",
+      workflowVersionId: "workflow-version-video",
+      recipeId: "recipe-first-last",
+      name: "首尾帧视频",
+      category: "video",
+      mode: "FL2VA_FIRST_LAST",
+      fields: [
+        { key: "first_frame", type: "image", label: "首帧", required: true },
+        { key: "last_frame", type: "image", label: "尾帧", required: true },
+      ],
+    };
+
+    expect(validateRecipeValues(recipe, {
+      first_frame: { type: "image_asset", assetId: "asset-same" },
+      last_frame: { type: "image_asset", assetId: "asset-same" },
+    })).toEqual({ last_frame: "首帧与尾帧不能使用同一图片，请选择不同图片。" });
+  });
+});

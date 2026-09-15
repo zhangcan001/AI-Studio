@@ -75,8 +75,15 @@ pub enum GenerationInputPrepareError {
         expected_asset_ids: Vec<String>,
         actual_asset_ids: Vec<String>,
     },
+    DuplicateFirstLastAsset {
+        asset_id: String,
+    },
     Repository(String),
-    Upload(ComfyAdapterError),
+    Upload {
+        input_key: String,
+        asset_id: String,
+        error: ComfyAdapterError,
+    },
 }
 
 impl GenerationInputPrepareError {
@@ -88,8 +95,9 @@ impl GenerationInputPrepareError {
             Self::AssetRead { .. } => "INPUT_ASSET_READ_FAILED",
             Self::InvalidAssetMime { .. } => "INPUT_ASSET_MIME_INVALID",
             Self::ReferenceMappingIncomplete { .. } => "REFERENCE_MAPPING_INCOMPLETE",
+            Self::DuplicateFirstLastAsset { .. } => "INPUT_ASSET_DUPLICATE",
             Self::Repository(_) => "INPUT_ASSET_REPOSITORY_ERROR",
-            Self::Upload(error) => match error {
+            Self::Upload { error, .. } => match error {
                 ComfyAdapterError::Offline(_) => "COMFY_OFFLINE",
                 ComfyAdapterError::Timeout(_) => "COMFY_TIMEOUT",
                 ComfyAdapterError::Protocol(_) | ComfyAdapterError::Incompatible(_) => {
@@ -146,8 +154,21 @@ impl fmt::Display for GenerationInputPrepareError {
                 expected_asset_ids.len(),
                 actual_asset_ids.len()
             ),
+            Self::DuplicateFirstLastAsset { asset_id } => write!(
+                formatter,
+                "{}: first_frame and last_frame cannot use the same image asset {asset_id}",
+                self.code()
+            ),
             Self::Repository(message) => write!(formatter, "{}: {message}", self.code()),
-            Self::Upload(error) => write!(formatter, "{}: {error}", self.code()),
+            Self::Upload {
+                input_key,
+                asset_id,
+                error,
+            } => write!(
+                formatter,
+                "{}: input {input_key} asset {asset_id} upload failed: {error}",
+                self.code()
+            ),
         }
     }
 }
@@ -258,6 +279,17 @@ impl GenerationInputPreparer {
                 _ => {}
             }
         }
+        if let (
+            Some(GenerationInputValue::ImageAsset(first_frame)),
+            Some(GenerationInputValue::ImageAsset(last_frame)),
+        ) = (values.get("first_frame"), values.get("last_frame"))
+        {
+            if first_frame == last_frame {
+                return Err(GenerationInputPrepareError::DuplicateFirstLastAsset {
+                    asset_id: first_frame.as_str().to_owned(),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -299,7 +331,14 @@ impl GenerationInputPreparer {
                 GenerationInputValue::ImageAsset(asset_id) => {
                     let asset = self.load_image_asset(project_id, asset_id).await?;
                     let prepared = self
-                        .upload_image_asset(task_id, &project_root, &asset, None, &mut upload_cache)
+                        .upload_image_asset(
+                            task_id,
+                            &project_root,
+                            key,
+                            &asset,
+                            None,
+                            &mut upload_cache,
+                        )
                         .await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Image(prepared.comfy.name.clone()));
@@ -314,6 +353,7 @@ impl GenerationInputPreparer {
                             .upload_image_asset(
                                 task_id,
                                 &project_root,
+                                key,
                                 &asset,
                                 Some(index + 1),
                                 &mut upload_cache,
@@ -330,7 +370,14 @@ impl GenerationInputPreparer {
                         .load_media_asset(project_id, asset_id, MediaExpectation::Video)
                         .await?;
                     let prepared = self
-                        .upload_media_asset(task_id, &project_root, &asset, None, &mut upload_cache)
+                        .upload_media_asset(
+                            task_id,
+                            &project_root,
+                            key,
+                            &asset,
+                            None,
+                            &mut upload_cache,
+                        )
                         .await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Video(prepared.comfy.name.clone()));
@@ -341,7 +388,14 @@ impl GenerationInputPreparer {
                         .load_media_asset(project_id, asset_id, MediaExpectation::Audio)
                         .await?;
                     let prepared = self
-                        .upload_media_asset(task_id, &project_root, &asset, None, &mut upload_cache)
+                        .upload_media_asset(
+                            task_id,
+                            &project_root,
+                            key,
+                            &asset,
+                            None,
+                            &mut upload_cache,
+                        )
                         .await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Audio(prepared.comfy.name.clone()));
@@ -358,6 +412,7 @@ impl GenerationInputPreparer {
                             .upload_media_asset(
                                 task_id,
                                 &project_root,
+                                key,
                                 &asset,
                                 Some(index + 1),
                                 &mut upload_cache,
@@ -380,6 +435,7 @@ impl GenerationInputPreparer {
                             .upload_media_asset(
                                 task_id,
                                 &project_root,
+                                key,
                                 &asset,
                                 Some(index + 1),
                                 &mut upload_cache,
@@ -470,9 +526,10 @@ impl GenerationInputPreparer {
         &self,
         task_id: &TaskId,
         project_root: &std::path::Path,
+        input_key: &str,
         asset: &Asset,
         position: Option<usize>,
-        _upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
+        upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
     ) -> Result<PreparedImageInput, GenerationInputPrepareError> {
         if !matches!(
             asset.mime_type.as_str(),
@@ -483,24 +540,34 @@ impl GenerationInputPreparer {
                 mime_type: asset.mime_type.clone(),
             });
         }
-        let bytes = self
-            .asset_store
-            .read(project_root, std::path::Path::new(&asset.storage_path))
-            .await
-            .map_err(|error| GenerationInputPrepareError::AssetRead {
-                asset_id: asset.id.as_str().to_owned(),
-                message: error.to_string(),
-            })?;
-        let upload = crate::application::ports::ComfyImageUpload {
-            bytes,
-            upload_name: upload_name_at(task_id, asset, position),
-            content_type: asset.mime_type.clone(),
+        let comfy = if let Some(uploaded) = upload_cache.get(&asset.id) {
+            uploaded.clone()
+        } else {
+            let bytes = self
+                .asset_store
+                .read(project_root, std::path::Path::new(&asset.storage_path))
+                .await
+                .map_err(|error| GenerationInputPrepareError::AssetRead {
+                    asset_id: asset.id.as_str().to_owned(),
+                    message: error.to_string(),
+                })?;
+            let upload = crate::application::ports::ComfyImageUpload {
+                bytes,
+                upload_name: upload_name_at(task_id, asset, position),
+                content_type: asset.mime_type.clone(),
+            };
+            let uploaded = self
+                .comfy_adapter
+                .upload_image(upload)
+                .await
+                .map_err(|error| GenerationInputPrepareError::Upload {
+                    input_key: input_key.to_owned(),
+                    asset_id: asset.id.as_str().to_owned(),
+                    error,
+                })?;
+            upload_cache.insert(asset.id.clone(), uploaded.clone());
+            uploaded
         };
-        let comfy = self
-            .comfy_adapter
-            .upload_image(upload)
-            .await
-            .map_err(GenerationInputPrepareError::Upload)?;
         Ok(PreparedImageInput {
             asset_id: asset.id.clone(),
             sha256: asset.sha256.clone(),
@@ -512,6 +579,7 @@ impl GenerationInputPreparer {
         &self,
         task_id: &TaskId,
         project_root: &std::path::Path,
+        input_key: &str,
         asset: &Asset,
         position: Option<usize>,
         upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
@@ -543,7 +611,11 @@ impl GenerationInputPreparer {
                 .comfy_adapter
                 .upload_input_file(upload)
                 .await
-                .map_err(GenerationInputPrepareError::Upload)?;
+                .map_err(|error| GenerationInputPrepareError::Upload {
+                    input_key: input_key.to_owned(),
+                    asset_id: asset.id.as_str().to_owned(),
+                    error,
+                })?;
             upload_cache.insert(asset.id.clone(), uploaded.clone());
             uploaded
         };
@@ -707,9 +779,7 @@ mod tests {
             _project_root: &Path,
             _path: &Path,
         ) -> Result<Vec<u8>, AssetStoreError> {
-            Err(AssetStoreError::Read(
-                "media must use a bounded read stream".to_owned(),
-            ))
+            Ok(vec![1, 2, 3, 4])
         }
 
         async fn open_read_stream(
@@ -780,6 +850,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct RecordingAdapter {
         filenames: Arc<Mutex<Vec<String>>>,
+        failure: Arc<Mutex<Option<ComfyAdapterError>>>,
     }
 
     #[async_trait]
@@ -800,6 +871,9 @@ mod tests {
             &self,
             mut upload: ComfyInputUpload,
         ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+            if let Some(error) = self.failure.lock().unwrap().clone() {
+                return Err(error);
+            }
             while upload
                 .stream
                 .next_chunk()
@@ -988,6 +1062,92 @@ mod tests {
             1
         );
         assert!(filenames.iter().any(|name| name.contains("_02.mp4")));
+    }
+
+    #[tokio::test]
+    async fn reuses_one_image_upload_for_same_asset_referenced_by_non_duplicate_inputs() {
+        let adapter = RecordingAdapter::default();
+        let filenames = adapter.filenames.clone();
+        let preparer = preparer(vec![asset()], adapter);
+        let values = BTreeMap::from([
+            (
+                "first_frame".to_owned(),
+                GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+            ),
+            (
+                "reference_image".to_owned(),
+                GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+            ),
+        ]);
+
+        let prepared = preparer
+            .prepare(
+                "project-1",
+                &TaskId::parse("tsk_first_last").unwrap(),
+                &values,
+            )
+            .await
+            .expect("same image references should reuse one successful upload");
+
+        assert_eq!(filenames.lock().unwrap().len(), 1);
+        assert_eq!(
+            prepared.images["first_frame"][0].comfy,
+            prepared.images["reference_image"][0].comfy
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_duplicate_first_last_assets_before_upload() {
+        let adapter = RecordingAdapter::default();
+        let filenames = adapter.filenames.clone();
+        let preparer = preparer(vec![asset()], adapter);
+        let values = BTreeMap::from([
+            (
+                "first_frame".to_owned(),
+                GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+            ),
+            (
+                "last_frame".to_owned(),
+                GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+            ),
+        ]);
+
+        let error = preparer
+            .validate_asset_references("project-1", &values)
+            .await
+            .expect_err("duplicate first/last references should be rejected");
+
+        assert_eq!(error.code(), "INPUT_ASSET_DUPLICATE");
+        assert!(filenames.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn upload_errors_include_input_and_asset_context() {
+        let adapter = RecordingAdapter {
+            failure: Arc::new(Mutex::new(Some(ComfyAdapterError::Timeout(
+                "POST /upload/image timed out".to_owned(),
+            )))),
+            ..RecordingAdapter::default()
+        };
+        let preparer = preparer(vec![asset()], adapter);
+        let values = BTreeMap::from([(
+            "first_frame".to_owned(),
+            GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+        )]);
+
+        let error = preparer
+            .prepare(
+                "project-1",
+                &TaskId::parse("tsk_upload_error").unwrap(),
+                &values,
+            )
+            .await
+            .expect_err("the configured upload failure should propagate");
+
+        assert_eq!(error.code(), "COMFY_TIMEOUT");
+        let message = error.to_string();
+        assert!(message.contains("input first_frame"));
+        assert!(message.contains("asset ast_reference"));
     }
 
     #[tokio::test]

@@ -22,6 +22,7 @@ describe("简体中文状态展示", () => {
     expect(productionStatusLabel("PAUSED")).toBe("已暂停");
     expect(productionStatusLabel("READY")).toBe("待启动");
     expect(productionStatusLabel("RUNNING")).toBe("运行中");
+    expect(productionStatusLabel("COMPLETED")).toBe("已结束");
     expect(productionItemStatusLabel("PENDING")).toBe("待执行");
     expect(productionItemStatusLabel("DISPATCHED")).toBe("运行中");
     expect(productionReviewStatusLabel("UNREVIEWED")).toBe("待审核");

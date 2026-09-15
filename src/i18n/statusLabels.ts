@@ -18,7 +18,7 @@ const PRODUCTION_STATUS_LABELS: Record<string, string> = {
   READY: "待启动",
   RUNNING: "运行中",
   PAUSED: "已暂停",
-  COMPLETED: "已完成",
+  COMPLETED: "已结束",
 };
 
 const PRODUCTION_ITEM_STATUS_LABELS: Record<string, string> = {

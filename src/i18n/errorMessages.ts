@@ -78,6 +78,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INPUT_ASSET_TYPE_INVALID: "所选素材类型不符合当前输入要求。",
   INPUT_ASSET_READ_FAILED: "读取所选素材失败，请重新选择。",
   INPUT_ASSET_MIME_INVALID: "所选素材格式不受支持，请重新选择。",
+  INPUT_ASSET_DUPLICATE: "首帧和尾帧不能使用同一图片，请选择不同图片。",
   INPUT_ASSET_REPOSITORY_ERROR: "读取素材库失败，请稍后重试。",
   WORKFLOW_NOT_API_FORMAT: "该文件不是 ComfyUI API 格式工作流，请重新导出 API 格式工作流。",
   WORKFLOW_FILE_TYPE: "工作流文件必须是 JSON，请重新选择 .json 文件。",

@@ -26,6 +26,7 @@ import type {
 } from "../../types/productionQueue";
 import type { BatchDraftItem } from "./batchDraft";
 import { canCancelPendingProductionQueue, isSafeProductionQueueRequeue } from "./productionQueuePolicy";
+import { productionBatchOutcomeLabel } from "./productionQueueOutcome";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import type { ReusableGenerationDraft } from "../../types/history";
@@ -604,7 +605,7 @@ export function ProductionQueuePanel({
                     {activeItem
                       ? `正在执行第 ${activeItem.ordinal + 1} 项`
                       : detail.status === "COMPLETED"
-                        ? "批次已完成"
+                        ? productionBatchOutcomeLabel(detail)
                         : productionStatusLabel(detail.status)}
                   </span>
                 </div>
@@ -626,7 +627,13 @@ export function ProductionQueuePanel({
             <div>
               <span className="section-label">{inline ? "当前批次" : "当前队列"}</span>
               <strong>{detail.name}</strong>
-              <span>{detail.archivedAt ? "已归档" : productionStatusLabel(detail.status)}</span>
+              <span>
+                {detail.archivedAt
+                  ? "已归档"
+                  : detail.status === "COMPLETED"
+                    ? productionBatchOutcomeLabel(detail)
+                    : productionStatusLabel(detail.status)}
+              </span>
             </div>
             <div className="production-queue-detail-heading-actions">
               {hasReviewableVideo && (

@@ -241,6 +241,17 @@ export function validateRecipeValues(
       }
     }
   }
+  if (recipe.mode === "FL2VA_FIRST_LAST") {
+    const firstFrame = values.first_frame;
+    const lastFrame = values.last_frame;
+    if (
+      firstFrame?.type === "image_asset"
+      && lastFrame?.type === "image_asset"
+      && firstFrame.assetId === lastFrame.assetId
+    ) {
+      errors.last_frame = "首帧与尾帧不能使用同一图片，请选择不同图片。";
+    }
+  }
   return errors;
 }
 

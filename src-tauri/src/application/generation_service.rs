@@ -1930,6 +1930,23 @@ fn task_error_from_input_prepare(error: &GenerationInputPrepareError) -> TaskErr
                 "expectedAssetIds": expected_asset_ids,
                 "actualAssetIds": actual_asset_ids,
             })),
+            GenerationInputPrepareError::DuplicateFirstLastAsset { asset_id } => {
+                Some(serde_json::json!({
+                    "phase": "input_validation",
+                    "inputKeys": ["first_frame", "last_frame"],
+                    "assetId": asset_id,
+                }))
+            }
+            GenerationInputPrepareError::Upload {
+                input_key,
+                asset_id,
+                error,
+            } => Some(serde_json::json!({
+                "phase": "upload",
+                "inputKey": input_key,
+                "assetId": asset_id,
+                "errorKind": error.kind(),
+            })),
             _ => None,
         },
     }

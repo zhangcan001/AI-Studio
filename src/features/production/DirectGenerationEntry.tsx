@@ -16,6 +16,7 @@ import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import type { ShotStage, ShotView } from "../../types/shot";
 import { defaultGenerationValues } from "../../stores/studioStore";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { productionStatusLabel } from "../../i18n/statusLabels";
 import { DynamicFormRenderer, validateRecipeValues } from "../studio/DynamicFormRenderer";
 import { migrateGenerationValues } from "../runtime/workflowCapabilities";
 import "./DirectGenerationEntry.css";
@@ -266,16 +267,6 @@ export function DirectGenerationEntry({
 
 function recipeKey(recipe: RecipeViewModel | undefined): string {
   return recipe ? `${recipe.workflowVersionId}::${recipe.recipeId}` : "";
-}
-
-function productionStatusLabel(status: string): string {
-  switch (status) {
-    case "READY": return "待启动";
-    case "RUNNING": return "运行中";
-    case "PAUSED": return "已暂停";
-    case "COMPLETED": return "已完成";
-    default: return status;
-  }
 }
 
 async function loadRegistryMetadata(projectId: string): Promise<{
