@@ -53,9 +53,13 @@ pub enum FieldViewModel {
         key: String,
         label: String,
         required: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
         default: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         min: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         max: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         step: Option<i64>,
     },
     #[serde(rename = "number")]
@@ -63,9 +67,13 @@ pub enum FieldViewModel {
         key: String,
         label: String,
         required: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
         default: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         min: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         max: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         step: Option<f64>,
     },
     #[serde(rename = "seed")]
@@ -333,6 +341,30 @@ mod tests {
         assert!(!json.contains("node"));
         assert!(!json.contains("class_type"));
         assert!(!json.contains("binding"));
+    }
+
+    #[tokio::test]
+    async fn omits_absent_numeric_constraints_from_catalog_json() {
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("app.db")).await.unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        sqlx::query("UPDATE recipes SET recipe_yaml = ? WHERE id = 'recipe-1'")
+            .bind(
+                "schema_version: 1\nid: recipe\nname: Recipe\nworkflow:\n  file: workflow_api.json\ninputs:\n  denoise:\n    type: number\n    label: Denoise\n    required: true\n  duration:\n    type: integer\n    label: Duration\n    required: true\nbindings: []\noutputs: []\n",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let repository = std::sync::Arc::new(SqliteGenerationDefinitionRepository::new(pool));
+        let catalog = GenerationCatalogService::new(repository);
+        let view = catalog.list().await.unwrap().remove(0);
+        let json = to_string(&view).unwrap();
+
+        assert!(!json.contains("\"default\":null"));
+        assert!(!json.contains("\"min\":null"));
+        assert!(!json.contains("\"max\":null"));
+        assert!(!json.contains("\"step\":null"));
     }
 
     #[tokio::test]
