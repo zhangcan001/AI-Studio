@@ -259,7 +259,7 @@ export function ConsistencyProfileEditor({
           </label>
         )}
         <label className="field-control">
-          <span>默认风格 Profile</span>
+          <span>默认风格档案</span>
           <select value={draft.defaultStyleProfileId} onChange={(event) => setText("defaultStyleProfileId", event.target.value)} disabled={savingNow}>
             <option value="">不设置</option>
             {availableStyleProfiles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}

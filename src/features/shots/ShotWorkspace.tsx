@@ -41,8 +41,10 @@ import type { ProductionBatchRunbookView } from "../../types/productionBatchRunb
 import type { SeriesPresetApplyRequest } from "../../types/seriesProduction";
 import type { BatchWorkflowPreset } from "../../types/sceneProduction";
 import type { ShotInputValues, ShotStage, ShotView } from "../../types/shot";
+import type { ComfyStatus } from "../../types/comfy";
 import type { WorkspaceSelection } from "../../types/workspaceSelection";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { comfyStatusLabel } from "../../i18n/statusLabels";
 import { deriveShotStatus, shotStatusLabels } from "./shotDomain";
 import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
@@ -275,6 +277,10 @@ interface Props {
   focusProductionReviewItemId?: string;
   focusProductionStage?: ShotStage;
   onOpenProductionQueue?: (batchId?: string) => void;
+  comfyStatus?: ComfyStatus;
+  capabilityLoading?: boolean;
+  onRefreshComfyCapabilities?: () => void;
+  onOpenSettings?: () => void;
   consistencyWorkspace?: Omit<ScopeConsistencyWorkspaceProps, "projectId" | "scope" | "scopeOptions" | "onScopeChange"> & {
     scopeOptions?: ConsistencyScopeOption[];
     onScopeChange?: (scope: ConsistencyScopeRef) => void;
@@ -293,7 +299,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, focusProductionReviewItemId, focusProductionStage, onOpenProductionQueue, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, focusProductionReviewItemId, focusProductionStage, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -1577,6 +1583,16 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         onError={(message) => setError(message || undefined)}
       />
       </section>}
+      {mode === "production" && comfyStatus && (
+        <section className={`production-runtime-strip production-runtime-strip-${comfyStatus.status.toLowerCase()}`} aria-label="生产运行环境" role="status">
+          <div>
+            <span className="section-label">运行前检查</span>
+            <strong>ComfyUI：{comfyStatusLabel(comfyStatus.status)}</strong>
+            <span>{comfyStatus.capability ? `节点能力已刷新（${comfyStatus.capability.nodeCount} 个）` : "节点能力尚未确认"}</span>
+          </div>
+          {onRefreshComfyCapabilities && <button type="button" className="quiet-button" onClick={onRefreshComfyCapabilities} disabled={capabilityLoading || comfyStatus.status !== "CONNECTED"}>{capabilityLoading ? "正在刷新能力…" : "刷新节点能力"}</button>}
+        </section>
+      )}
       <ProductionQueueDrawer
         overview={mode === "production" ? productionQueueOverview : undefined}
         queues={mode === "production" ? productionQueues : undefined}
@@ -1594,6 +1610,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         onCancelQueuedStart={cancelQueuedSequentialBatch}
         onResumeSequentialStart={resumeSequentialBatchStart}
         onCancelSequentialStart={cancelSequentialBatchStart}
+        onOpenSettings={onOpenSettings}
         onPause={pauseProductionBatch}
         onOpen={mode === "production"
           ? (batchId) => openProductionMonitorBatch(batchId)

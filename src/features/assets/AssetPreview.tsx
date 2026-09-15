@@ -295,25 +295,25 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
         <section className="asset-detail-section" aria-label="素材来源与溯源">
           <div className="asset-detail-section-heading"><div><strong>来源与溯源</strong><small>只展示现有 Asset、Task 与显式跨模块关系，不推断历史关联。</small></div></div>
           <dl className="asset-detail-definition-list">
-            <div><dt>Prompt</dt><dd>{asset.sourceTaskId ? "随生成任务记录" : "未关联 Prompt"}</dd></div>
-            <div><dt>Model</dt><dd>未记录</dd></div>
-            <div><dt>Generation</dt><dd>{asset.sourceTaskId ? `任务 ${asset.sourceTaskId}` : "本地导入或未关联生成记录"}</dd></div>
-            <div><dt>Date</dt><dd>{formatDateTime(asset.createdAt)}</dd></div>
+            <div><dt>提示词</dt><dd>{asset.sourceTaskId ? "随生成任务记录" : "未关联提示词"}</dd></div>
+            <div><dt>模型</dt><dd>未记录</dd></div>
+            <div><dt>生成任务</dt><dd>{asset.sourceTaskId ? `任务 ${asset.sourceTaskId}` : "本地导入或未关联生成记录"}</dd></div>
+            <div><dt>日期</dt><dd>{formatDateTime(asset.createdAt)}</dd></div>
           </dl>
-          <section className="asset-detail-section" aria-label="Generation History">
-            <div className="asset-detail-section-heading"><div><strong>Generation History</strong><small>跨模块溯源只接受后端已保存的显式关系。</small></div></div>
+          <section className="asset-detail-section" aria-label="生成历史">
+            <div className="asset-detail-section-heading"><div><strong>生成历史</strong><small>跨模块溯源只接受后端已保存的显式关系。</small></div></div>
             {provenanceLoading && <p className="disabled-note" role="status">正在加载生成溯源…</p>}
             {provenanceError && <p className="error-message" role="alert">生成溯源加载失败：{provenanceError}</p>}
             {!provenanceLoading && !provenanceError && !asset.sourceTaskId && <p className="empty-state">暂无生成历史；该资产没有来源任务。</p>}
             {!provenanceLoading && !provenanceError && asset.sourceTaskId && (
               <>
                 <dl className="asset-detail-definition-list">
-                  <div><dt>Prompt Version</dt><dd>未记录（历史数据未提供显式提示词版本关联）</dd></div>
-                  <div><dt>Model Version</dt><dd>未记录（历史数据未提供显式模型版本关联）</dd></div>
-                  <div><dt>Tool Version</dt><dd>{toolVersionLabel(toolUsages)}</dd></div>
-                  <div><dt>Source Task</dt><dd>{asset.sourceTaskId}</dd></div>
+                  <div><dt>提示词版本</dt><dd>未记录（历史数据未提供显式提示词版本关联）</dd></div>
+                  <div><dt>模型版本</dt><dd>未记录（历史数据未提供显式模型版本关联）</dd></div>
+                  <div><dt>工具版本</dt><dd>{toolVersionLabel(toolUsages)}</dd></div>
+                  <div><dt>来源任务</dt><dd>{asset.sourceTaskId}</dd></div>
                 </dl>
-                <div className="asset-detail-section-heading"><div><strong>Tool Usage</strong><small>工具使用记录来自 ProvenanceLineageService。</small></div><span className="status-pill">{toolUsages.length} 条</span></div>
+                <div className="asset-detail-section-heading"><div><strong>工具使用</strong><small>工具使用记录来自 ProvenanceLineageService。</small></div><span className="status-pill">{toolUsages.length} 条</span></div>
                 {toolUsages.length > 0 ? (
                   <ul className="asset-relation-list">
                     {toolUsages.map((usage) => (
@@ -325,7 +325,7 @@ export function AssetPreview({ projectId, asset, onClose, onUseInStudio, onOpenT
                     ))}
                   </ul>
                 ) : <p className="empty-state">暂无显式工具使用记录。</p>}
-                <div className="asset-detail-section-heading"><div><strong>Asset Versions</strong><small>只展示当前资产版本已建立的 Generation → AssetVersion 关系。</small></div><span className="status-pill">{visibleAssetVersionLinks.length} 条</span></div>
+                <div className="asset-detail-section-heading"><div><strong>资产版本溯源</strong><small>只展示当前资产版本已建立的生成任务 → 资产版本关系。</small></div><span className="status-pill">{visibleAssetVersionLinks.length} 条</span></div>
                 {visibleAssetVersionLinks.length > 0 ? (
                   <ul className="asset-relation-list">
                     {visibleAssetVersionLinks.map((link) => (

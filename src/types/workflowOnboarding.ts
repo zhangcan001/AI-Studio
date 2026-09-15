@@ -9,13 +9,14 @@ export type CapabilityState =
 
 export type WorkflowAutoOnboardingState =
   | "AUTO_PUBLISHED"
+  | "WORKFLOW_NOT_API_FORMAT"
   | "NEEDS_REVIEW"
   | "WAITING_FOR_COMFY_UI"
   | "ALREADY_EXISTS"
   | "ALREADY_EXISTS_ARCHIVED"
   | "BLOCKED";
 
-export type WorkflowImportFormat = "API" | "UI" | "UNKNOWN" | "INVALID_JSON";
+export type WorkflowImportFormat = "API" | "UI" | "NOT_API" | "UNKNOWN" | "INVALID_JSON";
 
 export type WorkflowRecognitionIdentity = "NEW" | "EXACT_RAW" | "EXACT_SEMANTIC" | "STRUCTURAL_VARIANT";
 export type WorkflowRecipeStatus = "CURRENT" | "OUTDATED" | "MISSING";

@@ -205,7 +205,7 @@ export function ReferenceSetEditor({
     <section className="reference-set-editor" aria-label={base ? "编辑参考集" : "新建参考集"} style={{ display: "grid", gap: 14, minWidth: 0 }}>
       <div className="section-heading" style={{ alignItems: "flex-start", marginBottom: 0 }}>
         <div>
-          <span className="section-label">{base ? "ReferenceSet 编辑" : "新建 ReferenceSet"}</span>
+          <span className="section-label">{base ? "参考集编辑" : "新建参考集"}</span>
           <h3>{base ? "编辑参考集" : "新建参考集"}</h3>
           <p className="section-description">按稳定顺序组织最多 {MAX_REFERENCE_SET_ITEMS} 张图片，供 Profile 和镜头上下文复用。</p>
         </div>

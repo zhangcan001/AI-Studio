@@ -21,6 +21,16 @@
   --studio-danger: #fb7185;
   --studio-info: #60a5fa;
 
+  /* Shared action/state vocabulary for production, review, and tool panels. */
+  --action-primary: var(--studio-accent-strong);
+  --action-primary-hover: var(--studio-accent-hover);
+  --action-quiet: var(--studio-text-secondary);
+  --action-danger: var(--studio-danger);
+  --state-running: var(--studio-info);
+  --state-paused: var(--studio-warning);
+  --state-failed: var(--studio-danger);
+  --state-success: var(--studio-success);
+
   --studio-radius-sm: 8px;
   --studio-radius-md: 10px;
   --studio-radius-lg: 12px;

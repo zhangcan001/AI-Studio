@@ -29,7 +29,7 @@ const GATE_KEYS: readonly string[] = [
 
 export function ShotReadinessInspector({ detail, loading = false, error, onRetry }: ShotReadinessInspectorProps) {
   if (loading) {
-    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>正在读取镜头详情</strong><span>按需解析上下文与七项 Gate…</span></div></aside>;
+    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>正在读取镜头详情</strong><span>按需解析上下文与七项门禁…</span></div></aside>;
   }
 
   if (error) {
@@ -37,7 +37,7 @@ export function ShotReadinessInspector({ detail, loading = false, error, onRetry
   }
 
   if (!detail) {
-    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>选择一个镜头</strong><span>右侧会显示完整上下文、七 Gate 与冻结前检查摘要。</span></div></aside>;
+    return <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查"><div className="shot-readiness-inspector-empty"><strong>选择一个镜头</strong><span>右侧会显示完整上下文、七项门禁与冻结前检查摘要。</span></div></aside>;
   }
 
   const readiness = detail.readiness;
@@ -59,7 +59,7 @@ export function ShotReadinessInspector({ detail, loading = false, error, onRetry
     <aside className="shot-readiness-inspector" aria-label="镜头就绪度检查">
       <div className="shot-readiness-inspector-heading">
         <div>
-          <span className="section-label">Readiness / Context</span>
+          <span className="section-label">就绪与上下文</span>
           <h3>{detail.name || detail.shotId}</h3>
           <small>{detail.shotId} · {detail.stage === "image" ? "图片" : "视频"} · #{detail.ordinal + 1}</small>
         </div>
@@ -73,8 +73,8 @@ export function ShotReadinessInspector({ detail, loading = false, error, onRetry
         {detail.stalePreparedBatchIds.length > 0 && <em className="shot-readiness-stale">旧上下文</em>}
       </div>
 
-      <section className="shot-readiness-inspector-section" aria-label="七项 Gate">
-        <div className="shot-readiness-inspector-section-heading"><h4>七项 Gate</h4><span>{preparationStatusLabel(status)}</span></div>
+      <section className="shot-readiness-inspector-section" aria-label="七项门禁">
+        <div className="shot-readiness-inspector-section-heading"><h4>七项门禁</h4><span>{preparationStatusLabel(status)}</span></div>
         <div className="shot-readiness-gates">
           {GATE_KEYS.map((key) => <GateRow key={key} gate={gateMap.get(key)} gateKey={key} />)}
         </div>
@@ -90,16 +90,16 @@ export function ShotReadinessInspector({ detail, loading = false, error, onRetry
       <section className="shot-readiness-inspector-section" aria-label="上下文摘要">
         <div className="shot-readiness-inspector-section-heading"><h4>上下文摘要</h4><span className="shot-readiness-hash" title={detail.contextHash}>Hash {shortHash(detail.contextHash)}</span></div>
         <dl className="shot-readiness-context-list">
-          <div><dt>Profile 来源</dt><dd>{profiles.length ? profiles.length + " 个" : "无新 Profile（可能使用 Legacy）"}</dd></div>
-          <div><dt>ReferenceSet</dt><dd>{references.sets.length ? references.sets.length + " 个 · " + references.assetCount + " 个素材" : "无 ReferenceSet"}</dd></div>
+          <div><dt>档案来源</dt><dd>{profiles.length ? profiles.length + " 个" : "无新档案（可能使用旧版配置）"}</dd></div>
+          <div><dt>参考集</dt><dd>{references.sets.length ? references.sets.length + " 个 · " + references.assetCount + " 个素材" : "无参考集"}</dd></div>
           <div><dt>工作流</dt><dd>{detail.resolvedContext.workflow?.workflowVersionId ?? "未配置"}{detail.resolvedContext.workflow?.recipeId ? " · " + detail.resolvedContext.workflow.recipeId : ""}</dd></div>
           <div><dt>上下文 Hash</dt><dd className="shot-readiness-breakable">{detail.contextHash || "—"}</dd></div>
         </dl>
-        {legacy && <div className="shot-readiness-legacy-note"><strong>Legacy Shot</strong><span>沿用旧 Shot prompt / stage config / reference 关系，无需先创建 Profile。</span></div>}
+        {legacy && <div className="shot-readiness-legacy-note"><strong>旧版镜头</strong><span>沿用旧镜头提示词、阶段配置和参考关系，无需先创建档案。</span></div>}
       </section>
 
-      <section className="shot-readiness-inspector-section" aria-label="Profile 与 ReferenceSet 来源">
-        <div className="shot-readiness-inspector-section-heading"><h4>Profile / ReferenceSet</h4></div>
+      <section className="shot-readiness-inspector-section" aria-label="档案与参考集来源">
+        <div className="shot-readiness-inspector-section-heading"><h4>档案 / 参考集</h4></div>
         {profiles.length > 0 && <div className="shot-readiness-profile-list">{profiles.map((profile) => <div className="shot-readiness-profile-row" key={profile.key}><span className="shot-readiness-profile-type">{profile.type}</span><strong>{profile.name}</strong><small>{profile.source}</small></div>)}</div>}
         {references.sets.length > 0 && <div className="shot-readiness-reference-list">{references.sets.map((referenceSet) => <div className="shot-readiness-reference-row" key={referenceSet.key}><span>{referenceSet.role}</span><strong>{referenceSet.name}</strong><small>{referenceSet.assetCount} 个素材 · {referenceSet.source}</small></div>)}</div>}
         {!profiles.length && !references.sets.length && <p className="shot-readiness-inspector-muted">当前镜头没有可展示的新一致性档案或参考集。</p>}
@@ -143,7 +143,7 @@ function profileEntries(detail: ShotProductionPlanDetail): ProfileEntry[] {
   return entries.filter(({ profile }) => profile).map(({ profile, type }) => ({
     key: type + ":" + (profile!.profileId ?? profile!.id ?? profile!.name ?? "profile"),
     type,
-    name: profile!.name ?? profile!.profileId ?? profile!.id ?? "未命名 Profile",
+    name: profile!.name ?? profile!.profileId ?? profile!.id ?? "未命名档案",
     source: sourceLabel(profile!.source),
   }));
 }
@@ -175,7 +175,7 @@ function sourceLabel(source: unknown): string {
   if (typeof source !== "object") return "未知来源";
   const trace = source as { scope?: string; scopeId?: string };
   const scope = trace.scope ?? "未知来源";
-  const labels: Record<string, string> = { PROJECT: "Project", SERIES: "Series", EPISODE: "Episode", SCENE: "Scene", SHOT: "Shot", LEGACY: "Legacy" };
+  const labels: Record<string, string> = { PROJECT: "项目", SERIES: "系列", EPISODE: "集", SCENE: "场景", SHOT: "镜头", LEGACY: "旧版" };
   return (labels[scope] ?? scope) + (trace.scopeId ? " · " + trace.scopeId : "");
 }
 

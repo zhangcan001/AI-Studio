@@ -47,6 +47,7 @@ import type { GenerationValues, RecipeViewModel } from "../../types/generation";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import type { RuntimeParameterProfile } from "../../types/settings";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 import { formatDateTime } from "../../i18n/statusLabels";
 import { WorkflowImportController } from "./WorkflowImportController";
 import { useWorkflowSmartImportController } from "./hooks/useWorkflowSmartImportController";
@@ -786,17 +787,18 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         <div>
           <span className="section-label">导入质量门</span>
           <strong>选择 JSON → 自动识别 → 检查环境 → 确认添加</strong>
-          <p>正常工作流只需一次操作；只有歧义、缺失节点或不兼容字段才会进入问题聚焦。</p>
+          <p>仅支持 ComfyUI “Export API”得到的 JSON；编辑器直接保存的 nodes/links 文件不能导入。</p>
         </div>
         <ul>
           <li>校验 JSON 根结构、节点类型与输入对象</li>
           <li>已连接 ComfyUI 时自动读取 /object_info</li>
+          <li>含子图的节点 ID（如 105:11）按当前版本支持；首尾冒号、空段和字母会被拒绝</li>
           <li>不会自动提交 GPU 生成任务，快速测试仍由用户主动触发</li>
         </ul>
       </section>
 
-      {workspaceError && <p className="error-message" role="alert">{workspaceError}</p>}
-      {error && <p className="error-message" role="alert">{error}</p>}
+      {workspaceError && <UiErrorNotice error={workspaceError} />}
+      {error && <UiErrorNotice error={error} />}
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
 
       <WorkflowImportController

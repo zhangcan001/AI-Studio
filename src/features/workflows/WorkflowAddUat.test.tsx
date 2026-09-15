@@ -316,6 +316,24 @@ describe("DEV-079 添加工作流前端 UAT", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it("识别非 API 工作流状态时显示单独的 API 导出说明", () => {
+    const props = smartImportProps();
+
+    expect(workflowImportFormat(plan({ state: "WORKFLOW_NOT_API_FORMAT" }))).toBe("NOT_API");
+    render(
+      <WorkflowSmartImport
+        plan={plan({ state: "WORKFLOW_NOT_API_FORMAT" })}
+        {...props}
+        onRetry={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "不是 ComfyUI API 格式工作流" })).toBeTruthy();
+    expect(screen.getByText("该文件不是 ComfyUI API 格式工作流，请重新导出 API 格式工作流。")).toBeTruthy();
+    expect(screen.queryByText("这个 JSON 不是可识别的 ComfyUI 工作流。")).toBeNull();
+  });
+
   it("非法 JSON 和未知 JSON 都停留在未添加态", () => {
     const onRetry = vi.fn();
     const onCancel = vi.fn();

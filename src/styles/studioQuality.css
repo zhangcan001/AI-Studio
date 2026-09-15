@@ -292,20 +292,20 @@ body::after {
 }
 
 .studio-shell :where(.primary-action, .generate-button, .shot-primary-action, .series-production-primary-action, .production-package-workspace-create-button) {
-  border-color: var(--studio-accent-strong);
+  border-color: var(--action-primary);
   color: #ffffff;
-  background: var(--studio-accent-strong);
+  background: var(--action-primary);
 }
 
 .studio-shell :where(.primary-action, .generate-button, .shot-primary-action, .series-production-primary-action, .production-package-workspace-create-button):hover:not(:disabled) {
-  border-color: var(--studio-accent-hover);
+  border-color: var(--action-primary-hover);
   color: #ffffff;
   background: #8b5cf6;
 }
 
 .studio-shell .quiet-button {
   border-color: var(--studio-border);
-  color: var(--studio-text-secondary);
+  color: var(--action-quiet);
   background: transparent;
 }
 
@@ -316,9 +316,9 @@ body::after {
 }
 
 .studio-shell .danger-button {
-  border-color: color-mix(in srgb, var(--studio-danger) 52%, var(--studio-border));
+  border-color: color-mix(in srgb, var(--action-danger) 52%, var(--studio-border));
   color: #fecdd3;
-  background: color-mix(in srgb, var(--studio-danger) 12%, var(--studio-surface-1));
+  background: color-mix(in srgb, var(--action-danger) 12%, var(--studio-surface-1));
 }
 
 /* Mature-product list rhythm: quiet headers, generous rows, clear selection. */
@@ -418,19 +418,19 @@ body::after {
 }
 
 .studio-shell :where(.error-message, .settings-warning, .production-review-item-error, .local-tool-hub-detail-error) {
-  border-color: color-mix(in srgb, var(--studio-danger) 48%, var(--studio-border));
-  border-left: 3px solid var(--studio-danger);
+  border-color: color-mix(in srgb, var(--state-failed) 48%, var(--studio-border));
+  border-left: 3px solid var(--state-failed);
   border-radius: var(--studio-radius-sm);
   color: #fecdd3;
-  background: color-mix(in srgb, var(--studio-danger) 9%, var(--studio-surface-1));
+  background: color-mix(in srgb, var(--state-failed) 9%, var(--studio-surface-1));
 }
 
 .studio-shell :where(.studio-notice, .settings-notice, .workflow-notice) {
-  border-color: color-mix(in srgb, var(--studio-success) 42%, var(--studio-border));
-  border-left: 3px solid var(--studio-success);
+  border-color: color-mix(in srgb, var(--state-success) 42%, var(--studio-border));
+  border-left: 3px solid var(--state-success);
   border-radius: var(--studio-radius-sm);
   color: #bbf7d0;
-  background: color-mix(in srgb, var(--studio-success) 8%, var(--studio-surface-1));
+  background: color-mix(in srgb, var(--state-success) 8%, var(--studio-surface-1));
 }
 
 .studio-shell :where(pre, code) {

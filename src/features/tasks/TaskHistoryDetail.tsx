@@ -250,11 +250,11 @@ function GenerationProvenanceSection({
 }) {
   const timeline = buildProvenanceTimeline(taskId, createdAt, finishedAt, toolUsages, assetVersionLinks);
   return (
-    <section className="detail-section generation-provenance" aria-label="Generation Provenance">
+    <section className="detail-section generation-provenance" aria-label="生成溯源">
       <div className="section-heading">
         <div>
           <span className="section-label">跨模块溯源</span>
-          <h3>Generation Provenance</h3>
+          <h3>生成溯源</h3>
         </div>
         <span className="status-pill">只读</span>
       </div>
@@ -264,25 +264,25 @@ function GenerationProvenanceSection({
         <>
           {!toolUsages.length && !assetVersionLinks.length && <p className="disabled-note">当前任务暂无显式跨模块关系；旧任务可能没有保存历史关联。</p>}
           <div className="provenance-detail-grid">
-            <section aria-label="Tool Usage">
-              <div className="asset-detail-section-heading"><strong>Tool Usage</strong><span className="status-pill">{toolUsages.length} 条</span></div>
+            <section aria-label="工具使用">
+              <div className="asset-detail-section-heading"><strong>工具使用</strong><span className="status-pill">{toolUsages.length} 条</span></div>
               {toolUsages.length > 0 ? (
                 <ul className="provenance-relation-list">
                   {toolUsages.map((usage) => <li key={usage.id}><strong>{usage.toolVersionId ?? "工具版本未记录"}</strong><span>实例 {usage.toolInstanceId}</span><small>{formatDateTime(usage.createdAt)}</small></li>)}
                 </ul>
               ) : <p className="empty-state">暂无显式工具使用记录。</p>}
             </section>
-            <section aria-label="Asset Versions">
-              <div className="asset-detail-section-heading"><strong>Asset Versions</strong><span className="status-pill">{assetVersionLinks.length} 条</span></div>
+            <section aria-label="资产版本">
+              <div className="asset-detail-section-heading"><strong>资产版本</strong><span className="status-pill">{assetVersionLinks.length} 条</span></div>
               {assetVersionLinks.length > 0 ? (
                 <ul className="provenance-relation-list">
                   {assetVersionLinks.map((link) => <li key={link.id}><strong>{link.assetVersionId}</strong><span>{link.relationType} · 输出 {link.outputId} · 第 {link.ordinal + 1} 项</span><small>{formatDateTime(link.createdAt)}</small></li>)}
                 </ul>
-              ) : <p className="empty-state">暂无显式 AssetVersion 关系。</p>}
+              ) : <p className="empty-state">暂无显式资产版本关系。</p>}
             </section>
           </div>
-          <section className="provenance-timeline-section" aria-label="Provenance Timeline">
-            <div className="asset-detail-section-heading"><strong>Provenance Timeline</strong><small>按已保存的关系时间排序。</small></div>
+          <section className="provenance-timeline-section" aria-label="溯源时间线">
+            <div className="asset-detail-section-heading"><strong>溯源时间线</strong><small>按已保存的关系时间排序。</small></div>
             <ol className="provenance-timeline">
               {timeline.map((event) => <li key={event.id}><strong>{event.label}</strong><span>{event.value}</span><small>{formatDateTime(event.createdAt)}</small></li>)}
             </ol>
@@ -307,20 +307,20 @@ function buildProvenanceTimeline(
   toolUsages: readonly GenerationToolUsageView[],
   assetVersionLinks: readonly GenerationAssetVersionView[],
 ): ProvenanceTimelineEvent[] {
-  const events: ProvenanceTimelineEvent[] = [{ id: `task-${taskId}`, label: "Source Task", value: taskId, createdAt }];
+  const events: ProvenanceTimelineEvent[] = [{ id: `task-${taskId}`, label: "来源任务", value: taskId, createdAt }];
   toolUsages.forEach((usage) => events.push({
     id: `tool-${usage.id}`,
-    label: "Tool Usage",
+    label: "工具使用",
     value: `${usage.toolInstanceId}${usage.toolVersionId ? ` · ${usage.toolVersionId}` : ""}`,
     createdAt: usage.createdAt,
   }));
   assetVersionLinks.forEach((link) => events.push({
     id: `asset-${link.id}`,
-    label: "Asset Version",
+    label: "资产版本",
     value: `${link.assetVersionId} · ${link.relationType}`,
     createdAt: link.createdAt,
   }));
-  if (finishedAt) events.push({ id: `finished-${taskId}`, label: "Task Finished", value: taskId, createdAt: finishedAt });
+  if (finishedAt) events.push({ id: `finished-${taskId}`, label: "任务已完成", value: taskId, createdAt: finishedAt });
   return events.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
 }
 

@@ -441,7 +441,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                     </section>
                     <section className="prompt-studio-subpanel" aria-label="Prompt Studio 跨模块溯源">
                       <div className="prompt-studio-panel-heading"><h4>跨模块溯源</h4><span className="status-pill">只读</span></div>
-                      <p className="prompt-studio-note">当前数据层没有 Prompt Version → Generation 显式关系；下列生成、资产和工具仅是当前项目的显式溯源参考，不归因于当前提示词。</p>
+                      <p className="prompt-studio-note">当前数据层没有提示词版本 → 生成任务显式关系；下列生成、资产和工具仅是当前项目的显式溯源参考，不归因于当前提示词。</p>
                       {historyLoading && <p className="disabled-note" role="status">等待生成历史后读取溯源…</p>}
                       {!historyLoading && provenanceLoading && <p className="disabled-note" role="status">正在读取跨模块溯源…</p>}
                       {provenanceError && <p className="error-message" role="alert">跨模块溯源加载失败：{provenanceError}</p>}
@@ -449,7 +449,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                         <div className="prompt-studio-two-column">
                           <section className="prompt-studio-subpanel" aria-label="相关生成">
                             <h4>相关生成</h4>
-                            <p className="prompt-studio-note">当前数据层尚未建立 Prompt Version → Generation 显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。</p>
+                            <p className="prompt-studio-note">当前数据层尚未建立提示词版本 → 生成任务显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。</p>
                             {history.length > 0 ? (
                               <ul className="prompt-studio-history-list">
                                 {history.slice(0, 6).map((task) => <li key={task.id}><strong>{task.id}</strong><span>{task.workflowName} · {taskStatusLabel(task.status)} · {formatDateTime(task.createdAt)}</span></li>)}
@@ -463,14 +463,14 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                                 {assetVersionLineageRecords.map(({ task, link }) => <li key={link.id}><strong>{link.assetVersionId}</strong><span>{task.id} · {link.relationType} · 输出 {link.outputId} · 第 {link.ordinal + 1} 项</span></li>)}
                               </ul>
                             ) : history.some((task) => task.outputCount > 0) ? (
-                              <p className="empty-state">任务有输出，但尚未建立 Generation → AssetVersion 显式关系。</p>
+                              <p className="empty-state">任务有输出，但尚未建立生成任务 → 资产版本显式关系。</p>
                             ) : <p className="empty-state">暂无已建立的结果资产溯源。</p>}
                           </section>
                           <section className="prompt-studio-subpanel" aria-label="模型版本">
                             <h4>模型版本</h4>
                             {selectedVersion?.modelVersionId ? (
-                              <ul className="prompt-studio-history-list"><li><strong>{linkedModel && linkedModelVersion ? `${linkedModel.provider} / ${linkedModel.name}` : selectedVersion.modelVersionId}</strong><span>Prompt Version v{selectedVersion.version} · {linkedModelVersion?.version ?? "历史版本未加载"}</span></li></ul>
-                            ) : <p className="empty-state">当前 Prompt Version 未记录 ModelVersion 关联。</p>}
+                              <ul className="prompt-studio-history-list"><li><strong>{linkedModel && linkedModelVersion ? `${linkedModel.provider} / ${linkedModel.name}` : selectedVersion.modelVersionId}</strong><span>提示词版本 v{selectedVersion.version} · {linkedModelVersion?.version ?? "历史版本未加载"}</span></li></ul>
+                            ) : <p className="empty-state">当前提示词版本未记录模型版本关联。</p>}
                           </section>
                           <section className="prompt-studio-subpanel" aria-label="工具使用">
                             <h4>工具使用</h4>
@@ -487,7 +487,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                       <h4>生成来源</h4>
                       <ol className="prompt-studio-provenance">
                         <li><strong>提示词版本</strong><span>{selectedVersion ? `v${selectedVersion.version}` : "未选择"}</span></li>
-                        <li><strong>模型版本</strong><span>{linkedModelVersion ? `${linkedModel?.name ?? "未知模型"} · ${linkedModelVersion.version}` : "未绑定"}</span></li>
+                        <li><strong>模型版本</strong><span>{linkedModelVersion ? `${linkedModel?.name ?? "未知模型"} · ${linkedModelVersion.version}` : "未绑定模型版本"}</span></li>
                         <li><strong>生成快照</strong><span>{history.length ? "由现有任务历史保留" : "尚无直接快照"}</span></li>
                         <li><strong>结果资产</strong><span>{history.some((task) => task.outputCount > 0) ? "可从任务历史查看输出" : "尚无结果资产"}</span></li>
                       </ol>

@@ -185,7 +185,7 @@ export function DirectGenerationEntry({
   if (!enabled) {
     return (
       <section className="direct-generation-entry" aria-label="单次生成入口" data-project-id={projectId}>
-        <div className="direct-generation-entry-empty"><strong>单次生成</strong><p>切换到此页后，选择一个目标和明确的 Prompt / Model / Tool 上下文。</p></div>
+        <div className="direct-generation-entry-empty"><strong>单次生成</strong><p>切换到此页后，选择一个目标和明确的提示词、模型与工具上下文。</p></div>
       </section>
     );
   }
@@ -193,8 +193,8 @@ export function DirectGenerationEntry({
   return (
     <section className="direct-generation-entry" aria-label="单次生成入口" data-project-id={projectId} aria-busy={busy}>
       <header className="direct-generation-entry-heading">
-        <div><span className="section-label">Production · Direct Entry</span><h3>单次生成</h3><p>为当前项目准备一个目标生成，保存后进入现有队列。</p></div>
-        <span className="direct-generation-queue-badge">Queue Start 才会执行</span>
+        <div><span className="section-label">生产 · 单次入口</span><h3>单次生成</h3><p>为当前项目准备一个目标生成，保存后进入现有队列。</p></div>
+        <span className="direct-generation-queue-badge">点击“开始生产”后才会执行</span>
       </header>
 
       <div className="direct-generation-scope-note" role="status"><strong>项目：</strong>{projectName ?? projectId}<span>({projectId})</span><small>所有选择均按明确 ID 保存，不从名称、路径或文本推断关系。</small></div>
@@ -218,25 +218,25 @@ export function DirectGenerationEntry({
       {!selectedShot && <p className="direct-generation-target-note" role="status">当前为项目级通用生成，不绑定 Shot。</p>}
 
       <div className="direct-generation-source-grid">
-        <label><span>Prompt Version <small>可选</small></span><select value={promptVersionId} onChange={(event) => setPromptVersionId(event.target.value)} disabled={busy}>
-          <option value="">不绑定 Prompt（UNKNOWN）</option>
+        <label><span>提示词版本 <small>可选</small></span><select value={promptVersionId} onChange={(event) => setPromptVersionId(event.target.value)} disabled={busy}>
+          <option value="">不绑定提示词（未记录）</option>
           {prompts.flatMap((prompt) => prompt.versions.map((version) => <option key={version.id} value={version.id}>{prompt.name} · v{version.version}</option>))}
         </select></label>
-        <label><span>Model Version <small>可选</small></span><select value={modelVersionId} onChange={(event) => setModelVersionId(event.target.value)} disabled={busy}>
-          <option value="">不绑定 Model（UNKNOWN）</option>
+        <label><span>模型版本 <small>可选</small></span><select value={modelVersionId} onChange={(event) => setModelVersionId(event.target.value)} disabled={busy}>
+          <option value="">不绑定模型（未记录）</option>
           {modelVersions.map(({ model, version }) => <option key={version.id} value={version.id}>{model.name} · {version.version} · {model.provider}</option>)}
         </select></label>
-        <label><span>Tool Instance <small>可选</small></span><select value={toolInstanceId} onChange={(event) => { setToolInstanceId(event.target.value); setToolVersionId(""); }} disabled={busy}>
-          <option value="">不绑定 Tool（NOT_CAPTURED）</option>
+        <label><span>工具实例 <small>可选</small></span><select value={toolInstanceId} onChange={(event) => { setToolInstanceId(event.target.value); setToolVersionId(""); }} disabled={busy}>
+          <option value="">不绑定工具（不记录工具溯源）</option>
           {toolEntries.flatMap((entry) => entry.instances.map((instance) => <option key={instance.id} value={instance.id}>{entry.tool.name} · {instance.endpoint ?? instance.path ?? instance.id} · {instance.status}</option>))}
         </select></label>
-        <label><span>Tool Version <small>需先选择实例</small></span><select value={toolVersionId} onChange={(event) => setToolVersionId(event.target.value)} disabled={busy || !toolInstanceId}>
-          <option value="">不绑定 Tool Version</option>
+        <label><span>工具版本 <small>需先选择实例</small></span><select value={toolVersionId} onChange={(event) => setToolVersionId(event.target.value)} disabled={busy || !toolInstanceId}>
+          <option value="">不绑定工具版本</option>
           {availableToolVersions.map((version) => <option key={version.id} value={version.id}>{version.version} · {version.id}</option>)}
         </select></label>
       </div>
 
-      <div className="direct-generation-recipe-heading"><div><span className="section-label">Generation parameters</span><h4>生成参数</h4></div><label><span>Workflow / Recipe</span><select value={selectedRecipe ? recipeKey(selectedRecipe) : ""} onChange={(event) => {
+      <div className="direct-generation-recipe-heading"><div><span className="section-label">生成参数</span><h4>生成参数</h4></div><label><span>工作流 / 配方</span><select value={selectedRecipe ? recipeKey(selectedRecipe) : ""} onChange={(event) => {
         const nextRecipe = catalog.find((recipe) => recipeKey(recipe) === event.target.value);
         if (!nextRecipe) return;
         setSelectedRecipeKey(recipeKey(nextRecipe));
@@ -259,7 +259,7 @@ export function DirectGenerationEntry({
         <button type="button" onClick={() => void submit()} disabled={busy || !selectedRecipe || Boolean(createdBatch)}>{busy ? "正在加入队列…" : createdBatch ? "已加入队列" : "创建单次生成"}</button>
         {createdBatch && <button type="button" className="quiet-button" onClick={() => void onOpenProductionQueue?.(createdBatch.id)} disabled={busy || !onOpenProductionQueue}>{queueOpenFailed ? "重新打开生产队列" : "打开生产队列"}</button>}
       </div>
-      {createdBatch && <div className="direct-generation-created" role="status"><strong>{createdBatch.name}</strong><span>状态：{productionStatusLabel(createdBatch.status)}</span><small>Batch ID：{createdBatch.id} · Item：{createdBatch.items[0]?.id ?? "—"}</small><p>已使用现有 Queue；点击“开始生产”前不会创建 Task、提交 Comfy 或开始执行。</p></div>}
+      {createdBatch && <div className="direct-generation-created" role="status"><strong>{createdBatch.name}</strong><span>状态：{productionStatusLabel(createdBatch.status)}</span><small>批次 ID：{createdBatch.id} · 项目项：{createdBatch.items[0]?.id ?? "—"}</small><p>已使用现有生产队列；点击“开始生产”前不会创建任务、提交 Comfy 或开始执行。</p></div>}
     </section>
   );
 }
@@ -291,23 +291,23 @@ async function loadRegistryMetadata(projectId: string): Promise<{
   ]);
   const errors: string[] = [];
   const prompts = promptResult.status === "fulfilled" ? promptResult.value.items : [];
-  if (promptResult.status === "rejected") errors.push("Prompt");
+  if (promptResult.status === "rejected") errors.push("提示词");
   const models = modelResult.status === "fulfilled" ? modelResult.value : [];
-  if (modelResult.status === "rejected") errors.push("Model");
+  if (modelResult.status === "rejected") errors.push("模型");
   const tools = toolResult.status === "fulfilled" ? toolResult.value : [];
-  if (toolResult.status === "rejected") errors.push("Tool");
+  if (toolResult.status === "rejected") errors.push("工具");
 
   const modelVersionResults = await Promise.allSettled(models.map(async (model) => (
     (await listModelVersions(model.id)).map((version) => ({ model, version }))
   )));
   const modelVersions = modelVersionResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-  if (modelVersionResults.some((result) => result.status === "rejected")) errors.push("Model Version");
+  if (modelVersionResults.some((result) => result.status === "rejected")) errors.push("模型版本");
 
   const toolResults = await Promise.allSettled(tools.map(async (tool) => {
     const [instances, versions] = await Promise.all([listToolInstances(tool.id), listToolVersions(tool.id)]);
     return { tool, instances, versions };
   }));
   const toolEntries = toolResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-  if (toolResults.some((result) => result.status === "rejected")) errors.push("Tool Instance / Version");
+  if (toolResults.some((result) => result.status === "rejected")) errors.push("工具实例或版本");
   return { prompts, modelVersions, tools: toolEntries, errors };
 }

@@ -40,11 +40,13 @@ export function workflowImportFormat(plan: WorkflowAutoOnboardingPlanView): Work
   const value = String(candidate.format ?? candidate.inputFormat ?? "").trim().toUpperCase();
   if (["API", "API_FORMAT"].includes(value)) return "API";
   if (["UI", "UI_FORMAT", "COMFY_UI"].includes(value)) return "UI";
+  if (["NOT_API", "NOT_API_FORMAT", "WORKFLOW_NOT_API_FORMAT"].includes(value)) return "NOT_API";
   if (["INVALID", "INVALID_JSON", "MALFORMED_JSON"].includes(value)) return "INVALID_JSON";
   if (["UNKNOWN", "UNKNOWN_FORMAT", "UNRECOGNIZED"].includes(value)) return "UNKNOWN";
 
   const state = String(plan.state).trim().toUpperCase();
   if (["UNSUPPORTED_UI_FORMAT", "UI_FORMAT_UNSUPPORTED"].includes(state)) return "UI";
+  if (["WORKFLOW_NOT_API_FORMAT", "NOT_API_FORMAT"].includes(state)) return "NOT_API";
   if (["INVALID_JSON", "INVALID_JSON_FORMAT"].includes(state)) return "INVALID_JSON";
   if (["UNKNOWN", "UNKNOWN_FORMAT"].includes(state)) return "UNKNOWN";
   return undefined;
@@ -55,6 +57,12 @@ function formatIssue(format: WorkflowImportFormat): WorkflowImportErrorView | un
     return {
       kind: "UI_FORMAT",
       message: "这个文件是 ComfyUI 普通工作流格式，不能安全地直接添加。",
+    };
+  }
+  if (format === "NOT_API") {
+    return {
+      kind: "NOT_API_FORMAT",
+      message: "该文件不是 ComfyUI API 格式工作流，请重新导出 API 格式工作流。",
     };
   }
   if (format === "INVALID_JSON") {

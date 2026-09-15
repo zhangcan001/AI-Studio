@@ -196,7 +196,7 @@ export function SceneProductionPreparation({
     <section className="scene-production-preparation" aria-label="场景生产准备">
       <header className="scene-preparation-header">
         <div>
-          <span className="section-label">PRODUCTION PREPARATION</span>
+          <span className="section-label">生产准备</span>
           <h2>场景生产准备</h2>
           <p>先解析当前场景的上下文与 ComfyUI 能力，再由你选择可准备镜头创建待启动批次。</p>
         </div>
@@ -229,7 +229,7 @@ export function SceneProductionPreparation({
       <div className="scene-preparation-layout">
         <section className="scene-preparation-main" aria-label="镜头准备列表">
           <div className="scene-preparation-list-heading">
-            <div><span className="section-label">SHOT PLAN</span><h3>{view?.sceneName || "当前场景"} · {stage === "image" ? "图片" : "视频"}</h3></div>
+            <div><span className="section-label">镜头计划</span><h3>{view?.sceneName || "当前场景"} · {stage === "image" ? "图片" : "视频"}</h3></div>
             <div className="scene-preparation-selection-actions">
               <span>{selectedCount}/{MAX_PREPARATION_BATCH_ITEMS} 已选</span>
               <button type="button" className="quiet-button" onClick={selectAllReady} disabled={isBusy || !readyItems.length}>选择全部可准备</button>
@@ -277,7 +277,7 @@ function ShotPreparationCard({ item, selected, onToggle, onInspect, disabled }: 
       </div>
       <div className="scene-preparation-shot-copy">
         <div className="scene-preparation-shot-heading"><strong>{item.name}</strong><StatusBadge status={item.status} /></div>
-        <small>{item.shotId} · #{item.ordinal + 1}{item.legacy ? " · Legacy Shot" : ""}</small>
+        <small>{item.shotId} · #{item.ordinal + 1}{item.legacy ? " · 旧版镜头" : ""}</small>
         <div className="scene-preparation-shot-meta">
           <span>{item.characterNames?.length ? "角色：" + item.characterNames.slice(0, 2).join("、") : (item.characterCount ?? 0) + " 个角色"}</span>
           <span>{item.sceneProfileName ?? "无场景 Profile"}</span>

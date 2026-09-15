@@ -180,7 +180,7 @@ describe("DirectGenerationEntry", () => {
       }],
     })));
     expect(screen.getByText(/当前待启动/)).toBeTruthy();
-    expect(screen.getByText(/Queue；点击“开始生产”前不会创建 Task/)).toBeTruthy();
+    expect(screen.getByText(/生产队列；点击“开始生产”前不会创建任务/)).toBeTruthy();
   });
 
   it("passes exact Shot and provenance selections without starting the queue", async () => {
@@ -189,10 +189,10 @@ describe("DirectGenerationEntry", () => {
 
     await user.selectOptions(await screen.findByLabelText("目标"), shot.id);
     await user.selectOptions(screen.getByLabelText("阶段"), "video");
-    await user.selectOptions(await screen.findByLabelText("Prompt Version 可选"), "prompt-version-1");
-    await user.selectOptions(await screen.findByLabelText("Model Version 可选"), "model-version-1");
-    await user.selectOptions(await screen.findByLabelText("Tool Instance 可选"), "tool-instance-1");
-    await user.selectOptions(screen.getByLabelText("Tool Version 需先选择实例"), "tool-version-1");
+    await user.selectOptions(await screen.findByLabelText("提示词版本 可选"), "prompt-version-1");
+    await user.selectOptions(await screen.findByLabelText("模型版本 可选"), "model-version-1");
+    await user.selectOptions(await screen.findByLabelText("工具实例 可选"), "tool-instance-1");
+    await user.selectOptions(screen.getByLabelText("工具版本 需先选择实例"), "tool-version-1");
     await user.click(screen.getByRole("button", { name: "创建单次生成" }));
 
     await waitFor(() => expect(mocks.createProductionQueue).toHaveBeenCalledWith(expect.objectContaining({

@@ -63,7 +63,7 @@ export function ReviewCompareInspector({ item, candidate, context: suppliedConte
       {!isSnapshot && <p className="review-compare-legacy-note">旧版任务，无生产准备快照</p>}
       {context ? <ContextRows context={context} currentName={currentName} /> : <ContextRows context={{ prompt: candidate?.label }} currentName={currentName} />}
       <div className="review-compare-inspector-row review-compare-negative-prompt">
-        <span>Negative Prompt</span>
+        <span>负面提示词</span>
         <strong>{hasNegativePrompt ? context?.negativePrompt : "当前 Workflow 未提供独立 Negative Prompt 输入"}</strong>
       </div>
     </aside>
@@ -80,17 +80,17 @@ function ContextRows({ context, currentName }: { context: ReviewCompareContextSn
   return (
     <div className="review-compare-context-rows">
       {historicalName ? <InspectorRow label="历史名称" value={historicalName} /> : currentName ? <InspectorRow label="当前名称" value={currentName} /> : null}
-      <InspectorRow label="Prompt" value={context.prompt ?? context.promptText} multiline />
-      <InspectorRow label="Context" value={context.context} multiline />
-      <InspectorRow label="Workflow" value={context.workflow ?? context.workflowName ?? context.workflowVersionId} />
-      <InspectorRow label="Recipe" value={context.recipe ?? context.recipeName ?? context.recipeId} />
-      <InspectorRow label="Context Hash" value={context.contextHash} mono />
-      <InspectorRow label="Reference Sets" value={referenceNames(referenceSets)} />
-      <InspectorRow label="Reference Assets" value={referenceNames(referenceAssets)} />
+      <InspectorRow label="提示词" value={context.prompt ?? context.promptText} multiline />
+      <InspectorRow label="上下文" value={context.context} multiline />
+      <InspectorRow label="工作流" value={context.workflow ?? context.workflowName ?? context.workflowVersionId} />
+      <InspectorRow label="配方" value={context.recipe ?? context.recipeName ?? context.recipeId} />
+      <InspectorRow label="上下文哈希" value={context.contextHash} mono />
+      <InspectorRow label="参考集" value={referenceNames(referenceSets)} />
+      <InspectorRow label="参考资产" value={referenceNames(referenceAssets)} />
       <ReferenceAssetDetails assets={detailedReferenceAssets} />
-      <InspectorRow label="Output Spec" value={context.outputSpec} />
-      <InspectorRow label="Stage Input" value={context.stageInput} />
-      <InspectorRow label="Readiness" value={context.readiness} />
+      <InspectorRow label="输出规格" value={context.outputSpec} />
+      <InspectorRow label="阶段输入" value={context.stageInput} />
+      <InspectorRow label="就绪状态" value={context.readiness} />
     </div>
   );
 }
@@ -98,7 +98,7 @@ function ContextRows({ context, currentName }: { context: ReviewCompareContextSn
 function ReferenceAssetDetails({ assets }: { assets: ReviewCompareReferenceAsset[] }) {
   return (
     <div className="review-compare-reference-assets" aria-label="Reference Asset Inspector">
-      <span>Reference Asset Inspector</span>
+      <span>参考资产检查</span>
       {assets.length ? (
         <ul>
           {assets.map((asset) => {

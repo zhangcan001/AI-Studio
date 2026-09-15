@@ -157,9 +157,12 @@ describe("ProjectWorkspace archive UX", () => {
     expect(message).toContain("不会覆盖");
     expect(message).toContain("不会自动生成");
     expect(restoreProjectBackup).toHaveBeenCalledWith("bki_1");
-    expect(await screen.findByText("Restore Complete")).toBeTruthy();
-    expect(screen.getByText(/Assets: 3/)).toBeTruthy();
-    expect(screen.getByText(/Missing Tools: 1/)).toBeTruthy();
+    expect(await screen.findByText("已恢复，但有警告")).toBeTruthy();
+    expect(screen.getByText(/项目：归档项目（恢复）/)).toBeTruthy();
+    expect(screen.getByText("资产版本溯源")).toBeTruthy();
+    expect(screen.getByText("工具溯源")).toBeTruthy();
+    expect(screen.getByText(/缺少工具（1）/)).toBeTruthy();
+    expect(screen.getByText(/未解析工具实例（1）/)).toBeTruthy();
     expect(screen.getByText("工具状态为 UNKNOWN。")).toBeTruthy();
   });
 

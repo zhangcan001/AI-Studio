@@ -73,12 +73,12 @@ describe("TaskHistoryDetail provenance visibility", () => {
   it("renders tool usage, asset-version lineage, and the timeline", async () => {
     renderDetail();
 
-    expect(await screen.findByRole("region", { name: "Generation Provenance" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Tool Usage" }).textContent).toContain("tver-comfy-1");
-    expect(screen.getByRole("region", { name: "Asset Versions" }).textContent).toContain("av-1");
-    expect(screen.getByRole("region", { name: "Provenance Timeline" }).textContent).toContain("Source Task");
-    expect(screen.getByRole("region", { name: "Provenance Timeline" }).textContent).toContain("Tool Usage");
-    expect(screen.getByRole("region", { name: "Provenance Timeline" }).textContent).toContain("Asset Version");
+    expect(await screen.findByRole("region", { name: "生成溯源" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "工具使用" }).textContent).toContain("tver-comfy-1");
+    expect(screen.getByRole("region", { name: "资产版本" }).textContent).toContain("av-1");
+    expect(screen.getByRole("region", { name: "溯源时间线" }).textContent).toContain("来源任务");
+    expect(screen.getByRole("region", { name: "溯源时间线" }).textContent).toContain("工具使用");
+    expect(screen.getByRole("region", { name: "溯源时间线" }).textContent).toContain("资产版本");
     expect(mocks.listGenerationToolUsages).toHaveBeenCalledWith("project-1", "tsk-1");
     expect(mocks.listGenerationAssetVersionLinks).toHaveBeenCalledWith("project-1", "tsk-1");
   });
@@ -90,7 +90,7 @@ describe("TaskHistoryDetail provenance visibility", () => {
 
     expect(await screen.findByText("当前任务暂无显式跨模块关系；旧任务可能没有保存历史关联。")).toBeTruthy();
     expect(screen.getByText("暂无显式工具使用记录。")).toBeTruthy();
-    expect(screen.getByText("暂无显式 AssetVersion 关系。")).toBeTruthy();
+    expect(screen.getByText("暂无显式资产版本关系。")).toBeTruthy();
   });
 
   it("reports a lineage loading error without hiding the task detail", async () => {

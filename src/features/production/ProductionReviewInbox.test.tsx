@@ -23,6 +23,7 @@ it("shows the selected result and navigates to its exact Asset, with IDs folded 
   render(<ProductionReviewInbox projectId="project-1" onNavigate={onNavigate} />);
   expect(await screen.findByText("已选择结果 · 可打开素材查看")).toBeTruthy();
   expect(screen.getByText("待审核结果")).toBeTruthy();
+  expect(screen.getByText("执行：已完成 · 审核：已通过")).toBeTruthy();
   expect(screen.getByText(/批次 batch-1/).closest("details")?.open).toBe(false);
   await userEvent.setup().click(screen.getByRole("button", { name: "打开审片" }));
   expect(onNavigate).toHaveBeenCalledWith({

@@ -54,6 +54,7 @@ export interface ProductionQueueDrawerProps {
   onCancelQueuedStart?: (batchId: string) => void;
   onResumeSequentialStart?: () => void;
   onCancelSequentialStart?: () => void;
+  onOpenSettings?: () => void;
 }
 
 interface QueueDisplayData {
@@ -110,6 +111,7 @@ export function ProductionQueueDrawer({
   onCancelQueuedStart,
   onResumeSequentialStart,
   onCancelSequentialStart,
+  onOpenSettings,
 }: ProductionQueueDrawerProps) {
   const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
   const [busyAction, setBusyAction] = useState<string>();
@@ -182,6 +184,7 @@ export function ProductionQueueDrawer({
           canResume={sequentialCanResume}
           onResume={onResumeSequentialStart}
           onCancel={onCancelSequentialStart}
+          onOpenSettings={onOpenSettings}
         />
       )}
 
@@ -376,6 +379,7 @@ function SequentialStatusBar({
   canResume,
   onResume,
   onCancel,
+  onOpenSettings,
 }: {
   status: SequentialBatchStartStatus;
   currentBatchId?: string;
@@ -385,6 +389,7 @@ function SequentialStatusBar({
   canResume: boolean;
   onResume?: () => void;
   onCancel?: () => void;
+  onOpenSettings?: () => void;
 }) {
   if (status === "ACTIVE") {
     return (
@@ -409,12 +414,16 @@ function SequentialStatusBar({
     && formattedPauseReason.technicalMessage !== displayPauseReason
     ? formattedPauseReason.technicalMessage
     : undefined;
+  const pauseGuidance = formattedPauseReason?.code
+    ? "请先处理运行环境问题，再重试启动；不会自动提交新的生产任务。"
+    : "请先处理上一批失败项，再继续后续生产。";
 
   return (
     <div className="production-queue-drawer-sequence production-queue-drawer-sequence-paused" data-sequential-status="PAUSED" role="alert">
       <div className="production-queue-drawer-sequence-copy">
         <strong>连续运行已暂停</strong>
         <span>{displayPauseReason}</span>
+        <span>{pauseGuidance}</span>
         {technicalPauseReason && (
           <details className="technical-error-details">
             <summary>查看详细原因</summary>
@@ -423,7 +432,8 @@ function SequentialStatusBar({
         )}
       </div>
       <div className="production-queue-drawer-sequence-actions">
-        {canResume && onResume && <button type="button" data-action="resume-sequence" onClick={onResume}>继续后续</button>}
+        {canResume && onResume && <button type="button" data-action="resume-sequence" onClick={onResume}>重试启动</button>}
+        {onOpenSettings && <button type="button" className="quiet" data-action="open-settings" onClick={onOpenSettings}>打开连接设置</button>}
         {onCancel && queuedBatchIds.length > 0 && <button type="button" className="quiet" data-action="cancel-sequence" onClick={onCancel}>取消后续连续运行</button>}
       </div>
     </div>

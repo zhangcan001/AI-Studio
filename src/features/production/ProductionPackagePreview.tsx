@@ -152,15 +152,15 @@ export function ProductionPackagePreview({
     >
       <div className="section-heading workspace-heading">
         <div>
-          <span className="section-label">External Production Package V1</span>
-          <h2>{inspection?.packageName || "Production Package 预览"}</h2>
+          <span className="section-label">外部生产包 V1</span>
+          <h2>{inspection?.packageName || "生产包预览"}</h2>
           <p className="section-description">检查生产包项目状态、媒体元数据和视频提示词；完整提示词不会在预览中展开。</p>
         </div>
         {inspection && <span className="status-pill">{inspection.itemCount} 个项目</span>}
       </div>
 
       {!inspection ? (
-        <p className="empty-state" role="status">尚未加载 Production Package 检查结果。</p>
+        <p className="empty-state" role="status">尚未加载生产包检查结果。</p>
       ) : (
         <>
           <PackageSummary inspection={inspection} counts={counts} />

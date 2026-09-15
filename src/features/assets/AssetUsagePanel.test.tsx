@@ -47,7 +47,7 @@ describe("AssetUsagePanel", () => {
   it("renders a lazy, selected-asset usage section", () => {
     const html = renderToStaticMarkup(<AssetUsagePanel projectId="project-1" assetId="asset-1" assetName="主角参考图" />);
 
-    expect(html).toContain("Asset Usage");
+    expect(html).toContain("资产使用情况");
     expect(html).toContain("使用情况");
     expect(html).toContain("正在加载使用情况");
   });

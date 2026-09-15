@@ -14,6 +14,7 @@ import type { ProjectBackupPreview, ProjectView, RestoredProjectView } from "../
 import type { RecipeViewModel } from "../../types/generation";
 import type { ProjectWorkflowConfigView } from "../../types/projectWorkflow";
 import { toUserMessage } from "../../i18n/errorMessages";
+import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 import { formatDateTime, projectDisplayName } from "../../i18n/statusLabels";
 import type { ProjectTemplate, TemplateProjectResult } from "../../types/organization";
 import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
@@ -37,7 +38,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<unknown>();
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupPreview, setBackupPreview] = useState<ProjectBackupPreview>();
   const [restoreReport, setRestoreReport] = useState<RestoredProjectView>();
@@ -192,24 +193,41 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
       </div>
 
       {backupNotice && <p className="settings-notice" role="status">{backupNotice}</p>}
-      {error && !formMode && <p className="error-message" role="alert">{error}</p>}
+      {error !== undefined && !formMode && <UiErrorNotice error={error} />}
       {restoreReport && (
         <section className="project-backup-preview" aria-labelledby="project-restore-report-title" aria-live="polite">
           <div className="section-heading">
             <div>
               <span className="section-label">归档恢复</span>
-              <h3 id="project-restore-report-title">Restore Complete</h3>
+              <h3 id="project-restore-report-title">
+                {restoreReportHasWarnings(restoreReport) ? "已恢复，但有警告" : "恢复完成"}
+              </h3>
             </div>
           </div>
-          <p>Project: {restoreReport.name} · Backup v{restoreReport.backupVersion}</p>
-          <p>Assets: {restoreReport.assets} · Versions: {restoreReport.versions} · Generations: {restoreReport.generations}</p>
-          <p>Missing Tools: {restoreReport.missingTools.length} · Missing Models: {restoreReport.missingModels.length} · Missing Files: {restoreReport.missingFiles.length}</p>
-          <p>Warnings:</p>
-          {restoreReport.warnings.length > 0 ? (
-            <ul>
-              {restoreReport.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-            </ul>
-          ) : <p>无</p>}
+          <p>项目：{restoreReport.name} · 归档版本：v{restoreReport.backupVersion}</p>
+          <dl className="project-restore-report-summary">
+            <div><dt>资产</dt><dd>{restoreReport.assets}</dd></div>
+            <div><dt>资产版本</dt><dd>{restoreReport.versions}</dd></div>
+            <div><dt>生成任务</dt><dd>{restoreReport.generations}</dd></div>
+            <div><dt>工具溯源</dt><dd>{restoreReport.restoredGenerationToolUsages}</dd></div>
+            <div><dt>资产版本溯源</dt><dd>{restoreReport.restoredGenerationAssetVersions}</dd></div>
+          </dl>
+          <div className="project-restore-report-issues">
+            <RestoreReportList title="缺少工具" items={restoreReport.missingTools} />
+            <RestoreReportList title="缺少模型" items={restoreReport.missingModels} />
+            <RestoreReportList title="缺少媒体文件" items={restoreReport.missingFiles} />
+            <RestoreReportList title="未解析模型版本" items={restoreReport.unresolvedModelVersionIds} />
+            <RestoreReportList title="未解析工具实例" items={restoreReport.unresolvedToolInstanceIds} />
+            <RestoreReportList title="未解析工具版本" items={restoreReport.unresolvedToolVersionIds} />
+          </div>
+          <div>
+            <strong>恢复提示</strong>
+            {restoreReport.warnings.length > 0 ? (
+              <ul>
+                {restoreReport.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+              </ul>
+            ) : <p>未发现恢复警告。</p>}
+          </div>
         </section>
       )}
       {backupPreview && (
@@ -259,7 +277,7 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
               rows={3}
             />
           </label>
-          {error && <p className="error-message" role="alert">{error}</p>}
+          {error !== undefined && <UiErrorNotice error={error} />}
           <div className="project-form-actions">
             <button type="submit" disabled={saving}>{saving ? "正在保存..." : formMode.kind === "create" ? "创建项目" : "保存修改"}</button>
             <button type="button" className="quiet-button" onClick={closeForm} disabled={saving}>取消</button>
@@ -330,6 +348,28 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
         })}
         {!projects.length && <p className="empty-state">暂无项目。创建第一个项目后，可以导入 Production Handoff 或建立镜头。</p>}
       </div>
+    </section>
+  );
+}
+
+function restoreReportHasWarnings(report: RestoredProjectView): boolean {
+  return report.warnings.length > 0
+    || report.missingTools.length > 0
+    || report.missingModels.length > 0
+    || report.missingFiles.length > 0
+    || report.unresolvedModelVersionIds.length > 0
+    || report.unresolvedToolInstanceIds.length > 0
+    || report.unresolvedToolVersionIds.length > 0;
+}
+
+function RestoreReportList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <section>
+      <strong>{title}（{items.length}）</strong>
+      <ul>
+        {items.map((item) => <li key={item}><code>{item}</code></li>)}
+      </ul>
     </section>
   );
 }

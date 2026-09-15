@@ -93,7 +93,7 @@ function ProfileUsagePanel({ profile, usage, loading, error }: { profile?: Consi
   return (
     <aside className="consistency-usage-panel" aria-label="档案使用情况" style={{ display: "grid", gap: 10, minWidth: 0 }}>
       <div>
-        <span className="section-label">Usage</span>
+        <span className="section-label">使用情况</span>
         <h3>使用情况</h3>
       </div>
       {profile && (
@@ -415,7 +415,7 @@ export function ConsistencyProfileLibrary({ projectId }: Props) {
     <section className="workspace-panel consistency-profile-library" aria-label="档案库" style={{ display: "grid", gap: 14, minWidth: 0 }}>
       <div className="section-heading workspace-heading" style={{ alignItems: "flex-start", marginBottom: 0 }}>
         <div>
-          <span className="section-label">Consistency</span>
+        <span className="section-label">一致性档案</span>
           <h2>档案库</h2>
           <p className="section-description">管理角色、场景、道具和风格 Profile；这里只保存语义与关系，不复制素材文件。</p>
         </div>

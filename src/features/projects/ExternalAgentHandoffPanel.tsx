@@ -117,7 +117,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
   }
 
   return (
-    <section className="workspace-panel project-import-workspace" aria-busy={busy} aria-label="External Agent Handoff 工作区">
+    <section className="workspace-panel project-import-workspace" aria-busy={busy} aria-label="外部交接工作区">
       <div className="section-heading workspace-heading">
         <div>
           <span className="section-label">项目工具 · 外部智能体</span>
@@ -160,10 +160,10 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
           rows={10}
           disabled={busy}
         />
-        <p className="project-import-help">预检是只读的；写入会创建 Series / Episode / Scene / Shot、提示词、阶段配置、已有素材引用和来源映射，不会创建 Queue Task、Comfy 任务或自动执行。</p>
+        <p className="project-import-help">预检是只读的；写入会创建系列 / 集 / 场景 / 镜头、提示词、阶段配置、已有素材引用和来源映射，不会创建队列任务、Comfy 任务或自动执行。</p>
         <details>
           <summary>查看格式说明</summary>
-          <p>必填：schemaVersion=1、当前 projectId、source.agent、series。Series → Episode → Scene → Shot 均使用稳定 externalId、名称、描述和正整数顺序。最多 500 个镜头；素材和工作流配置只能使用当前项目的真实 ID。</p>
+          <p>必填：schemaVersion=1、当前 projectId、source.agent、series。系列 → 集 → 场景 → 镜头均使用稳定 externalId、名称、描述和正整数顺序。最多 500 个镜头；素材和工作流配置只能使用当前项目的真实 ID。</p>
           <p>可先复制标准示例，再替换其中的工作流/配方占位符；不知道精确配置时，删除 stages 字段。预检会指出阻塞字段，不会写入数据。</p>
         </details>
         <div className="project-import-actions">
@@ -180,18 +180,18 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
 
       {error !== undefined && <UiErrorNotice error={error} />}
       {preview && (
-        <section className="project-import-dry-run-card" aria-label="External Agent Handoff 预检结果">
+        <section className="project-import-dry-run-card" aria-label="外部交接预检结果">
           <div className="project-import-card-heading">
-            <div><span className="section-label">2 · Preview</span><h3>预检结果</h3></div>
+            <div><span className="section-label">2 · 预检</span><h3>预检结果</h3></div>
             <strong className={preview.errors.length === 0 ? "project-import-ready" : "project-import-blocked"}>
               {preview.errors.length === 0 ? "可以确认" : "存在阻塞项"}
             </strong>
           </div>
           <div className="project-import-summary-grid">
-            <span><small>Series</small><strong>{preview.seriesCount}</strong></span>
-            <span><small>Episode</small><strong>{preview.episodeCount}</strong></span>
-            <span><small>Scene</small><strong>{preview.sceneCount}</strong></span>
-            <span><small>Shot</small><strong>{preview.shotCount}</strong></span>
+            <span><small>系列</small><strong>{preview.seriesCount}</strong></span>
+            <span><small>集</small><strong>{preview.episodeCount}</strong></span>
+            <span><small>场景</small><strong>{preview.sceneCount}</strong></span>
+            <span><small>镜头</small><strong>{preview.shotCount}</strong></span>
             <span><small>SHA256</small><strong title={preview.documentSha256}>{preview.documentSha256.slice(0, 12)}…</strong></span>
           </div>
           {preview.replay.status !== "NEW" && <p role="status">幂等状态：{preview.replay.status}，不会重复创建正式实体。</p>}
@@ -200,7 +200,7 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
               {[...preview.errors, ...preview.warnings].map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.path && <><code>{issue.path}</code> · </>}<strong>{issue.code}</strong>：{issue.message}</li>)}
             </ul>
           )}
-          <p>预计写入：{preview.writePlan.createsSeries} 个 Series、{preview.writePlan.createsEpisodes} 个 Episode、{preview.writePlan.createsScenes} 个 Scene、{preview.writePlan.createsShots} 个 Shot。</p>
+          <p>预计写入：{preview.writePlan.createsSeries} 个系列、{preview.writePlan.createsEpisodes} 个集、{preview.writePlan.createsScenes} 个场景、{preview.writePlan.createsShots} 个镜头。</p>
           <button type="button" className="primary-action" onClick={() => void confirmImport()} disabled={busy || completed || preview.errors.length > 0}>
             {completed ? "已确认写入" : "明确确认并写入"}
           </button>
@@ -208,8 +208,8 @@ export function ExternalAgentHandoffPanel({ projectId, onBack, onImported, onOpe
         </section>
       )}
 
-      <section className="project-import-dry-run-card" aria-label="External Agent Handoff 历史">
-        <div className="project-import-card-heading"><div><span className="section-label">3 · History</span><h3>交接历史</h3></div></div>
+      <section className="project-import-dry-run-card" aria-label="外部交接历史">
+        <div className="project-import-card-heading"><div><span className="section-label">3 · 历史</span><h3>交接历史</h3></div></div>
         {history.length === 0 ? <p>当前项目暂无外部交接记录。</p> : <ul className="project-import-issues">{history.map((item) => <li key={item.id}><div><strong>{item.sourceAgent}</strong>{item.sourceRevision ? ` @ ${item.sourceRevision}` : ""} · {item.documentSha256.slice(0, 12)}… · {new Date(item.importedAt).toLocaleString()}</div><button type="button" className="quiet-button" onClick={() => void showMappings(item.id)} disabled={busy}>查看映射</button>{selectedHandoffId === item.id && <ul><li>{mappings.length === 0 ? "没有实体映射" : `${mappings.length} 个实体映射已加载`}</li>{mappings.map((mapping) => <li key={`${mapping.entityKind}-${mapping.externalId}`}><code>{mapping.entityKind}</code> {mapping.externalId} → {mapping.formalEntityId}</li>)}</ul>}</li>)}</ul>}
       </section>
     </section>

@@ -88,10 +88,10 @@ describe("AssetPreview detail MVP", () => {
     expect(screen.getByText("任务 task-1")).toBeTruthy();
     expect(screen.getByText("版本历史")).toBeTruthy();
     expect(screen.getByText("资产关系")).toBeTruthy();
-    expect(screen.getByText("Prompt")).toBeTruthy();
-    expect(screen.getByText("Model")).toBeTruthy();
-    expect(screen.getByText("Generation")).toBeTruthy();
-    expect(screen.getByText("Date")).toBeTruthy();
+    expect(screen.getByText("提示词")).toBeTruthy();
+    expect(screen.getByText("模型")).toBeTruthy();
+    expect(screen.getByText("生成任务")).toBeTruthy();
+    expect(screen.getByText("日期")).toBeTruthy();
   });
 
   it("shows explicit tool and asset-version provenance without inferring missing links", async () => {

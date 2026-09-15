@@ -57,7 +57,7 @@ const detail: ShotProductionPlanDetail = {
 describe("ShotReadinessInspector", () => {
   it("shows all seven gates, context hash, profile sources, reference summary, and offline blocker", () => {
     const html = renderToStaticMarkup(<ShotReadinessInspector detail={detail} />);
-    expect(html).toContain("七项 Gate");
+    expect(html).toContain("七项门禁");
     for (const label of ["角色", "场景", "参考", "提示词", "工作流", "输出", "ComfyUI"]) {
       expect(html).toContain(label);
     }
@@ -66,8 +66,8 @@ describe("ShotReadinessInspector", () => {
     expect(html).toContain("ComfyUI");
     expect(html).toContain("01234567");
     expect(html).toContain("0123456789abcdef0123456789abcdef");
-    expect(html).toContain("Project");
-    expect(html).toContain("Scene");
+    expect(html).toContain("项目");
+    expect(html).toContain("场景");
     expect(html).toContain("character-1");
     expect(html).toContain("scene-profile-1");
     expect(html).toContain("reference-set-1");
@@ -123,10 +123,10 @@ describe("ShotReadinessInspector", () => {
       />,
     );
 
-    expect(html).toContain("Legacy Shot");
-    expect(html).toContain("沿用旧 Shot prompt / stage config / reference 关系");
-    expect(html).toContain("无新 Profile（可能使用 Legacy）");
-    expect(html).toContain("无 ReferenceSet");
+    expect(html).toContain("旧版镜头");
+    expect(html).toContain("沿用旧镜头提示词、阶段配置和参考关系");
+    expect(html).toContain("无新档案（可能使用旧版配置）");
+    expect(html).toContain("无参考集");
   });
 
   it("normalizes missing gates to seven visible incomplete entries and exposes check messages", () => {

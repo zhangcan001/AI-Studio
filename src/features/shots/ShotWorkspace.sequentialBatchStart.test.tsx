@@ -298,7 +298,7 @@ describe("ShotWorkspace explicit sequential batch start", () => {
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[data-sequential-status="ACTIVE"]')).toBeNull();
     expect(document.querySelector('[data-sequential-status="PAUSED"]')).toBeNull();
-    expect(screen.queryByRole("button", { name: "继续后续" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重试启动" })).toBeNull();
 
     fireEvent.click(startButton("batch-d"));
     await flushAsyncWork();
@@ -407,7 +407,7 @@ describe("ShotWorkspace explicit sequential batch start", () => {
     expect(screen.getByText(/连续运行已暂停/)).toBeTruthy();
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "继续后续" }));
+    fireEvent.click(screen.getByRole("button", { name: "重试启动" }));
     await flushAsyncWork();
     expect(mocks.startProductionQueue).toHaveBeenNthCalledWith(2, "project-1", "batch-b");
   });

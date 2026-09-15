@@ -75,7 +75,7 @@ function ReferenceSetUsagePanel({ referenceSet, usage, loading, error }: { refer
   const relations = usageRelations(usage);
   return (
     <aside className="reference-set-usage-panel" aria-label="参考集使用情况" style={{ display: "grid", gap: 10, minWidth: 0 }}>
-      <div><span className="section-label">Usage</span><h3>使用情况</h3></div>
+      <div><span className="section-label">使用情况</span><h3>使用情况</h3></div>
       {referenceSet && (
         <dl style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: "6px 10px", margin: 0, fontSize: "0.78rem" }}>
           <dt>用途</dt><dd style={{ margin: 0 }}>{purposeLabels[referenceSet.purpose]}</dd>
@@ -334,7 +334,7 @@ export function ReferenceSetLibrary({ projectId }: Props) {
     <section className="workspace-panel reference-set-library" aria-label="参考集库" style={{ display: "grid", gap: 14, minWidth: 0 }}>
       <div className="section-heading workspace-heading" style={{ alignItems: "flex-start", marginBottom: 0 }}>
         <div>
-          <span className="section-label">ReferenceSet</span>
+          <span className="section-label">参考集</span>
           <h2>参考集</h2>
           <p className="section-description">管理可复用的有序图片集合；旧版参考锚点仍保留，不会被自动转换或删除。</p>
         </div>
@@ -399,7 +399,7 @@ export function ReferenceSetLibrary({ projectId }: Props) {
       {conversionOpen && (
         <div className="asset-preview-backdrop" role="presentation" onMouseDown={() => !conversionBusy && setConversionOpen(false)}>
           <section className="asset-preview-panel" role="dialog" aria-modal="true" aria-label="从旧参考锚点创建参考集" onMouseDown={(event) => event.stopPropagation()} style={{ display: "grid", gap: 12 }}>
-            <div className="section-heading" style={{ marginBottom: 0 }}><div><span className="section-label">Legacy Anchor</span><h3>从旧参考锚点创建</h3><p className="section-description">这是显式转换；原参考锚点和顺序会保持不变。</p></div><button type="button" className="quiet-button" onClick={() => setConversionOpen(false)} disabled={conversionBusy}>关闭</button></div>
+            <div className="section-heading" style={{ marginBottom: 0 }}><div><span className="section-label">旧版参考锚点</span><h3>从旧参考锚点创建</h3><p className="section-description">这是显式转换；原参考锚点和顺序会保持不变。</p></div><button type="button" className="quiet-button" onClick={() => setConversionOpen(false)} disabled={conversionBusy}>关闭</button></div>
             <label className="field-control"><span>旧参考锚点</span><select value={anchorId} onChange={(event) => setAnchorId(event.target.value)} disabled={conversionBusy}><option value="">请选择</option>{anchors.map((anchor) => <option key={anchor.id} value={anchor.id}>{anchor.name} · {anchor.assets.length} 张图片</option>)}</select></label>
             <label className="field-control"><span>新参考集名称</span><input value={conversionName} onChange={(event) => setConversionName(event.target.value)} placeholder="例如：主角参考集" disabled={conversionBusy} /></label>
             {conversionError && <p className="error-message" role="alert">{conversionError}</p>}

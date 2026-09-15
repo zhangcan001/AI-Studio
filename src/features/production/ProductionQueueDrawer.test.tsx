@@ -221,11 +221,15 @@ describe("ProductionQueueDrawer", () => {
         sequentialPauseReason="RUNTIME_ADMISSION_COMFY_UNAVAILABLE: ComfyUI status is Offline"
         sequentialCanResume
         onResumeSequentialStart={vi.fn()}
+        onOpenSettings={vi.fn()}
       />,
     );
 
     expect(html).toContain("连续运行已暂停");
     expect(html).toContain("无法启动生产队列：ComfyUI 当前不可用。");
+    expect(html).toContain("请先处理运行环境问题，再重试启动");
+    expect(html).toContain("重试启动");
+    expect(html).toContain("打开连接设置");
     expect(html).toContain("RUNTIME_ADMISSION_COMFY_UNAVAILABLE");
     expect(html).toContain('role="alert"');
   });

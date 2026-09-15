@@ -216,7 +216,7 @@ export function ProductionPackageWorkspace({
     if (busy) return;
     if (paths.length !== 1) {
       setError({
-        message: "一次只能拖入一个 Production Package 文件夹。",
+        message: "一次只能拖入一个生产包文件夹。",
         code: "PACKAGE_DROP_INVALID",
         requiresReinspect: false,
       });
@@ -227,7 +227,7 @@ export function ProductionPackageWorkspace({
     const droppedPath = normalizePath(paths[0]);
     if (!droppedPath || isLikelyDroppedFile(droppedPath)) {
       setError({
-        message: "请拖入包含 production-package.json 的整个 Production Package 文件夹。",
+        message: "请拖入包含 production-package.json 的整个生产包文件夹。",
         code: "PACKAGE_DROP_INVALID",
         requiresReinspect: false,
       });
@@ -434,14 +434,14 @@ export function ProductionPackageWorkspace({
       className="production-package-workspace"
       data-state={workspaceState}
       data-selected-count={selectedItems.length}
-      aria-label="Production Package 工作区"
+      aria-label="生产包工作区"
       aria-busy={busy}
     >
       <div className="production-package-workspace-heading">
         <div>
-          <span className="section-label">External Production Package V1</span>
+          <span className="section-label">外部生产包 V1</span>
           <h2>{inspection?.packageName || "批量视频生产"}</h2>
-          <p className="section-description">选择或拖入外部智能体准备好的 Production Package 文件夹；检查后创建待启动批次，开始生产仍由你明确点击。</p>
+          <p className="section-description">选择或拖入外部智能体准备好的生产包文件夹；检查后创建待启动批次，开始生产仍由你明确点击。</p>
         </div>
         <span className={`production-package-workspace-state production-package-workspace-state-${workspaceState.toLowerCase()}`}>
           {workspaceStateLabel(workspaceState)}
@@ -451,15 +451,15 @@ export function ProductionPackageWorkspace({
       <div className="production-package-workspace-folder" aria-label="生产包文件夹入口" data-drop-support={dropSupport}>
         <div
           className={`production-package-workspace-drop-zone${isDragOver ? " production-package-workspace-drop-zone-active" : ""}`}
-          aria-label="Production Package 文件夹拖放区域"
+          aria-label="生产包文件夹拖放区域"
           data-drop-state={isDragOver ? "DRAG_OVER" : "IDLE"}
         >
-          <strong>{isDragOver ? "松开以检查 Production Package 文件夹" : "将 Production Package 文件夹拖到这里"}</strong>
+          <strong>{isDragOver ? "松开以检查生产包文件夹" : "将生产包文件夹拖到这里"}</strong>
           <span>或使用下方的文件夹选择器</span>
           <small>目录中必须包含 <code>production-package.json</code></small>
           {dropSupport === "unavailable" && <small>桌面拖放 API 不可用，请使用文件夹选择器。</small>}
         </div>
-        <label htmlFor="production-package-folder-path">Production Package 文件夹路径</label>
+        <label htmlFor="production-package-folder-path">生产包文件夹路径</label>
         <div className="production-package-workspace-folder-row">
           <input
             id="production-package-folder-path"
@@ -495,7 +495,7 @@ export function ProductionPackageWorkspace({
       </div>
 
       <details className="production-package-workspace-spec">
-        <summary>Production Package V1 规范 / 生产包格式说明</summary>
+          <summary>生产包 V1 规范 / 格式说明</summary>
         <div>
           <p>文件夹根目录必须包含 <code>production-package.json</code>，媒体路径使用相对于该根目录的路径。</p>
           <ul>
@@ -605,7 +605,7 @@ export function ProductionPackageWorkspace({
         >
           <div className="production-package-workspace-created-heading">
             <div>
-              <span className="section-label">CREATE RESULT</span>
+              <span className="section-label">创建结果</span>
               <h3>{isPartialCreate ? "待启动批次创建部分完成" : `已创建 ${createdResult.batchCount} 个待启动生产批次`}</h3>
             </div>
             <span className="production-package-workspace-created-count">{isPartialCreate ? `${createdCount} 个项目已加入` : `${createdCount} 个项目`}</span>
@@ -733,7 +733,7 @@ function statusMessageForState(
   switch (state) {
     case "EMPTY": return "尚未选择生产包。请拖入或选择包含 production-package.json 的目录。";
     case "DRAG_OVER": return "已识别拖放操作；松开后将自动检查生产包。";
-    case "INSPECTING": return "正在检查 Production Package，请稍候。";
+    case "INSPECTING": return "正在检查生产包，请稍候。";
     case "READY": return `检查完成：${counts.total} 个项目全部 READY，可创建批次。`;
     case "PARTIAL": return `检查完成：${counts.ready} 个 READY、${counts.warning} 个 WARNING、${counts.blocked} 个 BLOCKED；当前已选择 ${selectedCount} 项。`;
     case "BLOCKED": return "检查完成，但没有可创建的 READY 或 WARNING 项目。请修复生产包后重新检查。";
@@ -771,7 +771,7 @@ function folderStatusLabel(input: {
   isBlocked: boolean;
   hasInspection: boolean;
 }): string {
-  if (!input.hasPath) return "尚未选择 Production Package 文件夹";
+  if (!input.hasPath) return "尚未选择生产包文件夹";
   if (input.isInspecting) return "已选择 · 正在检查";
   if (input.hasCreatedResult) return "已选择 · 已创建待启动批次";
   if (input.hasError || input.isBlocked) return "已选择 · 检查发现问题";

@@ -225,12 +225,12 @@ function ResolvedContextPreview({ stage, context, onCopyHash }: { stage: ShotSta
   return (
     <section className="consistency-resolved-panel" aria-label={title}>
       <div className="consistency-workspace-section-heading">
-        <div><span className="section-label">Resolver</span><h3>{title}</h3></div>
-        {context?.readinessStatus && <span className="consistency-readiness">Readiness: {context.readinessStatus}</span>}
+        <div><span className="section-label">一致性解析</span><h3>{title}</h3></div>
+        {context?.readinessStatus && <span className="consistency-readiness">就绪状态：{context.readinessStatus}</span>}
       </div>
       {!context && <p className="consistency-empty-row">暂未加载最终解析上下文。</p>}
       {context && <>
-        {context.partial && <p className="consistency-partial" role="status">解析不完整；请查看下方 diagnostics，Readiness 仍以后端为准。</p>}
+        {context.partial && <p className="consistency-partial" role="status">解析不完整；请查看下方诊断信息，就绪状态仍以后端为准。</p>}
         {context.legacy?.usesLegacyShotReferences && <p className="consistency-legacy" role="note">当前使用旧版镜头参考素材</p>}
         {!context.legacy?.usesLegacyShotReferences && context.referenceSets?.length && <p className="consistency-takeover" role="note">一致性参考集已接管本镜头参考输入</p>}
         <div className="consistency-context-meta">
@@ -244,9 +244,9 @@ function ResolvedContextPreview({ stage, context, onCopyHash }: { stage: ShotSta
         </div>
         <div className="consistency-prompt-grid">
           <div><span>最终解析提示词</span><pre>{context.promptText || context.legacy?.prompt || "—"}</pre></div>
-          <div><span>Resolved negative prompt</span><pre>{context.negativePrompt || "—"}</pre></div>
+          <div><span>解析后的负面提示词</span><pre>{context.negativePrompt || "—"}</pre></div>
         </div>
-        {context.diagnostics.length > 0 && <div className="consistency-diagnostics" aria-label="解析 diagnostics"><strong>Diagnostics</strong>{context.diagnostics.map((diagnostic, index) => <p key={`${diagnostic.code}:${index}`} className={`consistency-diagnostic-${diagnostic.severity.toLowerCase()}`}><span>{diagnostic.severity}</span><strong>{diagnostic.code}</strong>{diagnostic.message}</p>)}</div>}
+        {context.diagnostics.length > 0 && <div className="consistency-diagnostics" aria-label="解析诊断"><strong>诊断信息</strong>{context.diagnostics.map((diagnostic, index) => <p key={`${diagnostic.code}:${index}`} className={`consistency-diagnostic-${diagnostic.severity.toLowerCase()}`}><span>{diagnostic.severity}</span><strong>{diagnostic.code}</strong>{diagnostic.message}</p>)}</div>}
       </>}
     </section>
   );

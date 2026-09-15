@@ -14,10 +14,10 @@ interface Props {
 type UsageBucket = "referenceSets" | "profiles" | "shots" | "legacyReferences" | "selectedKeyframes" | "productionHistory";
 
 const bucketLabels: Record<UsageBucket, string> = {
-  referenceSets: "ReferenceSet",
-  profiles: "Profile",
-  shots: "Shot",
-  legacyReferences: "Legacy Anchor",
+  referenceSets: "参考集",
+  profiles: "一致性档案",
+  shots: "镜头",
+  legacyReferences: "旧版参考锚点",
   selectedKeyframes: "选中关键帧",
   productionHistory: "历史生产引用",
 };
@@ -103,12 +103,12 @@ export function AssetUsagePanel({ projectId, assetId, assetName, onOpenShot, onO
   return (
     <section className="asset-usage-panel" aria-label={`${assetName ?? "素材"} 使用情况`} style={{ display: "grid", gap: 10, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--studio-border, rgba(255,255,255,.08))" }}>
       <div className="section-heading" style={{ marginBottom: 0 }}>
-        <div><span className="section-label">Asset Usage</span><h3>使用情况</h3><p className="section-description">只在选中素材后读取当前项目的语义与生产引用。</p></div>
+        <div><span className="section-label">资产使用情况</span><h3>使用情况</h3><p className="section-description">只在选中素材后读取当前项目的语义与生产引用。</p></div>
         {summary && <span className="status-pill">{summary.total} 条关系 · {summary.blockingCount} 个阻塞</span>}
       </div>
       {loading && <p className="disabled-note" role="status">正在加载使用情况…</p>}
       {error && <p className="error-message" role="alert">使用情况加载失败：{error}</p>}
-      {summary && !visibleBuckets.length && <p className="empty-state">当前素材还没有 Profile、ReferenceSet、Shot 或历史引用。</p>}
+      {summary && !visibleBuckets.length && <p className="empty-state">当前素材还没有一致性档案、参考集、镜头或历史引用。</p>}
       {summary && visibleBuckets.map(({ bucket, items }) => (
         <section key={bucket} aria-label={bucketLabels[bucket]} style={{ display: "grid", gap: 7 }}>
           <strong>{bucketLabels[bucket]}（{items.length}）</strong>

@@ -184,7 +184,7 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported, o
             disabled={busy}
           />
         </label>
-        <p className="project-import-help">当前真实支持范围：JSON 或 TSV/TXT 镜头批量导入。不会创建或修改 Episode、Scene、Character 等其他实体。</p>
+        <p className="project-import-help">当前真实支持范围：JSON 或 TSV/TXT 镜头批量导入。不会创建或修改集、场景、角色等其他实体。</p>
         {file && (
           <dl className="project-import-file-meta">
             <div><dt>文件名</dt><dd>{file.name}</dd></div>
@@ -212,7 +212,7 @@ export function ProjectImportDryRunWorkspace({ projectId, onClose, onImported, o
           <section className="project-import-dry-run-card" aria-labelledby="project-import-dry-run-title">
             <div className="project-import-card-heading">
               <div>
-                <span className="section-label">3 · Dry-Run</span>
+                <span className="section-label">3 · 预检</span>
                 <h3 id="project-import-dry-run-title">预计变化</h3>
               </div>
               <strong className={result.readiness.ready ? "project-import-ready" : "project-import-blocked"}>
@@ -260,7 +260,7 @@ function ProjectImportSummary({ result }: { result: ImportDryRunResult }) {
   const { readiness } = result;
   return (
     <section className="project-import-summary" role="status" aria-label="导入文件摘要">
-      <div className="project-import-card-heading"><div><span className="section-label">2 · Parse / Validate</span><h3>导入文件摘要</h3></div><strong>{readiness.ready ? "预检通过" : "预检阻塞"}</strong></div>
+      <div className="project-import-card-heading"><div><span className="section-label">2 · 解析 / 校验</span><h3>导入文件摘要</h3></div><strong>{readiness.ready ? "预检通过" : "预检阻塞"}</strong></div>
       <div className="project-import-summary-grid">
         <span><small>记录总数</small><strong>{readiness.totalRecords}</strong></span>
         <span><small>可识别实体</small><strong>{readiness.validRecords}</strong></span>

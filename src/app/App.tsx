@@ -1044,6 +1044,10 @@ function App() {
               focusProductionReviewItemId={focusedProductionReviewItemId}
               focusProductionStage={focusedProductionStage}
               onOpenProductionQueue={openProductionQueueFromShot}
+              comfyStatus={comfy}
+              capabilityLoading={capabilityLoading}
+              onRefreshComfyCapabilities={() => void refreshCapabilities()}
+              onOpenSettings={() => navigateToStudioSection("settings")}
               consistencyWorkspace={{
                 profiles: consistencyProfiles,
                 referenceSets: consistencyReferenceSets,

@@ -721,6 +721,14 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .project-heading-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .project-backup-preview { display: grid; gap: 10px; padding: 16px; border: 1px solid #4d658f; border-radius: 12px; background: #182337; }
 .project-backup-preview p { margin: 0; color: #b9c8df; }
+.project-restore-report-summary { display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr)); gap: 8px; margin: 0; }
+.project-restore-report-summary > div { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid #2c3547; border-radius: 9px; background: #111720; }
+.project-restore-report-summary dt { color: #8997ad; font-size: 0.76rem; }
+.project-restore-report-summary dd { margin: 0; color: #eef4ff; font-size: 1.1rem; font-weight: 700; }
+.project-restore-report-issues { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.project-restore-report-issues > section { padding: 10px 12px; border: 1px solid #80652d; border-radius: 9px; color: #ffe3a3; background: #2a2417; }
+.project-restore-report-issues ul { margin: 6px 0 0; padding-left: 18px; }
+.project-restore-report-issues code { overflow-wrap: anywhere; }
 .project-form { display: grid; gap: 14px; padding: 16px; border: 1px solid #35435b; border-radius: 12px; background: #111720; }
 .project-form label { display: grid; gap: 7px; color: #d5deec; font-weight: 600; }
 .project-form label small { color: #8997ad; font-size: 0.75rem; font-weight: 400; }
@@ -796,6 +804,11 @@ select:focus, input:focus, textarea:focus { outline: 2px solid #6d8ec9; outline-
 .project-description-cell { color: #b9c8df; }
 .active-project-badge { display: inline-block; padding: 4px 8px; border-radius: 999px; color: #b9f5cd; background: #1d5535; font-size: 0.74rem; font-weight: 700; }
 .project-row-actions button { min-height: 36px; }
+
+@media (max-width: 760px) {
+  .project-restore-report-summary,
+  .project-restore-report-issues { grid-template-columns: 1fr 1fr; }
+}
 
 .workflow-workspace { display: grid; gap: 18px; }
 .workflow-workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; }

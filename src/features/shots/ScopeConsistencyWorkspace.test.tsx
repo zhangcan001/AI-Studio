@@ -89,7 +89,7 @@ describe("ScopeConsistencyWorkspace", () => {
     expect(screen.getByText("最终解析提示词")).toBeTruthy();
     expect(screen.getByText("赤羽站在雨巷")).toBeTruthy();
     expect(screen.getByText("低清晰度")).toBeTruthy();
-    expect(screen.getByText("解析不完整；请查看下方 diagnostics，Readiness 仍以后端为准。")).toBeTruthy();
+    expect(screen.getByText("解析不完整；请查看下方诊断信息，就绪状态仍以后端为准。")).toBeTruthy();
     expect(screen.getByText("CONTEXT_PROFILE_NOT_FOUND")).toBeTruthy();
     expect(screen.getByText("INCOMPLETE", { exact: false })).toBeTruthy();
     expect(screen.getByText("雨巷远景")).toBeTruthy();

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getProductionReviewInbox } from "../../services/tauriClient";
 import type { ProductionReviewInboxPage } from "../../types/productionItemReview";
-import { formatDateTime, productionReviewStatusLabel } from "../../i18n/statusLabels";
+import { UiErrorNotice } from "../../i18n/UiErrorNotice";
+import { formatDateTime, productionItemStatusLabel, productionReviewStatusLabel } from "../../i18n/statusLabels";
 import type { ProjectCommandCenterNavigationRequest } from "../projects/ProjectCommandCenter";
 
 const PAGE_SIZE = 25;
@@ -15,7 +16,7 @@ interface Props {
 export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" }: Props) {
   const [page, setPage] = useState<ProductionReviewInboxPage>();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<unknown>();
 
   const load = useCallback(async (offset: number, append: boolean) => {
     if (!projectId) return;
@@ -25,7 +26,7 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
       const next = await getProductionReviewInbox(projectId, PAGE_SIZE, offset);
       setPage((current) => append && current ? { ...next, items: [...current.items, ...next.items] } : next);
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : "项目审片收件箱加载失败");
+      setError(cause);
     } finally {
       setLoading(false);
     }
@@ -53,7 +54,7 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
           <button type="button" className="quiet-button" onClick={() => void load(0, false)} disabled={loading}>刷新</button>
         </div>
       </div>
-      {error && <p className="error-message" role="alert">{error}</p>}
+      {error !== undefined && <UiErrorNotice error={error} />}
       {items.length === 0 && !loading && !error && <p className="disabled-note">当前项目没有待处理审片项。完成生产后，待审核结果会出现在这里；已选择结果可从项目中心的“最终结果”进入。</p>}
       {items.length > 0 && (
         <div className="production-review-inbox-list">
@@ -61,7 +62,8 @@ export function ProductionReviewInbox({ projectId, onNavigate, mode = "summary" 
             <article className="production-review-inbox-row" key={`${item.batchId}:${item.itemId}`}>
               <div className="production-review-inbox-copy">
                 <strong>{item.promptSummary || `第 ${item.ordinal + 1} 项`}</strong>
-                <span>{item.batchName} · #{item.ordinal + 1} · {productionReviewStatusLabel(item.reviewStatus)}</span>
+                <span>{item.batchName} · #{item.ordinal + 1}</span>
+                <span>执行：{productionItemStatusLabel(item.itemStatus)} · 审核：{productionReviewStatusLabel(item.reviewStatus)}</span>
                 {item.selectedAssetId && <span>已选择结果 · 可打开素材查看</span>}
                 <details><summary>查看技术详情</summary><small>
                   批次 {item.batchId} · 项目 {item.itemId}

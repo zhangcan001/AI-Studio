@@ -9,6 +9,7 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   CANCEL_REQUESTED: "正在取消",
   COLLECTING: "正在收集结果",
   SUCCEEDED: "已完成",
+  COMPLETED: "已完成",
   FAILED: "失败",
   CANCELLED: "已取消",
 };
@@ -25,6 +26,7 @@ const PRODUCTION_ITEM_STATUS_LABELS: Record<string, string> = {
   DISPATCHING: "正在提交",
   DISPATCHED: "运行中",
   SUCCEEDED: "已完成",
+  COMPLETED: "已完成",
   FAILED: "失败，需要处理",
   CANCELLED: "已取消",
   SKIPPED: "已跳过",
