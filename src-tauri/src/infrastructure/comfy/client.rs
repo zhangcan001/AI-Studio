@@ -30,6 +30,10 @@ const COMFY_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 // finishes bookkeeping or unloads a large model. Keep ordinary requests
 // responsive, but give these control-plane operations a wider window.
 const COMFY_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
+// GPU telemetry can briefly block while ComfyUI is loading or releasing a
+// model; health checks should not classify a live endpoint as offline after
+// the ordinary request timeout.
+const COMFY_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -89,7 +93,9 @@ impl ComfyHttpAdapter {
     }
 
     async fn get_system_stats_internal(&self) -> Result<SystemStats, ComfyAdapterError> {
-        let dto: SystemStatsDto = self.get_json("system_stats").await?;
+        let dto: SystemStatsDto = self
+            .get_json_with_timeout("system_stats", COMFY_HEALTH_TIMEOUT)
+            .await?;
 
         if dto.system.is_none() && dto.devices.is_empty() {
             return Err(ComfyAdapterError::Incompatible(
@@ -1162,6 +1168,31 @@ mod tests {
         assert_eq!(stats.devices[0].name.as_deref(), Some("Test GPU"));
         assert_eq!(stats.devices[0].vram_total, Some(17179869184));
         assert_eq!(stats.devices[0].vram_free, Some(8589934592));
+    }
+
+    #[tokio::test]
+    async fn health_check_allows_slow_system_stats_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/system_stats"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({
+                        "system": {"comfyui_version": "slow-health"},
+                        "devices": []
+                    }))
+                    .set_delay(Duration::from_secs(6)),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let stats = adapter
+            .get_system_stats()
+            .await
+            .expect("slow health response should remain a connected ComfyUI");
+
+        assert_eq!(stats.comfyui_version.as_deref(), Some("slow-health"));
     }
 
     #[tokio::test]
