@@ -9,13 +9,14 @@ import type {
 
 interface StudioState {
   selectedWorkflow?: RecipeViewModel;
+  selectedModelVersionId?: string;
   values: GenerationValues;
   draftDirty: boolean;
   validationErrors: Record<string, string>;
   pendingAssetIntent?: PendingStudioAssetIntent;
   reuseProvenance?: StudioReuseProvenance;
   setSelectedWorkflow: (workflow?: RecipeViewModel) => void;
-  loadDraft: (workflow: RecipeViewModel, values: GenerationValues) => void;
+  loadDraft: (workflow: RecipeViewModel, values: GenerationValues, modelVersionId?: string) => void;
   setPendingAssetIntent: (intent: PendingStudioAssetIntent) => void;
   clearPendingAssetIntent: () => void;
   setReuseProvenance: (provenance?: StudioReuseProvenance) => void;
@@ -33,13 +34,14 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSelectedWorkflow: (workflow) =>
     set({
       selectedWorkflow: workflow,
+      selectedModelVersionId: undefined,
       values: workflow ? defaultGenerationValues(workflow) : {},
       draftDirty: false,
       validationErrors: {},
       reuseProvenance: undefined,
     }),
-  loadDraft: (workflow, values) =>
-    set({ selectedWorkflow: workflow, values, draftDirty: false, validationErrors: {} }),
+  loadDraft: (workflow, values, selectedModelVersionId) =>
+    set({ selectedWorkflow: workflow, selectedModelVersionId, values, draftDirty: false, validationErrors: {} }),
   setPendingAssetIntent: (pendingAssetIntent) => set({ pendingAssetIntent }),
   clearPendingAssetIntent: () => set({ pendingAssetIntent: undefined }),
   setReuseProvenance: (reuseProvenance) => set({ reuseProvenance }),
@@ -56,6 +58,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   resetDraft: () =>
     set(() => ({
       selectedWorkflow: undefined,
+      selectedModelVersionId: undefined,
       values: {},
       draftDirty: false,
       validationErrors: {},

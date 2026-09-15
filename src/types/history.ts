@@ -118,6 +118,7 @@ export interface ReusableGenerationDraft {
   projectId: string;
   workflowVersionId: string;
   recipeId: string;
+  modelVersionId?: string | null;
   workflowName: string;
   createdAt: string;
   values: GenerationValues;

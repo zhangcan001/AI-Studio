@@ -201,6 +201,7 @@ impl TaskHistoryService {
             project_id: record.task.project_id,
             workflow_version_id: record.task.workflow_version_id,
             recipe_id: record.task.recipe_id,
+            model_version_id: draft.model_version_id,
             workflow_name: record.workflow_name,
             created_at: record.task.created_at,
             values: draft.values,
@@ -295,6 +296,9 @@ impl TaskHistoryService {
         Ok(ReusableDraft {
             values,
             missing_asset_ids,
+            model_version_id: snapshot
+                .model_version_id
+                .map(|model_version_id| model_version_id.as_str().to_owned()),
         })
     }
 }
@@ -615,6 +619,7 @@ pub struct ReusableGenerationDraftView {
     pub project_id: String,
     pub workflow_version_id: String,
     pub recipe_id: String,
+    pub model_version_id: Option<String>,
     pub workflow_name: String,
     pub created_at: DateTime<Utc>,
     pub values: BTreeMap<String, DraftValueView>,
@@ -700,6 +705,7 @@ fn asset_matches_draft_kind(
 struct ReusableDraft {
     values: BTreeMap<String, DraftValueView>,
     missing_asset_ids: Vec<String>,
+    model_version_id: Option<String>,
 }
 
 fn parse_snapshot_values(

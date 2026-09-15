@@ -98,6 +98,7 @@ export function GenerationStudio({
   onReconnectComfy,
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
+  const selectedModelVersionId = useStudioStore((state) => state.selectedModelVersionId);
   const productCatalog = useMemo(
     () => filterImageRecipes(catalog),
     [catalog],
@@ -216,6 +217,7 @@ export function GenerationStudio({
   const generationController = useGenerationSubmissionController({
     projectId,
     selectedWorkflow,
+    modelVersionId: selectedModelVersionId,
     values,
     configurationError: krea2ConfigError,
     productionAdmission,
@@ -484,8 +486,8 @@ export function GenerationStudio({
               projectId={projectId}
               recipe={selectedWorkflow}
               values={values}
-              onApplyValues={(nextValues) => {
-                useStudioStore.getState().loadDraft(selectedWorkflow, nextValues);
+              onApplyValues={(nextValues, nextModelVersionId) => {
+                useStudioStore.getState().loadDraft(selectedWorkflow, nextValues, nextModelVersionId);
                 setMissingAssetFields(new Set());
               }}
               onUseForExperiment={experimentController.usePromptVersionsForExperiment}

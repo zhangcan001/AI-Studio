@@ -24,7 +24,7 @@ interface Props {
   projectId: string;
   recipe: RecipeViewModel;
   values: GenerationValues;
-  onApplyValues: (values: GenerationValues) => void;
+  onApplyValues: (values: GenerationValues, modelVersionId?: string) => void;
   onUseForExperiment: (fieldKey: string, versions: PromptVersionView[]) => void;
 }
 
@@ -217,7 +217,10 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
       setError(result.issue ?? "无法应用当前版本。");
       return;
     }
-    onApplyValues(result.values);
+    onApplyValues(
+      result.values,
+      detail?.kind === "prompt" ? version.modelVersionId ?? undefined : undefined,
+    );
     setNotice(detail?.kind === "snippet" ? `片段已${mode === "prepend" ? "插入开头" : mode === "append" ? "追加到末尾" : "替换"}；未自动生成。` : "提示词版本已应用到 Studio；未自动生成。");
   }
 

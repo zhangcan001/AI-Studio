@@ -107,6 +107,7 @@ export function TaskHistoryDetail({
         workflowVersionId: draft.workflowVersionId,
         recipeId: draft.recipeId,
         values: draft.values,
+        ...(draft.modelVersionId ? { modelVersionId: draft.modelVersionId } : {}),
         submissionIdempotencyKey: taskRetrySubmissionKey(detail.id),
       });
       useTaskStore.getState().adoptCreatedTask(task);

@@ -140,6 +140,17 @@ describe("useGenerationSubmissionController", () => {
     expect(onNotice).toHaveBeenLastCalledWith(null);
   });
 
+  it("forwards an explicitly selected model version without inferring one", async () => {
+    mocks.createGeneration.mockResolvedValue(task());
+    const { result } = renderHook(() => useGenerationSubmissionController(options({ modelVersionId: "model-version-a" })));
+
+    await act(async () => { await result.current.generate(); });
+
+    expect(mocks.createGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      modelVersionId: "model-version-a",
+    }));
+  });
+
   it("keeps creating true during a request and reuses one key for concurrent submissions", async () => {
     const pending = deferred<TaskView>();
     mocks.createGeneration.mockReturnValue(pending.promise);
