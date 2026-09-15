@@ -607,7 +607,11 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 definition_repository.clone(),
             ));
             let asset_query_service = Arc::new(
-                AssetQueryService::new(asset_repository.clone(), asset_store.clone())
+                AssetQueryService::new(
+                    asset_repository.clone(),
+                    asset_store.clone(),
+                    project_repository.clone(),
+                )
                     .with_output_order_repositories(
                         Arc::new(SqliteTaskRepository::new(database_pool.clone())),
                         definition_repository.clone(),

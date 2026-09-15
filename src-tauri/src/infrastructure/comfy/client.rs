@@ -448,6 +448,7 @@ impl ComfyHttpAdapter {
         &self,
         file: &ComfyOutputFile,
     ) -> Result<ComfyOutputData, ComfyAdapterError> {
+        validate_comfy_output_file(file)?;
         let url = self.config.route_url("view");
         let response = self
             .client
@@ -509,6 +510,7 @@ impl ComfyHttpAdapter {
         &self,
         file: &ComfyOutputFile,
     ) -> Result<Box<dyn ComfyOutputStream>, ComfyAdapterError> {
+        validate_comfy_output_file(file)?;
         let url = self.config.route_url("view");
         let response = self
             .client
@@ -796,20 +798,22 @@ fn normalize_saved_result_array(
                     "history output node {node_id} {field} filename is missing"
                 ))
             })?;
+        let file = ComfyOutputFile {
+            filename: filename.to_owned(),
+            subfolder: entry
+                .get("subfolder")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            folder_type: entry
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("output")
+                .to_owned(),
+        };
+        validate_comfy_output_file(&file)?;
         results.push(ComfySavedResult {
-            file: ComfyOutputFile {
-                filename: filename.to_owned(),
-                subfolder: entry
-                    .get("subfolder")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-                folder_type: entry
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("output")
-                    .to_owned(),
-            },
+            file,
             animated: animated_flags
                 .and_then(|flags| flags.get(index))
                 .and_then(Value::as_bool)
@@ -818,6 +822,42 @@ fn normalize_saved_result_array(
         });
     }
     Ok(results)
+}
+
+fn validate_comfy_output_file(file: &ComfyOutputFile) -> Result<(), ComfyAdapterError> {
+    if file.filename.trim().is_empty()
+        || matches!(file.filename.as_str(), "." | "..")
+        || file
+            .filename
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+    {
+        return Err(ComfyAdapterError::Protocol(
+            "Comfy output filename must be one safe file name".to_owned(),
+        ));
+    }
+
+    if !file.subfolder.is_empty()
+        && file.subfolder.split(['/', '\\']).any(|part| {
+            part.is_empty()
+                || matches!(part, "." | "..")
+                || part
+                    .chars()
+                    .any(|character| character.is_control() || character == ':')
+        })
+    {
+        return Err(ComfyAdapterError::Protocol(
+            "Comfy output subfolder must be a safe relative path".to_owned(),
+        ));
+    }
+
+    if !matches!(file.folder_type.as_str(), "output" | "temp" | "input") {
+        return Err(ComfyAdapterError::Protocol(format!(
+            "unsupported Comfy output folder type: {}",
+            file.folder_type
+        )));
+    }
+    Ok(())
 }
 
 fn normalize_queue_ids(value: &Value, field: &str) -> Result<Vec<String>, ComfyAdapterError> {
@@ -1831,6 +1871,53 @@ mod tests {
             bytes.extend(chunk);
         }
         assert_eq!(bytes[4..8], *b"ftyp");
+    }
+
+    #[tokio::test]
+    async fn rejects_unsafe_view_parameters_before_request() {
+        let server = MockServer::start().await;
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+
+        for file in [
+            ComfyOutputFile {
+                filename: "../escape.png".to_owned(),
+                subfolder: String::new(),
+                folder_type: "output".to_owned(),
+            },
+            ComfyOutputFile {
+                filename: "safe.png".to_owned(),
+                subfolder: "../escape".to_owned(),
+                folder_type: "output".to_owned(),
+            },
+            ComfyOutputFile {
+                filename: "safe.png".to_owned(),
+                subfolder: String::new(),
+                folder_type: "other".to_owned(),
+            },
+        ] {
+            assert!(matches!(
+                adapter.download_output(&file).await,
+                Err(ComfyAdapterError::Protocol(_))
+            ));
+        }
+
+        let stream_error = match adapter
+            .open_output_stream(&ComfyOutputFile {
+                filename: "safe.png".to_owned(),
+                subfolder: "nested//escape".to_owned(),
+                folder_type: "output".to_owned(),
+            })
+            .await
+        {
+            Ok(_) => panic!("unsafe stream path should be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(stream_error, ComfyAdapterError::Protocol(_)));
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty());
     }
 
     #[tokio::test]

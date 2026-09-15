@@ -107,7 +107,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            36
+            37
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_033_through_036_preserve_existing_project_asset_shot_task_review_rows() {
+    async fn migration_033_through_037_preserve_existing_project_asset_shot_task_review_rows() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-032.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()

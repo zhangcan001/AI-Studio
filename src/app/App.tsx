@@ -747,7 +747,12 @@ function App() {
       setError("当前工作流版本已不在运行目录中，请刷新工作流列表。");
       return;
     }
-    useStudioStore.getState().loadDraft(workflow, draft.values);
+    useStudioStore.getState().loadDraft(
+      workflow,
+      draft.values,
+      draft.modelVersionId ?? undefined,
+      draft.promptVersionId ?? undefined,
+    );
     useStudioStore.getState().setReuseProvenance({
       workflowName: draft.workflowName,
       createdAt: draft.createdAt,
@@ -923,7 +928,7 @@ function App() {
           <div>
             <span className="section-label">生产队列正在运行</span>
             <strong>{productionAdmission.batchName ?? "生产队列"}</strong>
-            <p>当前 GPU 正在执行生产任务，新的生成任务暂时不可提交。</p>
+            <p>当前 GPU 正在执行生产任务{productionAdmission.activeTaskId ? `（任务 ${productionAdmission.activeTaskId}）` : ""}；新的生成任务暂时不可提交。服务端执行准入会保持 GPU 串行。</p>
           </div>
           <button
             type="button"

@@ -24,11 +24,17 @@ interface Props {
   projectId: string;
   recipe: RecipeViewModel;
   values: GenerationValues;
-  onApplyValues: (values: GenerationValues, modelVersionId?: string) => void;
+  selectedModelVersionId?: string;
+  onApplyValues: (values: GenerationValues, provenance: PromptStudioProvenance) => void;
   onUseForExperiment: (fieldKey: string, versions: PromptVersionView[]) => void;
 }
 
-export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, onUseForExperiment }: Props) {
+export interface PromptStudioProvenance {
+  promptVersionId?: string;
+  modelVersionId?: string;
+}
+
+export function PromptLibraryPanel({ projectId, recipe, values, selectedModelVersionId, onApplyValues, onUseForExperiment }: Props) {
   const textFields = useMemo(() => recipe.fields.filter((field) => field.type === "textarea"), [recipe]);
   const [kind, setKind] = useState<PromptKind>("prompt");
   const [keywordInput, setKeywordInput] = useState("");
@@ -164,6 +170,7 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
         name: newName,
         tags: parseTags(newTags),
         text: values[fieldKey]?.type === "string" ? values[fieldKey].value : "",
+        ...(newKind === "prompt" && selectedModelVersionId ? { modelVersionId: selectedModelVersionId } : {}),
       });
       setEntries((current) => [created, ...current.filter((entry) => entry.id !== created.id)]);
       setSelectedId(created.id);
@@ -178,7 +185,12 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
     if (!detail || !fieldKey) return;
     setSaving(true); setError(undefined); setNotice(undefined);
     try {
-      const version = await addPromptLibraryVersion(projectId, detail.id, currentText);
+      const version = await addPromptLibraryVersion(
+        projectId,
+        detail.id,
+        currentText,
+        detail.kind === "prompt" ? selectedModelVersionId : undefined,
+      );
       setDetail((current) => current ? { ...current, versions: [...current.versions, version], versionCount: current.versionCount + 1, updatedAt: version.createdAt } : current);
       setSelectedVersionId(version.id);
       setNotice(`已追加 v${version.version}。未创建生成任务。`);
@@ -219,7 +231,12 @@ export function PromptLibraryPanel({ projectId, recipe, values, onApplyValues, o
     }
     onApplyValues(
       result.values,
-      detail?.kind === "prompt" ? version.modelVersionId ?? undefined : undefined,
+      detail?.kind === "prompt"
+        ? {
+            promptVersionId: version.id,
+            modelVersionId: version.modelVersionId ?? undefined,
+          }
+        : {},
     );
     setNotice(detail?.kind === "snippet" ? `片段已${mode === "prepend" ? "插入开头" : mode === "append" ? "追加到末尾" : "替换"}；未自动生成。` : "提示词版本已应用到 Studio；未自动生成。");
   }

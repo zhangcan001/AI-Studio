@@ -1,6 +1,6 @@
 use crate::application::ports::{
     AssetReadStream, AssetRepository, AssetStore, ComfyAdapter, ComfyAdapterError,
-    ComfyInputStream, ComfyInputUpload, ComfyUploadedInput, RepositoryError,
+    ComfyInputStream, ComfyInputUpload, ComfyUploadedInput, ProjectRepository, RepositoryError,
 };
 use crate::domain::{
     Asset, AssetId, AssetType, InputValue, SeedValue, TaskId, GENERATED_VIDEO_CATEGORY,
@@ -157,6 +157,7 @@ impl Error for GenerationInputPrepareError {}
 pub struct GenerationInputPreparer {
     asset_repository: Arc<dyn AssetRepository>,
     asset_store: Arc<dyn AssetStore>,
+    project_repository: Arc<dyn ProjectRepository>,
     comfy_adapter: Arc<dyn ComfyAdapter>,
 }
 
@@ -164,11 +165,13 @@ impl GenerationInputPreparer {
     pub fn new(
         asset_repository: Arc<dyn AssetRepository>,
         asset_store: Arc<dyn AssetStore>,
+        project_repository: Arc<dyn ProjectRepository>,
         comfy_adapter: Arc<dyn ComfyAdapter>,
     ) -> Self {
         Self {
             asset_repository,
             asset_store,
+            project_repository,
             comfy_adapter,
         }
     }
@@ -264,6 +267,16 @@ impl GenerationInputPreparer {
         task_id: &TaskId,
         values: &BTreeMap<String, GenerationInputValue>,
     ) -> Result<PreparedGenerationInputs, GenerationInputPrepareError> {
+        let project_root = self
+            .project_repository
+            .get_storage_root(project_id)
+            .await
+            .map_err(repository_error)?
+            .ok_or_else(|| {
+                GenerationInputPrepareError::Repository(format!(
+                    "storage root is not configured for project {project_id}"
+                ))
+            })?;
         let mut compiler_values = BTreeMap::new();
         let mut images = BTreeMap::new();
         let mut media = BTreeMap::new();
@@ -286,7 +299,7 @@ impl GenerationInputPreparer {
                 GenerationInputValue::ImageAsset(asset_id) => {
                     let asset = self.load_image_asset(project_id, asset_id).await?;
                     let prepared = self
-                        .upload_image_asset(task_id, &asset, None, &mut upload_cache)
+                        .upload_image_asset(task_id, &project_root, &asset, None, &mut upload_cache)
                         .await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Image(prepared.comfy.name.clone()));
@@ -298,7 +311,13 @@ impl GenerationInputPreparer {
                     for (index, asset_id) in asset_ids.iter().enumerate() {
                         let asset = self.load_image_asset(project_id, asset_id).await?;
                         let prepared = self
-                            .upload_image_asset(task_id, &asset, Some(index + 1), &mut upload_cache)
+                            .upload_image_asset(
+                                task_id,
+                                &project_root,
+                                &asset,
+                                Some(index + 1),
+                                &mut upload_cache,
+                            )
                             .await?;
                         comfy_names.push(prepared.comfy.name.clone());
                         prepared_images.push(prepared);
@@ -311,7 +330,7 @@ impl GenerationInputPreparer {
                         .load_media_asset(project_id, asset_id, MediaExpectation::Video)
                         .await?;
                     let prepared = self
-                        .upload_media_asset(task_id, &asset, None, &mut upload_cache)
+                        .upload_media_asset(task_id, &project_root, &asset, None, &mut upload_cache)
                         .await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Video(prepared.comfy.name.clone()));
@@ -322,7 +341,7 @@ impl GenerationInputPreparer {
                         .load_media_asset(project_id, asset_id, MediaExpectation::Audio)
                         .await?;
                     let prepared = self
-                        .upload_media_asset(task_id, &asset, None, &mut upload_cache)
+                        .upload_media_asset(task_id, &project_root, &asset, None, &mut upload_cache)
                         .await?;
                     compiler_values
                         .insert(key.clone(), InputValue::Audio(prepared.comfy.name.clone()));
@@ -336,7 +355,13 @@ impl GenerationInputPreparer {
                             .load_media_asset(project_id, asset_id, MediaExpectation::Video)
                             .await?;
                         let prepared = self
-                            .upload_media_asset(task_id, &asset, Some(index + 1), &mut upload_cache)
+                            .upload_media_asset(
+                                task_id,
+                                &project_root,
+                                &asset,
+                                Some(index + 1),
+                                &mut upload_cache,
+                            )
                             .await?;
                         comfy_names.push(prepared.comfy.name.clone());
                         prepared_media.push(prepared);
@@ -352,7 +377,13 @@ impl GenerationInputPreparer {
                             .load_media_asset(project_id, asset_id, MediaExpectation::Audio)
                             .await?;
                         let prepared = self
-                            .upload_media_asset(task_id, &asset, Some(index + 1), &mut upload_cache)
+                            .upload_media_asset(
+                                task_id,
+                                &project_root,
+                                &asset,
+                                Some(index + 1),
+                                &mut upload_cache,
+                            )
                             .await?;
                         comfy_names.push(prepared.comfy.name.clone());
                         prepared_media.push(prepared);
@@ -438,6 +469,7 @@ impl GenerationInputPreparer {
     async fn upload_image_asset(
         &self,
         task_id: &TaskId,
+        project_root: &std::path::Path,
         asset: &Asset,
         position: Option<usize>,
         _upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
@@ -453,7 +485,7 @@ impl GenerationInputPreparer {
         }
         let bytes = self
             .asset_store
-            .read(std::path::Path::new(&asset.storage_path))
+            .read(project_root, std::path::Path::new(&asset.storage_path))
             .await
             .map_err(|error| GenerationInputPrepareError::AssetRead {
                 asset_id: asset.id.as_str().to_owned(),
@@ -479,6 +511,7 @@ impl GenerationInputPreparer {
     async fn upload_media_asset(
         &self,
         task_id: &TaskId,
+        project_root: &std::path::Path,
         asset: &Asset,
         position: Option<usize>,
         upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
@@ -494,7 +527,7 @@ impl GenerationInputPreparer {
         } else {
             let stream = self
                 .asset_store
-                .open_read_stream(std::path::Path::new(&asset.storage_path))
+                .open_read_stream(project_root, std::path::Path::new(&asset.storage_path))
                 .await
                 .map_err(|error| GenerationInputPrepareError::AssetRead {
                     asset_id: asset.id.as_str().to_owned(),
@@ -594,14 +627,14 @@ mod tests {
     use crate::application::ports::{
         AssetReadStream, AssetRepository, AssetStore, AssetStoreError, ComfyAdapter,
         ComfyAdapterError, ComfyEventSubscription, ComfyHealth, ComfyHistory, ComfyInputUpload,
-        ComfyOutputData, ComfyOutputFile, ComfyUploadedInput, PromptSubmission, RepositoryError,
-        StoredAssetFile, SystemStats,
+        ComfyOutputData, ComfyOutputFile, ComfyUploadedInput, ProjectRecord, ProjectRepository,
+        PromptSubmission, RepositoryError, StoredAssetFile, SystemStats,
     };
     use crate::domain::{Asset, AssetId, TaskId};
     use async_trait::async_trait;
     use serde_json::json;
     use std::collections::{BTreeMap, HashMap, VecDeque};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -669,7 +702,11 @@ mod tests {
             Ok(())
         }
 
-        async fn read(&self, _path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+        async fn read(
+            &self,
+            _project_root: &Path,
+            _path: &Path,
+        ) -> Result<Vec<u8>, AssetStoreError> {
             Err(AssetStoreError::Read(
                 "media must use a bounded read stream".to_owned(),
             ))
@@ -677,11 +714,66 @@ mod tests {
 
         async fn open_read_stream(
             &self,
+            _project_root: &Path,
             _path: &Path,
         ) -> Result<Box<dyn AssetReadStream>, AssetStoreError> {
             Ok(Box::new(ChunkStream {
                 chunks: VecDeque::from([vec![1, 2], vec![3, 4]]),
             }))
+        }
+    }
+
+    struct TestProjectRepository;
+
+    #[async_trait]
+    impl ProjectRepository for TestProjectRepository {
+        async fn list(&self) -> Result<Vec<ProjectRecord>, RepositoryError> {
+            Ok(Vec::new())
+        }
+
+        async fn find_by_id(
+            &self,
+            _project_id: &str,
+        ) -> Result<Option<ProjectRecord>, RepositoryError> {
+            Ok(None)
+        }
+
+        async fn insert(&self, _project: &ProjectRecord) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        async fn update_metadata(
+            &self,
+            _project_id: &str,
+            _name: &str,
+            _description: Option<&str>,
+            _updated_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<Option<ProjectRecord>, RepositoryError> {
+            Ok(None)
+        }
+
+        async fn get_storage_root(
+            &self,
+            _project_id: &str,
+        ) -> Result<Option<PathBuf>, RepositoryError> {
+            Ok(Some(PathBuf::from(".")))
+        }
+
+        async fn ensure_default_project(
+            &self,
+            project_id: &str,
+            name: &str,
+            root_path: &PathBuf,
+            created_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<ProjectRecord, RepositoryError> {
+            Ok(ProjectRecord {
+                id: project_id.to_owned(),
+                name: name.to_owned(),
+                description: None,
+                root_path: root_path.clone(),
+                created_at,
+                updated_at: created_at,
+            })
         }
     }
 
@@ -815,6 +907,7 @@ mod tests {
         GenerationInputPreparer::new(
             Arc::new(repository),
             Arc::new(StreamingAssetStore),
+            Arc::new(TestProjectRepository),
             Arc::new(adapter),
         )
     }

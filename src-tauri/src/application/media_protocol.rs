@@ -1,4 +1,6 @@
-use crate::application::ports::{AssetRepository, AssetStore, ProjectRepository};
+use crate::application::ports::{
+    validate_asset_read_path, AssetRepository, AssetStore, ProjectRepository,
+};
 use crate::domain::{validate_project_id, AssetType};
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -74,10 +76,16 @@ impl MediaProtocolService {
         }) else {
             return MediaResponse::not_found();
         };
-        if !std::path::Path::new(&asset.storage_path).starts_with(&project_root) {
-            tracing::warn!(project_id, asset_id = %asset.id, "rejected media path outside project root");
-            return MediaResponse::not_found();
-        }
+        let asset_path = match validate_asset_read_path(
+            &project_root,
+            std::path::Path::new(&asset.storage_path),
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::warn!(project_id, asset_id = %asset.id, error = %error, "rejected media path outside project root");
+                return MediaResponse::not_found();
+            }
+        };
 
         let total = asset.file_size;
         let requested = match range {
@@ -131,11 +139,7 @@ impl MediaProtocolService {
         }
         response.body = match self
             .asset_store
-            .read_range(
-                std::path::Path::new(&asset.storage_path),
-                requested.start,
-                length,
-            )
+            .read_range(&project_root, &asset_path, requested.start, length)
             .await
         {
             Ok(bytes) => bytes,
@@ -373,12 +377,17 @@ mod tests {
             Ok(())
         }
 
-        async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+        async fn read(
+            &self,
+            _project_root: &Path,
+            path: &Path,
+        ) -> Result<Vec<u8>, AssetStoreError> {
             std::fs::read(path).map_err(|error| AssetStoreError::Read(error.to_string()))
         }
 
         async fn read_range(
             &self,
+            _project_root: &Path,
             path: &Path,
             offset: u64,
             length: u64,

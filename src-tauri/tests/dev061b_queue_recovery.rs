@@ -495,7 +495,7 @@ impl AssetStore for GuardedAssetStore {
         self.inner.delete(path).await
     }
 
-    async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+    async fn read(&self, project_root: &Path, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
         self.reads
             .lock()
             .expect("asset read mutex should work")
@@ -506,7 +506,7 @@ impl AssetStore for GuardedAssetStore {
                 path.display()
             )));
         }
-        self.inner.read(path).await
+        self.inner.read(project_root, path).await
     }
 }
 

@@ -50,6 +50,7 @@ pub struct GenerationSnapshot {
     pub user_inputs_json: Value,
     pub resolved_inputs_json: Value,
     pub model_version_id: Option<ModelVersionId>,
+    pub prompt_version_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -90,6 +91,32 @@ impl GenerationSnapshot {
             user_inputs_json,
             resolved_inputs_json,
             model_version_id,
+            prompt_version_id: None,
+            created_at,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    pub fn new_with_provenance(
+        task_id: TaskId,
+        workflow_json: Value,
+        recipe_yaml: impl Into<String>,
+        user_inputs_json: Value,
+        resolved_inputs_json: Value,
+        model_version_id: Option<ModelVersionId>,
+        prompt_version_id: Option<String>,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, SnapshotDomainError> {
+        let snapshot = Self {
+            id: SnapshotId::new(),
+            task_id,
+            workflow_json,
+            recipe_yaml: recipe_yaml.into(),
+            user_inputs_json,
+            resolved_inputs_json,
+            model_version_id,
+            prompt_version_id,
             created_at,
         };
         snapshot.validate()?;

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createGeneration, getProjectWorkflowConfig, listRuntimeProfiles } from "../../services/tauriClient";
+import {
+  createGeneration,
+  getProjectWorkflowConfig,
+  listModelVersions,
+  listModels,
+  listRuntimeProfiles,
+} from "../../services/tauriClient";
 import {
   cleanWorkflowStaging,
   compareWorkflowVersions,
@@ -130,6 +136,10 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [workspaceError, setWorkspaceError] = useState<string>();
   const [checkingAll, setCheckingAll] = useState(false);
   const [quickTestingId, setQuickTestingId] = useState<string>();
+  const [quickTestModelOptions, setQuickTestModelOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [quickTestModelLoading, setQuickTestModelLoading] = useState(false);
+  const [quickTestModelError, setQuickTestModelError] = useState<string>();
+  const [selectedQuickTestModelVersionId, setSelectedQuickTestModelVersionId] = useState("");
   const [deletionTarget, setDeletionTarget] = useState<WorkflowDeletionTarget>();
   const [renameTarget, setRenameTarget] = useState<WorkflowWorkspaceItem>();
   const [renameValue, setRenameValue] = useState("");
@@ -268,6 +278,43 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    setQuickTestModelOptions([]);
+    setSelectedQuickTestModelVersionId("");
+    setQuickTestModelError(undefined);
+    if (!projectId) {
+      setQuickTestModelLoading(false);
+      return () => { active = false; };
+    }
+    setQuickTestModelLoading(true);
+    void listModels()
+      .then(async (models) => {
+        const versionResults = await Promise.allSettled(models.map(async (model) => {
+          const versions = await listModelVersions(model.id);
+          return versions.map((version) => ({ model, version }));
+        }));
+        if (!active) return;
+        const options = versionResults.flatMap((result) => result.status === "fulfilled"
+          ? result.value.map(({ model, version }) => ({
+            id: version.id,
+            label: `${model.provider} · ${model.name} · v${version.version}`,
+          }))
+          : []);
+        setQuickTestModelOptions(options);
+        if (versionResults.some((result) => result.status === "rejected")) {
+          setQuickTestModelError("部分模型版本加载失败；未加载的版本不会被推断到快速测试。" );
+        }
+      })
+      .catch((value: unknown) => {
+        if (active) setQuickTestModelError(toUserMessage(value));
+      })
+      .finally(() => {
+        if (active) setQuickTestModelLoading(false);
+      });
+    return () => { active = false; };
+  }, [projectId]);
 
   const discardReplacedDraft = async (previousDraftId: string | undefined, nextDraftId?: string) => {
     if (!previousDraftId || previousDraftId === nextDraftId) return;
@@ -707,6 +754,7 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
         workflowVersionId: recipe.workflowVersionId,
         recipeId: recipe.recipeId,
         values,
+        ...(selectedQuickTestModelVersionId ? { modelVersionId: selectedQuickTestModelVersionId } : {}),
       });
       setNotice(`快速测试任务已创建：${task.id}`);
       onOpenTask?.(task.id);
@@ -800,6 +848,23 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       {workspaceError && <UiErrorNotice error={workspaceError} />}
       {error && <UiErrorNotice error={error} />}
       {notice && <p className="workflow-notice" role="status">{notice}</p>}
+
+      <section className="model-version-selector" aria-label="快速测试模型版本">
+        <label>
+          <span>快速测试模型版本（可选）</span>
+          <select
+            value={selectedQuickTestModelVersionId}
+            onChange={(event) => setSelectedQuickTestModelVersionId(event.target.value)}
+            disabled={quickTestModelLoading}
+          >
+            <option value="">不记录模型版本</option>
+            {quickTestModelOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+        </label>
+        {quickTestModelLoading && <p className="disabled-note" aria-live="polite">正在加载模型版本…</p>}
+        {quickTestModelError && <p className="disabled-note" aria-live="polite">模型版本：{quickTestModelError}</p>}
+        {!quickTestModelLoading && !quickTestModelError && !quickTestModelOptions.length && <p className="disabled-note" aria-live="polite">暂无可用模型版本；快速测试仍可创建，但不会记录模型版本。</p>}
+      </section>
 
       <WorkflowImportController
         plan={smartImportController.plan}

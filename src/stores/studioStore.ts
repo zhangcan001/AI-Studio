@@ -10,13 +10,15 @@ import type {
 interface StudioState {
   selectedWorkflow?: RecipeViewModel;
   selectedModelVersionId?: string;
+  selectedPromptVersionId?: string;
   values: GenerationValues;
   draftDirty: boolean;
   validationErrors: Record<string, string>;
   pendingAssetIntent?: PendingStudioAssetIntent;
   reuseProvenance?: StudioReuseProvenance;
   setSelectedWorkflow: (workflow?: RecipeViewModel) => void;
-  loadDraft: (workflow: RecipeViewModel, values: GenerationValues, modelVersionId?: string) => void;
+  loadDraft: (workflow: RecipeViewModel, values: GenerationValues, modelVersionId?: string, promptVersionId?: string) => void;
+  clearPromptVersion: () => void;
   setPendingAssetIntent: (intent: PendingStudioAssetIntent) => void;
   clearPendingAssetIntent: () => void;
   setReuseProvenance: (provenance?: StudioReuseProvenance) => void;
@@ -35,13 +37,15 @@ export const useStudioStore = create<StudioState>((set) => ({
     set({
       selectedWorkflow: workflow,
       selectedModelVersionId: undefined,
+      selectedPromptVersionId: undefined,
       values: workflow ? defaultGenerationValues(workflow) : {},
       draftDirty: false,
       validationErrors: {},
       reuseProvenance: undefined,
     }),
-  loadDraft: (workflow, values, selectedModelVersionId) =>
-    set({ selectedWorkflow: workflow, selectedModelVersionId, values, draftDirty: false, validationErrors: {} }),
+  loadDraft: (workflow, values, selectedModelVersionId, selectedPromptVersionId) =>
+    set({ selectedWorkflow: workflow, selectedModelVersionId, selectedPromptVersionId, values, draftDirty: false, validationErrors: {} }),
+  clearPromptVersion: () => set({ selectedPromptVersionId: undefined }),
   setPendingAssetIntent: (pendingAssetIntent) => set({ pendingAssetIntent }),
   clearPendingAssetIntent: () => set({ pendingAssetIntent: undefined }),
   setReuseProvenance: (reuseProvenance) => set({ reuseProvenance }),
@@ -59,6 +63,7 @@ export const useStudioStore = create<StudioState>((set) => ({
     set(() => ({
       selectedWorkflow: undefined,
       selectedModelVersionId: undefined,
+      selectedPromptVersionId: undefined,
       values: {},
       draftDirty: false,
       validationErrors: {},

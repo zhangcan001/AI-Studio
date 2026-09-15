@@ -1744,6 +1744,8 @@ pub(crate) struct BackupSnapshot {
     pub(crate) resolved_inputs: Value,
     #[serde(default)]
     pub(crate) model_version_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt_version_id: Option<String>,
     pub(crate) created_at: String,
 }
 
@@ -3740,6 +3742,20 @@ fn validate_prompt_document(document: &BackupDocument) -> Result<(), AppError> {
             .map_err(|error| AppError::backup_invalid(format!("提示词版本正文无效：{error}")))?;
         if text != version.text {
             return Err(AppError::backup_invalid("备份提示词版本正文不是规范文本"));
+        }
+    }
+    let prompt_version_ids = document
+        .prompt_versions
+        .iter()
+        .map(|version| version.id.as_str())
+        .collect::<HashSet<_>>();
+    for snapshot in &document.snapshots {
+        if snapshot
+            .prompt_version_id
+            .as_ref()
+            .is_some_and(|id| !prompt_version_ids.contains(id.as_str()))
+        {
+            return Err(AppError::backup_invalid("备份生成快照引用了未知提示词版本"));
         }
     }
     Ok(())
@@ -7089,6 +7105,7 @@ mod tests {
                     }
                 }),
                 model_version_id: None,
+                prompt_version_id: None,
                 created_at: now.to_rfc3339(),
             }],
             presets: Vec::new(),
@@ -8654,6 +8671,7 @@ mod tests {
             user_inputs: json!({}),
             resolved_inputs: json!({}),
             model_version_id: Some("mdv_multimedia".to_owned()),
+            prompt_version_id: Some("prv_multimedia".to_owned()),
             created_at: timestamp.to_owned(),
         }];
         document.tools = vec![BackupTool {
@@ -8924,6 +8942,24 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(snapshot_model, "mdv_multimedia");
+        let snapshot_prompt: String = sqlx::query_scalar(
+            "SELECT prompt_version_id FROM generation_snapshots gs
+             JOIN tasks t ON t.id = gs.task_id WHERE t.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let restored_prompt_version: String = sqlx::query_scalar(
+            "SELECT pv.id FROM prompt_versions pv
+             JOIN prompt_entries pe ON pe.id = pv.prompt_id WHERE pe.project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(snapshot_prompt, restored_prompt_version);
+        assert_ne!(snapshot_prompt, "prv_multimedia");
         let prompt_model: String = sqlx::query_scalar(
             "SELECT model_version_id FROM prompt_versions pv
              JOIN prompt_entries pe ON pe.id = pv.prompt_id WHERE pe.project_id = ?",
@@ -9019,6 +9055,7 @@ mod tests {
             user_inputs: json!({}),
             resolved_inputs: json!({}),
             model_version_id: Some("mdv_unknown".to_owned()),
+            prompt_version_id: Some("prv_unknown".to_owned()),
             created_at: timestamp.to_owned(),
         }];
         document.models = vec![BackupModel {

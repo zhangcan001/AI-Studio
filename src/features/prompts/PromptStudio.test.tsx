@@ -148,7 +148,7 @@ describe("PromptStudio", () => {
     expect(await screen.findByText("相关生成")).toBeTruthy();
     expect(await screen.findByText("tver-comfy-1")).toBeTruthy();
     expect(await screen.findByText("av-1")).toBeTruthy();
-    expect(screen.getByText("当前数据层尚未建立提示词版本 → 生成任务显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。")).toBeTruthy();
+    expect(screen.getByText("以下是当前项目任务历史参考；只有任务保存了当前提示词版本 ID 时，才视为当前提示词的直接使用。")).toBeTruthy();
     expect(mocks.listGenerationToolUsages).toHaveBeenCalledWith("project-1", "tsk-1");
     expect(mocks.listGenerationAssetVersionLinks).toHaveBeenCalledWith("project-1", "tsk-1");
   });

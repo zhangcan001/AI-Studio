@@ -11,6 +11,7 @@ interface UseGenerationSubmissionControllerOptions {
   projectId: string;
   selectedWorkflow?: RecipeViewModel;
   modelVersionId?: string;
+  promptVersionId?: string;
   values: GenerationValues;
   configurationError?: string;
   productionAdmission: ProductionAdmissionStatus;
@@ -27,6 +28,7 @@ export function useGenerationSubmissionController({
   projectId,
   selectedWorkflow,
   modelVersionId,
+  promptVersionId,
   values,
   configurationError,
   productionAdmission,
@@ -77,6 +79,7 @@ export function useGenerationSubmissionController({
         recipeId: selectedWorkflow.recipeId,
         values,
         ...(modelVersionId ? { modelVersionId } : {}),
+        ...(promptVersionId ? { promptVersionId } : {}),
         submissionIdempotencyKey,
       });
       adoptCreatedTask(task);
@@ -88,7 +91,7 @@ export function useGenerationSubmissionController({
         generationRequestIdRef.current = undefined;
       }
     }
-  }, [adoptCreatedTask, comfyConnected, configurationError, missingAsset, modelVersionId, onNotice, onValidationErrors, productionAdmission.busy, projectId, selectedWorkflow, taskEventError, taskEventsReady, unsupportedField, values]);
+  }, [adoptCreatedTask, comfyConnected, configurationError, missingAsset, modelVersionId, onNotice, onValidationErrors, productionAdmission.busy, projectId, promptVersionId, selectedWorkflow, taskEventError, taskEventsReady, unsupportedField, values]);
 
   const cancelCurrentTask = useCallback(async () => {
     if (!currentTask) return;

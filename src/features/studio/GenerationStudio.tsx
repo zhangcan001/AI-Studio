@@ -99,6 +99,7 @@ export function GenerationStudio({
 }: Props) {
   const selectedWorkflow = useStudioStore((state) => state.selectedWorkflow);
   const selectedModelVersionId = useStudioStore((state) => state.selectedModelVersionId);
+  const selectedPromptVersionId = useStudioStore((state) => state.selectedPromptVersionId);
   const productCatalog = useMemo(
     () => filterImageRecipes(catalog),
     [catalog],
@@ -109,6 +110,7 @@ export function GenerationStudio({
   const reuseProvenance = useStudioStore((state) => state.reuseProvenance);
   const setValue = useStudioStore((state) => state.setValue);
   const removeValue = useStudioStore((state) => state.removeValue);
+  const clearPromptVersion = useStudioStore((state) => state.clearPromptVersion);
   const setValidationErrors = useStudioStore((state) => state.setValidationErrors);
   const currentTask = useTaskStore((state) => state.currentTask);
   const [refreshing, setRefreshing] = useState(false);
@@ -181,6 +183,10 @@ export function GenerationStudio({
   );
   const productionPolicy = productionInteractionPolicy(productionAdmission.busy);
   const errors = selectedWorkflow ? validateRecipeValues(selectedWorkflow, values) : {};
+  const textFieldKeys = useMemo(
+    () => new Set(selectedWorkflow?.fields.filter((field) => field.type === "textarea").map((field) => field.key) ?? []),
+    [selectedWorkflow],
+  );
   const canGenerate = Boolean(
     comfyConnected &&
       taskEventsReady &&
@@ -218,6 +224,7 @@ export function GenerationStudio({
     projectId,
     selectedWorkflow,
     modelVersionId: selectedModelVersionId,
+    promptVersionId: selectedPromptVersionId,
     values,
     configurationError: krea2ConfigError,
     productionAdmission,
@@ -335,7 +342,12 @@ export function GenerationStudio({
         setNotice(result.issue ?? "无法应用提示词。");
         return;
       }
-      useStudioStore.getState().loadDraft(selectedWorkflow, result.values);
+      useStudioStore.getState().loadDraft(
+        selectedWorkflow,
+        result.values,
+        entry.kind === "prompt" ? version.modelVersionId ?? undefined : undefined,
+        entry.kind === "prompt" ? version.id : undefined,
+      );
       setMissingAssetFields(new Set());
       setNotice(`${entry.kind === "snippet" ? "片段已追加" : "提示词已应用到 Studio"}；未自动生成。`);
     } catch (value: unknown) {
@@ -486,8 +498,14 @@ export function GenerationStudio({
               projectId={projectId}
               recipe={selectedWorkflow}
               values={values}
-              onApplyValues={(nextValues, nextModelVersionId) => {
-                useStudioStore.getState().loadDraft(selectedWorkflow, nextValues, nextModelVersionId);
+              selectedModelVersionId={selectedModelVersionId}
+              onApplyValues={(nextValues, provenance) => {
+                useStudioStore.getState().loadDraft(
+                  selectedWorkflow,
+                  nextValues,
+                  provenance.modelVersionId,
+                  provenance.promptVersionId,
+                );
                 setMissingAssetFields(new Set());
               }}
               onUseForExperiment={experimentController.usePromptVersionsForExperiment}
@@ -497,7 +515,11 @@ export function GenerationStudio({
               values={values}
               validationErrors={validationErrors}
               hiddenFieldKeys={krea2Contract?.ok ? ["width", "height"] : []}
-              onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
+              onChange={(key, value) => {
+                if (textFieldKeys.has(key)) clearPromptVersion();
+                if (value) setValue(key, value);
+                else removeValue(key);
+              }}
               onGenerate={() => void generationController.generate()}
               projectId={projectId}
               onImageAssetAvailabilityChange={handleAssetAvailabilityChange}
@@ -614,7 +636,11 @@ export function GenerationStudio({
                   values={values}
                   validationErrors={validationErrors}
                   hiddenFieldKeys={krea2Contract?.ok ? [imagePrompt?.key ?? "prompt", "width", "height"] : [imagePrompt?.key ?? "prompt"]}
-                  onChange={(key, value) => (value ? setValue(key, value) : removeValue(key))}
+                  onChange={(key, value) => {
+                    if (textFieldKeys.has(key)) clearPromptVersion();
+                    if (value) setValue(key, value);
+                    else removeValue(key);
+                  }}
                   onGenerate={() => void generationController.generate()}
                   projectId={projectId}
                   onImageAssetAvailabilityChange={handleAssetAvailabilityChange}

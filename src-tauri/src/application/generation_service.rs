@@ -292,6 +292,7 @@ impl GenerationService {
             generation_input_preparer: Arc::new(GenerationInputPreparer::new(
                 asset_repository.clone(),
                 asset_store,
+                project_repository.clone(),
                 comfy_adapter.clone(),
             )),
             comfy_adapter,
@@ -874,13 +875,14 @@ impl GenerationService {
                 })
             })
             .transpose()?;
-        let snapshot = match GenerationSnapshot::new_with_model_version(
+        let snapshot = match GenerationSnapshot::new_with_provenance(
             task.id.clone(),
             compile_result.workflow.clone(),
             definition.recipe_yaml.clone(),
             input_values_to_json(&request.values),
             resolved_inputs_to_json(&compile_result.resolved_inputs, &prepared),
             model_version_id,
+            request.prompt_version_id.clone(),
             self.clock.now(),
         ) {
             Ok(snapshot) => snapshot,

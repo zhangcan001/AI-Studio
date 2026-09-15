@@ -1,6 +1,9 @@
 use crate::domain::{Asset, AssetId};
 use async_trait::async_trait;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredAssetFile {
@@ -49,6 +52,67 @@ impl std::fmt::Display for AssetStoreError {
 }
 
 impl std::error::Error for AssetStoreError {}
+
+/// Resolve an asset path and enforce that the existing regular file remains
+/// inside the owning project's canonical storage root. This is shared by the
+/// application boundary and filesystem adapter so HEAD/GET/stream reads use
+/// the same policy.
+pub fn validate_asset_read_path(
+    project_root: &Path,
+    candidate: &Path,
+) -> Result<PathBuf, AssetStoreError> {
+    if project_root.as_os_str().is_empty() || candidate.as_os_str().is_empty() {
+        return Err(AssetStoreError::InvalidPath(
+            "project root and asset path are required".to_owned(),
+        ));
+    }
+    if candidate
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(AssetStoreError::FilesystemBoundary(format!(
+            "path traversal is not allowed: {}",
+            candidate.display()
+        )));
+    }
+
+    let root = fs::canonicalize(project_root).map_err(|error| {
+        AssetStoreError::FilesystemBoundary(format!(
+            "canonicalize project root {}: {error}",
+            project_root.display()
+        ))
+    })?;
+    let lexical = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(candidate)
+    };
+    let metadata = fs::symlink_metadata(&lexical).map_err(|error| {
+        AssetStoreError::Read(format!("inspect {}: {error}", lexical.display()))
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(AssetStoreError::FilesystemBoundary(format!(
+            "symbolic links are not allowed: {}",
+            lexical.display()
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(AssetStoreError::FilesystemBoundary(format!(
+            "asset path is not a regular file: {}",
+            lexical.display()
+        )));
+    }
+    let canonical = fs::canonicalize(&lexical).map_err(|error| {
+        AssetStoreError::Read(format!("canonicalize {}: {error}", lexical.display()))
+    })?;
+    if !canonical.starts_with(&root) {
+        return Err(AssetStoreError::FilesystemBoundary(format!(
+            "asset path is outside project root: {}",
+            lexical.display()
+        )));
+    }
+    Ok(canonical)
+}
 
 #[async_trait]
 pub trait AssetStore: Send + Sync {
@@ -165,10 +229,14 @@ pub trait AssetStore: Send + Sync {
         ))
     }
 
-    async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError>;
+    /// Read a stored asset only after resolving it against its owning project
+    /// root. Implementations must enforce the same boundary for the actual
+    /// filesystem operation, not just rely on callers to preflight the path.
+    async fn read(&self, project_root: &Path, path: &Path) -> Result<Vec<u8>, AssetStoreError>;
 
     async fn open_read_stream(
         &self,
+        _project_root: &Path,
         _path: &Path,
     ) -> Result<Box<dyn AssetReadStream>, AssetStoreError> {
         Err(AssetStoreError::Read(
@@ -178,6 +246,7 @@ pub trait AssetStore: Send + Sync {
 
     async fn read_range(
         &self,
+        _project_root: &Path,
         _path: &Path,
         _offset: u64,
         _length: u64,

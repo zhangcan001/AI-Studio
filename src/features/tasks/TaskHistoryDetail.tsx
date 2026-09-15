@@ -108,6 +108,7 @@ export function TaskHistoryDetail({
         recipeId: draft.recipeId,
         values: draft.values,
         ...(draft.modelVersionId ? { modelVersionId: draft.modelVersionId } : {}),
+        ...(draft.promptVersionId ? { promptVersionId: draft.promptVersionId } : {}),
         submissionIdempotencyKey: taskRetrySubmissionKey(detail.id),
       });
       useTaskStore.getState().adoptCreatedTask(task);

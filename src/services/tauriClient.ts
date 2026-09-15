@@ -380,9 +380,10 @@ export function addPromptLibraryVersion(
   projectId: string,
   promptId: string,
   text: string,
+  modelVersionId?: string,
 ): Promise<PromptVersionView> {
   return invoke<PromptVersionView>("prompt_library_add_version", {
-    request: { projectId, promptId, text },
+    request: { projectId, promptId, text, ...(modelVersionId ? { modelVersionId } : {}) },
   });
 }
 

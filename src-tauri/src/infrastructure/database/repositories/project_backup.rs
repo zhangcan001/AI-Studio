@@ -830,6 +830,7 @@ struct DbSnapshot {
     user_inputs_json: String,
     resolved_inputs_json: String,
     model_version_id: Option<String>,
+    prompt_version_id: Option<String>,
     created_at: String,
 }
 
@@ -1706,7 +1707,7 @@ async fn query_snapshots(
     let mut result = Vec::new();
     for task_id in task_ids {
         let row = sqlx::query_as::<_, DbSnapshot>(
-            "SELECT id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, model_version_id, created_at FROM generation_snapshots WHERE task_id = ?",
+            "SELECT id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, model_version_id, prompt_version_id, created_at FROM generation_snapshots WHERE task_id = ?",
         )
         .bind(task_id)
         .fetch_optional(&mut **transaction)
@@ -1721,6 +1722,7 @@ async fn query_snapshots(
                 user_inputs: parse_value(Some(&row.user_inputs_json), "用户输入快照")?,
                 resolved_inputs: parse_value(Some(&row.resolved_inputs_json), "解析输入快照")?,
                 model_version_id: row.model_version_id,
+                prompt_version_id: row.prompt_version_id,
                 created_at: row.created_at,
             });
         }
@@ -3001,8 +3003,12 @@ async fn restore_rows_in_transaction(
             .model_version_id
             .as_ref()
             .and_then(|id| model_version_map.get(id).cloned());
+        let prompt_version_id = snapshot
+            .prompt_version_id
+            .as_ref()
+            .and_then(|id| prompt_version_ids.get(id).cloned());
         sqlx::query(
-            "INSERT INTO generation_snapshots (id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, model_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO generation_snapshots (id, task_id, workflow_json, recipe_yaml, user_inputs_json, resolved_inputs_json, model_version_id, prompt_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(snapshot_id)
         .bind(task_id)
@@ -3011,6 +3017,7 @@ async fn restore_rows_in_transaction(
         .bind(snapshot.user_inputs.to_string())
         .bind(snapshot.resolved_inputs.to_string())
         .bind(model_version_id)
+        .bind(prompt_version_id)
         .bind(&snapshot.created_at)
         .execute(&mut **transaction)
         .await

@@ -46,8 +46,9 @@ impl GenerationSnapshotRepository for SqliteGenerationSnapshotRepository {
         sqlx::query(
             "INSERT INTO generation_snapshots (
                 id, task_id, workflow_json, recipe_yaml,
-                user_inputs_json, resolved_inputs_json, model_version_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                user_inputs_json, resolved_inputs_json, model_version_id,
+                prompt_version_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(snapshot.id.as_str())
         .bind(snapshot.task_id.as_str())
@@ -61,6 +62,7 @@ impl GenerationSnapshotRepository for SqliteGenerationSnapshotRepository {
                 .as_ref()
                 .map(ModelVersionId::as_str),
         )
+        .bind(&snapshot.prompt_version_id)
         .bind(format_datetime(snapshot.created_at))
         .execute(&self.pool)
         .await
@@ -75,7 +77,8 @@ impl GenerationSnapshotRepository for SqliteGenerationSnapshotRepository {
     ) -> Result<Option<GenerationSnapshot>, RepositoryError> {
         let row = sqlx::query_as::<_, SnapshotRow>(
             "SELECT id, task_id, workflow_json, recipe_yaml,
-                    user_inputs_json, resolved_inputs_json, model_version_id, created_at
+                    user_inputs_json, resolved_inputs_json, model_version_id,
+                    prompt_version_id, created_at
              FROM generation_snapshots WHERE task_id = ?",
         )
         .bind(task_id.as_str())
@@ -96,6 +99,7 @@ struct SnapshotRow {
     user_inputs_json: String,
     resolved_inputs_json: String,
     model_version_id: Option<String>,
+    prompt_version_id: Option<String>,
     created_at: String,
 }
 
@@ -133,6 +137,7 @@ impl SnapshotRow {
                         .map_err(|error| map_domain_error("snapshot model_version_id", error))
                 })
                 .transpose()?,
+            prompt_version_id: self.prompt_version_id,
             created_at: parse_datetime("snapshot created_at", &self.created_at)?,
         };
         snapshot
@@ -236,19 +241,21 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let snapshot = GenerationSnapshot::new_with_model_version(
+        let snapshot = GenerationSnapshot::new_with_provenance(
             task.id.clone(),
             json!({"3": {"inputs": {}, "class_type": "KSampler"}}),
             "schema_version: 1\nid: test",
             json!({"prompt": "hello"}),
             json!({"prompt": "hello"}),
             Some(ModelVersionId::parse("mdv_snapshot").unwrap()),
+            Some("prv_snapshot".to_owned()),
             task.created_at,
         )
         .unwrap();
         repository.insert(&snapshot).await.unwrap();
         let found = repository.find_by_task_id(&task.id).await.unwrap().unwrap();
         assert_eq!(found.model_version_id, snapshot.model_version_id);
+        assert_eq!(found.prompt_version_id, snapshot.prompt_version_id);
     }
 
     #[tokio::test]

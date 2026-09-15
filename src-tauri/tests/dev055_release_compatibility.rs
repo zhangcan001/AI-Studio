@@ -855,6 +855,15 @@ async fn remove_migration_034_schema(pool: &SqlitePool) {
 
 async fn remove_migration_036_schema(pool: &SqlitePool) {
     for statement in [
+        "DROP INDEX IF EXISTS idx_generation_snapshots_prompt_version",
+        "ALTER TABLE generation_snapshots DROP COLUMN prompt_version_id",
+    ] {
+        sqlx::query(statement)
+            .execute(pool)
+            .await
+            .expect("037 prompt provenance schema should be removable from the isolated fixture");
+    }
+    for statement in [
         "DROP INDEX IF EXISTS idx_generation_asset_versions_asset_version",
         "DROP INDEX IF EXISTS idx_generation_asset_versions_generation_created",
         "DROP TABLE IF EXISTS generation_asset_versions",
@@ -1244,8 +1253,8 @@ async fn remove_migration_024(pool: &SqlitePool) {
 }
 
 async fn assert_current_migration_gate(pool: &SqlitePool) {
-    assert_eq!(max_migration(pool).await, 36);
-    assert_eq!(migration_marker_count(pool, 36).await, 1);
+    assert_eq!(max_migration(pool).await, 37);
+    assert_eq!(migration_marker_count(pool, 37).await, 1);
 }
 
 fn read_zip_json(path: &Path, entry_name: &str) -> Value {
@@ -1407,10 +1416,10 @@ fn manifest_has_key_containing(value: &Value, needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn dev055_migration_matrix_reaches_036() {
+async fn dev055_migration_matrix_reaches_037() {
     let versions = migration_versions();
     assert_eq!(versions.first().copied(), Some(1));
-    assert_eq!(versions.last().copied(), Some(36));
+    assert_eq!(versions.last().copied(), Some(37));
     assert!(
         versions.contains(&33),
         "repository must contain migration 033"
@@ -1520,7 +1529,7 @@ async fn dev055_migration_matrix_reaches_036() {
 }
 
 #[tokio::test]
-async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_036() {
+async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_037() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-0-project")).await;
     insert_published_1_0_post_legacy_rows(&pool).await;
@@ -1530,7 +1539,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_036() {
     pool.close().await;
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.0 database should upgrade through migration 036");
+        .expect("reconstructed 1.0 database should upgrade through migration 037");
     assert_current_migration_gate(&upgraded).await;
 
     assert_eq!(
@@ -1651,7 +1660,7 @@ async fn dev096_reconstructed_1_0_fixture_upgrades_from_026_to_036() {
 }
 
 #[tokio::test]
-async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_036() {
+async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_037() {
     let (directory, pool) = database().await;
     insert_consistency_project(&pool, &directory.path().join("published-1-1-project")).await;
     remove_migration_035_schema(&pool).await;
@@ -1681,7 +1690,7 @@ async fn dev106_reconstructed_1_1_fixture_upgrades_from_031_to_036() {
 
     let upgraded = initialize(&directory.path().join("app.db"))
         .await
-        .expect("reconstructed 1.1 database should upgrade through migration 036");
+        .expect("reconstructed 1.1 database should upgrade through migration 037");
     assert_current_migration_gate(&upgraded).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM projects WHERE id = ?")

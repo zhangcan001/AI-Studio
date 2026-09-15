@@ -441,7 +441,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                     </section>
                     <section className="prompt-studio-subpanel" aria-label="Prompt Studio 跨模块溯源">
                       <div className="prompt-studio-panel-heading"><h4>跨模块溯源</h4><span className="status-pill">只读</span></div>
-                      <p className="prompt-studio-note">当前数据层没有提示词版本 → 生成任务显式关系；下列生成、资产和工具仅是当前项目的显式溯源参考，不归因于当前提示词。</p>
+                      <p className="prompt-studio-note">只有带有显式 PromptVersionId 的任务才会建立提示词归因；旧记录不会根据文本、名称或时间推断。</p>
                       {historyLoading && <p className="disabled-note" role="status">等待生成历史后读取溯源…</p>}
                       {!historyLoading && provenanceLoading && <p className="disabled-note" role="status">正在读取跨模块溯源…</p>}
                       {provenanceError && <p className="error-message" role="alert">跨模块溯源加载失败：{provenanceError}</p>}
@@ -449,7 +449,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                         <div className="prompt-studio-two-column">
                           <section className="prompt-studio-subpanel" aria-label="相关生成">
                             <h4>相关生成</h4>
-                            <p className="prompt-studio-note">当前数据层尚未建立提示词版本 → 生成任务显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。</p>
+                            <p className="prompt-studio-note">以下是当前项目任务历史参考；只有任务保存了当前提示词版本 ID 时，才视为当前提示词的直接使用。</p>
                             {history.length > 0 ? (
                               <ul className="prompt-studio-history-list">
                                 {history.slice(0, 6).map((task) => <li key={task.id}><strong>{task.id}</strong><span>{task.workflowName} · {taskStatusLabel(task.status)} · {formatDateTime(task.createdAt)}</span></li>)}

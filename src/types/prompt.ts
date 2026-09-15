@@ -29,6 +29,7 @@ export interface PromptLibraryCreateRequest {
   name: string;
   tags: string[];
   text: string;
+  modelVersionId?: string;
 }
 
 export interface PromptLibraryMetadataRequest {

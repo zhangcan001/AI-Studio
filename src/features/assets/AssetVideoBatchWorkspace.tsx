@@ -5,6 +5,8 @@ import {
   createProductionQueue,
   deletePreset,
   getPreferredPreset,
+  listModelVersions,
+  listModels,
   listPresets,
   readAssetImage,
   readAssetThumbnail,
@@ -1570,6 +1572,10 @@ function GenericVideoWorkflowPanel({
   const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [presetLoading, setPresetLoading] = useState(false);
   const [presetError, setPresetError] = useState<string>();
+  const [modelVersionOptions, setModelVersionOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [modelVersionLoading, setModelVersionLoading] = useState(false);
+  const [modelVersionError, setModelVersionError] = useState<string>();
+  const [selectedModelVersionId, setSelectedModelVersionId] = useState("");
 
   useEffect(() => {
     setValues(defaultGenerationValues(recipe));
@@ -1614,6 +1620,38 @@ function GenericVideoWorkflowPanel({
       active = false;
     };
   }, [projectId, recipe.recipeId, recipe.workflowVersionId]);
+
+  useEffect(() => {
+    let active = true;
+    setModelVersionOptions([]);
+    setSelectedModelVersionId("");
+    setModelVersionError(undefined);
+    setModelVersionLoading(true);
+    void listModels()
+      .then(async (models) => {
+        const versionResults = await Promise.allSettled(models.map(async (model) => {
+          const versions = await listModelVersions(model.id);
+          return versions.map((version) => ({ model, version }));
+        }));
+        if (!active) return;
+        setModelVersionOptions(versionResults.flatMap((result) => result.status === "fulfilled"
+          ? result.value.map(({ model, version }) => ({
+            id: version.id,
+            label: `${model.provider} · ${model.name} · v${version.version}`,
+          }))
+          : []));
+        if (versionResults.some((result) => result.status === "rejected")) {
+          setModelVersionError("部分模型版本加载失败；未加载的版本不会被推断到生成任务。" );
+        }
+      })
+      .catch((value: unknown) => {
+        if (active) setModelVersionError(toUserMessage(value));
+      })
+      .finally(() => {
+        if (active) setModelVersionLoading(false);
+      });
+    return () => { active = false; };
+  }, [projectId]);
 
   function applyPreset(preset: PresetView) {
     setValues(preset.values);
@@ -1740,6 +1778,7 @@ function GenericVideoWorkflowPanel({
         recipeId: recipe.recipeId,
         values,
         submissionIdempotencyKey,
+        ...(selectedModelVersionId ? { modelVersionId: selectedModelVersionId } : {}),
       });
       setCreatedTaskId(task.id);
       setNotice("通用视频任务已创建；工作流版本和配方已冻结。" );
@@ -1805,6 +1844,23 @@ function GenericVideoWorkflowPanel({
         </div>
       )}
       {presetError && <p className="error-message" role="alert">预设：{presetError}</p>}
+      <div className="model-version-selector">
+        <label>
+          <span>模型版本（可选）</span>
+          <select
+            aria-label="通用视频模型版本"
+            value={selectedModelVersionId}
+            onChange={(event) => setSelectedModelVersionId(event.target.value)}
+            disabled={modelVersionLoading || creating}
+          >
+            <option value="">不记录模型版本</option>
+            {modelVersionOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+        </label>
+        {modelVersionLoading && <p className="disabled-note" aria-live="polite">正在加载模型版本…</p>}
+        {modelVersionError && <p className="disabled-note" aria-live="polite">模型版本：{modelVersionError} 当前生成不会记录模型版本。</p>}
+        {!modelVersionLoading && !modelVersionError && !modelVersionOptions.length && <p className="disabled-note" aria-live="polite">暂无可用模型版本；当前生成不会记录模型版本。</p>}
+      </div>
       <DynamicFormRenderer
         recipe={recipe}
         values={values}

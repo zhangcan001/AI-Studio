@@ -538,7 +538,11 @@ mod tests {
             Ok(())
         }
 
-        async fn read(&self, _path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+        async fn read(
+            &self,
+            _project_root: &Path,
+            _path: &Path,
+        ) -> Result<Vec<u8>, AssetStoreError> {
             Ok(Vec::new())
         }
 

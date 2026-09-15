@@ -1,6 +1,6 @@
 use crate::application::ports::{
-    AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession, StagedAssetFile,
-    StoredAssetFile,
+    validate_asset_read_path, AssetReadStream, AssetStore, AssetStoreError, AssetWriteSession,
+    StagedAssetFile, StoredAssetFile,
 };
 use crate::domain::{Asset, AssetId};
 use async_trait::async_trait;
@@ -241,9 +241,11 @@ impl AssetStore for FileSystemAssetStore {
 
     async fn open_read_stream(
         &self,
+        project_root: &Path,
         path: &Path,
     ) -> Result<Box<dyn AssetReadStream>, AssetStoreError> {
-        let file = tokio::fs::File::open(path)
+        let path = validate_asset_read_path(project_root, path)?;
+        let file = tokio::fs::File::open(&path)
             .await
             .map_err(|error| AssetStoreError::Read(format!("open {}: {error}", path.display())))?;
         Ok(Box::new(FileSystemAssetReadStream { file }))
@@ -397,18 +399,21 @@ impl AssetStore for FileSystemAssetStore {
         Ok(())
     }
 
-    async fn read(&self, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
-        fs::read(path)
+    async fn read(&self, project_root: &Path, path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+        let path = validate_asset_read_path(project_root, path)?;
+        fs::read(&path)
             .map_err(|error| AssetStoreError::Read(format!("read {}: {error}", path.display())))
     }
 
     async fn read_range(
         &self,
+        project_root: &Path,
         path: &Path,
         offset: u64,
         length: u64,
     ) -> Result<Vec<u8>, AssetStoreError> {
-        let mut file = fs::File::open(path)
+        let path = validate_asset_read_path(project_root, path)?;
+        let mut file = fs::File::open(&path)
             .map_err(|error| AssetStoreError::Read(format!("open {}: {error}", path.display())))?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|error| AssetStoreError::Read(format!("seek {}: {error}", path.display())))?;

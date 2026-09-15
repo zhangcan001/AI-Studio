@@ -202,6 +202,7 @@ impl TaskHistoryService {
             workflow_version_id: record.task.workflow_version_id,
             recipe_id: record.task.recipe_id,
             model_version_id: draft.model_version_id,
+            prompt_version_id: draft.prompt_version_id,
             workflow_name: record.workflow_name,
             created_at: record.task.created_at,
             values: draft.values,
@@ -299,6 +300,7 @@ impl TaskHistoryService {
             model_version_id: snapshot
                 .model_version_id
                 .map(|model_version_id| model_version_id.as_str().to_owned()),
+            prompt_version_id: snapshot.prompt_version_id,
         })
     }
 }
@@ -620,6 +622,7 @@ pub struct ReusableGenerationDraftView {
     pub workflow_version_id: String,
     pub recipe_id: String,
     pub model_version_id: Option<String>,
+    pub prompt_version_id: Option<String>,
     pub workflow_name: String,
     pub created_at: DateTime<Utc>,
     pub values: BTreeMap<String, DraftValueView>,
@@ -706,6 +709,7 @@ struct ReusableDraft {
     values: BTreeMap<String, DraftValueView>,
     missing_asset_ids: Vec<String>,
     model_version_id: Option<String>,
+    prompt_version_id: Option<String>,
 }
 
 fn parse_snapshot_values(

@@ -1,6 +1,7 @@
 use crate::application::ports::{
     AssetRepository, AssetStore, AssetStoreError, GenerationDefinitionRepository,
-    OrganizationRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
+    OrganizationRepository, ProjectRepository, RepositoryError, TaskOutputAssetMapping,
+    TaskRepository,
 };
 use crate::compiler::RecipeParser;
 use crate::domain::{AssetId, AssetType, TaskId};
@@ -11,6 +12,7 @@ use std::{error::Error, fmt, sync::Arc};
 pub struct AssetQueryService {
     asset_repository: Arc<dyn AssetRepository>,
     asset_store: Arc<dyn AssetStore>,
+    project_repository: Arc<dyn ProjectRepository>,
     task_repository: Option<Arc<dyn TaskRepository>>,
     definition_repository: Option<Arc<dyn GenerationDefinitionRepository>>,
     organization_repository: Option<Arc<dyn OrganizationRepository>>,
@@ -20,10 +22,12 @@ impl AssetQueryService {
     pub fn new(
         asset_repository: Arc<dyn AssetRepository>,
         asset_store: Arc<dyn AssetStore>,
+        project_repository: Arc<dyn ProjectRepository>,
     ) -> Self {
         Self {
             asset_repository,
             asset_store,
+            project_repository,
             task_repository: None,
             definition_repository: None,
             organization_repository: None,
@@ -170,9 +174,10 @@ impl AssetQueryService {
         if asset.asset_type != AssetType::Image {
             return Err(AssetQueryError::NotImage(asset_id.as_str().to_owned()));
         }
+        let project_root = self.project_root(project_id).await?;
         let bytes = self
             .asset_store
-            .read(std::path::Path::new(&asset.storage_path))
+            .read(&project_root, std::path::Path::new(&asset.storage_path))
             .await
             .map_err(AssetQueryError::Read)?;
         Ok(AssetBinary { bytes })
@@ -200,12 +205,24 @@ impl AssetQueryService {
         let path = asset
             .thumbnail_path
             .ok_or_else(|| AssetQueryError::ThumbnailNotAvailable(asset_id.as_str().to_owned()))?;
+        let project_root = self.project_root(project_id).await?;
         let bytes = self
             .asset_store
-            .read(std::path::Path::new(&path))
+            .read(&project_root, std::path::Path::new(&path))
             .await
             .map_err(AssetQueryError::Read)?;
         Ok(AssetBinary { bytes })
+    }
+
+    async fn project_root(&self, project_id: &str) -> Result<std::path::PathBuf, AssetQueryError> {
+        self.project_repository
+            .get_storage_root(project_id)
+            .await?
+            .ok_or_else(|| {
+                AssetQueryError::Read(AssetStoreError::FilesystemBoundary(format!(
+                    "storage root is not configured for project {project_id}"
+                )))
+            })
     }
 }
 
@@ -370,7 +387,8 @@ mod tests {
     };
     use crate::domain::{Asset, AssetId, Task};
     use crate::infrastructure::database::{
-        initialize, repositories::test_support, SqliteAssetRepository, SqliteTaskRepository,
+        initialize, repositories::test_support, SqliteAssetRepository, SqliteProjectRepository,
+        SqliteTaskRepository,
     };
     use crate::infrastructure::filesystem::FileSystemAssetStore;
     use async_trait::async_trait;
@@ -404,7 +422,11 @@ mod tests {
             unreachable!()
         }
 
-        async fn read(&self, _path: &Path) -> Result<Vec<u8>, AssetStoreError> {
+        async fn read(
+            &self,
+            _project_root: &Path,
+            _path: &Path,
+        ) -> Result<Vec<u8>, AssetStoreError> {
             self.reads.fetch_add(1, Ordering::SeqCst);
             Ok(Vec::new())
         }
@@ -447,10 +469,18 @@ mod tests {
             task.created_at,
         )
         .unwrap();
-        let repository = SqliteAssetRepository::new(pool);
+        let repository = SqliteAssetRepository::new(pool.clone());
         repository.insert_many(&[asset]).await.unwrap();
-        let service =
-            AssetQueryService::new(Arc::new(repository), Arc::new(FileSystemAssetStore::new()));
+        sqlx::query("UPDATE projects SET root_path = ? WHERE id = 'project-1'")
+            .bind(directory.path().to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let service = AssetQueryService::new(
+            Arc::new(repository),
+            Arc::new(FileSystemAssetStore::new()),
+            Arc::new(SqliteProjectRepository::new(pool)),
+        );
 
         assert_eq!(
             service
@@ -533,7 +563,7 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 1).unwrap(),
         )
         .unwrap();
-        let repository = SqliteAssetRepository::new(pool);
+        let repository = SqliteAssetRepository::new(pool.clone());
         repository.insert_many(&[asset]).await.unwrap();
         let reads = Arc::new(AtomicUsize::new(0));
         let service = AssetQueryService::new(
@@ -541,6 +571,7 @@ mod tests {
             Arc::new(CountingAssetStore {
                 reads: reads.clone(),
             }),
+            Arc::new(SqliteProjectRepository::new(pool)),
         );
 
         assert!(matches!(
