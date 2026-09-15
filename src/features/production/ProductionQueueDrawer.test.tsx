@@ -213,4 +213,20 @@ describe("ProductionQueueDrawer", () => {
     expect(html).toContain('aria-label="开始生产队列 batch-1"');
     expect(html).toContain('aria-label="开始生产队列 batch-2"');
   });
+
+  it("turns a structured pause reason into actionable Chinese copy with technical details", () => {
+    const html = renderToStaticMarkup(
+      <ProductionQueueDrawer
+        sequentialStartStatus="PAUSED"
+        sequentialPauseReason="RUNTIME_ADMISSION_COMFY_UNAVAILABLE: ComfyUI status is Offline"
+        sequentialCanResume
+        onResumeSequentialStart={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("连续运行已暂停");
+    expect(html).toContain("无法启动生产队列：ComfyUI 当前不可用。");
+    expect(html).toContain("RUNTIME_ADMISSION_COMFY_UNAVAILABLE");
+    expect(html).toContain('role="alert"');
+  });
 });

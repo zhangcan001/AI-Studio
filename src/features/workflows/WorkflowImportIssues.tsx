@@ -7,7 +7,7 @@ import type {
   WorkflowOnboardingDraftView,
 } from "../../types/workflowOnboarding";
 
-export type WorkflowImportErrorKind = "UI_FORMAT" | "INVALID_JSON" | "UNKNOWN_FORMAT" | "IMPORT_FAILED";
+export type WorkflowImportErrorKind = "UI_FORMAT" | "NOT_API_FORMAT" | "INVALID_JSON" | "UNKNOWN_FORMAT" | "IMPORT_FAILED";
 
 export interface WorkflowImportErrorView {
   kind: WorkflowImportErrorKind;
@@ -138,8 +138,11 @@ interface FormatIssueProps {
 export function WorkflowImportFormatIssue({ issue, loading, onRetry, onCancel }: FormatIssueProps) {
   const [showGuide, setShowGuide] = useState(false);
   const isUi = issue.kind === "UI_FORMAT";
+  const isNotApi = issue.kind === "NOT_API_FORMAT";
   const title = isUi
     ? "检测到 ComfyUI 普通工作流 JSON"
+    : isNotApi
+      ? "不是 ComfyUI API 格式工作流"
     : issue.kind === "INVALID_JSON"
       ? "无法读取这个文件"
       : issue.kind === "UNKNOWN_FORMAT"
@@ -155,7 +158,7 @@ export function WorkflowImportFormatIssue({ issue, loading, onRetry, onCancel }:
           <span className="section-label">添加工作流</span>
           <h3>{title}</h3>
           <p>{issue.message}</p>
-          {isUi && <p>请在 ComfyUI 中将该工作流导出为 API Format JSON，然后重新选择该文件。</p>}
+          {(isUi || isNotApi) && <p>请在 ComfyUI 中将该工作流导出为 API Format JSON，然后重新选择该文件。</p>}
           {hasTechnicalDetails && (
             <details className="technical-error-details">
               <summary>查看详细原因</summary>
@@ -172,7 +175,7 @@ export function WorkflowImportFormatIssue({ issue, loading, onRetry, onCancel }:
         </div>
       )}
       <div className="workflow-smart-actions">
-        {isUi && <button type="button" className="quiet-button" onClick={() => setShowGuide((current) => !current)} aria-expanded={showGuide}>{showGuide ? "收起导出方法" : "查看导出方法"}</button>}
+        {(isUi || isNotApi) && <button type="button" className="quiet-button" onClick={() => setShowGuide((current) => !current)} aria-expanded={showGuide}>{showGuide ? "收起导出方法" : "查看导出方法"}</button>}
         {onRetry && <button type="button" onClick={onRetry} disabled={loading}>选择另一个文件</button>}
         {onCancel && <button type="button" className="quiet-button" onClick={onCancel} disabled={loading}>返回工作流列表</button>}
       </div>

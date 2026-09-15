@@ -145,7 +145,7 @@ describe("PromptStudio", () => {
 
     render(<PromptStudio projectId="project-1" />);
 
-    expect(await screen.findByText("Used Generations")).toBeTruthy();
+    expect(await screen.findByText("相关生成")).toBeTruthy();
     expect(await screen.findByText("tver-comfy-1")).toBeTruthy();
     expect(await screen.findByText("av-1")).toBeTruthy();
     expect(screen.getByText("当前数据层尚未建立 Prompt Version → Generation 显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。")).toBeTruthy();
@@ -184,6 +184,18 @@ describe("PromptStudio", () => {
     mocks.getPromptLibraryEntry.mockRejectedValue(new Error("detail unavailable"));
     render(<PromptStudio projectId="project-1" />);
     expect(await screen.findByText("提示词详情加载失败：操作失败，请查看技术详情。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试读取详情" })).toBeTruthy();
+  });
+
+  it("does not present a missing model version as an unbound model", async () => {
+    mocks.getPromptLibraryEntry.mockResolvedValue({
+      ...promptDetail,
+      versions: [{ ...promptDetail.versions[1], modelVersionId: "mdv-missing" }],
+    });
+    render(<PromptStudio projectId="project-1" />);
+
+    expect((await screen.findAllByText("模型版本缺失")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("未绑定模型")).toBeNull();
   });
 
   it("exposes model and generation-history errors", async () => {

@@ -56,6 +56,14 @@ function healthClass(status: ToolHealthStatus): string {
   return "local-tool-health-badge local-tool-health-badge--" + status.toLowerCase();
 }
 
+function detailStateLabel(detail: ToolDetail | undefined, error: string | undefined, loading: boolean): { label: string; className: string } {
+  if (error) return { label: "加载失败", className: "local-tool-health-badge local-tool-health-badge--error" };
+  if (loading) return { label: "读取中…", className: "local-tool-health-badge local-tool-health-badge--unknown" };
+  if (!detail) return { label: "尚未读取", className: "local-tool-health-badge local-tool-health-badge--unknown" };
+  const status = resolveHealthStatus(detail.instances);
+  return { label: healthLabels[status], className: healthClass(status) };
+}
+
 function latestVersion(versions: readonly ToolVersionView[]): ToolVersionView | undefined {
   return versions.length ? versions[versions.length - 1] : undefined;
 }
@@ -197,7 +205,7 @@ export function LocalToolHub() {
                 <tbody>
                   {tools.map((tool) => {
                     const detail = detailsById[tool.id];
-                    const status = detail ? resolveHealthStatus(detail.instances) : "UNKNOWN";
+                    const state = detailStateLabel(detail, detailErrorsById[tool.id], loading || detailLoadingId === tool.id);
                     const version = detail ? latestVersion(detail.versions)?.version : undefined;
                     return (
                       <tr key={tool.id} className={tool.id === selectedToolId ? "active" : undefined}>
@@ -212,10 +220,10 @@ export function LocalToolHub() {
                           </button>
                         </th>
                         <td>{tool.type}</td>
-                        <td><span className={healthClass(status)}>{healthLabels[status]}</span></td>
-                        <td>{version ? "v" + version : loading ? "读取中…" : "—"}</td>
+                        <td><span className={state.className}>{state.label}</span></td>
+                        <td>{version ? "v" + version : state.label}</td>
                         <td className="local-tool-hub-location-cell" title={detail ? formatLocation(detail.instances[0]) : undefined}>
-                          {detail ? formatLocation(detail.instances[0]) : loading ? "读取中…" : "未读取"}
+                          {detail ? formatLocation(detail.instances[0]) : state.label}
                         </td>
                       </tr>
                     );
@@ -234,9 +242,10 @@ export function LocalToolHub() {
           {!selectedTool && loading && <p className="disabled-note" role="status">正在读取工具详情…</p>}
           {!selectedTool && !loading && !error && <p className="empty-state">请选择一个工具查看详情。</p>}
           {selectedTool && !selectedDetail && detailLoadingId === selectedTool.id && <p className="disabled-note" role="status">正在读取工具详情…</p>}
-          {selectedTool && selectedDetailError && !selectedDetail && (
+          {selectedTool && selectedDetailError && (
             <div className="local-tool-hub-detail-error">
               <p className="error-message" role="alert">工具详情加载失败：{selectedDetailError}</p>
+              {selectedDetail && <p className="local-tool-hub-note">以下内容为上次成功读取的结果。</p>}
               <button type="button" className="quiet-button" onClick={() => void retryToolDetail(selectedTool.id)} disabled={detailLoadingId === selectedTool.id}>
                 {detailLoadingId === selectedTool.id ? "正在重试…" : "重试"}
               </button>

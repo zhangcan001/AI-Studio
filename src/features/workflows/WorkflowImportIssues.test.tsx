@@ -3,7 +3,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkflowImportIssues, workflowIssueSelectionKey } from "./WorkflowImportIssues";
+import { WorkflowImportFormatIssue, WorkflowImportIssues, workflowIssueSelectionKey } from "./WorkflowImportIssues";
 import type {
   WorkflowAutoIssueView,
   WorkflowAutoOnboardingPlanView,
@@ -105,6 +105,19 @@ function draftWithOptions(plan: WorkflowAutoOnboardingPlanView): WorkflowOnboard
 }
 
 describe("WorkflowImportIssues", () => {
+  it("把非 API 格式与未知格式分开说明，并提供导出指引", () => {
+    render(
+      <WorkflowImportFormatIssue
+        issue={{ kind: "NOT_API_FORMAT", message: "该文件不是 ComfyUI API 格式工作流。" }}
+        loading={false}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "不是 ComfyUI API 格式工作流" })).toBeTruthy();
+    expect(screen.getByText(/导出为 API Format JSON/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "无法识别这个工作流" })).toBeNull();
+  });
+
   it("隔离相同 code 的不同 field，并向 resolve 传递准确 issue 与 candidate", async () => {
     const user = userEvent.setup();
     const onResolve = vi.fn();

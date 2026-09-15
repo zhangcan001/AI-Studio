@@ -10,7 +10,10 @@ export function workflowImportErrorView(error: unknown): WorkflowImportErrorView
   if (/UI[_\s-]*(FORMAT|WORKFLOW)|WORKFLOW[_\s-]*UI|UNSUPPORTED[_\s-]*UI/.test(haystack)) {
     return { kind: "UI_FORMAT", message: "检测到 ComfyUI 普通工作流 JSON，但这个格式不能安全地直接添加。" };
   }
-  if (/\bUNKNOWN\b|UNRECOGNIZED|WORKFLOW_NOT_API_FORMAT/.test(haystack)) {
+  if (/WORKFLOW[_\s-]*NOT[_\s-]*API[_\s-]*FORMAT/.test(haystack)) {
+    return { kind: "NOT_API_FORMAT", message: "该文件不是 ComfyUI API 格式工作流，请重新导出 API 格式工作流。" };
+  }
+  if (/\bUNKNOWN(?:[_\s-]|$)|UNRECOGNIZED/.test(haystack)) {
     return { kind: "UNKNOWN_FORMAT", message: "这个 JSON 不是可识别的 ComfyUI 工作流。" };
   }
   return {

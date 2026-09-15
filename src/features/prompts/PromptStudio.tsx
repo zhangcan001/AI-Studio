@@ -77,6 +77,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   const [provenanceError, setProvenanceError] = useState<string>();
   const [error, setError] = useState<string>();
   const [detailError, setDetailError] = useState<string>();
+  const [detailErrorsById, setDetailErrorsById] = useState<Record<string, string>>({});
   const [modelError, setModelError] = useState<string>();
   const [historyError, setHistoryError] = useState<string>();
   const promptRequest = useRef(0);
@@ -95,8 +96,16 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
     try {
       const detail = await getPromptLibraryEntry(projectId, promptId);
       setDetailsById((current) => ({ ...current, [detail.id]: detail }));
+      setDetailError(undefined);
+      setDetailErrorsById((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
     } catch (value: unknown) {
-      setDetailError(toUserMessage(value));
+      const message = toUserMessage(value);
+      setDetailError(message);
+      setDetailErrorsById((current) => ({ ...current, [promptId]: message }));
     } finally {
       setDetailLoading(false);
     }
@@ -130,11 +139,21 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
       if (promptRequest.current !== request) return;
       const firstDetailError = detailResults.find((item) => item.status === "rejected");
       if (firstDetailError?.status === "rejected") setDetailError(toUserMessage(firstDetailError.reason));
-      const details = detailResults.reduce<Record<string, PromptEntryView>>((result, item) => {
-        if (item.status === "fulfilled") result[item.value.id] = item.value;
-        return result;
-      }, {});
+      const details: Record<string, PromptEntryView> = {};
+      detailResults.forEach((item) => {
+        if (item.status === "fulfilled") details[item.value.id] = item.value;
+      });
       setDetailsById((current) => (reset ? details : { ...current, ...details }));
+      setDetailErrorsById((current) => {
+        const next = reset ? {} : { ...current };
+        detailResults.forEach((item, index) => {
+          const entry = page.items[index];
+          if (!entry) return;
+          if (item.status === "fulfilled") delete next[entry.id];
+          else next[entry.id] = toUserMessage(item.reason);
+        });
+        return next;
+      });
     } catch (value: unknown) {
       if (promptRequest.current === request) setError(toUserMessage(value));
     } finally {
@@ -145,6 +164,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   useEffect(() => {
     setEntries([]);
     setDetailsById({});
+    setDetailErrorsById({});
     setCursor(undefined);
     setSelectedPromptId(undefined);
     setSelectedVersionId(undefined);
@@ -239,6 +259,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   const selectedDetail = selectedPromptId ? detailsById[selectedPromptId] : undefined;
   const selectedVersion = selectedDetail?.versions.find((version) => version.id === selectedVersionId)
     ?? latestVersion(selectedDetail);
+  const selectedPromptDetailError = selectedPromptId ? detailErrorsById[selectedPromptId] : detailError;
   const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
   const modelVersionById = useMemo(() => {
     const result = new Map<string, ModelVersionView>();
@@ -282,17 +303,22 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
   function selectPrompt(promptId: string) {
     setSelectedPromptId(promptId);
     const detail = detailsById[promptId];
+    setDetailError(undefined);
     setSelectedVersionId(latestVersion(detail)?.id);
     if (!detail) void loadPromptDetail(promptId);
   }
 
   function modelLabel(entry: PromptEntryView): string {
+    if (detailErrorsById[entry.id]) return "加载失败";
+    if (!detailsById[entry.id] && loading) return "读取中…";
     const version = latestVersion(detailsById[entry.id]);
     if (!version?.modelVersionId) return "未绑定模型";
     const modelVersion = modelVersionById.get(version.modelVersionId);
     const model = modelVersion ? modelById.get(modelVersion.modelId) : undefined;
     if (model && modelVersion) return `${model.provider} / ${model.name} · ${modelVersion.version}`;
-    return modelLoading ? "读取中…" : version.modelVersionId;
+    if (modelLoading) return "读取中…";
+    if (modelError) return "模型加载失败";
+    return "模型版本缺失";
   }
 
   return (
@@ -367,7 +393,12 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
             </div>
             {!selectedDetail && (detailLoading || loading) && <p className="disabled-note" role="status">正在读取提示词详情…</p>}
             {!selectedDetail && !detailLoading && !loading && entries.length > 0 && <p className="empty-state">请选择一个提示词查看详情。</p>}
-            {detailError && <p className="error-message" role="alert">提示词详情加载失败：{detailError}</p>}
+            {selectedPromptDetailError && (
+              <div>
+                <p className="error-message" role="alert">提示词详情加载失败：{selectedPromptDetailError}</p>
+                {selectedPromptId && <button type="button" className="quiet-button" onClick={() => void loadPromptDetail(selectedPromptId)} disabled={detailLoading}>{detailLoading ? "正在重试…" : "重试读取详情"}</button>}
+              </div>
+            )}
             {selectedDetail && (
               <>
                 <div className="prompt-studio-version-layout">
@@ -388,7 +419,7 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                     <dl className="prompt-studio-metadata">
                       <div><dt>版本</dt><dd>{selectedVersion ? `v${selectedVersion.version}` : "—"}</dd></div>
                       <div><dt>更新时间</dt><dd>{selectedVersion ? formatDateTime(selectedVersion.createdAt) : "—"}</dd></div>
-                      <div><dt>模型版本</dt><dd>{linkedModel && linkedModelVersion ? `${linkedModel.provider} / ${linkedModel.name} · ${linkedModelVersion.version}` : "未绑定模型版本"}</dd></div>
+                      <div><dt>模型版本</dt><dd>{!selectedVersion?.modelVersionId ? "未绑定模型版本" : linkedModel && linkedModelVersion ? `${linkedModel.provider} / ${linkedModel.name} · ${linkedModelVersion.version}` : modelLoading ? "读取中…" : modelError ? "模型加载失败" : "模型版本缺失"}</dd></div>
                     </dl>
                     <div className="prompt-studio-two-column">
                       <section className="prompt-studio-subpanel" aria-label="参数">
@@ -416,8 +447,8 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                       {provenanceError && <p className="error-message" role="alert">跨模块溯源加载失败：{provenanceError}</p>}
                       {!historyLoading && !provenanceLoading && !provenanceError && (
                         <div className="prompt-studio-two-column">
-                          <section className="prompt-studio-subpanel" aria-label="Used Generations">
-                            <h4>Used Generations</h4>
+                          <section className="prompt-studio-subpanel" aria-label="相关生成">
+                            <h4>相关生成</h4>
                             <p className="prompt-studio-note">当前数据层尚未建立 Prompt Version → Generation 显式关系；以下仅为当前项目任务历史，不推断为当前提示词直接使用。</p>
                             {history.length > 0 ? (
                               <ul className="prompt-studio-history-list">
@@ -425,8 +456,8 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                               </ul>
                             ) : <p className="empty-state">暂无生成记录。</p>}
                           </section>
-                          <section className="prompt-studio-subpanel" aria-label="Generated Assets">
-                            <h4>Generated Assets</h4>
+                          <section className="prompt-studio-subpanel" aria-label="生成资产">
+                            <h4>生成资产</h4>
                             {assetVersionLineageRecords.length > 0 ? (
                               <ul className="prompt-studio-history-list">
                                 {assetVersionLineageRecords.map(({ task, link }) => <li key={link.id}><strong>{link.assetVersionId}</strong><span>{task.id} · {link.relationType} · 输出 {link.outputId} · 第 {link.ordinal + 1} 项</span></li>)}
@@ -435,14 +466,14 @@ export function PromptStudio({ projectId, onOpenTaskHistory }: Props) {
                               <p className="empty-state">任务有输出，但尚未建立 Generation → AssetVersion 显式关系。</p>
                             ) : <p className="empty-state">暂无已建立的结果资产溯源。</p>}
                           </section>
-                          <section className="prompt-studio-subpanel" aria-label="Model Versions">
-                            <h4>Model Versions</h4>
+                          <section className="prompt-studio-subpanel" aria-label="模型版本">
+                            <h4>模型版本</h4>
                             {selectedVersion?.modelVersionId ? (
                               <ul className="prompt-studio-history-list"><li><strong>{linkedModel && linkedModelVersion ? `${linkedModel.provider} / ${linkedModel.name}` : selectedVersion.modelVersionId}</strong><span>Prompt Version v{selectedVersion.version} · {linkedModelVersion?.version ?? "历史版本未加载"}</span></li></ul>
                             ) : <p className="empty-state">当前 Prompt Version 未记录 ModelVersion 关联。</p>}
                           </section>
-                          <section className="prompt-studio-subpanel" aria-label="Tools">
-                            <h4>Tools</h4>
+                          <section className="prompt-studio-subpanel" aria-label="工具使用">
+                            <h4>工具使用</h4>
                             {toolUsageRecords.length > 0 ? (
                               <ul className="prompt-studio-history-list">
                                 {toolUsageRecords.map(({ task, usage }) => <li key={usage.id}><strong>{usage.toolVersionId ?? "工具版本未记录"}</strong><span>{task.id} · 实例 {usage.toolInstanceId} · {formatDateTime(usage.createdAt)}</span></li>)}

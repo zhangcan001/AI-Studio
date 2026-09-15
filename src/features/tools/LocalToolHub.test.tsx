@@ -128,4 +128,13 @@ describe("LocalToolHub", () => {
     render(<LocalToolHub />);
     expect(await screen.findByText("暂无本地工具登记。")).toBeTruthy();
   });
+
+  it("does not collapse a detail request failure into unknown health", async () => {
+    mocks.listToolInstances.mockRejectedValueOnce(new Error("instance detail unavailable"));
+    render(<LocalToolHub />);
+
+    expect((await screen.findAllByText("加载失败")).length).toBeGreaterThan(0);
+    expect(screen.getByText("工具详情加载失败：操作失败，请查看技术详情。")).toBeTruthy();
+    expect(screen.queryByText("未知")).toBeNull();
+  });
 });

@@ -158,6 +158,11 @@
   background: rgb(148 163 184 / 13%);
 }
 
+.local-tool-health-badge--error {
+  color: #fdba74;
+  background: rgb(249 115 22 / 14%);
+}
+
 .local-tool-hub-detail-content {
   display: grid;
   gap: 10px;

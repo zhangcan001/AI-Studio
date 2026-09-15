@@ -7,6 +7,7 @@ import type {
   SequentialBatchStartStatus,
 } from "../../types/productionQueue";
 import type { ProductionBatchRunbookRow, ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
+import { formatUiError } from "../../i18n/errorMessages";
 import "./ProductionQueueDrawer.css";
 
 const MAX_VISIBLE_ROWS = 24;
@@ -400,11 +401,26 @@ function SequentialStatusBar({
     );
   }
 
+  const formattedPauseReason = pauseReason ? formatUiError(pauseReason) : undefined;
+  const displayPauseReason = formattedPauseReason?.code
+    ? formattedPauseReason.message
+    : pauseReason ?? "上一批存在失败项。";
+  const technicalPauseReason = formattedPauseReason?.code
+    && formattedPauseReason.technicalMessage !== displayPauseReason
+    ? formattedPauseReason.technicalMessage
+    : undefined;
+
   return (
-    <div className="production-queue-drawer-sequence production-queue-drawer-sequence-paused" data-sequential-status="PAUSED" role="status">
+    <div className="production-queue-drawer-sequence production-queue-drawer-sequence-paused" data-sequential-status="PAUSED" role="alert">
       <div className="production-queue-drawer-sequence-copy">
         <strong>连续运行已暂停</strong>
-        <span>{pauseReason ?? "上一批存在失败项。"}</span>
+        <span>{displayPauseReason}</span>
+        {technicalPauseReason && (
+          <details className="technical-error-details">
+            <summary>查看详细原因</summary>
+            <code>{technicalPauseReason}</code>
+          </details>
+        )}
       </div>
       <div className="production-queue-drawer-sequence-actions">
         {canResume && onResume && <button type="button" data-action="resume-sequence" onClick={onResume}>继续后续</button>}
