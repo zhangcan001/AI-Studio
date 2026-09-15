@@ -35,6 +35,9 @@ const COMFY_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 // the ordinary request timeout.
 const COMFY_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
+// Input uploads may include large media and wait for a busy ComfyUI; keep a
+// bounded upload budget without widening ordinary HTTP requests.
+const COMFY_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub struct ComfyHttpAdapter {
@@ -161,6 +164,7 @@ impl ComfyHttpAdapter {
         let response = self
             .client
             .post(&url)
+            .timeout(COMFY_UPLOAD_TIMEOUT)
             .multipart(form)
             .send()
             .await
@@ -185,11 +189,7 @@ impl ComfyHttpAdapter {
         let dto = response
             .json::<UploadResponseDto>()
             .await
-            .map_err(|error| {
-                ComfyAdapterError::Protocol(format!(
-                    "POST {url} returned invalid upload JSON: {error}"
-                ))
-            })?;
+            .map_err(|error| upload_response_error(&url, error))?;
         let name = dto
             .name
             .filter(|value| !value.trim().is_empty())
@@ -1127,6 +1127,14 @@ fn request_error(method: &str, url: &str, error: reqwest::Error) -> ComfyAdapter
     }
 }
 
+fn upload_response_error(url: &str, error: reqwest::Error) -> ComfyAdapterError {
+    if error.is_timeout() {
+        request_error("POST", url, error)
+    } else {
+        ComfyAdapterError::Protocol(format!("POST {url} returned invalid upload JSON: {error}"))
+    }
+}
+
 fn http_status_error(method: &str, url: &str, status: StatusCode) -> ComfyAdapterError {
     let message = format!("{method} {url} returned HTTP {status}");
     if matches!(
@@ -1422,6 +1430,36 @@ mod tests {
             .expect("upload should parse");
         assert_eq!(uploaded.name, "aistudio_task_asset.png");
         assert_eq!(uploaded.folder_type, "input");
+    }
+
+    #[tokio::test]
+    async fn upload_allows_slow_response_beyond_default_http_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({
+                        "name": "slow-input.png",
+                        "subfolder": "",
+                        "type": "input"
+                    }))
+                    .set_delay(Duration::from_secs(6)),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let uploaded = adapter
+            .upload_image(ComfyImageUpload {
+                bytes: vec![1, 2, 3],
+                upload_name: "slow-input.png".to_owned(),
+                content_type: "image/png".to_owned(),
+            })
+            .await
+            .expect("slow upload response should remain within the upload timeout");
+
+        assert_eq!(uploaded.name, "slow-input.png");
     }
 
     #[tokio::test]
