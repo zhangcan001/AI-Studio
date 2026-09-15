@@ -3072,7 +3072,7 @@ fn analysis_input_mapping(
         max_items: field_type.is_plural().then_some(8),
         target_node: input.node_id.clone(),
         target_input: input.input_name.clone(),
-        item_index: None,
+        item_index: input.item_index,
     })
 }
 
@@ -4582,7 +4582,7 @@ fn current_value_summary(value: &Value) -> String {
 }
 
 fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<String> {
-    let name = name.to_ascii_lowercase();
+    let name = name.to_ascii_lowercase().replace(['-', ' ', '.'], "_");
     if linked {
         return match name.as_str() {
             "prompt" | "text" | "positive" | "positive_prompt" | "negative" | "negative_prompt" => {
@@ -4592,10 +4592,18 @@ fn suggestion_for_input(name: &str, value: &Value, linked: bool) -> Option<Strin
                 Some("integer".to_owned())
             }
             "seed" | "noise_seed" | "random_seed" => Some("seed".to_owned()),
-            "image" | "input_image" | "first_frame" | "start_frame" | "last_frame"
-            | "end_frame" => Some("image".to_owned()),
+            "image" | "input_image" | "first_frame" | "start_frame" | "first_image"
+            | "start_image" | "last_frame" | "end_frame" | "last_image" | "end_image" => {
+                Some("image".to_owned())
+            }
             "video" | "input_video" => Some("video".to_owned()),
+            "videos" | "reference_videos" | "ref_videos" => Some("videos".to_owned()),
             "audio" | "input_audio" => Some("audio".to_owned()),
+            "audios" | "reference_audios" | "ref_audios" => Some("audios".to_owned()),
+            "images" | "reference_images" | "ref_images" => Some("images".to_owned()),
+            _ if is_indexed_media_slot(&name, "image") => Some("images".to_owned()),
+            _ if is_indexed_media_slot(&name, "video") => Some("videos".to_owned()),
+            _ if is_indexed_media_slot(&name, "audio") => Some("audios".to_owned()),
             _ => None,
         };
     }
@@ -4774,21 +4782,77 @@ fn is_safe_key(value: &str) -> bool {
 }
 
 fn linked_target_semantic(input_name: &str) -> Option<&'static str> {
-    match input_name.to_ascii_lowercase().as_str() {
+    let name = input_name
+        .to_ascii_lowercase()
+        .replace(['-', ' ', '.'], "_");
+    match name.as_str() {
         "prompt" | "text" | "positive" | "positive_prompt" => Some("prompt"),
         "negative" | "negative_prompt" => Some("negative_prompt"),
         "width" => Some("width"),
         "height" => Some("height"),
         "seed" | "noise_seed" | "random_seed" => Some("seed"),
         "length" | "frames" | "num_frames" | "frame_count" => Some("duration_seconds"),
+        "first_frame" | "start_frame" | "first_image" | "start_image" => Some("first_frame"),
+        "last_frame" | "end_frame" | "last_image" | "end_image" => Some("last_frame"),
         "image" | "input_image" => Some("reference_image"),
-        "images" | "reference_images" => Some("reference_images"),
+        "images" | "reference_images" | "ref_images" => Some("reference_images"),
         "video" | "input_video" => Some("reference_video"),
-        "videos" | "reference_videos" => Some("reference_videos"),
+        "videos" | "reference_videos" | "ref_videos" => Some("reference_videos"),
         "audio" | "input_audio" => Some("reference_audio"),
-        "audios" | "reference_audios" => Some("reference_audios"),
+        "audios" | "reference_audios" | "ref_audios" => Some("reference_audios"),
+        _ if is_indexed_media_slot(&name, "image") => Some("reference_images"),
+        _ if is_indexed_media_slot(&name, "video") => Some("reference_videos"),
+        _ if is_indexed_media_slot(&name, "audio") => Some("reference_audios"),
         _ => None,
     }
+}
+
+const IMAGE_SLOT_PREFIXES: &[&str] = &[
+    "ref_images_ref_image_",
+    "ref_images_image_",
+    "reference_images_image_",
+    "ref_image_",
+    "reference_images_",
+    "reference_image_",
+    "image_",
+    "images_",
+];
+
+const VIDEO_SLOT_PREFIXES: &[&str] = &[
+    "ref_videos_ref_video_",
+    "ref_videos_video_",
+    "reference_videos_video_",
+    "ref_video_",
+    "reference_videos_",
+    "reference_video_",
+    "video_",
+    "videos_",
+];
+
+const AUDIO_SLOT_PREFIXES: &[&str] = &[
+    "ref_video_audios_ref_video_audio_",
+    "ref_audios_ref_audio_",
+    "ref_audios_audio_",
+    "reference_audios_audio_",
+    "ref_audio_",
+    "reference_audios_",
+    "reference_audio_",
+    "audio_",
+    "audios_",
+];
+
+fn is_indexed_media_slot(name: &str, media: &str) -> bool {
+    let prefixes = match media {
+        "image" => IMAGE_SLOT_PREFIXES,
+        "video" => VIDEO_SLOT_PREFIXES,
+        "audio" => AUDIO_SLOT_PREFIXES,
+        _ => return false,
+    };
+    prefixes.iter().any(|prefix| {
+        name.strip_prefix(prefix).is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    })
 }
 
 fn is_integer_number(value: &Value) -> bool {
@@ -6294,6 +6358,90 @@ outputs: []
         assert_eq!(
             possible_link(&draft.workflow.inputs("63").unwrap()["length"]),
             Some(("35", 1))
+        );
+    }
+
+    #[test]
+    fn graph_inference_maps_indexed_reference_images_to_distinct_slots() {
+        let first_last_raw = include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_0_0/workflow_api.json"
+        );
+        let first_last = test_draft(
+            serde_json::from_str(first_last_raw).expect("first-last fixture should parse"),
+        );
+        let first_last_result = infer_auto_onboarding(&first_last);
+        assert!(
+            first_last_result
+                .issues
+                .iter()
+                .all(|issue| issue.code != "AMBIGUOUS_INPUT"),
+            "unexpected first-last issues: {:?}",
+            first_last_result.issues
+        );
+        for (semantic_key, target_node) in [("first_frame", "24"), ("last_frame", "28")] {
+            let mapping = first_last_result
+                .input_mappings
+                .iter()
+                .find(|mapping| mapping.semantic_key == semantic_key)
+                .unwrap_or_else(|| panic!("missing first-last mapping {semantic_key}"));
+            assert_eq!(mapping.target_node, target_node);
+            assert_eq!(mapping.target_input, "image");
+            assert_eq!(mapping.item_index, None);
+            assert_eq!(mapping.field_type, SemanticFieldType::Image);
+        }
+
+        let raw = include_str!(
+            "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/workflow_api.json"
+        );
+        let value: Value = serde_json::from_str(raw).expect("fixture should parse");
+        let draft = test_draft(value);
+        let result = infer_auto_onboarding(&draft);
+
+        assert!(
+            result
+                .issues
+                .iter()
+                .all(|issue| issue.code != "AMBIGUOUS_INPUT"),
+            "unexpected issues: {:?}",
+            result.issues
+        );
+        let references = result
+            .input_mappings
+            .iter()
+            .filter(|mapping| mapping.semantic_key == "reference_images")
+            .collect::<Vec<_>>();
+        assert_eq!(references.len(), 9);
+        assert_eq!(
+            references
+                .iter()
+                .map(|mapping| mapping.item_index)
+                .collect::<Vec<_>>(),
+            (0..9).map(Some).collect::<Vec<_>>()
+        );
+        assert!(references.iter().all(|mapping| {
+            mapping.target_input == "image"
+                && mapping.target_node.parse::<u64>().is_ok()
+                && mapping.field_type == SemanticFieldType::Images
+        }));
+
+        let recipe = build_recipe(&WorkflowOnboardingDraft {
+            input_mappings: result.input_mappings.clone(),
+            output_mappings: result.output_mappings.clone(),
+            ..draft
+        })
+        .expect("indexed reference mappings should produce a valid recipe");
+        let bindings = recipe
+            .bindings
+            .iter()
+            .filter(|binding| binding.source == "reference_images")
+            .collect::<Vec<_>>();
+        assert_eq!(bindings.len(), 9);
+        assert_eq!(
+            bindings
+                .iter()
+                .map(|binding| binding.item_index)
+                .collect::<Vec<_>>(),
+            (0..9).map(Some).collect::<Vec<_>>()
         );
     }
 

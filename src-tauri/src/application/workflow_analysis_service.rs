@@ -7,7 +7,7 @@
 
 use crate::{
     application::{
-        workflow_graph_analysis::{WorkflowGraph, WorkflowSource},
+        workflow_graph_analysis::{WorkflowGraph, WorkflowSource, WorkflowSourceTrace},
         workflow_recognition_service::{
             structural_workflow_sha256, RecognitionConfidence, WorkflowIdentity,
             WorkflowRecognitionFormat,
@@ -31,6 +31,7 @@ pub struct WorkflowAnalysisInput {
     pub value: Option<Value>,
     pub node_id: String,
     pub input_name: String,
+    pub item_index: Option<usize>,
     pub confidence: RecognitionConfidence,
     pub source: String,
 }
@@ -163,7 +164,7 @@ pub fn analyze_workflow(workflow: &WorkflowDocument, raw_bytes: &[u8]) -> Workfl
         inference_scope
     };
 
-    let mut candidates = BTreeMap::<String, Vec<Candidate>>::new();
+    let mut candidates = BTreeMap::<(String, Option<usize>), Vec<Candidate>>::new();
     let mut issues = output_analysis.issues;
     let Some(nodes) = workflow.value().as_object() else {
         return report(
@@ -202,6 +203,9 @@ pub fn analyze_workflow(workflow: &WorkflowDocument, raw_bytes: &[u8]) -> Workfl
                     &mut issues,
                 );
             } else if let Some(guess) = literal_guess(class_type, input_name, value) {
+                if is_contextualized_media_literal(&graph, node_id, &guess) {
+                    continue;
+                }
                 append_candidate(
                     &mut candidates,
                     Candidate::literal(node_id, input_name, value, guess),
@@ -236,6 +240,7 @@ struct Candidate {
     value: Option<Value>,
     node_id: String,
     input_name: String,
+    item_index: Option<usize>,
     confidence: RecognitionConfidence,
     source: String,
 }
@@ -249,6 +254,7 @@ impl Candidate {
             value: Some(value.clone()),
             node_id: node_id.to_owned(),
             input_name: input_name.to_owned(),
+            item_index: None,
             confidence: guess.confidence,
             source: guess.source.to_owned(),
         }
@@ -262,12 +268,19 @@ impl Candidate {
             value: None,
             node_id: node_id.to_owned(),
             input_name: input_name.to_owned(),
+            item_index: None,
             confidence: guess.confidence,
             source: guess.source.to_owned(),
         }
     }
 
-    fn linked_leaf(node_id: &str, input_name: &str, value: &Value, guess: Guess) -> Self {
+    fn linked_leaf(
+        node_id: &str,
+        input_name: &str,
+        value: &Value,
+        item_index: Option<usize>,
+        guess: Guess,
+    ) -> Self {
         Self {
             semantic_key: guess.semantic_key.to_owned(),
             field_type: guess.field_type.to_owned(),
@@ -275,6 +288,7 @@ impl Candidate {
             value: Some(value.clone()),
             node_id: node_id.to_owned(),
             input_name: input_name.to_owned(),
+            item_index,
             confidence: guess.confidence,
             source: guess.source.to_owned(),
         }
@@ -290,17 +304,25 @@ struct Guess {
     source: &'static str,
 }
 
+#[derive(Clone, Copy)]
+struct LinkedTargetSemantic {
+    semantic_key: &'static str,
+    item_index: Option<usize>,
+    force_media_source: bool,
+}
+
 fn infer_linked_input(
     workflow: &WorkflowDocument,
     graph: &WorkflowGraph,
     target_node: &str,
     target_input: &str,
-    candidates: &mut BTreeMap<String, Vec<Candidate>>,
+    candidates: &mut BTreeMap<(String, Option<usize>), Vec<Candidate>>,
     issues: &mut Vec<WorkflowAnalysisIssue>,
 ) {
-    let Some(semantic_key) = linked_target_semantic(target_input) else {
+    let Some(target_semantic) = linked_target_semantic(target_input) else {
         return;
     };
+    let semantic_key = target_semantic.semantic_key;
 
     if matches!(semantic_key, "width" | "height") {
         append_candidate(
@@ -337,22 +359,30 @@ fn infer_linked_input(
     }
 
     for trace in graph.trace_sources(target_node, target_input) {
+        if trace_crosses_unrelated_media_input(&trace, target_node, target_input, target_semantic) {
+            continue;
+        }
         let leaf = trace.source;
         let class_type = workflow.class_type(&leaf.node_id).unwrap_or_default();
         let Some(guess) = literal_guess(class_type, &leaf.input, &leaf.value) else {
             continue;
         };
-        if guess.semantic_key != semantic_key {
+        let Some(guess) = linked_source_guess(target_semantic, guess) else {
             continue;
-        }
+        };
         append_candidate(
             candidates,
             Candidate::linked_leaf(
                 &leaf.node_id,
                 &leaf.input,
                 &leaf.value,
+                target_semantic.item_index,
                 Guess {
-                    source: "GRAPH_LINKED_SOURCE_LEAF",
+                    source: if guess.source == "GRAPH_LINKED_MEDIA_SOURCE" {
+                        "GRAPH_LINKED_MEDIA_SOURCE"
+                    } else {
+                        "GRAPH_LINKED_SOURCE_LEAF"
+                    },
                     ..guess
                 },
             ),
@@ -387,6 +417,7 @@ fn infer_duration_candidate(
         &leaf.node_id,
         &leaf.input,
         &leaf.value,
+        None,
         Guess {
             semantic_key: "duration_seconds",
             field_type: if is_integer_number(&leaf.value) {
@@ -401,8 +432,77 @@ fn infer_duration_candidate(
     ))
 }
 
+fn linked_source_guess(
+    target_semantic: LinkedTargetSemantic,
+    source_guess: Guess,
+) -> Option<Guess> {
+    if source_guess.semantic_key == target_semantic.semantic_key {
+        return Some(source_guess);
+    }
+    if target_semantic.force_media_source
+        && media_family(target_semantic.semantic_key) == media_family(source_guess.semantic_key)
+        && media_family(target_semantic.semantic_key).is_some()
+    {
+        return Some(Guess {
+            semantic_key: target_semantic.semantic_key,
+            field_type: field_type_for_semantic(target_semantic.semantic_key),
+            required: true,
+            confidence: RecognitionConfidence::High,
+            source: "GRAPH_LINKED_MEDIA_SOURCE",
+        });
+    }
+    None
+}
+
+fn field_type_for_semantic(semantic_key: &str) -> &'static str {
+    match semantic_key {
+        "reference_images" => "images",
+        "reference_videos" => "videos",
+        "reference_audios" => "audios",
+        "reference_video" => "video",
+        "reference_audio" => "audio",
+        _ => "image",
+    }
+}
+
+fn media_family(semantic_key: &str) -> Option<&'static str> {
+    match semantic_key {
+        "first_frame" | "last_frame" | "reference_image" | "reference_images" => Some("image"),
+        "reference_video" | "reference_videos" => Some("video"),
+        "reference_audio" | "reference_audios" => Some("audio"),
+        _ => None,
+    }
+}
+
+fn is_contextualized_media_literal(graph: &WorkflowGraph, node_id: &str, guess: &Guess) -> bool {
+    media_family(guess.semantic_key).is_some()
+        && graph.downstream_of(node_id).iter().any(|link| {
+            linked_target_semantic(&link.target_input).is_some_and(|target| {
+                media_family(target.semantic_key) == media_family(guess.semantic_key)
+            })
+        })
+}
+
+fn trace_crosses_unrelated_media_input(
+    trace: &WorkflowSourceTrace,
+    target_node: &str,
+    target_input: &str,
+    target_semantic: LinkedTargetSemantic,
+) -> bool {
+    trace.path.iter().skip(1).any(|link| {
+        if link.target_node_id == target_node && link.target_input == target_input {
+            return false;
+        }
+        linked_target_semantic(&link.target_input).is_some_and(|nested| {
+            media_family(nested.semantic_key).is_some()
+                && (nested.semantic_key != target_semantic.semantic_key
+                    || nested.item_index != target_semantic.item_index)
+        })
+    })
+}
+
 fn resolve_candidates(
-    candidates: BTreeMap<String, Vec<Candidate>>,
+    candidates: BTreeMap<(String, Option<usize>), Vec<Candidate>>,
 ) -> (
     Vec<WorkflowAnalysisInput>,
     Vec<WorkflowAnalysisBinding>,
@@ -411,7 +511,7 @@ fn resolve_candidates(
     let mut inputs = Vec::new();
     let mut bindings = Vec::new();
     let mut issues = Vec::new();
-    for (semantic_key, mut choices) in candidates {
+    for ((semantic_key, _item_index), mut choices) in candidates {
         choices.sort_by(|left, right| {
             left.node_id
                 .cmp(&right.node_id)
@@ -457,6 +557,7 @@ fn resolve_candidates(
             value: selected.value,
             node_id: selected.node_id.clone(),
             input_name: selected.input_name.clone(),
+            item_index: selected.item_index,
             confidence: selected.confidence,
             source: selected.source,
         });
@@ -464,18 +565,23 @@ fn resolve_candidates(
             semantic_key: selected.semantic_key,
             target_node: selected.node_id,
             target_input: selected.input_name,
-            item_index: None,
+            item_index: selected.item_index,
         });
     }
     (inputs, bindings, issues)
 }
 
-fn append_candidate(candidates: &mut BTreeMap<String, Vec<Candidate>>, candidate: Candidate) {
+fn append_candidate(
+    candidates: &mut BTreeMap<(String, Option<usize>), Vec<Candidate>>,
+    candidate: Candidate,
+) {
     let choices = candidates
-        .entry(candidate.semantic_key.clone())
+        .entry((candidate.semantic_key.clone(), candidate.item_index))
         .or_default();
     if let Some(existing) = choices.iter_mut().find(|existing| {
-        existing.node_id == candidate.node_id && existing.input_name == candidate.input_name
+        existing.node_id == candidate.node_id
+            && existing.input_name == candidate.input_name
+            && existing.item_index == candidate.item_index
     }) {
         if confidence_rank(candidate.confidence) > confidence_rank(existing.confidence) {
             *existing = candidate;
@@ -682,22 +788,104 @@ fn numeric_guess(
     }
 }
 
-fn linked_target_semantic(input_name: &str) -> Option<&'static str> {
-    match normalize(input_name).as_str() {
-        "prompt" | "text" | "positive" | "positive_prompt" => Some("prompt"),
-        "negative" | "negative_prompt" => Some("negative_prompt"),
-        "width" => Some("width"),
-        "height" => Some("height"),
-        "seed" | "noise_seed" | "random_seed" => Some("seed"),
-        "length" | "frames" | "num_frames" | "frame_count" => Some("duration_seconds"),
-        "image" | "input_image" => Some("reference_image"),
-        "images" | "reference_images" => Some("reference_images"),
-        "video" | "input_video" => Some("reference_video"),
-        "videos" | "reference_videos" => Some("reference_videos"),
-        "audio" | "input_audio" => Some("reference_audio"),
-        "audios" | "reference_audios" => Some("reference_audios"),
-        _ => None,
-    }
+fn linked_target_semantic(input_name: &str) -> Option<LinkedTargetSemantic> {
+    let name = normalize(input_name);
+    let semantic_key = match name.as_str() {
+        "prompt" | "text" | "positive" | "positive_prompt" => "prompt",
+        "negative" | "negative_prompt" => "negative_prompt",
+        "width" => "width",
+        "height" => "height",
+        "seed" | "noise_seed" | "random_seed" => "seed",
+        "length" | "frames" | "num_frames" | "frame_count" => "duration_seconds",
+        "first_frame" | "start_frame" | "first_image" | "start_image" => "first_frame",
+        "last_frame" | "end_frame" | "last_image" | "end_image" => "last_frame",
+        "image" | "input_image" => "reference_image",
+        "images" | "reference_images" | "ref_images" => "reference_images",
+        "video" | "input_video" => "reference_video",
+        "videos" | "reference_videos" | "ref_videos" => "reference_videos",
+        "audio" | "input_audio" => "reference_audio",
+        "audios" | "reference_audios" | "ref_audios" => "reference_audios",
+        _ => {
+            if indexed_slot(&name, IMAGE_SLOT_PREFIXES).is_some() {
+                "reference_images"
+            } else if indexed_slot(&name, VIDEO_SLOT_PREFIXES).is_some() {
+                "reference_videos"
+            } else if indexed_slot(&name, AUDIO_SLOT_PREFIXES).is_some() {
+                "reference_audios"
+            } else {
+                return None;
+            }
+        }
+    };
+    let item_index = indexed_slot_for_semantic(&name, semantic_key);
+    let force_media_source = item_index.is_some()
+        || matches!(semantic_key, "first_frame" | "last_frame")
+        || matches!(
+            name.as_str(),
+            "ref_images"
+                | "reference_images"
+                | "ref_videos"
+                | "reference_videos"
+                | "ref_audios"
+                | "reference_audios"
+        );
+    Some(LinkedTargetSemantic {
+        semantic_key,
+        item_index,
+        force_media_source,
+    })
+}
+
+const IMAGE_SLOT_PREFIXES: &[&str] = &[
+    "ref_images_ref_image_",
+    "ref_images_image_",
+    "reference_images_image_",
+    "ref_image_",
+    "reference_images_",
+    "reference_image_",
+    "image_",
+    "images_",
+];
+
+const VIDEO_SLOT_PREFIXES: &[&str] = &[
+    "ref_videos_ref_video_",
+    "ref_videos_video_",
+    "reference_videos_video_",
+    "ref_video_",
+    "reference_videos_",
+    "reference_video_",
+    "video_",
+    "videos_",
+];
+
+const AUDIO_SLOT_PREFIXES: &[&str] = &[
+    "ref_video_audios_ref_video_audio_",
+    "ref_audios_ref_audio_",
+    "ref_audios_audio_",
+    "reference_audios_audio_",
+    "ref_audio_",
+    "reference_audios_",
+    "reference_audio_",
+    "audio_",
+    "audios_",
+];
+
+fn indexed_slot_for_semantic(name: &str, semantic_key: &'static str) -> Option<usize> {
+    let prefixes: &[&str] = match semantic_key {
+        "reference_images" => IMAGE_SLOT_PREFIXES,
+        "reference_videos" => VIDEO_SLOT_PREFIXES,
+        "reference_audios" => AUDIO_SLOT_PREFIXES,
+        _ => &[],
+    };
+    indexed_slot(name, prefixes)
+}
+
+fn indexed_slot(name: &str, prefixes: &[&str]) -> Option<usize> {
+    prefixes.iter().find_map(|prefix| {
+        name.strip_prefix(prefix)
+            .filter(|suffix| !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|suffix| suffix.parse::<usize>().ok())
+    })
 }
 
 fn infer_outputs(workflow: &WorkflowDocument, graph: &WorkflowGraph) -> OutputAnalysis {
@@ -893,7 +1081,7 @@ fn report(
                 semantic_key: input.semantic_key.clone(),
                 target_node: input.node_id.clone(),
                 target_input: input.input_name.clone(),
-                item_index: None,
+                item_index: input.item_index,
             })
             .collect(),
         inputs,
@@ -1231,6 +1419,12 @@ mod tests {
     const AITUDOU_8STEP: &str = include_str!(
         "../../runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/workflow_api.json"
     );
+    const FL2VA_FIRST_LAST: &str = include_str!(
+        "../../runtime_packages/minimax_h3_fl2va_first_last_quality_2_0_0/workflow_api.json"
+    );
+    const REFERENCE_VIDEO: &str = include_str!(
+        "../../runtime_packages/minimax_h3_reference_video_quality_2_0_0/workflow_api.json"
+    );
 
     fn fixture_report() -> WorkflowAnalysisReport {
         let value: Value = serde_json::from_str(AITUDOU_8STEP).expect("fixture should parse");
@@ -1301,5 +1495,77 @@ mod tests {
         assert_ne!(first.raw_sha256, second.raw_sha256);
         assert_eq!(first.semantic_sha256, second.semantic_sha256);
         assert_eq!(first.structural_sha256, second.structural_sha256);
+    }
+
+    #[test]
+    fn first_last_frame_links_are_inferred_from_their_loader_nodes() {
+        let value: Value = serde_json::from_str(FL2VA_FIRST_LAST).expect("fixture should parse");
+        let workflow = WorkflowDocument::parse(value).expect("fixture should be an API workflow");
+        let report = analyze_workflow(&workflow, FL2VA_FIRST_LAST.as_bytes());
+
+        assert!(
+            report
+                .issues
+                .iter()
+                .all(|issue| issue.code != "AMBIGUOUS_INPUT"),
+            "unexpected issues: {:?}",
+            report.issues
+        );
+        assert_eq!(report.mode, "image_to_video");
+        for (key, node) in [("first_frame", "24"), ("last_frame", "28")] {
+            let input = report
+                .inputs
+                .iter()
+                .find(|input| input.semantic_key == key)
+                .unwrap_or_else(|| panic!("missing input {key}"));
+            assert_eq!(input.node_id, node);
+            assert_eq!(input.input_name, "image");
+            assert_eq!(input.item_index, None);
+            assert!(report.bindings.iter().any(|binding| {
+                binding.semantic_key == key
+                    && binding.target_node == node
+                    && binding.target_input == "image"
+                    && binding.item_index.is_none()
+            }));
+        }
+    }
+
+    #[test]
+    fn indexed_reference_image_links_are_inferred_as_distinct_plural_slots() {
+        let audio_target = linked_target_semantic("ref_audios.ref_audio_0")
+            .expect("indexed audio target should be recognized");
+        assert_eq!(audio_target.semantic_key, "reference_audios");
+        assert_eq!(audio_target.item_index, Some(0));
+
+        let value: Value = serde_json::from_str(REFERENCE_VIDEO).expect("fixture should parse");
+        let workflow = WorkflowDocument::parse(value).expect("fixture should be an API workflow");
+        let graph = WorkflowGraph::from_document(&workflow).expect("fixture graph should build");
+        let audio_guess = literal_guess("LoadAudio", "audio", &serde_json::json!("audio.wav"))
+            .expect("audio literal should be recognized");
+        assert!(is_contextualized_media_literal(&graph, "50", &audio_guess));
+        let report = analyze_workflow(&workflow, REFERENCE_VIDEO.as_bytes());
+
+        assert!(
+            report
+                .issues
+                .iter()
+                .all(|issue| issue.code != "AMBIGUOUS_INPUT"),
+            "unexpected issues: {:?}",
+            report.issues
+        );
+        let references = report
+            .inputs
+            .iter()
+            .filter(|input| input.semantic_key == "reference_images")
+            .collect::<Vec<_>>();
+        assert_eq!(references.len(), 9);
+        assert_eq!(
+            references
+                .iter()
+                .map(|input| input.item_index)
+                .collect::<Vec<_>>(),
+            (0..9).map(Some).collect::<Vec<_>>()
+        );
+        assert!(references.iter().all(|input| input.input_name == "image"));
     }
 }

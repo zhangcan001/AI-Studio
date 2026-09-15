@@ -65,6 +65,7 @@ export interface WorkflowRecognitionInputView {
   required: boolean;
   nodeId: string;
   inputName: string;
+  itemIndex?: number;
   confidence: "HIGH" | "MEDIUM" | "LOW" | string;
 }
 
