@@ -623,7 +623,12 @@ fn api_error_report_with_identity(
 }
 
 fn is_numeric_node_id(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+    !value.is_empty()
+        && value.split(':').all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && part.parse::<u64>().is_ok()
+        })
 }
 
 fn compare_version(left: &str, right: &str) -> std::cmp::Ordering {
@@ -691,6 +696,19 @@ mod tests {
             recognize_workflow(br#"{"foo":true}"#, &[]).format,
             WorkflowRecognitionFormat::Unknown
         );
+    }
+
+    #[test]
+    fn recognizes_comfy_subgraph_api_node_ids() {
+        let bytes = api(json!({
+            "105:11": {"class_type": "CLIPTextEncode", "inputs": {}},
+            "92": {"class_type": "SaveVideo", "inputs": {"video": ["105:11", 0]}}
+        }));
+
+        let report = recognize_workflow(&bytes, &[]);
+
+        assert_eq!(report.format, WorkflowRecognitionFormat::Api);
+        assert!(report.importable);
     }
 
     #[test]

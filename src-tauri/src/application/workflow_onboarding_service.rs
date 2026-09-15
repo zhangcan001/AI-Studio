@@ -4754,8 +4754,11 @@ fn sanitize_display_value(value: &str) -> String {
 
 fn is_numeric_node_id(value: &str) -> bool {
     !value.is_empty()
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-        && value.parse::<u64>().is_ok()
+        && value.split(':').all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && part.parse::<u64>().is_ok()
+        })
 }
 
 fn is_safe_key(value: &str) -> bool {
@@ -5203,6 +5206,33 @@ mod tests {
         let invalid_error = parse_import_workflow(br#"{"#).unwrap_err();
         assert_eq!(invalid_error.code(), "INVALID_JSON");
         assert!(format!("{invalid_error}").contains("不是有效的 JSON"));
+    }
+
+    #[test]
+    fn accepts_comfy_subgraph_api_node_ids() {
+        let api = serde_json::to_vec(&json!({
+            "105:11": {"class_type": "CLIPTextEncode", "inputs": {}},
+            "92": {"class_type": "SaveVideo", "inputs": {"video": ["105:11", 0]}}
+        }))
+        .unwrap();
+
+        assert_eq!(
+            detect_comfy_workflow_format(&api),
+            ComfyWorkflowInputFormat::Api
+        );
+        assert!(parse_import_workflow(&api).is_ok());
+
+        for invalid_id in ["105:", ":11", "105::11", "105:a"] {
+            let invalid = serde_json::to_vec(&json!({
+                invalid_id: {"class_type": "SaveVideo", "inputs": {}}
+            }))
+            .unwrap();
+            assert_ne!(
+                detect_comfy_workflow_format(&invalid),
+                ComfyWorkflowInputFormat::Api,
+                "invalid subgraph node id should not be accepted: {invalid_id}"
+            );
+        }
     }
 
     fn test_draft(value: Value) -> WorkflowOnboardingDraft {

@@ -353,8 +353,11 @@ impl WorkflowValidator {
 
 fn is_valid_node_id(node_id: &str) -> bool {
     !node_id.is_empty()
-        && node_id.bytes().all(|byte| byte.is_ascii_digit())
-        && node_id.parse::<u64>().is_ok()
+        && node_id.split(':').all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && part.parse::<u64>().is_ok()
+        })
 }
 
 #[cfg(test)]
@@ -588,6 +591,23 @@ outputs: []
         .expect("root should parse");
 
         WorkflowValidator::validate(&workflow).expect("workflow should validate");
+    }
+
+    #[test]
+    fn validates_subgraph_node_ids() {
+        let workflow = WorkflowDocument::parse(json!({
+            "105:11": {
+                "inputs": {},
+                "class_type": "CLIPTextEncode"
+            },
+            "92": {
+                "inputs": {"video": ["105:11", 0]},
+                "class_type": "SaveVideo"
+            }
+        }))
+        .expect("root should parse");
+
+        WorkflowValidator::validate(&workflow).expect("subgraph IDs should validate");
     }
 
     #[test]

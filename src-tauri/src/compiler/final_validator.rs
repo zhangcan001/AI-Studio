@@ -157,11 +157,20 @@ fn possible_link(value: &Value) -> Option<(&str, i64)> {
         return None;
     }
     let node_id = array.first()?.as_str()?;
-    if !node_id.bytes().all(|byte| byte.is_ascii_digit()) {
+    if !is_numeric_node_id(node_id) {
         return None;
     }
     let output_index = array.get(1)?.as_i64()?;
     Some((node_id, output_index))
+}
+
+fn is_numeric_node_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.split(':').all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && part.parse::<u64>().is_ok()
+        })
 }
 
 fn validate_media_mappings(
@@ -346,6 +355,17 @@ outputs:
     fn normal_krea2_compiled_workflow_passes() {
         FinalCompiledWorkflowValidator::validate(&valid_workflow(), &recipe(), &[])
             .expect("Krea2 graph should pass");
+    }
+
+    #[test]
+    fn subgraph_node_links_pass_validation() {
+        let workflow = json!({
+            "105:11": {"inputs": {}, "class_type": "CLIPTextEncode"},
+            "3": {"inputs": {"images": ["105:11", 0]}, "class_type": "SaveImage"}
+        });
+
+        FinalCompiledWorkflowValidator::validate(&workflow, &recipe(), &[])
+            .expect("subgraph node links should pass");
     }
 
     #[test]
