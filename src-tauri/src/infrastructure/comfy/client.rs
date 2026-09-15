@@ -56,13 +56,6 @@ impl ComfyHttpAdapter {
         self.config.endpoint()
     }
 
-    async fn get_json<T>(&self, route: &str) -> Result<T, ComfyAdapterError>
-    where
-        T: DeserializeOwned,
-    {
-        self.get_json_with_timeout(route, COMFY_HTTP_TIMEOUT).await
-    }
-
     async fn get_json_with_timeout<T>(
         &self,
         route: &str,
@@ -618,7 +611,11 @@ impl ComfyAdapter for ComfyHttpAdapter {
     }
 
     async fn get_object_info(&self) -> Result<Value, ComfyAdapterError> {
-        let object_info: Value = self.get_json("object_info").await?;
+        // object_info can be large and slow while ComfyUI is loading nodes/models;
+        // admission refresh must not fail with COMFY_TIMEOUT after only 5s.
+        let object_info: Value = self
+            .get_json_with_timeout("object_info", COMFY_CONTROL_TIMEOUT)
+            .await?;
 
         if !object_info.is_object() {
             return Err(ComfyAdapterError::Incompatible(
@@ -1333,6 +1330,28 @@ mod tests {
             .expect("object info should parse");
 
         assert_eq!(object_info.as_object().expect("object expected").len(), 3);
+    }
+
+    #[tokio::test]
+    async fn object_info_allows_slow_control_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/object_info"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"KSampler": {}}))
+                    .set_delay(Duration::from_secs(6)),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let object_info = adapter
+            .get_object_info()
+            .await
+            .expect("slow object info response should remain within the control timeout");
+
+        assert!(object_info.get("KSampler").is_some());
     }
 
     #[tokio::test]
