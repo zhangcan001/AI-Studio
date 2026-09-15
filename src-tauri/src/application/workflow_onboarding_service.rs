@@ -2923,11 +2923,12 @@ fn auto_inference_from_analysis(
     draft: &WorkflowOnboardingDraft,
     analysis: &WorkflowAnalysisReport,
 ) -> AutoInferenceResult {
-    let input_mappings = analysis
+    let mut input_mappings = analysis
         .inputs
         .iter()
         .filter_map(|input| analysis_input_mapping(draft, input))
         .collect::<Vec<_>>();
+    normalize_inferred_plural_bounds(&mut input_mappings);
     let output_mappings = if analysis
         .issues
         .iter()
@@ -3059,11 +3060,20 @@ fn analysis_input_mapping(
         ),
         _ => (None, None, None),
     };
+    // A plural media input is represented by indexed bindings. The inferred
+    // recipe currently permits an empty list (the same contract used by the
+    // built-in reference workflows), so it must not be marked required while
+    // min_items remains zero.
+    let required = if field_type.is_plural() {
+        false
+    } else {
+        input.required
+    };
     Some(InputMapping {
         semantic_key: input.semantic_key.clone(),
         field_type,
         label: input.label.clone(),
-        required: input.required,
+        required,
         default_value,
         min_value,
         max_value,
@@ -3074,6 +3084,33 @@ fn analysis_input_mapping(
         target_input: input.input_name.clone(),
         item_index: input.item_index,
     })
+}
+
+fn normalize_inferred_plural_bounds(mappings: &mut [InputMapping]) {
+    let mut max_items_by_semantic = BTreeMap::<String, usize>::new();
+    for mapping in mappings
+        .iter()
+        .filter(|mapping| mapping.field_type.is_plural())
+    {
+        let discovered = mapping
+            .item_index
+            .and_then(|index| index.checked_add(1))
+            .unwrap_or_default();
+        let declared = mapping.max_items.unwrap_or_default();
+        max_items_by_semantic
+            .entry(mapping.semantic_key.clone())
+            .and_modify(|max_items| *max_items = (*max_items).max(declared).max(discovered))
+            .or_insert(declared.max(discovered));
+    }
+    for mapping in mappings
+        .iter_mut()
+        .filter(|mapping| mapping.field_type.is_plural())
+    {
+        if let Some(max_items) = max_items_by_semantic.get(&mapping.semantic_key) {
+            mapping.required = false;
+            mapping.max_items = Some((*max_items).max(mapping.min_items.unwrap_or_default()));
+        }
+    }
 }
 
 fn parse_inferred_i64(value: String) -> Option<String> {
@@ -6430,6 +6467,8 @@ outputs: []
             ..draft
         })
         .expect("indexed reference mappings should produce a valid recipe");
+        RecipeValidator::validate(&recipe)
+            .expect("indexed plural media mappings should produce a valid recipe definition");
         let bindings = recipe
             .bindings
             .iter()
