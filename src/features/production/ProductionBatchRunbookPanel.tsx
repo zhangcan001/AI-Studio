@@ -96,7 +96,7 @@ function stagePriority(stage: ProductionBatchRunbookRow["stage"]): number {
 }
 
 function runbookStatusLabel(status: ProductionBatchRunbookStatus): string {
-  return { READY: "待启动", RUNNING: "运行中", PAUSED: "已暂停", COMPLETED: "已完成" }[status] ?? status;
+  return { READY: "待启动", RUNNING: "运行中", PAUSED: "已暂停", COMPLETED: "已结束" }[status] ?? status;
 }
 
 function runbookStageLabel(stage: ProductionBatchRunbookRow["stage"]): string {

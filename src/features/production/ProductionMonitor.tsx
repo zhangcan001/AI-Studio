@@ -245,7 +245,7 @@ export function ProductionMonitor({
         </div>
         <div className={`production-monitor-batch-status status-${statusClass(model.status)}`}>
           <span>批次状态</span>
-          <strong>{batchStatusLabel(model.status, isComplete)}</strong>
+          <strong>{batchStatusLabel(model.status, isComplete, hasFailures)}</strong>
         </div>
       </header>
 
@@ -514,9 +514,10 @@ function itemStatusLabel(status: string): string {
   }[status] ?? "处理中";
 }
 
-function batchStatusLabel(status: string, complete: boolean): string {
+function batchStatusLabel(status: string, complete: boolean, hasFailures: boolean): string {
   if (status === "FAILED") return "失败，需要处理";
   if (status === "CANCELLED") return "已取消";
+  if (complete && hasFailures) return "已结束，有失败项目";
   if (complete) return "已完成";
   return { PENDING: "待启动", RUNNING: "运行中", PAUSED: "已暂停" }[status] ?? itemStatusLabel(status);
 }

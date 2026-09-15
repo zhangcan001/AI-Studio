@@ -186,6 +186,18 @@ describe("ProductionMonitor", () => {
     expect(screen.queryByRole("button", { name: "选择下一个生产包" })).toBeNull();
   });
 
+  it("does not present a completed batch with failed items as a successful completion", () => {
+    render(
+      <ProductionMonitor
+        batch={{ status: "COMPLETED", items: [item(1, "FAILED", { errorCode: "COMFY_TIMEOUT" })] }}
+      />,
+    );
+
+    expect(screen.getByText("已结束，有失败项目")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "批次已结束，存在失败项目" })).toBeTruthy();
+    expect(screen.queryByText("批次状态已完成")).toBeNull();
+  });
+
   it("keeps a 500-item batch to ten pages and reaches the final ordered page", async () => {
     const user = userEvent.setup();
     const items = Array.from({ length: 500 }, (_, index) => item(500 - index));

@@ -626,7 +626,7 @@ function statusLabel(status: string): string {
     READY: "待启动",
     RUNNING: "运行中",
     PAUSED: "已暂停",
-    COMPLETED: "已完成",
+    COMPLETED: "已结束",
     PENDING: "待执行",
     DISPATCHING: "提交中",
     DISPATCHED: "运行中",

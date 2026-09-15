@@ -444,7 +444,7 @@ describe("ShotWorkspace multi-package completion convergence", () => {
 
     expect(within(boardRow("EP2")).getByText("已完成")).toBeTruthy();
     expect(within(boardRow("EP2")).getByLabelText("100%，1/1")).toBeTruthy();
-    expect(within(queueRow(ids.ep2Batch)).getByText("已完成")).toBeTruthy();
+    expect(within(queueRow(ids.ep2Batch)).getByText("已结束")).toBeTruthy();
     const monitor = screen.getByTestId("production-monitor");
     expect(monitor.querySelector(".production-monitor-batch-status")?.textContent).toContain("已完成");
     expect(within(monitor).getByText("成品记录可用")).toBeTruthy();
@@ -493,7 +493,7 @@ describe("ShotWorkspace multi-package completion convergence", () => {
 
     expect(within(boardRow("EP2")).getByText("已完成")).toBeTruthy();
     expect(within(boardRow("EP2")).getByLabelText("100%，1/1")).toBeTruthy();
-    expect(within(queueRow(ids.ep2Batch)).getByText("已完成")).toBeTruthy();
+    expect(within(queueRow(ids.ep2Batch)).getByText("已结束")).toBeTruthy();
     expect(screen.getByTestId("production-monitor").querySelector(".production-monitor-batch-status")?.textContent).toContain("已完成");
   });
 
@@ -507,7 +507,7 @@ describe("ShotWorkspace multi-package completion convergence", () => {
     await flushAsyncWork();
 
     const drawer = screen.getByRole("region", { name: "生产队列" });
-    expect(within(queueRow(ids.ep2Batch)).getByText("已完成")).toBeTruthy();
+    expect(within(queueRow(ids.ep2Batch)).getByText("已结束")).toBeTruthy();
     expect(drawer.querySelector("[aria-label='生产队列摘要']")?.textContent).toContain("0");
   });
 
