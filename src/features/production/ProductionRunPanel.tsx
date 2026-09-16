@@ -27,6 +27,13 @@ import {
   h3RecipeForMode,
   type H3QualityProfile,
 } from "../runtime/productRuntimeScope";
+import { ResolutionControl } from "../runtime/ResolutionControl";
+import { resolutionFields, validateResolution } from "../runtime/resolution";
+import {
+  isMinimaxH3OutputResolution,
+  MINIMAX_H3_RESOLUTION_PRESETS,
+  resolutionPresetsForRecipe,
+} from "../runtime/resolutionPresets";
 import { AssetCard } from "../assets/AssetCard";
 
 type NumericRecipeField = Extract<RecipeField, { type: "integer" | "number" }>;
@@ -199,6 +206,29 @@ function recipeValueError(recipe: RecipeViewModel, values: GenerationValues): st
   return key && message ? `${fieldLabel(key)}：${message}` : undefined;
 }
 
+export function h3ResolutionSelectionError(
+  recipe: RecipeViewModel,
+  values: GenerationValues,
+): string | undefined {
+  const fields = resolutionFields(recipe);
+  if (!fields) return "H3 配方缺少合法的 width/height 整数字段。";
+
+  const width = numericValue(values, fields.width.key);
+  const height = numericValue(values, fields.height.key);
+  const validation = validateResolution(recipe, width, height);
+  if (!validation.ok) {
+    return validation.errors.width ?? validation.errors.height ?? "请选择有效的 H3 输出分辨率。";
+  }
+  if (!isMinimaxH3OutputResolution(width!, height!)) {
+    return "H3 输出分辨率必须从图片规格中的 14 档 16:9 选项中选择。";
+  }
+  return undefined;
+}
+
+function h3ParameterError(recipe: RecipeViewModel, values: GenerationValues): string | undefined {
+  return recipeValueError(recipe, values) ?? h3ResolutionSelectionError(recipe, values);
+}
+
 function statusLabel(status: string): string {
   switch (status) {
     case "READY": return "待启动";
@@ -263,6 +293,15 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
     [catalog, h3Profile, selectedMode.recipeMode],
   );
   const numericFields = useMemo(() => h3NumericFields(h3Recipe), [h3Recipe]);
+  const h3ScalarNumericFields = useMemo(
+    () => numericFields.filter((field) => !/(width|height|resolution)/i.test(`${field.key} ${field.label}`)),
+    [numericFields],
+  );
+  const h3Resolution = useMemo(() => (h3Recipe ? resolutionFields(h3Recipe) : undefined), [h3Recipe]);
+  const h3ResolutionPresets = useMemo(
+    () => h3Recipe ? resolutionPresetsForRecipe(h3Recipe, MINIMAX_H3_RESOLUTION_PRESETS) : [],
+    [h3Recipe],
+  );
   const promptKey = h3PromptKey(h3Recipe);
   const [h3Values, setH3Values] = useState<GenerationValues>(() => h3Recipe ? defaultGenerationValues(h3Recipe) : {});
   const [runs, setRuns] = useState<ProductionRun[]>([]);
@@ -419,7 +458,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
 
   async function saveTemplate() {
     if (!h3Recipe) return;
-    const validationError = recipeValueError(h3Recipe, h3Values);
+    const validationError = h3ParameterError(h3Recipe, h3Values);
     if (validationError) {
       setError(`H3 参数无效：${validationError}`);
       return;
@@ -455,7 +494,7 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
       setError(`当前 ${selectedMode.label} / ${h3Profile === "H3_QUALITY" ? "质量" : "快速"} 没有可用的视频配方。`);
       return;
     }
-    const validationError = recipeValueError(h3Recipe, h3Values);
+    const validationError = h3ParameterError(h3Recipe, h3Values);
     if (validationError) {
       setError(`H3 参数无效：${validationError}`);
       return;
@@ -573,9 +612,30 @@ export function ProductionRunPanel({ projectId, catalog, baseRecipe, baseValues,
         <label><span>Krea2 图片数量</span><input type="number" min={videoMode === "REF2VA" ? 2 : 1} max={100} value={imageCount} onChange={(event) => setImageCount(normalizedImageCount(Number(event.target.value), videoMode))} /></label>
         <label><span>H3 模式</span><select value={videoMode} onChange={(event) => changeVideoMode(event.target.value as ProductionRunVideoMode)} disabled={busy}><option value="I2V">I2V · 单首帧</option><option value="REF2VA">REF2VA · 2–N 参考图</option></select><small>{selectedMode.description}</small></label>
         <label><span>H3 配置档</span><select value={h3Profile} onChange={(event) => setH3Profile(h3ProfileValue(event.target.value))} disabled={busy}><option value="H3_FAST">快速</option><option value="H3_QUALITY">质量</option></select></label>
-        {numericFields.map((field) => <label key={field.key}><span>{fieldLabel(field.key, field.label)}</span><input type="number" min={field.min} max={field.max} step={field.step} value={numericValue(h3Values, field.key) ?? ""} onChange={(event) => { const value = Number(event.target.value); if (!Number.isFinite(value)) return; setH3Values((current) => ({ ...current, [field.key]: { type: field.type, value } })); }} /></label>)}
+        {h3ScalarNumericFields.map((field) => <label key={field.key}><span>{fieldLabel(field.key, field.label)}</span><input type="number" min={field.min} max={field.max} step={field.step} value={numericValue(h3Values, field.key) ?? ""} onChange={(event) => { const value = Number(event.target.value); if (!Number.isFinite(value)) return; setH3Values((current) => ({ ...current, [field.key]: { type: field.type, value } })); }} /></label>)}
         <label className="production-run-prompt"><span>H3 提示词</span><textarea rows={2} value={h3Prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder="输入视频提示词" /></label>
       </div>
+      {h3Resolution && (
+        <ResolutionControl
+          widthField={h3Resolution.width}
+          heightField={h3Resolution.height}
+          width={numericValue(h3Values, h3Resolution.width.key)}
+          height={numericValue(h3Values, h3Resolution.height.key)}
+          presets={h3ResolutionPresets}
+          presetsOnly
+          disabled={busy}
+          onChange={(next) => {
+            const width = next.width;
+            const height = next.height;
+            if (width === undefined || height === undefined) return;
+            setH3Values((current) => ({
+              ...current,
+              [h3Resolution.width.key]: { type: "integer", value: width },
+              [h3Resolution.height.key]: { type: "integer", value: height },
+            }));
+          }}
+        />
+      )}
       <div className="production-run-actions">
         <button type="button" onClick={() => void createRun()} disabled={busy || !h3Recipe}>新建生产运行</button>
         <button type="button" className="quiet-button" onClick={() => void saveTemplate()} disabled={busy || !h3Recipe}>保存模板</button>

@@ -3,6 +3,7 @@ import type { ProductionRunStage } from "../../types/productionRun";
 import type { RecipeViewModel } from "../../types/generation";
 import {
   h3ReferenceImageMax,
+  h3ResolutionSelectionError,
   moveProductionRunAsset,
   productionRunSelectionBounds,
   productionRunSelectionError,
@@ -92,5 +93,32 @@ describe("ProductionRun REF2VA selection contract", () => {
       ],
     };
     expect(productionRunSelectionIds(stage)).toEqual(["B", "A", "C"]);
+  });
+});
+
+describe("ProductionRun H3 resolution contract", () => {
+  const recipe: RecipeViewModel = {
+    workflowId: "wfl_minimax_h3_reference_video",
+    workflowVersionId: "workflow-version-h3",
+    recipeId: "recipe-h3",
+    name: "H3",
+    category: "video",
+    mode: "REF2VA_IMAGE",
+    outputTypes: ["video"],
+    fields: [
+      { key: "width", type: "integer", label: "宽度", required: true, default: 960, min: 32, max: 2048, step: 32 },
+      { key: "height", type: "integer", label: "高度", required: true, default: 544, min: 32, max: 2048, step: 32 },
+    ],
+  };
+
+  it("accepts a built-in H3 output and rejects a merely step-aligned custom size", () => {
+    expect(h3ResolutionSelectionError(recipe, {
+      width: { type: "integer", value: 960 },
+      height: { type: "integer", value: 544 },
+    })).toBeUndefined();
+    expect(h3ResolutionSelectionError(recipe, {
+      width: { type: "integer", value: 1024 },
+      height: { type: "integer", value: 576 },
+    })).toContain("14 档 16:9");
   });
 });
