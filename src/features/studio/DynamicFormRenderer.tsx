@@ -8,6 +8,19 @@ import { MediaField } from "./fields/MediaField";
 import { MultiMediaField } from "./fields/MultiMediaField";
 import { SeedField } from "./fields/SeedField";
 import { TextAreaField } from "./fields/TextAreaField";
+import { ResolutionControl } from "../runtime/ResolutionControl";
+import { resolutionFields } from "../runtime/resolution";
+import { MINIMAX_H3_RESOLUTION_PRESETS, resolutionPresetsForRecipe, isMinimaxH3OutputResolution } from "../runtime/resolutionPresets";
+import { h3FamilyForWorkflowId } from "../runtime/productRuntimeScope";
+
+// Presentation policy only: imported recipes have generated IDs. This does not
+// resolve workflow identity, execution bindings, or model provenance by name.
+function usesH3ResolutionPresets(recipe: RecipeViewModel): boolean {
+  return Boolean(recipe.outputTypes?.includes("video") && (
+    h3FamilyForWorkflowId(recipe.workflowId)
+    || /(?:minimax|minmax)[\s_-]*h3\b/i.test(recipe.name)
+  ));
+}
 
 const U64_MAX = "18446744073709551615";
 
@@ -32,9 +45,26 @@ export function DynamicFormRenderer({
   onImageAssetAvailabilityChange,
   hiddenFieldKeys = [],
 }: Props) {
+  const resolution = usesH3ResolutionPresets(recipe) ? resolutionFields(recipe) : undefined;
+  const showResolution = resolution && !hiddenFieldKeys.includes("width") && !hiddenFieldKeys.includes("height");
   return (
     <div className="dynamic-form">
-      {recipe.fields.filter((field) => !hiddenFieldKeys.includes(field.key)).map((field) =>
+      {showResolution && <ResolutionControl
+        widthField={resolution.width}
+        heightField={resolution.height}
+        width={values.width?.type === "integer" ? values.width.value : undefined}
+        height={values.height?.type === "integer" ? values.height.value : undefined}
+        presets={resolutionPresetsForRecipe(recipe, MINIMAX_H3_RESOLUTION_PRESETS)}
+        presetsOnly
+        disabled={false}
+        onChange={({ width, height }) => {
+          if (width === undefined || height === undefined) return;
+          onChange("width", { type: "integer", value: width });
+          onChange("height", { type: "integer", value: height });
+        }}
+      />}
+      {recipe.fields.filter((field) => !hiddenFieldKeys.includes(field.key)
+        && !(showResolution && (field.key === "width" || field.key === "height"))).map((field) =>
         renderField(
           field,
           values,
@@ -167,6 +197,14 @@ export function validateRecipeValues(
   values: GenerationValues,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
+  if (usesH3ResolutionPresets(recipe) && resolutionFields(recipe)) {
+    const width = values.width;
+    const height = values.height;
+    if (width?.type !== "integer" || height?.type !== "integer"
+      || !isMinimaxH3OutputResolution(width.value, height.value)) {
+      errors.width = "请选择内置的 H3 输出分辨率。";
+    }
+  }
   for (const field of recipe.fields) {
     const value = values[field.key];
     if (field.type === "textarea") {
