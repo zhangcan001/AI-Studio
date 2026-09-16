@@ -25,6 +25,11 @@ function Form({ recipe = imported }: { recipe?: RecipeViewModel }) {
     <output data-testid="values">{JSON.stringify(values)}</output></>;
 }
 describe("imported H3 resolution form", () => {
+  it.each(["111video_minimax_h3_i2v", "video_minimax_h3_t2v (2)"])("recognizes the actual imported name %s", (name) => {
+    render(<Form recipe={{ ...imported, name }} />);
+    expect(screen.queryAllByRole("spinbutton")).toHaveLength(0);
+    expect(screen.getAllByRole("option")).toHaveLength(14);
+  });
   it("renders all 14 presets instead of width/height inputs and updates both values", async () => {
     render(<Form />);
     expect(screen.queryAllByRole("spinbutton")).toHaveLength(0);
@@ -37,12 +42,15 @@ describe("imported H3 resolution form", () => {
   it("does not change non-H3 video or image forms", () => {
     const view = render(<Form recipe={{ ...imported, name: "Other video" }} />);
     expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
+    view.rerender(<Form recipe={{ ...imported, name: "video_minimax_h30_i2v" }} />);
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
     view.rerender(<Form recipe={{ ...imported, outputTypes: ["image"] }} />);
     expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
   });
   it("rejects unsupported imported H3 sizes, but leaves non-H3 validation unchanged", () => {
     const values: GenerationValues = { width: { type: "integer", value: 1024 }, height: { type: "integer", value: 576 } };
     expect(validateRecipeValues(imported, values).width).toContain("H3");
+    expect(validateRecipeValues({ ...imported, name: "111video_minimax_h3_i2v" }, values).width).toContain("H3");
     expect(validateRecipeValues({ ...imported, name: "Other video" }, values)).toEqual({});
   });
 });

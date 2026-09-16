@@ -18,7 +18,8 @@ import { h3FamilyForWorkflowId } from "../runtime/productRuntimeScope";
 function usesH3ResolutionPresets(recipe: RecipeViewModel): boolean {
   return Boolean(recipe.outputTypes?.includes("video") && (
     h3FamilyForWorkflowId(recipe.workflowId)
-    || /(?:minimax|minmax)[\s_-]*h3\b/i.test(recipe.name)
+    // Imported names commonly use h3_i2v/h3_t2v; underscore is a word character.
+    || /(?:minimax|minmax)[\s_-]*h3(?=$|[^a-z0-9])/i.test(recipe.name)
   ));
 }
 
