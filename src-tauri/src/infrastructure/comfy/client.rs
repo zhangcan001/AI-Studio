@@ -19,7 +19,10 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::{
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use tokio::net::TcpStream;
@@ -42,6 +45,7 @@ const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub struct ComfyHttpAdapter {
     client: Client,
+    upload_client: Client,
     config: ComfyConnectionConfig,
 }
 
@@ -51,8 +55,22 @@ impl ComfyHttpAdapter {
             .no_proxy()
             .timeout(COMFY_HTTP_TIMEOUT)
             .build()?;
+        // ComfyUI may close long-idle keep-alive sockets while reqwest still
+        // considers them reusable. Uploads carry a non-replayable multipart
+        // stream, so a stale pooled socket can block until the full upload
+        // timeout instead of being safely retried. Do not retain idle upload
+        // connections; ordinary control and execution requests keep pooling.
+        let upload_client = Client::builder()
+            .no_proxy()
+            .pool_max_idle_per_host(0)
+            .timeout(COMFY_HTTP_TIMEOUT)
+            .build()?;
 
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            upload_client,
+            config,
+        })
     }
 
     pub fn endpoint(&self) -> String {
@@ -126,13 +144,27 @@ impl ComfyHttpAdapter {
         upload: ComfyInputUpload,
     ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
         let url = self.config.route_url("upload/image");
+        let started_at = std::time::Instant::now();
+        let expected_bytes = upload.content_length;
+        let upload_filename = upload.filename.clone();
+        let bytes_read = Arc::new(AtomicU64::new(0));
+        let bytes_read_for_body = Arc::clone(&bytes_read);
         let stream_error = Arc::new(Mutex::new(None::<String>));
         let stream_error_for_body = Arc::clone(&stream_error);
+        tracing::debug!(
+            filename = %upload_filename,
+            expected_bytes = ?expected_bytes,
+            "ComfyUI input upload started"
+        );
         let body_stream = futures_util::stream::unfold(upload.stream, move |mut stream| {
             let stream_error = Arc::clone(&stream_error_for_body);
+            let bytes_read = Arc::clone(&bytes_read_for_body);
             async move {
                 match stream.next_chunk().await {
-                    Ok(Some(chunk)) => Some((Ok::<Vec<u8>, std::io::Error>(chunk), stream)),
+                    Ok(Some(chunk)) => {
+                        bytes_read.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                        Some((Ok::<Vec<u8>, std::io::Error>(chunk), stream))
+                    }
                     Ok(None) => None,
                     Err(error) => {
                         if let Ok(mut stored) = stream_error.lock() {
@@ -162,7 +194,7 @@ impl ComfyHttpAdapter {
             .text("subfolder", String::new())
             .text("overwrite", "false");
         let response = self
-            .client
+            .upload_client
             .post(&url)
             .timeout(COMFY_UPLOAD_TIMEOUT)
             .multipart(form)
@@ -170,17 +202,43 @@ impl ComfyHttpAdapter {
             .await
             .map_err(|error| {
                 let stream_message = stream_error.lock().ok().and_then(|value| value.clone());
+                tracing::warn!(
+                    filename = %upload_filename,
+                    expected_bytes = ?expected_bytes,
+                    bytes_read = bytes_read.load(Ordering::Relaxed),
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    stream_error = ?stream_message,
+                    error = %error,
+                    "ComfyUI input upload request failed"
+                );
                 stream_message.map_or_else(
                     || request_error("POST", &url, error),
                     |message| ComfyAdapterError::InputUpload(format!("stream failed: {message}")),
                 )
             })?;
+        let response_status = response.status();
         if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            tracing::warn!(
+                filename = %upload_filename,
+                expected_bytes = ?expected_bytes,
+                bytes_read = bytes_read.load(Ordering::Relaxed),
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                status = %response_status,
+                "ComfyUI rejected an input upload as too large"
+            );
             return Err(ComfyAdapterError::InputUploadTooLarge(
                 "ComfyUI rejected the multipart body with HTTP 413".to_owned(),
             ));
         }
         if !response.status().is_success() {
+            tracing::warn!(
+                filename = %upload_filename,
+                expected_bytes = ?expected_bytes,
+                bytes_read = bytes_read.load(Ordering::Relaxed),
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                status = %response_status,
+                "ComfyUI rejected an input upload"
+            );
             return Err(ComfyAdapterError::InputUpload(format!(
                 "POST {url} returned HTTP {}",
                 response.status()
@@ -189,7 +247,18 @@ impl ComfyHttpAdapter {
         let dto = response
             .json::<UploadResponseDto>()
             .await
-            .map_err(|error| upload_response_error(&url, error))?;
+            .map_err(|error| {
+                tracing::warn!(
+                    filename = %upload_filename,
+                    expected_bytes = ?expected_bytes,
+                    bytes_read = bytes_read.load(Ordering::Relaxed),
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    status = %response_status,
+                    error = %error,
+                    "ComfyUI input upload response could not be parsed"
+                );
+                upload_response_error(&url, error)
+            })?;
         let name = dto
             .name
             .filter(|value| !value.trim().is_empty())
@@ -206,6 +275,14 @@ impl ComfyHttpAdapter {
                     "POST /upload/image response did not contain type".to_owned(),
                 )
             })?;
+        tracing::debug!(
+            filename = %upload_filename,
+            expected_bytes = ?expected_bytes,
+            bytes_read = bytes_read.load(Ordering::Relaxed),
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            status = %response_status,
+            "ComfyUI input upload completed"
+        );
         Ok(ComfyUploadedInput {
             name,
             subfolder: dto.subfolder.unwrap_or_default(),
@@ -1160,7 +1237,8 @@ mod tests {
     use std::collections::VecDeque;
     use std::net::TcpListener;
     use std::time::Duration;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
     use tokio_tungstenite::{accept_async, tungstenite::Message};
     use wiremock::{
         matchers::{body_json, body_string_contains, method, path, query_param},
@@ -1460,6 +1538,120 @@ mod tests {
             .expect("slow upload response should remain within the upload timeout");
 
         assert_eq!(uploaded.name, "slow-input.png");
+    }
+
+    #[tokio::test]
+    async fn uploads_use_a_fresh_connection_after_a_previous_upload() {
+        async fn read_request(stream: &mut TcpStream) -> std::io::Result<()> {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let read = stream.read(&mut chunk).await?;
+                if read == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "request ended before its body was received",
+                    ));
+                }
+                request.extend_from_slice(&chunk[..read]);
+                let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("Content-Length:")
+                            .or_else(|| line.strip_prefix("content-length:"))
+                    })
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or_default();
+                if request.len() >= header_end + 4 + content_length {
+                    return Ok(());
+                }
+            }
+        }
+
+        async fn respond(stream: &mut TcpStream) -> std::io::Result<()> {
+            let body = r#"{"name":"fresh.png","subfolder":"","type":"input"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).await
+        }
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("test listener should have an address")
+            .port();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener
+                .accept()
+                .await
+                .expect("first upload should connect");
+            read_request(&mut first)
+                .await
+                .expect("first upload request should be complete");
+            respond(&mut first)
+                .await
+                .expect("first response should write");
+
+            tokio::select! {
+                result = listener.accept() => {
+                    let (mut second, _) = result.expect("second upload should connect");
+                    read_request(&mut second)
+                        .await
+                        .expect("second upload request should be complete");
+                    respond(&mut second).await.expect("second response should write");
+                    true
+                }
+                result = read_request(&mut first) => {
+                    if result.is_ok() {
+                        respond(&mut first).await.expect("reused response should write");
+                        false
+                    } else {
+                        let (mut second, _) = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            listener.accept(),
+                        )
+                        .await
+                        .expect("fresh connection should arrive")
+                        .expect("fresh connection should be accepted");
+                        read_request(&mut second)
+                            .await
+                            .expect("second upload request should be complete");
+                        respond(&mut second).await.expect("second response should write");
+                        true
+                    }
+                }
+            }
+        });
+
+        let adapter = ComfyHttpAdapter::new(ComfyConnectionConfig::new("http", "127.0.0.1", port))
+            .expect("client should build");
+        for filename in ["first.png", "second.png"] {
+            adapter
+                .upload_image(ComfyImageUpload {
+                    bytes: vec![1, 2, 3],
+                    upload_name: filename.to_owned(),
+                    content_type: "image/png".to_owned(),
+                })
+                .await
+                .expect("upload should succeed");
+        }
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .expect("connection test should finish")
+                .expect("connection test should not panic"),
+            "a later upload must not reuse the previous idle connection"
+        );
     }
 
     #[tokio::test]
