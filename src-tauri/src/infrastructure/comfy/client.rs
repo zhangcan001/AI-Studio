@@ -38,9 +38,11 @@ const COMFY_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 // the ordinary request timeout.
 const COMFY_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
-// Input uploads may include large media and wait for a busy ComfyUI; keep a
-// bounded upload budget without widening ordinary HTTP requests.
-const COMFY_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+// Input uploads may include large media and wait for a busy ComfyUI while it
+// loads nodes/models. A 60s budget was still too short after the full request
+// body had been sent, so keep a bounded but practical three-minute budget
+// without widening ordinary HTTP requests.
+const COMFY_UPLOAD_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_IMAGE_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub struct ComfyHttpAdapter {
