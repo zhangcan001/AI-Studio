@@ -15,6 +15,7 @@ use std::{
     fmt,
     io::Cursor,
     sync::Arc,
+    time::Instant,
 };
 
 const IMAGE_PREVIEW_REFERENCE: &str = "__aistudio_preflight_image__";
@@ -547,17 +548,20 @@ impl GenerationInputPreparer {
                     message: error.to_string(),
                 })?;
             let original_bytes = bytes.len();
+            let preprocess_started_at = Instant::now();
             let bytes = prepare_image_bytes_for_comfy(bytes, asset).map_err(|message| {
                 GenerationInputPrepareError::AssetRead {
                     asset_id: asset.id.as_str().to_owned(),
                     message: format!("image preparation failed: {message}"),
                 }
             })?;
+            let preprocess_elapsed_ms = preprocess_started_at.elapsed().as_millis() as u64;
             if bytes.len() != original_bytes {
                 tracing::debug!(
                     asset_id = %asset.id,
                     original_bytes,
                     upload_bytes = bytes.len(),
+                    preprocess_elapsed_ms,
                     "ComfyUI image upload copy downscaled"
                 );
             }
@@ -572,7 +576,9 @@ impl GenerationInputPreparer {
                 width = asset.width,
                 height = asset.height,
                 attempt = 1usize,
-                elapsed_ms = 0u64,
+                attempt_elapsed_ms = 0u64,
+                total_elapsed_ms = 0u64,
+                preprocess_elapsed_ms,
                 http_status = Option::<u16>::None,
                 error_class = "",
                 "preparing ComfyUI image upload without health admission gate"

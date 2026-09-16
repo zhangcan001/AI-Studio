@@ -38,14 +38,18 @@ only makes a stalled upload wait longer.
 
 Upload events are structured with task/asset identity when the caller has an
 exact relationship, filename, source bytes, upload bytes, dimensions, attempt,
-phase, elapsed time, HTTP status, and error class. Phases include:
+attempt/total elapsed time, HTTP status, and error class. Image preprocessing
+also records its own decode/resize/encode duration before the HTTP request
+timer starts. Phases include:
 
 ```text
-preflight -> connect -> upload -> wait_response -> parse_response
+preflight -> request_start -> response_received -> parse_response -> retry
 ```
 
 The `preflight` event records local request preparation; it does not perform a
-health probe or block the upload.
+health probe or block the upload. Reqwest does not expose reliable separate
+connect-versus-body-upload timings through this adapter, so the logs do not
+claim to measure either phase independently.
 
 ## Files changed
 

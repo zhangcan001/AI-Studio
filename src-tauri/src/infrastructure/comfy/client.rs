@@ -151,7 +151,8 @@ impl ComfyHttpAdapter {
         upload: ComfyInputUpload,
     ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
         let url = self.config.route_url("upload/image");
-        let started_at = Instant::now();
+        let attempt_started_at = Instant::now();
+        let total_started_at = attempt_started_at;
         let expected_bytes = upload.content_length;
         let upload_filename = upload.filename.clone();
         let upload_context = upload.context.clone();
@@ -172,10 +173,11 @@ impl ComfyHttpAdapter {
             width = ?width,
             height = ?height,
             attempt = 1usize,
-            elapsed_ms = 0u64,
+            attempt_elapsed_ms = 0u64,
+            total_elapsed_ms = 0u64,
             http_status = Option::<u16>::None,
             error_class = "",
-            "ComfyUI input upload started"
+            "prepared ComfyUI input upload request"
         );
         let body_stream = futures_util::stream::unfold(upload.stream, move |mut stream| {
             let stream_error = Arc::clone(&stream_error_for_body);
@@ -215,7 +217,7 @@ impl ComfyHttpAdapter {
             .text("subfolder", String::new())
             .text("overwrite", "false");
         tracing::debug!(
-            phase = "connect",
+            phase = "request_start",
             task_id = %task_id,
             asset_id = %asset_id,
             filename = %upload_filename,
@@ -224,25 +226,11 @@ impl ComfyHttpAdapter {
             width = ?width,
             height = ?height,
             attempt = 1usize,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+            total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
             http_status = Option::<u16>::None,
             error_class = "",
-            "connecting to ComfyUI for input upload"
-        );
-        tracing::debug!(
-            phase = "upload",
-            task_id = %task_id,
-            asset_id = %asset_id,
-            filename = %upload_filename,
-            source_bytes = ?source_bytes,
-            upload_bytes = bytes_read.load(Ordering::Relaxed),
-            width = ?width,
-            height = ?height,
-            attempt = 1usize,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
-            http_status = Option::<u16>::None,
-            error_class = "",
-            "sending ComfyUI input upload body"
+            "starting ComfyUI input upload request"
         );
         let response = self
             .upload_client
@@ -260,7 +248,7 @@ impl ComfyHttpAdapter {
                     None => request_error("POST", &url, error),
                 };
                 tracing::warn!(
-                    phase = "upload",
+                    phase = "request_start",
                     task_id = %task_id,
                     asset_id = %asset_id,
                     filename = %upload_filename,
@@ -269,7 +257,8 @@ impl ComfyHttpAdapter {
                     width = ?width,
                     height = ?height,
                     attempt = 1usize,
-                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+                    total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
                     http_status = Option::<u16>::None,
                     error_class = mapped.kind(),
                     stream_error = ?stream_message,
@@ -283,7 +272,8 @@ impl ComfyHttpAdapter {
             &url,
             &upload_filename,
             bytes_read.load(Ordering::Relaxed),
-            started_at,
+            attempt_started_at,
+            total_started_at,
             upload_context.as_ref(),
             1,
         )
@@ -295,10 +285,11 @@ impl ComfyHttpAdapter {
         &self,
         upload: &ComfyImageUpload,
         attempt: usize,
+        attempt_started_at: Instant,
         timeout: Duration,
+        total_started_at: Instant,
     ) -> Result<ComfyUploadedInput, UploadAttemptFailure> {
         let url = self.config.route_url("upload/image");
-        let started_at = Instant::now();
         let upload_filename = upload.upload_name.as_str();
         let (task_id, asset_id, source_bytes, width, height) =
             upload_context_fields(upload.context.as_ref());
@@ -325,13 +316,14 @@ impl ComfyHttpAdapter {
             width = ?width,
             height = ?height,
             attempt,
-            elapsed_ms = 0u64,
+            attempt_elapsed_ms = 0u64,
+            total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
             http_status = Option::<u16>::None,
             error_class = "",
-            "ComfyUI replayable image upload started"
+            "prepared ComfyUI replayable image upload request"
         );
         tracing::debug!(
-            phase = "connect",
+            phase = "request_start",
             task_id = %task_id,
             asset_id = %asset_id,
             filename = %upload_filename,
@@ -340,25 +332,11 @@ impl ComfyHttpAdapter {
             width = ?width,
             height = ?height,
             attempt,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+            total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
             http_status = Option::<u16>::None,
             error_class = "",
-            "connecting to ComfyUI for replayable image upload"
-        );
-        tracing::debug!(
-            phase = "upload",
-            task_id = %task_id,
-            asset_id = %asset_id,
-            filename = %upload_filename,
-            source_bytes = ?source_bytes,
-            upload_bytes = upload.bytes.len() as u64,
-            width = ?width,
-            height = ?height,
-            attempt,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
-            http_status = Option::<u16>::None,
-            error_class = "",
-            "sending ComfyUI replayable image upload body"
+            "starting ComfyUI replayable image upload request"
         );
         let response = self
             .upload_client
@@ -370,7 +348,7 @@ impl ComfyHttpAdapter {
             .map_err(|error| {
                 let mapped = request_error("POST", &url, error);
                 tracing::warn!(
-                    phase = "upload",
+                    phase = "request_start",
                     task_id = %task_id,
                     asset_id = %asset_id,
                     filename = %upload_filename,
@@ -379,7 +357,8 @@ impl ComfyHttpAdapter {
                     width = ?width,
                     height = ?height,
                     attempt,
-                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+                    total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
                     http_status = Option::<u16>::None,
                     error_class = mapped.kind(),
                     error = %mapped,
@@ -393,7 +372,8 @@ impl ComfyHttpAdapter {
             &url,
             upload_filename,
             upload.bytes.len() as u64,
-            started_at,
+            attempt_started_at,
+            total_started_at,
             upload.context.as_ref(),
             attempt,
         )
@@ -413,9 +393,19 @@ impl ComfyHttpAdapter {
         upload: ComfyImageUpload,
         timeout: Duration,
     ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
-        let retry_started_at = Instant::now();
+        let total_started_at = Instant::now();
         for attempt in 0..MAX_IMAGE_UPLOAD_ATTEMPTS {
-            match self.upload_image_once(&upload, attempt + 1, timeout).await {
+            let attempt_started_at = Instant::now();
+            match self
+                .upload_image_once(
+                    &upload,
+                    attempt + 1,
+                    attempt_started_at,
+                    timeout,
+                    total_started_at,
+                )
+                .await
+            {
                 Err(failure) if failure.retryable && attempt + 1 < MAX_IMAGE_UPLOAD_ATTEMPTS => {
                     let delay = failure
                         .retry_after
@@ -434,7 +424,8 @@ impl ComfyHttpAdapter {
                         attempt = attempt + 1,
                         next_attempt = attempt + 2,
                         delay_ms = delay.as_millis() as u64,
-                        elapsed_ms = retry_started_at.elapsed().as_millis() as u64,
+                        attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+                        total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
                         http_status = ?failure.http_status,
                         error_class = failure.error.kind(),
                         error = %failure.error,
@@ -857,18 +848,35 @@ async fn finish_upload_response(
     url: &str,
     upload_filename: &str,
     bytes_read: u64,
-    started_at: Instant,
+    attempt_started_at: Instant,
+    total_started_at: Instant,
     context: Option<&ComfyUploadContext>,
     attempt: usize,
 ) -> Result<ComfyUploadedInput, UploadAttemptFailure> {
     let response_status = response.status();
     let (task_id, asset_id, source_bytes, width, height) = upload_context_fields(context);
+    tracing::debug!(
+        phase = "response_received",
+        task_id = %task_id,
+        asset_id = %asset_id,
+        filename = %upload_filename,
+        source_bytes = ?source_bytes,
+        upload_bytes = bytes_read,
+        width = ?width,
+        height = ?height,
+        attempt,
+        attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+        total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
+        http_status = response_status.as_u16(),
+        error_class = "",
+        "received ComfyUI input upload response"
+    );
     if response_status == StatusCode::PAYLOAD_TOO_LARGE {
         let error = ComfyAdapterError::InputUploadTooLarge(
             "ComfyUI rejected the multipart body with HTTP 413".to_owned(),
         );
         tracing::warn!(
-            phase = "wait_response",
+            phase = "response_received",
             task_id = %task_id,
             asset_id = %asset_id,
             filename = %upload_filename,
@@ -877,7 +885,8 @@ async fn finish_upload_response(
             width = ?width,
             height = ?height,
             attempt,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+            total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
             http_status = response_status.as_u16(),
             error_class = error.kind(),
             "ComfyUI rejected an input upload as too large"
@@ -892,7 +901,7 @@ async fn finish_upload_response(
             .flatten()
             .and_then(parse_retry_after);
         tracing::warn!(
-            phase = "wait_response",
+            phase = "response_received",
             task_id = %task_id,
             asset_id = %asset_id,
             filename = %upload_filename,
@@ -901,7 +910,8 @@ async fn finish_upload_response(
             width = ?width,
             height = ?height,
             attempt,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+            total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
             http_status = response_status.as_u16(),
             error_class = error.kind(),
             "ComfyUI rejected an input upload"
@@ -913,21 +923,6 @@ async fn finish_upload_response(
         ));
     }
     tracing::debug!(
-        phase = "wait_response",
-        task_id = %task_id,
-        asset_id = %asset_id,
-        filename = %upload_filename,
-        source_bytes = ?source_bytes,
-        upload_bytes = bytes_read,
-        width = ?width,
-        height = ?height,
-        attempt,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
-        http_status = response_status.as_u16(),
-        error_class = "",
-        "ComfyUI input upload response received"
-    );
-    tracing::debug!(
         phase = "parse_response",
         task_id = %task_id,
         asset_id = %asset_id,
@@ -937,7 +932,8 @@ async fn finish_upload_response(
         width = ?width,
         height = ?height,
         attempt,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+        total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
         http_status = response_status.as_u16(),
         error_class = "",
         "parsing ComfyUI input upload response"
@@ -957,7 +953,8 @@ async fn finish_upload_response(
                 width = ?width,
                 height = ?height,
                 attempt,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+                total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
                 http_status = response_status.as_u16(),
                 error_class = mapped.kind(),
                 error = %mapped,
@@ -981,7 +978,8 @@ async fn finish_upload_response(
                 width = ?width,
                 height = ?height,
                 attempt,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+                total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
                 http_status = response_status.as_u16(),
                 error_class = error.kind(),
                 error = %error,
@@ -1006,7 +1004,8 @@ async fn finish_upload_response(
                 width = ?width,
                 height = ?height,
                 attempt,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+                total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
                 http_status = response_status.as_u16(),
                 error_class = error.kind(),
                 error = %error,
@@ -1025,7 +1024,8 @@ async fn finish_upload_response(
         width = ?width,
         height = ?height,
         attempt,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        attempt_elapsed_ms = attempt_started_at.elapsed().as_millis() as u64,
+        total_elapsed_ms = total_started_at.elapsed().as_millis() as u64,
         http_status = response_status.as_u16(),
         error_class = "",
         "ComfyUI input upload completed"
