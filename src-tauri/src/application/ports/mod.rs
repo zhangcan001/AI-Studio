@@ -78,7 +78,7 @@ pub use comfy_adapter::{
     ComfyConnectionConfig, ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory,
     ComfyHistoryStatus, ComfyImageUpload, ComfyInputStream, ComfyInputUpload, ComfyNodeOutput,
     ComfyOutputData, ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult,
-    ComfyUploadedInput, DeviceInfo, PromptSubmission, SystemStats,
+    ComfyUploadContext, ComfyUploadedInput, DeviceInfo, PromptSubmission, SystemStats,
 };
 pub use consistency_profile_repository::ConsistencyProfileRepository;
 pub use consistency_scope_repository::ConsistencyScopeRepository;

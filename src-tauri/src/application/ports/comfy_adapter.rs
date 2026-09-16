@@ -219,10 +219,25 @@ pub trait ComfyOutputStream: Send {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComfyUploadContext {
+    /// Optional production identity. It is supplied only when the caller has
+    /// an exact task/asset relationship; the HTTP adapter never infers it
+    /// from a filename or path.
+    pub task_id: Option<String>,
+    pub asset_id: Option<String>,
+    /// Bytes read from the source asset before any upload-only preprocessing.
+    pub source_bytes: Option<u64>,
+    /// Source asset dimensions. The original asset remains unchanged.
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComfyImageUpload {
     pub bytes: Vec<u8>,
     pub upload_name: String,
     pub content_type: String,
+    pub context: Option<ComfyUploadContext>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,6 +259,7 @@ pub struct ComfyInputUpload {
     pub content_type: String,
     pub content_length: Option<u64>,
     pub stream: Box<dyn ComfyInputStream>,
+    pub context: Option<ComfyUploadContext>,
 }
 
 struct InMemoryComfyInputStream {
@@ -418,6 +434,7 @@ pub trait ComfyAdapter: Send + Sync {
             stream: Box::new(InMemoryComfyInputStream {
                 bytes: Some(upload.bytes),
             }),
+            context: upload.context,
         })
         .await
     }

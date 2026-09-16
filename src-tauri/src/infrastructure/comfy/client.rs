@@ -1,8 +1,8 @@
 use crate::application::ports::{
     CancelPromptResult, ComfyAdapter, ComfyAdapterError, ComfyAdapterFactory,
     ComfyConnectionConfig, ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory,
-    ComfyHistoryStatus, ComfyImageUpload, ComfyInputStream, ComfyInputUpload, ComfyNodeOutput,
-    ComfyOutputData, ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult,
+    ComfyHistoryStatus, ComfyImageUpload, ComfyInputUpload, ComfyNodeOutput, ComfyOutputData,
+    ComfyOutputFile, ComfyOutputStream, ComfyQueueState, ComfySavedResult, ComfyUploadContext,
     ComfyUploadedInput, DeviceInfo, PromptSubmission, SystemStats,
 };
 use crate::infrastructure::comfy::dto::{
@@ -11,7 +11,7 @@ use crate::infrastructure::comfy::dto::{
 use async_trait::async_trait;
 use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::{
-    header::CONTENT_TYPE,
+    header::{CONTENT_TYPE, RETRY_AFTER},
     multipart::{Form, Part},
     Body, Client, StatusCode,
 };
@@ -43,7 +43,7 @@ const COMFY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(30);
 // body had been sent, so keep a bounded but practical three-minute budget
 // without widening ordinary HTTP requests.
 const COMFY_UPLOAD_TIMEOUT: Duration = Duration::from_secs(180);
-const MAX_REPLAYABLE_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+const COMFY_UPLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_IMAGE_UPLOAD_ATTEMPTS: usize = 3;
 const IMAGE_UPLOAD_RETRY_DELAYS: [Duration; 2] =
     [Duration::from_millis(200), Duration::from_millis(800)];
@@ -69,6 +69,7 @@ impl ComfyHttpAdapter {
         let upload_client = Client::builder()
             .no_proxy()
             .pool_max_idle_per_host(0)
+            .connect_timeout(COMFY_UPLOAD_CONNECT_TIMEOUT)
             .timeout(COMFY_HTTP_TIMEOUT)
             .build()?;
 
@@ -150,16 +151,30 @@ impl ComfyHttpAdapter {
         upload: ComfyInputUpload,
     ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
         let url = self.config.route_url("upload/image");
-        let started_at = std::time::Instant::now();
+        let started_at = Instant::now();
         let expected_bytes = upload.content_length;
         let upload_filename = upload.filename.clone();
+        let upload_context = upload.context.clone();
         let bytes_read = Arc::new(AtomicU64::new(0));
         let bytes_read_for_body = Arc::clone(&bytes_read);
         let stream_error = Arc::new(Mutex::new(None::<String>));
         let stream_error_for_body = Arc::clone(&stream_error);
+        let (task_id, asset_id, source_bytes, width, height) =
+            upload_context_fields(upload_context.as_ref());
+        let source_bytes = source_bytes.or(expected_bytes);
         tracing::debug!(
+            phase = "preflight",
+            task_id = %task_id,
+            asset_id = %asset_id,
             filename = %upload_filename,
-            expected_bytes = ?expected_bytes,
+            source_bytes = ?source_bytes,
+            upload_bytes = 0u64,
+            width = ?width,
+            height = ?height,
+            attempt = 1usize,
+            elapsed_ms = 0u64,
+            http_status = Option::<u16>::None,
+            error_class = "",
             "ComfyUI input upload started"
         );
         let body_stream = futures_util::stream::unfold(upload.stream, move |mut stream| {
@@ -199,63 +214,35 @@ impl ComfyHttpAdapter {
             .text("type", "input")
             .text("subfolder", String::new())
             .text("overwrite", "false");
-        let response = self
-            .upload_client
-            .post(&url)
-            .timeout(COMFY_UPLOAD_TIMEOUT)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|error| {
-                let stream_message = stream_error.lock().ok().and_then(|value| value.clone());
-                tracing::warn!(
-                    filename = %upload_filename,
-                    expected_bytes = ?expected_bytes,
-                    bytes_read = bytes_read.load(Ordering::Relaxed),
-                    elapsed_ms = started_at.elapsed().as_millis() as u64,
-                    stream_error = ?stream_message,
-                    error = %error,
-                    "ComfyUI input upload request failed"
-                );
-                stream_message.map_or_else(
-                    || request_error("POST", &url, error),
-                    |message| ComfyAdapterError::InputUpload(format!("stream failed: {message}")),
-                )
-            })?;
-        finish_upload_response(
-            response,
-            &url,
-            &upload_filename,
-            expected_bytes,
-            bytes_read.load(Ordering::Relaxed),
-            started_at,
-        )
-        .await
-    }
-
-    async fn upload_image_once(
-        &self,
-        upload: &ComfyImageUpload,
-    ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
-        let url = self.config.route_url("upload/image");
-        let started_at = Instant::now();
-        let expected_bytes = Some(upload.bytes.len() as u64);
-        let upload_filename = upload.upload_name.as_str();
-        let part = Part::bytes(upload.bytes.clone())
-            .file_name(upload.upload_name.clone())
-            .mime_str(&upload.content_type)
-            .map_err(|error| {
-                ComfyAdapterError::InputUpload(format!("invalid input MIME type: {error}"))
-            })?;
-        let form = Form::new()
-            .part("image", part)
-            .text("type", "input")
-            .text("subfolder", String::new())
-            .text("overwrite", "false");
         tracing::debug!(
+            phase = "connect",
+            task_id = %task_id,
+            asset_id = %asset_id,
             filename = %upload_filename,
-            expected_bytes = ?expected_bytes,
-            "ComfyUI replayable image upload started"
+            source_bytes = ?source_bytes,
+            upload_bytes = bytes_read.load(Ordering::Relaxed),
+            width = ?width,
+            height = ?height,
+            attempt = 1usize,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            http_status = Option::<u16>::None,
+            error_class = "",
+            "connecting to ComfyUI for input upload"
+        );
+        tracing::debug!(
+            phase = "upload",
+            task_id = %task_id,
+            asset_id = %asset_id,
+            filename = %upload_filename,
+            source_bytes = ?source_bytes,
+            upload_bytes = bytes_read.load(Ordering::Relaxed),
+            width = ?width,
+            height = ?height,
+            attempt = 1usize,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            http_status = Option::<u16>::None,
+            error_class = "",
+            "sending ComfyUI input upload body"
         );
         let response = self
             .upload_client
@@ -265,24 +252,150 @@ impl ComfyHttpAdapter {
             .send()
             .await
             .map_err(|error| {
+                let stream_message = stream_error.lock().ok().and_then(|value| value.clone());
+                let mapped = match stream_message.as_deref() {
+                    Some(message) => {
+                        ComfyAdapterError::InputUpload(format!("stream failed: {message}"))
+                    }
+                    None => request_error("POST", &url, error),
+                };
                 tracing::warn!(
+                    phase = "upload",
+                    task_id = %task_id,
+                    asset_id = %asset_id,
                     filename = %upload_filename,
-                    expected_bytes = ?expected_bytes,
-                    bytes_read = upload.bytes.len(),
+                    source_bytes = ?source_bytes,
+                    upload_bytes = bytes_read.load(Ordering::Relaxed),
+                    width = ?width,
+                    height = ?height,
+                    attempt = 1usize,
                     elapsed_ms = started_at.elapsed().as_millis() as u64,
-                    error = %error,
+                    http_status = Option::<u16>::None,
+                    error_class = mapped.kind(),
+                    stream_error = ?stream_message,
+                    error = %mapped,
+                    "ComfyUI input upload request failed"
+                );
+                mapped
+            })?;
+        finish_upload_response(
+            response,
+            &url,
+            &upload_filename,
+            bytes_read.load(Ordering::Relaxed),
+            started_at,
+            upload_context.as_ref(),
+            1,
+        )
+        .await
+        .map_err(|failure| failure.error)
+    }
+
+    async fn upload_image_once(
+        &self,
+        upload: &ComfyImageUpload,
+        attempt: usize,
+        timeout: Duration,
+    ) -> Result<ComfyUploadedInput, UploadAttemptFailure> {
+        let url = self.config.route_url("upload/image");
+        let started_at = Instant::now();
+        let upload_filename = upload.upload_name.as_str();
+        let (task_id, asset_id, source_bytes, width, height) =
+            upload_context_fields(upload.context.as_ref());
+        let part = Part::bytes(upload.bytes.clone())
+            .file_name(upload.upload_name.clone())
+            .mime_str(&upload.content_type)
+            .map_err(|error| {
+                UploadAttemptFailure::terminal(ComfyAdapterError::InputUpload(format!(
+                    "invalid input MIME type: {error}"
+                )))
+            })?;
+        let form = Form::new()
+            .part("image", part)
+            .text("type", "input")
+            .text("subfolder", String::new())
+            .text("overwrite", "false");
+        tracing::debug!(
+            phase = "preflight",
+            task_id = %task_id,
+            asset_id = %asset_id,
+            filename = %upload_filename,
+            source_bytes = ?source_bytes,
+            upload_bytes = upload.bytes.len() as u64,
+            width = ?width,
+            height = ?height,
+            attempt,
+            elapsed_ms = 0u64,
+            http_status = Option::<u16>::None,
+            error_class = "",
+            "ComfyUI replayable image upload started"
+        );
+        tracing::debug!(
+            phase = "connect",
+            task_id = %task_id,
+            asset_id = %asset_id,
+            filename = %upload_filename,
+            source_bytes = ?source_bytes,
+            upload_bytes = upload.bytes.len() as u64,
+            width = ?width,
+            height = ?height,
+            attempt,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            http_status = Option::<u16>::None,
+            error_class = "",
+            "connecting to ComfyUI for replayable image upload"
+        );
+        tracing::debug!(
+            phase = "upload",
+            task_id = %task_id,
+            asset_id = %asset_id,
+            filename = %upload_filename,
+            source_bytes = ?source_bytes,
+            upload_bytes = upload.bytes.len() as u64,
+            width = ?width,
+            height = ?height,
+            attempt,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            http_status = Option::<u16>::None,
+            error_class = "",
+            "sending ComfyUI replayable image upload body"
+        );
+        let response = self
+            .upload_client
+            .post(&url)
+            .timeout(timeout)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|error| {
+                let mapped = request_error("POST", &url, error);
+                tracing::warn!(
+                    phase = "upload",
+                    task_id = %task_id,
+                    asset_id = %asset_id,
+                    filename = %upload_filename,
+                    source_bytes = ?source_bytes,
+                    upload_bytes = upload.bytes.len() as u64,
+                    width = ?width,
+                    height = ?height,
+                    attempt,
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    http_status = Option::<u16>::None,
+                    error_class = mapped.kind(),
+                    error = %mapped,
                     "ComfyUI replayable image upload request failed"
                 );
-                request_error("POST", &url, error)
+                UploadAttemptFailure::request(mapped)
             })?;
 
         finish_upload_response(
             response,
             &url,
             upload_filename,
-            expected_bytes,
             upload.bytes.len() as u64,
             started_at,
+            upload.context.as_ref(),
+            attempt,
         )
         .await
     }
@@ -291,24 +404,46 @@ impl ComfyHttpAdapter {
         &self,
         upload: ComfyImageUpload,
     ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+        self.upload_image_with_retry_timeout(upload, COMFY_UPLOAD_TIMEOUT)
+            .await
+    }
+
+    async fn upload_image_with_retry_timeout(
+        &self,
+        upload: ComfyImageUpload,
+        timeout: Duration,
+    ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+        let retry_started_at = Instant::now();
         for attempt in 0..MAX_IMAGE_UPLOAD_ATTEMPTS {
-            match self.upload_image_once(&upload).await {
-                Err(error)
-                    if is_retryable_image_upload_error(&error)
-                        && attempt + 1 < MAX_IMAGE_UPLOAD_ATTEMPTS =>
-                {
-                    let delay = IMAGE_UPLOAD_RETRY_DELAYS[attempt];
+            match self.upload_image_once(&upload, attempt + 1, timeout).await {
+                Err(failure) if failure.retryable && attempt + 1 < MAX_IMAGE_UPLOAD_ATTEMPTS => {
+                    let delay = failure
+                        .retry_after
+                        .unwrap_or(IMAGE_UPLOAD_RETRY_DELAYS[attempt]);
+                    let (task_id, asset_id, source_bytes, width, height) =
+                        upload_context_fields(upload.context.as_ref());
                     tracing::warn!(
+                        phase = "retry",
+                        task_id = %task_id,
+                        asset_id = %asset_id,
                         filename = %upload.upload_name,
+                        source_bytes = ?source_bytes,
+                        upload_bytes = upload.bytes.len() as u64,
+                        width = ?width,
+                        height = ?height,
                         attempt = attempt + 1,
                         next_attempt = attempt + 2,
                         delay_ms = delay.as_millis() as u64,
-                        error = %error,
+                        elapsed_ms = retry_started_at.elapsed().as_millis() as u64,
+                        http_status = ?failure.http_status,
+                        error_class = failure.error.kind(),
+                        error = %failure.error,
                         "retrying replayable ComfyUI image upload"
                     );
                     tokio::time::sleep(delay).await;
                 }
-                result => return result,
+                Ok(uploaded) => return Ok(uploaded),
+                Err(failure) => return Err(failure.error),
             }
         }
 
@@ -319,19 +454,10 @@ impl ComfyHttpAdapter {
         &self,
         upload: ComfyImageUpload,
     ) -> Result<ComfyUploadedInput, ComfyAdapterError> {
-        if upload.bytes.len() <= MAX_REPLAYABLE_IMAGE_BYTES {
-            return self.upload_image_with_retry(upload).await;
-        }
-
-        self.upload_input_file_internal(ComfyInputUpload {
-            filename: upload.upload_name,
-            content_type: upload.content_type,
-            content_length: Some(upload.bytes.len() as u64),
-            stream: Box::new(BytesComfyInputStream {
-                bytes: Some(upload.bytes),
-            }),
-        })
-        .await
+        // ComfyImageUpload is already buffered by the input preparer. Always
+        // build a fresh Part::bytes from that replayable source so large images
+        // never fall back to a one-shot stream during a retry.
+        self.upload_image_with_retry(upload).await
     }
 
     async fn submit_workflow_internal(
@@ -675,14 +801,54 @@ impl ComfyHttpAdapter {
     }
 }
 
-struct BytesComfyInputStream {
-    bytes: Option<Vec<u8>>,
+struct UploadAttemptFailure {
+    error: ComfyAdapterError,
+    retryable: bool,
+    retry_after: Option<Duration>,
+    http_status: Option<u16>,
 }
 
-#[async_trait]
-impl ComfyInputStream for BytesComfyInputStream {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
-        Ok(self.bytes.take())
+impl UploadAttemptFailure {
+    fn terminal(error: ComfyAdapterError) -> Self {
+        Self {
+            error,
+            retryable: false,
+            retry_after: None,
+            http_status: None,
+        }
+    }
+
+    fn request(error: ComfyAdapterError) -> Self {
+        let retryable = matches!(
+            error,
+            ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)
+        );
+        Self {
+            error,
+            retryable,
+            retry_after: None,
+            http_status: None,
+        }
+    }
+
+    fn response(
+        error: ComfyAdapterError,
+        status: StatusCode,
+        retry_after: Option<Duration>,
+    ) -> Self {
+        Self {
+            error,
+            retryable: matches!(
+                status,
+                StatusCode::REQUEST_TIMEOUT
+                    | StatusCode::TOO_MANY_REQUESTS
+                    | StatusCode::BAD_GATEWAY
+                    | StatusCode::SERVICE_UNAVAILABLE
+                    | StatusCode::GATEWAY_TIMEOUT
+            ),
+            retry_after,
+            http_status: Some(status.as_u16()),
+        }
     }
 }
 
@@ -690,75 +856,178 @@ async fn finish_upload_response(
     response: reqwest::Response,
     url: &str,
     upload_filename: &str,
-    expected_bytes: Option<u64>,
     bytes_read: u64,
     started_at: Instant,
-) -> Result<ComfyUploadedInput, ComfyAdapterError> {
+    context: Option<&ComfyUploadContext>,
+    attempt: usize,
+) -> Result<ComfyUploadedInput, UploadAttemptFailure> {
     let response_status = response.status();
+    let (task_id, asset_id, source_bytes, width, height) = upload_context_fields(context);
     if response_status == StatusCode::PAYLOAD_TOO_LARGE {
+        let error = ComfyAdapterError::InputUploadTooLarge(
+            "ComfyUI rejected the multipart body with HTTP 413".to_owned(),
+        );
         tracing::warn!(
+            phase = "wait_response",
+            task_id = %task_id,
+            asset_id = %asset_id,
             filename = %upload_filename,
-            expected_bytes = ?expected_bytes,
-            bytes_read,
+            source_bytes = ?source_bytes,
+            upload_bytes = bytes_read,
+            width = ?width,
+            height = ?height,
+            attempt,
             elapsed_ms = started_at.elapsed().as_millis() as u64,
-            status = %response_status,
+            http_status = response_status.as_u16(),
+            error_class = error.kind(),
             "ComfyUI rejected an input upload as too large"
         );
-        return Err(ComfyAdapterError::InputUploadTooLarge(
-            "ComfyUI rejected the multipart body with HTTP 413".to_owned(),
-        ));
+        return Err(UploadAttemptFailure::response(error, response_status, None));
     }
     if !response_status.is_success() {
+        let error =
+            ComfyAdapterError::InputUpload(format!("POST {url} returned HTTP {}", response_status));
+        let retry_after = (response_status == StatusCode::TOO_MANY_REQUESTS)
+            .then(|| response.headers().get(RETRY_AFTER))
+            .flatten()
+            .and_then(parse_retry_after);
         tracing::warn!(
+            phase = "wait_response",
+            task_id = %task_id,
+            asset_id = %asset_id,
             filename = %upload_filename,
-            expected_bytes = ?expected_bytes,
-            bytes_read,
+            source_bytes = ?source_bytes,
+            upload_bytes = bytes_read,
+            width = ?width,
+            height = ?height,
+            attempt,
             elapsed_ms = started_at.elapsed().as_millis() as u64,
-            status = %response_status,
+            http_status = response_status.as_u16(),
+            error_class = error.kind(),
             "ComfyUI rejected an input upload"
         );
-        return Err(ComfyAdapterError::InputUpload(format!(
-            "POST {url} returned HTTP {}",
-            response_status
-        )));
+        return Err(UploadAttemptFailure::response(
+            error,
+            response_status,
+            retry_after,
+        ));
     }
+    tracing::debug!(
+        phase = "wait_response",
+        task_id = %task_id,
+        asset_id = %asset_id,
+        filename = %upload_filename,
+        source_bytes = ?source_bytes,
+        upload_bytes = bytes_read,
+        width = ?width,
+        height = ?height,
+        attempt,
+        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        http_status = response_status.as_u16(),
+        error_class = "",
+        "ComfyUI input upload response received"
+    );
+    tracing::debug!(
+        phase = "parse_response",
+        task_id = %task_id,
+        asset_id = %asset_id,
+        filename = %upload_filename,
+        source_bytes = ?source_bytes,
+        upload_bytes = bytes_read,
+        width = ?width,
+        height = ?height,
+        attempt,
+        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        http_status = response_status.as_u16(),
+        error_class = "",
+        "parsing ComfyUI input upload response"
+    );
     let dto = response
         .json::<UploadResponseDto>()
         .await
         .map_err(|error| {
+            let mapped = upload_response_error(url, error);
             tracing::warn!(
+                phase = "parse_response",
+                task_id = %task_id,
+                asset_id = %asset_id,
                 filename = %upload_filename,
-                expected_bytes = ?expected_bytes,
-                bytes_read,
+                source_bytes = ?source_bytes,
+                upload_bytes = bytes_read,
+                width = ?width,
+                height = ?height,
+                attempt,
                 elapsed_ms = started_at.elapsed().as_millis() as u64,
-                status = %response_status,
-                error = %error,
+                http_status = response_status.as_u16(),
+                error_class = mapped.kind(),
+                error = %mapped,
                 "ComfyUI input upload response could not be parsed"
             );
-            upload_response_error(url, error)
+            UploadAttemptFailure::request(mapped)
         })?;
-    let name = dto
-        .name
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            ComfyAdapterError::Protocol(
+    let name = match dto.name.filter(|value| !value.trim().is_empty()) {
+        Some(name) => name,
+        None => {
+            let error = ComfyAdapterError::Protocol(
                 "POST /upload/image response did not contain name".to_owned(),
-            )
-        })?;
-    let folder_type = dto
-        .folder_type
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            ComfyAdapterError::Protocol(
+            );
+            tracing::warn!(
+                phase = "parse_response",
+                task_id = %task_id,
+                asset_id = %asset_id,
+                filename = %upload_filename,
+                source_bytes = ?source_bytes,
+                upload_bytes = bytes_read,
+                width = ?width,
+                height = ?height,
+                attempt,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                http_status = response_status.as_u16(),
+                error_class = error.kind(),
+                error = %error,
+                "ComfyUI input upload response did not contain a name"
+            );
+            return Err(UploadAttemptFailure::terminal(error));
+        }
+    };
+    let folder_type = match dto.folder_type.filter(|value| !value.trim().is_empty()) {
+        Some(folder_type) => folder_type,
+        None => {
+            let error = ComfyAdapterError::Protocol(
                 "POST /upload/image response did not contain type".to_owned(),
-            )
-        })?;
+            );
+            tracing::warn!(
+                phase = "parse_response",
+                task_id = %task_id,
+                asset_id = %asset_id,
+                filename = %upload_filename,
+                source_bytes = ?source_bytes,
+                upload_bytes = bytes_read,
+                width = ?width,
+                height = ?height,
+                attempt,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                http_status = response_status.as_u16(),
+                error_class = error.kind(),
+                error = %error,
+                "ComfyUI input upload response did not contain a folder type"
+            );
+            return Err(UploadAttemptFailure::terminal(error));
+        }
+    };
     tracing::debug!(
+        phase = "parse_response",
+        task_id = %task_id,
+        asset_id = %asset_id,
         filename = %upload_filename,
-        expected_bytes = ?expected_bytes,
-        bytes_read,
+        source_bytes = ?source_bytes,
+        upload_bytes = bytes_read,
+        width = ?width,
+        height = ?height,
+        attempt,
         elapsed_ms = started_at.elapsed().as_millis() as u64,
-        status = %response_status,
+        http_status = response_status.as_u16(),
+        error_class = "",
         "ComfyUI input upload completed"
     );
     Ok(ComfyUploadedInput {
@@ -766,6 +1035,22 @@ async fn finish_upload_response(
         subfolder: dto.subfolder.unwrap_or_default(),
         folder_type,
     })
+}
+
+fn upload_context_fields(
+    context: Option<&ComfyUploadContext>,
+) -> (&str, &str, Option<u64>, Option<u32>, Option<u32>) {
+    (
+        context
+            .and_then(|value| value.task_id.as_deref())
+            .unwrap_or("unknown"),
+        context
+            .and_then(|value| value.asset_id.as_deref())
+            .unwrap_or("unknown"),
+        context.and_then(|value| value.source_bytes),
+        context.and_then(|value| value.width),
+        context.and_then(|value| value.height),
+    )
 }
 
 pub struct ComfyHttpAdapterFactory;
@@ -1356,11 +1641,17 @@ fn upload_response_error(url: &str, error: reqwest::Error) -> ComfyAdapterError 
     }
 }
 
-fn is_retryable_image_upload_error(error: &ComfyAdapterError) -> bool {
-    matches!(
-        error,
-        ComfyAdapterError::Offline(_) | ComfyAdapterError::Timeout(_)
-    )
+fn parse_retry_after(value: &reqwest::header::HeaderValue) -> Option<Duration> {
+    let value = value.to_str().ok()?.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    let retry_at = chrono::DateTime::parse_from_rfc2822(value)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    let wait_ms = (retry_at - chrono::Utc::now()).num_milliseconds().max(0) as u64;
+    Some(Duration::from_millis(wait_ms))
 }
 
 fn http_status_error(method: &str, url: &str, status: StatusCode) -> ComfyAdapterError {
@@ -1656,6 +1947,7 @@ mod tests {
                 bytes: vec![1, 2, 3],
                 upload_name: "aistudio_task_asset.png".to_owned(),
                 content_type: "image/png".to_owned(),
+                context: None,
             })
             .await
             .expect("upload should parse");
@@ -1686,6 +1978,7 @@ mod tests {
                 bytes: vec![1, 2, 3],
                 upload_name: "slow-input.png".to_owned(),
                 content_type: "image/png".to_owned(),
+                context: None,
             })
             .await
             .expect("slow upload response should remain within the upload timeout");
@@ -1729,6 +2022,7 @@ mod tests {
                 bytes: vec![1, 2, 3, 4],
                 upload_name: "retried.png".to_owned(),
                 content_type: "image/png".to_owned(),
+                context: None,
             })
             .await
             .expect("a replayable image should succeed after a connection failure");
@@ -1763,6 +2057,7 @@ mod tests {
                 bytes: vec![1, 2, 3, 4],
                 upload_name: "exhausted.png".to_owned(),
                 content_type: "image/png".to_owned(),
+                context: None,
             })
             .await
             .expect_err("three connection failures should exhaust the retry budget");
@@ -1789,6 +2084,7 @@ mod tests {
                 bytes: vec![1, 2, 3, 4],
                 upload_name: "too-large.png".to_owned(),
                 content_type: "image/png".to_owned(),
+                context: None,
             })
             .await
             .expect_err("HTTP 413 should remain a terminal upload error");
@@ -1799,6 +2095,216 @@ mod tests {
             .await
             .expect("wiremock should expose received requests");
         assert_eq!(requests.len(), 1, "HTTP 413 must not be retried");
+    }
+
+    #[tokio::test]
+    async fn replayable_image_upload_does_not_retry_other_client_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload/image"))
+            .respond_with(ResponseTemplate::new(400))
+            .mount(&server)
+            .await;
+
+        let adapter = ComfyHttpAdapter::new(config_for(&server)).expect("client should build");
+        let error = adapter
+            .upload_image(ComfyImageUpload {
+                bytes: vec![1, 2, 3, 4],
+                upload_name: "bad-request.png".to_owned(),
+                content_type: "image/png".to_owned(),
+                context: None,
+            })
+            .await
+            .expect_err("HTTP 400 should remain a terminal upload error");
+
+        assert!(matches!(error, ComfyAdapterError::InputUpload(_)));
+        let requests = server
+            .received_requests()
+            .await
+            .expect("wiremock should expose received requests");
+        assert_eq!(requests.len(), 1, "ordinary 4xx must not be retried");
+    }
+
+    #[tokio::test]
+    async fn replayable_image_upload_retries_timeout_then_succeeds() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("test listener should have an address")
+            .port();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener
+                .accept()
+                .await
+                .expect("first upload should connect");
+            read_upload_request(&mut first)
+                .await
+                .expect("first upload body should be received");
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            drop(first);
+
+            let (mut second, _) = tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                .await
+                .expect("retry should connect")
+                .expect("retry connection should be accepted");
+            read_upload_request(&mut second)
+                .await
+                .expect("retry request should contain its full body");
+            write_upload_response(&mut second, "timeout-retry.png")
+                .await
+                .expect("retry response should write");
+        });
+
+        let adapter = ComfyHttpAdapter::new(ComfyConnectionConfig::new("http", "127.0.0.1", port))
+            .expect("client should build");
+        let uploaded = adapter
+            .upload_image_with_retry_timeout(
+                ComfyImageUpload {
+                    bytes: vec![1, 2, 3, 4],
+                    upload_name: "timeout-retry.png".to_owned(),
+                    content_type: "image/png".to_owned(),
+                    context: None,
+                },
+                Duration::from_millis(100),
+            )
+            .await
+            .expect("a timed-out image upload should succeed on retry");
+
+        assert_eq!(uploaded.name, "timeout-retry.png");
+        server.await.expect("timeout retry server should not panic");
+    }
+
+    #[tokio::test]
+    async fn large_replayable_image_upload_retries_after_disconnect() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("test listener should have an address")
+            .port();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener
+                .accept()
+                .await
+                .expect("first upload should connect");
+            read_upload_request(&mut first)
+                .await
+                .expect("first large upload body should be received");
+            drop(first);
+
+            let (mut second, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                .await
+                .expect("retry should connect")
+                .expect("retry connection should be accepted");
+            let request = read_upload_request(&mut second)
+                .await
+                .expect("retry large request should contain its full body");
+            assert!(request.len() > 16 * 1024 * 1024);
+            write_upload_response(&mut second, "large-retry.png")
+                .await
+                .expect("retry response should write");
+        });
+
+        let adapter = ComfyHttpAdapter::new(ComfyConnectionConfig::new("http", "127.0.0.1", port))
+            .expect("client should build");
+        let uploaded = adapter
+            .upload_image(ComfyImageUpload {
+                bytes: vec![7; 16 * 1024 * 1024 + 1],
+                upload_name: "large-retry.png".to_owned(),
+                content_type: "image/png".to_owned(),
+                context: None,
+            })
+            .await
+            .expect("a large replayable image should succeed on retry");
+
+        assert_eq!(uploaded.name, "large-retry.png");
+        server.await.expect("large retry server should not panic");
+    }
+
+    #[tokio::test]
+    async fn replayable_image_upload_retries_retryable_http_statuses() {
+        for (status, retry_after) in [
+            (408, None),
+            (429, Some("0")),
+            (502, None),
+            (503, None),
+            (504, None),
+        ] {
+            let (port, server) = spawn_upload_status_sequence(status, retry_after).await;
+            let adapter =
+                ComfyHttpAdapter::new(ComfyConnectionConfig::new("http", "127.0.0.1", port))
+                    .expect("client should build");
+            let uploaded = adapter
+                .upload_image(ComfyImageUpload {
+                    bytes: vec![1, 2, 3],
+                    upload_name: "retryable-status.png".to_owned(),
+                    content_type: "image/png".to_owned(),
+                    context: None,
+                })
+                .await
+                .expect("retryable status should succeed on the next attempt");
+
+            assert_eq!(uploaded.name, "server-after-retry.png");
+            server
+                .await
+                .expect("status sequence server should not panic");
+        }
+    }
+
+    async fn spawn_upload_status_sequence(
+        status: u16,
+        retry_after: Option<&'static str>,
+    ) -> (u16, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("test listener should have an address")
+            .port();
+        let server = tokio::spawn(async move {
+            for (response_status, response_retry_after) in [(status, retry_after), (200, None)] {
+                let (mut stream, _) =
+                    tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                        .await
+                        .expect("upload attempt should connect")
+                        .expect("upload connection should be accepted");
+                let request = read_upload_request(&mut stream)
+                    .await
+                    .expect("status request should contain its full body");
+                assert!(String::from_utf8_lossy(&request).contains("retryable-status.png"));
+                write_upload_status_response(&mut stream, response_status, response_retry_after)
+                    .await
+                    .expect("status response should write");
+            }
+        });
+        (port, server)
+    }
+
+    async fn write_upload_status_response(
+        stream: &mut TcpStream,
+        status: u16,
+        retry_after: Option<&str>,
+    ) -> std::io::Result<()> {
+        let (reason, body) = if status == 200 {
+            (
+                "OK",
+                r#"{"name":"server-after-retry.png","subfolder":"","type":"input"}"#,
+            )
+        } else {
+            ("Retryable", "retryable upload status")
+        };
+        let retry_header = retry_after
+            .map(|value| format!("Retry-After: {value}\r\n"))
+            .unwrap_or_default();
+        let response = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{retry_header}Connection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await
     }
 
     async fn read_upload_request(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
@@ -1941,6 +2447,7 @@ mod tests {
                     bytes: vec![1, 2, 3],
                     upload_name: filename.to_owned(),
                     content_type: "image/png".to_owned(),
+                    context: None,
                 })
                 .await
                 .expect("upload should succeed");
@@ -1980,6 +2487,7 @@ mod tests {
                 stream: Box::new(TestInputStream {
                     chunks: VecDeque::from([Ok(Some(vec![1, 2])), Ok(Some(vec![3, 4])), Ok(None)]),
                 }),
+                context: None,
             })
             .await
             .expect("video upload should parse");
@@ -1993,6 +2501,7 @@ mod tests {
                 stream: Box::new(TestInputStream {
                     chunks: VecDeque::from([Ok(Some(vec![5, 6])), Ok(None)]),
                 }),
+                context: None,
             })
             .await
             .expect("audio upload should parse");
@@ -2027,6 +2536,7 @@ mod tests {
                 stream: Box::new(TestInputStream {
                     chunks: VecDeque::from([Ok(Some(vec![1])), Ok(None)]),
                 }),
+                context: None,
             })
             .await
             .expect_err("413 should be rejected");
@@ -2055,6 +2565,7 @@ mod tests {
                 stream: Box::new(TestInputStream {
                     chunks: VecDeque::from([Err("disk read failed".to_owned())]),
                 }),
+                context: None,
             })
             .await
             .expect_err("stream failure should fail upload");
@@ -2215,6 +2726,7 @@ mod tests {
                 bytes: vec![1, 2, 3],
                 upload_name: "image.png".to_owned(),
                 content_type: "image/png".to_owned(),
+                context: None,
             })
             .await
             .expect_err("malformed upload response should fail");
