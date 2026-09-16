@@ -549,12 +549,26 @@ impl GenerationInputPreparer {
                 })?;
             let original_bytes = bytes.len();
             let preprocess_started_at = Instant::now();
-            let bytes = prepare_image_bytes_for_comfy(bytes, asset).map_err(|message| {
-                GenerationInputPrepareError::AssetRead {
+            let bytes = if asset.width.max(asset.height) <= MAX_COMFY_IMAGE_EDGE
+                && original_bytes <= MAX_COMFY_IMAGE_UPLOAD_BYTES
+            {
+                // Preserve the zero-copy fast path for already-safe image uploads.
+                bytes
+            } else {
+                let preprocess_asset = asset.clone();
+                tokio::task::spawn_blocking(move || {
+                    prepare_image_bytes_for_comfy(bytes, &preprocess_asset)
+                })
+                .await
+                .map_err(|error| GenerationInputPrepareError::AssetRead {
+                    asset_id: asset.id.as_str().to_owned(),
+                    message: format!("image preparation worker failed: {error}"),
+                })?
+                .map_err(|message| GenerationInputPrepareError::AssetRead {
                     asset_id: asset.id.as_str().to_owned(),
                     message: format!("image preparation failed: {message}"),
-                }
-            })?;
+                })?
+            };
             let preprocess_elapsed_ms = preprocess_started_at.elapsed().as_millis() as u64;
             if bytes.len() != original_bytes {
                 tracing::debug!(

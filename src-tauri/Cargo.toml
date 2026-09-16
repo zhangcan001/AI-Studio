@@ -42,6 +42,40 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 url = "2"
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
+# Keep the CPU-heavy image codecs and resize path responsive in `tauri dev`.
+# Release builds are optimized already; this only avoids unoptimized third-party
+# image work making local development preprocessing appear like an upload stall.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package.moxcms]
+opt-level = 3
+[profile.dev.package.pxfm]
+opt-level = 3
+[profile.dev.package.bytemuck]
+opt-level = 3
+[profile.dev.package.byteorder-lite]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.adler2]
+opt-level = 3
+[profile.dev.package.simd-adler32]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"
