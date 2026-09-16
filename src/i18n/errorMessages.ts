@@ -10,7 +10,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   FILESYSTEM_ERROR: "本地文件访问失败，请检查文件权限后重试。",
   INTERNAL_ERROR: "应用内部操作失败，请查看技术详情。",
   COMFY_OFFLINE: "ComfyUI 当前离线，请先启动或重新连接 ComfyUI。",
-  COMFY_TIMEOUT: "ComfyUI 响应超时，请检查运行状态后重试。",
+  COMFY_TIMEOUT: "ComfyUI 响应超时或当前较忙，请稍后重试。",
   COMFY_PROTOCOL_ERROR: "ComfyUI 返回了不兼容的响应，请检查版本和 API 工作流格式。",
   COMFY_STREAM_DISCONNECTED: "与 ComfyUI 的执行连接已断开，请重新同步任务状态。",
   COMFY_INPUT_UPLOAD_FAILED: "素材上传到 ComfyUI 失败。",

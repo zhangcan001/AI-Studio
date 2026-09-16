@@ -81,7 +81,16 @@ mod tests {
     #[async_trait]
     impl ComfyAdapter for FakeComfyAdapter {
         async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
-            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+            Ok(ComfyHealth {
+                system: SystemStats {
+                    comfyui_version: Some("test".to_owned()),
+                    python_version: None,
+                    os: None,
+                    ram_total: None,
+                    ram_free: None,
+                    devices: Vec::new(),
+                },
+            })
         }
 
         async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {

@@ -6,15 +6,18 @@ use crate::domain::{
     Asset, AssetId, AssetType, InputValue, SeedValue, TaskId, GENERATED_VIDEO_CATEGORY,
     SOURCE_AUDIO_CATEGORY, SOURCE_VIDEO_CATEGORY,
 };
+use image::{imageops::FilterType, ImageFormat, ImageReader};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, HashMap},
     error::Error,
     fmt,
+    io::Cursor,
     sync::Arc,
 };
 
 const IMAGE_PREVIEW_REFERENCE: &str = "__aistudio_preflight_image__";
+const MAX_COMFY_IMAGE_EDGE: u32 = 2048;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GenerationInputValue {
@@ -84,6 +87,9 @@ pub enum GenerationInputPrepareError {
         asset_id: String,
         error: ComfyAdapterError,
     },
+    ComfyUnavailable {
+        error: ComfyAdapterError,
+    },
 }
 
 impl GenerationInputPrepareError {
@@ -97,17 +103,9 @@ impl GenerationInputPrepareError {
             Self::ReferenceMappingIncomplete { .. } => "REFERENCE_MAPPING_INCOMPLETE",
             Self::DuplicateFirstLastAsset { .. } => "INPUT_ASSET_DUPLICATE",
             Self::Repository(_) => "INPUT_ASSET_REPOSITORY_ERROR",
-            Self::Upload { error, .. } => match error {
-                ComfyAdapterError::Offline(_) => "COMFY_OFFLINE",
-                ComfyAdapterError::Timeout(_) => "COMFY_TIMEOUT",
-                ComfyAdapterError::Protocol(_) | ComfyAdapterError::Incompatible(_) => {
-                    "COMFY_PROTOCOL_ERROR"
-                }
-                ComfyAdapterError::ImageUpload(_) => "COMFY_IMAGE_UPLOAD_FAILED",
-                ComfyAdapterError::InputUploadTooLarge(_) => "COMFY_INPUT_UPLOAD_TOO_LARGE",
-                ComfyAdapterError::InputUpload(_) => "COMFY_INPUT_UPLOAD_FAILED",
-                _ => "COMFY_IMAGE_UPLOAD_FAILED",
-            },
+            Self::Upload { error, .. } | Self::ComfyUnavailable { error } => {
+                comfy_error_code(error)
+            }
         }
     }
 }
@@ -167,6 +165,11 @@ impl fmt::Display for GenerationInputPrepareError {
             } => write!(
                 formatter,
                 "{}: input {input_key} asset {asset_id} upload failed: {error}",
+                self.code()
+            ),
+            Self::ComfyUnavailable { error } => write!(
+                formatter,
+                "{}: ComfyUI 不可用或较忙，已取消上传：{error}",
                 self.code()
             ),
         }
@@ -313,6 +316,7 @@ impl GenerationInputPreparer {
         let mut images = BTreeMap::new();
         let mut media = BTreeMap::new();
         let mut upload_cache = HashMap::<AssetId, ComfyUploadedInput>::new();
+        let mut upload_health_checked = false;
 
         for (key, value) in values {
             match value {
@@ -338,6 +342,7 @@ impl GenerationInputPreparer {
                             &asset,
                             None,
                             &mut upload_cache,
+                            &mut upload_health_checked,
                         )
                         .await?;
                     compiler_values
@@ -357,6 +362,7 @@ impl GenerationInputPreparer {
                                 &asset,
                                 Some(index + 1),
                                 &mut upload_cache,
+                                &mut upload_health_checked,
                             )
                             .await?;
                         comfy_names.push(prepared.comfy.name.clone());
@@ -377,6 +383,7 @@ impl GenerationInputPreparer {
                             &asset,
                             None,
                             &mut upload_cache,
+                            &mut upload_health_checked,
                         )
                         .await?;
                     compiler_values
@@ -395,6 +402,7 @@ impl GenerationInputPreparer {
                             &asset,
                             None,
                             &mut upload_cache,
+                            &mut upload_health_checked,
                         )
                         .await?;
                     compiler_values
@@ -416,6 +424,7 @@ impl GenerationInputPreparer {
                                 &asset,
                                 Some(index + 1),
                                 &mut upload_cache,
+                                &mut upload_health_checked,
                             )
                             .await?;
                         comfy_names.push(prepared.comfy.name.clone());
@@ -439,6 +448,7 @@ impl GenerationInputPreparer {
                                 &asset,
                                 Some(index + 1),
                                 &mut upload_cache,
+                                &mut upload_health_checked,
                             )
                             .await?;
                         comfy_names.push(prepared.comfy.name.clone());
@@ -530,6 +540,7 @@ impl GenerationInputPreparer {
         asset: &Asset,
         position: Option<usize>,
         upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
+        upload_health_checked: &mut bool,
     ) -> Result<PreparedImageInput, GenerationInputPrepareError> {
         if !matches!(
             asset.mime_type.as_str(),
@@ -543,6 +554,8 @@ impl GenerationInputPreparer {
         let comfy = if let Some(uploaded) = upload_cache.get(&asset.id) {
             uploaded.clone()
         } else {
+            self.ensure_comfy_upload_health(upload_health_checked)
+                .await?;
             let bytes = self
                 .asset_store
                 .read(project_root, std::path::Path::new(&asset.storage_path))
@@ -551,6 +564,21 @@ impl GenerationInputPreparer {
                     asset_id: asset.id.as_str().to_owned(),
                     message: error.to_string(),
                 })?;
+            let original_bytes = bytes.len();
+            let bytes = prepare_image_bytes_for_comfy(bytes, asset).map_err(|message| {
+                GenerationInputPrepareError::AssetRead {
+                    asset_id: asset.id.as_str().to_owned(),
+                    message: format!("image preparation failed: {message}"),
+                }
+            })?;
+            if bytes.len() != original_bytes {
+                tracing::debug!(
+                    asset_id = %asset.id,
+                    original_bytes,
+                    upload_bytes = bytes.len(),
+                    "ComfyUI image upload copy downscaled"
+                );
+            }
             let upload = crate::application::ports::ComfyImageUpload {
                 bytes,
                 upload_name: upload_name_at(task_id, asset, position),
@@ -583,6 +611,7 @@ impl GenerationInputPreparer {
         asset: &Asset,
         position: Option<usize>,
         upload_cache: &mut HashMap<AssetId, ComfyUploadedInput>,
+        upload_health_checked: &mut bool,
     ) -> Result<PreparedMediaInput, GenerationInputPrepareError> {
         if !asset.mime_type.starts_with("video/") && !asset.mime_type.starts_with("audio/") {
             return Err(GenerationInputPrepareError::InvalidAssetMime {
@@ -593,6 +622,8 @@ impl GenerationInputPreparer {
         let comfy = if let Some(uploaded) = upload_cache.get(&asset.id) {
             uploaded.clone()
         } else {
+            self.ensure_comfy_upload_health(upload_health_checked)
+                .await?;
             let stream = self
                 .asset_store
                 .open_read_stream(project_root, std::path::Path::new(&asset.storage_path))
@@ -625,6 +656,69 @@ impl GenerationInputPreparer {
             comfy,
         })
     }
+
+    async fn ensure_comfy_upload_health(
+        &self,
+        checked: &mut bool,
+    ) -> Result<(), GenerationInputPrepareError> {
+        if *checked {
+            return Ok(());
+        }
+        self.comfy_adapter
+            .health_check()
+            .await
+            .map_err(|error| GenerationInputPrepareError::ComfyUnavailable { error })?;
+        *checked = true;
+        Ok(())
+    }
+}
+
+fn comfy_error_code(error: &ComfyAdapterError) -> &'static str {
+    match error {
+        ComfyAdapterError::Offline(_) => "COMFY_OFFLINE",
+        ComfyAdapterError::Timeout(_) => "COMFY_TIMEOUT",
+        ComfyAdapterError::Protocol(_) | ComfyAdapterError::Incompatible(_) => {
+            "COMFY_PROTOCOL_ERROR"
+        }
+        ComfyAdapterError::ImageUpload(_) => "COMFY_IMAGE_UPLOAD_FAILED",
+        ComfyAdapterError::InputUploadTooLarge(_) => "COMFY_INPUT_UPLOAD_TOO_LARGE",
+        ComfyAdapterError::InputUpload(_) => "COMFY_INPUT_UPLOAD_FAILED",
+        _ => "COMFY_IMAGE_UPLOAD_FAILED",
+    }
+}
+
+fn prepare_image_bytes_for_comfy(bytes: Vec<u8>, asset: &Asset) -> Result<Vec<u8>, String> {
+    if asset.width.max(asset.height) <= MAX_COMFY_IMAGE_EDGE {
+        return Ok(bytes);
+    }
+
+    let format = match asset.mime_type.as_str() {
+        "image/png" => ImageFormat::Png,
+        "image/jpeg" => ImageFormat::Jpeg,
+        "image/webp" => ImageFormat::WebP,
+        mime_type => return Err(format!("unsupported image MIME type {mime_type}")),
+    };
+    let dimensions = ImageReader::with_format(Cursor::new(bytes.as_slice()), format)
+        .into_dimensions()
+        .map_err(|error| error.to_string())?;
+    let (width, height) = dimensions;
+    let longest_edge = width.max(height);
+    if longest_edge <= MAX_COMFY_IMAGE_EDGE {
+        return Ok(bytes);
+    }
+
+    let scale = f64::from(MAX_COMFY_IMAGE_EDGE) / f64::from(longest_edge);
+    let target_width = (f64::from(width) * scale).round().max(1.0) as u32;
+    let target_height = (f64::from(height) * scale).round().max(1.0) as u32;
+    let image = ImageReader::with_format(Cursor::new(bytes.as_slice()), format)
+        .decode()
+        .map_err(|error| error.to_string())?;
+    let resized = image.resize(target_width, target_height, FilterType::Lanczos3);
+    let mut output = Cursor::new(Vec::new());
+    resized
+        .write_to(&mut output, format)
+        .map_err(|error| error.to_string())?;
+    Ok(output.into_inner())
 }
 
 #[derive(Clone, Copy)]
@@ -695,7 +789,10 @@ pub fn upload_name_at(task_id: &TaskId, asset: &Asset, position: Option<usize>) 
 
 #[cfg(test)]
 mod tests {
-    use super::{upload_name, upload_name_at, GenerationInputPreparer, GenerationInputValue};
+    use super::{
+        prepare_image_bytes_for_comfy, upload_name, upload_name_at, GenerationInputPreparer,
+        GenerationInputValue,
+    };
     use crate::application::ports::{
         AssetReadStream, AssetRepository, AssetStore, AssetStoreError, ComfyAdapter,
         ComfyAdapterError, ComfyEventSubscription, ComfyHealth, ComfyHistory, ComfyInputUpload,
@@ -704,8 +801,10 @@ mod tests {
     };
     use crate::domain::{Asset, AssetId, TaskId};
     use async_trait::async_trait;
+    use image::{ImageFormat, ImageReader};
     use serde_json::json;
     use std::collections::{BTreeMap, HashMap, VecDeque};
+    use std::io::Cursor;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
@@ -851,12 +950,27 @@ mod tests {
     struct RecordingAdapter {
         filenames: Arc<Mutex<Vec<String>>>,
         failure: Arc<Mutex<Option<ComfyAdapterError>>>,
+        health_checks: Arc<Mutex<usize>>,
+        health_failure: Arc<Mutex<Option<ComfyAdapterError>>>,
     }
 
     #[async_trait]
     impl ComfyAdapter for RecordingAdapter {
         async fn health_check(&self) -> Result<ComfyHealth, ComfyAdapterError> {
-            Err(ComfyAdapterError::Incompatible("not used".to_owned()))
+            *self.health_checks.lock().unwrap() += 1;
+            if let Some(error) = self.health_failure.lock().unwrap().clone() {
+                return Err(error);
+            }
+            Ok(ComfyHealth {
+                system: SystemStats {
+                    comfyui_version: Some("test".to_owned()),
+                    python_version: None,
+                    os: None,
+                    ram_total: None,
+                    ram_free: None,
+                    devices: Vec::new(),
+                },
+            })
         }
 
         async fn get_system_stats(&self) -> Result<SystemStats, ComfyAdapterError> {
@@ -1097,6 +1211,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn probes_comfy_once_before_multiple_reference_uploads() {
+        let adapter = RecordingAdapter::default();
+        let health_checks = adapter.health_checks.clone();
+        let mut second = asset();
+        second.id = AssetId::parse("ast_reference_b").unwrap();
+        let preparer = preparer(vec![asset(), second], adapter);
+        let values = BTreeMap::from([(
+            "reference_images".to_owned(),
+            GenerationInputValue::ImageAssets(vec![
+                AssetId::parse("ast_reference").unwrap(),
+                AssetId::parse("ast_reference_b").unwrap(),
+            ]),
+        )]);
+
+        preparer
+            .prepare(
+                "project-1",
+                &TaskId::parse("tsk_health_probe").unwrap(),
+                &values,
+            )
+            .await
+            .expect("healthy ComfyUI should allow image preparation");
+
+        assert_eq!(*health_checks.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn health_probe_failure_prevents_uploading_any_input() {
+        let adapter = RecordingAdapter {
+            health_failure: Arc::new(Mutex::new(Some(ComfyAdapterError::Offline(
+                "ComfyUI is unavailable".to_owned(),
+            )))),
+            ..RecordingAdapter::default()
+        };
+        let filenames = adapter.filenames.clone();
+        let preparer = preparer(vec![asset()], adapter);
+        let values = BTreeMap::from([(
+            "reference_image".to_owned(),
+            GenerationInputValue::ImageAsset(AssetId::parse("ast_reference").unwrap()),
+        )]);
+
+        let error = preparer
+            .prepare(
+                "project-1",
+                &TaskId::parse("tsk_health_failure").unwrap(),
+                &values,
+            )
+            .await
+            .expect_err("an unavailable ComfyUI should stop before upload");
+
+        assert_eq!(error.code(), "COMFY_OFFLINE");
+        assert!(error.to_string().contains("已取消上传"));
+        assert!(filenames.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn rejects_duplicate_first_last_assets_before_upload() {
         let adapter = RecordingAdapter::default();
         let filenames = adapter.filenames.clone();
@@ -1185,6 +1355,29 @@ mod tests {
             assert_eq!(error.code(), expected_code);
         }
         assert!(filenames.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn downscales_only_the_comfy_upload_copy() {
+        let source = image::DynamicImage::new_rgb8(4096, 1024);
+        let mut encoded = Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, ImageFormat::Png)
+            .expect("test image should encode");
+        let original = encoded.into_inner();
+        let original_len = original.len();
+        let mut image_asset = asset();
+        image_asset.width = 4096;
+        image_asset.height = 1024;
+
+        let upload_copy = prepare_image_bytes_for_comfy(original.clone(), &image_asset)
+            .expect("large PNG should be resized");
+        let resized = ImageReader::with_format(Cursor::new(upload_copy), ImageFormat::Png)
+            .decode()
+            .expect("resized image should remain valid");
+
+        assert_eq!((resized.width(), resized.height()), (2048, 512));
+        assert_eq!(original.len(), original_len);
     }
 }
 
