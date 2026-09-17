@@ -22,6 +22,24 @@ const IMAGE_PREVIEW_REFERENCE: &str = "__aistudio_preflight_image__";
 const MAX_COMFY_IMAGE_EDGE: u32 = 2048;
 const MAX_COMFY_IMAGE_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, Default)]
+struct ImagePreprocessTimings {
+    fast_path: bool,
+    decode_ms: f64,
+    resize_ms: f64,
+    encode_ms: f64,
+    total_ms: f64,
+}
+
+struct PreparedComfyImageBytes {
+    bytes: Vec<u8>,
+    timings: ImagePreprocessTimings,
+}
+
+fn elapsed_ms(started_at: Instant) -> f64 {
+    started_at.elapsed().as_secs_f64() * 1_000.0
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum GenerationInputValue {
     Text(String),
@@ -549,14 +567,20 @@ impl GenerationInputPreparer {
                 })?;
             let original_bytes = bytes.len();
             let preprocess_started_at = Instant::now();
-            let bytes = if asset.width.max(asset.height) <= MAX_COMFY_IMAGE_EDGE
+            let (bytes, mut timings) = if asset.width.max(asset.height) <= MAX_COMFY_IMAGE_EDGE
                 && original_bytes <= MAX_COMFY_IMAGE_UPLOAD_BYTES
             {
                 // Preserve the zero-copy fast path for already-safe image uploads.
-                bytes
+                (
+                    bytes,
+                    ImagePreprocessTimings {
+                        fast_path: true,
+                        ..ImagePreprocessTimings::default()
+                    },
+                )
             } else {
                 let preprocess_asset = asset.clone();
-                tokio::task::spawn_blocking(move || {
+                let prepared = tokio::task::spawn_blocking(move || {
                     prepare_image_bytes_for_comfy(bytes, &preprocess_asset)
                 })
                 .await
@@ -567,21 +591,24 @@ impl GenerationInputPreparer {
                 .map_err(|message| GenerationInputPrepareError::AssetRead {
                     asset_id: asset.id.as_str().to_owned(),
                     message: format!("image preparation failed: {message}"),
-                })?
+                })?;
+                (prepared.bytes, prepared.timings)
             };
-            let preprocess_elapsed_ms = preprocess_started_at.elapsed().as_millis() as u64;
+            // Include spawn_blocking scheduling/wait in total wall time, but not in the
+            // decode/resize/encode stage timings collected inside the CPU worker.
+            timings.total_ms = elapsed_ms(preprocess_started_at);
             if bytes.len() != original_bytes {
                 tracing::debug!(
                     asset_id = %asset.id,
                     original_bytes,
                     upload_bytes = bytes.len(),
-                    preprocess_elapsed_ms,
+                    preprocess_elapsed_ms = timings.total_ms,
                     "ComfyUI image upload copy downscaled"
                 );
             }
             let upload_name = upload_name_at(task_id, asset, position);
             tracing::debug!(
-                phase = "preflight",
+                phase = "image_preprocess",
                 task_id = %task_id,
                 asset_id = %asset.id,
                 filename = %upload_name,
@@ -592,10 +619,14 @@ impl GenerationInputPreparer {
                 attempt = 1usize,
                 attempt_elapsed_ms = 0u64,
                 total_elapsed_ms = 0u64,
-                preprocess_elapsed_ms,
+                fast_path = timings.fast_path,
+                decode_ms = timings.decode_ms,
+                resize_ms = timings.resize_ms,
+                encode_ms = timings.encode_ms,
+                total_ms = timings.total_ms,
                 http_status = Option::<u16>::None,
                 error_class = "",
-                "preparing ComfyUI image upload without health admission gate"
+                "ComfyUI image preprocessing timings"
             );
             let upload = ComfyImageUpload {
                 bytes,
@@ -701,11 +732,22 @@ fn comfy_error_code(error: &ComfyAdapterError) -> &'static str {
     }
 }
 
-fn prepare_image_bytes_for_comfy(bytes: Vec<u8>, asset: &Asset) -> Result<Vec<u8>, String> {
+fn prepare_image_bytes_for_comfy(
+    bytes: Vec<u8>,
+    asset: &Asset,
+) -> Result<PreparedComfyImageBytes, String> {
+    let total_started_at = Instant::now();
     if asset.width.max(asset.height) <= MAX_COMFY_IMAGE_EDGE
         && bytes.len() <= MAX_COMFY_IMAGE_UPLOAD_BYTES
     {
-        return Ok(bytes);
+        return Ok(PreparedComfyImageBytes {
+            bytes,
+            timings: ImagePreprocessTimings {
+                fast_path: true,
+                total_ms: elapsed_ms(total_started_at),
+                ..ImagePreprocessTimings::default()
+            },
+        });
     }
 
     let format = match asset.mime_type.as_str() {
@@ -714,9 +756,11 @@ fn prepare_image_bytes_for_comfy(bytes: Vec<u8>, asset: &Asset) -> Result<Vec<u8
         "image/webp" => ImageFormat::WebP,
         mime_type => return Err(format!("unsupported image MIME type {mime_type}")),
     };
+    let decode_started_at = Instant::now();
     let image = ImageReader::with_format(Cursor::new(bytes.as_slice()), format)
         .decode()
         .map_err(|error| error.to_string())?;
+    let decode_ms = elapsed_ms(decode_started_at);
     let (width, height) = (image.width(), image.height());
     let mut target_width = width;
     let mut target_height = height;
@@ -726,12 +770,19 @@ fn prepare_image_bytes_for_comfy(bytes: Vec<u8>, asset: &Asset) -> Result<Vec<u8
         target_height = (f64::from(height) * scale).round().max(1.0) as u32;
     }
 
+    let mut resize_ms = 0.0;
     let mut resized = if (target_width, target_height) == (width, height) {
         image
     } else {
-        image.resize_exact(target_width, target_height, FilterType::Lanczos3)
+        let resize_started_at = Instant::now();
+        let resized = image.resize_exact(target_width, target_height, FilterType::Lanczos3);
+        resize_ms += elapsed_ms(resize_started_at);
+        resized
     };
+    let mut encode_ms = 0.0;
+    let encode_started_at = Instant::now();
     let mut encoded = encode_image_for_comfy(&resized, format)?;
+    encode_ms += elapsed_ms(encode_started_at);
     let mut resize_attempt = 0;
     while encoded.len() > MAX_COMFY_IMAGE_UPLOAD_BYTES {
         resize_attempt += 1;
@@ -751,10 +802,23 @@ fn prepare_image_bytes_for_comfy(bytes: Vec<u8>, asset: &Asset) -> Result<Vec<u8
                 MAX_COMFY_IMAGE_UPLOAD_BYTES
             ));
         }
+        let resize_started_at = Instant::now();
         resized = resized.resize_exact(next_width, next_height, FilterType::Lanczos3);
+        resize_ms += elapsed_ms(resize_started_at);
+        let encode_started_at = Instant::now();
         encoded = encode_image_for_comfy(&resized, format)?;
+        encode_ms += elapsed_ms(encode_started_at);
     }
-    Ok(encoded)
+    Ok(PreparedComfyImageBytes {
+        bytes: encoded,
+        timings: ImagePreprocessTimings {
+            fast_path: false,
+            decode_ms,
+            resize_ms,
+            encode_ms,
+            total_ms: elapsed_ms(total_started_at),
+        },
+    })
 }
 
 fn encode_image_for_comfy(
@@ -1083,6 +1147,24 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn safe_image_preserves_bytes_and_reports_fast_path_timings() {
+        let mut source = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 2)
+            .write_to(&mut source, ImageFormat::Png)
+            .expect("test image should encode");
+        let original = source.into_inner();
+        let prepared = prepare_image_bytes_for_comfy(original.clone(), &asset())
+            .expect("safe image should remain unchanged");
+
+        assert_eq!(prepared.bytes, original);
+        assert!(prepared.timings.fast_path);
+        assert_eq!(prepared.timings.decode_ms, 0.0);
+        assert_eq!(prepared.timings.resize_ms, 0.0);
+        assert_eq!(prepared.timings.encode_ms, 0.0);
+        assert!(prepared.timings.total_ms >= 0.0);
+    }
+
     fn video_asset(id: &str, project_id: &str) -> Asset {
         Asset::new_source_video(
             AssetId::parse(id).unwrap(),
@@ -1373,7 +1455,8 @@ mod tests {
         image_asset.height = 1024;
 
         let upload_copy = prepare_image_bytes_for_comfy(original.clone(), &image_asset)
-            .expect("large PNG should be resized");
+            .expect("large PNG should be resized")
+            .bytes;
         let resized = ImageReader::with_format(Cursor::new(upload_copy), ImageFormat::Png)
             .decode()
             .expect("resized image should remain valid");
@@ -1408,7 +1491,8 @@ mod tests {
         image_asset.width = 2048;
         image_asset.height = 2048;
         let upload_copy = prepare_image_bytes_for_comfy(original, &image_asset)
-            .expect("oversized encoded image should be reduced");
+            .expect("oversized encoded image should be reduced")
+            .bytes;
         assert!(upload_copy.len() <= MAX_COMFY_IMAGE_UPLOAD_BYTES);
         let resized = ImageReader::with_format(Cursor::new(upload_copy), ImageFormat::Png)
             .decode()

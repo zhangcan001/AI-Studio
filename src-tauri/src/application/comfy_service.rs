@@ -5,6 +5,7 @@ use crate::application::ports::{
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -82,6 +83,44 @@ pub struct ComfyService {
 pub struct ComfyRuntime {
     handle: Arc<ComfyAdapterHandle>,
     config: StdRwLock<ComfyConnectionConfig>,
+}
+
+fn write_canonical_json(value: &Value, output: &mut Vec<u8>) {
+    match value {
+        Value::Object(object) => {
+            let mut entries = object.iter().collect::<Vec<_>>();
+            entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            output.push(b'{');
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(b',');
+                }
+                serde_json::to_writer(&mut *output, key)
+                    .expect("JSON object keys should always serialize");
+                output.push(b':');
+                write_canonical_json(value, output);
+            }
+            output.push(b'}');
+        }
+        Value::Array(items) => {
+            output.push(b'[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    output.push(b',');
+                }
+                write_canonical_json(item, output);
+            }
+            output.push(b']');
+        }
+        scalar => serde_json::to_writer(output, scalar)
+            .expect("JSON scalar values should always serialize"),
+    }
+}
+
+fn capability_fingerprint(object_info: &Value) -> String {
+    let mut canonical = Vec::new();
+    write_canonical_json(object_info, &mut canonical);
+    format!("{:x}", Sha256::digest(canonical))
 }
 
 impl ComfyRuntime {
@@ -195,7 +234,7 @@ impl ComfyService {
         })?;
         let node_classes = object.keys().cloned().collect::<HashSet<_>>();
         let cache = CapabilityCache {
-            fingerprint: format!("{:x}", Sha256::digest(object_info.to_string().as_bytes())),
+            fingerprint: capability_fingerprint(&object_info),
             node_count: node_classes.len(),
             node_classes,
             captured_at: Utc::now(),
@@ -303,7 +342,7 @@ mod tests {
         SystemStats,
     };
     use async_trait::async_trait;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::sync::Arc;
 
     struct FakeAdapter {
@@ -370,6 +409,23 @@ mod tests {
         }
     }
 
+    async fn fingerprint_for(object_info: Value) -> String {
+        let adapter = FakeAdapter {
+            stats: Err(ComfyAdapterError::Offline("not used".to_owned())),
+            object_info: Ok(object_info),
+        };
+        let service = ComfyService::new(Arc::new(adapter), &ComfyConnectionConfig::default());
+        service
+            .refresh_capabilities()
+            .await
+            .expect("object_info capability refresh should succeed");
+        service
+            .capability_diagnostics()
+            .await
+            .expect("capability fingerprint should be cached")
+            .0
+    }
+
     #[tokio::test]
     async fn refreshes_capability_summary_without_exposing_raw_object_info() {
         let adapter = FakeAdapter {
@@ -403,6 +459,51 @@ mod tests {
             .get("rawObjectInfo")
             .is_none());
         assert!(matches!(status.status, ComfyConnectionStatus::Connected));
+    }
+
+    #[tokio::test]
+    async fn capability_fingerprint_ignores_object_key_order_recursively() {
+        let first: Value = serde_json::from_str(
+            r#"{"KSampler":{"input":{"required":{"steps":["INT",{"default":20,"min":1}],"cfg":["FLOAT",{"default":8.0}]}}},"LoadImage":{"input":{"required":{"image":["STRING"]}}}}"#,
+        )
+        .unwrap();
+        let reordered: Value = serde_json::from_str(
+            r#"{"LoadImage":{"input":{"required":{"image":["STRING"]}}},"KSampler":{"input":{"required":{"cfg":["FLOAT",{"default":8.0}],"steps":["INT",{"min":1,"default":20}]}}}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fingerprint_for(first).await,
+            fingerprint_for(reordered).await
+        );
+        assert_ne!(
+            fingerprint_for(json!({"EnumNode": {"choices": ["first", "second"]}})).await,
+            fingerprint_for(json!({"EnumNode": {"choices": ["second", "first"]}})).await,
+            "schema arrays preserve order"
+        );
+    }
+
+    #[tokio::test]
+    async fn capability_fingerprint_changes_when_node_classes_are_added_or_removed() {
+        let base = json!({"KSampler": {}, "LoadImage": {}});
+        let added = json!({"KSampler": {}, "LoadImage": {}, "SaveVideo": {}});
+        let removed = json!({"KSampler": {}});
+
+        let base_fingerprint = fingerprint_for(base).await;
+        assert_ne!(base_fingerprint, fingerprint_for(added).await);
+        assert_ne!(base_fingerprint, fingerprint_for(removed).await);
+    }
+
+    #[tokio::test]
+    async fn capability_fingerprint_changes_when_node_schema_changes() {
+        let before = json!({
+            "KSampler": {"input": {"required": {"steps": ["INT", {"default": 20}]}}}
+        });
+        let after = json!({
+            "KSampler": {"input": {"required": {"steps": ["INT", {"default": 22}]}}}
+        });
+
+        assert_ne!(fingerprint_for(before).await, fingerprint_for(after).await);
     }
 
     #[tokio::test]

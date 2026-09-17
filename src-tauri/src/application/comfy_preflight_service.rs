@@ -134,18 +134,10 @@ impl ComfyPreflightService {
             if let Some((schema_fingerprint, hyperstep_present)) =
                 self.comfy_service.capability_diagnostics().await
             {
-                use sha2::{Digest, Sha256};
-                report.environment_fingerprint = Some(format!(
-                    "{:x}",
-                    Sha256::digest(
-                        format!(
-                            "{}\n{}\n{}",
-                            report.endpoint,
-                            report.comfyui_version.as_deref().unwrap_or("UNKNOWN"),
-                            schema_fingerprint
-                        )
-                        .as_bytes()
-                    )
+                report.environment_fingerprint = Some(environment_fingerprint(
+                    &report.endpoint,
+                    report.comfyui_version.as_deref(),
+                    &schema_fingerprint,
                 ));
                 let previous = self.report_cache.read().await.clone();
                 append_compatibility_advice(&mut report, previous.as_ref(), hyperstep_present);
@@ -185,6 +177,22 @@ fn append_compatibility_advice(
             report.status = ComfyPreflightStatus::Warning;
         }
     }
+}
+
+fn environment_fingerprint(
+    endpoint: &str,
+    comfyui_version: Option<&str>,
+    schema_fingerprint: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+
+    let input = format!(
+        "{}\n{}\n{}",
+        endpoint,
+        comfyui_version.unwrap_or("UNKNOWN"),
+        schema_fingerprint
+    );
+    format!("{:x}", Sha256::digest(input.as_bytes()))
 }
 
 fn compose_report(
@@ -639,6 +647,21 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.severity == ComfyPreflightIssueSeverity::Error));
+    }
+
+    #[test]
+    fn environment_fingerprint_changes_when_endpoint_or_comfy_version_changes() {
+        let baseline =
+            super::environment_fingerprint("http://127.0.0.1:8188", Some("0.35.0"), "schema-hash");
+
+        assert_ne!(
+            baseline,
+            super::environment_fingerprint("http://127.0.0.1:8189", Some("0.35.0"), "schema-hash",)
+        );
+        assert_ne!(
+            baseline,
+            super::environment_fingerprint("http://127.0.0.1:8188", Some("0.36.0"), "schema-hash",)
+        );
     }
 
     #[test]
