@@ -45,6 +45,8 @@ export interface ComfyPreflightWorkflowSummary {
 }
 
 export interface ComfyPreflightReport {
+  /** Public runtime/schema fingerprint, not proof of plugin compatibility. */
+  environmentFingerprint?: string | null;
   endpoint: string;
   status: ComfyPreflightStatus;
   checkedAt: string;

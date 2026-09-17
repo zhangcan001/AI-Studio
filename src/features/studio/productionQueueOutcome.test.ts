@@ -10,7 +10,7 @@ describe("productionBatchOutcomeLabel", () => {
       failed: 1,
       cancelled: 0,
       skipped: 0,
-    })).toBe("处理结束 · 1/1 已处理 · 成功 0 项，失败 1 项");
+    })).toBe("生成失败 · 1/1 已处理 · 成功 0 项，失败 1 项");
   });
 
   it("reports a clean completed batch separately", () => {

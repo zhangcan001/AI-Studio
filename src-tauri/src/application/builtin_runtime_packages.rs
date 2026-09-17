@@ -28,6 +28,18 @@ struct BuiltinPackageIdentity {
 
 const PACKAGES: &[BuiltinPackage] = &[
     BuiltinPackage {
+        directory: "minimax_h3_fl2va_compatible_1_0_0",
+        manifest: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_compatible_1_0_0/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_compatible_1_0_0/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/minimax_h3_fl2va_compatible_1_0_0/workflow_api.json"
+        ),
+    },
+    BuiltinPackage {
         directory: "minimax_h3_fl2va_1_0_0",
         manifest: include_str!("../../runtime_packages/minimax_h3_fl2va_1_0_0/manifest.yaml"),
         recipe: include_str!("../../runtime_packages/minimax_h3_fl2va_1_0_0/recipe.yaml"),
@@ -271,6 +283,33 @@ mod tests {
     use crate::compiler::{BindingValidator, RecipeParser, RecipeValidator, WorkflowValidator};
     use crate::domain::WorkflowDocument;
     use tempfile::tempdir;
+
+    #[test]
+    fn compatible_copy_only_bypasses_hyperstep_and_preserves_original_identity() {
+        let original = PACKAGES
+            .iter()
+            .find(|p| p.directory == "minimax_h3_fl2va_1_0_0")
+            .unwrap();
+        let compatible = PACKAGES
+            .iter()
+            .find(|p| p.directory == "minimax_h3_fl2va_compatible_1_0_0")
+            .unwrap();
+        let mut expected: serde_json::Value = serde_json::from_str(original.workflow).unwrap();
+        let actual: serde_json::Value = serde_json::from_str(compatible.workflow).unwrap();
+        assert_eq!(expected["26"]["class_type"], "NBH3HyperStepSimple");
+        let model = expected["26"]["inputs"]["model"].clone();
+        expected["2"]["inputs"]["model"] = model.clone();
+        expected["23"]["inputs"]["model"] = model;
+        expected.as_object_mut().unwrap().remove("26");
+        assert_eq!(actual, expected);
+        assert_ne!(
+            WorkflowManifest::parse(original.manifest).unwrap().id,
+            WorkflowManifest::parse(compatible.manifest).unwrap().id
+        );
+        assert!(compatible.recipe.contains("duration_seconds:"));
+        assert!(compatible.recipe.contains("first_frame:"));
+        assert!(compatible.recipe.contains("last_frame:"));
+    }
 
     #[test]
     fn installs_missing_h3_packages_without_overwriting_existing_directory() {

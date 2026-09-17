@@ -161,6 +161,126 @@ mod tests {
         pool.close().await;
     }
 
+    #[tokio::test]
+    async fn compatibility_failure_preserves_pending_items_and_other_batches() {
+        use crate::application::ports::TaskRepository;
+        use crate::domain::{Task, TaskError, TaskStatus};
+        let directory = tempdir().unwrap();
+        let pool = initialize(&directory.path().join("compatibility.db"))
+            .await
+            .unwrap();
+        test_support::seed_task_dependencies(&pool).await;
+        let repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
+        let tasks = SqliteTaskRepository::new(pool.clone());
+        let now = Utc::now();
+        let mut task = Task::new(
+            "project-1",
+            "workflow-1",
+            "workflow-version-1",
+            "recipe-1",
+            now,
+        );
+        tasks.create(&task, &task.created_event()).await.unwrap();
+        let event = task.fail(TaskError {
+            code: "EXECUTION_ERROR".to_owned(),
+            message: "FinalLayer.forward() missing 3 required positional arguments: 'sigma', 'sample_sigmas', and 'shifts'".to_owned(),
+            raw: None,
+        }, now).unwrap();
+        tasks
+            .persist_transition(&task, &event, TaskStatus::Created)
+            .await
+            .unwrap();
+        let batch_id = ProductionBatchId::new();
+        let mut active = item(
+            &batch_id,
+            0,
+            ProductionBatchItemStatus::Dispatched,
+            None,
+            None,
+        );
+        active.task_id = Some(task.id.as_str().to_owned());
+        let pending = item(&batch_id, 1, ProductionBatchItemStatus::Pending, None, None);
+        let batch = ProductionBatch {
+            id: batch_id.clone(),
+            project_id: "project-1".to_owned(),
+            name: "Compatibility".to_owned(),
+            status: ProductionBatchStatus::Ready,
+            continue_on_failure: true,
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        repository.insert(&batch, &[active, pending]).await.unwrap();
+        let unrelated_id = ProductionBatchId::new();
+        let unrelated = ProductionBatch {
+            id: unrelated_id.clone(),
+            ..batch.clone()
+        };
+        repository
+            .insert(
+                &unrelated,
+                &[item(
+                    &unrelated_id,
+                    0,
+                    ProductionBatchItemStatus::Pending,
+                    None,
+                    None,
+                )],
+            )
+            .await
+            .unwrap();
+        // Seed RUNNING after admission, then drive the real service through its
+        // startup recovery path. No ComfyUI request is needed for a terminal task.
+        repository
+            .set_batch_status("project-1", &batch_id, ProductionBatchStatus::Running, now)
+            .await
+            .unwrap();
+        let queue = Arc::new(build_queue(&pool, repository.clone()));
+        queue.recover_and_resume().await.unwrap();
+        let detail = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let detail = repository
+                    .find_detail("project-1", &batch_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if detail.batch.status == ProductionBatchStatus::Paused {
+                    break detail;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("queue must pause without dispatching pending work");
+        assert_eq!(detail.items[0].status, ProductionBatchItemStatus::Failed);
+        assert_eq!(
+            detail.items[0].error_code.as_deref(),
+            Some("COMFY_NODE_INCOMPATIBLE")
+        );
+        assert_eq!(detail.items[1].status, ProductionBatchItemStatus::Pending);
+        assert!(detail.items[1].task_id.is_none());
+        assert!(detail.items[1].error_code.is_none());
+        let other = repository
+            .find_detail("project-1", &unrelated_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(other.batch.status, ProductionBatchStatus::Ready);
+        assert_eq!(other.items[0].status, ProductionBatchItemStatus::Pending);
+        assert_eq!(
+            tasks
+                .find_by_id(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .error
+                .unwrap()
+                .code,
+            "EXECUTION_ERROR",
+            "legacy task evidence must not be rewritten"
+        );
+    }
+
     fn build_queue(
         pool: &sqlx::SqlitePool,
         repository: Arc<SqliteProductionQueueRepository>,

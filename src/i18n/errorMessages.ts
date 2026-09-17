@@ -68,6 +68,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   QUEUE_RUNTIME_CAPABILITY_INVALID: "无法启动生产队列：ComfyUI 能力检查未通过。",
   QUEUE_RUNTIME_UNAVAILABLE: "无法启动生产队列：引用的运行时不可用。",
   QUEUE_RUNTIME_DISABLED: "无法启动生产队列：引用的运行时已停用。",
+  COMFY_NODE_INCOMPATIBLE: "H3 工作流节点与当前 ComfyUI 接口不兼容，本次没有生成结果。可选择“MiniMax H3 兼容版（无 HyperStep）”并新建生产任务；若修复原插件，可重试原失败项。",
   EXECUTION_ERROR: "生成执行失败，请查看任务详情中的技术信息。",
   EXECUTION_INTERRUPTED: "生成任务已被中断。",
   TASK_DOMAIN_ERROR: "任务状态操作失败，请查看技术详情。",
@@ -264,10 +265,20 @@ function runtimeAdmissionMessage(error: unknown, code: string | undefined, techn
   return base;
 }
 
+/** Recognize legacy records without rewriting historical errors. */
+export function isComfyNodeIncompatible(code?: string | null, message?: string | null): boolean {
+  return code === "COMFY_NODE_INCOMPATIBLE" || (
+    code === "EXECUTION_ERROR" && Boolean(message?.includes("FinalLayer.forward()")
+      && message.includes("missing 3 required positional arguments")
+      && ["sigma", "sample_sigmas", "shifts"].every((part) => message.includes(part)))
+  );
+}
+
 export function formatUiError(error: unknown): UiError {
   const technicalMessage = rawErrorMessage(error);
   const code = errorCode(error, technicalMessage);
-  const message = runtimeAdmissionMessage(error, code, technicalMessage)
+  const message = (isComfyNodeIncompatible(code, technicalMessage) ? ERROR_MESSAGES.COMFY_NODE_INCOMPATIBLE : undefined)
+    ?? runtimeAdmissionMessage(error, code, technicalMessage)
     ?? ((code && ERROR_MESSAGES[code]) ?? "操作失败，请查看技术详情。");
   return { message, code, technicalMessage };
 }

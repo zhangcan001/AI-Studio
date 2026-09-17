@@ -5,6 +5,7 @@ use crate::application::ports::{
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     sync::{Arc, RwLock as StdRwLock},
@@ -41,6 +42,7 @@ pub struct CapabilitySummary {
 
 #[derive(Debug)]
 pub struct CapabilityCache {
+    pub fingerprint: String,
     pub node_count: usize,
     pub node_classes: HashSet<String>,
     pub captured_at: DateTime<Utc>,
@@ -193,6 +195,7 @@ impl ComfyService {
         })?;
         let node_classes = object.keys().cloned().collect::<HashSet<_>>();
         let cache = CapabilityCache {
+            fingerprint: format!("{:x}", Sha256::digest(object_info.to_string().as_bytes())),
             node_count: node_classes.len(),
             node_classes,
             captured_at: Utc::now(),
@@ -208,6 +211,19 @@ impl ComfyService {
         );
 
         Ok(summary)
+    }
+
+    /// Observable public schema only; not proof of internal plugin compatibility.
+    pub async fn capability_diagnostics(&self) -> Option<(String, bool)> {
+        self.capability_cache.read().await.as_ref().map(|cache| {
+            (
+                cache.fingerprint.clone(),
+                cache
+                    .node_classes
+                    .iter()
+                    .any(|name| matches!(name.as_str(), "NBH3HyperStepSimple" | "NBH3HyperStep")),
+            )
+        })
     }
 
     async fn cached_capability(&self) -> Option<CapabilitySummary> {

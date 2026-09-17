@@ -65,6 +65,8 @@ pub struct ComfyPreflightWorkflowSummary {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComfyPreflightReport {
+    /// Session diagnostic, not a persisted certification of plugin internals.
+    pub environment_fingerprint: Option<String>,
     pub endpoint: String,
     pub status: ComfyPreflightStatus,
     pub checked_at: String,
@@ -120,7 +122,7 @@ impl ComfyPreflightService {
             Err(error) => (None, Some((error.code().to_owned(), error.to_string()))),
         };
 
-        let report = compose_report(
+        let mut report = compose_report(
             comfy_status,
             activity,
             node_count,
@@ -128,6 +130,27 @@ impl ComfyPreflightService {
             workspace,
             workspace_error,
         );
+        if report.node_count.is_some() {
+            if let Some((schema_fingerprint, hyperstep_present)) =
+                self.comfy_service.capability_diagnostics().await
+            {
+                use sha2::{Digest, Sha256};
+                report.environment_fingerprint = Some(format!(
+                    "{:x}",
+                    Sha256::digest(
+                        format!(
+                            "{}\n{}\n{}",
+                            report.endpoint,
+                            report.comfyui_version.as_deref().unwrap_or("UNKNOWN"),
+                            schema_fingerprint
+                        )
+                        .as_bytes()
+                    )
+                ));
+                let previous = self.report_cache.read().await.clone();
+                append_compatibility_advice(&mut report, previous.as_ref(), hyperstep_present);
+            }
+        }
         *self.report_cache.write().await = Some(report.clone());
         Ok(report)
     }
@@ -135,6 +158,32 @@ impl ComfyPreflightService {
     /// Return the last preflight report without refreshing ComfyUI capabilities.
     pub async fn cached_current(&self) -> Option<ComfyPreflightReport> {
         self.report_cache.read().await.clone()
+    }
+}
+
+fn append_compatibility_advice(
+    report: &mut ComfyPreflightReport,
+    previous: Option<&ComfyPreflightReport>,
+    hyperstep_present: bool,
+) {
+    let changed = previous
+        .and_then(|old| old.environment_fingerprint.as_ref())
+        .zip(report.environment_fingerprint.as_ref())
+        .is_some_and(|(old, current)| old != current);
+    if changed || hyperstep_present {
+        report.issues.push(ComfyPreflightIssue {
+            severity: ComfyPreflightIssueSeverity::Warning,
+            code: if changed { "COMFY_ENVIRONMENT_CHANGED" } else { "COMFY_PLUGIN_COMPATIBILITY_UNVERIFIED" }.to_owned(),
+            title: if changed { "运行环境已变化，请先验证首项" } else { "H3 加速插件内部兼容性尚未验证" }.to_owned(),
+            detail: "节点存在不代表内部 Python 接口兼容。环境指纹仅覆盖地址、ComfyUI 版本与公开节点结构，不能证明插件版本或模型实现兼容。".to_owned(),
+            workflow_id: None,
+            workflow_version_id: None,
+            missing_nodes: None,
+            suggested_action: Some("优先使用已验证的兼容工作流。现有队列逐项执行；首项出现已知接口不兼容时暂停，未执行项保持等待。修复后手动继续，不自动更新插件。".to_owned()),
+        });
+        if report.status == ComfyPreflightStatus::Ready {
+            report.status = ComfyPreflightStatus::Warning;
+        }
     }
 }
 
@@ -199,6 +248,7 @@ fn compose_report(
     );
 
     ComfyPreflightReport {
+        environment_fingerprint: None,
         endpoint: comfy_status.endpoint.clone(),
         status,
         checked_at: Utc::now().to_rfc3339(),
@@ -554,6 +604,41 @@ mod tests {
             items,
             staging: Vec::new(),
         }
+    }
+
+    #[test]
+    fn changed_environment_and_unknown_plugin_are_advisory_not_incompatible() {
+        let mut report = compose_report(
+            status(ComfyConnectionStatus::Connected),
+            RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            },
+            Some(3),
+            None,
+            Some(response(vec![workflow(true, "READY")])),
+            None,
+        );
+        report.environment_fingerprint = Some("before".to_owned());
+        let previous = report.clone();
+        report.environment_fingerprint = Some("after".to_owned());
+        super::append_compatibility_advice(&mut report, Some(&previous), false);
+        assert_eq!(report.status, ComfyPreflightStatus::Warning);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "COMFY_ENVIRONMENT_CHANGED"));
+        assert_eq!(report.workflow_summary.workflow_blocked, 0);
+        report.issues.clear();
+        super::append_compatibility_advice(&mut report, None, true);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "COMFY_PLUGIN_COMPATIBILITY_UNVERIFIED"));
+        assert!(!report
+            .issues
+            .iter()
+            .any(|issue| issue.severity == ComfyPreflightIssueSeverity::Error));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import { isComfyNodeIncompatible, toUserMessage } from "../../i18n/errorMessages";
 import { useEffect, useMemo, useState } from "react";
 import "./ProductionMonitor.css";
 
@@ -259,6 +260,9 @@ export function ProductionMonitor({
         <SummaryCard label="已跳过" value={model.counts.skipped} />
       </div>
 
+      {model.status === "PAUSED" && model.items.some((item) => item.status === "FAILED" && isComfyNodeIncompatible(item.errorCode, item.errorMessage)) && (
+        <p role="alert">已暂停：工作流与当前 ComfyUI 不兼容，剩余 {model.counts.pending} 项尚未执行。请先修复运行环境或使用兼容工作流，再继续生产；不会自动重试。</p>
+      )}
       <div className="production-monitor-progress-row">
         <div className="production-monitor-progress-copy">
           <span>终态进度</span>
@@ -323,8 +327,8 @@ export function ProductionMonitor({
         <section className="production-monitor-completion" aria-label={hasFailures ? "批次失败处理" : "批次完成操作"}>
           <div>
             <p className="production-monitor-eyebrow">批次已结束</p>
-            <h3>{model.status === "CANCELLED" ? "批次已取消" : hasFailures ? "批次已结束，存在失败项目" : "批次已完成"}</h3>
-            <p>{hasFailures ? `已处理 ${terminal} 项；失败项目需要处理，已完成结果仍可查看。` : `已处理 ${terminal} 项，可继续查看或导出本批次成品。`}</p>
+            <h3>{model.status === "CANCELLED" ? "批次已取消" : hasFailures ? (model.counts.succeeded === 0 ? "生成失败，没有成功结果" : "批次已结束，存在失败项目") : "批次已完成"}</h3>
+            <p>{hasFailures ? `已处理 ${terminal} 项：成功 ${model.counts.succeeded} 项，失败 ${model.counts.failed} 项。失败项目需修复后重试。` : `已处理 ${terminal} 项，可继续查看或导出本批次成品。`}</p>
           </div>
           <div className="production-monitor-completion-actions">
             {model.counts.succeeded > 0 && <ActionButton label="查看已完成成品" action={() => void runAction("view-products", viewAllProducts)} busy={busyAction === "view-products"} />}
@@ -361,7 +365,10 @@ function MonitorItem({ item, busyAction, playable, onRetry, onPlay, onOpenFile }
         {item.status === "FAILED" && (
           <div className="production-monitor-error" role="alert">
             <strong>{item.errorCode ? `错误 ${item.errorCode}` : "错误详情"}</strong>
-            <span>{item.errorMessage ?? "未提供错误详情"}</span>
+            {isComfyNodeIncompatible(item.errorCode, item.errorMessage) ? <>
+              <span>{toUserMessage({ code: item.errorCode, message: item.errorMessage })}</span>
+              <details><summary>查看技术详情</summary><pre>{item.errorMessage}</pre></details>
+            </> : <span>{item.errorMessage ?? "未提供错误详情"}</span>}
             <small>{onRetry ? "失败，需要处理；可点击“重试”创建新的执行尝试，原失败记录会保留。" : "失败，需要处理；请查看错误详情。"}</small>
           </div>
         )}
@@ -379,7 +386,7 @@ function MonitorItem({ item, busyAction, playable, onRetry, onPlay, onOpenFile }
       </div>
       {item.status === "FAILED" && onRetry && (
         <button type="button" className="quiet production-monitor-retry" onClick={onRetry} disabled={Boolean(busyAction)}>
-          {isRetrying ? "重试中…" : "重试"}
+          {isRetrying ? "重试中…" : isComfyNodeIncompatible(item.errorCode, item.errorMessage) ? "修复后重试" : "重试"}
         </button>
       )}
     </li>

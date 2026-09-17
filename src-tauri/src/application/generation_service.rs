@@ -1,5 +1,6 @@
 use crate::application::asset_import_service::{AssetImportError, AssetImportService};
 use crate::application::build_info;
+use crate::application::comfy_execution_failure::execution_error_code;
 use crate::application::generation_input_preparer::{
     image_snapshot_value, images_snapshot_value, media_list_snapshot_value, media_snapshot_value,
     GenerationInputPrepareError, GenerationInputPreparer, GenerationInputValue,
@@ -1056,15 +1057,13 @@ impl GenerationService {
                             .await;
                     }
                     CancelResolution::Failed(error) => {
+                        let code = error.code.clone();
                         let message = error.message.clone();
                         return Err(self
                             .fail_and_preserve(
                                 &mut task,
                                 error,
-                                GenerationServiceError::ExecutionFailed {
-                                    code: "EXECUTION_ERROR".to_owned(),
-                                    message,
-                                },
+                                GenerationServiceError::ExecutionFailed { code, message },
                             )
                             .await);
                     }
@@ -1217,15 +1216,16 @@ impl GenerationService {
                     } else {
                         message
                     };
+                    let code = execution_error_code(&message);
                     let original = GenerationServiceError::ExecutionFailed {
-                        code: "EXECUTION_ERROR".to_owned(),
+                        code: code.to_owned(),
                         message: message.clone(),
                     };
                     return Err(self
                         .fail_and_preserve(
                             &mut task,
                             TaskError {
-                                code: "EXECUTION_ERROR".to_owned(),
+                                code: code.to_owned(),
                                 message,
                                 raw: Some(raw),
                             },
@@ -1636,7 +1636,15 @@ fn history_error(history: &ComfyHistory) -> TaskError {
         code: if interrupted {
             "EXECUTION_INTERRUPTED".to_owned()
         } else {
-            "EXECUTION_ERROR".to_owned()
+            execution_error_code(
+                &history
+                    .status
+                    .messages
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            )
+            .to_owned()
         },
         message: history
             .status
@@ -2149,6 +2157,23 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn history_signature_failure_keeps_compatibility_code_and_raw_evidence() {
+        let raw = serde_json::json!([["execution_error", {"exception_message": "FinalLayer.forward() missing 3 required positional arguments: 'sigma', 'sample_sigmas', and 'shifts'"}]]);
+        let history = crate::application::ports::ComfyHistory {
+            prompt_id: "compatibility".to_owned(),
+            status: crate::application::ports::ComfyHistoryStatus {
+                status_str: Some("error".to_owned()),
+                completed: Some(false),
+                messages: Some(raw.clone()),
+            },
+            outputs: Default::default(),
+        };
+        let error = super::history_error(&history);
+        assert_eq!(error.code, "COMFY_NODE_INCOMPATIBLE");
+        assert_eq!(error.raw, Some(raw));
+    }
 
     #[test]
     fn output_failures_are_stable_task_error_codes() {

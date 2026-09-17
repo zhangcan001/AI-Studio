@@ -247,3 +247,10 @@ describe("ProductionQueueDrawer", () => {
     expect(html).not.toContain("请先处理上一批失败项");
   });
 });
+
+it("shows zero successes and failure count for a terminal batch", () => {
+  const html = renderToStaticMarkup(<ProductionQueueDrawer defaultExpanded details={[detail({ status: "COMPLETED", total: 5, pending: 0, running: 0, succeeded: 0, failed: 5, items: [] })]} />);
+  expect(html).toContain("生成失败");
+  expect(html).toContain("成功 0 项，失败 5 项");
+  expect(html).not.toContain("全部生成成功");
+});

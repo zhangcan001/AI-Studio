@@ -19,5 +19,6 @@ export function productionBatchOutcomeLabel(
   if (detail.failed > 0) counts.push(`失败 ${detail.failed} 项`);
   if (detail.cancelled > 0) counts.push(`取消 ${detail.cancelled} 项`);
   if (detail.skipped > 0) counts.push(`跳过 ${detail.skipped} 项`);
-  return `处理结束 · ${processed}/${detail.total} 已处理 · ${counts.join("，")}`;
+  const label = detail.failed > 0 && detail.succeeded === 0 ? "生成失败" : "处理结束";
+  return `${label} · ${processed}/${detail.total} 已处理 · ${counts.join("，")}`;
 }

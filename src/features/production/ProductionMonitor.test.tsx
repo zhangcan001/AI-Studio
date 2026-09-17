@@ -179,7 +179,7 @@ describe("ProductionMonitor", () => {
     );
 
     expect(screen.getByRole("heading", { name: "批次已结束，存在失败项目" })).toBeTruthy();
-    expect(screen.getByText("失败项目需要处理，已完成结果仍可查看。", { exact: false })).toBeTruthy();
+    expect(screen.getByText(/失败项目需修复后重试/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "查看已完成成品" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "打开成品文件夹" })).toBeNull();
     expect(screen.queryByRole("button", { name: "导出成品清单" })).toBeNull();
@@ -194,7 +194,7 @@ describe("ProductionMonitor", () => {
     );
 
     expect(screen.getByText("已结束，有失败项目")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "批次已结束，存在失败项目" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "生成失败，没有成功结果" })).toBeTruthy();
     expect(screen.queryByText("批次状态已完成")).toBeNull();
   });
 
@@ -214,4 +214,20 @@ describe("ProductionMonitor", () => {
     expect(rows[rows.length - 1].getAttribute("data-ordinal")).toBe("500");
     expect((next as HTMLButtonElement).disabled).toBe(true);
   });
+});
+
+const mismatch = "FinalLayer.forward() missing 3 required positional arguments: 'sigma', 'sample_sigmas', and 'shifts'";
+it("explains a compatibility pause without marking pending items failed", () => {
+  render(<ProductionMonitor batch={{status: "PAUSED", items: [item(1, "FAILED", {errorCode: "COMFY_NODE_INCOMPATIBLE", errorMessage: mismatch}), item(2)]}} onRetry={vi.fn()} />);
+  expect(screen.getByText(/剩余 1 项尚未执行/)).toBeTruthy();
+  expect(screen.getByText(/H3 工作流节点与当前 ComfyUI 接口不兼容/)).toBeTruthy();
+  expect(screen.getByText("查看技术详情")).toBeTruthy();
+  expect(screen.getByRole("button", {name: "修复后重试"})).toBeTruthy();
+  expect(screen.queryByRole("heading", {name: "批次已完成"})).toBeNull();
+});
+it("renders old EXECUTION_ERROR signature mismatches with the same guidance", () => {
+  render(<ProductionMonitor batch={{status: "COMPLETED", items: [item(1, "FAILED", {errorCode: "EXECUTION_ERROR", errorMessage: mismatch})]}} />);
+  expect(screen.getByRole("heading", {name: "生成失败，没有成功结果"})).toBeTruthy();
+  expect(screen.getByText(/成功 0 项，失败 1 项/)).toBeTruthy();
+  expect(screen.getByText(/H3 工作流节点与当前 ComfyUI 接口不兼容/)).toBeTruthy();
 });

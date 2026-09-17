@@ -289,6 +289,7 @@ function BatchRow({
           {queued && <span className="production-queue-drawer-sequential-label">等待自动开始 #{queuePosition}</span>}
           <StatusChip status={row.status} />
         </div>
+        {row.status === "COMPLETED" && <p role="status">{row.failed !== undefined && row.failed > 0 && row.succeeded === 0 ? "生成失败" : "处理结束"}：成功 {formatCount(row.succeeded)} 项，失败 {formatCount(row.failed)} 项</p>}
         <div className="production-queue-drawer-row-meta">
           {row.stage && <span>{stageLabel(row.stage)}</span>}
           {row.resolution && <span>{row.resolution}</span>}

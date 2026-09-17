@@ -27,7 +27,7 @@ import type {
 import type { BatchDraftItem } from "./batchDraft";
 import { canCancelPendingProductionQueue, isSafeProductionQueueRequeue } from "./productionQueuePolicy";
 import { productionBatchOutcomeLabel } from "./productionQueueOutcome";
-import { toUserMessage } from "../../i18n/errorMessages";
+import { isComfyNodeIncompatible, toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, productionItemStatusLabel, productionStatusLabel } from "../../i18n/statusLabels";
 import type { ReusableGenerationDraft } from "../../types/history";
 import type { AssetView } from "../../types/asset";
@@ -659,6 +659,9 @@ export function ProductionQueuePanel({
               <small>{detail.id}</small>
             </div>
           </div>
+          {detail.status === "PAUSED" && detail.items.some((item) => item.status === "FAILED" && isComfyNodeIncompatible(item.errorCode, item.errorMessage)) && (
+            <p role="alert">工作流与当前 ComfyUI 不兼容，剩余 {detail.pending} 项尚未执行。修复原插件后可继续；若改用兼容工作流，请新建生产任务，原批次和失败记录保留。</p>
+          )}
           <div className="production-queue-stats">
             <span>总数 <strong>{detail.total}</strong></span>
             <span>待执行 <strong>{detail.pending}</strong></span>

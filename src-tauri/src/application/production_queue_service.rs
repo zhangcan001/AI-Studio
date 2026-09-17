@@ -1,3 +1,4 @@
+use crate::application::comfy_execution_failure::{execution_error_code, NODE_INCOMPATIBLE};
 use crate::application::generation_input_preparer::GenerationInputValue;
 use crate::application::generation_service::{
     CreateGenerationRequest, GenerationService, GenerationServiceError, NewGenerationAdmission,
@@ -1149,6 +1150,16 @@ impl ProductionQueueService {
                 self.repository
                     .finish_item(&record.item.id, status, code, message, self.clock.now())
                     .await?;
+                if should_pause_after_terminal(status, code, record.batch.continue_on_failure) {
+                    self.repository
+                        .set_batch_status(
+                            &record.batch.project_id,
+                            &record.batch.id,
+                            ProductionBatchStatus::Paused,
+                            self.clock.now(),
+                        )
+                        .await?;
+                }
             }
         }
         active = self.repository.list_active_items().await?;
@@ -1992,6 +2003,7 @@ fn is_safety_blocking_failure(error_code: Option<&str>) -> bool {
         error_code,
         Some(
             "COMFY_OFFLINE"
+                | NODE_INCOMPATIBLE
                 | "COMFY_STREAM_DISCONNECTED"
                 | "SUBMISSION_STATE_UNCERTAIN"
                 | "QUEUE_DISPATCH_UNCERTAIN"
@@ -2004,7 +2016,11 @@ fn normalize_queue_failure_code<'a>(
     code: Option<&'a str>,
     message: Option<&str>,
 ) -> Option<&'a str> {
-    if code == Some("SUBMISSION_STATE_UNCERTAIN")
+    if code == Some("EXECUTION_ERROR")
+        && message.is_some_and(|message| execution_error_code(message) == NODE_INCOMPATIBLE)
+    {
+        Some(NODE_INCOMPATIBLE)
+    } else if code == Some("SUBMISSION_STATE_UNCERTAIN")
         && message.is_some_and(|message| {
             message.contains("COMFY_OFFLINE") || message.contains("ComfyUI is offline")
         })
@@ -2046,6 +2062,9 @@ fn generation_start_error_code(error: &GenerationServiceError) -> &'static str {
         GenerationServiceError::OutputCollection(_) => "OUTPUT_COLLECTION_ERROR",
         GenerationServiceError::AssetImport(_) => "ASSET_IMPORT_ERROR",
         GenerationServiceError::TaskCreatedHook { .. } => "TASK_HOOK_ERROR",
+        GenerationServiceError::ExecutionFailed { code, .. } if code == NODE_INCOMPATIBLE => {
+            NODE_INCOMPATIBLE
+        }
         GenerationServiceError::ExecutionFailed { .. } => "EXECUTION_ERROR",
     }
 }
@@ -2708,6 +2727,20 @@ mod tests {
 
         let error = freeze_random_seed_values(values, &recipe).unwrap_err();
         assert!(error.contains("outside the Recipe range"));
+    }
+
+    #[test]
+    fn known_node_incompatibility_pauses_even_when_ordinary_failures_continue() {
+        assert!(should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("COMFY_NODE_INCOMPATIBLE"),
+            true,
+        ));
+        assert!(!should_pause_after_terminal(
+            ProductionBatchItemStatus::Failed,
+            Some("EXECUTION_ERROR"),
+            true,
+        ));
     }
 
     #[test]

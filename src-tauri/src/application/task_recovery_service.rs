@@ -1,4 +1,5 @@
 use crate::application::asset_import_service::AssetImportService;
+use crate::application::comfy_execution_failure::execution_error_code;
 use crate::application::output_collector::OutputCollector;
 use crate::application::ports::{
     AssetRepository, AssetStore, Clock, ComfyAdapter, ComfyAdapterError, ComfyHistory,
@@ -582,7 +583,15 @@ fn history_error(history: &ComfyHistory) -> TaskError {
         code: if interrupted {
             "EXECUTION_INTERRUPTED".to_owned()
         } else {
-            "EXECUTION_ERROR".to_owned()
+            execution_error_code(
+                &history
+                    .status
+                    .messages
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            )
+            .to_owned()
         },
         message: history
             .status
@@ -1114,6 +1123,23 @@ outputs:
         )
         .unwrap();
         repository.insert_many(&[asset]).await.unwrap();
+    }
+
+    #[test]
+    fn history_signature_failure_keeps_compatibility_code_and_raw_evidence() {
+        let raw = serde_json::json!([["execution_error", {"exception_message": "FinalLayer.forward() missing 3 required positional arguments: 'sigma', 'sample_sigmas', and 'shifts'"}]]);
+        let history = crate::application::ports::ComfyHistory {
+            prompt_id: "compatibility".to_owned(),
+            status: crate::application::ports::ComfyHistoryStatus {
+                status_str: Some("error".to_owned()),
+                completed: Some(false),
+                messages: Some(raw.clone()),
+            },
+            outputs: Default::default(),
+        };
+        let error = super::history_error(&history);
+        assert_eq!(error.code, "COMFY_NODE_INCOMPATIBLE");
+        assert_eq!(error.raw, Some(raw));
     }
 
     #[tokio::test]

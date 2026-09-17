@@ -10,6 +10,7 @@ pub mod build_info;
 pub mod builtin_runtime_packages;
 #[cfg(test)]
 mod cancellation_e2e;
+mod comfy_execution_failure;
 pub mod comfy_memory_service;
 pub mod comfy_preflight_service;
 pub mod comfy_service;

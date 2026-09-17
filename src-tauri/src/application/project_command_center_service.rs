@@ -2186,6 +2186,7 @@ mod tests {
         view.shots.total = 1;
         view.shots.completed = 1;
         view.comfy.preflight = Some(ComfyPreflightReport {
+            environment_fingerprint: None,
             endpoint: "http://cached".to_owned(),
             status: ComfyPreflightStatus::Blocked,
             checked_at: NOW.to_owned(),
