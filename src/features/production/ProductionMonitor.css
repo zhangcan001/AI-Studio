@@ -85,6 +85,12 @@
 .production-monitor-retry { padding: 7px 10px; color: var(--monitor-muted); border-color: var(--monitor-border); background: var(--monitor-surface); font-size: .78rem; }
 .production-monitor .quiet:hover { color: var(--monitor-text); border-color: var(--monitor-accent); }
 .production-monitor-retry { align-self: center; color: var(--monitor-danger); }
+.production-monitor-task-context { margin: 7px 0 0; color: var(--monitor-muted); font-size: .75rem; overflow-wrap: anywhere; }
+.production-artifact-list { display: grid; gap: 12px; margin-top: 14px; }
+.production-artifact-card { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--monitor-border); border-radius: 10px; background: rgba(0, 0, 0, .12); }
+.production-artifact-card-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.production-artifact-card-heading strong { overflow-wrap: anywhere; }
+.production-monitor-loading { margin: 0 0 10px; color: var(--monitor-muted); font-size: .8rem; }
 
 .production-monitor-footer { justify-content: space-between; gap: 15px; margin-top: 15px; color: var(--monitor-muted); font-size: .76rem; }
 .production-monitor-pagination { display: flex; gap: 7px; }

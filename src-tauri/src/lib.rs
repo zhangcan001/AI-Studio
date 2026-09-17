@@ -9,27 +9,28 @@ pub mod infrastructure;
 pub use application::ports::{
     AssetDeletionRepository, AssetRepository, AssetStore, AssetUsageRepository,
     AssetVideoPromptRepository, Clock, GenerationDefinitionRepository,
-    GenerationSnapshotRepository, ModelRepository, ProductionItemReviewRepository,
-    ProductionQueueRepository, ProjectBackupRepository, ProjectRecord, ProjectRepository,
-    ProjectWorkflowBindingRecord, ProjectWorkflowBindingRepository, ProvenanceLineageRepository,
-    RecipeHistoryQueryRepository, RepositoryError, TaskOutputAssetMapping, TaskRepository,
-    ToolRepository, WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository,
-    WorkflowRunRepository, WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+    GenerationSnapshotRepository, ModelRepository, ProductionQueueRepository,
+    ProjectBackupRepository, ProjectRecord, ProjectRepository, ProjectWorkflowBindingRecord,
+    ProjectWorkflowBindingRepository, ProvenanceLineageRepository, RecipeHistoryQueryRepository,
+    RepositoryError, TaskOutputAssetMapping, TaskRepository, ToolRepository,
+    WorkflowLibraryRepository, WorkflowRecipeRuntimeStateRepository, WorkflowRunRepository,
+    WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
 };
 pub use error::{AppError, AppErrorCode};
 pub use infrastructure::database::{
-    initialize, SqliteAssetDeletionRepository, SqliteAssetRepository,
+    initialize, SqliteArtifactRepository, SqliteAssetDeletionRepository, SqliteAssetRepository,
     SqliteAssetVideoPromptRepository, SqliteExternalProductionHandoffRepository,
     SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
     SqliteModelRepository, SqliteOrganizationRepository, SqlitePresetRepository,
-    SqliteProductionItemReviewRepository, SqliteProductionQueueRepository,
-    SqliteProjectBackupRepository, SqliteProjectRepository, SqliteProjectWorkflowBindingRepository,
-    SqlitePromptLibraryRepository, SqliteProvenanceLineageRepository, SqliteTaskRepository,
-    SqliteToolRepository, SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
+    SqliteProductionQueueRepository, SqliteProjectBackupRepository, SqliteProjectRepository,
+    SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository,
+    SqliteProvenanceLineageRepository, SqliteTaskRepository, SqliteToolRepository,
+    SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
 };
 
 use app_state::AppState;
 use application::{
+    artifact_service::ArtifactService,
     asset_data_service::AssetDataService,
     asset_deletion_service::AssetDeletionService,
     asset_library_service::AssetLibraryService,
@@ -55,7 +56,6 @@ use application::{
     preset_service::PresetService,
     production_audit_service::ProductionAuditService,
     production_batch_runbook_service::ProductionBatchRunbookService,
-    production_item_review_service::ProductionItemReviewService,
     production_orchestrator_service::ProductionOrchestratorService,
     production_package_inspector::ProductionPackageInspector,
     production_package_service::{ProductionPackageH3Config, ProductionPackageService},
@@ -335,10 +335,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             );
             let production_queue_repository: Arc<dyn application::ports::ProductionQueueRepository> =
                 production_queue_repository_impl.clone();
-            let production_item_review_repository: Arc<dyn application::ports::ProductionItemReviewRepository> =
-                Arc::new(infrastructure::database::SqliteProductionItemReviewRepository::new(
-                    database_pool.clone(),
-                ));
+            let artifact_repository: Arc<dyn application::ports::ArtifactRepository> = Arc::new(
+                infrastructure::database::SqliteArtifactRepository::new(database_pool.clone()),
+            );
             let shot_batch_repository: Arc<dyn application::ports::ShotBatchRepository> =
                 production_queue_repository_impl.clone();
             let project_directory_store: Arc<dyn application::ports::ProjectDirectoryStore> =
@@ -700,17 +699,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 comfy_service.clone(),
                 workflow_lifecycle_service.clone(),
             ));
-            let production_item_review_service = Arc::new(
-                ProductionItemReviewService::new_with_shot_batch_repository(
-                    production_item_review_repository,
-                    production_queue_repository,
-                    production_queue_service.clone(),
-                    task_repository.clone(),
-                    asset_repository.clone(),
-                    shot_batch_repository.clone(),
-                    clock.clone(),
-                ),
-            );
+            let artifact_service = Arc::new(ArtifactService::new(
+                artifact_repository,
+                project_repository.clone(),
+                task_repository.clone(),
+                production_queue_service.clone(),
+                clock.clone(),
+            ));
             let production_audit_service = Arc::new(ProductionAuditService::new(Arc::new(
                 database::SqliteProductionAuditRepository::new(database_pool.clone()),
             )));
@@ -990,7 +985,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 project_template_service,
                 production_queue_service,
                 production_start_admission_service,
-                production_item_review_service,
+                artifact_service,
                 production_audit_service,
                 diagnostics_service,
                 comfy_preflight_service,
@@ -1236,15 +1231,12 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::production_queue::production_queue_requeue_item_by_item,
             commands::production_queue::production_queue_partial_resume_plan,
             commands::production_queue::production_queue_partial_resume,
-            commands::production_item_review::production_item_review_get,
-            commands::production_item_review::production_item_review_inbox_get,
-            commands::production_item_review::production_item_review_productivity_get,
-            commands::production_item_review::production_item_review_reveal_asset,
-            commands::production_item_review::production_item_review_open_output_folder,
-            commands::production_item_review::production_item_review_set_status,
-            commands::production_item_review::production_item_review_set_note,
-            commands::production_item_review::production_item_review_regenerate,
-            commands::production_item_review::production_item_review_regenerate_marked,
+            commands::artifact::production_batch_artifacts_get,
+            commands::artifact::artifact_review_queue_get,
+            commands::artifact::artifact_open,
+            commands::artifact::artifact_reveal,
+            commands::artifact::artifact_review_submit,
+            commands::artifact::artifact_review_reset,
             commands::production_audit::production_audit_summary,
             commands::production_audit::production_audit_recent_activity,
             commands::production_audit::production_audit_lineage,

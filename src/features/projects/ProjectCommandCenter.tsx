@@ -18,7 +18,7 @@ import type {
 } from "../../types/projectCommandCenter";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { formatDateTime, formatFileSize, projectDisplayName } from "../../i18n/statusLabels";
-import { deriveShotStatus } from "../shots/shotDomain";
+import { deriveShotStatus, deriveStageStatus } from "../shots/shotDomain";
 import { shotProgressSummary, type ShotProgressSummary } from "../shots/shotBatchDomain";
 import { ProjectImportDryRunWorkspace } from "./ProjectImportDryRunWorkspace";
 import { ProductionReviewInbox } from "../production/ProductionReviewInbox";
@@ -310,9 +310,10 @@ export function ProjectCommandCenterView({
   const displayActivity = aggregate?.recentActivity ?? activity;
   const hasSnapshot = Boolean(aggregate || summary || integrity || preflight || displayActivity.length || shots.length || structure);
   const action = aggregate ? recommendedActionFromAggregate(aggregate.recommendedAction, aggregate) : recommendedAction(derived);
-  const reviewCount = aggregate
-    ? aggregate.shots.imageReview + aggregate.shots.videoReview + aggregate.queue.reviewRequiredItems
-    : derived.production.reviewRequired + derived.progress.pendingVideoReview;
+  const candidateCount = aggregate
+    ? aggregate.shots.imageReview + aggregate.shots.videoReview
+    : shots.filter((shot) => deriveStageStatus(shot, "image") === "IMAGE_REVIEW" || deriveStageStatus(shot, "video") === "VIDEO_REVIEW").length;
+  const queueNeedsAttention = aggregate?.queue.reviewRequiredItems ?? derived.production.reviewRequired;
   const issueCount = derived.issues.filter((issue) => issue.severity !== "INFO").length;
   const errorCount = derived.issues.filter((issue) => issue.severity === "ERROR").length;
   const busyNow = busy || refreshBusy || preflightBusy || loading;
@@ -402,9 +403,9 @@ export function ProjectCommandCenterView({
               <span>{derived.progress.percent}% 已完成</span>
               <small>{derived.content.shots} 个镜头</small>
             </SummaryCard>
-            <SummaryCard label="待审核" title={`${reviewCount} 项`} tone={reviewCount ? "warning" : undefined}>
+            <SummaryCard label="镜头候选待确认" title={`${candidateCount} 项`} tone={candidateCount ? "warning" : undefined}>
               <span>{aggregate ? `${aggregate.shots.imageReview} 个图片 · ${aggregate.shots.videoReview} 个视频` : "人工检查"}</span>
-              <small>{derived.production.reviewRequired} 个生产项待处理</small>
+              <small>队列另有 {queueNeedsAttention} 个生产项需处理；产物审核见下方审核队列</small>
             </SummaryCard>
             <SummaryCard label="需要处理" title={`${issueCount} 项`} tone={issueCount ? "warning" : undefined}>
               <span>{errorCount} 个阻塞 · {Math.max(0, issueCount - errorCount)} 个提醒</span>
@@ -643,8 +644,8 @@ function recommendedActionFromAggregate(
     REVIEW_REQUIRED: { label: "处理失败项", detail: "有失败或不可自动恢复的生产项需要人工处理。", destination: "shots", section: "production" },
     AUTO_RESUMABLE: { label: "恢复并开始生产", detail: "有可自动恢复的生产项；恢复动作会创建新尝试并开始生产。", destination: "shots", section: "production" },
     ACTIVE_PRODUCTION: { label: "查看运行进度", detail: "项目仍有任务或生产批次运行中，先确认当前进度。", destination: "shots", section: "production" },
-    IMAGE_REVIEW: { label: "处理图片审核", detail: "有关键帧候选待审核，需要人工选择结果。", destination: "shots", section: "review" },
-    VIDEO_REVIEW: { label: "处理视频审核", detail: "有视频候选待审核，需要人工选择结果。", destination: "shots", section: "review" },
+    IMAGE_REVIEW: { label: "确认图片候选", detail: "有关键帧候选待确认，请选择要写入镜头的结果。", destination: "shots", section: "creation" },
+    VIDEO_REVIEW: { label: "确认视频候选", detail: "有视频候选待确认，请选择要写入镜头的结果。", destination: "shots", section: "creation" },
     MISSING_CONFIG: { label: "配置下一镜头", detail: "还有镜头缺少工作流或配方配置。", destination: "shots", section: "creation" },
     UNASSIGNED: { label: "整理项目结构", detail: "还有镜头尚未分配到场景。", destination: "shots", section: "creation" },
     NO_SHOTS: { label: "建立第一个镜头", detail: "项目还没有镜头，从镜头生产工作区建立可追踪的制作单元。", destination: "shots", section: "creation" },
@@ -732,7 +733,7 @@ const DAILY_PRODUCTION_BUCKETS: ReadonlyArray<{
   { key: "needsAttention", label: "需要处理", tone: "attention" },
   { key: "ready", label: "待启动", tone: "ready" },
   { key: "running", label: "运行中", tone: "running" },
-  { key: "review", label: "待审核", tone: "review" },
+  { key: "review", label: "待确认/处理", tone: "review" },
   { key: "completed", label: "已完成", tone: "completed" },
 ];
 
@@ -834,7 +835,7 @@ function DailyProductionBoard({
         </div>
         <small className="project-command-muted">只读派生 · 刷新后以当前事实为准</small>
       </div>
-      <p className="project-command-daily-contract">状态口径：待启动=已准备但未执行 · 运行中=已开始执行 · 待审核=等待人工选择 · 已完成=已有执行结果。</p>
+      <p className="project-command-daily-contract">状态口径：待启动=已准备但未执行 · 运行中=已开始执行 · 待确认/处理=镜头候选待确认或任务需处理 · 已完成=已有执行结果；产物审核使用独立审核队列。</p>
       {board.topAction && <p className="project-command-daily-top">推荐：{board.topAction.reason} · {board.topAction.label}</p>}
       {totalItems === 0 ? (
         <p className="project-command-daily-empty">还没有生产镜头。创建镜头或使用批量导入预检后，这里会显示生产状态。</p>
@@ -932,10 +933,10 @@ function dailyProductionCollectionNavigation(
     return { label: `查看全部失败任务 ${bucket.totalCount}`, request: { destination: "tasks", collectionFilter: { kind: "tasks", status: "FAILED" } } };
   }
   if (bucketKey === "review" && bucket.totalCount === aggregate.shots.imageReview && all(["IMAGE_REVIEW"])) {
-    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "review", collectionFilter: { kind: "shots", status: "IMAGE_REVIEW", stage: "image" } } };
+    return { label: `查看待确认图片候选 ${bucket.totalCount}`, request: { destination: "shots", section: "creation", collectionFilter: { kind: "shots", status: "IMAGE_REVIEW", stage: "image" } } };
   }
   if (bucketKey === "review" && bucket.totalCount === aggregate.shots.videoReview && all(["VIDEO_REVIEW"])) {
-    return { label: `查看全部 ${bucket.totalCount}`, request: { destination: "shots", section: "review", collectionFilter: { kind: "shots", status: "VIDEO_REVIEW", stage: "video" } } };
+    return { label: `查看待确认视频候选 ${bucket.totalCount}`, request: { destination: "shots", section: "creation", collectionFilter: { kind: "shots", status: "VIDEO_REVIEW", stage: "video" } } };
   }
   return undefined;
 }
@@ -950,7 +951,7 @@ function dailyProductionNavigation(item: ProjectCommandCenterDailyProductionItem
       ? "workflows"
       : destination === "assets"
         ? "assets"
-        : bucketKey === "review"
+        : bucketKey === "review" && destination === "tasks"
           ? "review"
           : destination === "tasks"
             ? "production"

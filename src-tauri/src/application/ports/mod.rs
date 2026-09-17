@@ -1,5 +1,6 @@
 //! Application ports are the boundary for infrastructure implementations.
 
+pub mod artifact_repository;
 pub mod asset_browse_repository;
 pub mod asset_deletion_repository;
 pub mod asset_repository;
@@ -18,7 +19,6 @@ pub mod model_repository;
 pub mod organization_repository;
 pub mod preset_repository;
 pub mod production_audit_repository;
-pub mod production_item_review_repository;
 pub mod production_orchestrator_repository;
 pub mod production_queue_repository;
 pub mod production_structure_repository;
@@ -55,6 +55,9 @@ pub mod workflow_runtime_artifact_repository;
 pub mod workflow_runtime_repository;
 pub mod workflow_runtime_state_repository;
 
+pub use artifact_repository::{
+    ArtifactRecord, ArtifactRepository, ArtifactReviewQueueFilter, ArtifactReviewQueuePage,
+};
 pub use asset_browse_repository::{
     AssetBrowseRepository, AssetCategoryFilter, AssetCreatedOrder, AssetLibraryQuery,
     AssetMediaTypeFilter, AssetSourceFilter,
@@ -102,10 +105,6 @@ pub use organization_repository::{
 };
 pub use preset_repository::PresetRepository;
 pub use production_audit_repository::*;
-pub use production_item_review_repository::{
-    ProductionItemReviewRecord, ProductionItemReviewRepository, ProductionReviewInboxItem,
-    ProductionReviewInboxPage,
-};
 pub use production_orchestrator_repository::*;
 pub use production_queue_repository::{ActiveProductionItem, ProductionQueueRepository};
 pub use production_structure_repository::{

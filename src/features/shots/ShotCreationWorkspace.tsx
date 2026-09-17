@@ -65,9 +65,9 @@ const workspaceTabs: Array<{ id: ShotCreationWorkspaceTab; label: string }> = [
 ];
 
 const candidateStatusLabels: Record<ShotCandidateStatus, string> = {
-  ready: "待审核",
+  ready: "待确认",
   selected: "已选择",
-  reviewed: "已审核",
+  reviewed: "已确认",
   failed: "失败",
   generating: "运行中",
   queued: "待执行",
@@ -270,7 +270,7 @@ function AssetContinuitySummary({ references = [], keyframeAsset, candidates, se
 }
 
 function CandidateRailItem({ projectId, candidate, selected, onSelect, disabled }: { projectId: string; candidate: ShotWorkspaceCandidate; selected: boolean; onSelect?: (candidate: ShotWorkspaceCandidate) => void; disabled: boolean }) {
-  const status = candidate.statusLabel ?? (candidate.status ? candidateStatusLabels[candidate.status] : "待审核");
+  const status = candidate.statusLabel ?? (candidate.status ? candidateStatusLabels[candidate.status] : "待确认");
   return (
     <article className={`shot-candidate-rail-item${selected ? " shot-candidate-rail-item-selected" : ""}`}>
       <button type="button" className="shot-candidate-select" onClick={() => onSelect?.(candidate)} disabled={disabled || !onSelect} aria-pressed={selected}>

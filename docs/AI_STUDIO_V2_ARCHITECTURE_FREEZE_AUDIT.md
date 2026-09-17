@@ -5,7 +5,8 @@ VERSION=v2.0.0-personal
 ARCHITECTURE_STATUS=FROZEN
 DATA_MODEL=STABLE
 MIGRATION_STATUS=STABLE
-BACKUP_VERSION=19
+RELEASE_BACKUP_VERSION=19
+CURRENT_BACKUP_VERSION=20
 PROVENANCE=STABLE
 EXECUTION_CONTROL=STABLE
 ```
@@ -24,7 +25,7 @@ generation authority, or alternate asset/result store.
 | Asset Library | Existing `assets` plus AssetVersion, AssetRelation, and explicit provenance extensions | Stable; project isolation and immutable history retained |
 | Prompt Studio | Existing Prompt/PromptVersion plus Model/ModelVersion registry | Stable; no second prompt or generation system |
 | Local Tool Hub | Tool, ToolInstance, ToolVersion, and Capability metadata | Stable; visibility only, no process control |
-| Project Archive | Existing v19 logical ZIP snapshot/export/restore path | Stable; exact ID maps, media integrity checks, and visible UNKNOWN state |
+| Project Archive | v19 release baseline; v20 current additive extension | Stable; exact ID maps, media integrity checks, ArtifactReview preservation, and visible UNKNOWN state |
 | Frontend boundary | Typed Tauri transport and existing feature services | Stable; components do not access SQLite directly |
 | Persistence boundary | Rust repository ports backed by SQLite migrations | Stable; historical Project/Shot/Task/Queue/Review rows preserved |
 
@@ -71,5 +72,6 @@ ARCHITECTURE_FREEZE=PASS
 NO_NEW_DOMAIN_AUTHORITY=PASS
 QUEUE_AUTHORITY=PASS
 MIGRATION_COMPATIBILITY_BOUNDARY=PASS
-ARCHIVE_CONTRACT=BACKUP_V19_STABLE
+RELEASE_ARCHIVE_BASELINE=BACKUP_V19_STABLE
+CURRENT_ARCHIVE_CONTRACT=BACKUP_V20_ARTIFACT_REVIEW
 ```

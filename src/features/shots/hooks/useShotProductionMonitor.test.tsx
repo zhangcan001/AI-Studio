@@ -2,13 +2,13 @@
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProductionBatchReviewProductivity } from "../../../services/tauriClient";
+import type { ProductionBatchArtifactsDto } from "../../../types/artifact";
 import type { ProductionBatchDetail } from "../../../types/productionQueue";
 import { useShotProductionMonitor } from "./useShotProductionMonitor";
 
 const mocks = vi.hoisted(() => ({
   getProductionQueue: vi.fn(),
-  getProductionBatchReviewProductivity: vi.fn(),
+  getProductionBatchArtifacts: vi.fn(),
 }));
 
 vi.mock("../../../services/tauriClient", async () => {
@@ -16,7 +16,7 @@ vi.mock("../../../services/tauriClient", async () => {
   return {
     ...actual,
     getProductionQueue: mocks.getProductionQueue,
-    getProductionBatchReviewProductivity: mocks.getProductionBatchReviewProductivity,
+    getProductionBatchArtifacts: mocks.getProductionBatchArtifacts,
   };
 });
 
@@ -40,8 +40,8 @@ function detail(batchId: string, status: ProductionBatchDetail["status"] = "RUNN
   };
 }
 
-function review(batchId: string, status: ProductionBatchDetail["status"] = "RUNNING") {
-  return { batch: detail(batchId, status), total: 1, successCount: status === "COMPLETED" ? 1 : 0, failedCount: 0, unreviewedCount: 0, approvedCount: 0, starredCount: 0, regenerateCount: 0, rejectedCount: 0, items: [] } as ProductionBatchReviewProductivity;
+function artifacts(batchId: string, status: ProductionBatchDetail["status"] = "RUNNING"): ProductionBatchArtifactsDto {
+  return { batchId, batchName: batchId, status, total: 1, pending: status === "RUNNING" ? 1 : 0, running: status === "RUNNING" ? 1 : 0, succeeded: status === "COMPLETED" ? 1 : 0, failed: 0, cancelled: 0, skipped: 0, items: [] };
 }
 
 function Harness({ enabled = true, selectedBatchId = "batch-a" }: { enabled?: boolean; selectedBatchId?: string }) {
@@ -64,7 +64,7 @@ async function flush() {
 beforeEach(() => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   mocks.getProductionQueue.mockImplementation(async (_projectId: string, batchId: string) => detail(batchId));
-  mocks.getProductionBatchReviewProductivity.mockImplementation(async (_projectId: string, batchId: string) => review(batchId));
+  mocks.getProductionBatchArtifacts.mockImplementation(async (_projectId: string, batchId: string) => artifacts(batchId));
 });
 
 afterEach(() => {
@@ -74,11 +74,11 @@ afterEach(() => {
 });
 
 describe("useShotProductionMonitor", () => {
-  it("loads the selected batch and review once", async () => {
+  it("loads the selected batch and typed artifact manifest once", async () => {
     render(<Harness />);
     await flush();
     expect(mocks.getProductionQueue).toHaveBeenCalledWith("project-1", "batch-a");
-    expect(mocks.getProductionBatchReviewProductivity).toHaveBeenCalledWith("project-1", "batch-a");
+    expect(mocks.getProductionBatchArtifacts).toHaveBeenCalledWith("project-1", "batch-a");
     expect(screen.getByTestId("batch").textContent).toBe("batch-a");
   });
 
@@ -100,7 +100,7 @@ describe("useShotProductionMonitor", () => {
       if (batchId === "batch-a") resolveA = resolve as (value: ProductionBatchDetail) => void;
       else resolveB = resolve as (value: ProductionBatchDetail) => void;
     }));
-    mocks.getProductionBatchReviewProductivity.mockImplementation(async (_projectId: string, batchId: string) => review(batchId));
+    mocks.getProductionBatchArtifacts.mockImplementation(async (_projectId: string, batchId: string) => artifacts(batchId));
     const view = render(<Harness selectedBatchId="batch-a" />);
     await flush();
     view.rerender(<Harness selectedBatchId="batch-b" />);
@@ -122,7 +122,7 @@ describe("useShotProductionMonitor", () => {
     vi.useFakeTimers();
     let status: ProductionBatchDetail["status"] = "RUNNING";
     mocks.getProductionQueue.mockImplementation(async (_projectId: string, batchId: string) => detail(batchId, status));
-    mocks.getProductionBatchReviewProductivity.mockImplementation(async (_projectId: string, batchId: string) => review(batchId, status));
+    mocks.getProductionBatchArtifacts.mockImplementation(async (_projectId: string, batchId: string) => artifacts(batchId, status));
     render(<Harness />);
     await flush();
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });

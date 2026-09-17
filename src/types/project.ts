@@ -51,6 +51,7 @@ export interface ProjectBackupPreview {
   toolInstances?: number;
   generationToolUsages?: number;
   generationAssetVersions?: number;
+  artifactReviews?: number;
   missingWorkflows: string[];
   activeTasksExcluded: number;
   warning: string;

@@ -1,3 +1,4 @@
+pub mod artifact_service;
 pub mod asset_data_service;
 pub mod asset_deletion_service;
 pub mod asset_import_service;
@@ -42,7 +43,6 @@ pub mod preset_service;
 pub mod product_runtime_scope;
 pub mod production_audit_service;
 pub mod production_batch_runbook_service;
-pub mod production_item_review_service;
 pub mod production_orchestrator_service;
 pub mod production_package_discovery_service;
 pub mod production_package_inspector;

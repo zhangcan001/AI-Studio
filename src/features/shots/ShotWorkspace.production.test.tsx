@@ -6,8 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductionBatchDetail, ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
 import type { ProductionPackageCreateBatchesResult, ProductionPackageInspectionResult } from "../../services/tauriClient";
-import type { ProductionBatchReviewProductivity } from "../../services/tauriClient";
-import type { AssetView } from "../../types/asset";
+import type { ArtifactDto, ProductionBatchArtifactsDto } from "../../types/artifact";
 import type { ProductionPackageBatchBinding } from "../../types/productionPackage";
 import type { ShotView } from "../../types/shot";
 import { buildLocalDeliveryManifest, ProductionModeTabs, ShotWorkspace } from "./ShotWorkspace";
@@ -29,13 +28,11 @@ const mocks = vi.hoisted(() => ({
   listProductionQueues: vi.fn(),
   getProductionAdmissionStatus: vi.fn(),
   getProductionQueue: vi.fn(),
-  getProductionBatchReviewProductivity: vi.fn(),
+  getProductionBatchArtifacts: vi.fn(),
   getProductionQueueOverview: vi.fn(),
   startProductionQueue: vi.fn(),
   pauseProductionQueue: vi.fn(),
   requeueProductionQueueItem: vi.fn(),
-  revealProductionReviewAsset: vi.fn(),
-  openProductionReviewOutputFolder: vi.fn(),
 }));
 
 const multiPackageTestKeys = vi.hoisted(() => ({
@@ -64,13 +61,11 @@ vi.mock("../../services/tauriClient", async () => {
     listProductionQueues: mocks.listProductionQueues,
     getProductionAdmissionStatus: mocks.getProductionAdmissionStatus,
     getProductionQueue: mocks.getProductionQueue,
-    getProductionBatchReviewProductivity: mocks.getProductionBatchReviewProductivity,
+    getProductionBatchArtifacts: mocks.getProductionBatchArtifacts,
     getProductionQueueOverview: mocks.getProductionQueueOverview,
     startProductionQueue: mocks.startProductionQueue,
     pauseProductionQueue: mocks.pauseProductionQueue,
     requeueProductionQueueItem: mocks.requeueProductionQueueItem,
-    revealProductionReviewAsset: mocks.revealProductionReviewAsset,
-    openProductionReviewOutputFolder: mocks.openProductionReviewOutputFolder,
   };
 });
 
@@ -142,18 +137,16 @@ vi.mock("../production/ProductionBatchRunbookPanel", () => ({
 
 vi.mock("../production/ProductionMonitor", () => ({
     ProductionMonitor: (props: {
-      batch?: { status?: string; items?: Array<{ assetId?: string }> };
-      onRetryItem?: (itemId: string) => void | Promise<void>;
-      onPlay?: (itemId: string, assetId: string) => void | Promise<void>;
-      onOpenFileLocation?: (itemId: string, filePath?: string) => void | Promise<void>;
+      batch?: ProductionBatchArtifactsDto;
+      onRetry?: (productionItemId: string) => void | Promise<void>;
+      onViewAllProducts?: () => void | Promise<void>;
       onExportManifest?: () => void | Promise<void>;
     }) => (
       <section aria-label="生产监控">
         <strong data-testid="monitor-batch-status">{props.batch?.status ?? "EMPTY"}</strong>
-        <span data-testid="monitor-output-asset-ids">{props.batch?.items?.flatMap((item) => item.assetId ?? []).join(",")}</span>
-        <button type="button" onClick={() => void props.onRetryItem?.("item-1")}>监控项重试</button>
-        <button type="button" onClick={() => void props.onPlay?.("item-1", "asset-success")}>监控资产预览</button>
-        <button type="button" onClick={() => void props.onOpenFileLocation?.("item-1", "D:/AIStudio/outputs/success.mp4")}>监控资产位置</button>
+        <span data-testid="monitor-output-asset-ids">{props.batch?.items.flatMap((item) => item.artifacts.map((artifact) => artifact.id)).join(",")}</span>
+        <button type="button" onClick={() => void props.onRetry?.("item-1")}>监控项重试</button>
+        <button type="button" onClick={() => void props.onViewAllProducts?.()}>监控查看产物</button>
         <button type="button" onClick={() => void props.onExportManifest?.()}>监控导出成品清单</button>
       </section>
     ),
@@ -161,7 +154,6 @@ vi.mock("../production/ProductionMonitor", () => ({
 
 let queues: ProductionBatchSummary[];
 let batchStatus: ProductionBatchDetail["status"] = "READY";
-let review: ProductionBatchReviewProductivity;
 
 const configReadFailureShot: ShotView = {
   id: "shot-config-read-failure",
@@ -179,22 +171,23 @@ const configReadFailureShot: ShotView = {
   generationLinks: [],
 };
 
-const successAsset: AssetView = {
+const successArtifact: ArtifactDto = {
   id: "asset-success",
-  assetType: "video",
-  category: "generated_video",
+  taskId: "task-success",
+  outputId: "output-video",
+  ordinal: 0,
+  mediaType: "video",
   name: "成功视频",
-  originalName: "success.mp4",
   mimeType: "video/mp4",
   width: 960,
   height: 544,
   durationMs: 5000,
-  fileSize: 100,
+  sizeBytes: 100,
+  version: 1,
   createdAt: "2026-08-29T00:00:03Z",
-  sourceTaskId: "task-success",
+  availability: "available",
+  reviewStatus: "PENDING",
   thumbnailAvailable: true,
-  isFavorite: false,
-  tags: [],
 };
 
 const queueOverview: ProductionQueueOverview = {
@@ -337,50 +330,33 @@ function makeBatchDetail(status: ProductionBatchDetail["status"] = batchStatus):
   };
 }
 
-function makeReview(outputAssets: AssetView[] = []): ProductionBatchReviewProductivity {
+function makeArtifactBatch(detail = makeBatchDetail(), outputArtifacts: ArtifactDto[] = []): ProductionBatchArtifactsDto {
   return {
-    batch: makeBatchDetail(batchStatus),
-    total: 1,
-    successCount: outputAssets.length ? 1 : 0,
-    failedCount: 0,
-    unreviewedCount: outputAssets.length ? 1 : 0,
-    approvedCount: 0,
-    starredCount: 0,
-    regenerateCount: 0,
-    rejectedCount: 0,
-    items: [{
-      itemId: "item-1",
-      ordinal: 0,
-      taskId: "task-success",
-      taskStatus: outputAssets.length ? "SUCCEEDED" : batchStatus === "RUNNING" ? "RUNNING" : "PENDING",
-      productionItemStatus: outputAssets.length ? "SUCCEEDED" : batchStatus === "RUNNING" ? "DISPATCHED" : "PENDING",
-      reviewStatus: outputAssets.length ? "UNREVIEWED" : "IN_PROGRESS",
-      reviewNote: "",
-      preferred: true,
-      workflowVersionId: "workflow-1",
-      recipeId: "recipe-1",
-      qualityProfile: "QUALITY",
-      createdAt: "2026-08-29T00:00:00Z",
-      outputAssets,
-      shotId: "shot-1",
-      stage: "VIDEO",
-      selectedAssetId: outputAssets[0]?.id,
-      reviewable: outputAssets.length > 0,
-      candidateAssets: outputAssets.map((asset) => ({
-        assetId: asset.id,
-        assetType: asset.assetType ?? "video",
-        name: asset.name,
-        mimeType: asset.mimeType,
-        width: asset.width,
-        height: asset.height,
-        thumbnailAvailable: Boolean(asset.thumbnailAvailable),
-        taskId: asset.sourceTaskId,
-        localPath: "D:/AIStudio/outputs/success.mp4",
-        selected: false,
-        reviewResult: "UNREVIEWED",
-      })),
-      context: { snapshotAvailable: true },
-    }],
+    batchId: detail.id,
+    batchName: detail.name,
+    status: detail.status,
+    total: detail.total,
+    pending: detail.pending,
+    running: detail.running,
+    succeeded: detail.succeeded,
+    failed: detail.failed,
+    cancelled: detail.cancelled,
+    skipped: detail.skipped,
+    items: detail.items.map((item) => ({
+      productionItemId: item.id,
+      ordinal: item.ordinal,
+      productionItemStatus: item.status,
+      errorCode: item.errorCode,
+      errorMessage: item.errorMessage,
+      task: item.taskId ? {
+        id: item.taskId,
+        status: item.status,
+        workflowVersionId: item.workflowVersionId,
+        recipeId: item.recipeId,
+        createdAt: detail.createdAt,
+      } : undefined,
+      artifacts: item.taskId ? outputArtifacts : [],
+    })),
   };
 }
 
@@ -423,7 +399,6 @@ function setupSingleMultiPackageFixture(
 beforeEach(() => {
   queues = [];
   batchStatus = "READY";
-  review = makeReview();
   mocks.listShots.mockResolvedValue([]);
   mocks.getProjectWorkflowConfig.mockResolvedValue({ projectId: "project-1", videoModeOverrides: [] });
   mocks.listRecentAssets.mockResolvedValue([]);
@@ -443,18 +418,18 @@ beforeEach(() => {
   mocks.listProductionQueues.mockImplementation(async () => queues);
   mocks.getProductionAdmissionStatus.mockResolvedValue({ busy: false });
   mocks.getProductionQueue.mockImplementation(async () => makeBatchDetail());
-  mocks.getProductionBatchReviewProductivity.mockImplementation(async () => review);
+  mocks.getProductionBatchArtifacts.mockImplementation(async () => makeArtifactBatch(
+    makeBatchDetail(),
+    batchStatus === "COMPLETED" ? [successArtifact] : [],
+  ));
   mocks.getProductionQueueOverview.mockImplementation(async () => ({ ...queueOverview, totalQueues: queues.length, totalItems: queues.length }));
   mocks.startProductionQueue.mockImplementation(async () => {
     batchStatus = "RUNNING";
     queues = [makeQueue("RUNNING")];
-    review = makeReview();
     return makeBatchDetail("RUNNING");
   });
   mocks.pauseProductionQueue.mockResolvedValue({});
   mocks.requeueProductionQueueItem.mockResolvedValue(makeBatchDetail("READY"));
-  mocks.revealProductionReviewAsset.mockResolvedValue(undefined);
-  mocks.openProductionReviewOutputFolder.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -864,7 +839,7 @@ describe("ShotWorkspace production package queue integration", () => {
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
   });
 
-  it("wires Quick Create -> Queue -> manual Start -> RUNNING -> successful asset without auto-start", async () => {
+  it("wires Quick Create -> Queue -> manual Start -> RUNNING -> registered artifact without auto-start", async () => {
     const user = userEvent.setup();
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
 
@@ -876,7 +851,7 @@ describe("ShotWorkspace production package queue integration", () => {
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("monitor-batch-status").textContent).toContain("READY"));
     expect(mocks.getProductionQueue).toHaveBeenCalledWith("project-1", "pbt_uat_001");
-    expect(mocks.getProductionBatchReviewProductivity).toHaveBeenCalledWith("project-1", "pbt_uat_001");
+    expect(mocks.getProductionBatchArtifacts).toHaveBeenCalledWith("project-1", "pbt_uat_001");
 
     const drawer = await screen.findByRole("region", { name: "生产队列" });
     await user.click(within(drawer).getByRole("button", { name: "开始生产队列 pbt_uat_001" }));
@@ -884,36 +859,23 @@ describe("ShotWorkspace production package queue integration", () => {
     await waitFor(() => expect(screen.getByTestId("monitor-batch-status").textContent).toContain("RUNNING"));
 
     batchStatus = "COMPLETED";
-    review = makeReview([successAsset]);
     document.dispatchEvent(new Event("visibilitychange"));
     await waitFor(() => expect(screen.getByTestId("monitor-output-asset-ids").textContent).toContain("asset-success"));
-    await user.click(screen.getByRole("button", { name: "监控资产预览" }));
-    expect(await screen.findByRole("dialog", { name: "成功视频 全图预览" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "监控资产位置" }));
-    await waitFor(() => expect(mocks.revealProductionReviewAsset).toHaveBeenCalledWith({
-      projectId: "project-1",
-      batchId: "pbt_uat_001",
-      itemId: "item-1",
-      assetId: "asset-success",
-    }));
     expect(mocks.startProductionQueue).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a delivery manifest when monitor, review, and selected batch IDs disagree", () => {
+  it("rejects a delivery manifest when the selected batch identity differs", () => {
     const detail = makeBatchDetail("COMPLETED");
-    const reviewForDetail = { ...makeReview([successAsset]), batch: detail };
+    const artifactBatch = makeArtifactBatch(detail, [successArtifact]);
 
-    expect(buildLocalDeliveryManifest(detail, reviewForDetail, detail.id)).toMatchObject({
+    const manifest = buildLocalDeliveryManifest(artifactBatch, detail.id);
+    expect(manifest).toMatchObject({
       batchId: detail.id,
       total: 1,
-      items: [{ itemId: "item-1", videoAssetId: "asset-success" }],
+      items: [{ productionItemId: "item-1", artifacts: [{ artifactId: "asset-success" }] }],
     });
-    expect(buildLocalDeliveryManifest(detail, reviewForDetail, "pbt_other")).toBeUndefined();
-    expect(buildLocalDeliveryManifest(
-      detail,
-      { ...reviewForDetail, batch: { ...detail, id: "pbt_stale" } },
-      detail.id,
-    )).toBeUndefined();
+    expect(buildLocalDeliveryManifest(artifactBatch, "pbt_other")).toBeUndefined();
+    expect(buildLocalDeliveryManifest({ ...artifactBatch, batchId: "pbt_stale" }, detail.id)).toBeUndefined();
   });
 
   it("refreshes the selected batch before exporting a delivery manifest", async () => {
@@ -922,12 +884,12 @@ describe("ShotWorkspace production package queue integration", () => {
     batchStatus = "COMPLETED";
     const staleDetail = { ...makeBatchDetail("COMPLETED"), id: "pbt_stale" };
     const currentDetail = makeBatchDetail("COMPLETED");
-    const staleReview = { ...makeReview([successAsset]), batch: staleDetail };
-    const currentReview = { ...makeReview([successAsset]), batch: currentDetail };
     let queueCall = 0;
-    let reviewCall = 0;
     mocks.getProductionQueue.mockImplementation(async () => queueCall++ === 0 ? staleDetail : currentDetail);
-    mocks.getProductionBatchReviewProductivity.mockImplementation(async () => reviewCall++ === 0 ? staleReview : currentReview);
+    let artifactCall = 0;
+    mocks.getProductionBatchArtifacts.mockImplementation(async () => artifactCall++ === 0
+      ? makeArtifactBatch(staleDetail, [successArtifact])
+      : makeArtifactBatch(currentDetail, [successArtifact]));
 
     let manifestBlob: Blob | undefined;
     Object.defineProperty(URL, "createObjectURL", {
@@ -940,16 +902,17 @@ describe("ShotWorkspace production package queue integration", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
 
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
-    await waitFor(() => expect(mocks.getProductionBatchReviewProductivity).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.getProductionBatchArtifacts).toHaveBeenCalled());
     await user.click(screen.getByRole("button", { name: "监控导出成品清单" }));
 
     await waitFor(() => expect(manifestBlob).toBeDefined());
-    const manifest = JSON.parse(await manifestBlob!.text()) as { batchId: string; items: Array<{ itemId: string }> };
+    const manifest = JSON.parse(await manifestBlob!.text()) as { batchId: string; items: Array<{ productionItemId: string; artifacts: Array<{ artifactId: string }> }> };
     expect(manifest.batchId).toBe("pbt_uat_001");
     expect(manifest.items).toHaveLength(1);
-    expect(manifest.items[0].itemId).toBe("item-1");
+    expect(manifest.items[0].productionItemId).toBe("item-1");
+    expect(manifest.items[0].artifacts[0].artifactId).toBe("asset-success");
     expect(mocks.getProductionQueue).toHaveBeenLastCalledWith("project-1", "pbt_uat_001");
-    expect(mocks.getProductionBatchReviewProductivity).toHaveBeenLastCalledWith("project-1", "pbt_uat_001");
+    expect(mocks.getProductionBatchArtifacts).toHaveBeenLastCalledWith("project-1", "pbt_uat_001");
   });
 
   it("requeues a failed monitor item without starting it", async () => {
@@ -967,7 +930,6 @@ describe("ShotWorkspace production package queue integration", () => {
     vi.useFakeTimers();
     queues = [makeQueue("RUNNING")];
     batchStatus = "RUNNING";
-    review = makeReview();
     render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" />);
 
     await act(async () => {
@@ -1024,7 +986,6 @@ describe("ShotWorkspace production package queue integration", () => {
     expect(mocks.getProductionQueue).toHaveBeenCalledTimes(hiddenCount + 1);
 
     batchStatus = "COMPLETED";
-    review = makeReview([successAsset]);
     await act(async () => {
       vi.advanceTimersByTime(3000);
       await Promise.resolve();

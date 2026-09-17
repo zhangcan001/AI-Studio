@@ -172,6 +172,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             query_benchmark_quality_scores(&mut transaction, project_id).await?;
         let mut production_item_reviews =
             query_production_item_reviews(&mut transaction, project_id).await?;
+        let mut artifact_reviews = query_artifact_reviews(&mut transaction, project_id).await?;
         let mut shots = query_shots(&mut transaction, project_id).await?;
         let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
         let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
@@ -266,6 +267,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
                     .as_ref()
                     .is_none_or(|task_id| included_task_ids.contains(task_id))
         });
+        artifact_reviews.retain(|review| included_asset_ids.contains(review.artifact_id.as_str()));
         let included_shot_ids = shots
             .iter()
             .map(|shot| shot.id.clone())
@@ -437,6 +439,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
             script_sources,
             script_draft_revisions,
             production_item_reviews,
+            artifact_reviews,
             benchmark_experiments,
             benchmark_candidates,
             production_runs,
@@ -2301,6 +2304,45 @@ async fn query_production_item_reviews(
         .collect())
 }
 
+async fn query_artifact_reviews(
+    transaction: &mut Transaction<'_, Sqlite>,
+    project_id: &str,
+) -> Result<Vec<BackupArtifactReview>, RepositoryError> {
+    let rows = sqlx::query_as::<_, DbArtifactReview>(
+        "SELECT id, project_id, artifact_id, decision, comment, revision, created_at, updated_at
+         FROM artifact_reviews WHERE project_id = ? ORDER BY artifact_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| RepositoryError::database(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BackupArtifactReview {
+            id: row.id,
+            project_id: row.project_id,
+            artifact_id: row.artifact_id,
+            decision: row.decision,
+            comment: row.comment,
+            revision: row.revision,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
+}
+
+#[derive(FromRow)]
+struct DbArtifactReview {
+    id: String,
+    project_id: String,
+    artifact_id: String,
+    decision: String,
+    comment: String,
+    revision: i64,
+    created_at: String,
+    updated_at: String,
+}
+
 #[derive(FromRow)]
 struct DbShot {
     id: String,
@@ -3741,6 +3783,7 @@ async fn restore_rows_in_transaction(
         .await
         .map_err(|error| RepositoryError::database(error.to_string()))?;
     }
+    restore_artifact_reviews(transaction, document, asset_ids, &project.id).await?;
     for experiment in &document.benchmark_experiments {
         let experiment_id = benchmark_experiment_ids
             .get(&experiment.id)
@@ -4537,6 +4580,104 @@ async fn restore_rows_in_transaction(
         restored_generation_tool_usages,
         restored_generation_asset_versions,
     })
+}
+
+async fn restore_artifact_reviews(
+    transaction: &mut Transaction<'_, Sqlite>,
+    document: &BackupDocument,
+    asset_ids: &HashMap<String, String>,
+    project_id: &str,
+) -> Result<(), RepositoryError> {
+    // Older archives only have batch-item reviews. Carry a decision forward
+    // only when the review names an exact result asset and that asset has an
+    // exact task-output mapping; never infer from a task, filename, or path.
+    let mut legacy_reviews = document.production_item_reviews.iter().collect::<Vec<_>>();
+    legacy_reviews.sort_by(|left, right| {
+        left.updated_at
+            .cmp(&right.updated_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    for review in legacy_reviews {
+        let Some(old_asset_id) = review.result_asset_id.as_deref() else {
+            continue;
+        };
+        let exact_mapping_exists = document.mappings.iter().any(|mapping| {
+            mapping.asset_id == old_asset_id
+                && review
+                    .task_id
+                    .as_ref()
+                    .is_none_or(|task_id| mapping.task_id == *task_id)
+        });
+        if !exact_mapping_exists {
+            continue;
+        }
+        let Some(asset_id) = asset_ids.get(old_asset_id) else {
+            continue;
+        };
+        let decision = match review.review_status.as_str() {
+            "APPROVED" => "APPROVED",
+            "REJECTED" => "REJECTED",
+            _ => "PENDING",
+        };
+        let comment = if matches!(decision, "APPROVED" | "REJECTED") {
+            review.review_note.as_str()
+        } else {
+            ""
+        };
+        sqlx::query(
+            "INSERT INTO artifact_reviews
+             (id, project_id, artifact_id, decision, comment, revision, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+             ON CONFLICT(artifact_id) DO UPDATE SET
+                project_id = excluded.project_id,
+                decision = excluded.decision,
+                comment = excluded.comment,
+                revision = excluded.revision,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
+        )
+        .bind(format!("arv_{}", Uuid::new_v4().simple()))
+        .bind(project_id)
+        .bind(asset_id)
+        .bind(decision)
+        .bind(comment)
+        .bind(&review.created_at)
+        .bind(&review.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+    }
+
+    // Backup v20 state is canonical and overwrites any exact legacy conversion.
+    for review in &document.artifact_reviews {
+        let asset_id = asset_ids
+            .get(&review.artifact_id)
+            .ok_or_else(|| RepositoryError::integrity("产物审核引用缺少资产 ID 映射"))?;
+        sqlx::query(
+            "INSERT INTO artifact_reviews
+             (id, project_id, artifact_id, decision, comment, revision, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(artifact_id) DO UPDATE SET
+                project_id = excluded.project_id,
+                decision = excluded.decision,
+                comment = excluded.comment,
+                revision = excluded.revision,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
+        )
+        .bind(format!("arv_{}", Uuid::new_v4().simple()))
+        .bind(project_id)
+        .bind(asset_id)
+        .bind(&review.decision)
+        .bind(&review.comment)
+        .bind(review.revision)
+        .bind(&review.created_at)
+        .bind(&review.updated_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| RepositoryError::database(error.to_string()))?;
+    }
+    Ok(())
 }
 
 async fn validate_restored_snapshot_asset_ownership(

@@ -103,8 +103,6 @@ pub struct WorkflowBenchmarkCandidateView {
     pub aggregate: WorkflowBenchmarkAggregateView,
     pub quality: Option<WorkflowBenchmarkQualityView>,
     pub output_asset_ids: Vec<String>,
-    pub review_status: Option<String>,
-    pub review_note: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -1127,12 +1125,6 @@ fn build_candidate_views(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let reviews_by_item = snapshot
-        .reviews
-        .iter()
-        .map(|review| (review.production_batch_item_id.as_str(), review))
-        .collect::<BTreeMap<_, _>>();
-
     let mut views = Vec::with_capacity(snapshot.candidates.len());
     for row in &snapshot.candidates {
         let values = parse_json_value(&row.values_json)?;
@@ -1146,10 +1138,6 @@ fn build_candidate_views(
             .iter()
             .filter_map(|run| run.output_asset_id.clone())
             .collect::<Vec<_>>();
-        let review = row
-            .production_batch_item_id
-            .as_deref()
-            .and_then(|item_id| reviews_by_item.get(item_id).copied());
         let task_status = candidate_status_from_runs(&runs, row.task_id.as_deref());
         let aggregate = aggregate_runs(&runs);
         let telemetry = runs.first().and_then(telemetry_from_run);
@@ -1184,8 +1172,6 @@ fn build_candidate_views(
             aggregate,
             quality: quality_by_candidate.remove(&row.id),
             output_asset_ids,
-            review_status: review.map(|review| review.review_status.clone()),
-            review_note: review.map(|review| review.review_note.clone()),
         });
     }
     Ok(views)
@@ -2340,8 +2326,6 @@ mod tests {
             aggregate: super::WorkflowBenchmarkAggregateView::default(),
             quality: None,
             output_asset_ids: Vec::new(),
-            review_status: None,
-            review_note: None,
         };
         let second = super::WorkflowBenchmarkCandidateView {
             task_status: Some("FAILED".to_owned()),
@@ -2388,8 +2372,6 @@ mod tests {
             aggregate: super::WorkflowBenchmarkAggregateView::default(),
             quality: None,
             output_asset_ids: Vec::new(),
-            review_status: None,
-            review_note: None,
         }
     }
 

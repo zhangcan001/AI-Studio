@@ -9,9 +9,8 @@ import {
   getAsset,
   getShot,
   getProductionBatchRunbook,
-  getProductionBatchReviewProductivity,
+  getProductionBatchArtifacts,
   getProjectWorkflowConfig,
-  getProductionQueue,
   getSeriesProductionPlan,
   listPromptLibrary,
   listProductionStructure,
@@ -19,10 +18,8 @@ import {
   listBatchWorkflowPresets,
   listRecentAssets,
   listShots,
-  openProductionReviewOutputFolder,
   pickProductionPackageRoot,
   requeueProductionQueueItemByItem,
-  revealProductionReviewAsset,
   replaceShotReferences,
   selectShotResult,
   prepareSeriesProduction,
@@ -46,7 +43,6 @@ import type { WorkspaceSelection } from "../../types/workspaceSelection";
 import { toUserMessage } from "../../i18n/errorMessages";
 import { comfyStatusLabel } from "../../i18n/statusLabels";
 import { deriveShotStatus, shotStatusLabels } from "./shotDomain";
-import { ShotBatchReviewBoard } from "./ShotBatchReviewBoard";
 import { ProjectProductionPipeline } from "./ProjectProductionPipeline";
 import { ShotBulkImportPanel } from "./ShotBulkImportPanel";
 import { ShotListToolbar } from "./ShotListToolbar";
@@ -65,7 +61,6 @@ import { ProductionMonitor as ProductionMonitorComponent } from "../production/P
 import { ProductionReviewInbox } from "../production/ProductionReviewInbox";
 import type { ProjectCommandCenterNavigationRequest } from "../projects/ProjectCommandCenter";
 import type { ProductionMonitorProps } from "../production/ProductionMonitor";
-import { ProductionAssetPreview } from "../studio/ProductionAssetPreview";
 import { ProjectStructureTree, type ProjectStructureCreateTarget } from "./ProjectStructureTree";
 import { ShotCreationWorkspace, type ShotCreationWorkspaceTab, type ShotWorkspaceCandidate } from "./ShotCreationWorkspace";
 import {
@@ -80,9 +75,6 @@ import { useShotMultiPackageController } from "./hooks/useShotMultiPackageContro
 import { useShotTaskEvents } from "./hooks/useShotTaskEvents";
 import {
   buildLocalDeliveryManifest,
-  firstFinishedMonitorAsset,
-  monitorCandidateFor,
-  monitorReadModelFor,
   safeManifestPart,
 } from "./shotProductionMonitorModel";
 import { ScopeConsistencyWorkspace, type ScopeConsistencyWorkspaceProps } from "./ScopeConsistencyWorkspace";
@@ -274,8 +266,6 @@ interface Props {
   onOpenTask?: (taskId: string) => void;
   onNavigate?: (request: ProjectCommandCenterNavigationRequest) => void;
   focusProductionBatchId?: string;
-  focusProductionReviewItemId?: string;
-  focusProductionStage?: ShotStage;
   onOpenProductionQueue?: (batchId?: string) => void;
   comfyStatus?: ComfyStatus;
   capabilityLoading?: boolean;
@@ -299,7 +289,7 @@ const ProductionMonitor = ProductionMonitorComponent;
 
 export { buildLocalDeliveryManifest } from "./shotProductionMonitorModel";
 
-export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, focusProductionReviewItemId, focusProductionStage, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
+export function ShotWorkspace({ projectId, projectName, catalog, initialSelectedShotId, initialCollectionFilter, mode = "creation", onShotSelected, onContextPathChange, contextPathTarget, onOpenAsset, onOpenTask, onNavigate, focusProductionBatchId, onOpenProductionQueue, comfyStatus, capabilityLoading = false, onRefreshComfyCapabilities, onOpenSettings, consistencyWorkspace }: Props) {
   const [shots, setShots] = useState<ShotView[]>([]);
   const {
     selectedShotId,
@@ -308,7 +298,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     selectShot,
     reconcileSelectedShot,
   } = useShotWorkspaceSelection({ projectId, initialSelectedShotId, onShotSelected });
-  const [stage, setStage] = useState<ShotStage>(focusProductionStage ?? (initialCollectionFilter?.kind === "shots" ? initialCollectionFilter.stage : undefined) ?? "image");
+  const [stage, setStage] = useState<ShotStage>((initialCollectionFilter?.kind === "shots" ? initialCollectionFilter.stage : undefined) ?? "image");
   const [stageDrafts, setStageDrafts] = useState<Partial<Record<ShotStage, StageDraft>>>(emptyStageDrafts);
   const [dirtyStages, setDirtyStages] = useState<Set<ShotStage>>(new Set());
   const [references, setReferences] = useState<Record<ShotStage, string[]>>({ image: [], video: [] });
@@ -614,10 +604,6 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     };
   }, [focusProductionBatchId, focusProductionQueueBatch, mode, reloadProductionQueues]);
 
-  useEffect(() => {
-    if (mode === "review" && focusProductionStage) setStage(focusProductionStage);
-  }, [focusProductionStage, mode]);
-
   const monitorController = useShotProductionMonitor({
     projectId,
     enabled: mode === "production",
@@ -627,11 +613,9 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
   monitorFocusRef.current = monitorController.focusBatch;
   const {
     batch: productionMonitorBatch,
-    review: productionMonitorReview,
+    artifacts: productionMonitorArtifacts,
     loading: productionMonitorLoading,
     error: productionMonitorError,
-    previewAsset: monitorPreviewAsset,
-    setPreviewAsset: setMonitorPreviewAsset,
     clearError: clearProductionMonitorError,
     setError: setProductionMonitorError,
     refresh: refreshProductionMonitor,
@@ -945,18 +929,6 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     finally { setBusy(false); }
   }
 
-  async function selectBatchResult(shotId: string, resultStage: ShotStage, assetId: string, fromLinkedTask: boolean) {
-    setBusy(true); setError(undefined);
-    try {
-      applyShot(await selectShotResult({ projectId, shotId, stage: resultStage, assetId, fromLinkedTask }));
-      setNotice(`${resultStage === "image" ? "关键帧" : "最终视频"}已确认；不会自动提交下一阶段。`);
-    } catch (selectError: unknown) {
-      setError(toUserMessage(selectError));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function retryShot(shotId: string, retryStage: ShotStage) {
     const shot = shots.find((item) => item.id === shotId);
     const failedLink = shot?.generationLinks.find((link) => link.stage === retryStage && link.task?.status === "FAILED");
@@ -1145,52 +1117,6 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     }
   }, [requeueProductionMonitorItemFromQueue]);
 
-  const productionMonitorReadModel = useMemo(
-    () => monitorReadModelFor(productionMonitorBatch, productionMonitorReview, projectId),
-    [productionMonitorBatch, productionMonitorReview, projectId],
-  );
-  const finishedMonitorAsset = useMemo(
-    () => firstFinishedMonitorAsset(productionMonitorReview),
-    [productionMonitorReview],
-  );
-  const openMonitorAssetPreviewForItem = useCallback((itemId: string, assetId: string) => {
-    const item = productionMonitorReview?.items.find((candidate) => candidate.itemId === itemId);
-    const asset = item?.outputAssets.find((candidate) => candidate.id === assetId);
-    if (asset && isVideoAsset(asset)) setMonitorPreviewAsset(asset);
-  }, [productionMonitorReview]);
-  const revealMonitorAssetLocation = useCallback(async (itemId: string, filePath?: string) => {
-    const batchId = selectedProductionBatchId;
-    const item = productionMonitorReview?.items.find((candidate) => candidate.itemId === itemId);
-    const candidate = item?.candidateAssets.find((asset) => filePath && asset.localPath === filePath)
-      ?? (item ? monitorCandidateFor(item, true) : undefined);
-    if (!batchId || !candidate?.localPath) {
-      setProductionMonitorError("该成品没有可用的数据库文件位置。");
-      return;
-    }
-    try {
-      await revealProductionReviewAsset({ projectId, batchId, itemId, assetId: candidate.assetId });
-    } catch (openError: unknown) {
-      setProductionMonitorError(toUserMessage(openError));
-    }
-  }, [projectId, productionMonitorReview, selectedProductionBatchId]);
-  const openMonitorOutputFolder = useCallback(async () => {
-    const batchId = selectedProductionBatchId;
-    const finished = finishedMonitorAsset;
-    if (!batchId || !finished?.localPath) {
-      setProductionMonitorError("没有可打开的数据库成品目录。");
-      return;
-    }
-    try {
-      await openProductionReviewOutputFolder({
-        projectId,
-        batchId,
-        itemId: finished.itemId,
-        assetId: finished.assetId,
-      });
-    } catch (openError: unknown) {
-      setProductionMonitorError(toUserMessage(openError));
-    }
-  }, [finishedMonitorAsset, projectId, selectedProductionBatchId]);
   const exportLocalDeliveryManifest = useCallback(async () => {
     const batchId = selectedProductionBatchId;
     if (!batchId || typeof document === "undefined" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
@@ -1198,16 +1124,12 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
       return;
     }
     try {
-      const [detail, review] = await Promise.all([
-        getProductionQueue(projectId, batchId),
-        getProductionBatchReviewProductivity(projectId, batchId),
-      ]);
+      const detail = await getProductionBatchArtifacts(projectId, batchId);
       if (getMonitorBatchId() !== batchId || selectedProductionBatchId !== batchId) {
         setProductionMonitorError("当前监控批次已切换，请重新打开当前批次后再导出成品清单。");
         return;
       }
-      const batch = monitorReadModelFor(detail, review, projectId);
-      const manifest = batch ? buildLocalDeliveryManifest(batch, review, batchId) : undefined;
+      const manifest = buildLocalDeliveryManifest(detail, batchId);
       if (!manifest) {
         setProductionMonitorError("当前监控批次数据不一致，请重新打开当前批次后再导出成品清单。");
         return;
@@ -1256,17 +1178,15 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
   const multiPackageBoardPollingEnabled = productionModeTab === "multi-package"
     && multiPackageBoardPackages.some((item) => item.status === "CREATED" || item.status === "RUNNING");
   const monitorProps: ProductionMonitorProps = {
-    batch: productionMonitorReadModel,
-    readModel: productionMonitorReadModel,
+    projectId,
+    batch: productionMonitorArtifacts,
+    loading: productionMonitorLoading,
+    error: productionMonitorError,
     onRetry: requeueProductionMonitorItem,
-    onRetryItem: requeueProductionMonitorItem,
-    onPlay: openMonitorAssetPreviewForItem,
-    onOpenFileLocation: revealMonitorAssetLocation,
-    onViewAllFinishedProducts: () => {
+    onViewAllProducts: () => {
       if (selectedProductionBatchId) openProductionMonitorBatch(selectedProductionBatchId);
     },
-    onOpenFinishedProductsFolder: finishedMonitorAsset?.localPath ? openMonitorOutputFolder : undefined,
-    onExportManifest: productionMonitorReview ? exportLocalDeliveryManifest : undefined,
+    onExportManifest: productionMonitorArtifacts ? exportLocalDeliveryManifest : undefined,
     onSelectNextProductionPackage: selectNextProductionPackage,
   };
 
@@ -1315,10 +1235,14 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
             onBulkPrompt={assignBulkPrompt}
             onOpenProductionQueue={onOpenProductionQueue}
             busy={busy}
-            onOpenReview={(reviewStage, shotIds) => {
+            onOpenCandidates={(reviewStage, shotIds) => {
               if (busy || !shotIds.length) return;
               setStage(reviewStage);
-              selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
+              if (onNavigate) {
+                onNavigate({ destination: "shots", section: "creation", shotId: shotIds[0], stage: reviewStage });
+              } else {
+                selectWorkspaceSelection({ type: "shot", shotId: shotIds[0] });
+              }
             }}
           />
         </div>
@@ -1346,23 +1270,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
 
   const reviewSurface = (
     <div className="shot-review-surface" data-surface="review">
-      {mode === "review" && initialCollectionFilter?.kind === "review" && <ProductionReviewInbox projectId={projectId} mode="workspace" onNavigate={onNavigate} />}
-      {!(mode === "review" && initialCollectionFilter?.kind === "review") && <ShotBatchReviewBoard
-        projectId={projectId}
-        shots={initialCollectionFilter?.kind === "shots" ? shotList.filteredShots : shots}
-        assets={assets}
-        stage={stage}
-        busy={busy}
-        onAssetsLoaded={(loaded) => setAssets((current) => [...current, ...loaded.filter((asset) => !current.some((item) => item.id === asset.id))])}
-        onSelect={(shotId, reviewStage, assetId, fromLinkedTask) => void selectBatchResult(shotId, reviewStage, assetId, fromLinkedTask)}
-        onRetry={(shotId, reviewStage) => void retryShot(shotId, reviewStage)}
-        onOpenTask={onOpenTask}
-        onOpenShot={(shotId) => onNavigate?.({ destination: "shots", section: "creation", shotId, projectId })}
-        onOpenAsset={onOpenAsset}
-        reviewBatchId={mode === "review" ? focusProductionBatchId : undefined}
-        initialReviewItemId={mode === "review" ? focusProductionReviewItemId : undefined}
-        onOpenProductionQueue={onOpenProductionQueue}
-      />}
+      <ProductionReviewInbox projectId={projectId} mode="workspace" onNavigate={onNavigate} />
     </div>
   );
   const contextSurface = shotContextSurface(mode, workspaceSelection.type);
@@ -1618,17 +1526,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
       />
       {mode === "production" && (
         <>
-          {productionMonitorLoading && !productionMonitorReadModel && <p className="project-loading" role="status">正在加载生产监控...</p>}
-          {productionMonitorError && <p className="error-message" role="alert">{productionMonitorError}</p>}
           <ProductionMonitor {...monitorProps} />
-          {monitorPreviewAsset && (
-            <ProductionAssetPreview
-              projectId={projectId}
-              asset={monitorPreviewAsset}
-              onClose={() => setMonitorPreviewAsset(undefined)}
-              onOpenTask={onOpenTask}
-            />
-          )}
         </>
       )}
       {showWorkspaceFeedback && notice && <p className="studio-notice">{notice}</p>}

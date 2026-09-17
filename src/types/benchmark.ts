@@ -132,8 +132,6 @@ export interface WorkflowBenchmarkCandidateView extends WorkflowBenchmarkCandida
   aggregate: WorkflowBenchmarkAggregate;
   quality?: WorkflowBenchmarkQuality;
   outputAssetIds: string[];
-  reviewStatus?: string;
-  reviewNote?: string;
 }
 
 export interface WorkflowBenchmarkSummary {

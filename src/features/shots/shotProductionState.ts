@@ -73,7 +73,7 @@ const nextActionLabels: Partial<Record<ShotProductionStepId, string>> = {
   image: "生成关键帧",
   "image-review": "选择关键帧",
   video: "生成视频",
-  "video-review": "审核视频",
+  "video-review": "确认视频候选",
 };
 
 const interactiveStepIds = new Set<ShotProductionStepId>([

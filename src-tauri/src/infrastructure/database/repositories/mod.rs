@@ -1,3 +1,4 @@
+mod artifact;
 mod asset;
 mod asset_browse;
 mod asset_deletion;
@@ -13,7 +14,6 @@ mod model;
 mod organization;
 mod preset;
 mod production_audit;
-mod production_item_review;
 mod production_orchestrator;
 mod production_queue;
 mod production_structure;
@@ -42,6 +42,7 @@ mod workflow_runtime;
 mod workflow_runtime_artifact;
 mod workflow_runtime_state;
 
+pub use artifact::SqliteArtifactRepository;
 pub use asset::SqliteAssetRepository;
 pub use asset_browse::SqliteAssetBrowseRepository;
 pub use asset_deletion::SqliteAssetDeletionRepository;
@@ -57,7 +58,6 @@ pub use model::SqliteModelRepository;
 pub use organization::SqliteOrganizationRepository;
 pub use preset::SqlitePresetRepository;
 pub use production_audit::SqliteProductionAuditRepository;
-pub use production_item_review::SqliteProductionItemReviewRepository;
 pub use production_orchestrator::SqliteProductionOrchestratorRepository;
 pub use production_queue::SqliteProductionQueueRepository;
 pub use production_structure::SqliteProductionStructureRepository;

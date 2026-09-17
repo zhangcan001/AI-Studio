@@ -215,14 +215,13 @@ import type {
   ProductionQueueOverview,
 } from "../types/productionQueue";
 import type {
-  ProductionBatchReview,
-  ProductionReviewRegenerateResult,
-  ProductionReviewItem,
-  ProductionReviewCandidateAsset,
-  ProductionReviewStatus,
-  ProductionReviewInboxPage,
-} from "../types/productionItemReview";
-import type { ReviewCompareContextSnapshot } from "../types/reviewProductivity";
+  ArtifactReviewQueueFilter,
+  ArtifactReviewQueuePageDto,
+  ArtifactReviewResetRequest,
+  ArtifactReviewSubmitRequest,
+  ArtifactReviewDto,
+  ProductionBatchArtifactsDto,
+} from "../types/artifact";
 import type {
   ProductionAuditIntegrity,
   ProductionAuditLineage,
@@ -1325,6 +1324,40 @@ export function getProductionQueue(projectId: string, batchId: string): Promise<
   return invoke<ProductionBatchDetail>("production_queue_get", { projectId, batchId });
 }
 
+export function getProductionBatchArtifacts(projectId: string, batchId: string): Promise<ProductionBatchArtifactsDto> {
+  return invoke<ProductionBatchArtifactsDto>("production_batch_artifacts_get", { projectId, batchId });
+}
+
+export function getArtifactReviewQueue(
+  projectId: string,
+  limit = 50,
+  offset = 0,
+  filter?: ArtifactReviewQueueFilter,
+): Promise<ArtifactReviewQueuePageDto> {
+  return invoke<ArtifactReviewQueuePageDto>("artifact_review_queue_get", {
+    projectId,
+    limit,
+    offset,
+    ...(filter ? { filter } : {}),
+  });
+}
+
+export function openArtifact(artifactId: string): Promise<void> {
+  return invoke<void>("artifact_open", { artifactId });
+}
+
+export function revealArtifact(artifactId: string): Promise<void> {
+  return invoke<void>("artifact_reveal", { artifactId });
+}
+
+export function submitArtifactReview(request: ArtifactReviewSubmitRequest): Promise<ArtifactReviewDto> {
+  return invoke<ArtifactReviewDto>("artifact_review_submit", { request });
+}
+
+export function resetArtifactReview(request: ArtifactReviewResetRequest): Promise<ArtifactReviewDto> {
+  return invoke<ArtifactReviewDto>("artifact_review_reset", { request });
+}
+
 export function startProductionQueue(projectId: string, batchId: string): Promise<ProductionBatchDetail> {
   return invoke<ProductionBatchDetail>("production_queue_start", { projectId, batchId });
 }
@@ -1385,102 +1418,6 @@ export function partialResumeProductionQueue(
     projectId,
     batchId,
     selectedLeafItemIds,
-  });
-}
-
-export function getProductionBatchReview(projectId: string, batchId: string): Promise<ProductionBatchReview> {
-  return invoke<ProductionBatchReview>("production_item_review_get", { projectId, batchId });
-}
-
-export function getProductionReviewInbox(
-  projectId: string,
-  limit = 50,
-  offset = 0,
-): Promise<ProductionReviewInboxPage> {
-  return invoke<ProductionReviewInboxPage>("production_item_review_inbox_get", { projectId, limit, offset });
-}
-
-/** The enriched review payload used by the productivity/compare workspace. */
-export type ProductionReviewProductivityCandidate = ProductionReviewCandidateAsset;
-
-export interface ProductionReviewProductivityItem extends ProductionReviewItem {
-  shotId?: string;
-  stage?: string;
-  selectedAssetId?: string;
-  reviewable: boolean;
-  candidateAssets: ProductionReviewProductivityCandidate[];
-  context: ReviewCompareContextSnapshot & {
-    shotId?: string;
-    stage?: string;
-    snapshotAvailable: boolean;
-    promptText?: string;
-    readinessStatus?: string;
-  };
-}
-
-export interface ProductionBatchReviewProductivity extends Omit<ProductionBatchReview, "items"> {
-  items: ProductionReviewProductivityItem[];
-}
-
-/** Reads the enriched review payload through its dedicated read command. */
-export function getProductionBatchReviewProductivity(projectId: string, batchId: string): Promise<ProductionBatchReviewProductivity> {
-  return invoke<ProductionBatchReviewProductivity>("production_item_review_productivity_get", { projectId, batchId });
-}
-
-export interface ProductionReviewOpenAssetRequest {
-  projectId: string;
-  batchId: string;
-  itemId: string;
-  assetId: string;
-}
-
-export function revealProductionReviewAsset(request: ProductionReviewOpenAssetRequest): Promise<void> {
-  return invoke<void>("production_item_review_reveal_asset", { request });
-}
-
-export function openProductionReviewOutputFolder(request: ProductionReviewOpenAssetRequest): Promise<void> {
-  return invoke<void>("production_item_review_open_output_folder", { request });
-}
-
-export function setProductionReviewStatus(request: {
-  projectId: string;
-  batchId: string;
-  itemId: string;
-  status: Exclude<ProductionReviewStatus, "FAILED" | "IN_PROGRESS">;
-}): Promise<ProductionBatchReview> {
-  return invoke<ProductionBatchReview>("production_item_review_set_status", { request });
-}
-
-export function setProductionReviewNote(request: {
-  projectId: string;
-  batchId: string;
-  itemId: string;
-  note: string;
-}): Promise<ProductionBatchReview> {
-  return invoke<ProductionBatchReview>("production_item_review_set_note", { request });
-}
-
-export function regenerateProductionItem(request: {
-  projectId: string;
-  batchId: string;
-  itemId: string;
-  promptOverride?: string;
-  durationSeconds?: number;
-  width?: number;
-  height?: number;
-  useOriginalSeed: boolean;
-}): Promise<ProductionReviewRegenerateResult> {
-  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate", {
-    request,
-  });
-}
-
-export function regenerateMarkedProductionItems(request: {
-  projectId: string;
-  batchId: string;
-}): Promise<ProductionReviewRegenerateResult> {
-  return invoke<ProductionReviewRegenerateResult>("production_item_review_regenerate_marked", {
-    request,
   });
 }
 

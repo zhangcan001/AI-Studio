@@ -25,10 +25,10 @@ export const shotStatusLabels: Record<ShotStatus, string> = {
   DRAFT: "草稿",
   READY: "待启动",
   GENERATING_IMAGE: "运行中 · 关键帧",
-  IMAGE_REVIEW: "待审核 · 图片候选",
+  IMAGE_REVIEW: "候选待确认 · 图片",
   IMAGE_SELECTED: "已选择关键帧",
   GENERATING_VIDEO: "运行中 · 视频",
-  VIDEO_REVIEW: "待审核 · 视频候选",
+  VIDEO_REVIEW: "候选待确认 · 视频",
   COMPLETED: "已完成",
   FAILED: "失败，需要处理",
 };

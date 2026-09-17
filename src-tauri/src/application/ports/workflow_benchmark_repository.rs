@@ -78,19 +78,11 @@ pub struct WorkflowBenchmarkQualityRecord {
 }
 
 #[derive(Clone, Debug)]
-pub struct WorkflowBenchmarkReviewRecord {
-    pub production_batch_item_id: String,
-    pub review_status: String,
-    pub review_note: String,
-}
-
-#[derive(Clone, Debug)]
 pub struct WorkflowBenchmarkSnapshot {
     pub experiment: WorkflowBenchmarkExperimentRecord,
     pub candidates: Vec<WorkflowBenchmarkCandidateRecord>,
     pub runs: Vec<WorkflowBenchmarkRunRecord>,
     pub quality: Vec<WorkflowBenchmarkQualityRecord>,
-    pub reviews: Vec<WorkflowBenchmarkReviewRecord>,
 }
 
 #[derive(Clone, Debug)]

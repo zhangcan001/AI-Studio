@@ -10,7 +10,6 @@ import {
   previewWorkflowBenchmark,
   queueWorkflowBenchmark,
   saveWorkflowBenchmarkQuality,
-  setProductionReviewStatus,
   setWorkflowBenchmarkRecommendation,
   setWorkflowBenchmarkWinner,
 } from "../../services/tauriClient";
@@ -157,15 +156,6 @@ function compatibilityClass(compatibility: string): string {
 function candidateTitle(candidate: WorkflowBenchmarkCandidatePreview, catalog: RecipeViewModel[]): string {
   const recipe = catalog.find((item) => item.workflowVersionId === candidate.workflowVersionId && item.recipeId === candidate.recipeId);
   return recipe ? recipeLabel(recipe) : `${candidate.workflowVersionId} · ${candidate.recipeId}`;
-}
-
-function reviewLabel(status?: string): string {
-  switch (status) {
-    case "STARRED": return "最佳";
-    case "APPROVED": return "可用";
-    case "REJECTED": return "不推荐";
-    default: return "未审";
-  }
 }
 
 export function WorkflowBenchmarkPanel({
@@ -399,19 +389,6 @@ export function WorkflowBenchmarkPanel({
     }
   }
 
-  async function markReview(candidate: WorkflowBenchmarkCandidateView, status: "STARRED" | "APPROVED" | "REJECTED") {
-    if (!selected?.productionBatchId || !candidate.productionBatchItemId) return;
-    setBusy(true);
-    try {
-      await setProductionReviewStatus({ projectId, batchId: selected.productionBatchId, itemId: candidate.productionBatchItemId, status });
-      await refreshSelected();
-    } catch (reviewError: unknown) {
-      setError(toUserMessage(reviewError));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function openAsset(assetId: string) {
     setBusy(true);
     try {
@@ -635,7 +612,7 @@ export function WorkflowBenchmarkPanel({
                 <article className={`workflow-benchmark-result-card${isWinner ? " workflow-benchmark-result-card-winner" : ""}`} key={candidate.id}>
                   <div className="workflow-benchmark-result-card-main">
                     <div className="workflow-benchmark-result-card-title"><strong>#{candidate.position + 1} · {candidate.label}</strong><span className={compatibilityClass(candidate.compatibility)}>{compatibilityLabels[candidate.compatibility]}</span></div>
-                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {candidate.aggregate.runsSuccess}/{candidate.aggregate.runsTotal} 次运行 · 成功率 {formatRate(candidate.aggregate.successRate)} · 中位总耗时 {formatMetric(candidate.aggregate.totalMs.median)} · P95 {formatMetric(candidate.aggregate.totalMs.p95)} · Comfy 中位 {formatMetric(candidate.aggregate.comfyExecutionMs.median)} · 输出 {candidate.aggregate.outputSizeMean ?? "—"} 字节 · {runtimeProfileLabel(candidate.runtimeProfile ?? candidate.telemetry?.runtimeProfile)} · 审片：{reviewLabel(candidate.reviewStatus)}</small>
+                    <small>{candidateTitle(candidate, catalog)} · {taskStatusLabel(candidate.taskStatus)} · {candidate.aggregate.runsSuccess}/{candidate.aggregate.runsTotal} 次运行 · 成功率 {formatRate(candidate.aggregate.successRate)} · 中位总耗时 {formatMetric(candidate.aggregate.totalMs.median)} · P95 {formatMetric(candidate.aggregate.totalMs.p95)} · Comfy 中位 {formatMetric(candidate.aggregate.comfyExecutionMs.median)} · 输出 {candidate.aggregate.outputSizeMean ?? "—"} 字节 · {runtimeProfileLabel(candidate.runtimeProfile ?? candidate.telemetry?.runtimeProfile)}</small>
                     <small>工作流 SHA {candidate.workflowSha256 ?? "—"} · 配方 SHA {candidate.recipeSha256 ?? "—"} · 编译后 SHA {candidate.runs.find((run) => run.compiledWorkflowSha256)?.compiledWorkflowSha256 ?? "—"}</small>
                     {isWinner && <span className="workflow-benchmark-winner-mark">显式胜者</span>}
                     {isFastest && <span className="workflow-benchmark-fastest-mark">最快完成</span>}
@@ -647,9 +624,6 @@ export function WorkflowBenchmarkPanel({
                   </div>
                   <div className="workflow-benchmark-result-card-actions">
                     {candidate.taskId && onOpenTask && <button type="button" className="quiet-button" onClick={() => onOpenTask(candidate.taskId!)}>打开任务</button>}
-                    <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "STARRED")} disabled={!candidate.productionBatchItemId || busy}>标为最佳</button>
-                    <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "APPROVED")} disabled={!candidate.productionBatchItemId || busy}>可用</button>
-                    <button type="button" className="quiet-button" onClick={() => void markReview(candidate, "REJECTED")} disabled={!candidate.productionBatchItemId || busy}>不推荐</button>
                     <button type="button" onClick={() => void markWinner(isWinner ? undefined : candidate.id)} disabled={busy}>{isWinner ? "取消胜者" : "指定胜者"}</button>
                   </div>
                   <div className="workflow-benchmark-quality-editor">

@@ -1,0 +1,63 @@
+.artifact-review-workspace { display: grid; gap: 16px; min-width: 0; }
+.artifact-review-history { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--studio-border, #2b313b); border-radius: 9px; background: var(--studio-surface-2, #171c24); }
+.artifact-review-history-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.artifact-review-history-header h3 { margin: 3px 0; }
+.artifact-review-history-header p, .artifact-review-history-task { margin: 5px 0 0; color: var(--studio-text-muted, #9ba5b4); font-size: .76rem; }
+.artifact-review-history-list { display: grid; gap: 9px; }
+.artifact-review-history-item { display: grid; gap: 9px; min-width: 0; padding: 10px; border: 1px solid var(--studio-border, #2b313b); border-radius: 7px; }
+.artifact-review-history-item > header > div { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.artifact-review-history-item > header strong { overflow-wrap: anywhere; }
+.artifact-review-history-comment { margin: 0; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.artifact-review-history-revision { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; }
+.artifact-review-history-revision dt { color: var(--studio-text-muted, #9ba5b4); font-size: .7rem; }
+.artifact-review-history-revision dd { margin: 2px 0 0; font-size: .78rem; }
+.artifact-review-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.artifact-review-header h2, .artifact-review-main h3, .artifact-review-context h3 { margin: 3px 0; }
+.artifact-review-header p { margin: 5px 0 0; color: var(--studio-text-muted, #9ba5b4); font-size: .78rem; }
+.artifact-review-layout { display: grid; grid-template-columns: minmax(210px, 270px) minmax(0, 1fr) minmax(230px, 290px); gap: 12px; align-items: start; }
+.artifact-review-queue, .artifact-review-main, .artifact-review-context { min-width: 0; padding: 12px; border: 1px solid var(--studio-border, #2b313b); border-radius: 9px; background: var(--studio-surface-2, #171c24); }
+.artifact-review-queue { max-height: min(72vh, 760px); overflow: auto; }
+.artifact-review-queue ol { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.artifact-review-queue li > button { display: grid; width: 100%; gap: 5px; padding: 9px; color: inherit; border: 1px solid var(--studio-border, #2b313b); border-radius: 7px; background: var(--studio-surface-3, #202631); text-align: left; cursor: pointer; }
+.artifact-review-queue li > button.is-selected { border-color: var(--studio-accent, #8ab4ff); box-shadow: 0 0 0 1px rgb(138 180 255 / 18%); }
+.artifact-review-queue li > button > span:first-child { overflow-wrap: anywhere; font-size: .82rem; font-weight: 650; }
+.artifact-review-queue small { color: var(--studio-text-muted, #9ba5b4); font-size: .68rem; overflow-wrap: anywhere; }
+.artifact-review-main { display: grid; gap: 11px; }
+.artifact-review-selected-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.artifact-review-selected-heading > div { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.artifact-review-selected-heading h3 { overflow-wrap: anywhere; }
+.artifact-review-context { display: grid; gap: 12px; }
+.artifact-review-context h3 { font-size: .92rem; }
+.artifact-review-comment-label { font-size: .78rem; font-weight: 600; }
+.artifact-review-context textarea { box-sizing: border-box; width: 100%; min-height: 100px; resize: vertical; }
+.artifact-review-decisions { display: flex; gap: 8px; }
+.artifact-review-decisions button { flex: 1; min-height: 36px; }
+.artifact-review-decisions button.danger { color: var(--studio-danger, #f09595); }
+.artifact-review-error { padding: 8px 10px; color: var(--studio-danger, #f09595); border: 1px solid rgb(240 149 149 / 28%); border-radius: 6px; background: rgb(240 149 149 / 7%); font-size: .76rem; overflow-wrap: anywhere; }
+.artifact-review-empty { padding: 38px 14px; color: var(--studio-text-muted, #9ba5b4); border: 1px dashed var(--studio-border, #2b313b); border-radius: 8px; text-align: center; }
+.artifact-review-existing-comment { margin: 0; color: var(--studio-text-muted, #9ba5b4); font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.artifact-missing-label { color: var(--studio-danger, #f09595) !important; }
+.production-review-inbox-heading-actions { display: flex; gap: 8px; }
+.production-review-inbox-list { display: grid; gap: 8px; }
+.production-review-inbox-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--studio-border, #2b313b); border-radius: 7px; }
+.production-review-inbox-copy { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px; align-items: center; }
+.production-review-inbox-copy > strong { overflow-wrap: anywhere; }
+.production-review-inbox-copy > span, .production-review-inbox-copy > small { color: var(--studio-text-muted, #9ba5b4); font-size: .72rem; }
+.production-review-inbox-row .artifact-preview-media { grid-column: 1 / -1; max-height: 240px; }
+.production-review-inbox-row .artifact-actions { grid-column: 1 / -1; }
+.artifact-review-badge { display: inline-flex; flex: none; align-items: center; padding: 3px 7px; border-radius: 999px; color: var(--studio-text-muted, #9ba5b4); background: rgb(155 165 180 / 12%); font-size: .68rem; white-space: nowrap; }
+.artifact-review-approved { color: var(--studio-success, #8ed6ae); background: rgb(142 214 174 / 12%); }
+.artifact-review-rejected { color: var(--studio-danger, #f09595); background: rgb(240 149 149 / 12%); }
+.artifact-review-pending { color: var(--studio-warning, #e3bd79); background: rgb(227 189 121 / 12%); }
+
+@media (max-width: 1000px) {
+  .artifact-review-layout { grid-template-columns: minmax(190px, 240px) minmax(0, 1fr); }
+  .artifact-review-context { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .artifact-review-header { flex-direction: column; }
+  .artifact-review-layout { grid-template-columns: minmax(0, 1fr); }
+  .artifact-review-context { grid-column: auto; }
+  .artifact-review-queue { max-height: 300px; }
+  .production-review-inbox-row { grid-template-columns: minmax(0, 1fr); }
+}

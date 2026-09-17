@@ -102,7 +102,7 @@ export function projectPipelineStageCount(
   }
 }
 
-export function reviewShotIds(shots: ShotView[], stage: ShotStage): string[] {
+export function candidateShotIds(shots: ShotView[], stage: ShotStage): string[] {
   const reviewStatus = stage === "image" ? "IMAGE_REVIEW" : "VIDEO_REVIEW";
   return shots
     .filter((shot) => deriveStageStatus(shot, stage) === reviewStatus)
@@ -111,7 +111,7 @@ export function reviewShotIds(shots: ShotView[], stage: ShotStage): string[] {
 }
 
 export interface ProjectProductionPipelineProps extends ShotBulkConfigPanelProps {
-  onOpenReview?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
+  onOpenCandidates?: (stage: ShotStage, shotIds: string[]) => void | Promise<void>;
   busy?: boolean;
 }
 
@@ -124,11 +124,11 @@ const METRICS: ReadonlyArray<{
   { key: "unconfigured", label: "未配置", tone: "warning" },
   { key: "imageReady", label: "图片待启动", tone: "muted" },
   { key: "imageGenerating", label: "图片运行中", tone: "active" },
-  { key: "imageReview", label: "图片待审核", tone: "review" },
+  { key: "imageReview", label: "图片候选待确认", tone: "review" },
   { key: "imageSelected", label: "图片已选择", tone: "success" },
   { key: "videoReady", label: "视频待启动", tone: "muted" },
   { key: "videoGenerating", label: "视频运行中", tone: "active" },
-  { key: "videoReview", label: "视频待审核", tone: "review" },
+  { key: "videoReview", label: "视频候选待确认", tone: "review" },
   { key: "completed", label: "已完成", tone: "success" },
   { key: "failed", label: "失败", tone: "danger" },
 ];
@@ -137,24 +137,24 @@ const STAGE_LABELS: Record<ProjectPipelineStage, string> = {
   SHOTS: "镜头",
   IMAGE_CONFIGURED: "图片已配置",
   IMAGE_GENERATING: "图片运行中",
-  IMAGE_REVIEW: "图片待审核",
+  IMAGE_REVIEW: "图片候选待确认",
   IMAGE_SELECTED: "图片已选择",
   VIDEO_CONFIGURED: "视频已配置",
   VIDEO_GENERATING: "视频运行中",
-  VIDEO_REVIEW: "视频待审核",
+  VIDEO_REVIEW: "视频候选待确认",
   COMPLETED: "已完成",
 };
 
-export function ProjectProductionPipeline({ onOpenReview, busy = false, ...bulkProps }: ProjectProductionPipelineProps) {
+export function ProjectProductionPipeline({ onOpenCandidates, busy = false, ...bulkProps }: ProjectProductionPipelineProps) {
   const summary = useMemo(() => deriveProjectPipelineSummary(bulkProps.shots), [bulkProps.shots]);
   const completionPercent = projectCompletionPercent(summary);
-  const imageReviewIds = useMemo(() => reviewShotIds(bulkProps.shots, "image"), [bulkProps.shots]);
-  const videoReviewIds = useMemo(() => reviewShotIds(bulkProps.shots, "video"), [bulkProps.shots]);
+  const imageCandidateIds = useMemo(() => candidateShotIds(bulkProps.shots, "image"), [bulkProps.shots]);
+  const videoCandidateIds = useMemo(() => candidateShotIds(bulkProps.shots, "video"), [bulkProps.shots]);
 
-  async function openReview(stage: ShotStage, shotIds: string[]) {
-    if (!onOpenReview || !shotIds.length) return;
+  async function openCandidates(stage: ShotStage, shotIds: string[]) {
+    if (!onOpenCandidates || !shotIds.length) return;
     try {
-      await onOpenReview(stage, shotIds);
+      await onOpenCandidates(stage, shotIds);
     } catch (error: unknown) {
       bulkProps.onError?.(error instanceof Error ? error.message : String(error));
     }
@@ -202,12 +202,12 @@ export function ProjectProductionPipeline({ onOpenReview, busy = false, ...bulkP
 
       <div className="pipeline-review-actions">
         <div>
-          <strong>审核仍由人完成</strong>
-          <p className="pipeline-muted">生成结果不会自动成为已确认素材；REF2VA 的有序参考图也继续由用户配置。</p>
+          <strong>候选选择由用户完成</strong>
+          <p className="pipeline-muted">镜头阶段的候选确认只决定写入哪个 Shot 结果，不等同于产物审核；REF2VA 的有序参考图也继续由用户配置。</p>
         </div>
         <div className="pipeline-action-grid">
-          <button type="button" onClick={() => void openReview("image", imageReviewIds)} disabled={busy || !onOpenReview || !imageReviewIds.length}>审核图片（{imageReviewIds.length}）</button>
-          <button type="button" onClick={() => void openReview("video", videoReviewIds)} disabled={busy || !onOpenReview || !videoReviewIds.length}>审核视频（{videoReviewIds.length}）</button>
+          <button type="button" onClick={() => void openCandidates("image", imageCandidateIds)} disabled={busy || !onOpenCandidates || !imageCandidateIds.length}>确认图片候选（{imageCandidateIds.length}）</button>
+          <button type="button" onClick={() => void openCandidates("video", videoCandidateIds)} disabled={busy || !onOpenCandidates || !videoCandidateIds.length}>确认视频候选（{videoCandidateIds.length}）</button>
         </div>
       </div>
 

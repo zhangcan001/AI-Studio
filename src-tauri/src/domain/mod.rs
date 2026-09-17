@@ -3,6 +3,7 @@
 //! This module intentionally has no dependency on Tauri, SQLx, HTTP clients,
 //! or other infrastructure concerns.
 
+pub mod artifact;
 pub mod asset;
 pub mod consistency;
 pub mod generation_snapshot;
@@ -25,6 +26,10 @@ pub mod task;
 pub mod tool;
 pub mod workflow;
 
+pub use artifact::{
+    Artifact, ArtifactReview, ArtifactReviewDecision, ArtifactReviewError,
+    MAX_ARTIFACT_REVIEW_COMMENT_BYTES,
+};
 pub use asset::{
     Asset, AssetDomainError, AssetId, AssetRelation, AssetRelationId, AssetRelationType, AssetType,
     AssetVersion, AssetVersionId, GENERATED_IMAGE_CATEGORY, GENERATED_VIDEO_CATEGORY,

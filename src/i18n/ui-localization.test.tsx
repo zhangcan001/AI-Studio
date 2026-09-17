@@ -16,7 +16,6 @@ const keyUiSources = import.meta.glob([
   "../features/production/ProductionBatchRunbookPanel.tsx",
   "../features/production/ProductionRunPanel.tsx",
   "../features/production/ProductionAuditCenter.tsx",
-  "../features/studio/ProductionBatchReviewWorkspace.tsx",
   "../features/studio/ProductionQueuePanel.tsx",
   "../features/assets/AssetVideoBatchWorkspace.tsx",
   "../features/assets/AssetPreview.tsx",

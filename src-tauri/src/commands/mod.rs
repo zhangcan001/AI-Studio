@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod asset;
 pub mod batch_workflow_preset;
 pub mod catalog;
@@ -15,7 +16,6 @@ pub mod preflight;
 pub mod preset;
 pub mod production_audit;
 pub mod production_batch_runbook;
-pub mod production_item_review;
 pub mod production_orchestrator;
 pub mod production_package;
 pub mod production_package_discovery;

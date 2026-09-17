@@ -1,17 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getProductionBatchReviewProductivity,
+  getProductionBatchArtifacts,
   getProductionQueue,
-  type ProductionBatchReviewProductivity,
 } from "../../../services/tauriClient";
-import type { AssetView } from "../../../types/asset";
+import type { ProductionBatchArtifactsDto } from "../../../types/artifact";
 import type { ProductionBatchDetail } from "../../../types/productionQueue";
 import { toUserMessage } from "../../../i18n/errorMessages";
 import { isTerminalProductionBatch } from "../shotQueueState";
-import {
-  firstFinishedMonitorAsset,
-  monitorReadModelFor,
-} from "../shotProductionMonitorModel";
 
 export interface UseShotProductionMonitorOptions {
   projectId: string;
@@ -21,10 +16,9 @@ export interface UseShotProductionMonitorOptions {
 
 export function useShotProductionMonitor({ projectId, enabled, selectedBatchId }: UseShotProductionMonitorOptions) {
   const [batch, setBatch] = useState<ProductionBatchDetail>();
-  const [review, setReview] = useState<ProductionBatchReviewProductivity>();
+  const [artifacts, setArtifacts] = useState<ProductionBatchArtifactsDto>();
   const [loading, setLoading] = useState(false);
   const [error, setErrorState] = useState<string>();
-  const [previewAsset, setPreviewAsset] = useState<AssetView>();
   const requestInFlightRef = useRef(false);
   const pendingBatchRef = useRef<string | undefined>(undefined);
   const mountedRef = useRef(true);
@@ -48,13 +42,13 @@ export function useShotProductionMonitor({ projectId, enabled, selectedBatchId }
     setLoading(true);
     setErrorState(undefined);
     try {
-      const [nextBatch, nextReview] = await Promise.all([
+      const [nextBatch, nextArtifacts] = await Promise.all([
         getProductionQueue(projectId, batchId),
-        getProductionBatchReviewProductivity(projectId, batchId),
+        getProductionBatchArtifacts(projectId, batchId),
       ]);
       if (!mountedRef.current || currentBatchRef.current !== batchId) return;
       setBatch(nextBatch);
-      setReview(nextReview);
+      setArtifacts(nextArtifacts);
     } catch (monitorError: unknown) {
       if (mountedRef.current && currentBatchRef.current === batchId) setErrorState(toUserMessage(monitorError));
     } finally {
@@ -82,9 +76,8 @@ export function useShotProductionMonitor({ projectId, enabled, selectedBatchId }
     currentBatchRef.current = selectedBatchId;
     pendingBatchRef.current = undefined;
     setBatch(undefined);
-    setReview(undefined);
+    setArtifacts(undefined);
     setErrorState(undefined);
-    setPreviewAsset(undefined);
     if (!enabled || !selectedBatchId) return;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     void refresh(selectedBatchId);
@@ -107,18 +100,11 @@ export function useShotProductionMonitor({ projectId, enabled, selectedBatchId }
     };
   }, [batch, enabled, refresh, selectedBatchId]);
 
-  const readModel = useMemo(() => monitorReadModelFor(batch, review, projectId), [batch, projectId, review]);
-  const finishedAsset = useMemo(() => firstFinishedMonitorAsset(review), [review]);
-
   return {
     batch,
-    review,
+    artifacts,
     loading,
     error,
-    readModel,
-    finishedAsset,
-    previewAsset,
-    setPreviewAsset,
     refresh,
     clearError,
     setError,

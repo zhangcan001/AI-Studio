@@ -3,9 +3,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetView } from "../../types/asset";
+import type { ProductionBatchArtifactsDto } from "../../types/artifact";
 import type { ProductionBatchDetail, ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
 import type { ProductionPackageBatchBinding, ProductionPackageDiscoveryPackage, ProductionPackageInspectionResult } from "../../types/productionPackage";
-import type { ProductionBatchReviewProductivity } from "../../services/tauriClient";
 import type { TaskView } from "../../types/task";
 import { ShotWorkspace } from "./ShotWorkspace";
 
@@ -35,14 +35,12 @@ const mocks = vi.hoisted(() => ({
   listProductionPackageBindings: vi.fn(),
   listProductionQueues: vi.fn(),
   getProductionQueue: vi.fn(),
+  getProductionBatchArtifacts: vi.fn(),
   getProductionQueueOverview: vi.fn(),
-  getProductionBatchReviewProductivity: vi.fn(),
   getAssetMediaUrl: vi.fn(),
   startProductionQueue: vi.fn(),
   pauseProductionQueue: vi.fn(),
   requeueProductionQueueItem: vi.fn(),
-  revealProductionReviewAsset: vi.fn(),
-  openProductionReviewOutputFolder: vi.fn(),
   subscribeTaskUpdates: vi.fn(),
 }));
 
@@ -64,14 +62,12 @@ vi.mock("../../services/tauriClient", async () => {
     listProductionPackageBindings: mocks.listProductionPackageBindings,
     listProductionQueues: mocks.listProductionQueues,
     getProductionQueue: mocks.getProductionQueue,
+    getProductionBatchArtifacts: mocks.getProductionBatchArtifacts,
     getProductionQueueOverview: mocks.getProductionQueueOverview,
-    getProductionBatchReviewProductivity: mocks.getProductionBatchReviewProductivity,
     getAssetMediaUrl: mocks.getAssetMediaUrl,
     startProductionQueue: mocks.startProductionQueue,
     pauseProductionQueue: mocks.pauseProductionQueue,
     requeueProductionQueueItem: mocks.requeueProductionQueueItem,
-    revealProductionReviewAsset: mocks.revealProductionReviewAsset,
-    openProductionReviewOutputFolder: mocks.openProductionReviewOutputFolder,
   };
 });
 
@@ -255,52 +251,51 @@ function makeDetail(
   };
 }
 
-function makeReview(batchId: string, name: string, itemId: string, status: ProductionBatchDetail["status"]): ProductionBatchReviewProductivity {
+function makeArtifacts(batchId: string, name: string, itemId: string, status: ProductionBatchDetail["status"]): ProductionBatchArtifactsDto {
   const completed = status === "COMPLETED";
   const running = status === "RUNNING";
-  const detail = makeDetail(batchId, name, itemId, status);
+  const hasVideo = completed && name === "EP2";
   return {
-    batch: detail,
+    batchId,
+    batchName: name,
+    status,
     total: 1,
-    successCount: completed ? 1 : 0,
-    failedCount: 0,
-    unreviewedCount: completed ? 1 : 0,
-    approvedCount: 0,
-    starredCount: 0,
-    regenerateCount: 0,
-    rejectedCount: 0,
+    pending: status === "READY" ? 1 : 0,
+    running: running ? 1 : 0,
+    succeeded: completed ? 1 : 0,
+    failed: 0,
+    cancelled: 0,
+    skipped: 0,
     items: [{
-      itemId,
+      productionItemId: itemId,
       ordinal: 0,
-      taskId: name === "EP2" ? "task-ep2" : undefined,
-      taskStatus: completed ? "SUCCEEDED" : running ? "RUNNING" : "PENDING",
       productionItemStatus: completed ? "SUCCEEDED" : running ? "DISPATCHED" : "PENDING",
-      reviewStatus: completed ? "UNREVIEWED" : "IN_PROGRESS",
-      reviewNote: "",
-      preferred: true,
-      workflowVersionId: "workflow-" + name,
-      recipeId: "recipe-" + name,
-      qualityProfile: "QUALITY",
-      createdAt: "2026-09-01T00:00:00Z",
-      outputAssets: completed && name === "EP2" ? [videoAsset] : [],
-      shotId: name + "-shot",
-      stage: "VIDEO",
-      selectedAssetId: completed && name === "EP2" ? videoAsset.id : undefined,
-      reviewable: completed,
-      candidateAssets: completed && name === "EP2" ? [{
-        assetId: videoAsset.id,
-        assetType: "video",
+      task: name === "EP2" ? {
+        id: "task-ep2",
+        status: completed ? "SUCCEEDED" : running ? "RUNNING" : "PENDING",
+        workflowVersionId: "workflow-EP2",
+        recipeId: "recipe-EP2",
+        createdAt: "2026-09-01T00:00:00Z",
+      } : undefined,
+      artifacts: hasVideo ? [{
+        id: videoAsset.id,
+        taskId: "task-ep2",
+        outputId: "output-ep2",
+        ordinal: 0,
+        mediaType: "video",
         name: videoAsset.name,
         mimeType: videoAsset.mimeType,
         width: videoAsset.width,
         height: videoAsset.height,
+        durationMs: videoAsset.durationMs ?? undefined,
+        sizeBytes: videoAsset.fileSize,
+        version: 1,
+        createdAt: videoAsset.createdAt,
         thumbnailAvailable: true,
-        taskId: "task-ep2",
-        localPath: "C:/outputs/ep2.mp4",
-        selected: true,
-        reviewResult: "UNREVIEWED",
+        availability: "available",
+        reviewStatus: "PENDING",
+        reviewRevision: 0,
       }] : [],
-      context: { snapshotAvailable: true },
     }],
   };
 }
@@ -384,16 +379,14 @@ beforeEach(() => {
   mocks.getProductionQueue.mockImplementation(async (_projectId: string, batchId: string) => batchId === ids.ep2Batch
     ? makeDetail(ids.ep2Batch, "EP2", ids.ep2Item, ep2Status)
     : makeDetail(ids.ep10Batch, "EP10", ids.ep10Item, "READY"));
+  mocks.getProductionBatchArtifacts.mockImplementation(async (_projectId: string, batchId: string) => batchId === ids.ep2Batch
+    ? makeArtifacts(ids.ep2Batch, "EP2", ids.ep2Item, ep2Status)
+    : makeArtifacts(ids.ep10Batch, "EP10", ids.ep10Item, "READY"));
   mocks.getProductionQueueOverview.mockImplementation(async () => makeOverview());
-  mocks.getProductionBatchReviewProductivity.mockImplementation(async (_projectId: string, batchId: string) => batchId === ids.ep2Batch
-    ? makeReview(ids.ep2Batch, "EP2", ids.ep2Item, ep2Status)
-    : makeReview(ids.ep10Batch, "EP10", ids.ep10Item, "READY"));
   mocks.getAssetMediaUrl.mockImplementation((_projectId: string, assetId: string) => "asset://" + assetId);
   mocks.startProductionQueue.mockResolvedValue(makeDetail(ids.ep2Batch, "EP2", ids.ep2Item, "RUNNING"));
   mocks.pauseProductionQueue.mockResolvedValue(undefined);
   mocks.requeueProductionQueueItem.mockResolvedValue(makeDetail(ids.ep2Batch, "EP2", ids.ep2Item, "READY"));
-  mocks.revealProductionReviewAsset.mockResolvedValue(undefined);
-  mocks.openProductionReviewOutputFolder.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -447,7 +440,7 @@ describe("ShotWorkspace multi-package completion convergence", () => {
     expect(within(queueRow(ids.ep2Batch)).getByText("已结束")).toBeTruthy();
     const monitor = screen.getByTestId("production-monitor");
     expect(monitor.querySelector(".production-monitor-batch-status")?.textContent).toContain("已完成");
-    expect(within(monitor).getByText("成品记录可用")).toBeTruthy();
+    expect(within(monitor).getByText("EP2 成品")).toBeTruthy();
 
   });
 
@@ -522,9 +515,9 @@ describe("ShotWorkspace multi-package completion convergence", () => {
 
     const monitor = screen.getByTestId("production-monitor");
     expect(monitor.querySelector(".production-monitor-batch-status")?.textContent).toContain("已完成");
-    expect(within(monitor).getByText("成品记录可用")).toBeTruthy();
-    expect(within(monitor).getByText("播放")).toBeTruthy();
-    expect(within(monitor).getByText("打开文件位置")).toBeTruthy();
+    expect(within(monitor).getByText("EP2 成品")).toBeTruthy();
+    expect(within(monitor).getByRole("button", { name: "打开" })).toBeTruthy();
+    expect(within(monitor).getByRole("button", { name: "在文件夹中显示" })).toBeTruthy();
   });
 
   it("stops production surface polling after all created batches reach terminal state", async () => {

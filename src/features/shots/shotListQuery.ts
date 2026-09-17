@@ -16,10 +16,10 @@ export const SHOT_LIST_STATUS_OPTIONS: ReadonlyArray<{
   { value: "DRAFT", label: "待配置" },
   { value: "READY", label: "待启动" },
   { value: "GENERATING_IMAGE", label: "图片处理中" },
-  { value: "IMAGE_REVIEW", label: "图片待审核" },
+  { value: "IMAGE_REVIEW", label: "图片候选待确认" },
   { value: "IMAGE_SELECTED", label: "图片已选" },
   { value: "GENERATING_VIDEO", label: "视频处理中" },
-  { value: "VIDEO_REVIEW", label: "视频待审核" },
+  { value: "VIDEO_REVIEW", label: "视频候选待确认" },
   { value: "COMPLETED", label: "已完成" },
   { value: "FAILED", label: "失败" },
 ];

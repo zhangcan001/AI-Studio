@@ -141,13 +141,13 @@ export function resolveProjectCommandCenterNavigation(
   if (request.batchId) return { ...target, workspace: "shots", section: "production" };
   if (request.assetId) return { ...target, workspace: "assets", section: "assets" };
   if (request.shotId) {
-    const section = request.section === "production" || request.section === "review" ? request.section : "creation";
+    const section = request.section === "production" ? "production" : "creation";
     return { ...target, workspace: "shots", section };
   }
   if (request.collectionFilter?.kind === "tasks") return { ...target, workspace: "tasks", section: "review" };
   if (request.collectionFilter?.kind === "review") return { ...target, workspace: "shots", section: "review" };
   if (request.collectionFilter?.kind === "shots") {
-    const section = request.section === "production" || request.section === "review" ? request.section : "creation";
+    const section = request.section === "production" ? "production" : "creation";
     return { ...target, workspace: "shots", section };
   }
   if (request.section) {
@@ -162,11 +162,6 @@ export function resolveProjectCommandCenterNavigation(
     workspace: request.destination,
     section: defaultStudioSectionForWorkspace(request.destination),
   };
-}
-
-function normalizeNavigationStage(stage?: string): ShotStage | undefined {
-  const normalized = stage?.toLowerCase();
-  return normalized === "image" || normalized === "video" ? normalized : undefined;
 }
 
 export type WorkflowDefaultStage = "IMAGE" | "VIDEO";
@@ -225,8 +220,6 @@ function App() {
   const [videoBatchAssets, setVideoBatchAssets] = useState<AssetView[]>([]);
   const [focusedTaskId, setFocusedTaskId] = useState<string>();
   const [focusedProductionBatchId, setFocusedProductionBatchId] = useState<string>();
-  const [focusedProductionReviewItemId, setFocusedProductionReviewItemId] = useState<string>();
-  const [focusedProductionStage, setFocusedProductionStage] = useState<ShotStage>();
   const [focusedAssetId, setFocusedAssetId] = useState<string>();
   const [focusedCollectionFilter, setFocusedCollectionFilter] = useState<ProjectCommandCenterCollectionFilter>();
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
@@ -489,8 +482,6 @@ function App() {
     setResumeShotId(undefined);
     setFocusedTaskId(undefined);
     setFocusedProductionBatchId(undefined);
-    setFocusedProductionReviewItemId(undefined);
-    setFocusedProductionStage(undefined);
     setFocusedAssetId(undefined);
     setFocusedCollectionFilter(undefined);
   }
@@ -499,8 +490,6 @@ function App() {
     setResumeShotId(navigation.shotId);
     setFocusedTaskId(navigation.taskId);
     setFocusedProductionBatchId(navigation.batchId);
-    setFocusedProductionReviewItemId(navigation.reviewId ?? navigation.itemId);
-    setFocusedProductionStage(normalizeNavigationStage(navigation.stage));
     setFocusedAssetId(navigation.assetId);
     setFocusedCollectionFilter(navigation.collectionFilter);
     if (navigation.shotId) void recordShotChange(navigation.shotId);
@@ -1046,8 +1035,6 @@ function App() {
               }}
               onNavigate={navigateFromCommandCenter}
               focusProductionBatchId={focusedProductionBatchId}
-              focusProductionReviewItemId={focusedProductionReviewItemId}
-              focusProductionStage={focusedProductionStage}
               onOpenProductionQueue={openProductionQueueFromShot}
               comfyStatus={comfy}
               capabilityLoading={capabilityLoading}

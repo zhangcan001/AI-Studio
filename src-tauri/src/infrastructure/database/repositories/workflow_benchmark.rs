@@ -2,8 +2,7 @@ use super::map_sqlx_error;
 use crate::application::ports::{
     RepositoryError, WorkflowBenchmarkCandidateRecord, WorkflowBenchmarkDraft,
     WorkflowBenchmarkExperimentRecord, WorkflowBenchmarkQualityRecord, WorkflowBenchmarkQueueLink,
-    WorkflowBenchmarkRepository, WorkflowBenchmarkReviewRecord, WorkflowBenchmarkRunRecord,
-    WorkflowBenchmarkSnapshot,
+    WorkflowBenchmarkRepository, WorkflowBenchmarkRunRecord, WorkflowBenchmarkSnapshot,
 };
 use async_trait::async_trait;
 use sqlx::{FromRow, SqlitePool};
@@ -183,23 +182,6 @@ impl From<DbQuality> for WorkflowBenchmarkQualityRecord {
     }
 }
 
-#[derive(Debug, FromRow)]
-struct DbReview {
-    production_batch_item_id: String,
-    review_status: String,
-    review_note: String,
-}
-
-impl From<DbReview> for WorkflowBenchmarkReviewRecord {
-    fn from(value: DbReview) -> Self {
-        Self {
-            production_batch_item_id: value.production_batch_item_id,
-            review_status: value.review_status,
-            review_note: value.review_note,
-        }
-    }
-}
-
 #[async_trait]
 impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
     async fn list_experiments(
@@ -356,32 +338,12 @@ impl WorkflowBenchmarkRepository for SqliteWorkflowBenchmarkRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        let mut reviews = Vec::new();
-        for candidate in &candidates {
-            let Some(item_id) = candidate.production_batch_item_id.as_deref() else {
-                continue;
-            };
-            if let Some(review) = sqlx::query_as::<_, DbReview>(
-                "SELECT production_batch_item_id, review_status, review_note
-                 FROM production_item_reviews
-                 WHERE production_batch_item_id = ? ORDER BY version DESC LIMIT 1",
-            )
-            .bind(item_id)
-            .fetch_optional(&mut *transaction)
-            .await
-            .map_err(map_sqlx_error)?
-            {
-                reviews.push(review.into());
-            }
-        }
-
         transaction.commit().await.map_err(map_sqlx_error)?;
         Ok(Some(WorkflowBenchmarkSnapshot {
             experiment: experiment.into(),
             candidates: candidates.into_iter().map(Into::into).collect(),
             runs: runs.into_iter().map(Into::into).collect(),
             quality: quality.into_iter().map(Into::into).collect(),
-            reviews,
         }))
     }
 

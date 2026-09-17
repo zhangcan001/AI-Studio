@@ -8,15 +8,15 @@ mod dev048_consistency_e2e;
 
 pub use pool::initialize;
 pub use repositories::{
-    SqliteAssetBrowseRepository, SqliteAssetDeletionRepository, SqliteAssetRepository,
-    SqliteAssetVideoPromptRepository, SqliteConsistencyProfileRepository,
+    SqliteArtifactRepository, SqliteAssetBrowseRepository, SqliteAssetDeletionRepository,
+    SqliteAssetRepository, SqliteAssetVideoPromptRepository, SqliteConsistencyProfileRepository,
     SqliteDatabaseHealthProbe, SqliteExternalProductionHandoffRepository,
     SqliteGenerationDefinitionRepository, SqliteGenerationSnapshotRepository,
     SqliteModelRepository, SqliteOrganizationRepository, SqlitePresetRepository,
-    SqliteProductionAuditRepository, SqliteProductionItemReviewRepository,
-    SqliteProductionOrchestratorRepository, SqliteProductionQueueRepository,
-    SqliteProductionStructureRepository, SqliteProjectBackupRepository,
-    SqliteProjectCommandCenterRepository, SqliteProjectManifestRepository, SqliteProjectRepository,
+    SqliteProductionAuditRepository, SqliteProductionOrchestratorRepository,
+    SqliteProductionQueueRepository, SqliteProductionStructureRepository,
+    SqliteProjectBackupRepository, SqliteProjectCommandCenterRepository,
+    SqliteProjectManifestRepository, SqliteProjectRepository,
     SqliteProjectWorkflowBindingRepository, SqlitePromptLibraryRepository,
     SqliteProvenanceLineageRepository, SqliteRecipeHistoryQueryRepository,
     SqliteReferenceAnchorRepository, SqliteReferenceSetRepository, SqliteShotConsistencyRepository,

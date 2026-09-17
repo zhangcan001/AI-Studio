@@ -85,7 +85,7 @@ mod tests {
                'script_sources', 'script_import_drafts',
                'production_package_batch_bindings', 'project_workflow_bindings',
                'workflow_runtime_artifacts', 'workflow_recipe_promotions',
-               'workflow_recipe_runtime_states')",
+               'workflow_recipe_runtime_states', 'artifact_reviews')",
         )
         .fetch_one(pool)
         .await
@@ -101,13 +101,13 @@ mod tests {
             .await
             .expect("migration should succeed");
 
-        assert_eq!(table_count(&pool).await, 69);
+        assert_eq!(table_count(&pool).await, 70);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations",)
                 .fetch_one(&pool)
                 .await
                 .expect("latest migration should be readable"),
-            37
+            38
         );
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
@@ -330,12 +330,12 @@ mod tests {
         let second_pool = initialize(&database_path)
             .await
             .expect("second migration should succeed");
-        assert_eq!(table_count(&second_pool).await, 69);
+        assert_eq!(table_count(&second_pool).await, 70);
         second_pool.close().await;
     }
 
     #[tokio::test]
-    async fn migration_033_through_037_preserve_existing_project_asset_shot_task_review_rows() {
+    async fn migration_033_through_038_preserves_rows_and_migrates_exact_artifact_review_links() {
         let temporary_directory = tempdir().expect("temporary directory should be created");
         let database_path = temporary_directory.path().join("legacy-032.db");
         let options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -448,6 +448,18 @@ mod tests {
         .await
         .expect("legacy asset fixture should insert");
         sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path, sha256,
+              mime_type, width, height, file_size, source_task_id, metadata_json, created_at, updated_at)
+             VALUES ('ast_legacy_v2_unreviewed', 'legacy-v2-project', 'image', 'source_image',
+                     'Unreviewed output', 'other.png', 'C:/legacy-v2/other.png', 'other-sha',
+                     'image/png', 1280, 720, 2048, 'legacy-v2-task', '{}',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("unreviewed output fixture should insert");
+        sqlx::query(
             "INSERT INTO production_batches
              (id, project_id, name, status, continue_on_failure, created_at, updated_at)
              VALUES ('legacy-v2-batch', 'legacy-v2-project', 'Legacy batch', 'COMPLETED', 0,
@@ -489,6 +501,22 @@ mod tests {
         .execute(&pool)
         .await
         .expect("legacy review fixture should insert");
+        sqlx::query(
+            "INSERT INTO task_output_assets (task_id, output_id, ordinal, asset_id, created_at)
+             VALUES ('legacy-v2-task', 'legacy-output', 0, 'ast_legacy_v2_asset',
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy output mapping should insert");
+        sqlx::query(
+            "INSERT INTO task_output_assets (task_id, output_id, ordinal, asset_id, created_at)
+             VALUES ('legacy-v2-task', 'legacy-output-unreviewed', 0,
+                     'ast_legacy_v2_unreviewed', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("unreviewed output mapping should insert");
 
         let before: (i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT
@@ -639,6 +667,44 @@ mod tests {
             .await
             .expect("lineage tables should be readable"),
             2
+        );
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/037_prompt_version_provenance.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration 037 should apply to the legacy database");
+        sqlx::raw_sql(include_str!("../../../migrations/038_artifact_review.sql"))
+            .execute(&pool)
+            .await
+            .expect("migration 038 should apply to the legacy database");
+        let migrated_review: (String, String) = sqlx::query_as(
+            "SELECT decision, comment FROM artifact_reviews
+             WHERE project_id = 'legacy-v2-project' AND artifact_id = 'ast_legacy_v2_asset'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("exact legacy artifact review should migrate");
+        assert_eq!(
+            migrated_review,
+            ("APPROVED".to_owned(), "preserve me".to_owned())
+        );
+        let unlinked_review: (String, String) = sqlx::query_as(
+            "SELECT decision, comment FROM artifact_reviews
+             WHERE project_id = 'legacy-v2-project' AND artifact_id = 'ast_legacy_v2_unreviewed'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("unlinked output should remain pending, not inherit another output review");
+        assert_eq!(unlinked_review, ("PENDING".to_owned(), String::new()));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM production_item_reviews WHERE id = 'legacy-v2-review'",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("legacy review should remain available"),
+            1
         );
         pool.close().await;
     }

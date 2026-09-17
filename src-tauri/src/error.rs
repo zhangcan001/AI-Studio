@@ -41,6 +41,12 @@ pub enum AppErrorCode {
     ComfyMemoryBusy,
     ComfyMemoryReleaseFailed,
     ExternalProductionHandoffError,
+    ArtifactNotFound,
+    ArtifactFileMissing,
+    ArtifactPathInvalid,
+    ArtifactOpenFailed,
+    ArtifactReviewConflict,
+    ArtifactReviewInvalid,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,6 +236,30 @@ impl AppError {
         error
     }
 
+    pub fn artifact_not_found(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ArtifactNotFound, message)
+    }
+
+    pub fn artifact_file_missing(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ArtifactFileMissing, message)
+    }
+
+    pub fn artifact_path_invalid(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ArtifactPathInvalid, message)
+    }
+
+    pub fn artifact_open_failed(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ArtifactOpenFailed, message)
+    }
+
+    pub fn artifact_review_conflict(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ArtifactReviewConflict, message)
+    }
+
+    pub fn artifact_review_invalid(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ArtifactReviewInvalid, message)
+    }
+
     pub fn code(&self) -> &'static str {
         match self.code {
             AppErrorCode::InitializationError => "INITIALIZATION_ERROR",
@@ -268,6 +298,12 @@ impl AppError {
             AppErrorCode::ComfyMemoryBusy => "COMFY_MEMORY_BUSY",
             AppErrorCode::ComfyMemoryReleaseFailed => "COMFY_MEMORY_RELEASE_FAILED",
             AppErrorCode::ExternalProductionHandoffError => "EXTERNAL_PRODUCTION_HANDOFF_ERROR",
+            AppErrorCode::ArtifactNotFound => "ARTIFACT_NOT_FOUND",
+            AppErrorCode::ArtifactFileMissing => "ARTIFACT_FILE_MISSING",
+            AppErrorCode::ArtifactPathInvalid => "ARTIFACT_PATH_INVALID",
+            AppErrorCode::ArtifactOpenFailed => "ARTIFACT_OPEN_FAILED",
+            AppErrorCode::ArtifactReviewConflict => "ARTIFACT_REVIEW_CONFLICT",
+            AppErrorCode::ArtifactReviewInvalid => "ARTIFACT_REVIEW_INVALID",
         }
     }
 

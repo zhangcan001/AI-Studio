@@ -118,7 +118,7 @@ describe("ProjectCommandCenter", () => {
     expect(html).toContain("项目总览");
     expect(html).toContain(project.name);
     expect(html).toContain("总体进度");
-    expect(html).toContain("待审核");
+    expect(html).toContain("镜头候选待确认");
     expect(html).toContain("需要处理");
     expect(html).toContain("运行环境");
     expect(html).toContain("继续工作");
@@ -391,8 +391,8 @@ describe("ProjectCommandCenter", () => {
   });
 
   it.each([
-    ["IMAGE_REVIEW", { kind: "IMAGE_REVIEW", shotId: "shot-image" }, { destination: "shots", section: "review", shotId: "shot-image", actionKind: "IMAGE_REVIEW" }],
-    ["VIDEO_REVIEW", { kind: "VIDEO_REVIEW", shotId: "shot-video" }, { destination: "shots", section: "review", shotId: "shot-video", actionKind: "VIDEO_REVIEW" }],
+    ["IMAGE_REVIEW", { kind: "IMAGE_REVIEW", shotId: "shot-image" }, { destination: "shots", section: "creation", shotId: "shot-image", actionKind: "IMAGE_REVIEW" }],
+    ["VIDEO_REVIEW", { kind: "VIDEO_REVIEW", shotId: "shot-video" }, { destination: "shots", section: "creation", shotId: "shot-video", actionKind: "VIDEO_REVIEW" }],
     ["ACTIVE_PRODUCTION", { kind: "ACTIVE_PRODUCTION", batchId: "batch-active" }, { destination: "shots", section: "production", batchId: "batch-active", actionKind: "ACTIVE_PRODUCTION" }],
     ["AUTO_RESUMABLE", { kind: "AUTO_RESUMABLE", batchId: "batch-resume" }, { destination: "shots", section: "production", batchId: "batch-resume", actionKind: "AUTO_RESUMABLE" }],
     ["MISSING_CONFIG", { kind: "MISSING_CONFIG", shotId: "shot-config" }, { destination: "shots", section: "creation", shotId: "shot-config", actionKind: "MISSING_CONFIG" }],

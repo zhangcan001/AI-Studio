@@ -4,7 +4,7 @@ import {
   deriveProjectPipelineSummary,
   projectCompletionPercent,
   projectPipelineStageCount,
-  reviewShotIds,
+  candidateShotIds,
 } from "./ProjectProductionPipeline";
 import { buildShotListView, defaultShotListControls } from "./shotListQuery";
 
@@ -85,8 +85,8 @@ describe("Project production pipeline derivation", () => {
     const summary = deriveProjectPipelineSummary(shots);
 
     expect(projectCompletionPercent(summary)).toBe(0);
-    expect(reviewShotIds(shots, "image")).toEqual(["image-review-1"]);
-    expect(reviewShotIds(shots, "video")).toEqual(["video-review-2"]);
+    expect(candidateShotIds(shots, "image")).toEqual(["image-review-1"]);
+    expect(candidateShotIds(shots, "video")).toEqual(["video-review-2"]);
     expect(projectPipelineStageCount(summary, "IMAGE_REVIEW")).toBe(1);
     expect(projectPipelineStageCount(summary, "VIDEO_REVIEW")).toBe(1);
     expect(shots.every((shot) => !shot.selectedImageAssetId && !shot.selectedVideoAssetId)).toBe(true);

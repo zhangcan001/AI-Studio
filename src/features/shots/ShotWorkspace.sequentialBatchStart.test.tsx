@@ -3,7 +3,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductionBatchDetail, ProductionBatchSummary, ProductionQueueOverview } from "../../types/productionQueue";
-import type { ProductionBatchReviewProductivity } from "../../services/tauriClient";
 import type { TaskView } from "../../types/task";
 import { ShotWorkspace } from "./ShotWorkspace";
 
@@ -22,14 +21,12 @@ const mocks = vi.hoisted(() => ({
   listProductionQueues: vi.fn(),
   getProductionAdmissionStatus: vi.fn(),
   getProductionQueue: vi.fn(),
+  getProductionBatchArtifacts: vi.fn(),
   getProductionQueueOverview: vi.fn(),
-  getProductionBatchReviewProductivity: vi.fn(),
   getAssetMediaUrl: vi.fn(),
   startProductionQueue: vi.fn(),
   pauseProductionQueue: vi.fn(),
   requeueProductionQueueItem: vi.fn(),
-  revealProductionReviewAsset: vi.fn(),
-  openProductionReviewOutputFolder: vi.fn(),
   subscribeTaskUpdates: vi.fn(),
 }));
 
@@ -48,14 +45,12 @@ vi.mock("../../services/tauriClient", async () => {
     listProductionQueues: mocks.listProductionQueues,
     getProductionAdmissionStatus: mocks.getProductionAdmissionStatus,
     getProductionQueue: mocks.getProductionQueue,
+    getProductionBatchArtifacts: mocks.getProductionBatchArtifacts,
     getProductionQueueOverview: mocks.getProductionQueueOverview,
-    getProductionBatchReviewProductivity: mocks.getProductionBatchReviewProductivity,
     getAssetMediaUrl: mocks.getAssetMediaUrl,
     startProductionQueue: mocks.startProductionQueue,
     pauseProductionQueue: mocks.pauseProductionQueue,
     requeueProductionQueueItem: mocks.requeueProductionQueueItem,
-    revealProductionReviewAsset: mocks.revealProductionReviewAsset,
-    openProductionReviewOutputFolder: mocks.openProductionReviewOutputFolder,
   };
 });
 
@@ -64,7 +59,6 @@ vi.mock("./ProjectStructureTree", () => ({ ProjectStructureTree: () => <div aria
 vi.mock("./ShotListToolbar", () => ({ ShotListToolbar: () => <div aria-label="镜头搜索和筛选" /> }));
 vi.mock("./ProjectProductionPipeline", () => ({ ProjectProductionPipeline: () => <div aria-label="项目生产流水线" /> }));
 vi.mock("./ShotCreationWorkspace", () => ({ ShotCreationWorkspace: () => <div aria-label="镜头创建工作区" /> }));
-vi.mock("./ShotBatchReviewBoard", () => ({ ShotBatchReviewBoard: () => <div aria-label="镜头批次审核" /> }));
 vi.mock("./SceneProductionPanel", () => ({ SceneProductionPanel: () => <div aria-label="场景生产" /> }));
 vi.mock("./EpisodeProductionPanel", () => ({ EpisodeProductionPanel: () => <div aria-label="集生产" /> }));
 vi.mock("./SeriesProductionPanel", () => ({ SeriesProductionPanel: () => <div aria-label="系列生产" /> }));
@@ -105,21 +99,6 @@ function makeDetail(id: BatchId): ProductionBatchDetail {
     failed: counts.failed,
     cancelled: counts.cancelled,
     skipped: counts.skipped,
-    items: [],
-  };
-}
-
-function makeReview(id: BatchId): ProductionBatchReviewProductivity {
-  return {
-    batch: makeDetail(id),
-    total: batchCounts[id].total,
-    successCount: batchCounts[id].succeeded,
-    failedCount: batchCounts[id].failed,
-    unreviewedCount: 0,
-    approvedCount: 0,
-    starredCount: 0,
-    regenerateCount: 0,
-    rejectedCount: 0,
     items: [],
   };
 }
@@ -193,6 +172,22 @@ beforeEach(() => {
     projectId: activeBatchId ? "project-1" : undefined,
   }));
   mocks.getProductionQueue.mockImplementation(async (_projectId: string, id: BatchId) => makeDetail(id));
+  mocks.getProductionBatchArtifacts.mockImplementation(async (_projectId: string, id: BatchId) => {
+    const detail = makeDetail(id);
+    return {
+      batchId: detail.id,
+      batchName: detail.name,
+      status: detail.status,
+      total: detail.total,
+      pending: detail.pending,
+      running: detail.running,
+      succeeded: detail.succeeded,
+      failed: detail.failed,
+      cancelled: detail.cancelled,
+      skipped: detail.skipped,
+      items: [],
+    } satisfies import("../../types/artifact").ProductionBatchArtifactsDto;
+  });
   mocks.getProductionQueueOverview.mockImplementation(async () => {
     const values = ids.map((id) => makeDetail(id));
     return {
@@ -210,7 +205,6 @@ beforeEach(() => {
       skippedItems: values.reduce((sum, detail) => sum + detail.skipped, 0),
     } satisfies ProductionQueueOverview;
   });
-  mocks.getProductionBatchReviewProductivity.mockImplementation(async (_projectId: string, id: BatchId) => makeReview(id));
   mocks.getAssetMediaUrl.mockImplementation((_projectId: string, assetId: string) => `asset://${assetId}`);
   mocks.startProductionQueue.mockImplementation(async (_projectId: string, id: BatchId) => {
     if (id === startFailure) throw { code: "COMFY_TIMEOUT", message: "start failed" };
@@ -220,8 +214,6 @@ beforeEach(() => {
   });
   mocks.pauseProductionQueue.mockResolvedValue(undefined);
   mocks.requeueProductionQueueItem.mockResolvedValue(undefined);
-  mocks.revealProductionReviewAsset.mockResolvedValue(undefined);
-  mocks.openProductionReviewOutputFolder.mockResolvedValue(undefined);
   mocks.subscribeTaskUpdates.mockImplementation(async (listener: (task: TaskView) => void) => {
     taskUpdateListener = listener;
     return () => {

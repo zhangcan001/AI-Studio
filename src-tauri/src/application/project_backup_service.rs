@@ -22,7 +22,7 @@ use uuid::Uuid;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const BACKUP_FORMAT: &str = "ai-studio-project-backup";
-const BACKUP_VERSION: u32 = 19;
+const BACKUP_VERSION: u32 = 20;
 const MAX_ZIP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ENTRY_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -61,6 +61,9 @@ pub struct BackupInventoryCounts {
     pub tools: usize,
     pub lineage: usize,
     pub tasks: usize,
+    /// Missing from manifests produced before Backup v20.
+    #[serde(default)]
+    pub artifact_reviews: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -118,6 +121,7 @@ pub struct ProjectBackupPreviewView {
     pub tool_instances: usize,
     pub generation_tool_usages: usize,
     pub generation_asset_versions: usize,
+    pub artifact_reviews: usize,
     pub missing_workflows: Vec<String>,
     pub active_tasks_excluded: usize,
     pub warning: String,
@@ -340,6 +344,7 @@ impl ProjectBackupService {
             tool_instances: document.tool_instances.len(),
             generation_tool_usages: document.generation_tool_usages.len(),
             generation_asset_versions: document.generation_asset_versions.len(),
+            artifact_reviews: document.artifact_reviews.len(),
             missing_workflows,
             active_tasks_excluded: document.active_tasks_excluded,
             warning: "项目归档包含项目历史、提示词、素材与溯源，请妥善保存。检查不会修改数据库。"
@@ -973,6 +978,9 @@ pub struct BackupDocument {
     pub(crate) script_draft_revisions: Vec<BackupScriptDraftRevision>,
     #[serde(default)]
     pub(crate) production_item_reviews: Vec<BackupProductionItemReview>,
+    /// Per-artifact review state added in Backup v20. Absent on v19 and earlier.
+    #[serde(default)]
+    pub(crate) artifact_reviews: Vec<BackupArtifactReview>,
     #[serde(default)]
     pub(crate) benchmark_experiments: Vec<BackupBenchmarkExperiment>,
     #[serde(default)]
@@ -2002,6 +2010,19 @@ pub(crate) struct BackupProductionItemReview {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct BackupArtifactReview {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) artifact_id: String,
+    pub(crate) decision: String,
+    pub(crate) comment: String,
+    pub(crate) revision: i64,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct BackupShot {
     pub(crate) id: String,
     pub(crate) project_id: String,
@@ -2300,6 +2321,7 @@ fn build_inventory_counts(document: &BackupDocument) -> BackupInventoryCounts {
             .len()
             .saturating_add(document.generation_asset_versions.len()),
         tasks: document.tasks.len(),
+        artifact_reviews: document.artifact_reviews.len(),
     }
 }
 
@@ -2484,7 +2506,25 @@ fn inspect_archive(
     if manifest.format != BACKUP_FORMAT
         || !matches!(
             manifest.version,
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
+            1 | 2
+                | 3
+                | 4
+                | 5
+                | 6
+                | 7
+                | 8
+                | 9
+                | 10
+                | 11
+                | 12
+                | 13
+                | 14
+                | 15
+                | 16
+                | 17
+                | 18
+                | 19
+                | 20
         )
     {
         return Err(AppError::backup_invalid("备份格式或版本不受支持"));
@@ -2628,6 +2668,7 @@ fn validate_document_entries(
     validate_project_workflow_binding_document(document, version)?;
     validate_workflow_registry_document(document, version)?;
     validate_production_item_review_document(document)?;
+    validate_artifact_review_document(document)?;
     validate_organization_document(document)?;
     validate_reference_anchor_document(document)?;
     validate_consistency_document(document, version)?;
@@ -3452,6 +3493,35 @@ fn validate_production_item_review_document(document: &BackupDocument) -> Result
         {
             return Err(AppError::backup_invalid(
                 "备份审片版本无效或引用了未知项目数据",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_artifact_review_document(document: &BackupDocument) -> Result<(), AppError> {
+    let artifact_ids = document
+        .mappings
+        .iter()
+        .map(|mapping| mapping.asset_id.as_str())
+        .collect::<HashSet<_>>();
+    let mut review_ids = HashSet::new();
+    let mut reviewed_artifacts = HashSet::new();
+    for review in &document.artifact_reviews {
+        if review.project_id != document.project.id
+            || review.id.trim().is_empty()
+            || !review_ids.insert(review.id.as_str())
+            || !reviewed_artifacts.insert(review.artifact_id.as_str())
+            || !artifact_ids.contains(review.artifact_id.as_str())
+            || !matches!(
+                review.decision.as_str(),
+                "PENDING" | "APPROVED" | "REJECTED"
+            )
+            || review.revision < 0
+            || review.comment.as_bytes().len() > 4 * 1024
+        {
+            return Err(AppError::backup_invalid(
+                "备份产物审核状态无效或引用了未知产物",
             ));
         }
     }
@@ -4940,15 +5010,15 @@ mod tests {
         restored_name, safe_zip_path, validate_asset_video_prompt_document,
         validate_organization_document, validate_production_structure_document,
         validate_prompt_document, validate_reference_anchor_document, write_zip_to_path,
-        BackupAsset, BackupAssetRelation, BackupAssetTag, BackupAssetTagLink, BackupAssetVersion,
-        BackupAssetVideoPrompt, BackupDocument, BackupFileSource, BackupGenerationAssetVersion,
-        BackupGenerationToolUsage, BackupInventoryCounts, BackupMapping, BackupModel,
-        BackupModelVersion, BackupProductionEpisode, BackupProductionScene, BackupProductionSeries,
-        BackupProject, BackupPromptEntry, BackupPromptVersion, BackupReferenceAnchor,
-        BackupReferenceAnchorAsset, BackupShot, BackupShotSceneAssignment, BackupSnapshot,
-        BackupTask, BackupTool, BackupToolCapability, BackupToolInstance, BackupToolVersion,
-        DbReferenceAnchor, DbReferenceAnchorAsset, ProductionStructureIds, ProjectBackupManifest,
-        ProjectBackupService,
+        BackupArtifactReview, BackupAsset, BackupAssetRelation, BackupAssetTag, BackupAssetTagLink,
+        BackupAssetVersion, BackupAssetVideoPrompt, BackupDocument, BackupFileSource,
+        BackupGenerationAssetVersion, BackupGenerationToolUsage, BackupInventoryCounts,
+        BackupMapping, BackupModel, BackupModelVersion, BackupProductionEpisode,
+        BackupProductionScene, BackupProductionSeries, BackupProject, BackupPromptEntry,
+        BackupPromptVersion, BackupReferenceAnchor, BackupReferenceAnchorAsset, BackupShot,
+        BackupShotSceneAssignment, BackupSnapshot, BackupTask, BackupTool, BackupToolCapability,
+        BackupToolInstance, BackupToolVersion, DbReferenceAnchor, DbReferenceAnchorAsset,
+        ProductionStructureIds, ProjectBackupManifest, ProjectBackupService,
     };
     use crate::application::ports::ProjectRecord;
     use crate::infrastructure::{
@@ -5173,6 +5243,7 @@ mod tests {
             script_sources: Vec::new(),
             script_draft_revisions: Vec::new(),
             production_item_reviews: Vec::new(),
+            artifact_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
             production_runs: Vec::new(),
@@ -5378,11 +5449,12 @@ mod tests {
         assert!(document.tool_instances.is_empty());
         assert!(document.generation_tool_usages.is_empty());
         assert!(document.generation_asset_versions.is_empty());
+        assert!(document.artifact_reviews.is_empty());
         assert!(document.prompt_versions.is_empty());
     }
 
     #[test]
-    fn v19_backup_document_round_trips_additive_collections() {
+    fn v20_backup_document_round_trips_artifact_review_and_additive_collections() {
         let mut document = organization_document(Vec::new(), Vec::new());
         document.asset_versions = vec![BackupAssetVersion {
             id: "asv_1".to_owned(),
@@ -5418,6 +5490,23 @@ mod tests {
             capabilities_json: json!([]),
             parameter_schema_json: json!({}),
             created_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.mappings = vec![BackupMapping {
+            task_id: "tsk_1".to_owned(),
+            output_id: "out_1".to_owned(),
+            ordinal: 0,
+            asset_id: "ast_organization".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+        }];
+        document.artifact_reviews = vec![BackupArtifactReview {
+            id: "arv_1".to_owned(),
+            project_id: document.project.id.clone(),
+            artifact_id: "ast_organization".to_owned(),
+            decision: "REJECTED".to_owned(),
+            comment: "调整光线".to_owned(),
+            revision: 3,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:01:00Z".to_owned(),
         }];
         document.tools = vec![BackupTool {
             id: "tool_1".to_owned(),
@@ -5458,6 +5547,8 @@ mod tests {
         assert_eq!(decoded.models[0].provider, "MiniMax");
         assert_eq!(decoded.tool_instances[0].status, "AVAILABLE");
         assert_eq!(decoded.generation_asset_versions[0].relation_type, "OUTPUT");
+        assert_eq!(decoded.artifact_reviews[0].decision, "REJECTED");
+        assert_eq!(decoded.artifact_reviews[0].artifact_id, "ast_organization");
     }
 
     #[test]
@@ -6286,7 +6377,7 @@ mod tests {
         assert!(exported.entries >= 6);
         let (manifest, document, names) = inspect_archive(&archive_path).unwrap();
         assert_eq!(manifest.format, "ai-studio-project-backup");
-        assert_eq!(manifest.version, 19);
+        assert_eq!(manifest.version, 20);
         assert_eq!(document.project_workflow_bindings.len(), 2);
         assert_eq!(document.project_workflow_bindings[0].stage, "IMAGE");
         assert_eq!(
@@ -7146,6 +7237,7 @@ mod tests {
             script_sources: Vec::new(),
             script_draft_revisions: Vec::new(),
             production_item_reviews: Vec::new(),
+            artifact_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
             production_runs: Vec::new(),
@@ -7333,6 +7425,7 @@ mod tests {
             script_sources: Vec::new(),
             script_draft_revisions: Vec::new(),
             production_item_reviews: Vec::new(),
+            artifact_reviews: Vec::new(),
             benchmark_experiments: Vec::new(),
             benchmark_candidates: Vec::new(),
             production_runs: Vec::new(),
@@ -7448,7 +7541,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backup_v19_exports_and_restores_asset_versions_lineage_and_registry_policy() {
+    async fn backup_v20_exports_and_restores_artifact_reviews_with_remapped_assets() {
         let directory = tempdir().unwrap();
         let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
         let pool = initialize(&data_dirs.database).await.unwrap();
@@ -7572,6 +7665,45 @@ mod tests {
         .await
         .unwrap();
         sqlx::query(
+            "INSERT INTO production_batches
+             (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+             VALUES ('pbt_v19', 'project-v19', '旧批次', 'COMPLETE', 0,
+                     '2026-01-01T00:01:00Z', '2026-01-01T00:01:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_batch_items
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status,
+              task_id, created_at, updated_at)
+             VALUES ('pbi_v19', 'pbt_v19', 0, 'workflow-version-1', 'recipe-1', '{}',
+                     'SUCCEEDED', 'tsk_v19', '2026-01-01T00:01:00Z', '2026-01-01T00:01:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_item_reviews
+             (id, project_id, production_batch_id, production_batch_item_id, task_id,
+              result_asset_id, review_status, review_note, version, lineage_key,
+              created_at, updated_at)
+             VALUES ('pri_v19', 'project-v19', 'pbt_v19', 'pbi_v19', 'tsk_v19',
+                     'ast_v19', 'APPROVED', 'old approved', 1, 'pbi_v19',
+                     '2026-01-01T00:01:30Z', '2026-01-01T00:01:30Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE artifact_reviews SET decision = 'REJECTED', comment = '需要调整',
+             revision = 2, updated_at = '2026-01-01T00:02:00Z'
+             WHERE project_id = 'project-v19' AND artifact_id = 'ast_v19'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
             "INSERT INTO asset_versions
              (id, project_id, asset_id, version_number, metadata_snapshot, location, checksum, created_at)
              VALUES ('asv_v19', 'project-v19', 'ast_v19', 1, '{}', ?, ?, '2026-01-01T00:01:00Z')",
@@ -7636,7 +7768,7 @@ mod tests {
             .await
             .expect("export v19");
         let (manifest, document, _) = inspect_archive(&archive).unwrap();
-        assert_eq!(manifest.version, 19);
+        assert_eq!(manifest.version, 20);
         assert_eq!(document.asset_versions.len(), 1);
         assert_eq!(document.asset_relations.len(), 1);
         assert_eq!(document.models.len(), 1);
@@ -7645,6 +7777,12 @@ mod tests {
         assert_eq!(document.tool_instances.len(), 1);
         assert_eq!(document.generation_tool_usages.len(), 1);
         assert_eq!(document.generation_asset_versions.len(), 1);
+        assert_eq!(document.artifact_reviews.len(), 1);
+        assert_eq!(document.artifact_reviews[0].decision, "REJECTED");
+        assert_eq!(document.artifact_reviews[0].comment, "需要调整");
+        assert_eq!(document.production_item_reviews.len(), 1);
+        let legacy_archive = directory.path().join("v19-without-artifact-reviews.zip");
+        rewrite_v20_archive_as_v19(&archive, &legacy_archive);
 
         // Keep the source project (restore always creates a new project). Remove only the
         // tool instance so restore re-inserts it as UNKNOWN while reusing the tool row.
@@ -7659,16 +7797,54 @@ mod tests {
 
         let preview = service.inspect(archive).await.unwrap();
         assert_eq!(preview.asset_versions, 1);
+        assert_eq!(preview.artifact_reviews, 1);
         assert_eq!(preview.tools, 1);
         let restored = service.restore(&preview.inspection_id).await.unwrap();
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 19);
+        assert_eq!(restored.backup_version, 20);
         assert_eq!(restored.assets, 2);
         assert_eq!(restored.versions, 1);
         assert_eq!(restored.generations, 1);
         assert_eq!(restored.restored_generation_tool_usages, 1);
         assert_eq!(restored.restored_generation_asset_versions, 1);
         assert!(restored.warnings.is_empty());
+
+        let restored_review: (String, String, i64, String) = sqlx::query_as(
+            "SELECT decision, comment, revision, artifact_id FROM artifact_reviews
+             WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_review.0, "REJECTED");
+        assert_eq!(restored_review.1, "需要调整");
+        assert_eq!(restored_review.2, 2);
+        assert_ne!(restored_review.3, "ast_v19");
+
+        let legacy_preview = service.inspect(legacy_archive).await.unwrap();
+        assert_eq!(legacy_preview.artifact_reviews, 0);
+        let legacy_restored = service
+            .restore(&legacy_preview.inspection_id)
+            .await
+            .unwrap();
+        assert_eq!(legacy_restored.backup_version, 19);
+        let legacy_review: (String, String) = sqlx::query_as(
+            "SELECT decision, artifact_id FROM artifact_reviews WHERE project_id = ?",
+        )
+        .bind(&legacy_restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy_review.0, "APPROVED");
+        let legacy_comment: String =
+            sqlx::query_scalar("SELECT comment FROM artifact_reviews WHERE project_id = ?")
+                .bind(&legacy_restored.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(legacy_comment, "old approved");
+        assert_ne!(legacy_review.1, "ast_v19");
 
         let version_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM asset_versions WHERE project_id = ?")
@@ -7880,7 +8056,7 @@ mod tests {
         write_zip_to_path(&document, &files, &archive_path).unwrap();
 
         let (manifest, loaded, names) = inspect_archive(&archive_path).unwrap();
-        assert_eq!(manifest.version, 19);
+        assert_eq!(manifest.version, 20);
         assert!(manifest.logical_snapshot_checksum.is_some());
         assert_eq!(manifest.media_inventory.len(), 1);
         assert_eq!(manifest.media_inventory[0].sha256, sha);
@@ -8210,6 +8386,49 @@ mod tests {
         rewritten.finish().unwrap();
     }
 
+    fn rewrite_v20_archive_as_v19(source: &Path, destination: &Path) {
+        let mut source_archive = zip::ZipArchive::new(File::open(source).unwrap()).unwrap();
+        let mut project_bytes = Vec::new();
+        source_archive
+            .by_name("project.json")
+            .unwrap()
+            .read_to_end(&mut project_bytes)
+            .unwrap();
+        let mut project: serde_json::Value = serde_json::from_slice(&project_bytes).unwrap();
+        project.as_object_mut().unwrap().remove("artifactReviews");
+        let legacy_project_bytes = serde_json::to_vec_pretty(&project).unwrap();
+        let checksum = hash_bytes(&legacy_project_bytes);
+
+        let mut source_archive = zip::ZipArchive::new(File::open(source).unwrap()).unwrap();
+        let mut rewritten = ZipWriter::new(File::create(destination).unwrap());
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        for index in 0..source_archive.len() {
+            let mut entry = source_archive.by_index(index).unwrap();
+            let name = entry.name().to_owned();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            let bytes = match name.as_str() {
+                "manifest.json" => {
+                    let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    manifest["version"] = json!(19);
+                    manifest["logicalSnapshotChecksum"] = json!(checksum);
+                    if let Some(inventory) = manifest
+                        .get_mut("inventory")
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        inventory.remove("artifactReviews");
+                    }
+                    serde_json::to_vec_pretty(&manifest).unwrap()
+                }
+                "project.json" => legacy_project_bytes.clone(),
+                _ => bytes,
+            };
+            rewritten.start_file(name, options).unwrap();
+            rewritten.write_all(&bytes).unwrap();
+        }
+        rewritten.finish().unwrap();
+    }
+
     #[tokio::test]
     async fn truncated_corrupt_zip_fails_inspect_without_db_mutation() {
         let directory = tempdir().unwrap();
@@ -8278,6 +8497,7 @@ mod tests {
                 tools: 0,
                 lineage: 0,
                 tasks: 0,
+                artifact_reviews: 0,
             });
             inventory.assets = inventory.assets.saturating_add(99);
             manifest.inventory = Some(inventory);
@@ -8791,11 +9011,11 @@ mod tests {
             },
         ];
 
-        let archive_path = directory.path().join("multimedia-v19.aiarchive");
+        let archive_path = directory.path().join("multimedia-v20.aiarchive");
         write_zip_to_path(&document, &files, &archive_path).unwrap();
         let (manifest, loaded, _) = inspect_archive(&archive_path).unwrap();
-        assert_eq!(manifest.version, 19);
-        let inventory = manifest.inventory.expect("v19 inventory");
+        assert_eq!(manifest.version, 20);
+        let inventory = manifest.inventory.expect("v20 inventory");
         assert_eq!(inventory.assets, 3);
         assert_eq!(inventory.asset_versions, 6);
         assert_eq!(inventory.relations, 2);
@@ -8818,7 +9038,7 @@ mod tests {
         let restored = service.restore(&preview.inspection_id).await.unwrap();
 
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 19);
+        assert_eq!(restored.backup_version, 20);
         assert_eq!(restored.assets, 3);
         assert_eq!(restored.versions, 6);
         assert_eq!(restored.generations, 1);
@@ -9144,7 +9364,7 @@ mod tests {
         let restored = service.restore(&preview.inspection_id).await.unwrap();
 
         assert_eq!(restored.status, "COMPLETE");
-        assert_eq!(restored.backup_version, 19);
+        assert_eq!(restored.backup_version, 20);
         assert_eq!(restored.generations, 1);
         assert_eq!(restored.missing_models, vec!["mdv_unknown".to_owned()]);
         assert_eq!(restored.missing_tools, vec!["tins_unknown".to_owned()]);

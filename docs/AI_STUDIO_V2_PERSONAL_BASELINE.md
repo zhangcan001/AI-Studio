@@ -53,7 +53,7 @@ start, stop, or execute tools.
 
 ### Project Archive
 
-- Backup v19;
+- Backup v19 at the original v2.0.0-personal release baseline; current trunk extends it additively as Backup v20 for ArtifactReview;
 - logical project export and restore;
 - explicit project-owned ID remapping;
 - AssetVersion and provenance restoration; and

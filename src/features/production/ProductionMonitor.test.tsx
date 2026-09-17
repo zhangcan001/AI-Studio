@@ -1,233 +1,163 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProductionMonitor, PRODUCTION_MONITOR_PAGE_SIZE } from "./ProductionMonitor";
+import { openArtifact, revealArtifact } from "../../services/tauriClient";
+import type { ArtifactDto, ProductionBatchArtifactsDto, ProductionTaskDto } from "../../types/artifact";
+import { ProductionMonitor } from "./ProductionMonitor";
 
-const item = (ordinal: number, status = "PENDING", extra: Record<string, unknown> = {}) => ({
-  id: `item-${ordinal}`,
-  ordinal,
-  status,
-  name: `镜头 ${ordinal}`,
-  ...extra,
+vi.mock("../../services/tauriClient", async () => {
+  const actual = await vi.importActual<typeof import("../../services/tauriClient")>("../../services/tauriClient");
+  return {
+    ...actual,
+    openArtifact: vi.fn(),
+    revealArtifact: vi.fn(),
+    getAssetMediaUrl: vi.fn((_projectId: string, assetId: string) => `asset://${assetId}`),
+  };
 });
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-describe("ProductionMonitor", () => {
-  it("renders all summary counts, terminal progress, success rate and Chinese status labels", () => {
-    render(
-      <ProductionMonitor
-        batch={{
-          id: "batch-1",
-          name: "第一批",
-          status: "RUNNING",
-          items: [item(1, "PENDING"), item(2, "RUNNING"), item(3, "SUCCEEDED", { videoUrl: "https://example.test/video.mp4" }), item(4, "FAILED"), item(5, "CANCELLED"), item(6, "SKIPPED")],
-          total: 6,
-        }}
-      />,
-    );
+function artifact(id: string, overrides: Partial<ArtifactDto> = {}): ArtifactDto {
+  return {
+    id,
+    taskId: "task-1",
+    outputId: "output-video",
+    ordinal: 0,
+    mediaType: "video",
+    name: `${id}.mp4`,
+    mimeType: "video/mp4",
+    width: 1280,
+    height: 720,
+    durationMs: 5000,
+    sizeBytes: 2048,
+    version: 1,
+    createdAt: "2026-09-17T00:00:00Z",
+    thumbnailAvailable: false,
+    availability: "available",
+    reviewStatus: "PENDING",
+    ...overrides,
+  };
+}
 
-    expect(screen.getByRole("heading", { name: "第一批" })).toBeTruthy();
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("6总数");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1待执行");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1运行中");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1成功");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1失败");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1已取消");
-    expect(screen.getByTestId("production-monitor-summary").textContent).toContain("1已跳过");
-    expect(screen.getByLabelText("终态进度 67%")).toBeTruthy();
-    expect(screen.getByLabelText("成功率 17%")).toBeTruthy();
-    expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("已取消").length).toBeGreaterThan(0);
-  });
+function task(ordinal: number, status: string, artifacts: ArtifactDto[] = [], overrides: Partial<ProductionTaskDto> = {}): ProductionTaskDto {
+  return {
+    productionItemId: `item-${ordinal}`,
+    ordinal,
+    productionItemStatus: status,
+    task: {
+      id: `task-${ordinal}`,
+      status: status === "SUCCEEDED" ? "SUCCEEDED" : status,
+      workflowVersionId: "wfv-test",
+      recipeId: "rcp-test",
+      createdAt: "2026-09-17T00:00:00Z",
+    },
+    artifacts,
+    ...overrides,
+  };
+}
 
-  it("maps paused batch and item statuses to 已暂停", () => {
-    render(<ProductionMonitor batch={{ status: "PAUSED", items: [item(1, "PAUSED")] }} />);
+function batch(items: ProductionTaskDto[], status = "COMPLETED"): ProductionBatchArtifactsDto {
+  return {
+    batchId: "batch-test",
+    batchName: "测试批次",
+    status,
+    total: items.length,
+    pending: items.filter((item) => ["READY", "PENDING"].includes(item.productionItemStatus)).length,
+    running: items.filter((item) => ["RUNNING", "DISPATCHING", "DISPATCHED"].includes(item.productionItemStatus)).length,
+    succeeded: items.filter((item) => item.productionItemStatus === "SUCCEEDED").length,
+    failed: items.filter((item) => item.productionItemStatus === "FAILED").length,
+    cancelled: items.filter((item) => item.productionItemStatus === "CANCELLED").length,
+    skipped: items.filter((item) => item.productionItemStatus === "SKIPPED").length,
+    items,
+  };
+}
 
-    expect(screen.getAllByText("已暂停").length).toBe(2);
-    expect(screen.queryByText("处理中")).toBeNull();
-  });
-
-  it("orders items by ordinal ascending and paginates 100 items at 50 per page", async () => {
+describe("ProductionMonitor artifact workflow", () => {
+  it("shows artifacts for a completed task and opens by artifact ID", async () => {
     const user = userEvent.setup();
-    const items = Array.from({ length: 100 }, (_, index) => item(100 - index));
-    render(<ProductionMonitor batch={{ id: "batch-100", items, total: 100 }} />);
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(1, "SUCCEEDED", [artifact("asset-video")])])} />);
 
-    let rows = screen.getAllByRole("listitem");
-    expect(rows).toHaveLength(PRODUCTION_MONITOR_PAGE_SIZE);
-    expect(rows[0].getAttribute("data-ordinal")).toBe("1");
-    expect(rows[rows.length - 1].getAttribute("data-ordinal")).toBe("50");
-    expect(screen.getByText("第 1 / 2 页 · 每页 50 项")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "下一页" }));
-    rows = screen.getAllByRole("listitem");
-    expect(rows).toHaveLength(50);
-    expect(rows[0].getAttribute("data-ordinal")).toBe("51");
-    expect(rows[rows.length - 1].getAttribute("data-ordinal")).toBe("100");
+    expect(screen.queryByText("任务已完成，但没有登记可用产物。")).toBeNull();
+    expect(screen.getByText("asset-video.mp4")).toBeTruthy();
+    const artifactCard = screen.getByText("asset-video.mp4").closest("article");
+    expect(artifactCard).toBeTruthy();
+    expect(within(artifactCard as HTMLElement).getByText("asset-video")).toBeTruthy();
+    expect(within(artifactCard as HTMLElement).getByText("可用")).toBeTruthy();
+    expect(screen.getAllByText("已完成").length).toBeGreaterThan(0);
+    const open = screen.getByRole("button", { name: "打开" });
+    expect((open as HTMLButtonElement).disabled).toBe(false);
+    await user.click(open);
+    await waitFor(() => expect(openArtifact).toHaveBeenCalledWith("asset-video"));
   });
 
-  it("filters generating, failed and completed items and resets to page one", async () => {
+  it("disables actions and explains a missing artifact", () => {
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(1, "SUCCEEDED", [artifact("asset-missing", { availability: "missing" })])])} />);
+
+    expect(screen.getByText("文件不存在")).toBeTruthy();
+    expect(screen.getByText("文件不存在，无法预览或打开。")).toBeTruthy();
+    const artifactCard = screen.getByText("asset-missing.mp4").closest("article");
+    expect(artifactCard).toBeTruthy();
+    expect(within(artifactCard as HTMLElement).getByText("asset-missing")).toBeTruthy();
+    expect(within(artifactCard as HTMLElement).getByText("文件不存在")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "打开" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "在文件夹中显示" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("renders multiple outputs independently and keeps each action bound to its artifact", async () => {
     const user = userEvent.setup();
-    const items = [
-      ...Array.from({ length: 60 }, (_, index) => item(index + 1, "SUCCEEDED", { videoUrl: "https://example.test/a.mp4" })),
-      item(61, "RUNNING"),
-      item(62, "FAILED", { errorMessage: "生成超时" }),
-    ];
-    render(<ProductionMonitor batch={{ items, total: 62 }} />);
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(1, "SUCCEEDED", [
+      artifact("asset-a", { name: "first.mp4", ordinal: 0 }),
+      artifact("asset-b", { name: "second.mp4", ordinal: 1, availability: "missing" }),
+    ])])} />);
 
-    await user.click(screen.getByRole("button", { name: "下一页" }));
-    await user.click(screen.getByRole("button", { name: /^已完成/ }));
-    expect(screen.getByText("第 1 / 2 页 · 每页 50 项")).toBeTruthy();
-    expect(screen.getAllByRole("listitem")).toHaveLength(50);
-    expect(screen.getByRole("button", { name: /^已完成/ }).getAttribute("aria-pressed")).toBe("true");
-
-    await user.click(screen.getByRole("button", { name: /运行中/ }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.getByText("镜头 61")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: /失败/ }));
-    expect(screen.getByText("生成超时")).toBeTruthy();
+    const first = screen.getByText("first.mp4").closest("article");
+    const second = screen.getByText("second.mp4").closest("article");
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(within(first as HTMLElement).getByText("asset-a")).toBeTruthy();
+    expect(within(first as HTMLElement).getByText("可用")).toBeTruthy();
+    expect(within(second as HTMLElement).getByText("asset-b")).toBeTruthy();
+    expect(within(second as HTMLElement).getByText("文件不存在")).toBeTruthy();
+    await user.click(within(first as HTMLElement).getByRole("button", { name: "在文件夹中显示" }));
+    await waitFor(() => expect(revealArtifact).toHaveBeenCalledWith("asset-a"));
+    expect((within(second as HTMLElement).getByRole("button", { name: "打开" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(revealArtifact).not.toHaveBeenCalledWith("asset-b");
   });
 
-  it("shows failure details and invokes a manual retry callback", async () => {
+  it("shows a typed open command failure to the user", async () => {
+    const user = userEvent.setup();
+    vi.mocked(openArtifact).mockRejectedValueOnce(new Error("ARTIFACT_OPEN_FAILED: opener failed"));
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(1, "SUCCEEDED", [artifact("asset-fail")])])} />);
+
+    await user.click(screen.getByRole("button", { name: "打开" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+
+  it("does not treat task success as proof an artifact exists", () => {
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(1, "SUCCEEDED")])} />);
+    expect(screen.getByText("任务已完成，但没有登记可用产物。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开" })).toBeNull();
+  });
+
+  it("keeps production retry attached to the existing queue item", async () => {
     const user = userEvent.setup();
     const onRetry = vi.fn();
-    render(<ProductionMonitor batch={{ items: [item(7, "FAILED", { errorCode: "TIMEOUT", errorMessage: "ComfyUI 超时" })] }} onRetry={onRetry} />);
+    render(<ProductionMonitor projectId="project-1" batch={batch([task(7, "FAILED", [], { errorCode: "TIMEOUT", errorMessage: "ComfyUI 超时" })], "FAILED")} onRetry={onRetry} />);
 
-    expect(screen.getByText("错误 TIMEOUT")).toBeTruthy();
-    expect(screen.getByText("ComfyUI 超时")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "重试" }));
     expect(onRetry).toHaveBeenCalledWith("item-7");
+    expect(screen.getByText("ComfyUI 超时")).toBeTruthy();
   });
 
-  it("keeps output rows action-only, invokes play with item and asset IDs, opens file location, and explains unavailable records", async () => {
+  it("paginates task rows without collapsing their artifact collections", async () => {
     const user = userEvent.setup();
-    const onPlay = vi.fn();
-    const onOpenFileLocation = vi.fn();
-    render(
-      <ProductionMonitor
-        batch={{ items: [item(1, "SUCCEEDED", { videoUrl: "https://example.test/video.mp4", assetId: "asset-1", filePath: "D:/成果/1.mp4" }), item(2, "SUCCEEDED", { assetId: "image-2", assetType: "image", mimeType: "image/png", filePath: "D:/成果/2.png" }), item(3, "SUCCEEDED")] }}
-        onPlay={onPlay}
-        onOpenFileLocation={onOpenFileLocation}
-      />,
-    );
-
-    expect(document.querySelector("video")).toBeNull();
-    expect(document.querySelector("[preload]")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "播放" }));
-    expect(onPlay).toHaveBeenCalledWith("item-1", "asset-1");
-    const imageButtons = Array.from(document.querySelectorAll('[data-item-id="item-2"] button'));
-    expect(imageButtons.some((button) => button.textContent === "播放")).toBe(false);
-    const videoRow = document.querySelector('[data-item-id="item-1"]');
-    expect(videoRow).toBeTruthy();
-    await user.click(within(videoRow as HTMLElement).getByRole("button", { name: "打开文件位置" }));
-    expect(onOpenFileLocation).toHaveBeenCalledWith("item-1", "D:/成果/1.mp4");
-    expect(screen.getByText("成品记录不可用")).toBeTruthy();
-  });
-
-  it("renders completion actions and sends them to Host callbacks", async () => {
-    const user = userEvent.setup();
-    const callbacks = { view: vi.fn(), folder: vi.fn(), export: vi.fn(), next: vi.fn() };
-    render(
-      <ProductionMonitor
-        batch={{ status: "COMPLETED", total: 1, items: [item(1, "SUCCEEDED", { videoUrl: "https://example.test/1.mp4" })] }}
-        onViewAllProducts={callbacks.view}
-        onOpenProductsFolder={callbacks.folder}
-        onExportProductList={callbacks.export}
-        onSelectNextProductionPackage={callbacks.next}
-      />,
-    );
-
-    expect(screen.getByText("批次已完成")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "查看已完成成品" }));
-    await user.click(screen.getByRole("button", { name: "打开成品文件夹" }));
-    await user.click(screen.getByRole("button", { name: "导出成品清单" }));
-    await user.click(screen.getByRole("button", { name: "选择下一个生产包" }));
-    expect(callbacks.view).toHaveBeenCalledTimes(1);
-    expect(callbacks.folder).toHaveBeenCalledTimes(1);
-    expect(callbacks.export).toHaveBeenCalledTimes(1);
-    expect(callbacks.next).toHaveBeenCalledTimes(1);
-  });
-
-  it("switches to completed items before optionally notifying the Host", async () => {
-    const user = userEvent.setup();
-    render(<ProductionMonitor batch={{ status: "COMPLETED", items: [item(1, "SUCCEEDED", { assetId: "asset-1", assetType: "video" }), item(2, "FAILED")] }} />);
-
-    const viewAll = screen.getByRole("button", { name: "查看已完成成品" });
-    expect((viewAll as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByRole("button", { name: "打开成品文件夹" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "导出成品清单" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "选择下一个生产包" })).toBeNull();
-    await user.click(viewAll);
-
-    expect(screen.getByRole("button", { name: /^已完成/ }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.getByText("镜头 1")).toBeTruthy();
-    expect(screen.queryByText("镜头 2")).toBeNull();
-  });
-
-  it("keeps failed completion in handling mode and removes success-only actions", () => {
-    render(
-      <ProductionMonitor
-        batch={{ status: "FAILED", items: [item(1, "SUCCEEDED", { videoUrl: "https://example.test/1.mp4" }), item(2, "FAILED")] }}
-        onOpenProductsFolder={vi.fn()}
-        onExportProductList={vi.fn()}
-        onSelectNextProductionPackage={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("heading", { name: "批次已结束，存在失败项目" })).toBeTruthy();
-    expect(screen.getByText(/失败项目需修复后重试/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "查看已完成成品" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "打开成品文件夹" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "导出成品清单" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "选择下一个生产包" })).toBeNull();
-  });
-
-  it("does not present a completed batch with failed items as a successful completion", () => {
-    render(
-      <ProductionMonitor
-        batch={{ status: "COMPLETED", items: [item(1, "FAILED", { errorCode: "COMFY_TIMEOUT" })] }}
-      />,
-    );
-
-    expect(screen.getByText("已结束，有失败项目")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "生成失败，没有成功结果" })).toBeTruthy();
-    expect(screen.queryByText("批次状态已完成")).toBeNull();
-  });
-
-  it("keeps a 500-item batch to ten pages and reaches the final ordered page", async () => {
-    const user = userEvent.setup();
-    const items = Array.from({ length: 500 }, (_, index) => item(500 - index));
-    render(<ProductionMonitor batch={{ items, total: 500 }} />);
-
+    const items = Array.from({ length: 51 }, (_, index) => task(index + 1, "SUCCEEDED", [artifact(`asset-${index + 1}`)]));
+    render(<ProductionMonitor projectId="project-1" batch={batch(items)} />);
     expect(screen.getAllByRole("listitem")).toHaveLength(50);
-    expect(screen.getByText("第 1 / 10 页 · 每页 50 项")).toBeTruthy();
-    const next = screen.getByRole("button", { name: "下一页" });
-    for (let page = 1; page < 10; page += 1) await user.click(next);
-
-    const rows = screen.getAllByRole("listitem");
-    expect(screen.getByText("第 10 / 10 页 · 每页 50 项")).toBeTruthy();
-    expect(rows[0].getAttribute("data-ordinal")).toBe("451");
-    expect(rows[rows.length - 1].getAttribute("data-ordinal")).toBe("500");
-    expect((next as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("asset-51.mp4")).toBeTruthy();
   });
-});
-
-const mismatch = "FinalLayer.forward() missing 3 required positional arguments: 'sigma', 'sample_sigmas', and 'shifts'";
-it("explains a compatibility pause without marking pending items failed", () => {
-  render(<ProductionMonitor batch={{status: "PAUSED", items: [item(1, "FAILED", {errorCode: "COMFY_NODE_INCOMPATIBLE", errorMessage: mismatch}), item(2)]}} onRetry={vi.fn()} />);
-  expect(screen.getByText(/剩余 1 项尚未执行/)).toBeTruthy();
-  expect(screen.getByText(/H3 工作流节点与当前 ComfyUI 接口不兼容/)).toBeTruthy();
-  expect(screen.getByText("查看技术详情")).toBeTruthy();
-  expect(screen.getByRole("button", {name: "修复后重试"})).toBeTruthy();
-  expect(screen.queryByRole("heading", {name: "批次已完成"})).toBeNull();
-});
-it("renders old EXECUTION_ERROR signature mismatches with the same guidance", () => {
-  render(<ProductionMonitor batch={{status: "COMPLETED", items: [item(1, "FAILED", {errorCode: "EXECUTION_ERROR", errorMessage: mismatch})]}} />);
-  expect(screen.getByRole("heading", {name: "生成失败，没有成功结果"})).toBeTruthy();
-  expect(screen.getByText(/成功 0 项，失败 1 项/)).toBeTruthy();
-  expect(screen.getByText(/H3 工作流节点与当前 ComfyUI 接口不兼容/)).toBeTruthy();
 });

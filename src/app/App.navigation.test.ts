@@ -12,13 +12,13 @@ describe("project workflow navigation", () => {
     expect(workflowUseProjectDestination(catalog, "workflow-1", "missing-recipe")).toBeUndefined();
   });
 
-  it("keeps Continue Work shot and batch targets when resolving the App route", () => {
+  it("routes Shot candidate confirmation to creation rather than ArtifactReview", () => {
     expect(resolveProjectCommandCenterNavigation({
       destination: "shots",
       section: "review",
       shotId: "shot-42",
       actionKind: "VIDEO_REVIEW",
-    })).toEqual({ workspace: "shots", section: "review", shotId: "shot-42", batchId: undefined });
+    })).toEqual({ workspace: "shots", section: "creation", shotId: "shot-42", batchId: undefined });
 
     expect(resolveProjectCommandCenterNavigation({
       destination: "shots",

@@ -1,3 +1,4 @@
+use crate::application::artifact_service::ArtifactService;
 use crate::application::asset_data_service::AssetDataService;
 use crate::application::asset_deletion_service::AssetDeletionService;
 use crate::application::asset_library_service::AssetLibraryService;
@@ -21,7 +22,6 @@ use crate::application::organization_service::OrganizationService;
 use crate::application::preset_service::PresetService;
 use crate::application::production_audit_service::ProductionAuditService;
 use crate::application::production_batch_runbook_service::ProductionBatchRunbookService;
-use crate::application::production_item_review_service::ProductionItemReviewService;
 use crate::application::production_orchestrator_service::ProductionOrchestratorService;
 use crate::application::production_package_service::ProductionPackageService;
 use crate::application::production_preparation_service::ProductionPreparationService;
@@ -116,7 +116,7 @@ pub struct AppState {
     pub project_template_service: Arc<ProjectTemplateService>,
     pub production_queue_service: Arc<ProductionQueueService>,
     pub production_start_admission_service: Arc<ProductionStartAdmissionService>,
-    pub production_item_review_service: Arc<ProductionItemReviewService>,
+    pub artifact_service: Arc<ArtifactService>,
     pub production_audit_service: Arc<ProductionAuditService>,
     pub diagnostics_service: Arc<DiagnosticsService>,
     pub comfy_preflight_service: Arc<ComfyPreflightService>,
@@ -184,7 +184,7 @@ impl AppState {
         project_template_service: Arc<ProjectTemplateService>,
         production_queue_service: Arc<ProductionQueueService>,
         production_start_admission_service: Arc<ProductionStartAdmissionService>,
-        production_item_review_service: Arc<ProductionItemReviewService>,
+        artifact_service: Arc<ArtifactService>,
         production_audit_service: Arc<ProductionAuditService>,
         diagnostics_service: Arc<DiagnosticsService>,
         comfy_preflight_service: Arc<ComfyPreflightService>,
@@ -250,7 +250,7 @@ impl AppState {
             project_template_service,
             production_queue_service,
             production_start_admission_service,
-            production_item_review_service,
+            artifact_service,
             production_audit_service,
             diagnostics_service,
             comfy_preflight_service,
