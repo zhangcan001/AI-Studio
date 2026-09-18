@@ -71,7 +71,8 @@ pub async fn workflow_onboarding_pick_api_workflow(
         return Ok(None);
     };
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .import_bytes(bytes, original_filename, existing_workflow_id)
         .await
         .map(Some)
@@ -89,7 +90,8 @@ pub async fn workflow_onboarding_auto_import_api_workflow(
         return Ok(None);
     };
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .auto_onboard_bytes(bytes, original_filename, existing_workflow_id)
         .await
         .map(Some)
@@ -103,7 +105,8 @@ pub async fn workflow_onboarding_auto_confirm(
     draft_id: String,
 ) -> Result<WorkflowAutoOnboardingPlanView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .auto_confirm(&draft_id)
         .await
         .map_err(map_onboarding_error)
@@ -117,7 +120,8 @@ pub async fn workflow_onboarding_regenerate_recipe(
     source_recipe_version: Option<String>,
 ) -> Result<WorkflowAutoOnboardingPlanView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .regenerate_recipe_draft(
             &workflow_id,
             &workflow_version,
@@ -133,7 +137,8 @@ pub fn workflow_onboarding_get(
     draft_id: String,
 ) -> Result<WorkflowOnboardingDraftView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .get(&draft_id)
         .map_err(map_onboarding_error)
 }
@@ -144,7 +149,8 @@ pub async fn workflow_onboarding_check_capability(
     draft_id: String,
 ) -> Result<crate::application::workflow_onboarding_service::CapabilityCheckView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .check_capability(&draft_id)
         .await
         .map_err(map_onboarding_error)
@@ -157,7 +163,8 @@ pub fn workflow_onboarding_set_metadata(
     request: WorkflowOnboardingMetadataRequest,
 ) -> Result<WorkflowOnboardingDraftView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .set_metadata(&draft_id, request)
         .map_err(map_onboarding_error)
 }
@@ -169,7 +176,8 @@ pub fn workflow_onboarding_set_input_mapping(
     request: WorkflowOnboardingInputMappingRequest,
 ) -> Result<WorkflowOnboardingDraftView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .set_input_mapping(&draft_id, request)
         .map_err(map_onboarding_error)
 }
@@ -181,7 +189,8 @@ pub fn workflow_onboarding_remove_input_mapping(
     request: WorkflowOnboardingRemoveInputMappingRequest,
 ) -> Result<WorkflowOnboardingDraftView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .remove_input_mapping(&draft_id, request)
         .map_err(map_onboarding_error)
 }
@@ -193,7 +202,8 @@ pub fn workflow_onboarding_set_output_mapping(
     request: WorkflowOnboardingOutputMappingRequest,
 ) -> Result<WorkflowOnboardingDraftView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .set_output_mapping(&draft_id, request)
         .map_err(map_onboarding_error)
 }
@@ -204,7 +214,8 @@ pub fn workflow_onboarding_validate(
     draft_id: String,
 ) -> Result<WorkflowOnboardingValidationView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .validate(&draft_id)
         .map_err(map_onboarding_error)
 }
@@ -216,7 +227,8 @@ pub async fn workflow_onboarding_publish(
     draft_id: String,
 ) -> Result<WorkflowOnboardingPublishView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .publish(&draft_id)
         .await
         .map_err(map_onboarding_error)
@@ -228,7 +240,8 @@ pub fn workflow_onboarding_discard(
     draft_id: String,
 ) -> Result<(), AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .discard(&draft_id)
         .map_err(map_onboarding_error)
 }
@@ -238,7 +251,8 @@ pub async fn workflow_workspace_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorkflowWorkspaceView>, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .list_workspace()
         .await
         .map_err(map_onboarding_error)

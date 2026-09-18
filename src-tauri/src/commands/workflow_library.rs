@@ -8,7 +8,8 @@ pub async fn workflow_library_refresh(
     state: State<'_, AppState>,
 ) -> Result<WorkflowSyncReport, AppError> {
     state
-        .workflow_library_service
+        .workflow
+        .library
         .sync()
         .await
         .map_err(|error| AppError::workflow_package_invalid(error.to_string()))

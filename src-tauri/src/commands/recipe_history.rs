@@ -17,7 +17,7 @@ pub async fn workflow_recipe_history_get(
     task_limit: Option<u32>,
 ) -> Result<RecipeHistoryView, AppError> {
     state
-        .recipe_history_query_service
+        .workflow.recipe_history_query
         .get_exact_pair(
             &workflow_version_id,
             &recipe_id,

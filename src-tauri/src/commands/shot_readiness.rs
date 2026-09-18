@@ -30,7 +30,8 @@ pub async fn shot_readiness_cached(
 ) -> Result<ShotReadiness, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_readiness_service
+        .shots
+        .readiness
         .readiness_cached(&request.project_id, &request.shot_id, stage)
         .await
         .map_err(map_readiness_error)
@@ -43,7 +44,8 @@ pub async fn shot_preflight(
 ) -> Result<ShotReadiness, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_readiness_service
+        .shots
+        .readiness
         .preflight(&request.project_id, &request.shot_id, stage)
         .await
         .map_err(map_readiness_error)
@@ -56,7 +58,8 @@ pub async fn scene_readiness_cached(
 ) -> Result<SceneReadinessSummary, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_readiness_service
+        .shots
+        .readiness
         .scene_readiness_cached(&request.project_id, &request.scene_id, stage)
         .await
         .map_err(map_readiness_error)
@@ -69,7 +72,8 @@ pub async fn scene_preflight(
 ) -> Result<SceneReadinessSummary, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_readiness_service
+        .shots
+        .readiness
         .scene_preflight(&request.project_id, &request.scene_id, stage)
         .await
         .map_err(map_readiness_error)

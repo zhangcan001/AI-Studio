@@ -17,7 +17,8 @@ pub async fn asset_tag_list(
     project_id: String,
 ) -> Result<Vec<AssetTag>, AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .list_tags(&project_id)
         .await
         .map_err(map_organization_error)
@@ -30,7 +31,8 @@ pub async fn asset_tag_create(
     name: String,
 ) -> Result<AssetTag, AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .create_tag(&project_id, &name)
         .await
         .map_err(map_organization_error)
@@ -44,7 +46,8 @@ pub async fn asset_tag_rename(
     name: String,
 ) -> Result<AssetTag, AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .rename_tag(&project_id, &tag_id, &name)
         .await
         .map_err(map_organization_error)
@@ -57,7 +60,8 @@ pub async fn asset_tag_delete(
     tag_id: String,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .delete_tag(&project_id, &tag_id)
         .await
         .map_err(map_organization_error)
@@ -71,7 +75,8 @@ pub async fn asset_tag_assign(
     tag_id: String,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .assign_tag(&project_id, &asset_id, &tag_id)
         .await
         .map_err(map_organization_error)
@@ -85,7 +90,8 @@ pub async fn asset_tag_remove(
     tag_id: String,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .remove_tag(&project_id, &asset_id, &tag_id)
         .await
         .map_err(map_organization_error)
@@ -99,7 +105,8 @@ pub async fn asset_set_favorite(
     favorite: bool,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .set_favorite(&project_id, &asset_id, favorite)
         .await
         .map_err(map_organization_error)
@@ -113,7 +120,8 @@ pub async fn asset_bulk_set_favorite(
     favorite: bool,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .bulk_set_favorite(&project_id, &asset_ids, favorite)
         .await
         .map_err(map_organization_error)
@@ -127,7 +135,8 @@ pub async fn asset_bulk_add_tag(
     tag_id: String,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .bulk_add_tag(&project_id, &asset_ids, &tag_id)
         .await
         .map_err(map_organization_error)
@@ -141,7 +150,8 @@ pub async fn asset_bulk_remove_tag(
     tag_id: String,
 ) -> Result<(), AppError> {
     state
-        .organization_service
+        .organization
+        .organization
         .bulk_remove_tag(&project_id, &asset_ids, &tag_id)
         .await
         .map_err(map_organization_error)
@@ -152,7 +162,8 @@ pub async fn project_template_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::application::ports::ProjectTemplate>, AppError> {
     state
-        .project_template_service
+        .organization
+        .project_template
         .list()
         .await
         .map_err(map_template_error)
@@ -164,7 +175,8 @@ pub async fn project_template_create(
     request: CreateProjectTemplate,
 ) -> Result<crate::application::ports::ProjectTemplate, AppError> {
     state
-        .project_template_service
+        .organization
+        .project_template
         .create(request)
         .await
         .map_err(map_template_error)
@@ -178,7 +190,8 @@ pub async fn project_template_update(
     description: Option<String>,
 ) -> Result<crate::application::ports::ProjectTemplate, AppError> {
     state
-        .project_template_service
+        .organization
+        .project_template
         .update(&template_id, &name, description.as_deref())
         .await
         .map_err(map_template_error)
@@ -190,7 +203,8 @@ pub async fn project_template_delete(
     template_id: String,
 ) -> Result<(), AppError> {
     state
-        .project_template_service
+        .organization
+        .project_template
         .delete(&template_id)
         .await
         .map_err(map_template_error)
@@ -204,7 +218,8 @@ pub async fn project_template_create_project(
     description: Option<String>,
 ) -> Result<TemplateProjectResult, AppError> {
     state
-        .project_template_service
+        .organization
+        .project_template
         .create_project(&template_id, &name, description.as_deref())
         .await
         .map_err(map_template_error)

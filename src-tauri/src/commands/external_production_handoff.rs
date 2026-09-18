@@ -34,7 +34,8 @@ pub async fn external_production_handoff_preview(
     request: ExternalProductionHandoffPreviewRequest,
 ) -> Result<ExternalProductionHandoffPreview, AppError> {
     state
-        .external_production_handoff_service
+        .production
+        .external_handoff
         .preview(&request.project_id, &request.content)
         .await
         .map_err(map_error)
@@ -46,7 +47,8 @@ pub async fn external_production_handoff_confirm(
     request: ExternalProductionHandoffConfirmRequest,
 ) -> Result<ExternalProductionHandoffConfirmResult, AppError> {
     state
-        .external_production_handoff_service
+        .production
+        .external_handoff
         .confirm(
             &request.project_id,
             &request.content,
@@ -62,7 +64,8 @@ pub async fn external_production_handoff_list(
     project_id: String,
 ) -> Result<Vec<ExternalProductionHandoffHistoryItem>, AppError> {
     state
-        .external_production_handoff_service
+        .production
+        .external_handoff
         .list(&project_id)
         .await
         .map_err(map_error)
@@ -78,7 +81,8 @@ pub async fn external_production_handoff_mappings(
     AppError,
 >{
     state
-        .external_production_handoff_service
+        .production
+        .external_handoff
         .mappings(&project_id, &handoff_id)
         .await
         .map_err(map_error)

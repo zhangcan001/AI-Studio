@@ -76,6 +76,52 @@ Evidence:
 - `src-tauri/tests/dev052_runtime_integration.rs::shot_generation_submission_keeps_linkage_pending_until_queue_start`
 - `src-tauri/tests/dev052_runtime_integration.rs::task_history_retry_stays_queued_and_preserves_parent_attempt_and_project_scope`
 
+## AppState / composition root closure
+
+`lib.rs` remains the explicit application composition root. `AppState` now
+exposes nine typed, dependency-only bundles; commands access services through
+their domain bundle. The bundles contain no methods or business behavior.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Direct `Arc<Service>` fields on `AppState` | 61 | 0 |
+| Top-level `AppState` fields | 64 | 9 |
+| `AppState::new` parameters | 64 | 9 |
+| Domain dependency bundles | 0 | 9 |
+
+The nine bundles are `ProductionServices`, `WorkflowServices`, `AssetServices`,
+`ProjectServices`, `ShotServices`, `CatalogServices`, `TaskServices`,
+`OrganizationServices`, and `SystemServices`. They continue to hold the
+existing 60 application-service dependencies, plus the existing lifecycle and
+shot-context helpers and `AppDataDirs`; these are references to the existing
+service instances, not newly constructed services. `GenerationService` is not
+exposed through `AppState`: its single existing `Arc` remains the worker
+dependency of `ProductionQueueService`. Production Queue Start remains the
+only product execution authority.
+
+Identity audit in `lib.rs` found one construction site each for
+`GenerationService`, `ProductionQueueService`,
+`ProductionStartAdmissionService`, `ArtifactService`, and
+`ProjectBackupService`; `AppState` assembly only groups the existing values.
+The application, infrastructure, and domain layers have no `AppState` or
+bundle dependency.
+
+Evidence and local gates:
+
+- `src-tauri/tests/app_state_composition_boundary.rs` — three architecture
+  guards for the direct field surface, constructor bound, and
+  dependency-only bundles.
+- `src-tauri/tests/production_execution_authority_boundary.rs::production_execution_requires_queue_start` — PASS.
+- Rust format, all-target check, and all-target tests (`--jobs 2`) — PASS;
+  1,152 passed, 0 failed, 3 ignored.
+- Frontend tests — PASS (160 files, 850 tests); TypeScript check and production
+  build — PASS. `FRONTEND_LINT=N/A_NOT_CONFIGURED`.
+- `DATA_MODEL=UNCHANGED`, `MIGRATIONS=UNCHANGED`,
+  `BACKUP_FORMAT=UNCHANGED`, `IPC_CONTRACT=UNCHANGED`.
+
+This closes the AppState / Composition Root P1 boundary only. The final
+architecture closure audit remains a separate next-stage gate.
+
 ## Freeze exclusions
 
 The following remain outside the frozen architecture and require a new product
@@ -94,6 +140,8 @@ ARCHITECTURE_FREEZE=PASS
 NO_NEW_DOMAIN_AUTHORITY=PASS
 QUEUE_AUTHORITY=PASS
 ARCHITECTURE_P0_STATUS=CLOSED
+COMPOSITION_ROOT=CLOSED
+APPSTATE_P1_STATUS=CLOSED
 MIGRATION_COMPATIBILITY_BOUNDARY=PASS
 RELEASE_ARCHIVE_BASELINE=BACKUP_V19_STABLE
 CURRENT_ARCHIVE_CONTRACT=BACKUP_V20_ARTIFACT_REVIEW

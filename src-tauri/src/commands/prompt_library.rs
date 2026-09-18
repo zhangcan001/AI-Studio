@@ -51,7 +51,8 @@ pub async fn prompt_library_list(
     limit: Option<u32>,
 ) -> Result<PromptLibraryPageView, AppError> {
     state
-        .prompt_library_service
+        .catalog
+        .prompt_library
         .list(
             &project_id,
             kind.as_deref(),
@@ -71,7 +72,8 @@ pub async fn prompt_library_get(
     prompt_id: String,
 ) -> Result<PromptEntryView, AppError> {
     state
-        .prompt_library_service
+        .catalog
+        .prompt_library
         .get(&project_id, &prompt_id)
         .await
         .map_err(map_prompt_error)
@@ -83,7 +85,8 @@ pub async fn prompt_library_create(
     request: PromptLibraryCreateRequest,
 ) -> Result<PromptEntryView, AppError> {
     state
-        .prompt_library_service
+        .catalog
+        .prompt_library
         .create_with_model_version(
             &request.project_id,
             &request.kind,
@@ -102,7 +105,8 @@ pub async fn prompt_library_add_version(
     request: PromptLibraryVersionRequest,
 ) -> Result<PromptVersionView, AppError> {
     state
-        .prompt_library_service
+        .catalog
+        .prompt_library
         .add_version_with_model_version(
             &request.project_id,
             &request.prompt_id,
@@ -119,7 +123,8 @@ pub async fn prompt_library_update_metadata(
     request: PromptLibraryMetadataRequest,
 ) -> Result<PromptEntryView, AppError> {
     state
-        .prompt_library_service
+        .catalog
+        .prompt_library
         .update_metadata(
             &request.project_id,
             &request.prompt_id,
@@ -137,7 +142,8 @@ pub async fn prompt_library_delete(
     prompt_id: String,
 ) -> Result<(), AppError> {
     state
-        .prompt_library_service
+        .catalog
+        .prompt_library
         .delete(&project_id, &prompt_id)
         .await
         .map_err(map_prompt_error)

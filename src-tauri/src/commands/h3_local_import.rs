@@ -170,7 +170,8 @@ pub async fn h3_local_import_pick_directory(
         .into_path()
         .map_err(|_| AppError::filesystem("所选任务目录无法读取"))?;
     let (session_id, inspection) = state
-        .h3_local_import_service
+        .catalog
+        .h3_local_import
         .pick(&project_id, root_path, mode)
         .await
         .map_err(map_local_import_error)?;
@@ -185,7 +186,8 @@ pub async fn h3_local_import_rescan(
 ) -> Result<H3LocalImportInspectionView, AppError> {
     let mode = H3LocalImportMode::parse(&mode).map_err(map_local_import_error)?;
     let inspection = state
-        .h3_local_import_service
+        .catalog
+        .h3_local_import
         .rescan(&session_id, mode)
         .await
         .map_err(map_local_import_error)?;
@@ -207,7 +209,8 @@ pub async fn h3_local_import_commit(
         ),
     };
     let result = state
-        .h3_local_import_service
+        .catalog
+        .h3_local_import
         .commit(
             &request.session_id,
             H3LocalImportCommitRequest {
@@ -248,7 +251,8 @@ pub async fn h3_local_import_update_project_segment_draft(
     request: H3ProjectSegmentDraftDto,
 ) -> Result<H3LocalImportInspectionView, AppError> {
     let inspection = state
-        .h3_local_import_service
+        .catalog
+        .h3_local_import
         .update_h3_project_segment_draft(
             &request.session_id,
             H3ProjectSegmentDraft {

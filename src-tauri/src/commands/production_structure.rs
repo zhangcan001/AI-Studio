@@ -105,7 +105,8 @@ pub async fn production_structure_tree(
     project_id: String,
 ) -> Result<ProductionStructureTreeView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .tree(&project_id)
         .await
         .map_err(map_error)
@@ -117,7 +118,8 @@ pub async fn production_series_create(
     request: ProductionStructureNameRequest,
 ) -> Result<ProductionSeriesView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .create_series(CreateSeriesRequest {
             project_id: request.project_id,
             name: request.name,
@@ -133,7 +135,8 @@ pub async fn production_series_update(
     request: ProductionSeriesUpdateRequest,
 ) -> Result<ProductionSeriesView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .update_series(UpdateSeriesRequest {
             project_id: request.project_id,
             series_id: request.series_id,
@@ -151,7 +154,8 @@ pub async fn production_series_delete(
     series_id: String,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .delete_series(&project_id, &series_id)
         .await
         .map_err(map_error)
@@ -163,7 +167,8 @@ pub async fn production_series_reorder(
     request: ProductionStructureReorderRequest,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .reorder_series(&request.project_id, &request.ordered_ids)
         .await
         .map_err(map_error)
@@ -175,7 +180,8 @@ pub async fn production_episode_create(
     request: ProductionEpisodeCreateRequest,
 ) -> Result<ProductionEpisodeView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .create_episode(CreateEpisodeRequest {
             project_id: request.project_id,
             series_id: request.series_id,
@@ -192,7 +198,8 @@ pub async fn production_episode_update(
     request: ProductionEpisodeUpdateRequest,
 ) -> Result<ProductionEpisodeView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .update_episode(UpdateEpisodeRequest {
             project_id: request.project_id,
             episode_id: request.episode_id,
@@ -210,7 +217,8 @@ pub async fn production_episode_delete(
     episode_id: String,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .delete_episode(&project_id, &episode_id)
         .await
         .map_err(map_error)
@@ -225,7 +233,8 @@ pub async fn production_episode_reorder(
         .parent_id
         .ok_or_else(|| AppError::invalid_input("series id is required"))?;
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .reorder_episodes(&request.project_id, &series_id, &request.ordered_ids)
         .await
         .map_err(map_error)
@@ -237,7 +246,8 @@ pub async fn production_scene_create(
     request: ProductionSceneCreateRequest,
 ) -> Result<ProductionSceneView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .create_scene(CreateSceneRequest {
             project_id: request.project_id,
             episode_id: request.episode_id,
@@ -254,7 +264,8 @@ pub async fn production_scene_update(
     request: ProductionSceneUpdateRequest,
 ) -> Result<ProductionSceneView, AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .update_scene(UpdateSceneRequest {
             project_id: request.project_id,
             scene_id: request.scene_id,
@@ -272,7 +283,8 @@ pub async fn production_scene_delete(
     scene_id: String,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .delete_scene(&project_id, &scene_id)
         .await
         .map_err(map_error)
@@ -287,7 +299,8 @@ pub async fn production_scene_reorder(
         .parent_id
         .ok_or_else(|| AppError::invalid_input("episode id is required"))?;
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .reorder_scenes(&request.project_id, &episode_id, &request.ordered_ids)
         .await
         .map_err(map_error)
@@ -299,7 +312,8 @@ pub async fn production_scene_assign_shots(
     request: ProductionSceneAssignShotsRequest,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .assign_shots(&request.project_id, &request.scene_id, &request.shot_ids)
         .await
         .map_err(map_error)
@@ -311,7 +325,8 @@ pub async fn production_scene_unassign_shots(
     request: ProductionSceneUnassignShotsRequest,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .unassign_shots(&request.project_id, &request.shot_ids)
         .await
         .map_err(map_error)
@@ -323,7 +338,8 @@ pub async fn production_scene_reorder_shots(
     request: ProductionSceneReorderShotsRequest,
 ) -> Result<(), AppError> {
     state
-        .production_structure_service
+        .organization
+        .production_structure
         .reorder_scene_shots(&request.scene_id, &request.ordered_shot_ids)
         .await
         .map_err(map_error)

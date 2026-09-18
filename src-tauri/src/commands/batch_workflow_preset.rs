@@ -10,7 +10,7 @@ use crate::{
 pub async fn batch_workflow_presets_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<BatchWorkflowPresetView>, AppError> {
-    state.batch_workflow_preset_service.list().await
+    state.catalog.batch_workflow_preset.list().await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -18,7 +18,7 @@ pub async fn batch_workflow_preset_create(
     state: tauri::State<'_, AppState>,
     input: BatchWorkflowPresetInput,
 ) -> Result<BatchWorkflowPresetView, AppError> {
-    state.batch_workflow_preset_service.create(input).await
+    state.catalog.batch_workflow_preset.create(input).await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -27,7 +27,8 @@ pub async fn batch_workflow_preset_update(
     request: BatchWorkflowPresetUpdateRequest,
 ) -> Result<BatchWorkflowPresetView, AppError> {
     state
-        .batch_workflow_preset_service
+        .catalog
+        .batch_workflow_preset
         .update(&request.preset_id, request.input)
         .await
 }
@@ -44,5 +45,5 @@ pub async fn batch_workflow_preset_delete(
     state: tauri::State<'_, AppState>,
     preset_id: String,
 ) -> Result<(), AppError> {
-    state.batch_workflow_preset_service.delete(&preset_id).await
+    state.catalog.batch_workflow_preset.delete(&preset_id).await
 }

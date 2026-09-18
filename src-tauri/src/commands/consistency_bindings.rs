@@ -240,7 +240,8 @@ pub async fn consistency_scope_binding_get(
     super::validate_project_id(&project_id)?;
     let scope_type = parse_scope_type(&scope_type)?;
     state
-        .consistency_scope_binding_service
+        .shots
+        .consistency_scope_binding
         .get_binding_pack(&project_id, scope_type, &scope_id)
         .await
         .map(map_scope_pack)
@@ -265,7 +266,8 @@ pub async fn consistency_scope_binding_replace(
         .map(ConsistencyReferenceSetBindingInput::to_domain)
         .collect::<Result<Vec<_>, _>>()?;
     state
-        .consistency_scope_binding_service
+        .shots
+        .consistency_scope_binding
         .replace_binding_pack(
             &request.project_id,
             scope_type,
@@ -285,12 +287,14 @@ pub async fn shot_consistency_binding_get(
 ) -> Result<ShotConsistencyBindingPackView, AppError> {
     super::validate_project_id(&project_id)?;
     let pack = state
-        .shot_consistency_binding_service
+        .shots
+        .consistency_binding
         .get_binding_pack(&project_id, &shot_id)
         .await
         .map_err(map_shot_error)?;
     let resolved = state
-        .shot_context_resolver
+        .shots
+        .context_resolver
         .resolve_draft(&project_id, &shot_id, ShotStage::Image)
         .await
         .ok();
@@ -314,7 +318,8 @@ pub async fn shot_consistency_binding_replace(
         .map(ConsistencyReferenceSetBindingInput::to_domain)
         .collect::<Result<Vec<_>, _>>()?;
     state
-        .shot_consistency_binding_service
+        .shots
+        .consistency_binding
         .replace_binding_pack(
             &request.project_id,
             &request.shot_id,
@@ -336,7 +341,8 @@ pub async fn shot_context_draft_get(
     let stage = ShotStage::try_from_str(&stage)
         .map_err(|error| AppError::invalid_input(format!("CONTEXT_STAGE_INVALID: {error}")))?;
     state
-        .shot_context_resolver
+        .shots
+        .context_resolver
         .resolve_draft(&project_id, &shot_id, stage)
         .await
         .map(map_context)

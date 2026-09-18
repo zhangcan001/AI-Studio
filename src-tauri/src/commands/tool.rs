@@ -76,13 +76,14 @@ pub struct ToolCapabilityCreateRequest {
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn tool_list(state: State<'_, AppState>) -> Result<Vec<ToolView>, AppError> {
-    state.tool_service.list().await.map_err(map_tool_error)
+    state.catalog.tool.list().await.map_err(map_tool_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn tool_get(state: State<'_, AppState>, tool_id: String) -> Result<ToolView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .get(&tool_id)
         .await
         .map_err(map_tool_error)
@@ -94,7 +95,8 @@ pub async fn tool_create(
     request: ToolCreateRequest,
 ) -> Result<ToolView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .create(CreateToolRequest {
             name: request.name,
             tool_type: request.tool_type,
@@ -111,7 +113,8 @@ pub async fn tool_update(
     request: ToolUpdateRequest,
 ) -> Result<ToolView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .update(UpdateToolRequest {
             tool_id: request.tool_id,
             name: request.name,
@@ -126,7 +129,8 @@ pub async fn tool_update(
 #[tauri::command(rename_all = "camelCase")]
 pub async fn tool_delete(state: State<'_, AppState>, tool_id: String) -> Result<(), AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .delete(&tool_id)
         .await
         .map_err(map_tool_error)
@@ -138,7 +142,8 @@ pub async fn tool_instance_list(
     tool_id: String,
 ) -> Result<Vec<ToolInstanceView>, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .list_instances(&tool_id)
         .await
         .map_err(map_tool_error)
@@ -150,7 +155,8 @@ pub async fn tool_instance_get(
     instance_id: String,
 ) -> Result<ToolInstanceView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .get_instance(&instance_id)
         .await
         .map_err(map_tool_error)
@@ -162,7 +168,8 @@ pub async fn tool_instance_create(
     request: ToolInstanceCreateRequest,
 ) -> Result<ToolInstanceView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .create_instance(CreateToolInstanceRequest {
             tool_id: request.tool_id,
             path: request.path,
@@ -181,7 +188,8 @@ pub async fn tool_instance_record_health(
     let status = ToolHealthStatus::try_from_db(request.status.trim())
         .map_err(|error| AppError::invalid_input(error.to_string()))?;
     state
-        .tool_service
+        .catalog
+        .tool
         .record_health(&request.instance_id, status)
         .await
         .map_err(map_tool_error)
@@ -193,7 +201,8 @@ pub async fn tool_version_list(
     tool_id: String,
 ) -> Result<Vec<ToolVersionView>, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .list_versions(&tool_id)
         .await
         .map_err(map_tool_error)
@@ -205,7 +214,8 @@ pub async fn tool_version_get(
     version_id: String,
 ) -> Result<ToolVersionView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .get_version(&version_id)
         .await
         .map_err(map_tool_error)
@@ -217,7 +227,8 @@ pub async fn tool_version_create(
     request: ToolVersionCreateRequest,
 ) -> Result<ToolVersionView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .create_version(CreateToolVersionRequest {
             tool_id: request.tool_id,
             version: request.version,
@@ -233,7 +244,8 @@ pub async fn tool_capability_list(
     tool_id: String,
 ) -> Result<Vec<CapabilityView>, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .list_capabilities(&tool_id)
         .await
         .map_err(map_tool_error)
@@ -245,7 +257,8 @@ pub async fn tool_capability_create(
     request: ToolCapabilityCreateRequest,
 ) -> Result<CapabilityView, AppError> {
     state
-        .tool_service
+        .catalog
+        .tool
         .create_capability(CreateCapabilityRequest {
             tool_id: request.tool_id,
             capability_name: request.capability_name,

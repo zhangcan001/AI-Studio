@@ -14,7 +14,8 @@ use tauri_plugin_dialog::DialogExt;
 #[tauri::command(rename_all = "camelCase")]
 pub async fn project_list(state: State<'_, AppState>) -> Result<Vec<ProjectView>, AppError> {
     state
-        .project_service
+        .projects
+        .project
         .list()
         .await
         .map_err(map_project_error)
@@ -27,7 +28,8 @@ pub async fn project_create(
     description: Option<String>,
 ) -> Result<ProjectView, AppError> {
     state
-        .project_service
+        .projects
+        .project
         .create(&name, description.as_deref())
         .await
         .map_err(map_project_error)
@@ -42,7 +44,8 @@ pub async fn project_update(
 ) -> Result<ProjectView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .project_service
+        .projects
+        .project
         .update(&project_id, &name, description.as_deref())
         .await
         .map_err(map_project_error)
@@ -55,7 +58,8 @@ pub async fn project_workflow_config_get(
 ) -> Result<ProjectWorkflowConfigView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .project_workflow_binding_service
+        .projects
+        .workflow_binding
         .get(&project_id)
         .await
         .map_err(map_project_workflow_error)
@@ -69,7 +73,8 @@ pub async fn project_workflow_config_replace(
 ) -> Result<ProjectWorkflowConfigView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .project_workflow_binding_service
+        .projects
+        .workflow_binding
         .replace(&project_id, request)
         .await
         .map_err(map_project_workflow_error)
@@ -95,7 +100,8 @@ pub async fn project_backup_export(
         .into_path()
         .map_err(|_| AppError::filesystem("备份保存位置不可用"))?;
     state
-        .project_backup_service
+        .projects
+        .backup
         .export(&project_id, destination)
         .await
         .map(Some)
@@ -118,7 +124,7 @@ pub async fn project_backup_inspect(
     let source = file
         .into_path()
         .map_err(|_| AppError::filesystem("备份文件位置不可用"))?;
-    state.project_backup_service.inspect(source).await.map(Some)
+    state.projects.backup.inspect(source).await.map(Some)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -126,7 +132,7 @@ pub async fn project_backup_restore(
     state: State<'_, AppState>,
     inspection_id: String,
 ) -> Result<crate::application::project_backup_service::RestoredProjectView, AppError> {
-    state.project_backup_service.restore(&inspection_id).await
+    state.projects.backup.restore(&inspection_id).await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -155,7 +161,8 @@ pub async fn project_manifest_export(
         }
     };
     state
-        .project_manifest_service
+        .projects
+        .manifest
         .export(&project_id, destination)
         .await
         .map(Some)

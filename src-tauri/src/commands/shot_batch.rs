@@ -29,7 +29,8 @@ pub async fn shot_batch_plan(
     validate_project_id(&project_id)?;
     let stage = parse_stage(&stage)?;
     state
-        .shot_batch_service
+        .shots
+        .batch
         .plan(&project_id, stage)
         .await
         .map_err(map_shot_batch_error)
@@ -43,7 +44,8 @@ pub async fn shot_batch_create(
     validate_project_id(&request.project_id)?;
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_batch_service
+        .shots
+        .batch
         .create(CreateShotBatchRequest {
             project_id: request.project_id,
             stage,

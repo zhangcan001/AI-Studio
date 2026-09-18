@@ -337,7 +337,8 @@ pub async fn consistency_profile_list(
     super::validate_project_id(&project_id)?;
     let profile_type = parse_optional_profile_type(profile_type)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .list(&project_id, profile_type)
         .await
         .map_err(map_profile_error)
@@ -354,7 +355,8 @@ pub async fn consistency_profile_get(
     super::validate_project_id(&project_id)?;
     let profile_type = parse_profile_type(&profile_type)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .get(&project_id, profile_type, &profile_id)
         .await
         .map_err(map_profile_error)
@@ -368,7 +370,8 @@ pub async fn character_profile_create(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .create_character(CreateCharacterProfileRequest {
             project_id: request.project_id,
             name: request.name,
@@ -391,7 +394,8 @@ pub async fn character_profile_update(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .update_character(UpdateCharacterProfileRequest {
             project_id: request.project_id,
             profile_id: request.profile_id,
@@ -415,7 +419,8 @@ pub async fn scene_profile_create(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .create_scene(CreateSceneProfileRequest {
             project_id: request.project_id,
             name: request.name,
@@ -438,7 +443,8 @@ pub async fn scene_profile_update(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .update_scene(UpdateSceneProfileRequest {
             project_id: request.project_id,
             profile_id: request.profile_id,
@@ -462,7 +468,8 @@ pub async fn prop_profile_create(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .create_prop(CreatePropProfileRequest {
             project_id: request.project_id,
             name: request.name,
@@ -484,7 +491,8 @@ pub async fn prop_profile_update(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .update_prop(UpdatePropProfileRequest {
             project_id: request.project_id,
             profile_id: request.profile_id,
@@ -507,7 +515,8 @@ pub async fn style_profile_create(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .create_style(CreateStyleProfileRequest {
             project_id: request.project_id,
             name: request.name,
@@ -529,7 +538,8 @@ pub async fn style_profile_update(
 ) -> Result<ConsistencyProfileView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .update_style(UpdateStyleProfileRequest {
             project_id: request.project_id,
             profile_id: request.profile_id,
@@ -555,12 +565,14 @@ pub async fn consistency_profile_delete(
     super::validate_project_id(&project_id)?;
     let profile_type = parse_profile_type(&profile_type)?;
     state
-        .asset_usage_service
+        .assets
+        .usage
         .ensure_profile_deletable(&project_id, profile_type, &profile_id)
         .await
         .map_err(map_usage_error)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .delete(&project_id, profile_type, &profile_id)
         .await
         .map_err(map_profile_error)
@@ -574,7 +586,8 @@ pub async fn costume_variant_list(
 ) -> Result<Vec<CostumeVariantView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .list_costumes(&project_id, &character_profile_id)
         .await
         .map_err(map_profile_error)
@@ -589,7 +602,8 @@ pub async fn costume_variant_get(
 ) -> Result<CostumeVariantView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .get_costume(&project_id, &costume_variant_id)
         .await
         .map_err(map_profile_error)
@@ -603,7 +617,8 @@ pub async fn costume_variant_create(
 ) -> Result<CostumeVariantView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .create_costume(CreateCostumeVariantRequest {
             project_id: request.project_id,
             character_profile_id: request.character_profile_id,
@@ -625,7 +640,8 @@ pub async fn costume_variant_update(
 ) -> Result<CostumeVariantView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .update_costume(UpdateCostumeVariantRequest {
             project_id: request.project_id,
             costume_variant_id: request.costume_variant_id,
@@ -648,7 +664,8 @@ pub async fn costume_variant_delete(
 ) -> Result<(), AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .consistency_profile_service
+        .shots
+        .consistency_profile
         .delete_costume(&project_id, &costume_variant_id)
         .await
         .map_err(map_profile_error)
@@ -663,7 +680,8 @@ pub async fn reference_set_list(
     super::validate_project_id(&project_id)?;
     let purpose = parse_optional_reference_set_purpose(purpose)?;
     state
-        .reference_set_service
+        .shots
+        .reference_set
         .list(&project_id, purpose)
         .await
         .map_err(map_reference_set_error)
@@ -678,7 +696,8 @@ pub async fn reference_set_detail_get(
 ) -> Result<ReferenceSetDetailViewDto, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .reference_set_service
+        .shots
+        .reference_set
         .get_detail(&project_id, &reference_set_id)
         .await
         .map_err(map_reference_set_error)
@@ -694,7 +713,8 @@ pub async fn reference_set_create(
     let purpose = parse_reference_set_purpose(&request.purpose)?;
     let owner_profile_type = parse_optional_profile_type(request.owner_profile_type)?;
     state
-        .reference_set_service
+        .shots
+        .reference_set
         .create(CreateReferenceSetRequest {
             project_id: request.project_id,
             name: request.name,
@@ -718,7 +738,8 @@ pub async fn reference_set_update(
     let purpose = parse_reference_set_purpose(&request.purpose)?;
     let owner_profile_type = parse_optional_profile_type(request.owner_profile_type)?;
     state
-        .reference_set_service
+        .shots
+        .reference_set
         .update(UpdateReferenceSetRequest {
             project_id: request.project_id,
             reference_set_id: request.reference_set_id,
@@ -742,12 +763,14 @@ pub async fn reference_set_delete(
 ) -> Result<(), AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_usage_service
+        .assets
+        .usage
         .ensure_reference_set_deletable(&project_id, &reference_set_id)
         .await
         .map_err(map_usage_error)?;
     state
-        .reference_set_service
+        .shots
+        .reference_set
         .delete(&project_id, &reference_set_id)
         .await
         .map_err(map_reference_set_error)
@@ -760,7 +783,8 @@ pub async fn reference_set_create_from_anchor(
 ) -> Result<ReferenceSetView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .reference_set_service
+        .shots
+        .reference_set
         .create_from_anchor(&request.project_id, &request.anchor_id, request.new_name)
         .await
         .map_err(map_reference_set_error)
@@ -1067,7 +1091,8 @@ pub async fn asset_usage_get(
 ) -> Result<AssetUsageSummaryView, AppError> {
     super::validate_project_id(&project_id)?;
     let usage = state
-        .asset_usage_service
+        .assets
+        .usage
         .asset_usage(&project_id, &asset_id)
         .await
         .map_err(map_usage_error)?;
@@ -1084,7 +1109,8 @@ pub async fn profile_usage_get(
     super::validate_project_id(&project_id)?;
     let profile_type = parse_profile_type(&profile_type)?;
     let usage = state
-        .asset_usage_service
+        .assets
+        .usage
         .profile_usage(&project_id, profile_type, &profile_id)
         .await
         .map_err(map_usage_error)?;
@@ -1099,7 +1125,8 @@ pub async fn reference_set_usage_get(
 ) -> Result<ReferenceSetUsageSummaryView, AppError> {
     super::validate_project_id(&project_id)?;
     let usage = state
-        .asset_usage_service
+        .assets
+        .usage
         .reference_set_usage(&project_id, &reference_set_id)
         .await
         .map_err(map_usage_error)?;

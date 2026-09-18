@@ -41,7 +41,8 @@ pub async fn generation_tool_usage_create(
     request: GenerationToolUsageCreateRequest,
 ) -> Result<GenerationToolUsageView, AppError> {
     state
-        .provenance_lineage_service
+        .tasks
+        .provenance_lineage
         .create_tool_usage(CreateGenerationToolUsageRequest {
             project_id: request.project_id,
             generation_id: request.generation_id,
@@ -60,7 +61,8 @@ pub async fn generation_tool_usage_list(
     generation_id: String,
 ) -> Result<Vec<GenerationToolUsageView>, AppError> {
     state
-        .provenance_lineage_service
+        .tasks
+        .provenance_lineage
         .list_tool_usages(&project_id, &generation_id)
         .await
         .map_err(map_provenance_lineage_error)
@@ -72,7 +74,8 @@ pub async fn generation_asset_version_link_create(
     request: GenerationAssetVersionLinkCreateRequest,
 ) -> Result<GenerationAssetVersionView, AppError> {
     state
-        .provenance_lineage_service
+        .tasks
+        .provenance_lineage
         .create_asset_version_link(CreateGenerationAssetVersionRequest {
             project_id: request.project_id,
             generation_id: request.generation_id,
@@ -92,7 +95,8 @@ pub async fn generation_asset_version_link_list(
     generation_id: String,
 ) -> Result<Vec<GenerationAssetVersionView>, AppError> {
     state
-        .provenance_lineage_service
+        .tasks
+        .provenance_lineage
         .list_asset_version_links(&project_id, &generation_id)
         .await
         .map_err(map_provenance_lineage_error)

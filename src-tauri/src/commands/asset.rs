@@ -30,7 +30,8 @@ pub async fn asset_list_by_task(
 ) -> Result<Vec<crate::application::asset_query_service::AssetView>, AppError> {
     super::validate_project_id(&project_id)?;
     let task_exists = state
-        .task_query_service
+        .tasks
+        .query
         .get(&project_id, &task_id)
         .await
         .map_err(map_task_query_error)?
@@ -41,7 +42,8 @@ pub async fn asset_list_by_task(
         )));
     }
     state
-        .asset_query_service
+        .assets
+        .query
         .list_by_task(&project_id, &task_id)
         .await
         .map_err(map_asset_error)
@@ -55,7 +57,8 @@ pub async fn asset_list_recent(
 ) -> Result<Vec<AssetView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_query_service
+        .assets
+        .query
         .list_recent(&project_id, limit.unwrap_or(100))
         .await
         .map_err(map_asset_error)
@@ -179,7 +182,8 @@ pub async fn asset_library_page(
 ) -> Result<AssetLibraryPageView, AppError> {
     super::validate_project_id(&query.project_id)?;
     state
-        .asset_library_service
+        .assets
+        .library
         .list_page(AssetLibraryQuery {
             project_id: query.project_id,
             category: query.category.into(),
@@ -204,7 +208,8 @@ pub async fn asset_get(
 ) -> Result<AssetView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_query_service
+        .assets
+        .query
         .get(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)
@@ -252,12 +257,14 @@ impl AssetRelationView {
         relation: AssetRelation,
     ) -> Result<Self, AppError> {
         let source_asset = state
-            .asset_query_service
+            .assets
+            .query
             .get(project_id, relation.source_asset_id.as_str())
             .await
             .map_err(map_asset_error)?;
         let target_asset = state
-            .asset_query_service
+            .assets
+            .query
             .get(project_id, relation.target_asset_id.as_str())
             .await
             .map_err(map_asset_error)?;
@@ -282,7 +289,8 @@ pub async fn asset_versions_list(
 ) -> Result<Vec<AssetVersionView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_data_service
+        .assets
+        .data
         .list_versions(&project_id, &asset_id)
         .await
         .map(|versions| versions.into_iter().map(AssetVersionView::from).collect())
@@ -297,7 +305,8 @@ pub async fn asset_relations_list(
 ) -> Result<Vec<AssetRelationView>, AppError> {
     super::validate_project_id(&project_id)?;
     let relations = state
-        .asset_data_service
+        .assets
+        .data
         .list_relations(&project_id, &asset_id)
         .await
         .map_err(map_asset_data_error)?;
@@ -316,7 +325,8 @@ pub async fn inspect_asset_deletion(
 ) -> Result<AssetDeleteInspection, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_deletion_service
+        .assets
+        .deletion
         .inspect(&project_id, &asset_ids)
         .await
         .map_err(map_asset_deletion_error)
@@ -330,7 +340,8 @@ pub async fn delete_assets(
 ) -> Result<AssetDeleteResult, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_deletion_service
+        .assets
+        .deletion
         .delete(&project_id, &asset_ids)
         .await
         .map_err(map_asset_deletion_error)
@@ -344,7 +355,8 @@ pub async fn asset_video_prompt_get(
 ) -> Result<Option<AssetVideoPromptView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_video_prompt_service
+        .assets
+        .video_prompt
         .get(&project_id, &asset_id)
         .await
         .map_err(map_asset_video_prompt_error)
@@ -358,7 +370,8 @@ pub async fn asset_video_prompt_list(
 ) -> Result<Vec<AssetVideoPromptView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .asset_video_prompt_service
+        .assets
+        .video_prompt
         .list(&project_id, &asset_ids)
         .await
         .map_err(map_asset_video_prompt_error)
@@ -379,7 +392,8 @@ pub async fn asset_video_prompt_set(
 ) -> Result<AssetVideoPromptView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .asset_video_prompt_service
+        .assets
+        .video_prompt
         .set(&request.project_id, &request.asset_id, &request.prompt_text)
         .await
         .map_err(map_asset_video_prompt_error)
@@ -404,7 +418,8 @@ pub async fn asset_pick_and_import_image(
         AppError::filesystem(format!("selected image path is unavailable: {error}"))
     })?;
     let asset = state
-        .source_asset_import_service
+        .assets
+        .source_import
         .import_image_file(&project_id, &path)
         .await
         .map_err(map_source_import_error)?;
@@ -467,7 +482,8 @@ pub async fn asset_pick_and_import_source_assets(
             }
         };
         let result = state
-            .source_asset_import_service
+            .assets
+            .source_import
             .import_files(&project_id, std::slice::from_ref(&path))
             .await;
         imported.extend(result.imported.into_iter().map(AssetView::from));
@@ -518,7 +534,8 @@ pub async fn asset_pick_and_import_video(
         AppError::filesystem(format!("selected video path is unavailable: {error}"))
     })?;
     let asset = state
-        .source_asset_import_service
+        .assets
+        .source_import
         .import_video_file(&project_id, &path)
         .await
         .map_err(map_source_import_error)?;
@@ -544,7 +561,8 @@ pub async fn asset_pick_and_import_audio(
         AppError::filesystem(format!("selected audio path is unavailable: {error}"))
     })?;
     let asset = state
-        .source_asset_import_service
+        .assets
+        .source_import
         .import_audio_file(&project_id, &path)
         .await
         .map_err(map_source_import_error)?;
@@ -559,7 +577,8 @@ pub async fn asset_read_image(
 ) -> Result<Response, AppError> {
     super::validate_project_id(&project_id)?;
     let asset = state
-        .asset_query_service
+        .assets
+        .query
         .read_image(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)?;
@@ -574,7 +593,8 @@ pub async fn asset_read_thumbnail(
 ) -> Result<Response, AppError> {
     super::validate_project_id(&project_id)?;
     let asset = state
-        .asset_query_service
+        .assets
+        .query
         .read_thumbnail(&project_id, &asset_id)
         .await
         .map_err(map_asset_error)?;

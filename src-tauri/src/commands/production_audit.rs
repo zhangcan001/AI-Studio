@@ -55,7 +55,8 @@ pub async fn production_audit_summary(
     request: ProductionAuditProjectRequest,
 ) -> Result<ProductionAuditSummary, AppError> {
     state
-        .production_audit_service
+        .production
+        .audit
         .summary(&request.project_id)
         .await
         .map_err(map_audit_error)
@@ -67,7 +68,8 @@ pub async fn production_audit_recent_activity(
     request: ProductionAuditRecentActivityRequest,
 ) -> Result<Vec<ProductionAuditActivity>, AppError> {
     state
-        .production_audit_service
+        .production
+        .audit
         .recent_activity(&request.project_id, request.limit)
         .await
         .map_err(map_audit_error)
@@ -79,7 +81,8 @@ pub async fn production_audit_lineage(
     request: ProductionAuditLineageRequest,
 ) -> Result<ProductionAuditLineage, AppError> {
     state
-        .production_audit_service
+        .production
+        .audit
         .lineage(&request.project_id, &request.root_type, &request.root_id)
         .await
         .map_err(map_audit_error)
@@ -91,7 +94,8 @@ pub async fn production_audit_integrity(
     request: ProductionAuditProjectRequest,
 ) -> Result<ProductionAuditIntegrity, AppError> {
     state
-        .production_audit_service
+        .production
+        .audit
         .integrity(&request.project_id)
         .await
         .map_err(map_audit_error)
@@ -105,7 +109,8 @@ pub async fn production_audit_snapshot_detail(
     request: ProductionAuditSnapshotDetailRequest,
 ) -> Result<Option<ProductionAuditSnapshotDetail>, AppError> {
     state
-        .production_audit_service
+        .production
+        .audit
         .snapshot_detail(&request.project_id, &request.production_batch_item_id)
         .await
         .map_err(map_audit_error)

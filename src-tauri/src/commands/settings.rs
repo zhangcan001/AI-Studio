@@ -8,7 +8,7 @@ use crate::{
 pub fn comfy_environment_profiles_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ComfyEnvironmentProfile>, AppError> {
-    Ok(state.settings_service.comfy_environment_profiles())
+    Ok(state.system.settings.comfy_environment_profiles())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -17,7 +17,8 @@ pub async fn comfy_environment_profile_save(
     profile: ComfyEnvironmentProfile,
 ) -> Result<ComfyEnvironmentProfile, AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .save_comfy_environment_profile(profile)
         .await
 }
@@ -28,7 +29,8 @@ pub async fn comfy_environment_profile_delete(
     profile_id: String,
 ) -> Result<(), AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .delete_comfy_environment_profile(&profile_id)
         .await
 }
@@ -39,7 +41,8 @@ pub async fn comfy_environment_profile_apply(
     profile_id: String,
 ) -> Result<crate::application::settings_service::SettingsView, AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .apply_comfy_environment_profile(&profile_id)
         .await
 }
@@ -48,19 +51,19 @@ pub async fn comfy_environment_profile_apply(
 pub fn runtime_profiles_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<RuntimeParameterProfile>, AppError> {
-    Ok(state.settings_service.runtime_profiles())
+    Ok(state.system.settings.runtime_profiles())
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn production_queue_name_presets_list(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, AppError> {
-    Ok(state.settings_service.production_queue_name_presets())
+    Ok(state.system.settings.production_queue_name_presets())
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn workspace_resume_get(state: tauri::State<'_, AppState>) -> WorkspaceResume {
-    state.settings_service.workspace_resume()
+    state.system.settings.workspace_resume()
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -69,7 +72,8 @@ pub async fn workspace_resume_save(
     workspace_resume: WorkspaceResume,
 ) -> Result<WorkspaceResume, AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .save_workspace_resume(workspace_resume)
         .await
 }
@@ -80,7 +84,8 @@ pub async fn production_queue_name_preset_save(
     name: String,
 ) -> Result<Vec<String>, AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .save_production_queue_name_preset(&name)
         .await
 }
@@ -91,7 +96,8 @@ pub async fn production_queue_name_preset_delete(
     name: String,
 ) -> Result<(), AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .delete_production_queue_name_preset(&name)
         .await
 }
@@ -101,7 +107,7 @@ pub async fn runtime_profiles_save(
     state: tauri::State<'_, AppState>,
     profile: RuntimeParameterProfile,
 ) -> Result<RuntimeParameterProfile, AppError> {
-    state.settings_service.save_runtime_profile(profile).await
+    state.system.settings.save_runtime_profile(profile).await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -110,7 +116,8 @@ pub async fn runtime_profiles_delete(
     profile_id: String,
 ) -> Result<(), AppError> {
     state
-        .settings_service
+        .system
+        .settings
         .delete_runtime_profile(&profile_id)
         .await
 }

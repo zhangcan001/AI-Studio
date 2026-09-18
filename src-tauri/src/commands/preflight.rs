@@ -7,5 +7,5 @@ use crate::{
 pub async fn comfy_preflight_current(
     state: tauri::State<'_, AppState>,
 ) -> Result<ComfyPreflightReport, AppError> {
-    state.comfy_preflight_service.current().await
+    state.system.comfy_preflight.current().await
 }

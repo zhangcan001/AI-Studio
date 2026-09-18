@@ -86,7 +86,8 @@ pub async fn workflow_analyze_import(
         return Ok(None);
     };
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .analyze_import_bytes(bytes, original_filename, existing_workflow_id)
         .await
         .map(Some)
@@ -100,14 +101,16 @@ pub async fn workflow_commit_import(
 ) -> Result<WorkflowOnboardingPublishView, AppError> {
     let set_current = request.set_current;
     let published = state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .commit_import(request)
         .await
         .map_err(|error| AppError::workflow_onboarding(format!("{}: {error}", error.code())))?;
     if set_current {
         if let Some(version_id) = &published.workflow_version_id {
             state
-                .workflow_registry_service
+                .workflow
+                .registry
                 .set_current_version(&published.workflow_id, version_id)
                 .await
                 .map_err(map_registry_error)?;
@@ -121,7 +124,8 @@ pub async fn workflow_list_registry(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorkflowRegistryView>, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .list()
         .await
         .map_err(map_registry_error)
@@ -133,7 +137,8 @@ pub async fn workflow_get_registry(
     workflow_id: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .get(&workflow_id)
         .await
         .map_err(map_registry_error)
@@ -146,7 +151,8 @@ pub async fn workflow_rename(
     name: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .rename(&workflow_id, &name)
         .await
         .map_err(map_registry_error)
@@ -159,7 +165,8 @@ pub async fn workflow_set_current_version(
     workflow_version_id: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .set_current_version(&workflow_id, &workflow_version_id)
         .await
         .map_err(map_registry_error)
@@ -172,7 +179,8 @@ pub async fn workflow_promote_recipe(
     recipe_id: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .promote_recipe(&workflow_version_id, &recipe_id)
         .await
         .map_err(map_registry_error)
@@ -185,7 +193,8 @@ pub async fn workflow_clear_recipe_promotion(
     recipe_id: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .clear_recipe_promotion(&workflow_version_id, &recipe_id)
         .await
         .map_err(map_registry_error)
@@ -198,7 +207,8 @@ pub async fn workflow_archive_recipe(
     recipe_id: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .archive_recipe(&workflow_version_id, &recipe_id)
         .await
         .map_err(map_registry_error)
@@ -211,7 +221,8 @@ pub async fn workflow_restore_recipe(
     recipe_id: String,
 ) -> Result<WorkflowRegistryView, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .restore_recipe(&workflow_version_id, &recipe_id)
         .await
         .map_err(map_registry_error)
@@ -223,7 +234,8 @@ pub async fn workflow_remove(
     workflow_id: String,
 ) -> Result<WorkflowRegistryMutationResult, AppError> {
     state
-        .workflow_lifecycle_coordinator
+        .workflow
+        .lifecycle_coordinator
         .remove_workflow(&workflow_id)
         .await
         .map_err(map_coordinator_error)
@@ -235,7 +247,8 @@ pub async fn workflow_restore(
     workflow_id: String,
 ) -> Result<WorkflowRegistryRestoreResult, AppError> {
     state
-        .workflow_lifecycle_coordinator
+        .workflow
+        .lifecycle_coordinator
         .restore_workflow(&workflow_id)
         .await
         .map_err(map_coordinator_error)
@@ -247,7 +260,8 @@ pub async fn workflow_purge(
     workflow_id: String,
 ) -> Result<WorkflowRegistryPurgeResult, AppError> {
     state
-        .workflow_lifecycle_coordinator
+        .workflow
+        .lifecycle_coordinator
         .purge_workflow(&workflow_id)
         .await
         .map_err(map_coordinator_error)
@@ -259,7 +273,8 @@ pub async fn workflow_inspect_purge(
     workflow_id: String,
 ) -> Result<WorkflowPurgeInspection, AppError> {
     state
-        .workflow_registry_service
+        .workflow
+        .registry
         .inspect_purge(&workflow_id)
         .await
         .map_err(map_registry_error)
@@ -271,7 +286,8 @@ pub async fn workflow_rerecognize(
     workflow_id: String,
 ) -> Result<WorkflowAutoOnboardingPlanView, AppError> {
     state
-        .workflow_onboarding_service
+        .workflow
+        .onboarding
         .rerecognize_workflow(&workflow_id)
         .await
         .map_err(|error| AppError::workflow_onboarding(format!("{}: {error}", error.code())))

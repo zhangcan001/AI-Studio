@@ -844,5 +844,6 @@ fn command_contract_is_stable_camel_case_and_explicitly_wired_for_later_main_reg
     }
     assert!(source.contains("pub struct ConsistencyProfileView"));
     assert!(!source.contains("pub enum ConsistencyProfileView"));
-    assert!(source.contains("reference_set_service\n        .create_from_anchor"));
+    let normalized = source.split_whitespace().collect::<String>();
+    assert!(normalized.contains("state.shots.reference_set.create_from_anchor("));
 }

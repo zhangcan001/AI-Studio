@@ -42,7 +42,8 @@ pub async fn reference_anchors_list(
 ) -> Result<Vec<ReferenceAnchorView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .reference_anchor_service
+        .shots
+        .reference_anchor
         .list(&project_id)
         .await
         .map_err(map_reference_anchor_error)
@@ -56,7 +57,8 @@ pub async fn reference_anchor_get(
 ) -> Result<ReferenceAnchorView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .reference_anchor_service
+        .shots
+        .reference_anchor
         .get(&project_id, &anchor_id)
         .await
         .map_err(map_reference_anchor_error)
@@ -70,7 +72,8 @@ pub async fn reference_anchor_create(
     super::validate_project_id(&request.project_id)?;
     let kind = parse_kind(&request.kind)?;
     state
-        .reference_anchor_service
+        .shots
+        .reference_anchor
         .create(CreateReferenceAnchorRequest {
             project_id: request.project_id,
             kind,
@@ -90,7 +93,8 @@ pub async fn reference_anchor_update(
     super::validate_project_id(&request.project_id)?;
     let kind = parse_kind(&request.kind)?;
     state
-        .reference_anchor_service
+        .shots
+        .reference_anchor
         .update(UpdateReferenceAnchorRequest {
             project_id: request.project_id,
             anchor_id: request.anchor_id,
@@ -111,7 +115,8 @@ pub async fn reference_anchor_delete(
 ) -> Result<(), AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .reference_anchor_service
+        .shots
+        .reference_anchor
         .delete(&project_id, &anchor_id)
         .await
         .map_err(map_reference_anchor_error)

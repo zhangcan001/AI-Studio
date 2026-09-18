@@ -85,7 +85,8 @@ pub async fn shot_list(
 ) -> Result<Vec<ShotView>, AppError> {
     validate_project_id(&project_id)?;
     state
-        .shot_service
+        .shots
+        .shot
         .list(&project_id)
         .await
         .map_err(map_shot_error)
@@ -99,7 +100,8 @@ pub async fn shot_get(
 ) -> Result<ShotView, AppError> {
     validate_project_id(&project_id)?;
     state
-        .shot_service
+        .shots
+        .shot
         .get(&project_id, &shot_id)
         .await
         .map_err(map_shot_error)
@@ -112,7 +114,8 @@ pub async fn shot_create(
 ) -> Result<ShotView, AppError> {
     validate_project_id(&project_id)?;
     state
-        .shot_service
+        .shots
+        .shot
         .create(&project_id)
         .await
         .map_err(map_shot_error)
@@ -124,7 +127,8 @@ pub async fn shot_update(
     request: ShotUpdateRequestDto,
 ) -> Result<ShotView, AppError> {
     state
-        .shot_service
+        .shots
+        .shot
         .update(ShotUpdateRequest {
             project_id: request.project_id,
             shot_id: request.shot_id,
@@ -145,7 +149,8 @@ pub async fn shot_delete(
 ) -> Result<(), AppError> {
     validate_project_id(&project_id)?;
     state
-        .shot_service
+        .shots
+        .shot
         .delete(&project_id, &shot_id)
         .await
         .map_err(map_shot_error)
@@ -157,7 +162,8 @@ pub async fn shot_reorder(
     request: ShotReorderRequestDto,
 ) -> Result<Vec<ShotView>, AppError> {
     state
-        .shot_service
+        .shots
+        .shot
         .reorder(&request.project_id, request.ordered_ids)
         .await
         .map_err(map_shot_error)
@@ -171,7 +177,8 @@ pub async fn shot_stage_config_set(
     let stage = parse_stage(&request.stage)?;
     let values = into_values(request.values)?;
     state
-        .shot_service
+        .shots
+        .shot
         .set_stage_config(ShotStageConfigRequest {
             project_id: request.project_id,
             shot_id: request.shot_id,
@@ -191,7 +198,8 @@ pub async fn shot_references_replace(
 ) -> Result<ShotView, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_service
+        .shots
+        .shot
         .replace_references(
             &request.project_id,
             &request.shot_id,
@@ -209,7 +217,8 @@ pub async fn shot_result_select(
 ) -> Result<ShotView, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_service
+        .shots
+        .shot
         .select_result(
             &request.project_id,
             &request.shot_id,
@@ -229,12 +238,14 @@ pub async fn shot_generate(
     let stage = parse_stage(&request.stage)?;
     let values = into_values(request.values)?;
     let _admission = state
-        .production_queue_service
+        .production
+        .queue
         .acquire_interactive_admission()
         .await
         .map_err(super::production_queue::map_queue_error)?;
     let prepared = state
-        .shot_service
+        .shots
+        .shot
         .prepare_generation_submission(ShotGenerationRequest {
             project_id: request.project_id,
             shot_id: request.shot_id,
@@ -246,7 +257,8 @@ pub async fn shot_generate(
         .await
         .map_err(map_shot_error)?;
     state
-        .production_queue_service
+        .production
+        .queue
         .create_direct_generation(CreateDirectGenerationRequest {
             project_id: prepared.project_id,
             name: "Shot generation".to_owned(),

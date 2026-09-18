@@ -18,9 +18,10 @@ fn production_queue_start_delegates_to_runtime_admission_service() {
         .find("\n#[tauri::command]")
         .map_or(source.len(), |offset| start + offset);
     let body = &source[start..end];
+    let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
 
     assert!(
-        body.contains("production_start_admission_service"),
+        normalized.contains(".production .admission .start("),
         "production_queue_start must delegate to the runtime admission service"
     );
     assert!(
@@ -28,7 +29,7 @@ fn production_queue_start_delegates_to_runtime_admission_service() {
         "the boundary must pass the original project and batch identifiers"
     );
     assert!(
-        !body.contains("production_queue_service"),
+        !normalized.contains(".production .queue"),
         "production_queue_start must not bypass runtime admission"
     );
 }

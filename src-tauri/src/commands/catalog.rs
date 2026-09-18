@@ -8,7 +8,8 @@ pub async fn generation_catalog_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<RecipeViewModel>, AppError> {
     state
-        .generation_catalog_service
+        .catalog
+        .generation
         .list()
         .await
         .map_err(|error| AppError::internal(error.to_string()))

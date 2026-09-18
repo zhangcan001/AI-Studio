@@ -49,7 +49,8 @@ pub async fn scene_production_plan(
 ) -> Result<SceneProductionPlan, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .scene_production_service
+        .production
+        .scene
         .plan(&request.project_id, &request.scene_id, stage)
         .await
         .map_err(map_error)
@@ -62,12 +63,13 @@ pub async fn scene_production_readiness_summary(
 ) -> Result<SceneProductionReadinessSummary, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .scene_production_service
+        .production
+        .scene
         .readiness_summary(
             &request.project_id,
             &request.scene_id,
             stage,
-            &state.shot_readiness_service,
+            &state.shots.readiness,
         )
         .await
         .map_err(map_error)
@@ -80,7 +82,8 @@ pub async fn scene_production_prepare(
 ) -> Result<SceneProductionPrepareView, AppError> {
     let stage = parse_stage(&request.stage)?;
     let result = state
-        .scene_production_service
+        .production
+        .scene
         .prepare(
             &request.project_id,
             &request.scene_id,

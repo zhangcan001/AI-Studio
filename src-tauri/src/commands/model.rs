@@ -52,7 +52,7 @@ pub struct ModelVersionCreateRequest {
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn model_list(state: State<'_, AppState>) -> Result<Vec<ModelView>, AppError> {
-    state.model_service.list().await.map_err(map_model_error)
+    state.catalog.model.list().await.map_err(map_model_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -61,7 +61,8 @@ pub async fn model_get(
     model_id: String,
 ) -> Result<ModelView, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .get(&model_id)
         .await
         .map_err(map_model_error)
@@ -73,7 +74,8 @@ pub async fn model_create(
     request: ModelCreateRequest,
 ) -> Result<ModelView, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .create(CreateModelRequest {
             name: request.name,
             provider: request.provider,
@@ -91,7 +93,8 @@ pub async fn model_update(
     request: ModelUpdateRequest,
 ) -> Result<ModelView, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .update(UpdateModelRequest {
             model_id: request.model_id,
             name: request.name,
@@ -107,7 +110,8 @@ pub async fn model_update(
 #[tauri::command(rename_all = "camelCase")]
 pub async fn model_delete(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .delete(&model_id)
         .await
         .map_err(map_model_error)
@@ -119,7 +123,8 @@ pub async fn model_version_list(
     model_id: String,
 ) -> Result<Vec<ModelVersionView>, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .list_versions(&model_id)
         .await
         .map_err(map_model_error)
@@ -131,7 +136,8 @@ pub async fn model_version_current(
     model_id: String,
 ) -> Result<Option<ModelVersionView>, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .current_version(&model_id)
         .await
         .map_err(map_model_error)
@@ -143,7 +149,8 @@ pub async fn model_version_get(
     version_id: String,
 ) -> Result<ModelVersionView, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .get_version(&version_id)
         .await
         .map_err(map_model_error)
@@ -155,7 +162,8 @@ pub async fn model_version_create(
     request: ModelVersionCreateRequest,
 ) -> Result<ModelVersionView, AppError> {
     state
-        .model_service
+        .catalog
+        .model
         .create_version(CreateModelVersionRequest {
             model_id: request.model_id,
             version: request.version,

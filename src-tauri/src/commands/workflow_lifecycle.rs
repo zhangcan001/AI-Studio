@@ -29,7 +29,8 @@ pub async fn workflow_runtime_workspace_list(
     state: State<'_, AppState>,
 ) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .list_workspace()
         .await
         .map_err(map_error)
@@ -40,7 +41,8 @@ pub async fn workflow_runtime_workspace_refresh(
     state: State<'_, AppState>,
 ) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .refresh_workspace()
         .await
         .map_err(map_error)
@@ -51,7 +53,8 @@ pub async fn workflow_runtime_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .list_workspace_diagnostics()
         .await
         .map_err(map_error)
@@ -63,12 +66,13 @@ pub async fn workflow_repair_builtin_package(
     package_name: String,
 ) -> Result<WorkflowProductionWorkspaceResponse, AppError> {
     crate::application::builtin_runtime_packages::repair_package(
-        &state.data_dirs.workflow_library,
+        &state.system.data_dirs.workflow_library,
         &package_name,
     )
     .map_err(AppError::workflow_onboarding)?;
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .refresh_workspace()
         .await
         .map_err(map_error)
@@ -82,13 +86,15 @@ pub async fn workflow_recheck_all_capabilities(
     AppError,
 > {
     let checked = state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .recheck_all_capabilities()
         .await
         .map_err(map_error)?;
     for item in &checked {
         state
-            .workflow_workspace_query_service
+            .workflow
+            .workspace_query
             .cache_capability_for_version(&item.workflow_version_id, item.capability.clone())
             .await
             .map_err(|error| AppError::workflow_onboarding(error.to_string()))?;
@@ -103,7 +109,8 @@ pub async fn workflow_set_enabled(
     enabled: bool,
 ) -> Result<(), AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .set_enabled(&workflow_version_id, enabled)
         .await
         .map_err(map_error)
@@ -115,12 +122,14 @@ pub async fn workflow_recheck_capability(
     workflow_version_id: String,
 ) -> Result<crate::application::workflow_onboarding_service::CapabilityCheckView, AppError> {
     let capability = state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .recheck_capability(&workflow_version_id)
         .await
         .map_err(map_error)?;
     state
-        .workflow_workspace_query_service
+        .workflow
+        .workspace_query
         .cache_capability_for_version(&workflow_version_id, capability.clone())
         .await
         .map_err(|error| AppError::workflow_onboarding(error.to_string()))?;
@@ -136,7 +145,8 @@ pub async fn workflow_duplicate_recipe(
 ) -> Result<crate::application::workflow_onboarding_service::WorkflowOnboardingDraftView, AppError>
 {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .duplicate_recipe(&workflow_version_id, recipe_id, recipe_version)
         .await
         .map_err(map_error)
@@ -149,7 +159,8 @@ pub async fn workflow_compare_versions(
     version_b_id: String,
 ) -> Result<WorkflowVersionDiffView, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .compare_versions(&version_a_id, &version_b_id)
         .await
         .map_err(map_error)
@@ -162,7 +173,8 @@ pub async fn workflow_export_package(
     workflow_version_id: String,
 ) -> Result<Option<WorkflowExportView>, AppError> {
     let export = state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .export_package(&workflow_version_id)
         .await
         .map_err(map_error)?;
@@ -227,7 +239,8 @@ pub async fn workflow_import_package_backup(
         ))
     })?;
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .restore_package(bytes)
         .await
         .map(Some)
@@ -240,7 +253,8 @@ pub async fn workflow_clean_staging(
     staging_id: String,
 ) -> Result<(), AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .cleanup_staging(&staging_id)
         .await
         .map_err(map_error)
@@ -252,7 +266,8 @@ pub async fn workflow_inspect_deletion(
     workflow_version_id: String,
 ) -> Result<WorkflowDeletionInspection, AppError> {
     state
-        .workflow_lifecycle_service
+        .workflow
+        .lifecycle
         .inspect_deletion(&workflow_version_id)
         .await
         .map_err(map_error)
@@ -264,7 +279,8 @@ pub async fn workflow_delete_version(
     workflow_version_id: String,
 ) -> Result<WorkflowDeletionResult, AppError> {
     state
-        .workflow_lifecycle_coordinator
+        .workflow
+        .lifecycle_coordinator
         .delete_version(&workflow_version_id)
         .await
         .map_err(map_coordinator_error)
@@ -276,7 +292,8 @@ pub async fn workflow_delete_workflow(
     workflow_id: String,
 ) -> Result<Vec<WorkflowDeletionResult>, AppError> {
     state
-        .workflow_lifecycle_coordinator
+        .workflow
+        .lifecycle_coordinator
         .delete_workflow(&workflow_id)
         .await
         .map_err(map_coordinator_error)
@@ -288,7 +305,8 @@ pub async fn workflow_restore_version(
     workflow_version_id: String,
 ) -> Result<WorkflowRestoreResult, AppError> {
     state
-        .workflow_lifecycle_coordinator
+        .workflow
+        .lifecycle_coordinator
         .restore_version(&workflow_version_id)
         .await
         .map_err(map_coordinator_error)

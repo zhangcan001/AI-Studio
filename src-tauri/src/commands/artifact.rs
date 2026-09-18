@@ -56,7 +56,8 @@ pub async fn production_batch_artifacts_get(
 ) -> Result<ProductionBatchArtifactsDto, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .artifact_service
+        .assets
+        .artifact
         .production_batch_artifacts(&project_id, &batch_id)
         .await
         .map_err(map_artifact_error)
@@ -72,7 +73,8 @@ pub async fn artifact_review_queue_get(
 ) -> Result<ArtifactReviewQueueView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .artifact_service
+        .assets
+        .artifact
         .review_queue(
             &project_id,
             filter.unwrap_or_default(),
@@ -90,7 +92,8 @@ pub async fn artifact_open(
     artifact_id: String,
 ) -> Result<(), AppError> {
     let path = state
-        .artifact_service
+        .assets
+        .artifact
         .resolve_artifact_path(&artifact_id)
         .await;
     run_artifact_opener_after_validation(path, |path| {
@@ -107,7 +110,8 @@ pub async fn artifact_reveal(
     artifact_id: String,
 ) -> Result<(), AppError> {
     let path = state
-        .artifact_service
+        .assets
+        .artifact
         .resolve_artifact_path(&artifact_id)
         .await;
     run_artifact_opener_after_validation(path, |path| {
@@ -124,7 +128,8 @@ pub async fn artifact_review_submit(
 ) -> Result<ArtifactReviewView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .artifact_service
+        .assets
+        .artifact
         .submit_review(
             &request.project_id,
             &request.artifact_id,
@@ -143,7 +148,8 @@ pub async fn artifact_review_reset(
 ) -> Result<ArtifactReviewView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .artifact_service
+        .assets
+        .artifact
         .reset_review(
             &request.project_id,
             &request.artifact_id,

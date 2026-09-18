@@ -140,7 +140,8 @@ pub async fn production_run_create(
     request: ProductionRunCreateRequestDto,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .create(request.into_application()?)
         .await
         .map_err(map_production_run_error)
@@ -152,7 +153,8 @@ pub async fn production_run_list(
     request: ProductionRunListRequest,
 ) -> Result<Vec<ProductionRunListItem>, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .list(&request.project_id, request.limit)
         .await
         .map_err(map_production_run_error)
@@ -165,7 +167,8 @@ pub async fn production_run_get(
     run_id: String,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .get(&project_id, &run_id)
         .await
         .map_err(map_production_run_error)
@@ -178,7 +181,8 @@ pub async fn production_run_run_images(
     run_id: String,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .run_images(&project_id, &run_id)
         .await
         .map_err(map_production_run_error)
@@ -190,7 +194,8 @@ pub async fn production_run_select_assets(
     request: ProductionRunAssetSelectionRequest,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .select_assets(&request.project_id, &request.run_id, request.asset_ids)
         .await
         .map_err(map_production_run_error)
@@ -203,7 +208,8 @@ pub async fn production_run_run_video(
     run_id: String,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .run_video(&project_id, &run_id)
         .await
         .map_err(map_production_run_error)
@@ -216,7 +222,8 @@ pub async fn production_run_retry_video(
     run_id: String,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .retry_video(&project_id, &run_id)
         .await
         .map_err(map_production_run_error)
@@ -229,7 +236,8 @@ pub async fn production_run_refresh(
     run_id: String,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .refresh(&project_id, &run_id)
         .await
         .map_err(map_production_run_error)
@@ -242,7 +250,8 @@ pub async fn production_run_cancel(
     run_id: String,
 ) -> Result<ProductionRunView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .cancel(&project_id, &run_id)
         .await
         .map_err(map_production_run_error)
@@ -254,7 +263,8 @@ pub async fn production_run_template_save(
     request: ProductionRunTemplateRequestDto,
 ) -> Result<ProductionRunTemplateView, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .save_template(request.into_application())
         .await
         .map_err(map_production_run_error)
@@ -266,7 +276,8 @@ pub async fn production_run_template_list(
     project_id: String,
 ) -> Result<Vec<ProductionRunTemplateView>, AppError> {
     state
-        .production_orchestrator_service
+        .production
+        .orchestrator
         .list_templates(&project_id)
         .await
         .map_err(map_production_run_error)

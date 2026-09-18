@@ -21,7 +21,8 @@ pub async fn project_command_center_get(
     project_id: String,
 ) -> Result<ProjectCommandCenterView, AppError> {
     state
-        .project_command_center_service
+        .projects
+        .command_center
         .get(&project_id)
         .await
         .map_err(map_error)

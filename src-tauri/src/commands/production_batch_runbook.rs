@@ -19,7 +19,8 @@ pub async fn production_batch_runbook(
     request: ProductionBatchRunbookRequest,
 ) -> Result<ProductionBatchRunbook, AppError> {
     state
-        .production_batch_runbook_service
+        .production
+        .batch_runbook
         .list(&request.project_id, request.series_id.as_deref())
         .await
         .map_err(|error| AppError::invalid_input(error.to_string()))

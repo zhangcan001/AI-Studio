@@ -13,7 +13,8 @@ pub async fn workflow_workspace_query(
     mode: WorkflowWorkspaceQueryMode,
 ) -> Result<WorkflowWorkspaceQueryResponse, AppError> {
     state
-        .workflow_workspace_query_service
+        .workflow
+        .workspace_query
         .query(mode)
         .await
         .map_err(|error| AppError::workflow_onboarding(error.to_string()))

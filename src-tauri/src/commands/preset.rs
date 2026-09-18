@@ -43,7 +43,8 @@ pub async fn preset_list(
 ) -> Result<Vec<PresetView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .preset_service
+        .catalog
+        .preset
         .list(&project_id, &workflow_version_id, &recipe_id)
         .await
         .map_err(map_preset_error)
@@ -57,7 +58,8 @@ pub async fn preset_create(
     super::validate_project_id(&request.project_id)?;
     let values = into_application_values(request.values)?;
     state
-        .preset_service
+        .catalog
+        .preset
         .create(
             &request.project_id,
             &request.workflow_version_id,
@@ -77,7 +79,8 @@ pub async fn preset_update(
     super::validate_project_id(&request.project_id)?;
     let values = into_application_values(request.values)?;
     state
-        .preset_service
+        .catalog
+        .preset
         .update(
             &request.project_id,
             &request.preset_id,
@@ -96,7 +99,8 @@ pub async fn preset_delete(
 ) -> Result<(), AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .preset_service
+        .catalog
+        .preset
         .delete(&project_id, &preset_id)
         .await
         .map_err(map_preset_error)
@@ -111,7 +115,8 @@ pub fn preset_get_preferred(
 ) -> Result<Option<String>, AppError> {
     super::validate_project_id(&project_id)?;
     Ok(state
-        .settings_service
+        .system
+        .settings
         .preferred_preset(&project_id, &workflow_version_id, &recipe_id))
 }
 
@@ -123,7 +128,8 @@ pub async fn preset_set_preferred(
     super::validate_project_id(&request.project_id)?;
     if let Some(preset_id) = request.preset_id.as_deref() {
         let preset = state
-            .preset_service
+            .catalog
+            .preset
             .get(&request.project_id, preset_id)
             .await
             .map_err(map_preset_error)?;
@@ -134,7 +140,8 @@ pub async fn preset_set_preferred(
         }
     }
     state
-        .settings_service
+        .system
+        .settings
         .set_preferred_preset(
             &request.project_id,
             &request.workflow_version_id,

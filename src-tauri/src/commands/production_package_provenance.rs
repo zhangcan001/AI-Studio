@@ -28,7 +28,8 @@ pub async fn production_package_bindings_list(
     project_id: String,
 ) -> Result<Vec<ProductionPackageBatchBindingView>, AppError> {
     let bindings = state
-        .production_queue_service
+        .production
+        .queue
         .list_package_bindings(&project_id)
         .await
         .map_err(|error| AppError::database(error.to_string()))?;

@@ -83,7 +83,7 @@ pub fn ping() -> Result<&'static str, AppError> {
 
 #[tauri::command]
 pub fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, AppError> {
-    if !state.data_dirs.root.is_dir() || !state.data_dirs.database.is_file() {
+    if !state.system.data_dirs.root.is_dir() || !state.system.data_dirs.database.is_file() {
         return Err(AppError::internal(
             "application data directory or database is not ready",
         ));

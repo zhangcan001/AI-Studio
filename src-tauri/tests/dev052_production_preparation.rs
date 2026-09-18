@@ -204,7 +204,10 @@ fn preparation_commands_match_the_landed_domain_contract() {
         );
     }
     assert!(commands.contains("ProductionPreparationService"));
-    assert!(commands.contains(".production_structure_service"));
+    let normalized_commands = commands.split_whitespace().collect::<String>();
+    assert!(
+        normalized_commands.contains("state.organization.production_structure.tree(project_id)")
+    );
     assert!(commands.contains(".plan_many("));
     assert!(commands.contains(".admit("));
     assert!(commands.contains(".plan_detail("));
@@ -247,11 +250,11 @@ fn scene_preflight_uses_project_scoped_scene_membership() {
         "async fn scene_scope",
         "fn validate_scene_shot_ids",
     );
+    let normalized_scope = scope.split_whitespace().collect::<String>();
     assert_contains_all(
-        scope,
+        &normalized_scope,
         &[
-            "production_structure_service",
-            ".tree(project_id)",
+            "state.organization.production_structure.tree(project_id)",
             "scene.scene.id",
             "scene.scene.name",
             "SCENE_NOT_FOUND",

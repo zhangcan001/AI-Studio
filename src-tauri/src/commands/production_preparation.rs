@@ -89,7 +89,8 @@ pub async fn scene_production_preflight(
     let (scene_name, shot_ids) =
         scene_scope(&state, &request.project_id, &request.scene_id).await?;
     let plans = state
-        .production_preparation_service
+        .production
+        .preparation
         .plan_many(&request.project_id, &shot_ids, stage)
         .await
         .map_err(map_preparation_error)?;
@@ -117,7 +118,8 @@ pub async fn scene_production_admit(
     let (_, scene_shot_ids) = scene_scope(&state, &request.project_id, &request.scene_id).await?;
     validate_scene_shot_ids(&request.shot_ids, &scene_shot_ids)?;
     let result = state
-        .production_preparation_service
+        .production
+        .preparation
         .admit(
             &request.project_id,
             &request.shot_ids,
@@ -137,7 +139,8 @@ pub async fn shot_production_plan_detail(
 ) -> Result<ShotProductionPlan, AppError> {
     let stage = parse_stage(&request.stage)?;
     let detail = state
-        .production_preparation_service
+        .production
+        .preparation
         .plan_detail(&request.project_id, &request.shot_id, stage)
         .await
         .map_err(map_preparation_error)?;
@@ -158,7 +161,8 @@ pub async fn project_production_preflight(
         return Ok(project_view(request.project_id, stage, Vec::new()));
     }
     let plans = state
-        .production_preparation_service
+        .production
+        .preparation
         .plan_many(&request.project_id, &shot_ids, stage)
         .await
         .map_err(map_preparation_error)?;
@@ -180,7 +184,8 @@ pub async fn project_production_admit(
         MAX_PREPARATION_BATCH_ITEMS,
     )?;
     state
-        .production_preparation_service
+        .production
+        .preparation
         .admit(
             &request.project_id,
             &request.shot_ids,
@@ -225,7 +230,8 @@ fn project_view(
 
 async fn project_scope(state: &AppState, project_id: &str) -> Result<Vec<String>, AppError> {
     let tree = state
-        .production_structure_service
+        .organization
+        .production_structure
         .tree(project_id)
         .await
         .map_err(|error| AppError::invalid_input(error.to_string()))?;
@@ -289,7 +295,8 @@ async fn scene_scope(
     scene_id: &str,
 ) -> Result<(String, Vec<String>), AppError> {
     let tree = state
-        .production_structure_service
+        .organization
+        .production_structure
         .tree(project_id)
         .await
         .map_err(|error| AppError::invalid_input(error.to_string()))?;

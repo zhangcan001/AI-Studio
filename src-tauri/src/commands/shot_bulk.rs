@@ -66,7 +66,8 @@ pub async fn preview_shot_bulk_import(
 ) -> Result<crate::application::shot_bulk_service::ShotBulkImportPreview, AppError> {
     validate_project_id(&request.project_id)?;
     state
-        .shot_bulk_service
+        .shots
+        .bulk
         .preview_import(&into_import_request(request)?)
         .await
         .map_err(map_bulk_error)
@@ -79,7 +80,8 @@ pub async fn commit_shot_bulk_import(
 ) -> Result<crate::application::shot_bulk_service::ShotBulkImportResult, AppError> {
     validate_project_id(&request.project_id)?;
     state
-        .shot_bulk_service
+        .shots
+        .bulk
         .commit_import(&into_import_request(request)?)
         .await
         .map_err(map_bulk_error)
@@ -93,7 +95,8 @@ pub async fn bulk_assign_shot_prompt(
     validate_project_id(&request.project_id)?;
     let stage = parse_stage(&request.stage)?;
     state
-        .shot_bulk_service
+        .shots
+        .bulk
         .assign_prompt(BulkPromptAssignmentRequest {
             project_id: request.project_id,
             stage,
@@ -117,7 +120,8 @@ pub async fn bulk_set_shot_stage_config(
         .map(|(key, value)| Ok((key.clone(), value.into_application(&key)?)))
         .collect::<Result<BTreeMap<String, GenerationInputValue>, AppError>>()?;
     state
-        .shot_bulk_service
+        .shots
+        .bulk
         .set_stage_config(BulkStageConfigRequest {
             project_id: request.project_id,
             stage,

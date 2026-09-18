@@ -37,7 +37,8 @@ pub async fn episode_production_plan(
 ) -> Result<EpisodeProductionPlan, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .episode_production_service
+        .production
+        .episode
         .plan(&request.project_id, &request.episode_id, stage)
         .await
         .map_err(map_error)
@@ -50,12 +51,13 @@ pub async fn episode_production_readiness_summary(
 ) -> Result<EpisodeProductionReadinessSummary, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .episode_production_service
+        .production
+        .episode
         .readiness_summary(
             &request.project_id,
             &request.episode_id,
             stage,
-            &state.shot_readiness_service,
+            &state.shots.readiness,
         )
         .await
         .map_err(map_error)
@@ -68,7 +70,8 @@ pub async fn episode_production_prepare(
 ) -> Result<EpisodeProductionPrepareResult, AppError> {
     let stage = parse_stage(&request.stage)?;
     state
-        .episode_production_service
+        .production
+        .episode
         .prepare(
             &request.project_id,
             &request.episode_id,

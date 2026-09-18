@@ -106,7 +106,8 @@ pub async fn production_package_inspect(
     request: ProductionPackageInspectRequest,
 ) -> Result<ProductionPackageInspectionView, AppError> {
     let (inspection_id, inspection) = state
-        .production_package_service
+        .production
+        .package
         .inspect_session(&request.project_id, request.package_root.into())
         .await
         .map_err(map_package_error)?;
@@ -122,7 +123,8 @@ pub async fn production_package_create_batches(
     request: ProductionPackageCreateBatchesRequest,
 ) -> Result<ProductionPackageCreateBatchesView, AppError> {
     let result = state
-        .production_package_service
+        .production
+        .package
         .create_batches(&request.inspection_id, &request.selected_item_ids)
         .await
         .map_err(map_package_error)?;

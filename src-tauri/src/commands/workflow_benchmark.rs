@@ -169,7 +169,8 @@ pub async fn workflow_benchmark_preview(
 ) -> Result<WorkflowBenchmarkPreviewResponse, AppError> {
     let request = request.into_application()?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .preview(&request)
         .await
         .map(|candidates| WorkflowBenchmarkPreviewResponse { candidates })
@@ -183,7 +184,8 @@ pub async fn workflow_benchmark_create(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     let request = request.into_application()?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .create(request)
         .await
         .map_err(map_benchmark_error)
@@ -196,7 +198,8 @@ pub async fn workflow_benchmark_list(
 ) -> Result<Vec<WorkflowBenchmarkSummaryView>, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .list(&request.project_id, request.limit)
         .await
         .map_err(map_benchmark_error)
@@ -210,7 +213,8 @@ pub async fn workflow_benchmark_get(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .get(&project_id, &experiment_id)
         .await
         .map_err(map_benchmark_error)
@@ -223,7 +227,8 @@ pub async fn workflow_benchmark_set_winner(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .set_winner(
             &request.project_id,
             &request.experiment_id,
@@ -240,7 +245,8 @@ pub async fn workflow_benchmark_set_recommendation(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .set_recommendation(
             &request.project_id,
             &request.experiment_id,
@@ -257,7 +263,8 @@ pub async fn workflow_benchmark_save_quality(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .save_quality(
             &request.project_id,
             &request.experiment_id,
@@ -282,7 +289,8 @@ pub async fn workflow_benchmark_clone(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .clone_experiment(&request.project_id, &request.experiment_id, request.name)
         .await
         .map_err(map_benchmark_error)
@@ -295,7 +303,8 @@ pub async fn workflow_benchmark_queue_existing(
 ) -> Result<WorkflowBenchmarkView, AppError> {
     super::validate_project_id(&request.project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .queue_existing(
             &request.project_id,
             &request.experiment_id,
@@ -313,7 +322,8 @@ pub async fn workflow_benchmark_delete(
 ) -> Result<WorkflowBenchmarkDeleteView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .workflow_benchmark_service
+        .workflow
+        .benchmark
         .delete(&project_id, &experiment_id)
         .await
         .map_err(map_benchmark_error)

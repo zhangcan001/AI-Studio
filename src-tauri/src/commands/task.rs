@@ -19,7 +19,8 @@ pub async fn task_get(
 ) -> Result<TaskView, AppError> {
     super::validate_project_id(&project_id)?;
     let task = state
-        .task_query_service
+        .tasks
+        .query
         .get(&project_id, &task_id)
         .await
         .map_err(map_query_error)?
@@ -35,7 +36,8 @@ pub async fn task_list_recent(
 ) -> Result<Vec<TaskView>, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .task_query_service
+        .tasks
+        .query
         .list_recent(&project_id, limit.unwrap_or(10).min(50))
         .await
         .map_err(map_query_error)
@@ -49,21 +51,19 @@ pub async fn task_cancel(
 ) -> Result<TaskView, AppError> {
     super::validate_project_id(&project_id)?;
     let task = state
-        .task_cancellation_service
+        .tasks
+        .cancellation
         .request_cancel(&project_id, &task_id)
         .await
         .map_err(map_cancellation_error)?;
-    state
-        .task_query_service
-        .view(task)
-        .await
-        .map_err(map_query_error)
+    state.tasks.query.view(task).await.map_err(map_query_error)
 }
 
 #[tauri::command]
 pub async fn task_reconcile_active(state: State<'_, AppState>) -> Result<RecoveryReport, AppError> {
     state
-        .task_recovery_service
+        .tasks
+        .recovery
         .reconcile_active()
         .await
         .map_err(map_recovery_error)
@@ -143,7 +143,8 @@ pub async fn task_history_page(
 ) -> Result<TaskHistoryPageView, AppError> {
     super::validate_project_id(&query.project_id)?;
     state
-        .task_history_service
+        .tasks
+        .history
         .list_page(TaskHistoryQuery {
             project_id: query.project_id,
             filter: query.filter.into(),
@@ -165,7 +166,8 @@ pub async fn task_get_detail(
 ) -> Result<TaskDetailView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .task_history_service
+        .tasks
+        .history
         .get_detail(&project_id, &task_id)
         .await
         .map_err(map_history_error)
@@ -179,7 +181,8 @@ pub async fn task_get_reusable_draft(
 ) -> Result<ReusableGenerationDraftView, AppError> {
     super::validate_project_id(&project_id)?;
     state
-        .task_history_service
+        .tasks
+        .history
         .get_reusable_draft(&project_id, &task_id)
         .await
         .map_err(map_history_error)

@@ -221,7 +221,8 @@ pub async fn production_queue_create(
             .next()
             .expect("direct generation item count was validated");
         state
-            .production_queue_service
+            .production
+            .queue
             .create_direct_generation(CreateDirectGenerationRequest {
                 project_id,
                 name,
@@ -240,7 +241,8 @@ pub async fn production_queue_create(
             .map_err(map_queue_error)?
     } else {
         state
-            .production_queue_service
+            .production
+            .queue
             .create(CreateProductionBatchRequest {
                 project_id,
                 name,
@@ -259,7 +261,8 @@ pub async fn production_queue_list(
     project_id: String,
 ) -> Result<Vec<ProductionBatchSummaryView>, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .list(&project_id)
         .await
         .map(|batches| batches.into_iter().map(Into::into).collect())
@@ -272,7 +275,8 @@ pub async fn production_queue_overview(
     project_id: String,
 ) -> Result<ProductionQueueOverviewView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .overview(&project_id)
         .await
         .map(Into::into)
@@ -284,7 +288,8 @@ pub async fn production_queue_admission_status(
     state: State<'_, AppState>,
 ) -> Result<ProductionAdmissionStatusView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .admission_status()
         .await
         .map(Into::into)
@@ -298,7 +303,8 @@ pub async fn production_queue_get(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .get(&project_id, &batch_id)
         .await
         .map(Into::into)
@@ -312,7 +318,8 @@ pub async fn production_queue_start(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_start_admission_service
+        .production
+        .admission
         .start(&project_id, &batch_id)
         .await
         .map_err(map_start_admission_error)?;
@@ -326,7 +333,8 @@ pub async fn production_queue_pause(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .pause(&project_id, &batch_id)
         .await
         .map_err(map_queue_error)?;
@@ -340,7 +348,8 @@ pub async fn production_queue_cancel_pending(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .cancel_pending(&project_id, &batch_id)
         .await
         .map(Into::into)
@@ -354,7 +363,8 @@ pub async fn production_queue_archive(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .archive(&project_id, &batch_id)
         .await
         .map_err(map_queue_error)?;
@@ -368,7 +378,8 @@ pub async fn production_queue_restore(
     batch_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .restore(&project_id, &batch_id)
         .await
         .map_err(map_queue_error)?;
@@ -382,7 +393,8 @@ pub async fn production_queue_delete(
     batch_id: String,
 ) -> Result<(), AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .delete(&project_id, &batch_id)
         .await
         .map_err(map_queue_error)
@@ -396,7 +408,8 @@ pub async fn production_queue_skip_item(
     item_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .skip_item(&project_id, &batch_id, &item_id)
         .await
         .map(Into::into)
@@ -411,7 +424,8 @@ pub async fn production_queue_requeue_item(
     item_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .requeue_item(&project_id, &batch_id, &item_id)
         .await
         .map(Into::into)
@@ -425,7 +439,8 @@ pub async fn production_queue_requeue_item_by_item(
     item_id: String,
 ) -> Result<ProductionBatchDetailView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .requeue_item_by_item(&project_id, &item_id)
         .await
         .map(Into::into)
@@ -439,7 +454,8 @@ pub async fn production_queue_partial_resume_plan(
     batch_id: String,
 ) -> Result<ProductionPartialResumePlanView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .partial_resume_plan(&project_id, &batch_id)
         .await
         .map(Into::into)
@@ -454,7 +470,8 @@ pub async fn production_queue_partial_resume(
     selected_leaf_item_ids: Vec<String>,
 ) -> Result<ProductionPartialResumeResultView, AppError> {
     state
-        .production_queue_service
+        .production
+        .queue
         .partial_resume(&project_id, &batch_id, &selected_leaf_item_ids)
         .await
         .map(Into::into)

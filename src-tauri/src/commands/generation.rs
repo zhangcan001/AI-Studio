@@ -257,12 +257,14 @@ pub async fn generation_create(
 ) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
     let request = request.into_application()?;
     let _admission = state
-        .production_queue_service
+        .production
+        .queue
         .acquire_interactive_admission()
         .await
         .map_err(super::production_queue::map_queue_error)?;
     state
-        .production_queue_service
+        .production
+        .queue
         .create_direct_generation(request)
         .await
         .map(Into::into)
@@ -278,7 +280,8 @@ pub async fn generation_create_batch(
         .map_err(|error| AppError::invalid_input(error.to_string()))?;
     validate_batch_size(request.items.len())?;
     let _admission = state
-        .production_queue_service
+        .production
+        .queue
         .acquire_interactive_admission()
         .await
         .map_err(super::production_queue::map_queue_error)?;
@@ -289,7 +292,8 @@ pub async fn generation_create_batch(
         .map(GenerationBatchItemRequest::into_application)
         .collect::<Result<Vec<_>, _>>()?;
     state
-        .production_queue_service
+        .production
+        .queue
         .create_direct_generation_batch(CreateDirectGenerationBatchRequest {
             project_id: request.project_id,
             name: "Generation batch".to_owned(),
