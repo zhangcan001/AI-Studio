@@ -1,0 +1,66 @@
+schema_version: 1
+id: rcp_kera2_t2i_local_v2_1_1_1
+name: Kera2 T2I Local v2 Resolution
+workflow:
+  file: workflow_api.json
+inputs:
+  prompt:
+    type: textarea
+    label: Prompt
+    required: true
+    default: ""
+  width:
+    type: integer
+    label: Width
+    required: true
+    default: 768
+    min: 16
+    max: 16384
+    step: 8
+  height:
+    type: integer
+    label: Height
+    required: true
+    default: 1280
+    min: 16
+    max: 16384
+    step: 8
+  steps:
+    type: integer
+    label: Steps
+    required: true
+    default: 10
+    min: 1
+    max: 100
+  seed:
+    type: seed
+    label: Seed
+    default: random
+    min: 0
+    max: 1125899906842624
+bindings:
+  - source: prompt
+    target:
+      node: "13"
+      input: text
+  - source: width
+    target:
+      node: "10"
+      input: width
+  - source: height
+    target:
+      node: "10"
+      input: height
+  - source: steps
+    target:
+      node: "3"
+      input: steps
+  - source: seed
+    target:
+      node: "2"
+      input: seed
+outputs:
+  - id: generated_image
+    type: image
+    node: "11"
+    required: true

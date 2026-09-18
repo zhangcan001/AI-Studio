@@ -477,7 +477,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             if let Err(error) = application::builtin_runtime_packages::ensure_installed(
                 &data_dirs.workflow_library,
             ) {
-                tracing::warn!(error_type = "builtin_runtime_package_install", %error, "builtin H3 runtime package installation skipped");
+                tracing::warn!(error_type = "builtin_runtime_package_install", %error, "builtin runtime package installation skipped");
             }
             match tauri::async_runtime::block_on(workflow_library_service.sync()) {
                 Ok(report) => tracing::info!(

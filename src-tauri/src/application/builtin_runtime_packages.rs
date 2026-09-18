@@ -1,9 +1,9 @@
-//! Immutable product-owned MiniMax H3 runtime packages.
+//! Immutable product-owned runtime packages.
 //!
 //! The package library remains user-data-backed so older packages are never
-//! overwritten. These two audited packages are copied only when their exact
-//! package directory is absent, then the normal library synchronizer validates
-//! and registers them like every other runtime package.
+//! overwritten. Embedded packages are copied only when their exact package
+//! directory is absent, then the normal library synchronizer validates and
+//! registers them like every other runtime package.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -21,8 +21,7 @@ struct BuiltinPackage {
 }
 
 struct BuiltinPackageIdentity {
-    /// Package directory reserved by a product-owned runtime whose files are
-    /// provisioned by the local runtime integration rather than embedded here.
+    /// Legacy package directory reserved by a product-owned runtime.
     directory: &'static str,
 }
 
@@ -115,12 +114,22 @@ const PACKAGES: &[BuiltinPackage] = &[
             "../../runtime_packages/aitudou_minimax_h3_lightx2v_8step_fast_1_0_0/workflow_api.json"
         ),
     },
+    BuiltinPackage {
+        directory: "kera2_t2i_local_v2_1_1_1_90894e9e",
+        manifest: include_str!(
+            "../../runtime_packages/kera2_t2i_local_v2_1_1_1_90894e9e/manifest.yaml"
+        ),
+        recipe: include_str!(
+            "../../runtime_packages/kera2_t2i_local_v2_1_1_1_90894e9e/recipe.yaml"
+        ),
+        workflow: include_str!(
+            "../../runtime_packages/kera2_t2i_local_v2_1_1_1_90894e9e/workflow_api.json"
+        ),
+    },
 ];
 
-// Kera2 is provisioned by the local image runtime, so its package files are
-// not embedded in this H3-only source list. Keeping its package identity here
-// still makes the builtin decision come from formal package metadata rather
-// than from a workflow ID conditional in the deletion service.
+// Older Kera2 package directory names remain product-owned for existing user
+// libraries. New installs use the immutable embedded package above.
 const PRODUCT_PACKAGE_IDENTITIES: &[BuiltinPackageIdentity] = &[
     BuiltinPackageIdentity {
         directory: "kera2_t2i_local_v2",
@@ -312,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn installs_missing_h3_packages_without_overwriting_existing_directory() {
+    fn installs_missing_product_packages_without_overwriting_existing_directory() {
         let directory = tempdir().expect("temp directory");
         ensure_installed(directory.path()).expect("builtin packages should install");
         let fl2va = directory.path().join("minimax_h3_fl2va_1_0_0");
@@ -321,10 +330,14 @@ mod tests {
         let quality_ref = directory
             .path()
             .join("minimax_h3_reference_video_quality_2_0_0");
+        let kera2 = directory.path().join("kera2_t2i_local_v2_1_1_1_90894e9e");
         assert!(fl2va.join("manifest.yaml").is_file());
         assert!(ref2va.join("recipe.yaml").is_file());
         assert!(quality_t2v.join("workflow_api.json").is_file());
         assert!(quality_ref.join("recipe.yaml").is_file());
+        assert!(kera2.join("manifest.yaml").is_file());
+        assert!(kera2.join("recipe.yaml").is_file());
+        assert!(kera2.join("workflow_api.json").is_file());
         let sentinel = fl2va.join("sentinel.txt");
         std::fs::write(&sentinel, "keep").expect("sentinel");
         ensure_installed(directory.path()).expect("second install should be a no-op");
@@ -368,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_h3_packages_pass_the_same_contract_audit_as_user_packages() {
+    fn embedded_product_packages_pass_the_same_contract_audit_as_user_packages() {
         for package in PACKAGES {
             let manifest = WorkflowManifest::parse(package.manifest).expect("manifest parses");
             manifest.validate().expect("manifest validates");
@@ -386,8 +399,47 @@ mod tests {
     fn product_package_identity_marks_kera2_builtin_without_workflow_id_logic() {
         assert!(is_builtin_package_name("kera2_t2i_local_v2"));
         assert!(is_builtin_package_name("kera2_t2i_local_v2_1_1_0_1d99a10d"));
+        assert!(is_builtin_package_name("kera2_t2i_local_v2_1_1_1_90894e9e"));
         assert!(is_builtin_package_name("krea2_t2i_local"));
         assert!(!is_builtin_package_name("custom_kera2_copy"));
+        assert_eq!(
+            PACKAGES
+                .iter()
+                .filter(|package| package.directory == "kera2_t2i_local_v2_1_1_1_90894e9e")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn embedded_kera2_package_has_canonical_scope_and_clean_runtime_defaults() {
+        let package = PACKAGES
+            .iter()
+            .find(|package| package.directory == "kera2_t2i_local_v2_1_1_1_90894e9e")
+            .expect("embedded Kera2 image package");
+        let manifest = WorkflowManifest::parse(package.manifest).expect("manifest parses");
+        assert_eq!(manifest.id, "wfl_kera2_t2i_local_v2");
+        assert_eq!(manifest.workflow_version, "1.1.1");
+        assert_eq!(manifest.recipe_version, "1.1.1");
+        let recipe = RecipeParser::parse(package.recipe).expect("recipe parses");
+        RecipeValidator::validate(&recipe).expect("recipe validates");
+        assert_eq!(recipe.bindings.len(), 5);
+        assert_eq!(recipe.outputs.len(), 1);
+        assert!(package.recipe.contains("rcp_kera2_t2i_local_v2_1_1_1"));
+
+        let workflow_value: serde_json::Value =
+            serde_json::from_str(package.workflow).expect("workflow JSON parses");
+        let workflow = WorkflowDocument::parse(workflow_value).expect("API workflow parses");
+        WorkflowValidator::validate(&workflow).expect("workflow validates");
+        BindingValidator::validate(&recipe, &workflow).expect("recipe bindings validate");
+        let value = workflow.value();
+        assert_eq!(value["11"]["class_type"], "SaveImage");
+        assert_eq!(value["11"]["inputs"]["filename_prefix"], "Kera2");
+        assert_eq!(value["13"]["inputs"]["text"], "");
+        assert!(!package.workflow.contains("20260806104502"));
+        assert!(!package.workflow.contains("一个美女在跳舞"));
+        assert!(!package.workflow.contains("C:\\Users\\ADMIN"));
+        assert!(!package.workflow.contains("D:\\"));
     }
 
     #[test]

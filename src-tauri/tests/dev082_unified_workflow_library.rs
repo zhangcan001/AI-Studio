@@ -476,6 +476,9 @@ mod lifecycle_e2e {
             PromptSubmission, RepositoryError, WorkflowLibrarySource, WorkflowPackageStore,
             WorkflowRunRepository, WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
         },
+        product_runtime_scope::{
+            production_runtime_for_stage, ProductionRuntimeKind, KERA2_WORKFLOW_ID,
+        },
         project_workflow_binding_service::{
             ProjectWorkflowBindingInput, ProjectWorkflowBindingService,
             ProjectWorkflowConfigUpdateRequest,
@@ -484,6 +487,7 @@ mod lifecycle_e2e {
         workflow_lifecycle_service::WorkflowLifecycleService,
         workflow_onboarding_service::{CapabilityState, WorkflowOnboardingService},
     };
+    use ai_studio_lib::domain::ShotStage;
     use ai_studio_lib::infrastructure::{
         database::{
             initialize, SqliteGenerationDefinitionRepository, SqliteProjectRepository,
@@ -507,6 +511,7 @@ mod lifecycle_e2e {
     use tempfile::{tempdir, TempDir};
 
     const PRODUCT_PACKAGE_NAME: &str = "aitudou_minimax_h3_lightx2v_8step_fast_1_0_0";
+    const KERA2_PACKAGE_NAME: &str = "kera2_t2i_local_v2_1_1_1_90894e9e";
     const USER_RACE_PACKAGE_NAME: &str = "dev082_user_race";
     const USER_RACE_WORKFLOW_ID: &str = "wfl_dev082_user_race";
     const USER_RACE_RECIPE_ID: &str = "rcp_dev082_user_race";
@@ -777,6 +782,15 @@ mod lifecycle_e2e {
             capability: CapabilityFixture,
             binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
         ) -> Services {
+            self.services_for_package(PRODUCT_PACKAGE_NAME, capability, binding_repository)
+        }
+
+        fn services_for_package(
+            &self,
+            package_name: &str,
+            capability: CapabilityFixture,
+            binding_repository: Option<Arc<dyn ProjectWorkflowBindingRepository>>,
+        ) -> Services {
             let clock: Arc<dyn Clock> = Arc::new(FixedClock);
             let source: Arc<dyn WorkflowLibrarySource> = Arc::new(
                 FileSystemWorkflowLibrarySource::new(self.library_root.clone()),
@@ -797,7 +811,7 @@ mod lifecycle_e2e {
             let product_workflow: Value = serde_json::from_str(
                 &fs::read_to_string(
                     self.library_root
-                        .join(PRODUCT_PACKAGE_NAME)
+                        .join(package_name)
                         .join("workflow_api.json"),
                 )
                 .expect("product workflow should be readable"),
@@ -1215,6 +1229,141 @@ mod lifecycle_e2e {
         restore_product(&services, &workflow, true, CapabilityState::Ready).await;
         assert!(available(&services, &workflow).await);
         assert!(catalog_contains(&services, &workflow).await);
+    }
+
+    #[tokio::test]
+    async fn fresh_install_registers_supported_kera2_runtime_package_and_image_preflight() {
+        let environment = TestEnvironment::new().await;
+        let kera2_package = environment.library_root.join(KERA2_PACKAGE_NAME);
+        assert!(
+            kera2_package.join("manifest.yaml").is_file(),
+            "fresh install should seed the Kera2 runtime package"
+        );
+        assert!(kera2_package.join("recipe.yaml").is_file());
+        assert!(kera2_package.join("workflow_api.json").is_file());
+
+        let services =
+            environment.services_for_package(KERA2_PACKAGE_NAME, CapabilityFixture::Ready, None);
+        let first_sync = services
+            .library_service
+            .sync()
+            .await
+            .expect("fresh runtime package discovery should sync");
+        assert_eq!(first_sync.packages_found, 9);
+        assert_eq!(first_sync.invalid, 0, "{:?}", first_sync.errors);
+
+        let versions = services
+            .runtime_repository
+            .list_versions()
+            .await
+            .expect("fresh runtime versions should be readable");
+        let kera2_versions = versions
+            .iter()
+            .filter(|version| version.workflow_id == KERA2_WORKFLOW_ID)
+            .collect::<Vec<_>>();
+        assert_eq!(kera2_versions.len(), 1);
+        let kera2 = kera2_versions[0];
+        assert_eq!(kera2.workflow_version, "1.1.1");
+        assert_eq!(kera2.package_name.as_deref(), Some(KERA2_PACKAGE_NAME));
+        assert_eq!(kera2.recipes.len(), 1);
+        assert_eq!(kera2.recipes[0].version, "1.1.1");
+        assert_eq!(
+            production_runtime_for_stage(ShotStage::Image, KERA2_WORKFLOW_ID),
+            Some(ProductionRuntimeKind::Kera2Image)
+        );
+
+        let definitions = services
+            .generation_repository
+            .list_available()
+            .await
+            .expect("fresh generation catalog should be readable");
+        assert!(definitions.iter().any(|definition| {
+            definition.workflow_id == KERA2_WORKFLOW_ID
+                && definition.workflow_version_id == kera2.workflow_version_id
+                && definition.recipe_version == "1.1.1"
+                && definition.recipe_id == kera2.recipes[0].recipe_id
+        }));
+
+        let project_id = "dev082-kera2-fresh-project";
+        ensure_project(&services, project_id).await;
+        services
+            .binding_service
+            .replace(
+                project_id,
+                ProjectWorkflowConfigUpdateRequest {
+                    bindings: vec![ProjectWorkflowBindingInput {
+                        stage: "IMAGE".to_owned(),
+                        mode: "DEFAULT".to_owned(),
+                        workflow_version_id: kera2.workflow_version_id.clone(),
+                        recipe_id: kera2.recipes[0].recipe_id.clone(),
+                    }],
+                },
+            )
+            .await
+            .expect("fresh project should bind the supported Kera2 image runtime");
+        let project_config = services
+            .binding_service
+            .get(project_id)
+            .await
+            .expect("fresh project image binding should resolve");
+        let image_binding = project_config
+            .image_default
+            .expect("fresh project should have a default image runtime");
+        assert!(image_binding.available);
+        assert_eq!(image_binding.workflow_version_id, kera2.workflow_version_id);
+        assert_eq!(image_binding.recipe_id, kera2.recipes[0].recipe_id);
+
+        let workspace = services
+            .lifecycle
+            .refresh_workspace()
+            .await
+            .expect("real application package preflight should complete");
+        let kera2_preflight = workspace
+            .items
+            .iter()
+            .find(|item| {
+                item.workflow_id.as_deref() == Some(KERA2_WORKFLOW_ID)
+                    && item.workflow_version.as_deref() == Some("1.1.1")
+            })
+            .expect("Kera2 package should be visible to application preflight");
+        assert_eq!(kera2_preflight.package_status, "VALID");
+        assert_eq!(kera2_preflight.capability, "READY");
+        assert_eq!(kera2_preflight.readiness, "DEGRADED");
+        assert!(kera2_preflight
+            .readiness_reasons
+            .iter()
+            .any(|reason| reason.contains("尚未完成真实生成验证")));
+        assert_eq!(kera2_preflight.recipes.len(), 1);
+        assert_eq!(kera2_preflight.recipes[0].version, "1.1.1");
+
+        builtin_runtime_packages::ensure_installed(&environment.library_root)
+            .expect("second fresh install should be idempotent");
+        let second_sync = services
+            .library_service
+            .sync()
+            .await
+            .expect("second runtime package sync should complete");
+        assert_eq!(second_sync.packages_found, 9);
+        assert_eq!(second_sync.invalid, 0, "{:?}", second_sync.errors);
+        let repeated_versions = services
+            .runtime_repository
+            .list_versions()
+            .await
+            .expect("repeated versions should be readable");
+        assert_eq!(
+            repeated_versions
+                .iter()
+                .filter(|version| version.workflow_id == KERA2_WORKFLOW_ID)
+                .count(),
+            1
+        );
+        assert_eq!(
+            repeated_versions
+                .iter()
+                .find(|version| version.workflow_id == KERA2_WORKFLOW_ID)
+                .map(|version| version.recipes.len()),
+            Some(1)
+        );
     }
 
     #[tokio::test]
