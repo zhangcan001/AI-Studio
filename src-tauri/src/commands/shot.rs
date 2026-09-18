@@ -3,11 +3,11 @@ use crate::{
     app_state::AppState,
     application::{
         generation_input_preparer::GenerationInputValue,
+        production_queue_service::{CreateDirectGenerationRequest, CreateProductionBatchItem},
         shot_service::{
             ShotGenerationRequest, ShotServiceError, ShotStageConfigRequest, ShotUpdateRequest,
             ShotView,
         },
-        task_query_service::TaskView,
     },
     domain::ShotStage,
     error::AppError,
@@ -73,8 +73,9 @@ pub struct ShotGenerateRequestDto {
     pub stage: String,
     #[serde(default)]
     pub values: BTreeMap<String, super::generation::InputValueDto>,
-    pub production_batch_item_id: Option<String>,
     pub retry_task_id: Option<String>,
+    #[serde(default)]
+    pub submission_idempotency_key: Option<String>,
 }
 
 #[tauri::command]
@@ -224,7 +225,7 @@ pub async fn shot_result_select(
 pub async fn shot_generate(
     state: State<'_, AppState>,
     request: ShotGenerateRequestDto,
-) -> Result<TaskView, AppError> {
+) -> Result<super::production_queue::ProductionBatchDetailView, AppError> {
     let stage = parse_stage(&request.stage)?;
     let values = into_values(request.values)?;
     let _admission = state
@@ -232,18 +233,41 @@ pub async fn shot_generate(
         .acquire_interactive_admission()
         .await
         .map_err(super::production_queue::map_queue_error)?;
-    state
+    let prepared = state
         .shot_service
-        .generate(ShotGenerationRequest {
+        .prepare_generation_submission(ShotGenerationRequest {
             project_id: request.project_id,
             shot_id: request.shot_id,
             stage,
             values,
-            production_batch_item_id: request.production_batch_item_id,
             retry_task_id: request.retry_task_id,
+            submission_idempotency_key: request.submission_idempotency_key,
         })
         .await
-        .map_err(map_shot_error)
+        .map_err(map_shot_error)?;
+    state
+        .production_queue_service
+        .create_direct_generation(CreateDirectGenerationRequest {
+            project_id: prepared.project_id,
+            name: "Shot generation".to_owned(),
+            continue_on_failure: true,
+            item: CreateProductionBatchItem {
+                workflow_version_id: prepared.workflow_version_id,
+                recipe_id: prepared.recipe_id,
+                values: prepared.values,
+            },
+            shot_id: Some(prepared.shot_id),
+            stage: Some(prepared.stage.as_str().to_owned()),
+            prompt_version_id: None,
+            model_version_id: None,
+            tool_instance_id: None,
+            tool_version_id: None,
+            submission_idempotency_key: prepared.submission_idempotency_key,
+            parent_task_id: prepared.parent_task_id,
+        })
+        .await
+        .map(Into::into)
+        .map_err(super::production_queue::map_queue_error)
 }
 
 fn parse_stage(value: &str) -> Result<ShotStage, AppError> {
@@ -269,7 +293,6 @@ fn map_shot_error(error: ShotServiceError) -> AppError {
         ShotServiceError::InvalidInput(message) => AppError::invalid_input(message),
         ShotServiceError::NotFound(id) => AppError::database(format!("shot {id} was not found")),
         ShotServiceError::Repository(error) => map_repository_error(&error),
-        ShotServiceError::Generation(error) => super::generation::map_generation_error(error),
         ShotServiceError::TaskView(message) => AppError::internal(message),
     }
 }

@@ -3,18 +3,25 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GenerationValues, RecipeViewModel } from "../../../types/generation";
+import type { ProductionBatchDetail } from "../../../types/productionQueue";
 import type { TaskView } from "../../../types/task";
 import { useTaskStore } from "../../../stores/taskStore";
 import { useGenerationSubmissionController } from "./useGenerationSubmissionController";
 
 const mocks = vi.hoisted(() => ({
-  createGeneration: vi.fn(),
+  submitGeneration: vi.fn(),
+  startProductionQueue: vi.fn(),
   cancelTask: vi.fn(),
 }));
 
 vi.mock("../../../services/tauriClient", async () => {
   const actual = await vi.importActual<typeof import("../../../services/tauriClient")>("../../../services/tauriClient");
-  return { ...actual, createGeneration: mocks.createGeneration, cancelTask: mocks.cancelTask };
+  return {
+    ...actual,
+    submitGeneration: mocks.submitGeneration,
+    startProductionQueue: mocks.startProductionQueue,
+    cancelTask: mocks.cancelTask,
+  };
 });
 
 const workflow: RecipeViewModel = {
@@ -38,6 +45,24 @@ const task = (id = "task-a"): TaskView => ({
   progress: { mode: "indeterminate" },
   createdAt: "2026-09-10T00:00:00Z",
   outputAssetIds: [],
+});
+
+const batch = (id = "batch-a"): ProductionBatchDetail => ({
+  id,
+  projectId: "project-a",
+  name: "Generation",
+  status: "READY",
+  continueOnFailure: true,
+  createdAt: "2026-09-10T00:00:00Z",
+  updatedAt: "2026-09-10T00:00:00Z",
+  total: 1,
+  pending: 1,
+  running: 0,
+  succeeded: 0,
+  failed: 0,
+  cancelled: 0,
+  skipped: 0,
+  items: [{ id: "item-a", ordinal: 0, workflowVersionId: "workflow-version-a", recipeId: "recipe-a", status: "PENDING" }],
 });
 
 function deferred<T>() {
@@ -69,7 +94,8 @@ function options(overrides: Partial<Parameters<typeof useGenerationSubmissionCon
 describe("useGenerationSubmissionController", () => {
   beforeEach(() => {
     useTaskStore.getState().clear();
-    mocks.createGeneration.mockReset();
+    mocks.submitGeneration.mockReset();
+    mocks.startProductionQueue.mockReset();
     mocks.cancelTask.mockReset();
   });
 
@@ -81,7 +107,7 @@ describe("useGenerationSubmissionController", () => {
   it("does not create without a selected workflow", async () => {
     const { result } = renderHook(() => useGenerationSubmissionController(options({ selectedWorkflow: undefined })));
     await act(async () => { await result.current.generate(); });
-    expect(mocks.createGeneration).not.toHaveBeenCalled();
+    expect(mocks.submitGeneration).not.toHaveBeenCalled();
   });
 
   it("blocks KREA/config errors before validation or creation", async () => {
@@ -95,7 +121,7 @@ describe("useGenerationSubmissionController", () => {
     await act(async () => { await result.current.generate(); });
     expect(onNotice).toHaveBeenCalledWith("KREA 配置错误");
     expect(onValidationErrors).not.toHaveBeenCalled();
-    expect(mocks.createGeneration).not.toHaveBeenCalled();
+    expect(mocks.submitGeneration).not.toHaveBeenCalled();
   });
 
   it("writes validation errors and does not create", async () => {
@@ -106,7 +132,7 @@ describe("useGenerationSubmissionController", () => {
     })));
     await act(async () => { await result.current.generate(); });
     expect(onValidationErrors).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.any(String) }));
-    expect(mocks.createGeneration).not.toHaveBeenCalled();
+    expect(mocks.submitGeneration).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -120,40 +146,41 @@ describe("useGenerationSubmissionController", () => {
     const { result } = renderHook(() => useGenerationSubmissionController(options({ ...override, onNotice })));
     await act(async () => { await result.current.generate(); });
     expect(onNotice).toHaveBeenCalledWith(expect.any(String));
-    expect(mocks.createGeneration).not.toHaveBeenCalled();
+    expect(mocks.submitGeneration).not.toHaveBeenCalled();
   });
 
-  it("submits exact runtime identity and adopts the returned task", async () => {
-    mocks.createGeneration.mockResolvedValue(task());
+  it("submits exact runtime identity and starts the persisted queue without adopting a Task", async () => {
+    mocks.submitGeneration.mockResolvedValue(batch());
     const onNotice = vi.fn();
     const { result } = renderHook(() => useGenerationSubmissionController(options({ onNotice })));
     await act(async () => { await result.current.generate(); });
-    expect(mocks.createGeneration).toHaveBeenCalledWith({
+    expect(mocks.submitGeneration).toHaveBeenCalledWith({
       projectId: "project-a",
       workflowVersionId: "workflow-version-a",
       recipeId: "recipe-a",
       values,
       submissionIdempotencyKey: expect.any(String),
     });
-    expect(useTaskStore.getState().currentTask).toEqual(task());
+    expect(mocks.startProductionQueue).toHaveBeenCalledWith("project-a", "batch-a");
+    expect(useTaskStore.getState().currentTask).toBeUndefined();
     expect(result.current.creating).toBe(false);
-    expect(onNotice).toHaveBeenLastCalledWith(null);
+    expect(onNotice).toHaveBeenLastCalledWith("已加入生产队列并开始处理。");
   });
 
   it("forwards an explicitly selected model version without inferring one", async () => {
-    mocks.createGeneration.mockResolvedValue(task());
+    mocks.submitGeneration.mockResolvedValue(batch());
     const { result } = renderHook(() => useGenerationSubmissionController(options({ modelVersionId: "model-version-a" })));
 
     await act(async () => { await result.current.generate(); });
 
-    expect(mocks.createGeneration).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.submitGeneration).toHaveBeenCalledWith(expect.objectContaining({
       modelVersionId: "model-version-a",
     }));
   });
 
-  it("keeps creating true during a request and reuses one key for concurrent submissions", async () => {
-    const pending = deferred<TaskView>();
-    mocks.createGeneration.mockReturnValue(pending.promise);
+  it("keeps creating true during a request and single-flights concurrent submissions", async () => {
+    const pending = deferred<ProductionBatchDetail>();
+    mocks.submitGeneration.mockReturnValue(pending.promise);
     const { result } = renderHook(() => useGenerationSubmissionController(options()));
     let first!: Promise<void>;
     let second!: Promise<void>;
@@ -162,26 +189,50 @@ describe("useGenerationSubmissionController", () => {
       second = result.current.generate();
     });
     await waitFor(() => expect(result.current.creating).toBe(true));
-    expect(mocks.createGeneration).toHaveBeenCalledTimes(2);
-    expect(mocks.createGeneration.mock.calls[0][0].submissionIdempotencyKey)
-      .toBe(mocks.createGeneration.mock.calls[1][0].submissionIdempotencyKey);
-    pending.resolve(task());
+    expect(mocks.submitGeneration).toHaveBeenCalledTimes(1);
+    pending.resolve(batch());
     await act(async () => { await Promise.all([first, second]); });
     expect(result.current.creating).toBe(false);
   });
 
   it("uses a new idempotency key for a later independent submission", async () => {
-    mocks.createGeneration.mockResolvedValue(task());
+    mocks.submitGeneration.mockResolvedValue(batch());
     const { result } = renderHook(() => useGenerationSubmissionController(options()));
     await act(async () => { await result.current.generate(); });
     await act(async () => { await result.current.generate(); });
-    const firstKey = mocks.createGeneration.mock.calls[0][0].submissionIdempotencyKey;
-    const secondKey = mocks.createGeneration.mock.calls[1][0].submissionIdempotencyKey;
+    const firstKey = mocks.submitGeneration.mock.calls[0][0].submissionIdempotencyKey;
+    const secondKey = mocks.submitGeneration.mock.calls[1][0].submissionIdempotencyKey;
     expect(secondKey).not.toBe(firstKey);
   });
 
-  it("surfaces create failures and clears creating", async () => {
-    mocks.createGeneration.mockRejectedValue(new Error("create failed"));
+  it("persists the queue item before official Queue Start and never adopts the submission as a Task", async () => {
+    const order: string[] = [];
+    mocks.submitGeneration.mockImplementation(async () => {
+      order.push("enqueue");
+      return batch();
+    });
+    mocks.startProductionQueue.mockImplementation(async () => {
+      order.push("start");
+      return batch();
+    });
+    const { result } = renderHook(() => useGenerationSubmissionController(options()));
+
+    await act(async () => { await result.current.generate(); });
+
+    expect(order).toEqual(["enqueue", "start"]);
+    expect(mocks.submitGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-a",
+      workflowVersionId: "workflow-version-a",
+      recipeId: "recipe-a",
+      values,
+      submissionIdempotencyKey: expect.any(String),
+    }));
+    expect(mocks.startProductionQueue).toHaveBeenCalledWith("project-a", "batch-a");
+    expect(useTaskStore.getState().currentTask).toBeUndefined();
+  });
+
+  it("surfaces submission failures and clears creating", async () => {
+    mocks.submitGeneration.mockRejectedValue(new Error("create failed"));
     const onNotice = vi.fn();
     const { result } = renderHook(() => useGenerationSubmissionController(options({ onNotice })));
     await act(async () => { await result.current.generate(); });

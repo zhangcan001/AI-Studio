@@ -17,7 +17,6 @@ import type {
   ShotProductionPlanSummary,
 } from "../../types/productionPreparation";
 import type { ShotInputValues, ShotStage, ShotStageConfig, ShotView } from "../../types/shot";
-import type { TaskView } from "../../types/task";
 import { ShotWorkspace } from "./ShotWorkspace";
 
 const tauriMocks = vi.hoisted(() => ({
@@ -37,7 +36,7 @@ const tauriMocks = vi.hoisted(() => ({
   getProductionAdmissionStatus: vi.fn(),
   bulkSetShotStageConfig: vi.fn(),
   setShotStageConfig: vi.fn(),
-  generateShot: vi.fn(),
+  submitShotGeneration: vi.fn(),
   planShotBatch: vi.fn(),
   createShotBatch: vi.fn(),
   startProductionQueue: vi.fn(),
@@ -252,19 +251,12 @@ class FakeSqliteProductionAdapter {
     return { projectId: request.projectId, stage: request.stage, configuredShotIds: request.shotIds, promptUpdatedShotIds: [] };
   }
 
-  async generateShot(request: { projectId: string; shotId: string; stage: ShotStage; values?: ShotInputValues }): Promise<TaskView> {
+  async submitShotGeneration(request: { projectId: string; shotId: string; stage: ShotStage; values?: ShotInputValues }): Promise<ProductionBatchDetail> {
     const current = this.shots.get(request.shotId);
     const config = current?.stageConfigs.find((item) => item.stage === request.stage);
     if (!config) throw new Error("stage config missing");
-    this.events.push(`generate:${request.stage}:${config.workflowVersionId}:${config.recipeId}`);
-    return {
-      id: "task-dev080",
-      projectId: request.projectId,
-      status: "QUEUED",
-      progress: { mode: "indeterminate" },
-      createdAt: TIMESTAMP,
-      outputAssetIds: [],
-    };
+    this.events.push(`enqueue:${request.stage}:${config.workflowVersionId}:${config.recipeId}`);
+    return this.createShotBatch({ projectId: request.projectId, stage: request.stage, shotIds: [request.shotId] });
   }
 
   async planShotBatch(projectId: string, stage: ShotStage) {
@@ -474,7 +466,7 @@ function installAdapter(adapter: FakeSqliteProductionAdapter): void {
   tauriMocks.getShot.mockImplementation((projectId: string, shotId: string) => adapter.getShot(projectId, shotId));
   tauriMocks.bulkSetShotStageConfig.mockImplementation((request) => adapter.bulkSetShotStageConfig(request));
   tauriMocks.setShotStageConfig.mockImplementation((request) => adapter.setShotStageConfig(request));
-  tauriMocks.generateShot.mockImplementation((request) => adapter.generateShot(request));
+  tauriMocks.submitShotGeneration.mockImplementation((request) => adapter.submitShotGeneration(request));
   tauriMocks.planShotBatch.mockImplementation((projectId: string, stage: ShotStage) => adapter.planShotBatch(projectId, stage));
   tauriMocks.createShotBatch.mockImplementation((request) => adapter.createShotBatch(request));
   tauriMocks.startProductionQueue.mockImplementation((projectId: string, batchId: string) => adapter.startProductionQueue(projectId, batchId));
@@ -585,7 +577,7 @@ describe("DEV-080 formal project workflow production UAT", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
 
-  it("persists a manual Shot workflow before direct generation", async () => {
+  it("persists a manual Shot workflow, then enqueues and uses official Queue Start", async () => {
     const adapter = new FakeSqliteProductionAdapter(
       projectConfig(binding(CUSTOM_IMAGE_A)),
       [shot([stageConfig("image", CUSTOM_IMAGE_A)])],
@@ -597,9 +589,17 @@ describe("DEV-080 formal project workflow production UAT", () => {
     await user.selectOptions(select, CUSTOM_IMAGE_B.recipeId);
     await user.click(screen.getByRole("button", { name: "生成" }));
 
-    await waitFor(() => expect(adapter.events.slice(-2)).toEqual([
+    await waitFor(() => expect(adapter.events.slice(-3)).toEqual([
       `set:image:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
-      `generate:image:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
+      `enqueue:image:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
+      `execute:${CUSTOM_IMAGE_B.workflowVersionId}:${CUSTOM_IMAGE_B.recipeId}`,
     ]));
+    expect(tauriMocks.submitShotGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      shotId: SHOT_ID,
+      stage: "image",
+      values: expect.any(Object),
+    }));
+    expect(tauriMocks.startProductionQueue).toHaveBeenCalledWith(PROJECT_ID, "pbt-dev080");
   });
 });

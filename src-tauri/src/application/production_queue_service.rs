@@ -62,11 +62,35 @@ pub struct CreateDirectGenerationRequest {
     pub model_version_id: Option<String>,
     pub tool_instance_id: Option<String>,
     pub tool_version_id: Option<String>,
+    pub submission_idempotency_key: Option<String>,
+    pub parent_task_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateDirectGenerationBatchItem {
+    pub item: CreateProductionBatchItem,
+    pub shot_id: Option<String>,
+    pub stage: Option<String>,
+    pub prompt_version_id: Option<String>,
+    pub model_version_id: Option<String>,
+    pub tool_instance_id: Option<String>,
+    pub tool_version_id: Option<String>,
+    pub submission_idempotency_key: Option<String>,
+    pub parent_task_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateDirectGenerationBatchRequest {
+    pub project_id: String,
+    pub name: String,
+    pub continue_on_failure: bool,
+    pub items: Vec<CreateDirectGenerationBatchItem>,
 }
 
 const DIRECT_GENERATION_CONTEXT_KEY: &str = "__ai_studio_direct_generation_context";
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 #[serde(rename_all = "camelCase")]
 struct DirectGenerationContext {
     shot_id: Option<String>,
@@ -75,6 +99,8 @@ struct DirectGenerationContext {
     model_version_id: Option<String>,
     tool_instance_id: Option<String>,
     tool_version_id: Option<String>,
+    submission_idempotency_key: Option<String>,
+    parent_task_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -224,46 +250,156 @@ impl ProductionQueueService {
         &self,
         request: CreateDirectGenerationRequest,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
-        let context = DirectGenerationContext {
-            shot_id: normalize_direct_context_id(request.shot_id, "shot id")?,
-            stage: normalize_direct_context_stage(request.stage)?,
-            prompt_version_id: normalize_direct_context_id(
-                request.prompt_version_id,
-                "prompt version id",
-            )?,
-            model_version_id: normalize_direct_context_id(
-                request.model_version_id,
-                "model version id",
-            )?,
-            tool_instance_id: normalize_direct_context_id(
-                request.tool_instance_id,
-                "tool instance id",
-            )?,
-            tool_version_id: normalize_direct_context_id(
-                request.tool_version_id,
-                "tool version id",
-            )?,
-        };
-        if context.shot_id.is_some() != context.stage.is_some() {
+        let CreateDirectGenerationRequest {
+            project_id,
+            name,
+            continue_on_failure,
+            item,
+            shot_id,
+            stage,
+            prompt_version_id,
+            model_version_id,
+            tool_instance_id,
+            tool_version_id,
+            submission_idempotency_key,
+            parent_task_id,
+        } = request;
+        self.create_direct_generation_batch(CreateDirectGenerationBatchRequest {
+            project_id,
+            name,
+            continue_on_failure,
+            items: vec![CreateDirectGenerationBatchItem {
+                item,
+                shot_id,
+                stage,
+                prompt_version_id,
+                model_version_id,
+                tool_instance_id,
+                tool_version_id,
+                submission_idempotency_key,
+                parent_task_id,
+            }],
+        })
+        .await
+    }
+
+    pub async fn create_direct_generation_batch(
+        &self,
+        request: CreateDirectGenerationBatchRequest,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        crate::domain::validate_project_id(&request.project_id)
+            .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+        if request.items.is_empty() || request.items.len() > MAX_PRODUCTION_BATCH_ITEMS {
+            return Err(ProductionQueueError::InvalidInput(format!(
+                "production batch must contain 1..{MAX_PRODUCTION_BATCH_ITEMS} items"
+            )));
+        }
+        let mut queue_items = Vec::with_capacity(request.items.len());
+        let mut contexts = Vec::with_capacity(request.items.len());
+        for direct_item in request.items {
+            let context = DirectGenerationContext {
+                shot_id: normalize_direct_context_id(direct_item.shot_id, "shot id")?,
+                stage: normalize_direct_context_stage(direct_item.stage)?,
+                prompt_version_id: normalize_direct_context_id(
+                    direct_item.prompt_version_id,
+                    "prompt version id",
+                )?,
+                model_version_id: normalize_direct_context_id(
+                    direct_item.model_version_id,
+                    "model version id",
+                )?,
+                tool_instance_id: normalize_direct_context_id(
+                    direct_item.tool_instance_id,
+                    "tool instance id",
+                )?,
+                tool_version_id: normalize_direct_context_id(
+                    direct_item.tool_version_id,
+                    "tool version id",
+                )?,
+                submission_idempotency_key: normalize_direct_context_id(
+                    direct_item.submission_idempotency_key,
+                    "submission idempotency key",
+                )?,
+                parent_task_id: normalize_direct_context_id(
+                    direct_item.parent_task_id,
+                    "parent task id",
+                )?,
+            };
+            if context.shot_id.is_some() != context.stage.is_some() {
+                return Err(ProductionQueueError::InvalidInput(
+                    "direct generation Shot targets require an explicit image or video stage"
+                        .to_owned(),
+                ));
+            }
+            if context.tool_version_id.is_some() && context.tool_instance_id.is_none() {
+                return Err(ProductionQueueError::InvalidInput(
+                    "tool version id requires an explicit tool instance id".to_owned(),
+                ));
+            }
+            if let Some(parent_task_id) = context.parent_task_id.as_deref() {
+                let parent_id = TaskId::parse(parent_task_id.to_owned())
+                    .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
+                let parent = self
+                    .task_repository
+                    .find_by_id(&parent_id)
+                    .await?
+                    .ok_or_else(|| {
+                        ProductionQueueError::InvalidInput(format!(
+                            "retry parent task {parent_task_id} was not found"
+                        ))
+                    })?;
+                if parent.project_id != request.project_id || parent.status != TaskStatus::Failed {
+                    return Err(ProductionQueueError::InvalidInput(
+                        "retry parent task must be a failed Task in the same project".to_owned(),
+                    ));
+                }
+            }
+            queue_items.push(direct_item.item);
+            contexts.push(context);
+        }
+        let mut idempotency_keys = HashSet::new();
+        if contexts
+            .iter()
+            .filter_map(|context| context.submission_idempotency_key.as_deref())
+            .any(|key| !idempotency_keys.insert(key))
+        {
             return Err(ProductionQueueError::InvalidInput(
-                "direct generation Shot targets require an explicit image or video stage"
-                    .to_owned(),
+                "direct generation batch contains duplicate submission idempotency keys".to_owned(),
             ));
         }
-        if context.tool_version_id.is_some() && context.tool_instance_id.is_none() {
-            return Err(ProductionQueueError::InvalidInput(
-                "tool version id requires an explicit tool instance id".to_owned(),
-            ));
+        if let [context] = contexts.as_slice() {
+            if let Some(key) = context.submission_idempotency_key.as_deref() {
+                for batch in self.repository.list(&request.project_id).await? {
+                    let Some(detail) = self
+                        .repository
+                        .find_detail(&request.project_id, &batch.id)
+                        .await?
+                    else {
+                        continue;
+                    };
+                    let already_submitted = detail.items.iter().any(|item| {
+                        direct_generation_context_from_json(&item.values_json)
+                            .ok()
+                            .flatten()
+                            .and_then(|context| context.submission_idempotency_key)
+                            .as_deref()
+                            == Some(key)
+                    });
+                    if already_submitted {
+                        return Ok(detail);
+                    }
+                }
+            }
         }
         self.create_internal(
             CreateProductionBatchRequest {
                 project_id: request.project_id,
                 name: request.name,
                 continue_on_failure: request.continue_on_failure,
-                items: vec![request.item],
+                items: queue_items,
             },
             None,
-            Some(context),
+            Some(contexts),
         )
         .await
     }
@@ -272,9 +408,9 @@ impl ProductionQueueService {
         &self,
         request: CreateProductionBatchRequest,
         provenance: Option<ProductionPackageProvenance>,
-        direct_context: Option<DirectGenerationContext>,
+        direct_contexts: Option<Vec<DirectGenerationContext>>,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
-        if provenance.is_some() && direct_context.is_some() {
+        if provenance.is_some() && direct_contexts.is_some() {
             return Err(ProductionQueueError::InvalidInput(
                 "production package provenance cannot be combined with direct generation context"
                     .to_owned(),
@@ -292,6 +428,14 @@ impl ProductionQueueService {
             return Err(ProductionQueueError::InvalidInput(format!(
                 "production batch must contain 1..{MAX_PRODUCTION_BATCH_ITEMS} items"
             )));
+        }
+        if direct_contexts
+            .as_ref()
+            .is_some_and(|contexts| contexts.len() != request.items.len())
+        {
+            return Err(ProductionQueueError::InvalidInput(
+                "direct generation context count must match queue item count".to_owned(),
+            ));
         }
 
         let now = self.clock.now();
@@ -333,8 +477,11 @@ impl ProductionQueueService {
             };
             let values = freeze_random_seed_values(item.values, &recipe)
                 .map_err(ProductionQueueError::InvalidInput)?;
-            let values_json = if direct_context.is_some() {
-                direct_context_values_json(&values, direct_context.as_ref().expect("context"))
+            let values_json = if let Some(context) = direct_contexts
+                .as_ref()
+                .and_then(|contexts| contexts.get(index))
+            {
+                direct_context_values_json(&values, context)
             } else {
                 generation_values_to_json(&values)
             };
@@ -379,25 +526,27 @@ impl ProductionQueueService {
             self.repository
                 .insert_with_provenance(&batch, &items, provenance)
                 .await?;
-        } else if let Some(context) = direct_context.as_ref() {
-            if let (Some(shot_id), Some(stage)) = (context.shot_id.as_ref(), context.stage.as_ref())
-            {
-                let stage = ShotStage::try_from_str(stage)
-                    .map_err(|error| ProductionQueueError::InvalidInput(error.to_string()))?;
-                let item = items.first().expect("direct generation item");
-                self.shot_batch_repository
-                    .insert_batch_with_bindings(
-                        &batch,
-                        &items,
-                        &[ShotBatchBinding {
-                            shot_id: shot_id.clone(),
-                            stage,
-                            production_batch_item_id: item.id.as_str().to_owned(),
-                        }],
-                    )
-                    .await?;
-            } else {
+        } else if let Some(contexts) = direct_contexts.as_ref() {
+            let mut bindings = Vec::new();
+            for (context, item) in contexts.iter().zip(&items) {
+                if let (Some(shot_id), Some(stage)) =
+                    (context.shot_id.as_ref(), context.stage.as_deref())
+                {
+                    bindings.push(ShotBatchBinding {
+                        shot_id: shot_id.clone(),
+                        stage: ShotStage::try_from_str(stage).map_err(|error| {
+                            ProductionQueueError::InvalidInput(error.to_string())
+                        })?,
+                        production_batch_item_id: item.id.as_str().to_owned(),
+                    });
+                }
+            }
+            if bindings.is_empty() {
                 self.repository.insert(&batch, &items).await?;
+            } else {
+                self.shot_batch_repository
+                    .insert_batch_with_bindings(&batch, &items, &bindings)
+                    .await?;
             }
         } else {
             self.repository.insert(&batch, &items).await?;
@@ -1474,8 +1623,24 @@ impl ProductionQueueService {
                         continue;
                     }
                 };
-                let (submission_attempt, parent_task_id) =
+                let (queue_attempt, queue_parent_task_id) =
                     self.retry_identity(&detail, next).await?;
+                let (direct_attempt, direct_parent_task_id) = self
+                    .direct_retry_identity(project_id, direct_context.as_ref())
+                    .await?;
+                let (submission_attempt, parent_task_id) = if queue_parent_task_id.is_some() {
+                    (queue_attempt, queue_parent_task_id)
+                } else {
+                    (direct_attempt, direct_parent_task_id)
+                };
+                let submission_idempotency_key = if next.retry_of_item_id.is_none() {
+                    direct_context
+                        .as_ref()
+                        .and_then(|context| context.submission_idempotency_key.clone())
+                        .unwrap_or_else(|| format!("production-item:{}", next.id.as_str()))
+                } else {
+                    format!("production-item:{}", next.id.as_str())
+                };
                 let item_id = next.id.as_str().to_owned();
                 let shot_batch_repository = Arc::clone(&self.shot_batch_repository);
                 let queue_repository = Arc::clone(&self.repository);
@@ -1501,10 +1666,7 @@ impl ProductionQueueService {
                                 .and_then(|context| context.tool_version_id.clone()),
                             values,
                             reference_manifest,
-                            submission_idempotency_key: Some(format!(
-                                "production-item:{}",
-                                next.id.as_str()
-                            )),
+                            submission_idempotency_key: Some(submission_idempotency_key),
                             submission_attempt,
                             parent_task_id,
                         },
@@ -1632,6 +1794,37 @@ impl ProductionQueueService {
             .ok_or_else(|| {
                 ProductionQueueError::InvalidState("submission attempt overflow".to_owned())
             })?;
+        Ok((Some(attempt), Some(parent_task_id.to_owned())))
+    }
+
+    async fn direct_retry_identity(
+        &self,
+        project_id: &str,
+        context: Option<&DirectGenerationContext>,
+    ) -> Result<(Option<u32>, Option<String>), ProductionQueueError> {
+        let Some(parent_task_id) = context.and_then(|context| context.parent_task_id.as_deref())
+        else {
+            return Ok((None, None));
+        };
+        let task_id = TaskId::parse(parent_task_id.to_owned())
+            .map_err(|error| ProductionQueueError::InvalidState(error.to_string()))?;
+        let task = self
+            .task_repository
+            .find_by_id(&task_id)
+            .await?
+            .ok_or_else(|| {
+                ProductionQueueError::InvalidState(format!(
+                    "retry parent task {parent_task_id} is missing"
+                ))
+            })?;
+        if task.project_id != project_id || task.status != TaskStatus::Failed {
+            return Err(ProductionQueueError::InvalidState(
+                "retry parent task must remain a failed Task in the same project".to_owned(),
+            ));
+        }
+        let attempt = task.submission_attempt.checked_add(1).ok_or_else(|| {
+            ProductionQueueError::InvalidState("submission attempt overflow".to_owned())
+        })?;
         Ok((Some(attempt), Some(parent_task_id.to_owned())))
     }
 }
@@ -2547,6 +2740,8 @@ mod tests {
             model_version_id: Some("model-version-1".to_owned()),
             tool_instance_id: Some("tool-instance-1".to_owned()),
             tool_version_id: Some("tool-version-1".to_owned()),
+            submission_idempotency_key: Some("submission-1".to_owned()),
+            parent_task_id: Some("task-parent".to_owned()),
         };
         let encoded = direct_context_values_json(&values, &context);
 

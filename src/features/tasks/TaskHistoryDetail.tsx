@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
-import { createGeneration, getReusableDraft, listGenerationAssetVersionLinks, listGenerationToolUsages } from "../../services/tauriClient";
-import { useTaskStore } from "../../stores/taskStore";
+import { useEffect, useRef, useState } from "react";
+import { getReusableDraft, listGenerationAssetVersionLinks, listGenerationToolUsages, startProductionQueue, submitGeneration } from "../../services/tauriClient";
 import type { DraftValue } from "../../types/generation";
 import type {
   ReusableGenerationDraft,
@@ -43,7 +42,9 @@ export function TaskHistoryDetail({
   const [draftError, setDraftError] = useState<string>();
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string>();
-  const [retryCreatedTaskId, setRetryCreatedTaskId] = useState<string>();
+  const [retryQueueId, setRetryQueueId] = useState<string>();
+  const [retryStarted, setRetryStarted] = useState(false);
+  const retrySubmissionIdRef = useRef<string | undefined>(undefined);
   const [toolUsages, setToolUsages] = useState<GenerationToolUsageView[]>([]);
   const [assetVersionLinks, setAssetVersionLinks] = useState<GenerationAssetVersionView[]>([]);
   const [provenanceLoading, setProvenanceLoading] = useState(true);
@@ -98,21 +99,34 @@ export function TaskHistoryDetail({
   }, [detail.id, projectId]);
 
   async function retryOnce() {
-    if (!retryDecision.allowed || !draft || retryCreatedTaskId || !productionPolicy.canRetryTask) return;
+    if (!retryDecision.allowed || !draft || retryStarted || !productionPolicy.canRetryTask) return;
     setRetrying(true);
     setRetryError(undefined);
     try {
-      const task = await createGeneration({
-        projectId,
-        workflowVersionId: draft.workflowVersionId,
-        recipeId: draft.recipeId,
-        values: draft.values,
-        ...(draft.modelVersionId ? { modelVersionId: draft.modelVersionId } : {}),
-        ...(draft.promptVersionId ? { promptVersionId: draft.promptVersionId } : {}),
-        submissionIdempotencyKey: taskRetrySubmissionKey(detail.id),
-      });
-      useTaskStore.getState().adoptCreatedTask(task);
-      setRetryCreatedTaskId(task.id);
+      let batchId = retryQueueId;
+      if (!batchId) {
+        const batch = await submitGeneration({
+          projectId,
+          workflowVersionId: draft.workflowVersionId,
+          recipeId: draft.recipeId,
+          values: draft.values,
+          ...(draft.modelVersionId ? { modelVersionId: draft.modelVersionId } : {}),
+          ...(draft.promptVersionId ? { promptVersionId: draft.promptVersionId } : {}),
+          ...(toolUsages[0] ? {
+            toolInstanceId: toolUsages[0].toolInstanceId,
+            ...(toolUsages[0].toolVersionId ? { toolVersionId: toolUsages[0].toolVersionId } : {}),
+          } : {}),
+          submissionIdempotencyKey: taskRetrySubmissionKey(
+            detail.id,
+            retrySubmissionIdRef.current ??= crypto.randomUUID(),
+          ),
+          parentTaskId: detail.id,
+        });
+        batchId = batch.id;
+        setRetryQueueId(batchId);
+      }
+      await startProductionQueue(projectId, batchId);
+      setRetryStarted(true);
     } catch (error: unknown) {
       setRetryError(toUserMessage(error));
     } finally {
@@ -160,8 +174,8 @@ export function TaskHistoryDetail({
           <div>
             <span className="section-label">重试说明</span>
             <p>
-              {retryCreatedTaskId
-                ? `已创建重试任务：${retryCreatedTaskId}`
+              {retryQueueId
+                ? retryStarted ? `重试已加入并开始处理：${retryQueueId}` : `重试已加入生产队列，等待 Queue Start：${retryQueueId}`
                 : retryDecision.allowed
                   ? "该任务看起来是临时失败，可以使用已保存的输入创建一个新任务。"
                   : retryDecision.reason}
@@ -176,10 +190,10 @@ export function TaskHistoryDetail({
               retrying ||
               draftLoading ||
               !draft ||
-              Boolean(retryCreatedTaskId)
+              retryStarted
             }
           >
-            {retrying ? "正在创建重试任务..." : retryCreatedTaskId ? "重试任务已创建" : "重试一次"}
+            {retrying ? "正在加入生产队列..." : retryStarted ? "重试已开始" : retryQueueId ? "开始处理已加入的重试" : "重试一次"}
           </button>
           {productionBusy && (
             <p className="disabled-note">生产队列正在运行，重试一次暂时不可用。</p>

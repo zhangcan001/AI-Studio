@@ -726,7 +726,7 @@ export function listGenerationCatalog(): Promise<RecipeViewModel[]> {
   return invoke<RecipeViewModel[]>("generation_catalog_list");
 }
 
-export function createGeneration(request: {
+export function submitGeneration(request: {
   projectId: string;
   workflowVersionId: string;
   recipeId: string;
@@ -736,8 +736,9 @@ export function createGeneration(request: {
   toolInstanceId?: string;
   toolVersionId?: string;
   submissionIdempotencyKey?: string;
-}): Promise<TaskView> {
-  return invoke<TaskView>("generation_create", { request });
+  parentTaskId?: string;
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("generation_create", { request });
 }
 
 export function previewWorkflowBenchmark(
@@ -1159,15 +1160,15 @@ export function selectShotResult(request: {
   return invoke<ShotView>("shot_result_select", { request });
 }
 
-export function generateShot(request: {
+export function submitShotGeneration(request: {
   projectId: string;
   shotId: string;
   stage: ShotStage;
   values?: ShotInputValues;
-  productionBatchItemId?: string;
   retryTaskId?: string;
-}): Promise<TaskView> {
-  return invoke<TaskView>("shot_generate", { request });
+  submissionIdempotencyKey?: string;
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("shot_generate", { request });
 }
 
 export function planShotBatch(projectId: string, stage: ShotStage): Promise<ShotBatchPlan> {
@@ -1279,16 +1280,11 @@ export interface GenerationBatchItemRequest {
   toolVersionId?: string;
 }
 
-export interface GenerationBatchCreateResult {
-  created: Array<{ index: number; task: TaskView }>;
-  failed: Array<{ index: number; code: string; message: string }>;
-}
-
-export function createGenerationBatch(request: {
+export function submitGenerationBatch(request: {
   projectId: string;
   items: GenerationBatchItemRequest[];
-}): Promise<GenerationBatchCreateResult> {
-  return invoke<GenerationBatchCreateResult>("generation_create_batch", { request });
+}): Promise<ProductionBatchDetail> {
+  return invoke<ProductionBatchDetail>("generation_create_batch", { request });
 }
 
 export function createProductionQueue(request: {

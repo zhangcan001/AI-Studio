@@ -54,6 +54,28 @@ Comfy admission is held until the real execution reaches a terminal state.
 Success, failure, cancellation, timeout, submit errors, disconnect handling,
 and application shutdown paths do not create a permanent permit leak.
 
+## Production execution authority closure
+
+```text
+single executor != single execution authority
+```
+
+GenerationService remains the execution implementation used by the queue worker.
+Production Queue Start is the sole product execution authority. Product
+submission commands no longer invoke GenerationService directly.
+`generation_create`, `generation_create_batch`, and `shot_generate` persist
+items in the existing Production Queue; active one-click product surfaces then
+call the official `production_queue_start` command. Remaining direct service
+starts in `generation_e2e.rs` and `cancellation_e2e.rs` are test-only.
+
+Evidence:
+
+- `src-tauri/tests/production_execution_authority_boundary.rs::production_execution_requires_queue_start`
+- `src-tauri/tests/dev052_runtime_integration.rs::direct_generation_submission_creates_no_task_or_comfy_submit_before_queue_start`
+- `src-tauri/tests/dev052_runtime_integration.rs::direct_generation_batch_creates_n_tasks_and_submissions_only_after_queue_start`
+- `src-tauri/tests/dev052_runtime_integration.rs::shot_generation_submission_keeps_linkage_pending_until_queue_start`
+- `src-tauri/tests/dev052_runtime_integration.rs::task_history_retry_stays_queued_and_preserves_parent_attempt_and_project_scope`
+
 ## Freeze exclusions
 
 The following remain outside the frozen architecture and require a new product
@@ -71,6 +93,7 @@ decision before implementation:
 ARCHITECTURE_FREEZE=PASS
 NO_NEW_DOMAIN_AUTHORITY=PASS
 QUEUE_AUTHORITY=PASS
+ARCHITECTURE_P0_STATUS=CLOSED
 MIGRATION_COMPATIBILITY_BOUNDARY=PASS
 RELEASE_ARCHIVE_BASELINE=BACKUP_V19_STABLE
 CURRENT_ARCHIVE_CONTRACT=BACKUP_V20_ARTIFACT_REVIEW

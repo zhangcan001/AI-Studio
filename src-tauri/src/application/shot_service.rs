@@ -1,7 +1,5 @@
 use crate::application::generation_input_preparer::GenerationInputValue;
-use crate::application::generation_service::{
-    CreateGenerationRequest, GenerationService, GenerationServiceError, ReferenceManifest,
-};
+use crate::application::generation_service::ReferenceManifest;
 use crate::application::ordered_reference_binding::{
     reference_manifest, validate_ordered_reference_ids,
 };
@@ -120,8 +118,20 @@ pub struct ShotGenerationRequest {
     pub shot_id: String,
     pub stage: ShotStage,
     pub values: BTreeMap<String, GenerationInputValue>,
-    pub production_batch_item_id: Option<String>,
     pub retry_task_id: Option<String>,
+    pub submission_idempotency_key: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedShotGeneration {
+    pub project_id: String,
+    pub shot_id: String,
+    pub stage: ShotStage,
+    pub workflow_version_id: String,
+    pub recipe_id: String,
+    pub values: BTreeMap<String, GenerationInputValue>,
+    pub submission_idempotency_key: Option<String>,
+    pub parent_task_id: Option<String>,
 }
 
 pub struct ShotService {
@@ -131,7 +141,6 @@ pub struct ShotService {
     definition_repository: Arc<dyn GenerationDefinitionRepository>,
     prompt_repository: Arc<dyn PromptLibraryRepository>,
     task_query_service: Arc<TaskQueryService>,
-    generation_service: Arc<GenerationService>,
     shot_batch_repository: Arc<dyn ShotBatchRepository>,
     clock: Arc<dyn Clock>,
     stage_prompt_repository: Option<Arc<dyn ShotBulkRepository>>,
@@ -147,7 +156,6 @@ impl ShotService {
         definition_repository: Arc<dyn GenerationDefinitionRepository>,
         prompt_repository: Arc<dyn PromptLibraryRepository>,
         task_query_service: Arc<TaskQueryService>,
-        generation_service: Arc<GenerationService>,
         shot_batch_repository: Arc<dyn ShotBatchRepository>,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -158,7 +166,6 @@ impl ShotService {
             definition_repository,
             prompt_repository,
             task_query_service,
-            generation_service,
             shot_batch_repository,
             clock,
             stage_prompt_repository: None,
@@ -428,10 +435,10 @@ impl ShotService {
         self.get(project_id, shot_id).await
     }
 
-    pub async fn generate(
+    pub async fn prepare_generation_submission(
         &self,
         request: ShotGenerationRequest,
-    ) -> Result<TaskUpdatePayload, ShotServiceError> {
+    ) -> Result<PreparedShotGeneration, ShotServiceError> {
         validate_project(&request.project_id)?;
         let data = self
             .repository
@@ -517,7 +524,6 @@ impl ShotService {
             values.extend(request.values);
             values
         };
-        let mut reference_manifest = None;
         if !is_frozen_retry {
             if let Some(prompt_key) = recipe.inputs.iter().find_map(|(key, input)| {
                 matches!(input, InputDefinition::TextArea { .. }).then_some(key)
@@ -597,10 +603,9 @@ impl ShotService {
                     } => Some((*min_items, *max_items)),
                     _ => None,
                 };
-                let (key, image_value, manifest) =
+                let (key, image_value, _manifest) =
                     build_video_input(&recipe, selected, references, bounds)?;
                 values.insert(key, image_value);
-                reference_manifest = manifest;
             }
             self.ensure_no_active_video_tasks(&request.project_id)
                 .await?;
@@ -640,54 +645,19 @@ impl ShotService {
             }
         }
 
-        let generation_request = CreateGenerationRequest {
+        let parent_task_id = retry_task
+            .as_ref()
+            .map(|(task, _)| task.id.as_str().to_owned());
+        Ok(PreparedShotGeneration {
             project_id: request.project_id.clone(),
+            shot_id: request.shot_id,
+            stage: request.stage,
             workflow_version_id,
             recipe_id,
-            model_version_id: None,
-            prompt_version_id: None,
-            tool_instance_id: None,
-            tool_version_id: None,
             values,
-            reference_manifest,
-            submission_idempotency_key: None,
-            submission_attempt: None,
-            parent_task_id: None,
-        };
-        let repository = Arc::clone(&self.repository);
-        let project_id = request.project_id.clone();
-        let shot_id = request.shot_id.clone();
-        let stage = request.stage;
-        let item_id = request.production_batch_item_id.clone();
-        let created_at = self.clock.now();
-        let task = self
-            .generation_service
-            .start_generation_with_task_hook(generation_request, move |task| {
-                let repository = Arc::clone(&repository);
-                let project_id = project_id.clone();
-                let shot_id = shot_id.clone();
-                let item_id = item_id.clone();
-                let task_id = task.id.to_string();
-                async move {
-                    repository
-                        .link_generation(
-                            &project_id,
-                            &shot_id,
-                            stage,
-                            &task_id,
-                            item_id.as_deref(),
-                            created_at,
-                        )
-                        .await
-                        .map(|_| ())
-                }
-            })
-            .await
-            .map_err(ShotServiceError::Generation)?;
-        self.task_query_service
-            .view(task)
-            .await
-            .map_err(|error| ShotServiceError::TaskView(error.to_string()))
+            submission_idempotency_key: request.submission_idempotency_key,
+            parent_task_id,
+        })
     }
 
     async fn validate_image_asset(
@@ -1321,7 +1291,6 @@ pub enum ShotServiceError {
     InvalidInput(String),
     NotFound(String),
     Repository(RepositoryError),
-    Generation(GenerationServiceError),
     TaskView(String),
 }
 
@@ -1331,7 +1300,6 @@ impl fmt::Display for ShotServiceError {
             Self::InvalidInput(message) => write!(formatter, "INVALID_INPUT: {message}"),
             Self::NotFound(id) => write!(formatter, "SHOT_NOT_FOUND: {id}"),
             Self::Repository(error) => write!(formatter, "{error}"),
-            Self::Generation(error) => write!(formatter, "{error}"),
             Self::TaskView(message) => write!(formatter, "TASK_VIEW_ERROR: {message}"),
         }
     }

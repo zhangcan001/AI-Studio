@@ -879,7 +879,6 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 definition_repository.clone(),
                 prompt_library_repository.clone(),
                 task_query_service.clone(),
-                generation_service.clone(),
                 shot_batch_repository.clone(),
                 clock.clone(),
             )

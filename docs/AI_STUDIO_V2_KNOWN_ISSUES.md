@@ -24,6 +24,15 @@ release scope.
 
 ## Explicit non-blocking policy
 
+The production execution-authority P0 is closed: all three compatibility
+submission commands now enqueue through the existing Production Queue, and
+only Queue Start dispatches product work to the retained `GenerationService`
+worker. This corrects execution authority, not the number of internal executor
+implementations (`single executor != single execution authority`). Evidence is
+the `production_execution_requires_queue_start` architecture test and the
+queue-before-task/Comfy, Shot-linkage, and retry-lineage behavior tests in
+`src-tauri/tests/dev052_runtime_integration.rs`.
+
 ```text
 P0=NONE
 P1=NONE

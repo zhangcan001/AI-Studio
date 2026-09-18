@@ -384,7 +384,6 @@ async fn dev055_real_comfyui_release_gate() {
             definition_repository.clone(),
             prompt_repository,
             task_query_service,
-            generation_service,
             shot_batch_repository.clone(),
             clock.clone(),
         )

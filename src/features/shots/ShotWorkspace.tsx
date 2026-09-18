@@ -5,7 +5,7 @@ import {
   bulkSetShotStageConfig,
   deleteShot,
   exportProjectManifest,
-  generateShot,
+  submitShotGeneration,
   getAsset,
   getShot,
   getProductionBatchRunbook,
@@ -330,6 +330,13 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
   const [structureMenuOpen, setStructureMenuOpen] = useState(false);
   const [shotListControls, setShotListControls] = useState<ShotListControls>(() => shotListControlsForNavigation(initialCollectionFilter));
   const reloadGeneration = useRef(0);
+  const pendingShotSubmissionRef = useRef<{
+    projectId: string;
+    shotId: string;
+    stage: ShotStage;
+    batchId?: string;
+    submissionIdempotencyKey: string;
+  } | undefined>(undefined);
   const monitorRefreshRef = useRef<((batchId: string) => Promise<void>) | undefined>(undefined);
   const monitorFocusRef = useRef<((batchId: string) => void) | undefined>(undefined);
 
@@ -922,8 +929,29 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         });
         applyShot(next);
       }
-      const task = await generateShot({ projectId, shotId: selectedShot.id, stage, values: currentDraft.values });
-      setNotice(`任务 ${task.id} 已创建；镜头状态由任务和候选素材派生。不会自动跳过候选选择。`);
+      let pending = pendingShotSubmissionRef.current;
+      if (!pending || pending.projectId !== projectId || pending.shotId !== selectedShot.id || pending.stage !== stage) {
+        pending = {
+          projectId,
+          shotId: selectedShot.id,
+          stage,
+          submissionIdempotencyKey: crypto.randomUUID(),
+        };
+        pendingShotSubmissionRef.current = pending;
+      }
+      if (!pending.batchId) {
+        const batch = await submitShotGeneration({
+          projectId,
+          shotId: selectedShot.id,
+          stage,
+          values: currentDraft.values,
+          submissionIdempotencyKey: pending.submissionIdempotencyKey,
+        });
+        pending.batchId = batch.id;
+      }
+      await startProductionQueue(projectId, pending.batchId);
+      setNotice(`已加入普通生产队列 ${pending.batchId} 并开始处理；镜头候选仍需手动选择。`);
+      pendingShotSubmissionRef.current = undefined;
       applyShot(await getShot(projectId, selectedShot.id));
     } catch (generateError: unknown) { setError(toUserMessage(generateError)); }
     finally { setBusy(false); }
@@ -940,8 +968,17 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
         await startProductionQueue(projectId, detail.id);
         setNotice("已创建新的普通队列项并开始处理；原失败任务和关联记录已保留。新队列仍按阶段严格串行。 ");
       } else {
-        const task = await generateShot({ projectId, shotId, stage: retryStage, retryTaskId: failedLink.task?.id });
-        setNotice(`已创建新的普通任务 ${task.id}；原失败任务仍保留。`);
+        const retryTaskId = failedLink.task?.id;
+        if (!retryTaskId) return;
+        const batch = await submitShotGeneration({
+          projectId,
+          shotId,
+          stage: retryStage,
+          retryTaskId,
+          submissionIdempotencyKey: `shot-retry:${retryTaskId}`,
+        });
+        await startProductionQueue(projectId, batch.id);
+        setNotice(`已创建并启动新的普通队列 ${batch.id}；原失败任务仍保留。`);
       }
       await reload();
     } catch (retryError: unknown) {

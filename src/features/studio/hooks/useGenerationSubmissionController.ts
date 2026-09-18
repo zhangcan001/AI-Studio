@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { cancelTask, createGeneration } from "../../../services/tauriClient";
+import { cancelTask, startProductionQueue, submitGeneration } from "../../../services/tauriClient";
 import { toUserMessage } from "../../../i18n/errorMessages";
 import { useTaskStore } from "../../../stores/taskStore";
 import type { GenerationValues, RecipeViewModel } from "../../../types/generation";
@@ -41,12 +41,14 @@ export function useGenerationSubmissionController({
   onNotice,
 }: UseGenerationSubmissionControllerOptions) {
   const currentTask = useTaskStore((state) => state.currentTask);
-  const adoptCreatedTask = useTaskStore((state) => state.adoptCreatedTask);
   const [creating, setCreating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const generationRequestIdRef = useRef<string | undefined>(undefined);
+  const pendingBatchIdRef = useRef<string | undefined>(undefined);
+  const creatingRef = useRef(false);
 
   const generate = useCallback(async () => {
+    if (creatingRef.current) return;
     if (!selectedWorkflow) return;
     if (configurationError) {
       onNotice(configurationError);
@@ -70,28 +72,35 @@ export function useGenerationSubmissionController({
     }
 
     const submissionIdempotencyKey = generationRequestIdRef.current ??= crypto.randomUUID();
+    creatingRef.current = true;
     setCreating(true);
     onNotice(null);
     try {
-      const task = await createGeneration({
-        projectId,
-        workflowVersionId: selectedWorkflow.workflowVersionId,
-        recipeId: selectedWorkflow.recipeId,
-        values,
-        ...(modelVersionId ? { modelVersionId } : {}),
-        ...(promptVersionId ? { promptVersionId } : {}),
-        submissionIdempotencyKey,
-      });
-      adoptCreatedTask(task);
+      let batchId = pendingBatchIdRef.current;
+      if (!batchId) {
+        const batch = await submitGeneration({
+          projectId,
+          workflowVersionId: selectedWorkflow.workflowVersionId,
+          recipeId: selectedWorkflow.recipeId,
+          values,
+          ...(modelVersionId ? { modelVersionId } : {}),
+          ...(promptVersionId ? { promptVersionId } : {}),
+          submissionIdempotencyKey,
+        });
+        batchId = batch.id;
+        pendingBatchIdRef.current = batchId;
+      }
+      await startProductionQueue(projectId, batchId);
+      pendingBatchIdRef.current = undefined;
+      generationRequestIdRef.current = undefined;
+      onNotice("已加入生产队列并开始处理。");
     } catch (error: unknown) {
       onNotice(toUserMessage(error));
     } finally {
+      creatingRef.current = false;
       setCreating(false);
-      if (generationRequestIdRef.current === submissionIdempotencyKey) {
-        generationRequestIdRef.current = undefined;
-      }
     }
-  }, [adoptCreatedTask, comfyConnected, configurationError, missingAsset, modelVersionId, onNotice, onValidationErrors, productionAdmission.busy, projectId, promptVersionId, selectedWorkflow, taskEventError, taskEventsReady, unsupportedField, values]);
+  }, [comfyConnected, configurationError, missingAsset, modelVersionId, onNotice, onValidationErrors, productionAdmission.busy, projectId, promptVersionId, selectedWorkflow, taskEventError, taskEventsReady, unsupportedField, values]);
 
   const cancelCurrentTask = useCallback(async () => {
     if (!currentTask) return;

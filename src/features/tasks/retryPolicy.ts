@@ -14,8 +14,8 @@ export interface RetryDecision {
   reason?: string;
 }
 
-export function taskRetrySubmissionKey(taskId: string): string {
-  return `task-retry:${taskId}`;
+export function taskRetrySubmissionKey(taskId: string, submissionId: string): string {
+  return `task-retry:${taskId}:${submissionId}`;
 }
 
 export function taskRetryDecision(detail: TaskDetail, comfyConnected: boolean): RetryDecision {

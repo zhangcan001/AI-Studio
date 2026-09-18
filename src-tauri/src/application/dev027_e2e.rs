@@ -478,7 +478,6 @@ outputs:
             definition_repository.clone(),
             prompt_repository.clone(),
             task_query_service,
-            generation_service.clone(),
             queue_repository.clone(),
             clock.clone(),
         )
@@ -902,7 +901,6 @@ outputs:
             definition_repository.clone(),
             prompt_repository.clone(),
             task_query_service,
-            generation_service.clone(),
             queue_repository.clone(),
             clock.clone(),
         )

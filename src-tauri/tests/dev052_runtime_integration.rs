@@ -17,15 +17,17 @@ use ai_studio_lib::application::{
         ComfyEventSubscription, ComfyExecutionEvent, ComfyHealth, ComfyHistory, ComfyOutputData,
         ComfyOutputFile, GenerationDefinitionRepository, GenerationSnapshotRepository,
         NoopTaskUpdateSink, ProductionQueueRepository, ProductionStructureRepository,
-        ProjectRepository, PromptSubmission, ShotBatchBinding, ShotBatchRepository, ShotRepository,
-        SystemStats, TaskRepository, WorkflowLibrarySource, WorkflowLibrarySourceError,
-        WorkflowPackageFiles, WorkflowPackageLoad, WorkflowPackageStore, WorkflowRunRepository,
-        WorkflowRuntimeRepository, WorkflowRuntimeStateRepository,
+        ProjectRepository, PromptSubmission, ShotBatchBinding, ShotBatchRepository,
+        ShotBulkRepository, ShotRepository, SystemStats, TaskRepository, WorkflowLibrarySource,
+        WorkflowLibrarySourceError, WorkflowPackageFiles, WorkflowPackageLoad,
+        WorkflowPackageStore, WorkflowRunRepository, WorkflowRuntimeRepository,
+        WorkflowRuntimeStateRepository,
     },
     production_preparation_service::ProductionPreparationService,
     production_queue_service::{
-        CreateProductionBatchItem, CreateProductionBatchRequest, ProductionQueueError,
-        ProductionQueueService,
+        CreateDirectGenerationBatchItem, CreateDirectGenerationBatchRequest,
+        CreateDirectGenerationRequest, CreateProductionBatchItem, CreateProductionBatchRequest,
+        ProductionQueueError, ProductionQueueService,
     },
     production_start_admission_service::{
         ProductionStartAdmissionError, ProductionStartAdmissionService,
@@ -35,6 +37,8 @@ use ai_studio_lib::application::{
     shot_batch_service::ShotBatchService,
     shot_context_resolver::ShotContextResolver,
     shot_readiness_service::ShotReadinessService,
+    shot_service::{ShotGenerationRequest, ShotService},
+    task_query_service::TaskQueryService,
     task_recovery_service::TaskRecoveryService,
     workflow_library_service::WorkflowLibraryService,
     workflow_lifecycle_service::WorkflowLifecycleService,
@@ -44,7 +48,7 @@ use ai_studio_lib::domain::{
     AssetId, BindingRole, ComfyCapabilityEvidence, ContextSourceScope, PreparationSnapshotRecord,
     PreparationSnapshotV1, ProductionBatch, ProductionBatchItem, ProductionBatchItemId,
     ProductionBatchItemStatus, ProductionBatchStatus, ResolvedReferenceAsset, ResolvedShotContext,
-    ResolvedStageInput, ShotStage,
+    ResolvedStageInput, ShotStage, Task, TaskError, TaskStatus,
 };
 use ai_studio_lib::infrastructure::database::repositories::SqliteConsistencyScopeRepository;
 use ai_studio_lib::infrastructure::{
@@ -52,7 +56,8 @@ use ai_studio_lib::infrastructure::{
         initialize, SqliteAssetRepository, SqliteConsistencyProfileRepository,
         SqliteDatabaseHealthProbe, SqliteGenerationDefinitionRepository,
         SqliteGenerationSnapshotRepository, SqliteProductionQueueRepository,
-        SqliteProductionStructureRepository, SqliteProjectRepository, SqliteReferenceSetRepository,
+        SqliteProductionStructureRepository, SqliteProjectRepository,
+        SqlitePromptLibraryRepository, SqliteReferenceSetRepository,
         SqliteShotConsistencyRepository, SqliteShotRepository, SqliteTaskRepository,
         SqliteWorkflowLibraryRepository, SqliteWorkflowRunRepository,
         SqliteWorkflowRuntimeRepository, SqliteWorkflowRuntimeStateRepository,
@@ -74,7 +79,10 @@ use std::{
     },
 };
 use tempfile::{tempdir, TempDir};
-use tokio::sync::Notify;
+use tokio::{
+    sync::Notify,
+    time::{sleep, Duration},
+};
 
 const PROJECT_ID: &str = "prj_default";
 const READY_SHOT_ID: &str = "shot_dev052_ready";
@@ -279,6 +287,7 @@ struct CountingComfyAdapter {
     health_check_notify: Arc<Notify>,
     health_check_release: Arc<Notify>,
     hold_submission: Arc<AtomicBool>,
+    reject_submission_as_validation_error: Arc<AtomicBool>,
     submission_released: Arc<AtomicBool>,
     submission_started: Arc<AtomicBool>,
     submission_notify: Arc<Notify>,
@@ -301,6 +310,7 @@ impl CountingComfyAdapter {
             health_check_notify: Arc::new(Notify::new()),
             health_check_release: Arc::new(Notify::new()),
             hold_submission: Arc::new(AtomicBool::new(false)),
+            reject_submission_as_validation_error: Arc::new(AtomicBool::new(false)),
             submission_started: Arc::new(AtomicBool::new(false)),
             submission_notify: Arc::new(Notify::new()),
             submission_release: Arc::new(Notify::new()),
@@ -321,6 +331,8 @@ impl CountingComfyAdapter {
         self.hold_health_check.store(false, Ordering::SeqCst);
         self.health_check_released.store(true, Ordering::SeqCst);
         self.hold_submission.store(false, Ordering::SeqCst);
+        self.reject_submission_as_validation_error
+            .store(false, Ordering::SeqCst);
         self.submission_released.store(true, Ordering::SeqCst);
     }
 
@@ -364,6 +376,11 @@ impl CountingComfyAdapter {
         self.submission_started.store(false, Ordering::SeqCst);
         self.submission_released.store(false, Ordering::SeqCst);
         self.hold_submission.store(true, Ordering::SeqCst);
+    }
+
+    fn reject_submission_as_validation_error(&self) {
+        self.reject_submission_as_validation_error
+            .store(true, Ordering::SeqCst);
     }
 
     fn release_submission(&self) {
@@ -481,6 +498,15 @@ impl ComfyAdapter for CountingComfyAdapter {
                 self.submission_release.notified().await;
             }
         }
+        if self
+            .reject_submission_as_validation_error
+            .load(Ordering::SeqCst)
+        {
+            return Err(ComfyAdapterError::WorkflowValidation {
+                message: "DEV-052 deterministic validation rejection".to_owned(),
+                node_errors: json!({"test": "deterministic rejection"}),
+            });
+        }
         Err(ComfyAdapterError::Incompatible(
             "DEV-052 preparation must not submit workflows".to_owned(),
         ))
@@ -506,6 +532,7 @@ struct Harness {
     lifecycle: Arc<WorkflowLifecycleService>,
     admission: Arc<ProductionStartAdmissionService>,
     queue: Arc<ProductionQueueService>,
+    shot_service: Arc<ShotService>,
     workflow_version_id: String,
     recipe_id: String,
     recipe_ids_by_version: BTreeMap<String, String>,
@@ -590,8 +617,9 @@ async fn harness_with_packages(
     let snapshot_repository: Arc<dyn GenerationSnapshotRepository> =
         Arc::new(SqliteGenerationSnapshotRepository::new(pool.clone()));
     let definition_repository: Arc<dyn GenerationDefinitionRepository> = definition_impl.clone();
-    let shot_repository: Arc<dyn ShotRepository> =
-        Arc::new(SqliteShotRepository::new(pool.clone()));
+    let shot_repository_impl = Arc::new(SqliteShotRepository::new(pool.clone()));
+    let shot_repository: Arc<dyn ShotRepository> = shot_repository_impl.clone();
+    let shot_bulk_repository: Arc<dyn ShotBulkRepository> = shot_repository_impl;
     let structure_repository: Arc<dyn ProductionStructureRepository> =
         Arc::new(SqliteProductionStructureRepository::new(pool.clone()));
     let scope_repository: Arc<dyn ai_studio_lib::application::ports::ConsistencyScopeRepository> =
@@ -656,6 +684,26 @@ async fn harness_with_packages(
     let queue_repository = Arc::new(SqliteProductionQueueRepository::new(pool.clone()));
     let production_queue_repository: Arc<dyn ProductionQueueRepository> = queue_repository.clone();
     let shot_batch_repository: Arc<dyn ShotBatchRepository> = queue_repository.clone();
+    let task_query_service = Arc::new(TaskQueryService::new(
+        task_repository.clone(),
+        asset_repository.clone(),
+        definition_repository.clone(),
+    ));
+    let prompt_repository = Arc::new(SqlitePromptLibraryRepository::new(pool.clone()));
+    let shot_service = Arc::new(
+        ShotService::new(
+            shot_repository.clone(),
+            task_repository.clone(),
+            asset_repository.clone(),
+            definition_repository.clone(),
+            prompt_repository,
+            task_query_service,
+            shot_batch_repository.clone(),
+            clock.clone(),
+        )
+        .with_stage_prompt_repository(shot_bulk_repository)
+        .with_generation_snapshot_repository(snapshot_repository.clone()),
+    );
     let generation_service = Arc::new(GenerationService::new(
         task_repository.clone(),
         snapshot_repository.clone(),
@@ -668,7 +716,7 @@ async fn harness_with_packages(
     ));
     let recovery_service = Arc::new(TaskRecoveryService::new(
         task_repository.clone(),
-        snapshot_repository,
+        snapshot_repository.clone(),
         asset_repository.clone(),
         comfy_adapter.clone(),
         project_repository.clone(),
@@ -714,10 +762,10 @@ async fn harness_with_packages(
         structure_repository,
     ));
     let shot_batch_service = Arc::new(ShotBatchService::new(
-        shot_repository,
-        shot_batch_repository,
+        shot_repository.clone(),
+        shot_batch_repository.clone(),
         Arc::new(SqliteTaskRepository::new(pool.clone())),
-        asset_repository,
+        asset_repository.clone(),
         definition_repository.clone(),
         project_repository.clone(),
         clock.clone(),
@@ -746,6 +794,7 @@ async fn harness_with_packages(
         lifecycle: workflow_lifecycle_service,
         admission,
         queue: queue_service,
+        shot_service,
         workflow_version_id,
         recipe_id,
         recipe_ids_by_version,
@@ -792,6 +841,414 @@ async fn create_runtime_batch_for_recipe(
         .id
         .as_str()
         .to_owned()
+}
+
+fn direct_generation_request(
+    harness: &Harness,
+    prompt: &str,
+    submission_idempotency_key: Option<&str>,
+    parent_task_id: Option<&str>,
+) -> CreateDirectGenerationRequest {
+    CreateDirectGenerationRequest {
+        project_id: PROJECT_ID.to_owned(),
+        name: "Direct generation submission".to_owned(),
+        continue_on_failure: true,
+        item: CreateProductionBatchItem {
+            workflow_version_id: harness.workflow_version_id.clone(),
+            recipe_id: harness.recipe_id.clone(),
+            values: BTreeMap::from([(
+                "prompt".to_owned(),
+                GenerationInputValue::Text(prompt.to_owned()),
+            )]),
+        },
+        shot_id: None,
+        stage: None,
+        prompt_version_id: None,
+        model_version_id: None,
+        tool_instance_id: None,
+        tool_version_id: None,
+        submission_idempotency_key: submission_idempotency_key.map(str::to_owned),
+        parent_task_id: parent_task_id.map(str::to_owned),
+    }
+}
+
+fn direct_generation_batch_request(
+    harness: &Harness,
+    item_count: usize,
+) -> CreateDirectGenerationBatchRequest {
+    CreateDirectGenerationBatchRequest {
+        project_id: PROJECT_ID.to_owned(),
+        name: "Direct generation batch".to_owned(),
+        continue_on_failure: true,
+        items: (0..item_count)
+            .map(|index| CreateDirectGenerationBatchItem {
+                item: CreateProductionBatchItem {
+                    workflow_version_id: harness.workflow_version_id.clone(),
+                    recipe_id: harness.recipe_id.clone(),
+                    values: BTreeMap::from([(
+                        "prompt".to_owned(),
+                        GenerationInputValue::Text(format!("Batch prompt {index}")),
+                    )]),
+                },
+                shot_id: None,
+                stage: None,
+                prompt_version_id: None,
+                model_version_id: None,
+                tool_instance_id: None,
+                tool_version_id: None,
+                submission_idempotency_key: Some(format!("direct-batch-item-{index}")),
+                parent_task_id: None,
+            })
+            .collect(),
+    }
+}
+
+async fn wait_for_dispatch_counts(
+    harness: &Harness,
+    expected_task_count: i64,
+    expected_comfy_submit_count: usize,
+) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if count(&harness.pool, "tasks").await >= expected_task_count
+                && harness.comfy.submit_calls.load(Ordering::SeqCst) >= expected_comfy_submit_count
+            {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("queue worker should create the expected tasks and Comfy submissions");
+}
+
+async fn create_failed_parent_task(
+    harness: &Harness,
+    project_id: &str,
+    submission_attempt: u32,
+    idempotency_key: &str,
+) -> String {
+    let task_repository = SqliteTaskRepository::new(harness.pool.clone());
+    let mut task = Task::new(
+        project_id,
+        "wfl_dev052_fixture",
+        harness.workflow_version_id.clone(),
+        harness.recipe_id.clone(),
+        Utc::now(),
+    );
+    task.submission_attempt = submission_attempt;
+    task.submission_idempotency_key = Some(idempotency_key.to_owned());
+    task_repository
+        .create(&task, &task.created_event())
+        .await
+        .expect("failed retry parent fixture should be inserted");
+    let event = task
+        .fail(
+            TaskError {
+                code: "FIXTURE_FAILED".to_owned(),
+                message: "fixture retry parent is failed".to_owned(),
+                raw: None,
+            },
+            Utc::now(),
+        )
+        .expect("created parent task should transition to failed");
+    task_repository
+        .persist_transition(&task, &event, TaskStatus::Created)
+        .await
+        .expect("failed retry parent status should persist");
+    task.id.as_str().to_owned()
+}
+
+#[tokio::test]
+async fn direct_generation_submission_creates_no_task_or_comfy_submit_before_queue_start() {
+    let harness = harness().await;
+    let request = direct_generation_request(
+        &harness,
+        "Queue-controlled image prompt",
+        Some("direct-generation-single"),
+        None,
+    );
+
+    let first = harness
+        .queue
+        .create_direct_generation(request.clone())
+        .await
+        .expect("direct generation should create a pending queue item");
+    let duplicate = harness
+        .queue
+        .create_direct_generation(request)
+        .await
+        .expect("a repeated idempotent submission should return its queue item");
+
+    assert_eq!(first.batch.id, duplicate.batch.id);
+    assert_eq!(count(&harness.pool, "production_batches").await, 1);
+    assert_eq!(count(&harness.pool, "production_batch_items").await, 1);
+    assert_eq!(first.items[0].status, ProductionBatchItemStatus::Pending);
+    assert!(first.items[0].task_id.is_none());
+    assert_eq!(
+        first.items[0].values_json["prompt"]["value"],
+        "Queue-controlled image prompt"
+    );
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(count(&harness.pool, "generation_snapshots").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, first.batch.id.as_str())
+        .await
+        .expect("the formal Queue Start should dispatch the persisted item");
+    harness.comfy.wait_for_submission().await;
+
+    let started = harness
+        .queue
+        .get(PROJECT_ID, first.batch.id.as_str())
+        .await
+        .expect("started queue should remain readable");
+    assert_eq!(
+        started.items[0].status,
+        ProductionBatchItemStatus::Dispatched
+    );
+    assert!(started.items[0].task_id.is_some());
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(count(&harness.pool, "generation_snapshots").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+    harness.comfy.release_submission();
+}
+
+#[tokio::test]
+async fn direct_generation_batch_creates_n_tasks_and_submissions_only_after_queue_start() {
+    let harness = harness().await;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(direct_generation_batch_request(&harness, 3))
+        .await
+        .expect("direct batch should persist exactly three pending items");
+    assert_eq!(batch.items.len(), 3);
+    assert_eq!(count(&harness.pool, "production_batches").await, 1);
+    assert_eq!(count(&harness.pool, "production_batch_items").await, 3);
+    assert!(batch
+        .items
+        .iter()
+        .all(|item| item.status == ProductionBatchItemStatus::Pending && item.task_id.is_none()));
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    harness.comfy.reject_submission_as_validation_error();
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("Queue Start should dispatch the first item");
+    harness.comfy.wait_for_submission().await;
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("repeated Queue Start must not spawn a second worker");
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+    harness.comfy.release_submission();
+
+    wait_for_dispatch_counts(&harness, 3, 3).await;
+    assert_eq!(count(&harness.pool, "tasks").await, 3);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 3);
+    let distinct_tasks = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(DISTINCT task_id) FROM production_batch_items WHERE batch_id = ? AND task_id IS NOT NULL",
+    )
+    .bind(batch.batch.id.as_str())
+    .fetch_one(&harness.pool)
+    .await
+    .expect("unique queue task links should be readable");
+    assert_eq!(distinct_tasks, 3);
+}
+
+#[tokio::test]
+async fn shot_generation_submission_keeps_linkage_pending_until_queue_start() {
+    let harness = harness().await;
+    let prepared = harness
+        .shot_service
+        .prepare_generation_submission(ShotGenerationRequest {
+            project_id: PROJECT_ID.to_owned(),
+            shot_id: READY_SHOT_ID.to_owned(),
+            stage: ShotStage::Image,
+            values: BTreeMap::new(),
+            retry_task_id: None,
+            submission_idempotency_key: Some("shot-image-submission".to_owned()),
+        })
+        .await
+        .expect("Shot service should prepare the configured stage without creating a Task");
+    assert_eq!(
+        prepared.values.get("prompt"),
+        Some(&GenerationInputValue::Text(
+            "A stable DEV-052 shot prompt".to_owned()
+        ))
+    );
+    let batch = harness
+        .queue
+        .create_direct_generation(CreateDirectGenerationRequest {
+            project_id: prepared.project_id,
+            name: "Shot generation".to_owned(),
+            continue_on_failure: true,
+            item: CreateProductionBatchItem {
+                workflow_version_id: prepared.workflow_version_id,
+                recipe_id: prepared.recipe_id,
+                values: prepared.values,
+            },
+            shot_id: Some(prepared.shot_id.clone()),
+            stage: Some(prepared.stage.as_str().to_owned()),
+            prompt_version_id: None,
+            model_version_id: None,
+            tool_instance_id: None,
+            tool_version_id: None,
+            submission_idempotency_key: prepared.submission_idempotency_key,
+            parent_task_id: prepared.parent_task_id,
+        })
+        .await
+        .expect("Shot generation should create an existing queue item and binding");
+
+    let (pending_task_id, pending_item_id, pending_stage): (Option<String>, String, String) =
+        sqlx::query_as(
+            "SELECT task_id, production_batch_item_id, stage FROM shot_generation_links WHERE shot_id = ?",
+        )
+        .bind(READY_SHOT_ID)
+        .fetch_one(&harness.pool)
+        .await
+        .expect("pending Shot generation link should be persisted");
+    assert_eq!(pending_task_id, None);
+    assert_eq!(pending_item_id, batch.items[0].id.as_str());
+    assert_eq!(pending_stage, "image");
+    assert_eq!(count(&harness.pool, "tasks").await, 0);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("Queue Start should dispatch the Shot-linked item");
+    harness.comfy.wait_for_submission().await;
+    let started = harness
+        .queue
+        .get(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .expect("Shot queue should remain readable after dispatch");
+    let task_id = started.items[0]
+        .task_id
+        .as_deref()
+        .expect("Queue Start should create one Task");
+    let (linked_task_id, linked_item_id, linked_stage): (Option<String>, String, String) =
+        sqlx::query_as(
+            "SELECT task_id, production_batch_item_id, stage FROM shot_generation_links WHERE shot_id = ?",
+        )
+        .bind(READY_SHOT_ID)
+        .fetch_one(&harness.pool)
+        .await
+        .expect("started Shot generation link should be readable");
+    assert_eq!(linked_task_id.as_deref(), Some(task_id));
+    assert_eq!(linked_item_id, started.items[0].id.as_str());
+    assert_eq!(linked_stage, "image");
+    assert_eq!(count(&harness.pool, "tasks").await, 1);
+    assert_eq!(count(&harness.pool, "generation_snapshots").await, 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+    harness.comfy.release_submission();
+}
+
+#[tokio::test]
+async fn task_history_retry_stays_queued_and_preserves_parent_attempt_and_project_scope() {
+    let harness = harness().await;
+    let parent_task_id = create_failed_parent_task(&harness, PROJECT_ID, 3, "original-task").await;
+    sqlx::query(
+        "INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("prj_retry_other")
+    .bind("Retry isolation fixture")
+    .bind(
+        harness
+            ._directory
+            .path()
+            .join("other-project")
+            .to_string_lossy()
+            .as_ref(),
+    )
+    .bind(Utc::now().to_rfc3339())
+    .bind(Utc::now().to_rfc3339())
+    .execute(&harness.pool)
+    .await
+    .expect("second project should exist for isolation coverage");
+    let foreign_parent_id =
+        create_failed_parent_task(&harness, "prj_retry_other", 2, "foreign-parent").await;
+
+    let before_tasks = count(&harness.pool, "tasks").await;
+    let invalid = harness
+        .queue
+        .create_direct_generation(direct_generation_request(
+            &harness,
+            "must not cross projects",
+            Some("foreign-retry-key"),
+            Some(&foreign_parent_id),
+        ))
+        .await
+        .expect_err("retry parent from another project must be rejected");
+    assert!(matches!(invalid, ProductionQueueError::InvalidInput(_)));
+    assert_eq!(count(&harness.pool, "production_batches").await, 0);
+    assert_eq!(count(&harness.pool, "tasks").await, before_tasks);
+
+    let request = direct_generation_request(
+        &harness,
+        "frozen retry prompt",
+        Some("history-retry-submission"),
+        Some(&parent_task_id),
+    );
+    let queued = harness
+        .queue
+        .create_direct_generation(request.clone())
+        .await
+        .expect("failed Task retry should create one pending queue item");
+    let repeated = harness
+        .queue
+        .create_direct_generation(request)
+        .await
+        .expect("repeated retry submission should reuse the pending batch");
+    assert_eq!(queued.batch.id, repeated.batch.id);
+    assert_eq!(queued.items[0].status, ProductionBatchItemStatus::Pending);
+    assert!(queued.items[0].task_id.is_none());
+    assert_eq!(count(&harness.pool, "tasks").await, before_tasks);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 0);
+
+    harness.comfy.hold_submission();
+    harness
+        .admission
+        .start(PROJECT_ID, queued.batch.id.as_str())
+        .await
+        .expect("formal Queue Start should create the retry Task");
+    harness.comfy.wait_for_submission().await;
+    let (actual_parent, attempt, submission_key, workflow_version_id, recipe_id): (
+        Option<String>,
+        i64,
+        Option<String>,
+        String,
+        String,
+    ) = sqlx::query_as(
+        "SELECT parent_task_id, submission_attempt, submission_idempotency_key, workflow_version_id, recipe_id FROM tasks WHERE parent_task_id = ?",
+    )
+    .bind(&parent_task_id)
+    .fetch_one(&harness.pool)
+    .await
+    .expect("retried Task lineage should be persisted");
+    assert_eq!(actual_parent.as_deref(), Some(parent_task_id.as_str()));
+    assert_eq!(attempt, 4);
+    assert_eq!(submission_key.as_deref(), Some("history-retry-submission"));
+    assert_eq!(workflow_version_id, harness.workflow_version_id);
+    assert_eq!(recipe_id, harness.recipe_id);
+    assert_eq!(count(&harness.pool, "tasks").await, before_tasks + 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
+    harness.comfy.release_submission();
 }
 
 fn recipe_id_for_version(harness: &Harness, recipe_version: &str) -> String {

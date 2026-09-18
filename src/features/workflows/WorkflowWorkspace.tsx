@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createGeneration,
   getProjectWorkflowConfig,
   listModelVersions,
   listModels,
   listRuntimeProfiles,
+  startProductionQueue,
+  submitGeneration,
 } from "../../services/tauriClient";
 import {
   cleanWorkflowStaging,
@@ -136,6 +137,8 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
   const [workspaceError, setWorkspaceError] = useState<string>();
   const [checkingAll, setCheckingAll] = useState(false);
   const [quickTestingId, setQuickTestingId] = useState<string>();
+  const quickTestSubmissionsRef = useRef(new Map<string, { idempotencyKey: string; batchId?: string }>());
+  const quickTestInProgressRef = useRef(false);
   const [quickTestModelOptions, setQuickTestModelOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [quickTestModelLoading, setQuickTestModelLoading] = useState(false);
   const [quickTestModelError, setQuickTestModelError] = useState<string>();
@@ -746,21 +749,41 @@ export function WorkflowWorkspace({ projectId, catalog, comfyConnected, onCatalo
       await onOpenStudio(recipe.workflowId, recipe.recipeId);
       return;
     }
+    if (quickTestInProgressRef.current) return;
+    const submissionIdentity = JSON.stringify([
+      projectId,
+      recipe.workflowVersionId,
+      recipe.recipeId,
+      selectedQuickTestModelVersionId,
+    ]);
+    const pendingSubmission = quickTestSubmissionsRef.current.get(submissionIdentity) ?? {
+      idempotencyKey: crypto.randomUUID(),
+    };
+    quickTestSubmissionsRef.current.set(submissionIdentity, pendingSubmission);
+    quickTestInProgressRef.current = true;
     setQuickTestingId(item.workflowVersionId);
     setWorkspaceError(undefined);
     try {
-      const task = await createGeneration({
-        projectId,
-        workflowVersionId: recipe.workflowVersionId,
-        recipeId: recipe.recipeId,
-        values,
-        ...(selectedQuickTestModelVersionId ? { modelVersionId: selectedQuickTestModelVersionId } : {}),
-      });
-      setNotice(`快速测试任务已创建：${task.id}`);
-      onOpenTask?.(task.id);
+      let batchId = pendingSubmission.batchId;
+      if (!batchId) {
+        const batch = await submitGeneration({
+          projectId,
+          workflowVersionId: recipe.workflowVersionId,
+          recipeId: recipe.recipeId,
+          values,
+          submissionIdempotencyKey: pendingSubmission.idempotencyKey,
+          ...(selectedQuickTestModelVersionId ? { modelVersionId: selectedQuickTestModelVersionId } : {}),
+        });
+        batchId = batch.id;
+        pendingSubmission.batchId = batchId;
+      }
+      await startProductionQueue(projectId, batchId);
+      quickTestSubmissionsRef.current.delete(submissionIdentity);
+      setNotice(`快速测试已加入生产队列并开始处理：${batchId}`);
     } catch (testError: unknown) {
       setWorkspaceError(toUserMessage(testError));
     } finally {
+      quickTestInProgressRef.current = false;
       setQuickTestingId(undefined);
     }
   }

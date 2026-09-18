@@ -17,8 +17,7 @@ export interface TaskStoreSnapshot {
 }
 
 /**
- * Adopt the synchronous generation_create response without replacing a task
- * update that arrived through the event stream first.
+ * Adopt a newly created Task without replacing a fresher event-stream update.
  */
 export function adoptCreatedTaskState(
   snapshot: TaskStoreSnapshot,

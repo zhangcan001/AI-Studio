@@ -233,6 +233,8 @@ pub async fn production_queue_create(
                 model_version_id,
                 tool_instance_id,
                 tool_version_id,
+                submission_idempotency_key: None,
+                parent_task_id: None,
             })
             .await
             .map_err(map_queue_error)?

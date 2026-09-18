@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createPreset,
-  createGeneration,
   createProductionQueue,
   deletePreset,
   getPreferredPreset,
@@ -14,6 +13,7 @@ import {
   setAssetVideoPrompt,
   setPreferredPreset,
   startProductionQueue,
+  submitGeneration,
   updatePreset,
 } from "../../services/tauriClient";
 import type { AssetMediaTypeFilter, AssetView } from "../../types/asset";
@@ -1037,7 +1037,7 @@ export function AssetVideoBatchWorkspace({
           comfyConnected={comfyConnected}
           taskEventsReady={taskEventsReady}
           productionBusy={productionAdmission.busy}
-          onOpenTask={onOpenTask}
+          onOpenProductionQueue={onOpenProductionQueue}
         />
       </section>
     );
@@ -1546,7 +1546,7 @@ interface GenericVideoWorkflowPanelProps {
   comfyConnected: boolean;
   taskEventsReady: boolean;
   productionBusy: boolean;
-  onOpenTask: (taskId: string) => void;
+  onOpenProductionQueue?: (batchId?: string) => void;
 }
 
 function GenericVideoWorkflowPanel({
@@ -1555,15 +1555,16 @@ function GenericVideoWorkflowPanel({
   comfyConnected,
   taskEventsReady,
   productionBusy,
-  onOpenTask,
+  onOpenProductionQueue,
 }: GenericVideoWorkflowPanelProps) {
   const [values, setValues] = useState<GenerationValues>(() => defaultGenerationValues(recipe));
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [missingAssetFields, setMissingAssetFields] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const generationRequestIdRef = useRef<string | undefined>(undefined);
+  const pendingBatchIdRef = useRef<string | undefined>(undefined);
   const [notice, setNotice] = useState<string>();
-  const [createdTaskId, setCreatedTaskId] = useState<string>();
+  const [createdQueueId, setCreatedQueueId] = useState<string>();
   const draftDirtyRef = useRef(false);
   const [presets, setPresets] = useState<PresetView[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState("");
@@ -1581,7 +1582,9 @@ function GenericVideoWorkflowPanel({
     setValues(defaultGenerationValues(recipe));
     setValidationErrors({});
     setMissingAssetFields(new Set());
-    setCreatedTaskId(undefined);
+    setCreatedQueueId(undefined);
+    pendingBatchIdRef.current = undefined;
+    generationRequestIdRef.current = undefined;
     setNotice(undefined);
     draftDirtyRef.current = false;
     setPresets([]);
@@ -1772,23 +1775,28 @@ function GenericVideoWorkflowPanel({
     setCreating(true);
     setNotice(undefined);
     try {
-      const task = await createGeneration({
-        projectId,
-        workflowVersionId: recipe.workflowVersionId,
-        recipeId: recipe.recipeId,
-        values,
-        submissionIdempotencyKey,
-        ...(selectedModelVersionId ? { modelVersionId: selectedModelVersionId } : {}),
-      });
-      setCreatedTaskId(task.id);
-      setNotice("通用视频任务已创建；工作流版本和配方已冻结。" );
+      let batchId = pendingBatchIdRef.current;
+      if (!batchId) {
+        const batch = await submitGeneration({
+          projectId,
+          workflowVersionId: recipe.workflowVersionId,
+          recipeId: recipe.recipeId,
+          values,
+          submissionIdempotencyKey,
+          ...(selectedModelVersionId ? { modelVersionId: selectedModelVersionId } : {}),
+        });
+        batchId = batch.id;
+        pendingBatchIdRef.current = batchId;
+      }
+      setCreatedQueueId(batchId);
+      await startProductionQueue(projectId, batchId);
+      setNotice("通用视频已加入生产队列并开始处理；工作流版本和配方已冻结。" );
+      pendingBatchIdRef.current = undefined;
+      generationRequestIdRef.current = undefined;
     } catch (error: unknown) {
       setNotice(toUserMessage(error));
     } finally {
       setCreating(false);
-      if (generationRequestIdRef.current === submissionIdempotencyKey) {
-        generationRequestIdRef.current = undefined;
-      }
     }
   }
 
@@ -1885,9 +1893,11 @@ function GenericVideoWorkflowPanel({
       />
       <div className="generic-video-workflow-actions">
         <button type="button" onClick={() => void generate()} disabled={!canGenerate}>
-          {creating ? "正在创建…" : "创建视频任务"}
+          {creating ? "正在加入队列…" : "加入队列并开始"}
         </button>
-        {createdTaskId && <button type="button" className="quiet-button" onClick={() => onOpenTask(createdTaskId)}>打开任务</button>}
+        {createdQueueId && onOpenProductionQueue && (
+          <button type="button" className="quiet-button" onClick={() => onOpenProductionQueue(createdQueueId)}>打开生产队列</button>
+        )}
       </div>
       {notice && <p className="studio-notice" role="status">{notice}</p>}
     </section>
