@@ -176,6 +176,7 @@ impl ProjectBackupRepository for SqliteProjectBackupRepository {
         let mut shots = query_shots(&mut transaction, project_id).await?;
         let mut shot_stage_configs = query_shot_stage_configs(&mut transaction).await?;
         let mut shot_stage_prompts = query_shot_stage_prompts(&mut transaction, project_id).await?;
+        materialize_legacy_shot_stage_prompts(&shots, &mut shot_stage_prompts);
         let mut shot_reference_assets = query_shot_reference_assets(&mut transaction).await?;
         let mut shot_generation_links = query_shot_generation_links(&mut transaction).await?;
         let asset_tags = sqlx::query_as::<_, BackupAssetTag>(
@@ -2483,6 +2484,36 @@ async fn query_shot_stage_prompts(
             updated_at: row.updated_at,
         })
         .collect())
+}
+
+fn materialize_legacy_shot_stage_prompts(
+    shots: &[BackupShot],
+    prompts: &mut Vec<BackupShotStagePrompt>,
+) {
+    let persisted_shot_ids = prompts
+        .iter()
+        .map(|prompt| prompt.shot_id.clone())
+        .collect::<HashSet<_>>();
+    for shot in shots {
+        if persisted_shot_ids.contains(&shot.id) {
+            continue;
+        }
+        for stage in ["image", "video"] {
+            prompts.push(BackupShotStagePrompt {
+                shot_id: shot.id.clone(),
+                stage: stage.to_owned(),
+                prompt_text: shot.prompt_text.clone(),
+                prompt_entry_id: shot.prompt_entry_id.clone(),
+                prompt_version_id: shot.prompt_version_id.clone(),
+                updated_at: shot.updated_at.clone(),
+            });
+        }
+    }
+    prompts.sort_by(|left, right| {
+        left.shot_id
+            .cmp(&right.shot_id)
+            .then_with(|| left.stage.cmp(&right.stage))
+    });
 }
 
 async fn query_shot_reference_assets(

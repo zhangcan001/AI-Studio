@@ -5051,6 +5051,274 @@ mod tests {
         )
     }
 
+    async fn seed_current_v20_legacy_shot_fixture(
+        directory: &tempfile::TempDir,
+    ) -> (sqlx::SqlitePool, ProjectBackupService, String, PathBuf) {
+        let data_dirs = AppDataDirs::initialize(directory.path().join("AIStudioData")).unwrap();
+        let pool = initialize(&data_dirs.database).await.unwrap();
+        crate::infrastructure::database::repositories::test_support::seed_task_dependencies(&pool)
+            .await;
+
+        let project_id = "project-current-v20".to_owned();
+        let project_root = data_dirs.projects.join(&project_id);
+        std::fs::create_dir_all(&project_root).unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, root_path, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&project_id)
+        .bind("Current v20 fixture")
+        .bind("legacy shot stage prompt source")
+        .bind(project_root.to_string_lossy().to_string())
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO project_workflow_bindings
+             (project_id, stage, mode, workflow_version_id, recipe_id, created_at, updated_at)
+             VALUES
+             (?, 'IMAGE', 'DEFAULT', 'workflow-version-1', 'recipe-1', ?, ?),
+             (?, 'VIDEO', 'DEFAULT', 'workflow-version-1', 'recipe-1', ?, ?)",
+        )
+        .bind(&project_id)
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .bind(&project_id)
+        .bind("2026-01-01T00:00:01Z")
+        .bind("2026-01-01T00:00:01Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO prompt_entries
+             (id, project_id, kind, name, normalized_name, tags_json, created_at, updated_at)
+             VALUES (?, ?, 'prompt', ?, ?, '[]', ?, ?)",
+        )
+        .bind("prm_current_v20")
+        .bind(&project_id)
+        .bind("Harbor prompt")
+        .bind("harbor prompt")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO prompt_versions (id, prompt_id, version, text, created_at)
+             VALUES (?, ?, 1, ?, ?)",
+        )
+        .bind("prv_current_v20")
+        .bind("prm_current_v20")
+        .bind("A quiet harbor at dawn")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO tasks
+             (id, project_id, workflow_id, workflow_version_id, recipe_id, status,
+              progress_mode, created_at, finished_at)
+             VALUES (?, ?, 'workflow-1', 'workflow-version-1', 'recipe-1', 'SUCCEEDED',
+                     'indeterminate', ?, ?)",
+        )
+        .bind("tsk_current_v20")
+        .bind(&project_id)
+        .bind("2026-01-01T00:01:00Z")
+        .bind("2026-01-01T00:02:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO generation_snapshots
+             (id, task_id, workflow_json, recipe_yaml, user_inputs_json,
+              resolved_inputs_json, created_at)
+             VALUES (?, ?, '{}', 'schema_version: 1\ninputs: {}\n', ?, ?, ?)",
+        )
+        .bind("snp_current_v20")
+        .bind("tsk_current_v20")
+        .bind(r#"{"reference_image":"ast_current_v20"}"#)
+        .bind(r#"{"reference_image":"ast_current_v20"}"#)
+        .bind("2026-01-01T00:02:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let bytes = b"current-v20-image-bytes";
+        let sha = Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let asset_path = project_root.join("generated.png");
+        std::fs::write(&asset_path, bytes).unwrap();
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path, sha256,
+              mime_type, width, height, file_size, metadata_json, created_at, updated_at,
+              source_task_id)
+             VALUES (?, ?, 'image', 'generated_image', 'Generated harbor', 'generated.png', ?, ?,
+                     'image/png', 1, 1, ?, '{}', ?, ?, ?)",
+        )
+        .bind("ast_current_v20")
+        .bind(&project_id)
+        .bind(asset_path.to_string_lossy().to_string())
+        .bind(&sha)
+        .bind(bytes.len() as i64)
+        .bind("2026-01-01T00:02:00Z")
+        .bind("2026-01-01T00:02:00Z")
+        .bind("tsk_current_v20")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let source_bytes = b"current-v20-source-bytes";
+        let source_sha = Sha256::digest(source_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let source_path = project_root.join("source.png");
+        std::fs::write(&source_path, source_bytes).unwrap();
+        sqlx::query(
+            "INSERT INTO assets
+             (id, project_id, type, category, name, original_name, storage_path, sha256,
+              mime_type, width, height, file_size, metadata_json, created_at, updated_at)
+             VALUES (?, ?, 'image', 'source_image', 'Source harbor', 'source.png', ?, ?,
+                     'image/png', 1, 1, ?, '{}', ?, ?)",
+        )
+        .bind("ast_current_v20_source")
+        .bind(&project_id)
+        .bind(source_path.to_string_lossy().to_string())
+        .bind(&source_sha)
+        .bind(source_bytes.len() as i64)
+        .bind("2026-01-01T00:02:01Z")
+        .bind("2026-01-01T00:02:01Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO task_output_assets
+             (task_id, output_id, ordinal, asset_id, created_at)
+             VALUES (?, 'output-current-v20', 0, ?, ?)",
+        )
+        .bind("tsk_current_v20")
+        .bind("ast_current_v20")
+        .bind("2026-01-01T00:02:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE artifact_reviews
+             SET decision = 'APPROVED', comment = 'accepted', revision = 1,
+                 updated_at = '2026-01-01T00:02:30Z'
+             WHERE project_id = ? AND artifact_id = 'ast_current_v20'",
+        )
+        .bind(&project_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO asset_versions
+             (id, project_id, asset_id, version_number, metadata_snapshot, location,
+              checksum, created_at)
+             VALUES (?, ?, ?, 1, '{}', ?, ?, ?)",
+        )
+        .bind("asv_current_v20")
+        .bind(&project_id)
+        .bind("ast_current_v20")
+        .bind(asset_path.to_string_lossy().to_string())
+        .bind(&sha)
+        .bind("2026-01-01T00:02:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO asset_relations
+             (id, project_id, source_asset_id, target_asset_id, relation_type, created_at)
+             VALUES (?, ?, ?, ?, 'SOURCE_OF', ?)",
+        )
+        .bind("rel_current_v20")
+        .bind(&project_id)
+        .bind("ast_current_v20_source")
+        .bind("ast_current_v20")
+        .bind("2026-01-01T00:02:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shots
+             (id, project_id, ordinal, name, prompt_text, prompt_entry_id, prompt_version_id,
+              selected_image_asset_id, selected_video_asset_id, created_at, updated_at)
+             VALUES (?, ?, 0, 'Harbor opening',
+                     'A quiet harbor at dawn, one red balloon drifting above the water, wide cinematic composition.',
+                     'prm_current_v20', 'prv_current_v20', ?, NULL, ?, ?)",
+        )
+        .bind("sht_current_v20")
+        .bind(&project_id)
+        .bind("ast_current_v20")
+        .bind("2026-01-01T00:03:00Z")
+        .bind("2026-01-01T00:03:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_stage_configs
+             (shot_id, stage, workflow_version_id, recipe_id, scalar_values_json, updated_at)
+             VALUES
+             (?, 'image', 'workflow-version-1', 'recipe-1', '{\"steps\":{\"type\":\"integer\",\"value\":4}}', ?),
+             (?, 'video', 'workflow-version-1', 'recipe-1', '{\"seed\":{\"type\":\"seed_random\"}}', ?)",
+        )
+        .bind("sht_current_v20")
+        .bind("2026-01-01T00:03:00Z")
+        .bind("sht_current_v20")
+        .bind("2026-01-01T00:03:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_batches
+             (id, project_id, name, status, continue_on_failure, created_at, updated_at)
+             VALUES (?, ?, 'Current v20 batch', 'COMPLETED', 0, ?, ?)",
+        )
+        .bind("pbt_current_v20")
+        .bind(&project_id)
+        .bind("2026-01-01T00:03:00Z")
+        .bind("2026-01-01T00:03:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO production_batch_items
+             (id, batch_id, ordinal, workflow_version_id, recipe_id, values_json, status,
+              task_id, created_at, updated_at)
+             VALUES (?, ?, 0, 'workflow-version-1', 'recipe-1', '{}', 'SUCCEEDED', ?, ?, ?)",
+        )
+        .bind("pbi_current_v20")
+        .bind("pbt_current_v20")
+        .bind("tsk_current_v20")
+        .bind("2026-01-01T00:03:00Z")
+        .bind("2026-01-01T00:03:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO shot_generation_links
+             (id, shot_id, stage, task_id, production_batch_item_id, created_at)
+             VALUES (?, ?, 'image', ?, ?, ?)",
+        )
+        .bind("sgl_current_v20")
+        .bind("sht_current_v20")
+        .bind("tsk_current_v20")
+        .bind("pbi_current_v20")
+        .bind("2026-01-01T00:03:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let service = test_service(&pool, data_dirs.projects.clone(), data_dirs.cache.clone());
+        let archive = directory.path().join("current-v20.aiarchive");
+        (pool, service, project_id, archive)
+    }
+
     #[test]
     fn backup_path_validation_rejects_traversal_and_absolute_paths() {
         assert!(safe_zip_path("assets/ast_1/content.png"));
@@ -7537,6 +7805,192 @@ mod tests {
                 "missing-version".to_owned(),
                 "missing-recipe".to_owned()
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn current_v20_export_is_immediately_inspectable() {
+        let directory = tempdir().unwrap();
+        let (_pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+
+        service
+            .export(&project_id, archive.clone())
+            .await
+            .expect("current v20 export");
+        let preview = service
+            .inspect(archive)
+            .await
+            .expect("a current v20 export must be immediately inspectable");
+
+        assert_eq!(preview.shots, 1);
+        assert_eq!(preview.asset_versions, 1);
+        assert_eq!(preview.asset_relations, 1);
+        assert_eq!(preview.artifact_reviews, 1);
+    }
+
+    #[tokio::test]
+    async fn current_v20_export_inspect_restore_round_trip() {
+        let directory = tempdir().unwrap();
+        let (pool, service, project_id, archive) =
+            seed_current_v20_legacy_shot_fixture(&directory).await;
+
+        service
+            .export(&project_id, archive.clone())
+            .await
+            .expect("current v20 export");
+        let preview = service
+            .inspect(archive)
+            .await
+            .expect("current v20 export inspect");
+        let restored = service
+            .restore(&preview.inspection_id)
+            .await
+            .expect("current v20 restore");
+
+        assert_eq!(restored.status, "COMPLETE");
+        assert_eq!(restored.backup_version, 20);
+        assert_eq!(restored.assets, 2);
+        assert_eq!(restored.versions, 1);
+        assert_eq!(restored.generations, 1);
+        assert!(restored.warnings.is_empty());
+        assert_ne!(restored.id, project_id);
+
+        let restored_binding_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM project_workflow_bindings WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_binding_count, 2);
+
+        let restored_shot: (String, String, String, Option<String>) = sqlx::query_as(
+            "SELECT id, prompt_entry_id, prompt_version_id, selected_image_asset_id
+             FROM shots WHERE project_id = ?",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_shot.0, "sht_current_v20");
+        assert_ne!(restored_shot.1, "prm_current_v20");
+        assert_ne!(restored_shot.2, "prv_current_v20");
+        assert_ne!(restored_shot.3.as_deref(), Some("ast_current_v20"));
+
+        let restored_stage_prompts: Vec<(String, String, Option<String>, Option<String>)> =
+            sqlx::query_as(
+                "SELECT stage, prompt_text, prompt_entry_id, prompt_version_id
+                 FROM shot_stage_prompts WHERE shot_id = ? ORDER BY stage",
+            )
+            .bind(&restored_shot.0)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(restored_stage_prompts.len(), 2);
+        assert_eq!(
+            restored_stage_prompts
+                .iter()
+                .map(|(stage, text, _, _)| (stage.as_str(), text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "image",
+                    "A quiet harbor at dawn, one red balloon drifting above the water, wide cinematic composition."
+                ),
+                (
+                    "video",
+                    "A quiet harbor at dawn, one red balloon drifting above the water, wide cinematic composition."
+                )
+            ]
+        );
+        assert!(restored_stage_prompts
+            .iter()
+            .all(
+                |(_, _, entry_id, version_id)| entry_id.as_deref() != Some("prm_current_v20")
+                    && version_id.as_deref() != Some("prv_current_v20")
+            ));
+
+        let restored_task: String = sqlx::query_scalar("SELECT id FROM tasks WHERE project_id = ?")
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_ne!(restored_task, "tsk_current_v20");
+        let snapshot_inputs: String = sqlx::query_scalar(
+            "SELECT user_inputs_json FROM generation_snapshots WHERE task_id = ?",
+        )
+        .bind(&restored_task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!snapshot_inputs.contains("ast_current_v20"));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM task_output_assets WHERE task_id = ?",
+            )
+            .bind(&restored_task)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shot_generation_links WHERE shot_id = ?",
+            )
+            .bind(&restored_shot.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+
+        let restored_asset: (String, String, String) = sqlx::query_as(
+            "SELECT id, storage_path, sha256 FROM assets
+             WHERE project_id = ? AND type = 'image' ORDER BY source_task_id IS NULL, id
+             LIMIT 1",
+        )
+        .bind(&restored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_ne!(restored_asset.0, "ast_current_v20");
+        assert_eq!(
+            std::fs::read(&restored_asset.1).unwrap(),
+            b"current-v20-image-bytes"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM artifact_reviews
+                 WHERE project_id = ? AND artifact_id = ? AND decision = 'APPROVED'",
+            )
+            .bind(&restored.id)
+            .bind(&restored_asset.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM asset_versions WHERE project_id = ?",
+            )
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM asset_relations WHERE project_id = ?",
+            )
+            .bind(&restored.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
         );
     }
 
