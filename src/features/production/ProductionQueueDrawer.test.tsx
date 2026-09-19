@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi, afterEach } from "vitest";
+import userEvent from "@testing-library/user-event";
 import type { ProductionBatchDetail, ProductionBatchItemView, ProductionQueueOverview } from "../../types/productionQueue";
 import type { ProductionBatchRunbookView } from "../../types/productionBatchRunbook";
 import { ProductionQueueDrawer } from "./ProductionQueueDrawer";
@@ -168,10 +169,38 @@ describe("ProductionQueueDrawer", () => {
 
     expect(html).toContain('aria-label="开始生产队列 batch-ready"');
     expect(html).toContain('aria-label="暂停队列 batch-1"');
-    expect(html).toContain('aria-label="打开队列 batch-1"');
+    expect(html).toContain('aria-label="查看批次详情 batch-1"');
     expect(html).not.toContain("Start All");
     expect(html).not.toContain("Scheduler");
     expect(html).not.toContain("Auto Start Next");
+  });
+
+  it("opens batch details through the busy action and prevents duplicate clicks", async () => {
+    const user = userEvent.setup();
+    let resolveOpen!: () => void;
+    const onOpen = vi.fn(() => new Promise<void>((resolve) => {
+      resolveOpen = resolve;
+    }));
+
+    render(
+      <ProductionQueueDrawer
+        details={[detail({ status: "COMPLETED", pending: 0, running: 0, succeeded: 1 })]}
+        defaultExpanded
+        onOpen={onOpen}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "查看批次详情 batch-1" });
+    await user.click(button);
+    await user.click(button);
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith("batch-1");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("处理中…")).toBeTruthy();
+
+    resolveOpen();
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("puts a focused batch first while keeping every queue visible", () => {

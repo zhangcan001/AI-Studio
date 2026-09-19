@@ -358,11 +358,11 @@ function BatchRow({
             type="button"
             className="quiet"
             data-action="open"
-            aria-label={`打开队列 ${row.id}`}
-            onClick={() => onOpen(row.id)}
+            aria-label={`查看批次详情 ${row.id}`}
+            onClick={() => void onOpen(row.id)}
             disabled={Boolean(busyAction)}
           >
-            打开
+            查看详情
           </button>
         )}
         {isBusy && <span className="production-queue-drawer-busy" role="status">处理中…</span>}

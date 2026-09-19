@@ -144,6 +144,7 @@ vi.mock("../production/ProductionMonitor", () => ({
     }) => (
       <section aria-label="生产监控">
         <strong data-testid="monitor-batch-status">{props.batch?.status ?? "EMPTY"}</strong>
+        <span data-testid="monitor-batch-id">{props.batch?.batchId ?? "EMPTY"}</span>
         <span data-testid="monitor-output-asset-ids">{props.batch?.items.flatMap((item) => item.artifacts.map((artifact) => artifact.id)).join(",")}</span>
         <button type="button" onClick={() => void props.onRetry?.("item-1")}>监控项重试</button>
         <button type="button" onClick={() => void props.onViewAllProducts?.()}>监控查看产物</button>
@@ -154,6 +155,7 @@ vi.mock("../production/ProductionMonitor", () => ({
 
 let queues: ProductionBatchSummary[];
 let batchStatus: ProductionBatchDetail["status"] = "READY";
+const scrollIntoView = vi.fn();
 
 const configReadFailureShot: ShotView = {
   id: "shot-config-read-failure",
@@ -360,6 +362,24 @@ function makeArtifactBatch(detail = makeBatchDetail(), outputArtifacts: Artifact
   };
 }
 
+function setupCompletedBatchFixtures() {
+  const batchA = makeQueue("COMPLETED");
+  const batchB = { ...makeQueue("COMPLETED"), id: "pbt_uat_002", name: "UAT package B" };
+  const batchById = new Map([batchA, batchB].map((batch) => [batch.id, batch]));
+  queues = [batchA, batchB];
+  batchStatus = "COMPLETED";
+  mocks.getProductionQueue.mockImplementation(async (_projectId: string, batchId: string) => {
+    const batch = batchById.get(batchId);
+    if (!batch) throw new Error(`未知生产批次：${batchId}`);
+    return { ...makeBatchDetail("COMPLETED"), ...batch };
+  });
+  mocks.getProductionBatchArtifacts.mockImplementation(async (_projectId: string, batchId: string) => {
+    const batch = batchById.get(batchId);
+    if (!batch) throw new Error(`未知生产批次：${batchId}`);
+    return makeArtifactBatch({ ...makeBatchDetail("COMPLETED"), ...batch }, [successArtifact]);
+  });
+}
+
 function setupMultiPackageInspectionMocks() {
   const inspections: Record<string, ProductionPackageInspectionResult> = {
     "C:/season/ep01": makeMultiPackageInspection("READY package", "inspection-ready", "sha-ready", ["READY", "READY", "READY"]),
@@ -430,11 +450,18 @@ beforeEach(() => {
   });
   mocks.pauseProductionQueue.mockResolvedValue({});
   mocks.requeueProductionQueueItem.mockResolvedValue(makeBatchDetail("READY"));
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+  vi.stubGlobal("requestAnimationFrame", (callback: (time: number) => void) => {
+    callback(0);
+    return 0;
+  });
 });
 
 afterEach(() => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  scrollIntoView.mockReset();
   cleanup();
   vi.resetAllMocks();
 });
@@ -813,6 +840,42 @@ describe("ShotWorkspace production package queue integration", () => {
     await waitFor(() => expect(drawer.querySelector("[data-batch-id='pbt_uat_001']")?.getAttribute("data-focused")).toBe("true"));
     expect((drawer.querySelector("button[aria-controls]") as HTMLButtonElement).getAttribute("aria-expanded")).toBe("true");
     expect(mocks.startProductionQueue).not.toHaveBeenCalled();
+  });
+
+  it("scrolls to a completed batch when it is already the selected monitor batch", async () => {
+    const user = userEvent.setup();
+    setupCompletedBatchFixtures();
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" focusProductionBatchId="pbt_uat_001" />);
+
+    await waitFor(() => expect(screen.getByTestId("monitor-batch-id").textContent).toBe("pbt_uat_001"));
+    scrollIntoView.mockClear();
+    mocks.getProductionBatchArtifacts.mockClear();
+
+    const drawer = await screen.findByRole("region", { name: "生产队列" });
+    await user.click(within(drawer).getByRole("button", { name: "查看批次详情 pbt_uat_001" }));
+
+    await waitFor(() => expect(mocks.getProductionBatchArtifacts).toHaveBeenLastCalledWith("project-1", "pbt_uat_001"));
+    expect(screen.getByTestId("monitor-batch-id").textContent).toBe("pbt_uat_001");
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(document.activeElement).toBe(screen.getByTestId("production-monitor-anchor"));
+  });
+
+  it("switches the monitor to another batch before scrolling to it", async () => {
+    const user = userEvent.setup();
+    setupCompletedBatchFixtures();
+    render(<ShotWorkspace projectId="project-1" catalog={[]} mode="production" focusProductionBatchId="pbt_uat_001" />);
+
+    await waitFor(() => expect(screen.getByTestId("monitor-batch-id").textContent).toBe("pbt_uat_001"));
+    scrollIntoView.mockClear();
+    mocks.getProductionBatchArtifacts.mockClear();
+
+    const drawer = await screen.findByRole("region", { name: "生产队列" });
+    await user.click(within(drawer).getByRole("button", { name: "查看批次详情 pbt_uat_002" }));
+
+    await waitFor(() => expect(screen.getByTestId("monitor-batch-id").textContent).toBe("pbt_uat_002"));
+    expect(mocks.getProductionBatchArtifacts).toHaveBeenLastCalledWith("project-1", "pbt_uat_002");
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(document.activeElement).toBe(screen.getByTestId("production-monitor-anchor"));
   });
 
   it("quick-creates, opens, focuses, and keeps a created generic batch manually startable", async () => {

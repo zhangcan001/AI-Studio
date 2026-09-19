@@ -339,6 +339,7 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
   } | undefined>(undefined);
   const monitorRefreshRef = useRef<((batchId: string) => Promise<void>) | undefined>(undefined);
   const monitorFocusRef = useRef<((batchId: string) => void) | undefined>(undefined);
+  const productionMonitorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1138,12 +1139,29 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
     openStructureManagement(context);
   }
 
-  const openProductionMonitorBatch = useCallback((batchId: string) => {
+  const openProductionMonitorBatch = useCallback(async (batchId: string) => {
     focusProductionQueueBatch(batchId);
-    if (typeof document === "undefined" || document.visibilityState !== "hidden") {
-      void refreshProductionMonitor(batchId);
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    try {
+      await refreshProductionMonitor(batchId);
+    } catch (openError: unknown) {
+      setProductionMonitorError(toUserMessage(openError));
+      return;
     }
-  }, [focusProductionQueueBatch, refreshProductionMonitor]);
+    const revealMonitor = () => {
+      const target = productionMonitorRef.current;
+      if (!target) return;
+      if (typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      target.focus({ preventScroll: true });
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(revealMonitor);
+    } else {
+      revealMonitor();
+    }
+  }, [focusProductionQueueBatch, refreshProductionMonitor, setProductionMonitorError]);
 
   const requeueProductionMonitorItem = useCallback(async (itemId: string) => {
     clearProductionMonitorError();
@@ -1563,7 +1581,9 @@ export function ShotWorkspace({ projectId, projectName, catalog, initialSelected
       />
       {mode === "production" && (
         <>
-          <ProductionMonitor {...monitorProps} />
+          <div ref={productionMonitorRef} tabIndex={-1} data-testid="production-monitor-anchor">
+            <ProductionMonitor {...monitorProps} />
+          </div>
         </>
       )}
       {showWorkspaceFeedback && notice && <p className="studio-notice">{notice}</p>}
